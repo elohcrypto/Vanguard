@@ -165,11 +165,8 @@ npx hardhat compile
 
 # 4. Compile ZK circuits (optional - pre-compiled artifacts included)
 
-**ZK Circuits**:
-```bash
 npm run setup:zk             # Setup ZK circuits (one-time)
-```
-```
+
 
 ### Available NPM Scripts
 
