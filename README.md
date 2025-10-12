@@ -164,9 +164,11 @@ npm install
 npx hardhat compile
 
 # 4. Compile ZK circuits (optional - pre-compiled artifacts included)
-cd circuits
-./compile_all.sh
-cd ..
+
+**ZK Circuits**:
+```bash
+npm run setup:zk             # Setup ZK circuits (one-time)
+```
 ```
 
 ### Available NPM Scripts
@@ -186,10 +188,6 @@ npm run demo:interactive:proof  # Run main interactive demo (89 options)
 npm run test        # Run tests with coverage report
 ```
 
-**ZK Circuits**:
-```bash
-npm run setup:zk             # Setup ZK circuits (one-time)
-```
 
 ### Running the Interactive Demo
 
