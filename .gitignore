@@ -1,0 +1,144 @@
+# Dependencies
+node_modules/
+package-lock.json
+yarn.lock
+pnpm-lock.yaml
+
+# Hardhat files
+cache/
+artifacts/
+typechain-types/
+
+# Coverage reports
+coverage/
+coverage.json
+.coverage_artifacts/
+.coverage_cache/
+.coverage_contracts/
+
+# Gas reports
+gas-report.txt
+.gas-snapshot
+
+# Environment variables
+.env
+.env.local
+.env.*.local
+
+# IDE and Editor files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# Build outputs
+dist/
+build/
+out/
+
+# Logs
+logs/
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+lerna-debug.log*
+
+# Temporary files
+tmp/
+temp/
+*.tmp
+
+# ZK Circuit artifacts
+circuits/*.r1cs
+circuits/*.wasm
+circuits/*.zkey
+circuits/*.sym
+circuits/*.json
+circuits/pot*
+circuits/verification_key.json
+circuits/proof.json
+circuits/public.json
+
+# ZK Circuit build outputs
+circuits/build/
+circuits/compiled/
+circuits/powers_of_tau/
+
+# Foundry
+cache_forge/
+out_forge/
+
+# Solidity coverage
+.solcover.js.bak
+allFiredEvents
+scTopics
+
+# TypeScript
+*.tsbuildinfo
+
+# Testing
+.nyc_output/
+
+# OS files
+Thumbs.db
+Desktop.ini
+
+# Backup files
+*.bak
+*.backup
+*~
+
+# Local development
+.local/
+local/
+
+# Deployment artifacts
+deployments/localhost/
+deployments/hardhat/
+
+# Private keys (NEVER commit these!)
+*.key
+*.pem
+private-keys.txt
+mnemonic.txt
+
+# Contract size reports
+.contract-sizes/
+contract-sizes.txt
+
+# Slither reports
+slither-report.json
+slither-report.txt
+
+# Mythril reports
+mythril-report.json
+mythril-report.txt
+
+# Documentation build
+docs/build/
+docs/_build/
+
+# Python (if using Python tools)
+__pycache__/
+*.py[cod]
+*$py.class
+.Python
+venv/
+env/
+ENV/
+
+# Circom specific
+*.cpp
+*.dat
+*.wtns
+
+# Demo data
+demo/data/*.json
+demo/logs/*.log
+
+# Ignore sensitive configuration
+config/production.json
+config/mainnet.json
