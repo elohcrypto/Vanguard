@@ -1,4 +1,4 @@
-# Vanguard StableCoin -  ERC-3643 Compliant Digital Currency
+# Vanguard RWA StableCoin -  ERC-3643 Compliant Digital Currency
 
 ## Overview
 
