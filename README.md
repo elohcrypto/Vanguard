@@ -2,7 +2,7 @@
 
 ## Overview
 
-This project implements a **production-ready Vanguard StableCoin (VSC)** system with comprehensive compliance management integrated with **ERC-3643** standard and **OnchainID (ERC-734/ERC-735)**. The system provides:
+This project implements a **production-ready Vanguard RWA StableCoin (VSC)** system with comprehensive compliance management integrated with **ERC-3643** standard and **OnchainID (ERC-734/ERC-735)**. The system provides:
 
 - ✅ **Real-time compliance validation** through oracle networks
 - ✅ **Dynamic whitelist/blacklist management** with 2/3 consensus
@@ -70,7 +70,7 @@ Vanguard/
 │   ├── PAYMENT_PROTOCOL_DESIGN.md              # Payment protocol docs
 │   ├── SYSTEM_WORKFLOW_GUIDE.md                # User workflows and interactions
 │   ├── TECHNICAL_DEEP_DIVE.md                  # In-depth technical analysis
-│   ├── VANGUARD_STABLECOIN_ECOSYSTEM_GUIDE.md  # Complete ecosystem guide
+│   ├── VANGUARD_RWA_TOKEN_ECOSYSTEM_GUIDE.md   # Complete ecosystem guide
 │   ├── VOTING_SYSTEM_DIAGRAM.md                # Voting system visualization
 │   ├── WORKFLOW_IMPLEMENTATION_SUMMARY.md      # Implementation workflow summary
 │   ├── WORKING_DEMOS.md                        # Verified working demos guide
@@ -123,7 +123,7 @@ Vanguard/
 
 ### **System Overview & Architecture**
 - [System Overview](/docs/SYSTEM_OVERVIEW.md) - Complete system architecture (83 menu options, 5 ZK circuits, 32+ contracts)
-- [Vanguard StableCoin Ecosystem Guide](/docs/VANGUARD_STABLECOIN_ECOSYSTEM_GUIDE.md) - Complete ecosystem overview
+- [Vanguard RWA StableCoin Ecosystem Guide](/docs/VANGUARD_RWA_TOKEN_ECOSYSTEM_GUIDE.md) - Complete ecosystem overview
 - [Technical Deep Dive](/docs/TECHNICAL_DEEP_DIVE.md) - In-depth technical analysis
 - [Working Demos](/docs/WORKING_DEMOS.md) - Verified working demos guide
 
@@ -309,7 +309,7 @@ npx hardhat coverage
 
 ```
 ┌─────────────────────────────────────────────────────────────────┐
-│                    VANGUARD STABLECOIN SYSTEM                   │
+│                    VANGUARD RWA STABLECOIN SYSTEM               │
 ├─────────────────────────────────────────────────────────────────┤
 │                                                                 │
 │  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐           │
@@ -328,7 +328,7 @@ npx hardhat coverage
 │  └────────────────────────────────────────────────────────┘     │
 │                           │                                     │
 │  ┌────────────────────────────────────────────────────────┐     │
-│  │      Vanguard StableCoin Token (VSC) - ERC-3643        │     │
+│  │      Vanguard RWA StableCoin Token (VSC) - ERC-3643    │     │
 │  │  - Compliant transfers with multi-layer validation     │     │
 │  │  - Investor type-specific limits                       │     │
 │  │  - Issuer-only minting with quotas                     │     │
@@ -428,7 +428,7 @@ MIT License - See LICENSE file for details
 
 ### **Documentation**
 - [System Overview](/docs/SYSTEM_OVERVIEW.md) - Start here for system architecture
-- [Vanguard StableCoin Ecosystem Guide](/docs/VANGUARD_STABLECOIN_ECOSYSTEM_GUIDE.md) - Complete ecosystem overview
+- [Vanguard RWA StableCoin Ecosystem Guide](/docs/VANGUARD_STABLECOIN_ECOSYSTEM_GUIDE.md) - Complete ecosystem overview
 - [Working Demos](/docs/WORKING_DEMOS.md) - Verified working demos guide
 - [System Workflow Guide](/docs/SYSTEM_WORKFLOW_GUIDE.md) - User workflows and interactions
 

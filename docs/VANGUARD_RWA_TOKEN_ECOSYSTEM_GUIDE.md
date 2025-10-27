@@ -2,7 +2,7 @@
 
 ## 🎯 Overview
 
-The interactive demo has been enhanced with a comprehensive **Vanguard StableCoin (StableCoin) Token Ecosystem** that demonstrates real-world Compliant StableCoin operations with compliance-based restrictions. This system models the Greater China banking network with the People's Bank of China as the central authority and retail banks in China, Hong Kong, and Macau.
+The interactive demo has been enhanced with a comprehensive **Vanguard RWA (StableCoin) Token Ecosystem** that demonstrates real-world Compliant StableCoin operations with compliance-based restrictions. This system models the Greater China banking network with the People's Bank of China as the central authority and retail banks in China, Hong Kong, and Macau.
 
 ## 🏦 Banking Institution Structure
 
@@ -34,7 +34,7 @@ The interactive demo has been enhanced with a comprehensive **Vanguard StableCoi
 
 ## 🪙 Token System Configuration
 
-### Vanguard StableCoin (VSC) Specifications
+### Vanguard RWA (VSC) Specifications
 - **Standard**: ERC-3643 Compliant
 - **Symbol**: VSC
 - **Locked Reserve**: 1,000,000 VSC
@@ -49,7 +49,7 @@ The interactive demo has been enhanced with a comprehensive **Vanguard StableCoi
 
 ## 📋 Enhanced Menu Structure
 
-### New Vanguard StableCoin Options (13-19)
+### New Vanguard RWA Options (13-19)
 ```
 🏦 === DIGITAL TOKEN (StableCoin) TOKEN ECOSYSTEM ===
 13. 🏭 Deploy Digital Token System
