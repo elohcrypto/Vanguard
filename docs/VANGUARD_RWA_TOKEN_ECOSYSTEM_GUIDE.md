@@ -1,4 +1,4 @@
-# Vanguard RWAStableCoin (StableCoin) Token Ecosystem Guide
+# Vanguard RWA StableCoin (StableCoin) Token Ecosystem Guide
 
 ## 🎯 Overview
 
