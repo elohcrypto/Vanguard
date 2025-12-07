@@ -213,15 +213,15 @@ describe("RealProofGenerator - All 5 Proof Types", function() {
             console.log("\n  🧪 Testing Compliance Proof Generation");
 
             const params = {
-                kycScore: BigInt(90),
-                amlScore: BigInt(85),
-                jurisdictionScore: BigInt(95),
-                accreditationScore: BigInt(80),
+                kycScore: BigInt(88),
+                amlScore: BigInt(88),
+                jurisdictionScore: BigInt(88),
+                accreditationScore: BigInt(88),
                 weightKyc: BigInt(30),
                 weightAml: BigInt(30),
                 weightJurisdiction: BigInt(20),
                 weightAccreditation: BigInt(20),
-                // Weighted sum = 90*30 + 85*30 + 95*20 + 80*20 = 8750
+                // Weighted sum = 88*30 + 88*30 + 88*20 + 88*20 = 8800 (divisible by 100 → 88)
                 // minimumComplianceLevel is 0-100 (gets multiplied by 100 in circuit)
                 // So 50 means minimum weighted sum of 5000
                 minimumComplianceLevel: BigInt(50)

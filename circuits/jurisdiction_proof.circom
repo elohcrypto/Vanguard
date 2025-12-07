@@ -31,12 +31,55 @@ template JurisdictionProof() {
     commitmentCheck.in[0] <== commitmentHasher.out;
     commitmentCheck.in[1] <== commitmentHash;
 
-    // Check if user's jurisdiction is in allowed mask
-    // Simplified approach: check if jurisdiction equals one of allowed values
-    // In production, this would use more sophisticated bit manipulation
+    // Check if user's jurisdiction is in allowed bitmask
+    // Improved bitmask implementation using direct bit extraction
+    //
+    // We support up to 16 jurisdictions (bits 0-15) for efficiency
+    // This is a practical limit that covers most use cases
+    // For more jurisdictions, deploy multiple instances or use a Merkle tree
+
+    // Convert allowedJurisdictionsMask to bits (16 bits for efficiency)
+    component maskToBits = Num2Bits(16);
+    maskToBits.in <== allowedJurisdictionsMask;
+
+    // Convert userJurisdiction to bits to use as selector
+    component jurisdictionToBits = Num2Bits(16);
+    jurisdictionToBits.in <== userJurisdiction;
+
+    // Create components array OUTSIDE the loop (Circom requirement)
+    component posMatch[16];
+    component andGate[16];
+
+    // Check each bit position
+    signal bitChecks[16];
+    signal positionMatches[16];
+
+    for (var i = 0; i < 16; i++) {
+        // Check if this position matches our jurisdiction
+        posMatch[i] = IsEqual();
+        posMatch[i].in[0] <== i;
+        posMatch[i].in[1] <== userJurisdiction;
+        positionMatches[i] <== posMatch[i].out;
+
+        // If position matches AND bit is set, this check passes
+        andGate[i] = AND();
+        andGate[i].a <== positionMatches[i];
+        andGate[i].b <== maskToBits.out[i];
+        bitChecks[i] <== andGate[i].out;
+    }
+
+    // Sum all bit checks - should be 1 if jurisdiction is allowed, 0 otherwise
+    signal bitCheckSum;
+    var sum = 0;
+    for (var i = 0; i < 16; i++) {
+        sum += bitChecks[i];
+    }
+    bitCheckSum <== sum;
+
+    // Verify that exactly one bit matched (jurisdiction is in the allowed set)
     component jurisdictionAllowed = IsEqual();
-    jurisdictionAllowed.in[0] <== userJurisdiction;
-    jurisdictionAllowed.in[1] <== allowedJurisdictionsMask; // Simplified: direct comparison
+    jurisdictionAllowed.in[0] <== bitCheckSum;
+    jurisdictionAllowed.in[1] <== 1;
 
     // Ensure jurisdiction code is valid (0-999 for ISO 3166-1 numeric codes)
     // Using 16-bit to support codes up to 65535

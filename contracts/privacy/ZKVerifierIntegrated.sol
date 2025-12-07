@@ -17,11 +17,11 @@ import "./verifiers/compliance_aggregationVerifier.sol";
  */
 contract ZKVerifierIntegrated is Ownable, ReentrancyGuard {
     // Real verifier contracts
-    whitelist_membershipVerifier public whitelistVerifier;
-    blacklist_membershipVerifier public blacklistVerifier;
-    jurisdiction_proofVerifier public jurisdictionVerifier;
-    accreditation_proofVerifier public accreditationVerifier;
-    compliance_aggregationVerifier public complianceVerifier;
+    WhitelistMembershipVerifier public whitelistVerifier;
+    BlacklistMembershipVerifier public blacklistVerifier;
+    JurisdictionProofVerifier public jurisdictionVerifier;
+    AccreditationProofVerifier public accreditationVerifier;
+    ComplianceAggregationVerifier public complianceVerifier;
     
     // Proof verification statistics
     mapping(string => uint256) public totalProofs;
@@ -62,11 +62,11 @@ contract ZKVerifierIntegrated is Ownable, ReentrancyGuard {
         testingMode = _testingMode;
 
         // Deploy real verifier contracts
-        whitelistVerifier = new whitelist_membershipVerifier();
-        blacklistVerifier = new blacklist_membershipVerifier();
-        jurisdictionVerifier = new jurisdiction_proofVerifier();
-        accreditationVerifier = new accreditation_proofVerifier();
-        complianceVerifier = new compliance_aggregationVerifier();
+        whitelistVerifier = new WhitelistMembershipVerifier();
+        blacklistVerifier = new BlacklistMembershipVerifier();
+        jurisdictionVerifier = new JurisdictionProofVerifier();
+        accreditationVerifier = new AccreditationProofVerifier();
+        complianceVerifier = new ComplianceAggregationVerifier();
     }
     
     /**
@@ -337,7 +337,9 @@ contract ZKVerifierIntegrated is Ownable, ReentrancyGuard {
             // Mock verification for testing - always return true for valid inputs
             result = (publicSignals.length == 6 && publicSignals[0] > 0);
         } else {
-            result = complianceVerifier.verifyProof(a, b, c, publicSignals);
+            // The actual circuit only has 2 public inputs, extract them from the 6-element array
+            uint256[2] memory actualPublicSignals = [publicSignals[0], publicSignals[1]];
+            result = complianceVerifier.verifyProof(a, b, c, actualPublicSignals);
         }
 
         if (result) {
@@ -381,16 +383,8 @@ contract ZKVerifierIntegrated is Ownable, ReentrancyGuard {
             // Mock verification for testing - always return true for valid inputs
             result = (publicSignals.length == 2 && publicSignals[0] > 0);
         } else {
-            // Pad public signals to 6 elements for old verifier interface
-            // TODO: Update to compliance_aggregation_fixed verifier (2 signals)
-            uint256[6] memory paddedSignals;
-            paddedSignals[0] = publicSignals[0];
-            paddedSignals[1] = publicSignals[1];
-            paddedSignals[2] = 0;
-            paddedSignals[3] = 0;
-            paddedSignals[4] = 0;
-            paddedSignals[5] = 0;
-            result = complianceVerifier.verifyProof(a, b, c, paddedSignals);
+            // The circuit has exactly 2 public inputs, pass them directly
+            result = complianceVerifier.verifyProof(a, b, c, publicSignals);
         }
 
         if (result) {
@@ -416,15 +410,15 @@ contract ZKVerifierIntegrated is Ownable, ReentrancyGuard {
         bytes32 proofHash = keccak256(abi.encodePacked(proofType));
 
         if (proofHash == keccak256(abi.encodePacked("whitelist"))) {
-            whitelistVerifier = whitelist_membershipVerifier(newVerifier);
+            whitelistVerifier = WhitelistMembershipVerifier(newVerifier);
         } else if (proofHash == keccak256(abi.encodePacked("blacklist"))) {
-            blacklistVerifier = blacklist_membershipVerifier(newVerifier);
+            blacklistVerifier = BlacklistMembershipVerifier(newVerifier);
         } else if (proofHash == keccak256(abi.encodePacked("jurisdiction"))) {
-            jurisdictionVerifier = jurisdiction_proofVerifier(newVerifier);
+            jurisdictionVerifier = JurisdictionProofVerifier(newVerifier);
         } else if (proofHash == keccak256(abi.encodePacked("accreditation"))) {
-            accreditationVerifier = accreditation_proofVerifier(newVerifier);
+            accreditationVerifier = AccreditationProofVerifier(newVerifier);
         } else if (proofHash == keccak256(abi.encodePacked("compliance"))) {
-            complianceVerifier = compliance_aggregationVerifier(newVerifier);
+            complianceVerifier = ComplianceAggregationVerifier(newVerifier);
         } else {
             revert("ZKVerifierIntegrated: Invalid proof type");
         }

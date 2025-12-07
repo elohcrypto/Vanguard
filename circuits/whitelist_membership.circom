@@ -1,7 +1,7 @@
 pragma circom 2.0.0;
 
 include "circomlib/circuits/poseidon.circom";
-include "circomlib/circuits/merkletree.circom";
+include "./merkletree.circom";
 include "circomlib/circuits/comparators.circom";
 include "circomlib/circuits/gates.circom";
 

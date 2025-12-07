@@ -47,8 +47,9 @@ async function downloadPtau() {
 
     try {
         // Download ptau file (this is a trusted setup for circuits up to 2^15 constraints)
-        const ptauUrl = 'https://hermez.s3-eu-west-1.amazonaws.com/powersOfTau28_hez_final_15.ptau';
-        await execAsync(`wget -O ${PTAU_FILE} ${ptauUrl}`);
+        // Use Google Cloud Storage CDN as the Hermez S3 URL is no longer accessible
+        const ptauUrl = 'https://storage.googleapis.com/zkevm/ptau/powersOfTau28_hez_final_15.ptau';
+        await execAsync(`curl -L -o ${PTAU_FILE} ${ptauUrl}`);
         console.log('✅ Powers of Tau file downloaded');
     } catch (error) {
         console.log('⚠️  Could not download ptau file, creating mock file for demo');
@@ -65,8 +66,10 @@ async function compileCircuit(circuitName) {
 
     try {
         // Compile circuit with circomlib include path
+        // Use the Rust circom binary (not the JS version in node_modules)
+        const circomBin = process.env.CIRCOM_BIN || '/home/elohsun/.cargo/bin/circom';
         const includeDir = path.join(__dirname, '../node_modules');
-        await execAsync(`circom ${circuitPath} --r1cs --wasm --sym -o ${buildPath} -l ${includeDir}`);
+        const result = await execAsync(`${circomBin} ${circuitPath} --r1cs --wasm --sym -o ${buildPath} -l ${includeDir}`);
         console.log(`✅ ${circuitName} circuit compiled`);
 
         // Generate witness calculator
@@ -78,6 +81,8 @@ async function compileCircuit(circuitName) {
         return true;
     } catch (error) {
         console.log(`❌ Failed to compile ${circuitName}: ${error.message}`);
+        if (error.stderr) console.log(`   stderr: ${error.stderr}`);
+        if (error.stdout) console.log(`   stdout: ${error.stdout}`);
 
         // Create mock files for demonstration
         const r1csPath = path.join(buildPath, `${circuitName}.r1cs`);
@@ -105,11 +110,11 @@ async function generateKeys(circuitName) {
 
     try {
         // Generate proving key
-        await execAsync(`snarkjs groth16 setup ${r1csPath} ${PTAU_FILE} ${zkeyPath}`);
+        await execAsync(`npx snarkjs groth16 setup ${r1csPath} ${PTAU_FILE} ${zkeyPath}`);
         console.log(`✅ ${circuitName} proving key generated`);
 
         // Export verifying key
-        await execAsync(`snarkjs zkey export verificationkey ${zkeyPath} ${vkeyPath}`);
+        await execAsync(`npx snarkjs zkey export verificationkey ${zkeyPath} ${vkeyPath}`);
         console.log(`✅ ${circuitName} verifying key exported`);
 
         return true;
@@ -161,8 +166,22 @@ async function generateSolidityVerifier(circuitName) {
 
     try {
         // Generate Solidity verifier
-        await execAsync(`snarkjs zkey export solidityverifier ${zkeyPath} ${verifierPath}`);
-        console.log(`✅ ${circuitName} Solidity verifier generated`);
+        await execAsync(`npx snarkjs zkey export solidityverifier ${zkeyPath} ${verifierPath}`);
+
+        // Rename the contract to avoid naming conflicts
+        // snarkjs generates all verifiers with the same name "Groth16Verifier"
+        let verifierContent = fs.readFileSync(verifierPath, 'utf8');
+        const contractName = circuitName.split('_').map(word =>
+            word.charAt(0).toUpperCase() + word.slice(1)
+        ).join('') + 'Verifier';
+
+        verifierContent = verifierContent.replace(
+            /contract Groth16Verifier/g,
+            `contract ${contractName}`
+        );
+
+        fs.writeFileSync(verifierPath, verifierContent);
+        console.log(`✅ ${circuitName} Solidity verifier generated (${contractName})`);
         return true;
     } catch (error) {
         console.log(`❌ Failed to generate Solidity verifier for ${circuitName}: ${error.message}`);

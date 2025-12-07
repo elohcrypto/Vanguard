@@ -8,7 +8,7 @@
         "test": "hardhat test",
         "test:coverage": "hardhat coverage",
         "test:gas": "REPORT_GAS=true hardhat test",
-        "node": "hardhat node",
+        "node": "CHOKIDAR_USEPOLLING=true hardhat node",
         "clean": "hardhat clean",
         "deploy:localhost": "hardhat run contracts/migrations/1_initial_migration.js --network localhost",
         "deploy:sepolia": "hardhat run contracts/migrations/1_initial_migration.js --network sepolia",
@@ -19,6 +19,7 @@
         "size": "hardhat size-contracts",
         "demo:interactive:proof": "hardhat run demo/index.js --network localhost",
         "demo:interactive:proof:old": "hardhat run demo/interactive-kyc-aml-utxo-proof.js.backup --network localhost",
+        "verify:zk": "node scripts/verify-zk-readiness.js",
         "setup:zk": "node scripts/setup-zk-circuits.js"
     },
     "keywords": [

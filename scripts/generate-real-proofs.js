@@ -383,7 +383,7 @@ class RealProofGenerator {
         };
 
         console.log("  🧮 Generating witness...");
-        const paths = this.getCircuitPaths("compliance_aggregation_fixed");
+        const paths = this.getCircuitPaths("compliance_aggregation");
 
         console.log("  🔐 Generating proof...");
         const { proof, publicSignals } = await snarkjs.groth16.fullProve(

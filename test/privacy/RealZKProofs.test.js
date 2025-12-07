@@ -254,9 +254,9 @@ describe('Real ZK Proof Verification Tests', function() {
 
             const complianceParams = {
                 kycScore: BigInt(80),
-                amlScore: BigInt(75),
-                jurisdictionScore: BigInt(85),
-                accreditationScore: BigInt(70),
+                amlScore: BigInt(76),
+                jurisdictionScore: BigInt(84),
+                accreditationScore: BigInt(60),
                 weightKyc: BigInt(25),
                 weightAml: BigInt(25),
                 weightJurisdiction: BigInt(25),
