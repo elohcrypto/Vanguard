@@ -64,8 +64,11 @@ contract UTXOCompliance is IUTXOCompliance, Ownable, ReentrancyGuard {
         address _owner
     ) Ownable(_owner) {
         require(_complianceValidator != address(0), "Invalid compliance validator");
+        require(_complianceValidator.code.length > 0, "UTXOCompliance: Compliance validator is not a contract");
         require(_oracleManager != address(0), "Invalid oracle manager");
+        require(_oracleManager.code.length > 0, "UTXOCompliance: Oracle manager is not a contract");
         require(_complianceRules != address(0), "Invalid compliance rules");
+        require(_complianceRules.code.length > 0, "UTXOCompliance: Compliance rules is not a contract");
 
         complianceValidator = IComplianceValidator(_complianceValidator);
         oracleManager = IOracleManager(_oracleManager);
@@ -476,6 +479,7 @@ contract UTXOCompliance is IUTXOCompliance, Ownable, ReentrancyGuard {
      */
     function setComplianceValidator(address _complianceValidator) external onlyOwner {
         require(_complianceValidator != address(0), "Invalid compliance validator");
+        require(_complianceValidator.code.length > 0, "UTXOCompliance: Compliance validator is not a contract");
         complianceValidator = IComplianceValidator(_complianceValidator);
     }
 
@@ -484,6 +488,7 @@ contract UTXOCompliance is IUTXOCompliance, Ownable, ReentrancyGuard {
      */
     function setOracleManager(address _oracleManager) external onlyOwner {
         require(_oracleManager != address(0), "Invalid oracle manager");
+        require(_oracleManager.code.length > 0, "UTXOCompliance: Oracle manager is not a contract");
         oracleManager = IOracleManager(_oracleManager);
     }
 
@@ -492,6 +497,7 @@ contract UTXOCompliance is IUTXOCompliance, Ownable, ReentrancyGuard {
      */
     function setComplianceRules(address _complianceRules) external onlyOwner {
         require(_complianceRules != address(0), "Invalid compliance rules");
+        require(_complianceRules.code.length > 0, "UTXOCompliance: Compliance rules is not a contract");
         complianceRules = IComplianceRules(_complianceRules);
     }
 }

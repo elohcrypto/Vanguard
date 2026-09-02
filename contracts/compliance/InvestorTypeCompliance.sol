@@ -52,6 +52,10 @@ contract InvestorTypeCompliance is ICompliance, Ownable, ReentrancyGuard {
 
     constructor(address _investorTypeRegistryAddress) Ownable(msg.sender) {
         require(_investorTypeRegistryAddress != address(0), "Invalid registry address");
+        require(
+            _investorTypeRegistryAddress.code.length > 0,
+            "InvestorTypeCompliance: Investor type registry address is not a contract"
+        );
         _investorTypeRegistry = IInvestorTypeRegistry(_investorTypeRegistryAddress);
         _complianceOfficers[msg.sender] = true;
     }
@@ -219,6 +223,10 @@ contract InvestorTypeCompliance is ICompliance, Ownable, ReentrancyGuard {
      */
     function setInvestorTypeRegistry(address _investorTypeRegistryAddress) external onlyOwner {
         require(_investorTypeRegistryAddress != address(0), "Invalid registry address");
+        require(
+            _investorTypeRegistryAddress.code.length > 0,
+            "InvestorTypeCompliance: Investor type registry address is not a contract"
+        );
         _investorTypeRegistry = IInvestorTypeRegistry(_investorTypeRegistryAddress);
     }
 

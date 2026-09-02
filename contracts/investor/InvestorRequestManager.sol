@@ -105,7 +105,9 @@ contract InvestorRequestManager is Ownable, ReentrancyGuard {
         require(_bank != address(0), "Invalid bank address");
         require(_token != address(0), "Invalid token address");
         require(_investorRegistry != address(0), "Invalid investor registry");
+        require(_investorRegistry.code.length > 0, "InvestorRequestManager: Investor registry is not a contract");
         require(_identityRegistry != address(0), "Invalid identity registry");
+        require(_identityRegistry.code.length > 0, "InvestorRequestManager: Identity registry is not a contract");
         
         bank = _bank;
         token = _token;

@@ -59,6 +59,7 @@ contract AccreditationProofValidator is Ownable, ReentrancyGuard {
 
     constructor(address _zkVerifier) Ownable(msg.sender) {
         require(_zkVerifier != address(0), "AccreditationProofValidator: Invalid ZK verifier");
+        require(_zkVerifier.code.length > 0, "AccreditationProofValidator: ZK verifier is not a contract");
         zkVerifier = IZKVerifier(_zkVerifier);
         nextTierId = 1;
 

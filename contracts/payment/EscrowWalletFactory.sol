@@ -100,9 +100,12 @@ contract EscrowWalletFactory is AccessControl, ReentrancyGuard {
         address _complianceRules
     ) {
         require(_vscToken != address(0), "Invalid token");
+        require(_vscToken.code.length > 0, "EscrowWalletFactory: VSC token is not a contract");
         require(_ownerWallet != address(0), "Invalid owner wallet");
         require(_identityRegistry != address(0), "Invalid identity registry");
+        require(_identityRegistry.code.length > 0, "EscrowWalletFactory: Identity registry is not a contract");
         require(_complianceRules != address(0), "Invalid compliance rules");
+        require(_complianceRules.code.length > 0, "EscrowWalletFactory: Compliance rules is not a contract");
 
         vscToken = IERC20(_vscToken);
         owner = msg.sender;
@@ -120,6 +123,7 @@ contract EscrowWalletFactory is AccessControl, ReentrancyGuard {
      */
     function setComplianceRules(address _complianceRules) external onlyRole(ADMIN_ROLE) {
         require(_complianceRules != address(0), "Invalid compliance rules");
+        require(_complianceRules.code.length > 0, "EscrowWalletFactory: Compliance rules is not a contract");
         complianceRules = IComplianceRules(_complianceRules);
     }
     
@@ -342,6 +346,7 @@ contract EscrowWalletFactory is AccessControl, ReentrancyGuard {
      */
     function setIdentityRegistry(address _identityRegistry) external onlyRole(ADMIN_ROLE) {
         require(_identityRegistry != address(0), "Invalid identity registry");
+        require(_identityRegistry.code.length > 0, "EscrowWalletFactory: Identity registry is not a contract");
         identityRegistry = IIdentityRegistry(_identityRegistry);
     }
 

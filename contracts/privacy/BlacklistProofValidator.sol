@@ -81,7 +81,9 @@ contract BlacklistProofValidator is Ownable, ReentrancyGuard {
 
     constructor(address _zkVerifier, address _privacyManager) Ownable(msg.sender) {
         require(_zkVerifier != address(0), "BlacklistProofValidator: Invalid ZK verifier");
+        require(_zkVerifier.code.length > 0, "BlacklistProofValidator: ZK verifier is not a contract");
         require(_privacyManager != address(0), "BlacklistProofValidator: Invalid privacy manager");
+        require(_privacyManager.code.length > 0, "BlacklistProofValidator: Privacy manager is not a contract");
         
         zkVerifier = IZKVerifier(_zkVerifier);
         privacyManager = PrivacyManager(_privacyManager);

@@ -74,6 +74,7 @@ contract InvestorLockWallet is ReentrancyGuard {
         require(_user != address(0), "Invalid user");
         require(_bank != address(0), "Invalid bank");
         require(_vscToken != address(0), "Invalid token");
+        require(_vscToken.code.length > 0, "InvestorLockWallet: VSC token is not a contract");
         require(_lockAmount > 0, "Invalid amount");
         
         user = _user;

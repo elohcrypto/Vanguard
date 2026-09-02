@@ -77,9 +77,13 @@ contract VanguardPaymentProtocol is IPaymentProtocol, Ownable, ReentrancyGuard, 
         address _identityRegistry
     ) Ownable(msg.sender) {
         require(_vscToken != address(0), "Invalid VSC token");
+        require(_vscToken.code.length > 0, "VanguardPaymentProtocol: VSC token is not a contract");
         require(_complianceRules != address(0), "Invalid compliance rules");
+        require(_complianceRules.code.length > 0, "VanguardPaymentProtocol: Compliance rules is not a contract");
         require(_oracleManager != address(0), "Invalid oracle manager");
+        require(_oracleManager.code.length > 0, "VanguardPaymentProtocol: Oracle manager is not a contract");
         require(_identityRegistry != address(0), "Invalid identity registry");
+        require(_identityRegistry.code.length > 0, "VanguardPaymentProtocol: Identity registry is not a contract");
 
         vscToken = IERC20(_vscToken);
         complianceRules = IComplianceRules(_complianceRules);
@@ -102,6 +106,7 @@ contract VanguardPaymentProtocol is IPaymentProtocol, Ownable, ReentrancyGuard, 
      */
     function setPaymentEscrow(address _paymentEscrow) external onlyOwner {
         require(_paymentEscrow != address(0), "Invalid escrow address");
+        require(_paymentEscrow.code.length > 0, "VanguardPaymentProtocol: Payment escrow is not a contract");
         paymentEscrow = IPaymentEscrow(_paymentEscrow);
     }
 
@@ -110,6 +115,7 @@ contract VanguardPaymentProtocol is IPaymentProtocol, Ownable, ReentrancyGuard, 
      */
     function setRefundManager(address _refundManager) external onlyOwner {
         require(_refundManager != address(0), "Invalid refund manager");
+        require(_refundManager.code.length > 0, "VanguardPaymentProtocol: Refund manager is not a contract");
         refundManager = IRefundManager(_refundManager);
     }
 
@@ -118,6 +124,7 @@ contract VanguardPaymentProtocol is IPaymentProtocol, Ownable, ReentrancyGuard, 
      */
     function setDisputeResolver(address _disputeResolver) external onlyOwner {
         require(_disputeResolver != address(0), "Invalid dispute resolver");
+        require(_disputeResolver.code.length > 0, "VanguardPaymentProtocol: Dispute resolver is not a contract");
         disputeResolver = IDisputeResolver(_disputeResolver);
     }
 

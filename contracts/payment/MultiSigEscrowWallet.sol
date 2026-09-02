@@ -112,6 +112,7 @@ contract MultiSigEscrowWallet is ReentrancyGuard {
         require(_payee != address(0), "Invalid payee");
         require(_investor != address(0), "Invalid investor");
         require(_vscToken != address(0), "Invalid token");
+        require(_vscToken.code.length > 0, "MultiSigEscrowWallet: VSC token is not a contract");
         require(_amount > 0, "Invalid amount");
         require(_owner != address(0), "Invalid owner");
         require(_investorWallet != address(0), "Invalid investor wallet");
