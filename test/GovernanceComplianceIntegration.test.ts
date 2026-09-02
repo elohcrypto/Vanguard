@@ -504,11 +504,137 @@ describe("Governance → ComplianceRules Integration Test", function () {
 
       await time.increase(9 * 24 * 60 * 60);
 
-      await expect(
-        vanguardGovernance.executeProposal(proposalId),
-      ).to.be.revertedWith("Quorum not met");
+      // Failing quorum must REJECT AND REFUND, not revert.
+      //
+      // This previously asserted revertedWith("Quorum not met"), which encoded
+      // a real bug as expected behaviour: the quorum require ran before the
+      // rejection branch that returns locked VGT, so a low-turnout proposal
+      // could never be settled and every deposit was trapped permanently.
+      const proposerBefore = await governanceToken.balanceOf(voter1.address);
+      const voterBefore = await governanceToken.balanceOf(voter2.address);
+      const locked = await vanguardGovernance.getLockedTokens(proposalId);
+      expect(locked, "deposits must be locked before settlement").to.be.greaterThan(0n);
 
-      console.log("✅ Single-voter proposal rejected: quorum enforced");
+      await vanguardGovernance.executeProposal(proposalId);
+
+      const [after] = await vanguardGovernance.getProposal(proposalId);
+      expect(after.status, "3 = Rejected").to.equal(3n);
+
+      // Every participant gets their stake back, and nothing stays locked.
+      expect(
+        await governanceToken.balanceOf(voter1.address),
+        "proposer must be refunded",
+      ).to.be.greaterThan(proposerBefore);
+      expect(
+        await governanceToken.balanceOf(voter2.address),
+        "voter must be refunded",
+      ).to.be.greaterThan(voterBefore);
+
+      console.log(
+        `✅ Below quorum: rejected and refunded ${ethers.formatEther(locked)} VGT`,
+      );
+    });
+
+    // A proposal nobody votes on must also settle. This was the same defect in
+    // its plainest form: `require(totalVotes > 0, "No votes cast")` reverted
+    // before the refund branch, so an ignored proposal locked the proposer's
+    // stake forever — on the ordinary path, with no attacker involved.
+    it("Should refund the proposer when a proposal receives no votes at all", async function () {
+      await governanceToken.transfer(voter1.address, ethers.parseEther("1000"));
+      await governanceToken
+        .connect(voter1)
+        .approve(
+          await vanguardGovernance.getAddress(),
+          ethers.parseEther("1000"),
+        );
+
+      const before = await governanceToken.balanceOf(voter1.address);
+      await vanguardGovernance
+        .connect(voter1)
+        .createProposal(
+          0,
+          "Ignored proposal",
+          "Nobody votes on this",
+          await complianceRules.getAddress(),
+          "0x",
+        );
+      const proposalId = 1;
+
+      await time.increase(9 * 24 * 60 * 60);
+      await vanguardGovernance.executeProposal(proposalId);
+
+      const [after] = await vanguardGovernance.getProposal(proposalId);
+      expect(after.status, "3 = Rejected").to.equal(3n);
+      expect(
+        await governanceToken.balanceOf(voter1.address),
+        "proposer's stake must be returned",
+      ).to.equal(before);
+
+      console.log("✅ Zero-vote proposal rejected, proposer refunded in full");
+    });
+
+    // Quorum must be measured against the eligible-voter count FROZEN at
+    // creation. Reading it live let an agent change an already-cast vote's
+    // outcome by registering identities mid-vote to push turnout below the bar.
+    it("Should not let identities registered mid-vote change the outcome", async function () {
+      await governanceToken.transfer(voter1.address, ethers.parseEther("1000"));
+      await governanceToken
+        .connect(voter1)
+        .approve(
+          await vanguardGovernance.getAddress(),
+          ethers.parseEther("1000"),
+        );
+      await governanceToken.transfer(voter2.address, ethers.parseEther("1000"));
+      await governanceToken
+        .connect(voter2)
+        .approve(
+          await vanguardGovernance.getAddress(),
+          ethers.parseEther("1000"),
+        );
+
+      const eligibleAtCreation =
+        await identityRegistry.registeredIdentityCount();
+      await vanguardGovernance
+        .connect(voter1)
+        .createProposal(
+          0,
+          "Snapshot test",
+          "Quorum must use the creation-time count",
+          await complianceRules.getAddress(),
+          "0x",
+        );
+      const proposalId = 1;
+
+      const [created] = await vanguardGovernance.getProposal(proposalId);
+      expect(created.eligibleVotersAtCreation).to.equal(eligibleAtCreation);
+
+      await vanguardGovernance
+        .connect(voter2)
+        .castVote(proposalId, true, "yes");
+      const [, , turnoutBefore] =
+        await vanguardGovernance.getProposal(proposalId);
+
+      // Flood the registry AFTER the vote is cast. With a live denominator
+      // this would dilute turnout; with the snapshot it must not move.
+      const signers = await ethers.getSigners();
+      for (const s of signers.slice(12, 18)) {
+        await identityRegistry.registerIdentity(s.address, s.address, 840);
+      }
+      expect(
+        await identityRegistry.registeredIdentityCount(),
+        "registry must actually have grown",
+      ).to.be.greaterThan(eligibleAtCreation);
+
+      const [, , turnoutAfter] =
+        await vanguardGovernance.getProposal(proposalId);
+      expect(
+        turnoutAfter,
+        "turnout must not change when identities are added mid-vote",
+      ).to.equal(turnoutBefore);
+
+      console.log(
+        `✅ Registry grew ${eligibleAtCreation} -> ${await identityRegistry.registeredIdentityCount()}, turnout unchanged at ${Number(turnoutAfter) / 100}%`,
+      );
     });
 
     // getProposal() is the ADVISORY view every UI reads to decide whether to
@@ -565,35 +691,32 @@ describe("Governance → ComplianceRules Integration Test", function () {
       const canExecute = view[3];
       const participationRate = view[2];
 
-      // Ground truth: does the enforcement path accept this proposal?
+      // Ground truth: does the proposal actually PASS?
       //
-      // Note executeProposal does NOT revert for every rejection: a proposal
-      // that fails the approval threshold takes the refund branch and
-      // succeeds. Only a quorum failure reverts. So "reverts" is the correct
-      // ground truth HERE (quorum is what fails), but canExecute means "will
-      // pass and execute its callData", which is the stricter claim.
-      let reverts = false;
-      try {
-        await vanguardGovernance.executeProposal.staticCall(proposalId);
-      } catch {
-        reverts = true;
-      }
+      // This previously used "does executeProposal revert?" as the ground
+      // truth, which only worked while a failed quorum reverted. Now that
+      // every settled proposal executes — passing ones run their callData,
+      // failing ones refund — the honest comparison is against the resulting
+      // status. That is also the stronger assertion: it holds for approval
+      // failures too, not just quorum failures.
+      await vanguardGovernance.executeProposal(proposalId);
+      const [settled] = await vanguardGovernance.getProposal(proposalId);
+      const actuallyPassed = settled.status === 4n; // 4 = Executed, 3 = Rejected
 
       console.log(
-        `   advisory canExecute=${canExecute}  enforcement reverts=${reverts}`,
+        `   advisory canExecute=${canExecute}  actual outcome=${actuallyPassed ? "Executed" : "Rejected"}`,
       );
       console.log(
         `   participationRate=${participationRate} (bps)  eligible=${eligible}  votes=1`,
       );
 
-      // A reverting proposal can never execute, so the advisory view must not
-      // claim it can.
-      expect(reverts, "precondition: this scenario must fail quorum").to.equal(
-        true,
-      );
       expect(
         canExecute,
-        "advisory view must not promise execution that reverts",
+        "advisory view must match the outcome enforcement produces",
+      ).to.equal(actuallyPassed);
+      expect(
+        actuallyPassed,
+        "precondition: one vote must be below the configured quorum",
       ).to.equal(false);
 
       // 1 vote of >=6 eligible voters is >=1000 bps (10%). A zero here means

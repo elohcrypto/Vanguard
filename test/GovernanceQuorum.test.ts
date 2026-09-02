@@ -56,37 +56,61 @@ describe("VanguardGovernance — quorum enforcement", () => {
     expect(t.quorumPercentage).to.be.greaterThan(0n);
   });
 
-  it("executeProposal enforces the configured quorum and approval thresholds", async () => {
-    const fs = require("fs");
-    const src = fs.readFileSync(
-      "contracts/governance/VanguardGovernance.sol",
-      "utf8",
-    );
-    const execBody = src.slice(
-      src.indexOf("function executeProposal"),
-      src.indexOf("function executeProposal") + 1600,
-    );
+  // This slot previously held a SOURCE-TEXT test: it sliced 1600 characters
+  // out of executeProposal and asserted the substrings "quorumPercentage",
+  // "Quorum not met" and "registeredIdentityCount" appeared. It was brittle in
+  // both directions and proved nothing about behaviour.
+  //
+  // It broke twice for reasons unrelated to correctness. Adding explanatory
+  // comments pushed the code past the 1600-character window, so the assertion
+  // failed while the logic was right. Then the quorum fix legitimately removed
+  // "Quorum not met" (a failed quorum now REJECTS AND REFUNDS instead of
+  // reverting) and moved the denominator to a creation-time snapshot, so two
+  // more assertions became false while the contract got safer.
+  //
+  // A test that fails when comments grow, and that pins the exact identifiers
+  // a fix must change, blocks correct work and permits incorrect work. The
+  // behavioural equivalents live in
+  // test/GovernanceComplianceIntegration.test.ts ("Quorum enforcement"):
+  // refund below quorum, refund on zero votes, snapshot immunity to mid-vote
+  // registration, and advisory/enforcement agreement — all executed on chain.
+  //
+  // What remains here is the structural fact those tests depend on and cannot
+  // easily assert themselves: the thresholds exist and are non-zero.
+  it("configures a non-zero quorum for every proposal type", async () => {
+    const [owner] = await ethers.getSigners();
 
-    // Quorum is read from the per-type thresholds, not ignored.
-    expect(
-      execBody,
-      "executeProposal must consult quorumPercentage",
-    ).to.contain("quorumPercentage");
-    expect(execBody, "quorum must actually gate execution").to.contain(
-      "Quorum not met",
+    const ir = await (
+      await ethers.getContractFactory("IdentityRegistry")
+    ).deploy();
+    const cr = await (
+      await ethers.getContractFactory("ComplianceRegistry")
+    ).deploy();
+    const gt = await (
+      await ethers.getContractFactory("GovernanceToken")
+    ).deploy("VGT", "VGT", await ir.getAddress(), await cr.getAddress());
+    const gov = await (
+      await ethers.getContractFactory("VanguardGovernance")
+    ).deploy(
+      await gt.getAddress(),
+      await ir.getAddress(),
+      owner.address,
+      owner.address,
+      owner.address,
+      owner.address,
     );
+    await gov.waitForDeployment();
 
-    // Approval uses the configured basis-points value, not a hardcoded 51.
-    expect(
-      execBody,
-      "approval must use thresholds.approvalPercentage",
-    ).to.contain("thresholds.approvalPercentage");
-
-    // The denominator is eligible voters (1p1v), not token supply.
-    expect(
-      execBody,
-      "1p1v quorum must be measured against registered identities",
-    ).to.contain("registeredIdentityCount");
+    // Ten ProposalType values; every one must define a real bar. A zero quorum
+    // would make that type executable by a single voter, which is the
+    // vulnerability the behavioural tests guard against.
+    for (let t = 0; t < 10; t++) {
+      const th = await gov.proposalThresholds(t);
+      expect(th.quorumPercentage, `type ${t} quorum`).to.be.greaterThan(0n);
+      expect(th.approvalPercentage, `type ${t} approval`).to.be.greaterThan(
+        5000n,
+      );
+    }
   });
 
   it("IdentityRegistry maintains the eligible-voter count", async () => {

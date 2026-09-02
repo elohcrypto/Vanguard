@@ -61,6 +61,16 @@ contract VanguardGovernance is Ownable, ReentrancyGuard {
         uint256 votesFor;
         uint256 votesAgainst;
         uint256 snapshotId;
+        // Eligible-voter count captured when the proposal was created.
+        //
+        // Quorum previously read identityRegistry.registeredIdentityCount() at
+        // EXECUTION time. Agents can register and delete identities while a
+        // vote is open, so the denominator — and therefore the outcome of an
+        // already-cast vote — could be changed after the fact: register
+        // identities to push a proposal below quorum, or delete them to lift
+        // it above. Freezing the count at creation makes the bar fixed for the
+        // life of the proposal.
+        uint256 eligibleVotersAtCreation;
     }
     
     // State variables
@@ -305,7 +315,8 @@ contract VanguardGovernance is Ownable, ReentrancyGuard {
             status: ProposalStatus.Active,
             votesFor: 0,
             votesAgainst: 0,
-            snapshotId: snapshotId
+            snapshotId: snapshotId,
+            eligibleVotersAtCreation: identityRegistry.registeredIdentityCount()
         });
 
         // Track locked tokens
@@ -382,7 +393,6 @@ contract VanguardGovernance is Ownable, ReentrancyGuard {
         require(block.timestamp > proposal.votingEnds, "Voting period not ended");
 
         uint256 totalVotes = proposal.votesFor + proposal.votesAgainst;
-        require(totalVotes > 0, "No votes cast");
 
         // Enforce the quorum and approval thresholds configured for this
         // proposal type. Previously both were ignored: the check was a
@@ -390,18 +400,34 @@ contract VanguardGovernance is Ownable, ReentrancyGuard {
         // and could execute an arbitrary target.call(callData) below.
         ProposalThresholds memory thresholds = proposalThresholds[proposal.proposalType];
 
+        // FAILING A THRESHOLD IS AN OUTCOME, NOT AN INVALID CALL.
+        //
+        // Quorum and "no votes cast" were both `require`s, which revert BEFORE
+        // the rejection branch below — the branch that returns every voter's
+        // and the proposer's locked VGT. A proposal with low turnout could
+        // therefore never be settled, and its deposits were trapped forever.
+        // That fires on the ordinary path: any proposal nobody bothers to vote
+        // on locked the proposer's stake permanently.
+        //
+        // Both are now folded into `passed`, so a failing proposal takes the
+        // refund branch and is marked Rejected. Only genuinely invalid calls
+        // (wrong status, voting still open) still revert.
+        //
         // Quorum is a share of ELIGIBLE VOTERS, not of token supply: votes are
         // counted one per verified person (votesFor += 1), so the denominator
-        // is the registered identity count.
-        uint256 eligibleVoters = identityRegistry.registeredIdentityCount();
-        require(
-            totalVotes * 10000 >= eligibleVoters * thresholds.quorumPercentage,
-            "Quorum not met"
-        );
+        // is the registered identity count — FROZEN AT CREATION, so that
+        // registering or deleting identities mid-vote cannot move the bar for
+        // a proposal already being voted on.
+        uint256 eligibleVoters = proposal.eligibleVotersAtCreation;
+        bool quorumMet = totalVotes * 10000 >= eligibleVoters * thresholds.quorumPercentage;
 
         // Thresholds are basis points (2000 = 20%), so scale votes to match.
-        uint256 approvalBps = (proposal.votesFor * 10000) / totalVotes;
-        bool passed = approvalBps >= thresholds.approvalPercentage;
+        // Guard the division: totalVotes == 0 means nobody voted, which is a
+        // rejection, not a division by zero.
+        bool approvalMet = totalVotes > 0 &&
+            (proposal.votesFor * 10000) / totalVotes >= thresholds.approvalPercentage;
+
+        bool passed = totalVotes > 0 && quorumMet && approvalMet;
 
         if (passed) {
             // Proposal passed: Execute and BURN locked tokens
@@ -489,14 +515,25 @@ contract VanguardGovernance is Ownable, ReentrancyGuard {
         // registered identity count. It was previously getTotalVotingPower()
         // (== totalSupply(), in wei), which made this a headcount divided by
         // a wei amount: with 1e24 wei supply the result was always 0.
-        uint256 eligibleVoters = identityRegistry.registeredIdentityCount();
+        //
+        // Read the SNAPSHOT, not the live count — the same value
+        // executeProposal uses. Reading live here would let this view drift
+        // from enforcement as identities are added or removed, which is the
+        // advisory/enforcement divergence this function was fixed for once
+        // already.
+        uint256 eligibleVoters = proposal.eligibleVotersAtCreation;
         participationRate = eligibleVoters > 0 ? (totalVotes * 10000) / eligibleVoters : 0;
 
-        // This is the ADVISORY view a UI reads to decide whether to offer an
-        // "Execute" action. It must apply the same gates as executeProposal,
-        // or the UI promises a transaction that reverts. It previously used a
+        // This is the ADVISORY view a UI reads. It applies the same gates as
+        // executeProposal, so the two cannot disagree. It previously used a
         // hardcoded 51% of votes cast and no quorum at all, while execution
-        // enforces the per-type thresholds below.
+        // enforced the per-type thresholds.
+        //
+        // canExecute means "this proposal will PASS and run its callData". It
+        // does NOT mean "executeProposal will revert otherwise": a proposal
+        // that fails quorum or approval executes successfully via the refund
+        // branch and is marked Rejected. A UI must therefore keep offering the
+        // call when canExecute is false, or locked VGT can never be reclaimed.
         ProposalThresholds memory thresholds = proposalThresholds[proposal.proposalType];
 
         bool quorumMet = totalVotes * 10000 >= eligibleVoters * thresholds.quorumPercentage;
@@ -672,7 +709,8 @@ contract VanguardGovernance is Ownable, ReentrancyGuard {
             status: ProposalStatus.Active,
             votesFor: 0,
             votesAgainst: 0,
-            snapshotId: snapshotId
+            snapshotId: snapshotId,
+            eligibleVotersAtCreation: identityRegistry.registeredIdentityCount()
         });
 
         // Store list update data
