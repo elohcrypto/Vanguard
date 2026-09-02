@@ -8,8 +8,8 @@
 3. ✅ **Proposal Creation Cost** (must pay VGT to create proposal)
 4. ✅ **Voting Cost** (must pay VGT to vote)
 5. ✅ **Token Locking & Burning/Returning**:
-   - If proposal passes (≥51%): Tokens are BURNED 🔥
-   - If proposal fails (<51%): Tokens are RETURNED 💰
+   - If proposal passes (quorum + approval met): Tokens are BURNED 🔥
+   - If proposal fails: Tokens are RETURNED 💰
 
 ---
 
@@ -53,21 +53,53 @@ Vote counted as 1 vote (equal weight) ✅
 ---
 
 ### **Step 3: Proposal Execution**
+
+Two gates must both pass. There is **no single 51% rule** — thresholds are
+configured per proposal type (see the table below) and read from
+`proposalThresholds(type)` on chain.
+
 ```
 Voting period ends
 ↓
-Calculate result: votesFor / totalVotes
+QUORUM:   totalVotes / registeredIdentityCount  ≥  type quorum
+          (a share of ELIGIBLE VOTERS, not of votes cast)
+          ↳ if not met: executeProposal REVERTS "Quorum not met"
 ↓
-If ≥51% FOR:
+APPROVAL: votesFor / totalVotes  ≥  type approval
+↓
+If both pass:
   ├─ Execute proposal ✅
   ├─ BURN all locked tokens 🔥
   └─ Status: Executed
 
-If <51% FOR:
+If approval not met:
   ├─ Proposal fails ❌
   ├─ RETURN all locked tokens to voters 💰
   └─ Status: Rejected
 ```
+
+> **Note:** a proposal that fails the *approval* threshold still executes
+> successfully — it takes the refund branch. Only a *quorum* failure reverts.
+> A UI must therefore keep offering "execute" on failing proposals, or the
+> locked VGT can never be reclaimed.
+
+### **Configured thresholds**
+
+| Proposal type | Quorum | Approval |
+|---|---|---|
+| InvestorTypeConfig | 20% | 60% |
+| ComplianceRules | 25% | 65% |
+| OracleParameters | 20% | 60% |
+| TokenParameters | 30% | 70% |
+| SystemParameters | 25% | 65% |
+| EmergencyAction | 10% | 75% |
+| AddToWhitelist | 15% | 60% |
+| RemoveFromWhitelist | 15% | 60% |
+| AddToBlacklist | 20% | 70% |
+| RemoveFromBlacklist | 20% | 65% |
+
+Set once in `_initializeThresholds()`; there is no setter, so they cannot be
+changed after deployment.
 
 ---
 
@@ -101,13 +133,13 @@ Voting:
 
 Result:
 ├─ Votes: 3 FOR, 1 AGAINST
-├─ Percentage: 75% FOR (≥51%)
+├─ Percentage: 75% FOR (above this type's approval threshold)
 ├─ Status: PASSED ✅
 └─ Action: BURN 1,040 VGT 🔥
 
 Alternative (Failed):
 ├─ Votes: 1 FOR, 3 AGAINST
-├─ Percentage: 25% FOR (<51%)
+├─ Percentage: 25% FOR (below this type's approval threshold)
 ├─ Status: FAILED ❌
 └─ Action: RETURN 1,040 VGT to all participants 💰
 ```
@@ -159,7 +191,7 @@ Each user has 33.3% voting power! ✅ Fair!
 
 ## 🔥 **Token Burning vs Returning**
 
-### **If Proposal Passes (≥51%):**
+### **If Proposal Passes (quorum + approval both met):**
 ```
 Proposal Result: 75% FOR
 ↓
@@ -182,7 +214,7 @@ Total supply decreased by 1,040 VGT
 
 ---
 
-### **If Proposal Fails (<51%):**
+### **If Proposal Fails (approval threshold not met):**
 ```
 Proposal Result: 25% FOR
 ↓
@@ -326,8 +358,8 @@ Option 82: Vote on Proposal
 ### **Step 5: Execute**
 ```bash
 Option 83: Execute Governance Proposal
-→ If ≥51% FOR: Burn all locked tokens
-→ If <51% FOR: Return all locked tokens
+→ If quorum AND approval met: Burn all locked tokens
+→ Otherwise: Return all locked tokens
 ```
 
 ---

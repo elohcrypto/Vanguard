@@ -14,6 +14,17 @@ contract IdentityRegistry is IIdentityRegistry, Ownable {
     // Mapping from wallet address to OnchainID identity
     mapping(address => address) private _identities;
 
+    /**
+     * @dev Number of currently registered identities.
+     *
+     * Governance needs a denominator to express quorum as a percentage of
+     * eligible voters. VanguardGovernance counts one vote per verified person
+     * (1p1v), so token supply is the wrong basis — the eligible population is
+     * the set of registered identities. Maintained in registerIdentity and
+     * deleteIdentity; never derived by iteration.
+     */
+    uint256 public registeredIdentityCount;
+
     // Mapping from wallet address to country code
     mapping(address => uint16) private _countries;
 
@@ -73,6 +84,9 @@ contract IdentityRegistry is IIdentityRegistry, Ownable {
 
         _identities[_userAddress] = _identity;
         _countries[_userAddress] = _country;
+        // New registration only. updateIdentity replaces an existing entry and
+        // must not change the count.
+        registeredIdentityCount += 1;
 
         emit IdentityStored(_userAddress, _identity);
         emit CountryUpdated(_identity, _country);
@@ -84,6 +98,11 @@ contract IdentityRegistry is IIdentityRegistry, Ownable {
         address identityAddr = _identities[_userAddress];
         delete _identities[_userAddress];
         delete _countries[_userAddress];
+        // Guarded by the "Identity not found" require above, so this cannot
+        // underflow, but the check makes that independent of call ordering.
+        if (registeredIdentityCount > 0) {
+            registeredIdentityCount -= 1;
+        }
 
         emit IdentityUnstored(_userAddress, identityAddr);
     }
@@ -194,6 +213,10 @@ contract IdentityRegistry is IIdentityRegistry, Ownable {
      */
     function setInvestorTypeRegistry(address _investorTypeRegistryAddress) external onlyOwner {
         require(_investorTypeRegistryAddress != address(0), "Invalid registry address");
+        require(
+            _investorTypeRegistryAddress.code.length > 0,
+            "IdentityRegistry: Investor type registry address is not a contract"
+        );
 
         address oldRegistry = address(_investorTypeRegistry);
         _investorTypeRegistry = IInvestorTypeRegistry(_investorTypeRegistryAddress);
@@ -213,6 +236,10 @@ contract IdentityRegistry is IIdentityRegistry, Ownable {
      */
     function setComplianceRules(address _complianceRulesAddress, address _token) external onlyOwner {
         require(_complianceRulesAddress != address(0), "Invalid compliance rules address");
+        require(
+            _complianceRulesAddress.code.length > 0,
+            "IdentityRegistry: Compliance rules address is not a contract"
+        );
         require(_token != address(0), "Invalid token address");
 
         address oldRules = address(_complianceRules);

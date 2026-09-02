@@ -149,6 +149,20 @@ contract VanguardGovernance is Ownable, ReentrancyGuard {
         address _oracleManager,
         address _token
     ) Ownable(msg.sender) {
+        // Only the two parameters cast to contract types are checked here. The
+        // rest are stored as plain addresses, so requiring code on them could
+        // reject a legitimate configuration.
+        require(_governanceToken != address(0), "VanguardGovernance: Governance token is zero address");
+        require(
+            _governanceToken.code.length > 0,
+            "VanguardGovernance: Governance token is not a contract"
+        );
+        require(_identityRegistry != address(0), "VanguardGovernance: Identity registry is zero address");
+        require(
+            _identityRegistry.code.length > 0,
+            "VanguardGovernance: Identity registry is not a contract"
+        );
+
         governanceToken = GovernanceToken(_governanceToken);
         identityRegistry = IIdentityRegistry(_identityRegistry);
         investorTypeRegistry = _investorTypeRegistry;
@@ -370,9 +384,24 @@ contract VanguardGovernance is Ownable, ReentrancyGuard {
         uint256 totalVotes = proposal.votesFor + proposal.votesAgainst;
         require(totalVotes > 0, "No votes cast");
 
-        // Calculate approval percentage (51% threshold)
-        uint256 approvalPercentage = (proposal.votesFor * 100) / totalVotes;
-        bool passed = approvalPercentage >= 51;
+        // Enforce the quorum and approval thresholds configured for this
+        // proposal type. Previously both were ignored: the check was a
+        // hardcoded 51% of votes cast, so a single voter was a 100% approval
+        // and could execute an arbitrary target.call(callData) below.
+        ProposalThresholds memory thresholds = proposalThresholds[proposal.proposalType];
+
+        // Quorum is a share of ELIGIBLE VOTERS, not of token supply: votes are
+        // counted one per verified person (votesFor += 1), so the denominator
+        // is the registered identity count.
+        uint256 eligibleVoters = identityRegistry.registeredIdentityCount();
+        require(
+            totalVotes * 10000 >= eligibleVoters * thresholds.quorumPercentage,
+            "Quorum not met"
+        );
+
+        // Thresholds are basis points (2000 = 20%), so scale votes to match.
+        uint256 approvalBps = (proposal.votesFor * 10000) / totalVotes;
+        bool passed = approvalBps >= thresholds.approvalPercentage;
 
         if (passed) {
             // Proposal passed: Execute and BURN locked tokens
@@ -455,15 +484,31 @@ contract VanguardGovernance is Ownable, ReentrancyGuard {
         proposal = _proposals[proposalId];
         totalVotes = proposal.votesFor + proposal.votesAgainst;
 
-        uint256 totalVotingPower = governanceToken.getTotalVotingPower();
-        participationRate = totalVotingPower > 0 ? (totalVotes * 10000) / totalVotingPower : 0;
+        // Turnout is a share of ELIGIBLE VOTERS. Votes are counted one per
+        // verified person (votesFor += 1), so the denominator must be the
+        // registered identity count. It was previously getTotalVotingPower()
+        // (== totalSupply(), in wei), which made this a headcount divided by
+        // a wei amount: with 1e24 wei supply the result was always 0.
+        uint256 eligibleVoters = identityRegistry.registeredIdentityCount();
+        participationRate = eligibleVoters > 0 ? (totalVotes * 10000) / eligibleVoters : 0;
 
-        // Check if proposal passed (≥51%)
-        bool passed = totalVotes > 0 && (proposal.votesFor * 100 / totalVotes) >= 51;
+        // This is the ADVISORY view a UI reads to decide whether to offer an
+        // "Execute" action. It must apply the same gates as executeProposal,
+        // or the UI promises a transaction that reverts. It previously used a
+        // hardcoded 51% of votes cast and no quorum at all, while execution
+        // enforces the per-type thresholds below.
+        ProposalThresholds memory thresholds = proposalThresholds[proposal.proposalType];
+
+        bool quorumMet = totalVotes * 10000 >= eligibleVoters * thresholds.quorumPercentage;
+        bool approved = totalVotes > 0 &&
+            (proposal.votesFor * 10000) / totalVotes >= thresholds.approvalPercentage;
 
         canExecute = proposal.status == ProposalStatus.Active &&
             block.timestamp > proposal.votingEnds &&
-            passed;
+            block.timestamp >= proposal.executionTime &&
+            totalVotes > 0 &&
+            quorumMet &&
+            approved;
     }
 
     /**
