@@ -5,11 +5,26 @@ import "./interfaces/ICompliance.sol";
 
 /**
  * @title ComplianceRegistry
- * @dev Simple mock compliance registry for demo purposes
+ * @dev PERMISSIVE TEST DOUBLE — NOT FOR PRODUCTION USE.
+ *
+ * `canTransfer` unconditionally returns true, so a Token bound to this contract
+ * performs NO compliance checking whatsoever. It exists so tests can exercise
+ * token mechanics without standing up the full compliance stack.
+ *
+ * For real deployments bind one of the enforcing ICompliance implementations
+ * instead: ComplianceRules, ComplianceValidator, or InvestorTypeCompliance.
+ *
+ * `isProductionCompliance()` returns false so deployment scripts and Token can
+ * detect this contract and refuse it. Any real implementation must return true.
  */
 contract ComplianceRegistry is ICompliance {
     mapping(address => bool) private _modules;
     address[] private _modulesList;
+
+    /// @notice Always false: this is a permissive test double, not a compliance engine.
+    function isProductionCompliance() external pure returns (bool) {
+        return false;
+    }
 
     event TokenBound(address indexed token);
     event TokenUnbound(address indexed token);
