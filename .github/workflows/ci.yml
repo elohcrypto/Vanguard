@@ -1,0 +1,147 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+# A newer push to the same branch cancels the older run.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CIRCOM_VERSION: v2.2.3
+
+jobs:
+  build-and-test:
+    runs-on: ubuntu-latest
+    # Local baseline: install ~20s, compile ~4min, setup:zk ~27s, tests ~9min.
+    timeout-minutes: 30
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+
+      # Fails if package.json and package-lock.json disagree, which is the
+      # drift that broke this build before (an unbounded "typescript": ">=4.5.0"
+      # resolved to TypeScript 7 and crashed ts-node).
+      - name: Install dependencies
+        run: npm ci
+
+      # The circuits declare `pragma circom 2.0.0`; only the Rust compiler can
+      # build them. The `circom` npm package is the deprecated 0.5.x JS build.
+      - name: Cache circom binary
+        id: circom-cache
+        uses: actions/cache@v4
+        with:
+          path: ~/.cargo/bin/circom
+          key: circom-${{ runner.os }}-${{ env.CIRCOM_VERSION }}
+
+      - name: Build circom ${{ env.CIRCOM_VERSION }}
+        if: steps.circom-cache.outputs.cache-hit != 'true'
+        run: |
+          git clone --depth 1 --branch "$CIRCOM_VERSION" https://github.com/iden3/circom.git /tmp/circom
+          cargo build --release --manifest-path /tmp/circom/Cargo.toml
+          mkdir -p ~/.cargo/bin
+          cp /tmp/circom/target/release/circom ~/.cargo/bin/circom
+
+      - name: Verify circom is 2.x
+        run: |
+          ~/.cargo/bin/circom --version
+          ~/.cargo/bin/circom --version | grep -qE '\b2\.[0-9]+\.[0-9]+' \
+            || { echo "::error::circom is not 2.x"; exit 1; }
+
+      # 37.8 MB trusted-setup file. Cached so CI does not re-download each run;
+      # setup:zk skips the download when the file is already present.
+      - name: Cache Powers of Tau
+        uses: actions/cache@v4
+        with:
+          path: build/circuits/powersOfTau28_hez_final_15.ptau
+          key: ptau-hez-final-15
+
+      - name: Compile contracts
+        run: npx hardhat compile
+
+      # `npm run` puts node_modules/.bin ahead of PATH, where the npm circom
+      # 0.5.x shim lives. CIRCOM_BIN pins the real compiler explicitly.
+      # $HOME rather than a literal path so this is not runner-specific.
+      - name: Build ZK circuits
+        run: CIRCOM_BIN="$HOME/.cargo/bin/circom" npm run setup:zk
+
+      # Static invariant: no setter or constructor may cast an address to a
+      # contract interface without checking the address has code. Casting does
+      # not validate, so a bad address is accepted here and reverts later inside
+      # the dependency call, with no reason string. Exits 1 on any finding.
+      # Runs before the build so a structural regression fails fast and cheap.
+      - name: Audit setter/constructor guards
+        run: node scripts/audit-setter-guards.js
+
+      # Regression guard for the silent-mock bug: setup:zk used to write
+      # placeholder files and overwrite the committed verifiers while exiting 0.
+      - name: Assert ZK artifacts are real
+        run: |
+          fail=0
+          for wasm in build/circuits/*/*_js/*.wasm; do
+            magic=$(xxd -p -l4 "$wasm")
+            if [ "$magic" != "0061736d" ]; then
+              echo "::error::$wasm is not WebAssembly (magic $magic; 'mock' is 6d6f636b)"
+              fail=1
+            fi
+          done
+          if ! git diff --quiet contracts/privacy/verifiers/; then
+            echo "::error::setup:zk modified committed verifier contracts"
+            git diff --stat contracts/privacy/verifiers/
+            fail=1
+          fi
+          exit $fail
+
+      - name: Run tests
+        run: npm test
+
+      # The demo wires contracts together the way an operator would — a path the
+      # unit tests do not cover. It cannot run interactively in CI (readline over
+      # a non-TTY pipe closes before the first prompt), so this drives the same
+      # ContractDeployer directly against a local node and reads the wiring back
+      # from chain. Exits non-zero on any mismatch.
+      - name: Demo deployment smoke test
+        run: |
+          npx hardhat node > /tmp/hardhat-node.log 2>&1 &
+          for i in $(seq 1 30); do
+            if curl -s -o /dev/null -m 1 -X POST -H "Content-Type: application/json" \
+                 --data '{"jsonrpc":"2.0","method":"eth_blockNumber","params":[],"id":1}' \
+                 http://127.0.0.1:8545; then break; fi
+            sleep 1
+          done
+          npx hardhat run scripts/demo-smoke.js --network localhost
+
+      # Blocks on critical (currently 0).
+      - name: Audit dependencies (critical blocks)
+        run: npm audit --audit-level=critical
+
+      # Ratchet: the 22 known highs are ReDoS/DoS in build tooling, pinned behind
+      # a hardhat-toolbox 4 -> 7 major bump (i.e. a Hardhat 2 -> 3 migration), so
+      # `npm audit fix` cannot clear them — verified: it changes nothing.
+      # Gating on `high` would be permanently red and quickly ignored. Instead
+      # fail only when the count RISES above the recorded baseline, so a newly
+      # introduced high is caught while the known backlog stays visible.
+      - name: Audit ratchet (no NEW high vulnerabilities)
+        run: |
+          BASELINE=22
+          count=$(npm audit --json 2>/dev/null \
+            | node -e "let s='';process.stdin.on('data',d=>s+=d).on('end',()=>{
+                console.log(JSON.parse(s).metadata.vulnerabilities.high)})")
+          echo "high vulnerabilities: $count (baseline $BASELINE)"
+          if [ "$count" -gt "$BASELINE" ]; then
+            echo "::error::High-severity count rose from $BASELINE to $count."
+            npm audit --audit-level=high || true
+            exit 1
+          fi
+          if [ "$count" -lt "$BASELINE" ]; then
+            echo "::notice::High count dropped to $count — lower BASELINE in ci.yml."
+          fi
