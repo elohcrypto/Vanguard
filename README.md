@@ -16,6 +16,14 @@ This project implements a **production-ready Vanguard RWA StableCoin (VSC)** sys
 
 **Current Status**: ✅ **PRODUCTION READY** - All 11 core requirements fully implemented
 
+> **Building from a fresh clone:** the ZK circuit artifacts are gitignored build output.
+> Run `npm run setup:zk` before `npm test`, or the 4 ZK test suites fail with `ENOENT`
+> (**23 failures** without them; **0 failures** with them — the pass count moves as tests
+> are added, so the failure count is the number to check).
+> `setup:zk` requires the **Rust circom 2.x** compiler — the `circom` npm package is the
+> deprecated 0.5.x JS build and cannot compile these circuits. See
+> [docs/ZK_CIRCUIT_BUILD_GUIDE.md](docs/ZK_CIRCUIT_BUILD_GUIDE.md).
+
 
 ## 🏗️ Project Structure
 

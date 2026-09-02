@@ -1,5 +1,29 @@
 # 🔧 ZK Circuit Build Guide
 
+## ⚠️ Prerequisite: Rust circom 2.x
+
+The circuits declare `pragma circom 2.0.0` and can **only** be compiled by the Rust
+circom 2.x compiler. The `circom` npm package (v0.5.46) is the deprecated JavaScript
+implementation and **cannot** compile them — do not `npm install -g circom`.
+
+```bash
+# Build and install Rust circom 2.x (takes ~1 minute)
+git clone --depth 1 https://github.com/iden3/circom.git
+cd circom && cargo build --release
+cp target/release/circom ~/.cargo/bin/
+
+# Verify — must report 2.x
+circom --version    # e.g. "circom compiler 2.2.3"
+```
+
+Requires a Rust toolchain (`rustup`). If circom lives elsewhere, set `CIRCOM_BIN`
+to its path.
+
+> **Note on PATH:** `npm run` prepends `node_modules/.bin` to `PATH`, where the
+> `circom` npm dependency installs a shim for the old 0.5.x compiler. `setup:zk`
+> therefore resolves the compiler explicitly and verifies it reports version 2.x,
+> so a shadowing 0.5.x shim is rejected rather than silently used.
+
 ## 🚀 Quick Start
 
 ### **Single Command to Build All Circuits:**
@@ -323,15 +347,21 @@ node scripts/test-proof-generation.js
 
 ## 🚨 Troubleshooting
 
-### **Issue 1: "circom: command not found"**
+### **Issue 1: "circom: command not found" or "No circom 2.x compiler found"**
+
+Install the **Rust** circom 2.x compiler (see Prerequisite at the top):
 
 ```bash
-# Install circom globally
-npm install -g circom
-
-# Or use npx
-npx circom --version
+git clone --depth 1 https://github.com/iden3/circom.git
+cd circom && cargo build --release
+cp target/release/circom ~/.cargo/bin/
+circom --version    # must report 2.x
 ```
+
+⚠️ **Do NOT run `npm install -g circom` or `npx circom`.** That is the deprecated
+0.5.x JavaScript compiler, which cannot parse `pragma circom 2.0.0`. Installing it
+also places a shim on `PATH` ahead of the real compiler under `npm run`, which makes
+the build fail in a way that looks like a circuit error.
 
 ### **Issue 2: "snarkjs: command not found"**
 
@@ -361,14 +391,23 @@ curl -o build/circuits/powersOfTau28_hez_final_15.ptau \
 NODE_OPTIONS="--max-old-space-size=4096" npm run setup:zk
 ```
 
-### **Issue 5: Mock files created instead of real circuits**
+### **Issue 5: Setup fails instead of producing circuits**
 
-This is normal for demo purposes. The script creates mock files if:
-- Circom is not installed
-- Powers of Tau file can't be downloaded
-- Circuit compilation fails
+`setup:zk` never writes mock or placeholder files. If any stage fails — missing
+compiler, failed Powers of Tau download, compilation error, key generation error —
+it aborts with exit code 1 and leaves `contracts/privacy/verifiers/` untouched.
 
-For production, ensure all dependencies are installed.
+Read the reported error and fix its cause; there is no fallback to work around.
+
+**Verifying artifacts are real:**
+
+```bash
+# Real WebAssembly starts with the magic bytes 0061736d
+xxd -p -l4 build/circuits/whitelist_membership/whitelist_membership_js/whitelist_membership.wasm
+
+# Proving keys are large binaries (300 KB – 5 MB), not small JSON
+ls -la build/circuits/*/*.zkey
+```
 
 ---
 
@@ -394,7 +433,9 @@ For production, ensure all dependencies are installed.
 
 ### **Dependencies:**
 
-- ✅ **circom** (v0.5.46+) - Circuit compiler
+- ✅ **circom 2.x (Rust)** - Circuit compiler. Installed separately via cargo; **not**
+  the `circom` npm package (v0.5.46), which is the deprecated JS compiler and cannot
+  build `pragma circom 2.0.0` circuits. Verified working: 2.2.3
 - ✅ **snarkjs** (v0.7.5+) - Proof generation/verification
 - ✅ **circomlib** (v2.0.5+) - Circuit library
 - ✅ **Node.js** (v16+) - Runtime environment

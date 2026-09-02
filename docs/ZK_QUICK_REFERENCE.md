@@ -19,9 +19,16 @@ npx hardhat run scripts/deploy.js --network localhost
 # Uses testingMode=true by default
 ```
 
+> ⚠️ Mock mode covers on-chain *verification*, but 4 test suites generate **real
+> proofs** with snarkjs and need the circuit artifacts on disk. Without
+> `npm run setup:zk` first, `npm test` reports **23 failures** (all `ENOENT`).
+> With it: **0 failures**. (Pass counts change as tests are added; the failure
+> count is the stable signal.)
+
 ### Production (REAL Mode)
 ```bash
 # Generate real circuit artifacts (one-time setup)
+# Requires Rust circom 2.x — see docs/ZK_CIRCUIT_BUILD_GUIDE.md
 npm run setup:zk
 
 # Test real proof generation
