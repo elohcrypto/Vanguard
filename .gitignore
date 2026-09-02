@@ -1,6 +1,9 @@
 # Dependencies
 node_modules/
-package-lock.json
+# package-lock.json is intentionally COMMITTED: this project uses npm, and the
+# lockfile is what makes `npm ci` reproducible. Without it, open-ended ranges
+# resolve to new majors and break the build (e.g. "typescript": ">=4.5.0"
+# resolved to TypeScript 7, which crashes ts-node).
 yarn.lock
 pnpm-lock.yaml
 

@@ -1,3 +1,11 @@
+# NOTE: Foundry is not currently used by this project. There are no .t.sol tests,
+# no lib/ directory, and no remappings.txt; the full suite runs under Hardhat
+# (`npm test`). This file is kept for a possible future Foundry setup.
+#
+# Keep solc_version in sync with hardhat.config.ts (currently 0.8.26). OpenZeppelin
+# 5.6 requires >= 0.8.26, and its Bytes.sol uses the mcopy opcode, so evm_version
+# must be cancun or later.
+
 [profile.default]
 src = "contracts"
 out = "out"
@@ -6,7 +14,8 @@ test = "test"
 cache_path = "cache_forge"
 
 # Compiler settings
-solc_version = "0.8.19"
+solc_version = "0.8.26"
+evm_version = "cancun"
 optimizer = true
 optimizer_runs = 200
 via_ir = true
