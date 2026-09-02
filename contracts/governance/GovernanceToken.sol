@@ -62,6 +62,19 @@ contract GovernanceToken is Token {
      * @param account Address to check
      * @param snapshotId Snapshot ID
      * @return Voting power at snapshot
+     *
+     * @custom:security NOT A WORKING SNAPSHOT. Nothing in this codebase ever
+     * writes `_votingPowerSnapshots`: the only two writers,
+     * `_snapshotVotingPower` and `setSnapshotVotingPower`, have no callers.
+     * Every lookup therefore misses and falls through to the CURRENT balance,
+     * so the same snapshotId returns different values as balances change.
+     *
+     * This is vestigial from a token-weighted design. VanguardGovernance now
+     * counts one vote per verified person (`votesFor += 1`) and never reads
+     * voting power for any decision — `castVote` gates on
+     * `identityRegistry.isVerified()` plus the voting fee. Do not build
+     * balance-at-a-point-in-time logic on this function; implement real
+     * checkpointing (e.g. OpenZeppelin ERC20Votes) instead.
      */
     function getVotingPowerAt(address account, uint256 snapshotId) public view returns (uint256) {
         require(snapshotId > 0 && snapshotId <= _currentSnapshotId, "Invalid snapshot ID");
