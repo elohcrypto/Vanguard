@@ -56,7 +56,10 @@ function findUnguardedSetters() {
       // for BOTH shapes. Start from the opening paren so a `)` earlier on the
       // same line (e.g. a modifier call) cannot truncate it.
       const openIdx = lines[i].indexOf("(");
-      const sigText = [lines[i].slice(openIdx), ...lines.slice(i + 1, Math.min(i + 12, lines.length))].join("\n");
+      const sigText = [
+        lines[i].slice(openIdx),
+        ...lines.slice(i + 1, Math.min(i + 12, lines.length)),
+      ].join("\n");
       const closeIdx = sigText.indexOf(")");
       const params = closeIdx === -1 ? sigText : sigText.slice(0, closeIdx);
 

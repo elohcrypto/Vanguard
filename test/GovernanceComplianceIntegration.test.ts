@@ -513,7 +513,10 @@ describe("Governance → ComplianceRules Integration Test", function () {
       const proposerBefore = await governanceToken.balanceOf(voter1.address);
       const voterBefore = await governanceToken.balanceOf(voter2.address);
       const locked = await vanguardGovernance.getLockedTokens(proposalId);
-      expect(locked, "deposits must be locked before settlement").to.be.greaterThan(0n);
+      expect(
+        locked,
+        "deposits must be locked before settlement",
+      ).to.be.greaterThan(0n);
 
       await vanguardGovernance.executeProposal(proposalId);
 
