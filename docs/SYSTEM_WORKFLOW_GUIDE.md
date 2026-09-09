@@ -59,12 +59,6 @@ contracts/
 │   └── helpers/
 │       ├── TestHelpers.sol       # Test helper functions
 │       └── DeploymentHelpers.sol # Deployment helper functions
-├── migrations/
-│   ├── 1_initial_migration.js
-│   ├── 2_deploy_onchain_id.js
-│   ├── 3_deploy_erc3643.js
-│   ├── 4_deploy_oracle.js
-│   └── 5_deploy_compliance.js
 ├── hardhat.config.js
 ├── package.json
 └── README.md

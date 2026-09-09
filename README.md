@@ -38,7 +38,6 @@ Vanguard/
 │   ├── investor/                # Investor type management
 │   ├── governance/              # Governance system (1 Person = 1 Vote)
 │   ├── payment/                 # Payment protocol with refunds
-│   ├── migrations/              # Contract migration scripts
 │   ├── upgradeable/             # Upgradeable contract patterns
 │   └── test/                    # Test contracts and helpers
 ├── circuits/                    # Zero-Knowledge Circuits 
@@ -190,7 +189,8 @@ npm run demo:interactive:proof  # Run main interactive demo (89 options)
 
 **Testing & Analysis**:
 ```bash
-npm run test        # Run tests with coverage report
+npm run test            # Run all tests
+npm run test:coverage   # Run all tests under solidity-coverage
 ```
 
 

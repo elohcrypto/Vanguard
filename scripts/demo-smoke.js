@@ -45,7 +45,25 @@ async function main() {
   const deployer = new ContractDeployer(state, new EnhancedLogger());
   await deployer.deployAllContracts();
   await deployer.deployComplianceRules();
-  await deployer.deployDigitalTokenSystem();
+
+  // deployDigitalTokenSystem is the only place a Token receives its compliance
+  // address, and it must run the production-compliance guard first. Capture
+  // its output so the guard's success line can be asserted below; the guard
+  // throwing is caught by main()'s catch and fails the run outright.
+  const deployLog = [];
+  const realDeployLog = console.log;
+  console.log = (...args) => deployLog.push(args.join(" "));
+  try {
+    await deployer.deployDigitalTokenSystem();
+  } finally {
+    console.log = realDeployLog;
+  }
+  if (!deployLog.some((l) => /reports production-ready/.test(l))) {
+    failures.push(
+      "compliance guard did not run before Token deployment (no 'reports production-ready' line)",
+    );
+  }
+
   await deployer.deployOracleSystem();
 
   // 1. Every expected contract exists and has code on chain.

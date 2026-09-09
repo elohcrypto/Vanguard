@@ -56,6 +56,16 @@ contract ComplianceRules is IComplianceRules, Ownable, ReentrancyGuard {
         return trustedContracts[contractAddress];
     }
 
+    /**
+     * @notice Deployment marker read by scripts/deploy-helpers.ts before a Token
+     *         is bound to this contract. True: canTransfer enforces KYC and
+     *         jurisdiction rules. The permissive test double ComplianceRegistry
+     *         returns false, and a contract without this function is refused.
+     */
+    function isProductionCompliance() external pure returns (bool) {
+        return true;
+    }
+
     function canTransfer(
         address from,
         address to,

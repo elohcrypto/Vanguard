@@ -153,12 +153,17 @@ export class DeploymentHelper {
     try {
       isProduction = await probe.isProductionCompliance();
     } catch {
-      // Function absent: predates the marker. Cannot conclude it is unsafe.
-      console.log(
-        `⚠️  ${complianceAddress} does not implement isProductionCompliance(); ` +
-          `confirm manually that it enforces transfer rules.`,
+      // Function absent. Every enforcing implementation in this repo carries
+      // the marker, so a contract without it is either a foreign contract or a
+      // test double. Neither should be bound without a human looking at it.
+      // An earlier version warned and returned here; that made the guard a
+      // formality, since anything unmarked passed.
+      throw new Error(
+        `Refusing to bind compliance at ${complianceAddress}: it does not ` +
+          `implement isProductionCompliance(). Every enforcing compliance in ` +
+          `this repo does (ComplianceRules). If this is a new implementation, ` +
+          `add the marker; if it is a test double, do not bind it.`,
       );
-      return;
     }
 
     if (!isProduction) {

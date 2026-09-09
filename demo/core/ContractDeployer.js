@@ -11,6 +11,7 @@
  */
 
 const { ethers } = require("hardhat");
+const { DeploymentHelper } = require("../../scripts/deploy-helpers");
 const {
   displaySection,
   displaySuccess,
@@ -459,6 +460,15 @@ class ContractDeployer {
         );
         console.log("      China, Russia (643), North Korea, Iran, Syria");
       }
+
+      // Refuse to bind a compliance contract that does not enforce. The
+      // helper reads isProductionCompliance() and throws on false or absent.
+      // This is the only place in the repo a Token receives its compliance
+      // address, so this is where the check has to live.
+      const complianceAddr = await this.state
+        .getContract("complianceRules")
+        .getAddress();
+      await DeploymentHelper.assertProductionCompliance(complianceAddr);
 
       // Deploy ERC-3643 compliant Digital Token
       console.log("\n📝 Step 2: Deploying ERC-3643 Token...");

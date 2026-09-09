@@ -25,15 +25,28 @@ describe("Production compliance guard", () => {
     ).to.be.rejectedWith(/isProductionCompliance\(\) == false/);
   });
 
-  it("allows a contract that omits the marker, with a warning", async () => {
-    // ComplianceRules is an enforcing implementation predating the marker.
+  it("accepts ComplianceRules, which carries the marker", async () => {
     const [owner] = await ethers.getSigners();
     const factory = await ethers.getContractFactory("ComplianceRules");
     const rules = await factory.deploy(owner.address, [840n], [408n]);
     await rules.waitForDeployment();
 
+    expect(await rules.isProductionCompliance()).to.equal(true);
     await expect(
       DeploymentHelper.assertProductionCompliance(await rules.getAddress()),
     ).to.not.be.rejected;
+  });
+
+  it("rejects a contract that omits the marker", async () => {
+    // Any contract with code but no isProductionCompliance(). An earlier
+    // version of the guard warned and let these through, which meant an
+    // unmarked permissive implementation passed.
+    const factory = await ethers.getContractFactory("IdentityRegistry");
+    const unmarked = await factory.deploy();
+    await unmarked.waitForDeployment();
+
+    await expect(
+      DeploymentHelper.assertProductionCompliance(await unmarked.getAddress()),
+    ).to.be.rejectedWith(/does not implement isProductionCompliance/);
   });
 });
