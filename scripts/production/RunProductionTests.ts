@@ -86,12 +86,12 @@ class ProductionTestRunner {
 
         try {
             // Run different test suites
+            // Only directories that exist. test/unit, test/security and
+            // test/performance were listed here but never created, so three of
+            // five "suites" reported failure on every run.
             const suites = [
-                { name: "Unit Tests", command: "npx hardhat test test/unit/**/*.test.ts" },
                 { name: "Integration Tests", command: "npx hardhat test test/integration/**/*.test.ts" },
                 { name: "Production Simulation", command: "npx hardhat test test/production/ProductionSimulation.test.ts" },
-                { name: "Security Tests", command: "npx hardhat test test/security/**/*.test.ts" },
-                { name: "Performance Tests", command: "npx hardhat test test/performance/**/*.test.ts" }
             ];
 
             for (const suite of suites) {

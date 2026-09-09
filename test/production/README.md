@@ -43,14 +43,10 @@ VERBOSE=true npx hardhat test test/production/ProductionSimulation.test.ts
 ### 2. Run Complete Production Test Suite
 
 ```bash
-# Run comprehensive test suite
+# Run the integration and production-simulation suites and write a report.
+# The script shells out to `npx hardhat test ...` on the in-process network;
+# a --network flag on the outer command does not reach those runs.
 npx hardhat run scripts/production/RunProductionTests.ts
-
-# Run on specific network
-npx hardhat run scripts/production/RunProductionTests.ts --network sepolia
-
-# Generate detailed reports
-npx hardhat run scripts/production/RunProductionTests.ts --network mainnet
 ```
 
 ### 3. Test Production Deployment
