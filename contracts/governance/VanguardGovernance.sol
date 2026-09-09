@@ -151,6 +151,10 @@ contract VanguardGovernance is Ownable2Step, ReentrancyGuard {
         string reason
     );
     event ProposalExecuted(uint256 indexed proposalId);
+    /// @notice A passed proposal's target call reverted; deposits were refunded.
+    /// @param reason Raw revert data from the target (selector + args, or a
+    ///        reason string), preserved so the cause can be decoded off-chain.
+    event ProposalExecutionFailed(uint256 indexed proposalId, bytes reason);
     event ProposalCancelled(uint256 indexed proposalId);
     event ProposalThresholdsUpdated(ProposalType indexed proposalType);
     event ProposalCreationCostUpdated(uint256 oldCost, uint256 newCost);
@@ -392,9 +396,10 @@ contract VanguardGovernance is Ownable2Step, ReentrancyGuard {
     }
     
     /**
-     * @dev Execute an approved proposal
-     * @notice If proposal passes (≥51%), locked tokens are burned
-     * @notice If proposal fails (<51%), locked tokens are returned to voters
+     * @dev Settle a proposal after its voting period.
+     * @notice Passes (quorum and approval for its type met, target call
+     *         succeeds): locked tokens are burned. Fails a threshold, or the
+     *         target call reverts: locked tokens are returned to everyone.
      */
     function executeProposal(uint256 proposalId) external nonReentrant {
         Proposal storage proposal = _proposals[proposalId];
@@ -452,9 +457,27 @@ contract VanguardGovernance is Ownable2Step, ReentrancyGuard {
                 // Execute list update
                 _executeListUpdate(proposalId);
             } else {
-                // Execute regular proposal
-                (bool success, ) = proposal.target.call(proposal.callData);
-                require(success, "Proposal execution failed");
+                (bool success, bytes memory reason) = proposal.target.call(proposal.callData);
+                if (!success) {
+                    // A PASSED VOTE WHOSE TARGET CALL REVERTS IS AN OUTCOME.
+                    //
+                    // This used to `require(success)`, which reverted the whole
+                    // transaction and left the proposal Active with every
+                    // deposit locked. No path out existed: re-executing hit
+                    // the same revert, and a rescue vote calling
+                    // cancelProposal() also reverted because executeProposal
+                    // and cancelProposal share one reentrancy lock, and
+                    // OpenZeppelin's guard refuses guarded-calls-guarded.
+                    //
+                    // Settle it instead: Rejected, refund, and log the target's
+                    // revert data so the failure is diagnosable. This makes a
+                    // failed execution terminal rather than retryable; the
+                    // proposer submits a new proposal.
+                    proposal.status = ProposalStatus.Rejected;
+                    _refundLockedTokens(proposalId);
+                    emit ProposalExecutionFailed(proposalId, reason);
+                    return;
+                }
             }
 
             // Burn all locked tokens

@@ -1467,9 +1467,42 @@ class GovernanceModule {
       }
 
       const tx = await vanguardGovernance.executeProposal(parseInt(proposalId));
-      await tx.wait();
+      const receipt = await tx.wait();
 
-      displaySuccess("PROPOSAL EXECUTED SUCCESSFULLY!");
+      // A mined receipt is not a success. executeProposal settles THREE
+      // outcomes without reverting: passed and ran (ProposalExecuted),
+      // failed a threshold (Rejected, refund, no event), or passed the vote
+      // but the target call reverted (ProposalExecutionFailed, refund).
+      // Read the outcome from the log, not from the fact that it mined.
+      const outcome = { executed: false, failed: null };
+      for (const log of receipt.logs) {
+        let parsed;
+        try {
+          parsed = vanguardGovernance.interface.parseLog(log);
+        } catch {
+          continue;
+        }
+        if (parsed?.name === "ProposalExecuted") outcome.executed = true;
+        if (parsed?.name === "ProposalExecutionFailed") outcome.failed = parsed.args.reason;
+      }
+
+      if (outcome.executed) {
+        displaySuccess("PROPOSAL EXECUTED — callData ran, locked VGT burned");
+      } else if (outcome.failed !== null) {
+        let why = outcome.failed;
+        try {
+          const err = vanguardGovernance.interface.parseError(outcome.failed);
+          if (err) why = `${err.name}(${err.args.map(String).join(", ")})`;
+        } catch {
+          // Not one of governance's own errors; show the raw bytes.
+        }
+        displayError("PROPOSAL PASSED THE VOTE BUT ITS TARGET CALL REVERTED");
+        console.log(`   Reason: ${why}`);
+        console.log("   Marked Rejected; every locked VGT deposit was refunded.");
+        console.log("   This is terminal — submit a corrected proposal.");
+      } else {
+        displayError("PROPOSAL REJECTED — thresholds not met, locked VGT refunded");
+      }
       console.log(`   Transaction: ${tx.hash}`);
     } catch (error) {
       displayError(`Execution failed: ${error.message}`);

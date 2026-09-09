@@ -122,4 +122,89 @@ describe("Hardening round 2 — contract changes", () => {
       expect(await gt.getVotingPower(bob.address)).to.equal(ethers.parseEther("2000"));
     });
   });
+
+  describe("R3: a passed proposal whose target call reverts is settled, not stuck", () => {
+    const D = 9 * 86400 + 60;
+    async function passedBadProposal() {
+      const { owner, alice, bob, carol, gt, gov, govAddr } = await govFixture();
+      // Calldata that reverts at execution. Governance does not own itself
+      // in this fixture (nor after the demo's option 74), so its own
+      // setVotingCost call fails onlyOwner with OwnableUnauthorizedAccount.
+      // That is exactly the shape of a real-world stuck proposal.
+      const cd = gov.interface.encodeFunctionData("setVotingCost", [ethers.parseEther("5000")]);
+      await gov.connect(alice).createProposal(0, "bad", "d", govAddr, cd);
+      const id = await gov.proposalCount();
+      await gov.connect(bob).castVote(id, true, "y");
+      await gov.connect(carol).castVote(id, true, "y");
+      await ethers.provider.send("evm_increaseTime", [D]);
+      await ethers.provider.send("evm_mine", []);
+      return { owner, alice, bob, carol, gt, gov, govAddr, id };
+    }
+
+    it("refunds every deposit, marks Rejected, and logs the target's revert data", async () => {
+      const { alice, bob, carol, gt, gov, govAddr, id } = await passedBadProposal();
+      const a0 = await gt.balanceOf(alice.address), b0 = await gt.balanceOf(bob.address), c0 = await gt.balanceOf(carol.address);
+      expect(await gov.getLockedTokens(id)).to.equal(ethers.parseEther("30"));
+      // Before: reverted "Proposal execution failed", proposal stayed Active,
+      // 30 VGT locked forever, and a rescue vote calling cancelProposal also
+      // reverted (shared reentrancy lock).
+      await expect(gov.executeProposal(id))
+        .to.emit(gov, "ProposalExecutionFailed")
+        .withArgs(id, (data: string) => {
+          // The raw revert data must decode to the target's actual error,
+          // with its argument intact, so the failure is diagnosable off-chain.
+          const err = gov.interface.parseError(data);
+          expect(err?.name, `decoded ${data.slice(0, 10)}`).to.equal("OwnableUnauthorizedAccount");
+          expect(err?.args[0]).to.equal(govAddr);
+          return true;
+        });
+      const [p] = await gov.getProposal(id);
+      expect(p.status).to.equal(3n); // Rejected
+      expect(await gov.getLockedTokens(id)).to.equal(0n);
+      expect(await gt.balanceOf(alice.address)).to.equal(a0 + ethers.parseEther("10"));
+      expect(await gt.balanceOf(bob.address)).to.equal(b0 + ethers.parseEther("10"));
+      expect(await gt.balanceOf(carol.address)).to.equal(c0 + ethers.parseEther("10"));
+      expect(await gt.balanceOf(govAddr)).to.equal(0n);
+      // The bad call had no effect.
+      expect(await gov.votingCost()).to.equal(ethers.parseEther("10"));
+    });
+
+    it("is terminal: cannot be executed or cancelled afterwards", async () => {
+      const { owner, gov, id } = await passedBadProposal();
+      await gov.executeProposal(id);
+      await expect(gov.executeProposal(id)).to.be.revertedWith("Proposal not active");
+      await expect(gov.connect(owner).cancelProposal(id)).to.be.revertedWith("Cannot cancel proposal");
+    });
+
+    it("a successful target call still executes and burns", async () => {
+      const { alice, bob, carol, gt, gov, govAddr } = await govFixture();
+      const supply0 = await gt.totalSupply();
+      const cd = gov.interface.encodeFunctionData("setVotingCost", [ethers.parseEther("20")]);
+      await gov.connect(alice).createProposal(0, "ok", "d", govAddr, cd);
+      const id = await gov.proposalCount();
+      await gov.connect(bob).castVote(id, true, "y");
+      await gov.connect(carol).castVote(id, true, "y");
+      await ethers.provider.send("evm_increaseTime", [D]);
+      await ethers.provider.send("evm_mine", []);
+      // Governance is not its own owner in this fixture, so the call reverts
+      // with OwnableUnauthorizedAccount — that is a FAILED execution too.
+      // Make governance own itself first, the same way the demo's option 83b
+      // does for the registry: nominate, then accept by vote.
+      // (Kept in this test so the "success" path is exercised, not assumed.)
+      await gov.transferOwnership(govAddr);
+      const cd2 = gov.interface.encodeFunctionData("acceptOwnership");
+      await gov.connect(alice).createProposal(0, "own", "d", govAddr, cd2);
+      const id2 = await gov.proposalCount();
+      await gov.connect(bob).castVote(id2, true, "y");
+      await gov.connect(carol).castVote(id2, true, "y");
+      await ethers.provider.send("evm_increaseTime", [D]);
+      await ethers.provider.send("evm_mine", []);
+      await expect(gov.executeProposal(id2)).to.emit(gov, "ProposalExecuted").withArgs(id2);
+      expect(await gov.owner()).to.equal(govAddr);
+      await expect(gov.executeProposal(id)).to.emit(gov, "ProposalExecuted").withArgs(id);
+      expect(await gov.votingCost()).to.equal(ethers.parseEther("20"));
+      // 30 VGT burned per passed proposal, two passed.
+      expect(await gt.totalSupply()).to.equal(supply0 - ethers.parseEther("60"));
+    });
+  });
 });
