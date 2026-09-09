@@ -258,6 +258,8 @@ New proposals now cost 5,000 VGT to create
 ### **Update Voting Cost:**
 ```solidity
 function setVotingCost(uint256 newCost) external onlyOwner
+// 0 < newCost <= MAX_COST (1000 VGT); emits VotingCostUpdated(old, new).
+// The bound stops an owner from pricing every holder out of governance.
 ```
 
 **Example:**
@@ -308,7 +310,8 @@ mapping(uint256 => address[]) private _proposalVoters;
 
 **New Functions:**
 - `setProposalCreationCost()` - Update creation cost
-- `setVotingCost()` - Update voting cost
+- `setVotingCost()` - Update voting cost (bounded, emits `VotingCostUpdated`)
+- `cancelProposal()` - Owner-only; refunds every locked VGT, same as a rejected proposal
 - `getLockedTokens()` - View locked tokens
 - `getVoterLockedTokens()` - View voter's locked tokens
 

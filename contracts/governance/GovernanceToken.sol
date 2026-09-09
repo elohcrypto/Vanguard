@@ -11,7 +11,6 @@ import "../erc3643/Token.sol";
  */
 contract GovernanceToken is Token {
     // Voting power tracking
-    mapping(address => uint256) private _votingPower;
     mapping(address => uint256) private _delegatedVotingPower;
     mapping(address => address) private _delegates;
     
@@ -44,8 +43,6 @@ contract GovernanceToken is Token {
     ) Token(_name, _symbol, _identityRegistryAddress, _complianceAddress) {
         // Mint initial supply to contract owner
         _mint(msg.sender, INITIAL_SUPPLY);
-        _votingPower[msg.sender] = INITIAL_SUPPLY;
-        emit VotingPowerChanged(msg.sender, INITIAL_SUPPLY);
     }
     
     /**
@@ -54,7 +51,10 @@ contract GovernanceToken is Token {
      * @return Voting power (token balance + delegated power)
      */
     function getVotingPower(address account) public view returns (uint256) {
-        return _votingPower[account] + _delegatedVotingPower[account];
+        // Own balance plus power delegated in. A private mirror of balanceOf
+        // used to be written on every transfer (two extra SSTOREs) and read
+        // here; it could never differ from balanceOf, so it is gone.
+        return balanceOf(account) + _delegatedVotingPower[account];
     }
     
     /**
@@ -185,9 +185,8 @@ contract GovernanceToken is Token {
         
         // Update voting power for sender
         if (from != address(0)) {
-            _votingPower[from] = balanceOf(from);
-            emit VotingPowerChanged(from, _votingPower[from]);
-            
+            emit VotingPowerChanged(from, balanceOf(from));
+
             // Update delegated power if sender has delegated
             address fromDelegate = _delegates[from];
             if (fromDelegate != address(0)) {
@@ -201,9 +200,8 @@ contract GovernanceToken is Token {
         
         // Update voting power for recipient
         if (to != address(0)) {
-            _votingPower[to] = balanceOf(to);
-            emit VotingPowerChanged(to, _votingPower[to]);
-            
+            emit VotingPowerChanged(to, balanceOf(to));
+
             // Update delegated power if recipient has delegated
             address toDelegate = _delegates[to];
             if (toDelegate != address(0)) {

@@ -242,7 +242,7 @@ contract MultiSigEscrowWallet is ReentrancyGuard {
      * @notice Payer signs to approve refund (2-of-3 multi-sig)
      * @dev Investor + Payer signature = Refund to Payer
      */
-    function signAsPayer() external {
+    function signAsPayer() external nonReentrant {
         require(payerSet, "Payer not set yet");
         require(msg.sender == payer, "Only payer can sign");
         require(state == WalletState.Active, "Wallet not active");
@@ -261,7 +261,7 @@ contract MultiSigEscrowWallet is ReentrancyGuard {
      * @notice Payee signs to approve release (2-of-3 multi-sig)
      * @dev Investor + Payee signature = Release to Payee
      */
-    function signAsPayee() external {
+    function signAsPayee() external nonReentrant {
         require(msg.sender == payee, "Only payee can sign");
         require(state == WalletState.Active, "Wallet not active");
         require(shipmentProof.exists, "No proof submitted");
@@ -284,7 +284,7 @@ contract MultiSigEscrowWallet is ReentrancyGuard {
      * @notice Investor signs to approve transaction (2-of-3 multi-sig)
      * @dev Investor + Payer = Refund, Investor + Payee = Release
      */
-    function signAsInvestor() external {
+    function signAsInvestor() external nonReentrant {
         require(msg.sender == investor, "Only investor can sign");
         require(state == WalletState.Active, "Wallet not active");
         require(!investorSigned, "Already signed");
@@ -311,7 +311,11 @@ contract MultiSigEscrowWallet is ReentrancyGuard {
      * @dev Release funds to payee with auto-distribution of fees
      * Requires investor + payee signatures (2-of-3)
      */
-    function _releaseToPayee() internal nonReentrant {
+    // Internal helpers carry no guard: every external entry that reaches
+    // them (signAsPayee, signAsInvestor, resolveDispute, manualRefund) is
+    // nonReentrant, and OpenZeppelin's guard reverts when a guarded
+    // function calls another guarded function.
+    function _releaseToPayee() internal {
         require(payeeSigned && investorSigned, "Need payee and investor signatures");
         require(state == WalletState.Active, "Wallet not active");
 

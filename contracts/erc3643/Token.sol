@@ -267,13 +267,22 @@ contract Token is IERC3643, ERC20, Ownable, Pausable {
         return address(_investorTypeRegistry);
     }
 
-    // Agent management
+    // Agent management. Agents mint, burn, freeze and pause, so every change
+    // is on the log; a monitor that cannot see agent changes cannot audit
+    // supply. Not part of IERC3643, so the events are declared here.
+    event AgentAdded(address indexed agent);
+    event AgentRemoved(address indexed agent);
+    error ZeroAgent();
+
     function addAgent(address _agent) external onlyOwner {
+        if (_agent == address(0)) revert ZeroAgent();
         _agents[_agent] = true;
+        emit AgentAdded(_agent);
     }
 
     function removeAgent(address _agent) external onlyOwner {
         _agents[_agent] = false;
+        emit AgentRemoved(_agent);
     }
 
     function isAgent(address _agent) external view returns (bool) {

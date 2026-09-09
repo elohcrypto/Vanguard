@@ -54,6 +54,8 @@ contract IdentityRegistry is IIdentityRegistry, Ownable {
     event InvestorTypeRegistryUpdated(address indexed oldRegistry, address indexed newRegistry);
     event ComplianceRulesUpdated(address indexed oldRules, address indexed newRules);
     event IdentityRegistrationRejected(address indexed userAddress, uint16 country, string reason);
+    event AgentAdded(address indexed agent);
+    event AgentRemoved(address indexed agent);
 
     modifier onlyAgent() {
         require(_agents[msg.sender] || msg.sender == owner(), "Not authorized agent");
@@ -193,10 +195,12 @@ contract IdentityRegistry is IIdentityRegistry, Ownable {
     function addAgent(address _agent) external onlyOwner {
         require(_agent != address(0), "Invalid agent address");
         _agents[_agent] = true;
+        emit AgentAdded(_agent);
     }
 
     function removeAgent(address _agent) external onlyOwner {
         _agents[_agent] = false;
+        emit AgentRemoved(_agent);
     }
 
     // Additional utility functions

@@ -105,7 +105,7 @@ jobs:
       # error fails; warnings fail only when they RISE above the baseline.
       - name: Lint ratchet (no solhint errors, no NEW warnings)
         run: |
-          BASELINE=1357
+          BASELINE=1356
           npx solhint -f unix 'contracts/**/*.sol' > solhint.log 2>&1 || true
           errors=$(grep -c '\[Error/' solhint.log || true)
           warnings=$(grep -c '\[Warning/' solhint.log || true)

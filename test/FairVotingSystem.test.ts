@@ -259,7 +259,9 @@ describe("Fair Voting System (1 Person = 1 Vote)", function () {
     });
 
     it("Should allow owner to update proposal creation cost", async function () {
-      const newCost = ethers.parseEther("5000");
+      // 500, not the 5000 this used to set: costs are capped at MAX_COST
+      // (1000 VGT) so the owner cannot price every holder out of governance.
+      const newCost = ethers.parseEther("500");
       await vanguardGovernance.setProposalCreationCost(newCost);
       expect(await vanguardGovernance.proposalCreationCost()).to.equal(newCost);
 

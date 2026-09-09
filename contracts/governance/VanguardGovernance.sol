@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.20;
 
-import "@openzeppelin/contracts/access/Ownable.sol";
+import "@openzeppelin/contracts/access/Ownable2Step.sol";
 import "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
 import "./GovernanceToken.sol";
 import "../erc3643/interfaces/IIdentityRegistry.sol";
@@ -14,7 +14,7 @@ import "../erc3643/interfaces/IInvestorTypeRegistry.sol";
  * @notice Voting power is based on governance token ownership
  * @notice Only approved addresses (holding governance tokens) can vote
  */
-contract VanguardGovernance is Ownable, ReentrancyGuard {
+contract VanguardGovernance is Ownable2Step, ReentrancyGuard {
     // Enums
     enum ProposalType {
         InvestorTypeConfig,
@@ -125,6 +125,12 @@ contract VanguardGovernance is Ownable, ReentrancyGuard {
     uint256 public proposalCreationCost = 10 * 10**18; // 10 VGT to create proposal
     uint256 public votingCost = 10 * 10**18; // 10 VGT per vote
 
+    /// @dev Upper bound for both costs. Without it the owner could set a
+    ///      cost above every holder's balance and freeze governance with
+    ///      one call. 1000 VGT is 100x the default; the exact ceiling is a
+    ///      product decision and only needs to block the freeze.
+    uint256 public constant MAX_COST = 1000 * 10**18;
+
     // Token locking tracking
     mapping(uint256 => uint256) private _lockedTokens; // proposalId => total locked tokens
     mapping(uint256 => mapping(address => uint256)) private _voterLockedTokens; // proposalId => voter => locked amount
@@ -147,6 +153,10 @@ contract VanguardGovernance is Ownable, ReentrancyGuard {
     event ProposalExecuted(uint256 indexed proposalId);
     event ProposalCancelled(uint256 indexed proposalId);
     event ProposalThresholdsUpdated(ProposalType indexed proposalType);
+    event ProposalCreationCostUpdated(uint256 oldCost, uint256 newCost);
+
+    error CostOutOfRange(uint256 requested, uint256 max);
+    event VotingCostUpdated(uint256 oldCost, uint256 newCost);
     
     /**
      * @dev Constructor
@@ -458,27 +468,43 @@ contract VanguardGovernance is Ownable, ReentrancyGuard {
         } else {
             // Proposal failed: RETURN locked tokens to voters
             proposal.status = ProposalStatus.Rejected;
+            _refundLockedTokens(proposalId);
+        }
+    }
 
-            // Return tokens to proposer
-            uint256 proposerTokens = _voterLockedTokens[proposalId][proposal.proposer];
-            if (proposerTokens > 0) {
+    /**
+     * @dev Return every VGT locked against a proposal to whoever locked it.
+     *      Shared by the reject branch above and by cancelProposal. Before
+     *      this existed, cancel only flipped the status, so a cancelled
+     *      proposal held its deposits forever: executeProposal requires
+     *      Active and there is no other withdrawal path.
+     */
+    function _refundLockedTokens(uint256 proposalId) internal {
+        Proposal storage proposal = _proposals[proposalId];
+
+        // Zero the aggregate before any transfer (checks-effects-interactions);
+        // each per-voter slot is zeroed just before its own transfer below.
+        _lockedTokens[proposalId] = 0;
+
+        uint256 proposerTokens = _voterLockedTokens[proposalId][proposal.proposer];
+        if (proposerTokens > 0) {
+            _voterLockedTokens[proposalId][proposal.proposer] = 0;
+            require(
+                governanceToken.transfer(proposal.proposer, proposerTokens),
+                "Token return to proposer failed"
+            );
+        }
+
+        address[] memory voters = _proposalVoters[proposalId];
+        for (uint256 i = 0; i < voters.length; i++) {
+            address voter = voters[i];
+            uint256 voterTokens = _voterLockedTokens[proposalId][voter];
+            if (voterTokens > 0 && voter != proposal.proposer) {
+                _voterLockedTokens[proposalId][voter] = 0;
                 require(
-                    governanceToken.transfer(proposal.proposer, proposerTokens),
-                    "Token return to proposer failed"
+                    governanceToken.transfer(voter, voterTokens),
+                    "Token return to voter failed"
                 );
-            }
-
-            // Return tokens to all voters
-            address[] memory voters = _proposalVoters[proposalId];
-            for (uint256 i = 0; i < voters.length; i++) {
-                address voter = voters[i];
-                uint256 voterTokens = _voterLockedTokens[proposalId][voter];
-                if (voterTokens > 0 && voter != proposal.proposer) {
-                    require(
-                        governanceToken.transfer(voter, voterTokens),
-                        "Token return to voter failed"
-                    );
-                }
             }
         }
     }
@@ -486,7 +512,7 @@ contract VanguardGovernance is Ownable, ReentrancyGuard {
     /**
      * @dev Cancel a proposal (owner only)
      */
-    function cancelProposal(uint256 proposalId) external onlyOwner {
+    function cancelProposal(uint256 proposalId) external onlyOwner nonReentrant {
         Proposal storage proposal = _proposals[proposalId];
         require(
             proposal.status == ProposalStatus.Active || proposal.status == ProposalStatus.Pending,
@@ -494,7 +520,8 @@ contract VanguardGovernance is Ownable, ReentrancyGuard {
         );
         
         proposal.status = ProposalStatus.Cancelled;
-        
+        _refundLockedTokens(proposalId);
+
         emit ProposalCancelled(proposalId);
     }
     
@@ -553,6 +580,8 @@ contract VanguardGovernance is Ownable, ReentrancyGuard {
      * @param newCost New cost in VGT tokens
      */
     function setProposalCreationCost(uint256 newCost) external onlyOwner {
+        if (newCost == 0 || newCost > MAX_COST) revert CostOutOfRange(newCost, MAX_COST);
+        emit ProposalCreationCostUpdated(proposalCreationCost, newCost);
         proposalCreationCost = newCost;
     }
 
@@ -561,6 +590,8 @@ contract VanguardGovernance is Ownable, ReentrancyGuard {
      * @param newCost New cost in VGT tokens
      */
     function setVotingCost(uint256 newCost) external onlyOwner {
+        if (newCost == 0 || newCost > MAX_COST) revert CostOutOfRange(newCost, MAX_COST);
+        emit VotingCostUpdated(votingCost, newCost);
         votingCost = newCost;
     }
 
