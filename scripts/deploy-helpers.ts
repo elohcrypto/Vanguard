@@ -1,4 +1,4 @@
-import { ethers } from "hardhat";
+import { ethers, run } from "hardhat";
 import { Contract, ContractFactory } from "ethers";
 
 export interface DeploymentResult {
@@ -61,7 +61,7 @@ export class DeploymentHelper {
     console.log(`🔍 Verifying contract at ${address}...`);
 
     try {
-      await ethers.run("verify:verify", {
+      await run("verify:verify", {
         address,
         constructorArguments: constructorArgs,
       });
