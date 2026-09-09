@@ -207,4 +207,26 @@ describe("Hardening round 2 — contract changes", () => {
       expect(await gt.totalSupply()).to.equal(supply0 - ethers.parseEther("60"));
     });
   });
+
+  describe("B5-C2: the fake snapshot API is gone", () => {
+    it("GovernanceToken ABI has no snapshot functions or event", async () => {
+      const { gt } = await govFixture();
+      for (const n of ["snapshot", "getVotingPowerAt", "setSnapshotVotingPower", "getCurrentSnapshotId", "SnapshotCreated"])
+        expect(gt.interface.fragments.some((f: any) => f.name === n), n).to.equal(false);
+      // The parts that are real stay.
+      for (const n of ["getVotingPower", "delegate", "distributeGovernanceTokens", "burn"])
+        expect(gt.interface.fragments.some((f: any) => f.name === n), n).to.equal(true);
+    });
+
+    it("ProposalCreated has four args and the struct has no snapshotId", async () => {
+      const { owner, alice, gov } = await govFixture();
+      const ev = gov.interface.getEvent("ProposalCreated")!;
+      expect(ev.inputs.map((i) => i.name)).to.deep.equal(["proposalId", "proposer", "proposalType", "title"]);
+      await expect(gov.connect(alice).createProposal(0, "t", "d", owner.address, "0x"))
+        .to.emit(gov, "ProposalCreated").withArgs(1n, alice.address, 0n, "t");
+      const [p] = await gov.getProposal(1);
+      expect((p as any).snapshotId).to.equal(undefined);
+      expect(p.eligibleVotersAtCreation).to.equal(5n);
+    });
+  });
 });

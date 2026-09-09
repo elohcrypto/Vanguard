@@ -60,7 +60,6 @@ contract VanguardGovernance is Ownable2Step, ReentrancyGuard {
         ProposalStatus status;
         uint256 votesFor;
         uint256 votesAgainst;
-        uint256 snapshotId;
         // Eligible-voter count captured when the proposal was created.
         //
         // Quorum previously read identityRegistry.registeredIdentityCount() at
@@ -140,8 +139,7 @@ contract VanguardGovernance is Ownable2Step, ReentrancyGuard {
         uint256 indexed proposalId,
         address indexed proposer,
         ProposalType proposalType,
-        string title,
-        uint256 snapshotId
+        string title
     );
     event VoteCast(
         uint256 indexed proposalId,
@@ -308,9 +306,6 @@ contract VanguardGovernance is Ownable2Step, ReentrancyGuard {
             "Token transfer failed"
         );
 
-        // Create snapshot of current voting power
-        uint256 snapshotId = governanceToken.snapshot();
-
         ProposalThresholds memory thresholds = proposalThresholds[proposalType];
 
         uint256 proposalId = _nextProposalId++;
@@ -329,7 +324,6 @@ contract VanguardGovernance is Ownable2Step, ReentrancyGuard {
             status: ProposalStatus.Active,
             votesFor: 0,
             votesAgainst: 0,
-            snapshotId: snapshotId,
             eligibleVotersAtCreation: identityRegistry.registeredIdentityCount()
         });
 
@@ -337,7 +331,7 @@ contract VanguardGovernance is Ownable2Step, ReentrancyGuard {
         _lockedTokens[proposalId] = proposalCreationCost;
         _voterLockedTokens[proposalId][msg.sender] = proposalCreationCost;
 
-        emit ProposalCreated(proposalId, msg.sender, proposalType, title, snapshotId);
+        emit ProposalCreated(proposalId, msg.sender, proposalType, title);
 
         return proposalId;
     }
@@ -741,9 +735,6 @@ contract VanguardGovernance is Ownable2Step, ReentrancyGuard {
             "Token transfer failed"
         );
 
-        // Create snapshot for voting
-        uint256 snapshotId = governanceToken.snapshot();
-
         // Get thresholds for this proposal type
         ProposalThresholds memory thresholds = proposalThresholds[proposalType];
 
@@ -763,7 +754,6 @@ contract VanguardGovernance is Ownable2Step, ReentrancyGuard {
             status: ProposalStatus.Active,
             votesFor: 0,
             votesAgainst: 0,
-            snapshotId: snapshotId,
             eligibleVotersAtCreation: identityRegistry.registeredIdentityCount()
         });
 
@@ -778,7 +768,7 @@ contract VanguardGovernance is Ownable2Step, ReentrancyGuard {
         _lockedTokens[proposalId] = proposalCreationCost;
         _voterLockedTokens[proposalId][msg.sender] = proposalCreationCost;
 
-        emit ProposalCreated(proposalId, msg.sender, proposalType, title, snapshotId);
+        emit ProposalCreated(proposalId, msg.sender, proposalType, title);
 
         return proposalId;
     }

@@ -1214,21 +1214,11 @@ class GovernanceModule {
       console.log("\n📋 PROPOSAL INFO:");
       console.log(`   Title: ${proposal.title}`);
       console.log(`   Status: ${statusNames[Number(proposal.status)]}`);
-      // proposal.snapshotId is deliberately not shown: nothing ever writes
-      // _votingPowerSnapshots, so the "snapshot" holds no historical value and
-      // voting is 1-person-1-vote regardless of balance. Displaying it implies
-      // a token-weighted mechanism that does not exist.
 
-      // Show who may actually vote.
-      //
-      // castVote requires isVerified(msg.sender) and a balance covering the
-      // voting fee; each eligible voter is worth exactly 1 vote. This block
-      // previously printed "Snapshot VGT | Current VGT" from
-      // getVotingPowerAt(). Those two columns can never differ:
-      // _votingPowerSnapshots is never written (no caller invokes
-      // _snapshotVotingPower or setSnapshotVotingPower), so getVotingPowerAt
-      // always falls through to the CURRENT balance. The old "has X now but 0
-      // at snapshot" branch was therefore unreachable.
+      // Show who may actually vote: castVote requires isVerified(msg.sender)
+      // and a balance covering the voting fee; each eligible voter is worth
+      // exactly 1 vote. Voting is not token-weighted and there is no
+      // snapshot, so no VGT amount is shown as a weight.
       const idRegistryForVoters = this.state.getContract("identityRegistry");
       const voteFee = await vanguardGovernance.votingCost();
 

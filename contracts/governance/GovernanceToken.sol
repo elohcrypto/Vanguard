@@ -18,15 +18,10 @@ contract GovernanceToken is Token {
     uint256 public constant DECIMALS = 18;
     uint256 public constant INITIAL_SUPPLY = 1_000_000 * 10**DECIMALS; // 1 million governance tokens
     
-    // Voting power snapshots for proposals
-    mapping(uint256 => mapping(address => uint256)) private _votingPowerSnapshots;
-    uint256 private _currentSnapshotId;
-    
     // Events
     event VotingPowerChanged(address indexed account, uint256 newVotingPower);
     event DelegateChanged(address indexed delegator, address indexed fromDelegate, address indexed toDelegate);
     event DelegateVotesChanged(address indexed delegate, uint256 previousBalance, uint256 newBalance);
-    event SnapshotCreated(uint256 indexed snapshotId);
     
     /**
      * @dev Constructor
@@ -57,40 +52,15 @@ contract GovernanceToken is Token {
         return balanceOf(account) + _delegatedVotingPower[account];
     }
     
-    /**
-     * @dev Get voting power at a specific snapshot
-     * @param account Address to check
-     * @param snapshotId Snapshot ID
-     * @return Voting power at snapshot
-     *
-     * @custom:security NOT A WORKING SNAPSHOT. Nothing in this codebase ever
-     * writes `_votingPowerSnapshots`: the only two writers,
-     * `_snapshotVotingPower` and `setSnapshotVotingPower`, have no callers.
-     * Every lookup therefore misses and falls through to the CURRENT balance,
-     * so the same snapshotId returns different values as balances change.
-     *
-     * This is vestigial from a token-weighted design. VanguardGovernance now
-     * counts one vote per verified person (`votesFor += 1`) and never reads
-     * voting power for any decision — `castVote` gates on
-     * `identityRegistry.isVerified()` plus the voting fee. Do not build
-     * balance-at-a-point-in-time logic on this function; implement real
-     * checkpointing (e.g. OpenZeppelin ERC20Votes) instead.
-     */
-    function getVotingPowerAt(address account, uint256 snapshotId) public view returns (uint256) {
-        require(snapshotId > 0 && snapshotId <= _currentSnapshotId, "Invalid snapshot ID");
+    // There is deliberately no balance-at-a-point-in-time lookup here.
+    // A snapshot API (snapshot / getVotingPowerAt / setSnapshotVotingPower)
+    // used to exist; nothing ever wrote the historical mapping, so every read
+    // fell through to the CURRENT balance while presenting itself as history,
+    // and an agent could write arbitrary numbers into storage nothing read.
+    // Governance counts one vote per verified person and never reads voting
+    // power. If token-weighted, checkpointed voting is ever wanted, use
+    // OpenZeppelin ERC20Votes rather than reviving that design.
 
-        // If snapshot exists, return it; otherwise return current voting power
-        // This allows lazy snapshotting - we capture voting power when first accessed
-        uint256 snapshotPower = _votingPowerSnapshots[snapshotId][account];
-        if (snapshotPower > 0) {
-            return snapshotPower;
-        }
-
-        // If no snapshot exists, use current voting power
-        // This handles the case where snapshot was just created
-        return getVotingPower(account);
-    }
-    
     /**
      * @dev Delegate voting power to another address
      * @param delegatee Address to delegate to
@@ -127,54 +97,6 @@ contract GovernanceToken is Token {
      */
     function getDelegate(address account) external view returns (address) {
         return _delegates[account];
-    }
-    
-    /**
-     * @dev Create a snapshot of current voting power
-     * @return Snapshot ID
-     */
-    function snapshot() external onlyAgent returns (uint256) {
-        _currentSnapshotId++;
-
-        // Note: Snapshots are created lazily - voting power is captured when accessed
-        // This is more gas-efficient than snapshotting all holders upfront
-
-        emit SnapshotCreated(_currentSnapshotId);
-        return _currentSnapshotId;
-    }
-
-    /**
-     * @dev Snapshot voting power for a specific account
-     * @param account Address to snapshot
-     * @param snapshotId Snapshot ID
-     */
-    function _snapshotVotingPower(address account, uint256 snapshotId) internal {
-        if (_votingPowerSnapshots[snapshotId][account] == 0) {
-            _votingPowerSnapshots[snapshotId][account] = getVotingPower(account);
-        }
-    }
-    
-    /**
-     * @dev Manually set snapshot voting power (called by governance contract)
-     * @param snapshotId Snapshot ID
-     * @param account Account address
-     * @param votingPower Voting power to set
-     */
-    function setSnapshotVotingPower(
-        uint256 snapshotId,
-        address account,
-        uint256 votingPower
-    ) external onlyAgent {
-        require(snapshotId > 0 && snapshotId <= _currentSnapshotId, "Invalid snapshot ID");
-        _votingPowerSnapshots[snapshotId][account] = votingPower;
-    }
-    
-    /**
-     * @dev Get current snapshot ID
-     * @return Current snapshot ID
-     */
-    function getCurrentSnapshotId() external view returns (uint256) {
-        return _currentSnapshotId;
     }
     
     /**

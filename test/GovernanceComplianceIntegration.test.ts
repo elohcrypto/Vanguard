@@ -238,24 +238,6 @@ describe("Governance → ComplianceRules Integration Test", function () {
         `   📋 New Blocked: ${newBlockedCountries.join(", ")} (Russia)`,
       );
 
-      // Set snapshot voting power
-      const snapshotId = await governanceToken.getCurrentSnapshotId();
-      await governanceToken.setSnapshotVotingPower(
-        snapshotId,
-        voter1.address,
-        VGT(300000),
-      );
-      await governanceToken.setSnapshotVotingPower(
-        snapshotId,
-        voter2.address,
-        VGT(400000),
-      );
-      await governanceToken.setSnapshotVotingPower(
-        snapshotId,
-        voter3.address,
-        VGT(300000),
-      );
-
       // Step 4: Cast votes (voter1 is proposer, cannot vote)
       console.log("\n✅ Step 4: Casting votes...");
       // voter1 created the proposal, so cannot vote
@@ -402,23 +384,7 @@ describe("Governance → ComplianceRules Integration Test", function () {
         callData,
       );
 
-      // Set snapshot and vote (voter1 is proposer, cannot vote)
-      const snapshotId = await governanceToken.getCurrentSnapshotId();
-      await governanceToken.setSnapshotVotingPower(
-        snapshotId,
-        voter1.address,
-        VGT(300000),
-      );
-      await governanceToken.setSnapshotVotingPower(
-        snapshotId,
-        voter2.address,
-        VGT(400000),
-      );
-      await governanceToken.setSnapshotVotingPower(
-        snapshotId,
-        voter3.address,
-        VGT(300000),
-      );
+      // voter1 is proposer, cannot vote
 
       // voter1 created the proposal, so cannot vote
       await vanguardGovernance.connect(voter2).castVote(1, true, "Support");

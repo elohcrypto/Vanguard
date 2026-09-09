@@ -266,28 +266,6 @@ describe("Governance Token System", function () {
         });
     });
 
-    describe("Snapshot Mechanism", function () {
-        beforeEach(async function () {
-            await governanceToken.distributeGovernanceTokens(
-                [voter1.address],
-                [VGT(10000)]
-            );
-        });
-
-        it("Should create snapshot", async function () {
-            const snapshotId = await governanceToken.snapshot();
-            expect(await governanceToken.getCurrentSnapshotId()).to.equal(1);
-        });
-
-        it("Should record voting power at snapshot", async function () {
-            await governanceToken.snapshot();
-            await governanceToken.setSnapshotVotingPower(1, voter1.address, VGT(10000));
-
-            const powerAtSnapshot = await governanceToken.getVotingPowerAt(voter1.address, 1);
-            expect(powerAtSnapshot).to.equal(VGT(10000));
-        });
-    });
-
     describe("VanguardGovernance - Proposal Creation", function () {
         beforeEach(async function () {
             await governanceToken.distributeGovernanceTokens(
@@ -480,12 +458,6 @@ describe("Governance Token System", function () {
                 "0x"
             );
             console.log("   ✅ Proposal created");
-
-            // Set snapshot voting power for all voters
-            const snapshotId = await governanceToken.getCurrentSnapshotId();
-            await governanceToken.setSnapshotVotingPower(snapshotId, voter1.address, VGT(300000));
-            await governanceToken.setSnapshotVotingPower(snapshotId, voter2.address, VGT(400000));
-            await governanceToken.setSnapshotVotingPower(snapshotId, voter3.address, VGT(300000));
 
             // Step 3: Cast votes (voter1 is proposer, cannot vote)
             console.log("\n✅ Step 3: Casting votes...");

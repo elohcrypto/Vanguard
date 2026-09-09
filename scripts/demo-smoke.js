@@ -242,9 +242,9 @@ async function main() {
 
   // Voting weight must never be shown as a VGT amount. Every verified voter
   // is worth exactly 1 vote; GovernanceToken.getVotingPower() returns a token
-  // balance from an abandoned token-weighted design, and getVotingPowerAt()
-  // is not a real snapshot (nothing writes _votingPowerSnapshots, so it
-  // returns the CURRENT balance for any snapshotId).
+  // balance from an abandoned token-weighted design. (The snapshot API that
+  // once sat beside it has been removed; the second check below stays as a
+  // regression guard against the wording coming back.)
   if (/Voting Power[^\n]*VGT/.test(output)) {
     failures.push(
       "governance output shows voting weight as a VGT amount — votes are 1 per verified person, not token-weighted",
