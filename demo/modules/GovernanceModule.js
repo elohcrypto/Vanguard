@@ -1259,14 +1259,14 @@ class GovernanceModule {
       }
 
       if (voters.length === 0) {
-        displayError("No signers had VGT tokens at snapshot time!");
+        // Eligibility is checked at castVote time, not at proposal creation:
+        // a voter funded and verified after the proposal exists may vote.
+        // An earlier message here said the opposite ("tokens distributed
+        // AFTER proposal creation cannot vote") — verified false on chain.
+        displayError("No signer is both verified and able to pay the vote fee");
         console.log("\n💡 SOLUTION:");
-        console.log("   1. Distribute VGT tokens first (option 75)");
-        console.log("   2. THEN create proposals (option 76)");
-        console.log("   3. Voters must have tokens BEFORE proposal creation");
-        console.log(
-          "\n   Tokens distributed AFTER proposal creation cannot vote!",
-        );
+        console.log("   1. Verify the signer (KYC) and distribute VGT (option 75)");
+        console.log("   2. Then vote — eligibility is checked when the vote is cast");
         return;
       }
 
@@ -1309,15 +1309,10 @@ class GovernanceModule {
         `   Support: ${support.toLowerCase() === "y" ? "FOR" : "AGAINST"}`,
       );
     } catch (error) {
+      // castVote reverts with "Insufficient tokens for voting" or
+      // "Must be KYC/AML verified"; no contract emits "No voting power",
+      // so the branch that used to key on it was unreachable.
       displayError(`Voting failed: ${error.message}`);
-      if (error.message.includes("No voting power")) {
-        console.log(
-          "\n💡 TIP: Tokens must be distributed BEFORE creating the proposal!",
-        );
-        console.log(
-          "   Voting uses snapshot-based balances from proposal creation time.",
-        );
-      }
     }
   }
 

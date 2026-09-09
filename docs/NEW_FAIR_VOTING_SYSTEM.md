@@ -23,12 +23,12 @@ Check: Is user KYC/AML verified? ✅
 ↓
 Check: Does user have enough VGT? (proposalCreationCost)
 ↓
-User pays 1000 VGT → LOCKED in governance contract
+User pays 10 VGT → LOCKED in governance contract
 ↓
 Proposal created ✅
 ```
 
-**Cost:** `proposalCreationCost` (default: 1,000 VGT)
+**Cost:** `proposalCreationCost` (default: 10 VGT)
 
 ---
 
@@ -106,7 +106,7 @@ changed after deployment.
 ## 💰 **Token Economics**
 
 ### **Proposal Creation:**
-- **Cost:** 1,000 VGT (governance-controlled)
+- **Cost:** 10 VGT (governance-controlled)
 - **Locked:** Yes
 - **Returned if fails:** Yes
 - **Burned if passes:** Yes
@@ -121,27 +121,27 @@ changed after deployment.
 
 ```
 Proposal Created:
-├─ Proposer pays: 1,000 VGT (locked)
-└─ Total locked: 1,000 VGT
+├─ Proposer pays: 10 VGT (locked)
+└─ Total locked: 10 VGT
 
 Voting:
 ├─ User A votes FOR: pays 10 VGT (locked)
 ├─ User B votes FOR: pays 10 VGT (locked)
 ├─ User C votes AGAINST: pays 10 VGT (locked)
 ├─ User D votes FOR: pays 10 VGT (locked)
-└─ Total locked: 1,040 VGT
+└─ Total locked: 50 VGT
 
 Result:
 ├─ Votes: 3 FOR, 1 AGAINST
 ├─ Percentage: 75% FOR (above this type's approval threshold)
 ├─ Status: PASSED ✅
-└─ Action: BURN 1,040 VGT 🔥
+└─ Action: BURN 50 VGT 🔥
 
 Alternative (Failed):
 ├─ Votes: 1 FOR, 3 AGAINST
 ├─ Percentage: 25% FOR (below this type's approval threshold)
 ├─ Status: FAILED ❌
-└─ Action: RETURN 1,040 VGT to all participants 💰
+└─ Action: RETURN 50 VGT to all participants 💰
 ```
 
 ---
@@ -197,14 +197,14 @@ Proposal Result: 75% FOR
 ↓
 All locked tokens are BURNED
 ↓
-Proposer: 1,000 VGT → BURNED 🔥
+Proposer: 10 VGT → BURNED 🔥
 Voter A: 10 VGT → BURNED 🔥
 Voter B: 10 VGT → BURNED 🔥
 Voter C: 10 VGT → BURNED 🔥
 Voter D: 10 VGT → BURNED 🔥
 ↓
-Total burned: 1,040 VGT
-Total supply decreased by 1,040 VGT
+Total burned: 50 VGT
+Total supply decreased by 50 VGT
 ```
 
 **Why burn?**
@@ -220,13 +220,13 @@ Proposal Result: 25% FOR
 ↓
 All locked tokens are RETURNED
 ↓
-Proposer: 1,000 VGT → RETURNED 💰
+Proposer: 10 VGT → RETURNED 💰
 Voter A: 10 VGT → RETURNED 💰
 Voter B: 10 VGT → RETURNED 💰
 Voter C: 10 VGT → RETURNED 💰
 Voter D: 10 VGT → RETURNED 💰
 ↓
-Total returned: 1,040 VGT
+Total returned: 50 VGT
 No tokens burned
 ```
 
@@ -246,7 +246,7 @@ function setProposalCreationCost(uint256 newCost) external onlyOwner
 
 **Example:**
 ```
-Current cost: 1,000 VGT
+Current cost: 10 VGT
 ↓
 Governance decides to increase to 5,000 VGT
 ↓
@@ -296,7 +296,7 @@ New votes now cost 5 VGT each
 **New State Variables:**
 ```solidity
 IIdentityRegistry public identityRegistry;
-uint256 public proposalCreationCost = 1000 * 10**18; // 1,000 VGT
+uint256 public proposalCreationCost = 10 * 10**18; // 10 VGT
 uint256 public votingCost = 10 * 10**18; // 10 VGT
 mapping(uint256 => uint256) private _lockedTokens;
 mapping(uint256 => mapping(address => uint256)) private _voterLockedTokens;
@@ -344,10 +344,10 @@ Option 80: Distribute Governance Tokens
 → Users need tokens to pay for proposals/voting
 ```
 
-### **Step 3: Create Proposal (Costs 1,000 VGT)**
+### **Step 3: Create Proposal (Costs 10 VGT)**
 ```bash
 Option 81: Create Governance Proposal
-→ User pays 1,000 VGT (locked)
+→ User pays 10 VGT (locked)
 → Proposal created
 ```
 
