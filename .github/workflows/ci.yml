@@ -151,6 +151,32 @@ jobs:
       - name: Run tests
         run: npm test
 
+      # Coverage ratchet. Baseline measured at 63.73% lines with the full suite.
+      # Fails only when the number DROPS below BASELINE; notices when it climbs
+      # 2+ points so the baseline can be raised. The plugin compiles instrumented
+      # bytecode into artifacts/; nothing else may compile in this tree while it
+      # runs, which is why this step follows "Run tests" rather than sharing it.
+      # DEPLOY_GAS_LIMIT (set by the npm script) lifts one hard-coded 10M deploy
+      # cap that instrumented initcode exceeds.
+      - name: Coverage ratchet (no DROP in line coverage)
+        run: |
+          BASELINE=63
+          npm run test:coverage > coverage.log 2>&1 || true
+          lines=$(grep -E '^All files' coverage.log | awk -F'|' '{gsub(/ /,"",$5); print $5}')
+          echo "line coverage: ${lines:-<none>}% (baseline $BASELINE)"
+          if [ -z "$lines" ]; then
+            echo "::error::coverage summary line not found; see coverage.log"
+            tail -20 coverage.log
+            exit 1
+          fi
+          if [ "$(printf '%s\n' "$lines" "$BASELINE" | sort -g | head -1)" != "$BASELINE" ]; then
+            echo "::error::line coverage ${lines}% dropped below baseline ${BASELINE}%."
+            exit 1
+          fi
+          if [ "$(printf '%s\n' "$lines" "$((BASELINE+2))" | sort -g | head -1)" = "$((BASELINE+2))" ]; then
+            echo "::notice::line coverage ${lines}% is 2+ points above baseline — raise BASELINE in ci.yml."
+          fi
+
       # The demo wires contracts together the way an operator would — a path the
       # unit tests do not cover. It cannot run interactively in CI (readline over
       # a non-TTY pipe closes before the first prompt), so this drives the same
