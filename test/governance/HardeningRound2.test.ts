@@ -325,4 +325,76 @@ describe("Hardening round 2 — contract changes", () => {
     });
   });
 
+  describe("R5: a list-update proposal whose manager call reverts is settled, not stuck", () => {
+    const D = 9 * 86400 + 60;
+    const REMOVE_FROM_WHITELIST = 7, ADD_TO_WHITELIST = 6;
+    async function listFixture() {
+      const base = await govFixture();
+      const dlm = await (await ethers.getContractFactory("DynamicListManager")).deploy(base.owner.address);
+      return { ...base, dlm };
+    }
+    async function passedListProposal(gov: any, alice: any, bob: any, carol: any, type: number, target: string) {
+      await gov.connect(alice).createListUpdateProposal(type, "list", "d", target, 1, "r");
+      const id = await gov.proposalCount();
+      await gov.connect(bob).castVote(id, true, "y");
+      await gov.connect(carol).castVote(id, true, "y");
+      await ethers.provider.send("evm_increaseTime", [D]);
+      await ethers.provider.send("evm_mine", []);
+      return id;
+    }
+
+    it("manager precondition revert: Rejected, claimable, reason preserved", async () => {
+      const { alice, bob, carol, gov, govAddr, dlm } = await listFixture();
+      await gov.setDynamicListManager(await dlm.getAddress());
+      await dlm.setGovernanceContract(govAddr);
+      // Removing a user who was never whitelisted reverts in the manager.
+      const id = await passedListProposal(gov, alice, bob, carol, REMOVE_FROM_WHITELIST, bob.address);
+      // Before: bubbled 'User not whitelisted', proposal stayed Active, 30 VGT locked.
+      await expect(gov.executeProposal(id))
+        .to.emit(gov, "ProposalExecutionFailed")
+        .withArgs(id, (data: string) => {
+          const err = gov.interface.parseError(data);
+          expect(err?.name).to.equal("Error");
+          expect(err?.args[0]).to.equal("User not whitelisted");
+          return true;
+        });
+      const [p] = await gov.getProposal(id);
+      expect(p.status).to.equal(3n);
+      expect(await gov.getClaimableRefund(id, alice.address)).to.equal(ethers.parseEther("10"));
+      expect(await gov.getClaimableRefund(id, bob.address)).to.equal(ethers.parseEther("10"));
+    });
+
+    it("manager not authorised, and manager never set, settle the same way", async () => {
+      const { alice, bob, carol, gov, dlm } = await listFixture();
+      // Not authorised: manager set on governance, governance not set on manager.
+      await gov.setDynamicListManager(await dlm.getAddress());
+      const a = await passedListProposal(gov, alice, bob, carol, ADD_TO_WHITELIST, bob.address);
+      await expect(gov.executeProposal(a))
+        .to.emit(gov, "ProposalExecutionFailed")
+        .withArgs(a, (data: string) => gov.interface.parseError(data)?.args[0] === "Only owner or governance");
+      expect(await gov.getClaimableRefund(a, alice.address)).to.equal(ethers.parseEther("10"));
+    });
+
+    it("manager never set is a configuration error and still reverts", async () => {
+      // Distinct from a target-call failure: nothing was voted on that could
+      // succeed later, and the owner can fix it with setDynamicListManager.
+      // Keeping this a revert preserves retry once the manager is wired.
+      const { alice, bob, carol, gov } = await listFixture();
+      const id = await passedListProposal(gov, alice, bob, carol, ADD_TO_WHITELIST, bob.address);
+      await expect(gov.executeProposal(id)).to.be.revertedWith("DynamicListManager not set");
+      const [p] = await gov.getProposal(id);
+      expect(p.status).to.equal(1n); // still Active: retryable after wiring
+    });
+
+    it("control: a wired manager call executes, whitelists, and burns", async () => {
+      const { alice, bob, carol, gt, gov, govAddr, dlm } = await listFixture();
+      await gov.setDynamicListManager(await dlm.getAddress());
+      await dlm.setGovernanceContract(govAddr);
+      const id = await passedListProposal(gov, alice, bob, carol, ADD_TO_WHITELIST, bob.address);
+      const s0 = await gt.totalSupply();
+      await expect(gov.executeProposal(id)).to.emit(gov, "ProposalExecuted").withArgs(id);
+      expect(await dlm.userStatus(bob.address)).to.equal(1n); // WHITELISTED
+      expect(s0 - (await gt.totalSupply())).to.equal(ethers.parseEther("30"));
+    });
+  });
 });

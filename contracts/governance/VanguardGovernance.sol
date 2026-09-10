@@ -454,35 +454,36 @@ contract VanguardGovernance is Ownable2Step, ReentrancyGuard {
             // Proposal passed: Execute and BURN locked tokens
             require(block.timestamp >= proposal.executionTime, "Execution delay not met");
 
-            // Check if this is a list update proposal
+            bool success;
+            bytes memory reason;
             if (proposal.proposalType == ProposalType.AddToWhitelist ||
                 proposal.proposalType == ProposalType.RemoveFromWhitelist ||
                 proposal.proposalType == ProposalType.AddToBlacklist ||
                 proposal.proposalType == ProposalType.RemoveFromBlacklist) {
-
-                // Execute list update
-                _executeListUpdate(proposalId);
+                (success, reason) = _executeListUpdate(proposalId);
             } else {
-                (bool success, bytes memory reason) = proposal.target.call(proposal.callData);
-                if (!success) {
-                    // A PASSED VOTE WHOSE TARGET CALL REVERTS IS AN OUTCOME.
-                    //
-                    // This used to `require(success)`, which reverted the whole
-                    // transaction and left the proposal Active with every
-                    // deposit locked. No path out existed: re-executing hit
-                    // the same revert, and a rescue vote calling
-                    // cancelProposal() also reverted because executeProposal
-                    // and cancelProposal share one reentrancy lock, and
-                    // OpenZeppelin's guard refuses guarded-calls-guarded.
-                    //
-                    // Settle it instead: Rejected, deposits claimable, and log
-                    // the target's revert data so the failure is diagnosable.
-                    // This makes a failed execution terminal rather than
-                    // retryable; the proposer submits a new proposal.
-                    _settleWithRefund(proposalId, ProposalStatus.Rejected);
-                    emit ProposalExecutionFailed(proposalId, reason);
-                    return;
-                }
+                (success, reason) = proposal.target.call(proposal.callData);
+            }
+
+            if (!success) {
+                // A PASSED VOTE WHOSE TARGET CALL REVERTS IS AN OUTCOME.
+                //
+                // Both branches used to revert here (require(success) on
+                // the regular path; the list path re-raised the manager's
+                // revert). That left the proposal Active with every deposit
+                // locked and no path out: re-executing hit the same revert,
+                // and a rescue vote calling cancelProposal() also reverted
+                // because executeProposal and cancelProposal share one
+                // reentrancy lock, and OpenZeppelin's guard refuses
+                // guarded-calls-guarded.
+                //
+                // Settle it instead: Rejected, deposits claimable, and log
+                // the target's revert data so the failure is diagnosable.
+                // This makes a failed execution terminal rather than
+                // retryable; the proposer submits a new proposal.
+                _settleWithRefund(proposalId, ProposalStatus.Rejected);
+                emit ProposalExecutionFailed(proposalId, reason);
+                return;
             }
 
             // Burn all locked tokens
@@ -667,14 +668,26 @@ contract VanguardGovernance is Ownable2Step, ReentrancyGuard {
      * @dev Internal function to execute list update
      * @param proposalId Proposal ID
      */
-    function _executeListUpdate(uint256 proposalId) internal {
+    /**
+     * @dev Call the list manager for a list-update proposal and report the
+     *      outcome. Does NOT revert on a failed call: the caller settles the
+     *      proposal and logs `reason`, exactly as for a regular target call.
+     *
+     *      An unset manager is different in kind. Nothing was voted on that
+     *      could ever succeed, and the owner can fix it with
+     *      setDynamicListManager, so that case stays a revert and the
+     *      proposal stays Active: retryable once wired.
+     */
+    function _executeListUpdate(uint256 proposalId)
+        internal
+        returns (bool success, bytes memory reason)
+    {
         require(dynamicListManager != address(0), "DynamicListManager not set");
 
         Proposal storage proposal = _proposals[proposalId];
         ListUpdateProposal storage listUpdate = listUpdateProposals[proposalId];
 
-        // Import DynamicListManager interface
-        (bool success, bytes memory returnData) = dynamicListManager.call(
+        (success, reason) = dynamicListManager.call(
             abi.encodeWithSignature(
                 _getListUpdateFunctionSignature(proposal.proposalType),
                 listUpdate.targetUser,
@@ -682,19 +695,6 @@ contract VanguardGovernance is Ownable2Step, ReentrancyGuard {
                 listUpdate.reason
             )
         );
-
-        if (!success) {
-            // If call failed, try to decode the error message
-            if (returnData.length > 0) {
-                // Bubble up the revert reason
-                assembly {
-                    let returndata_size := mload(returnData)
-                    revert(add(32, returnData), returndata_size)
-                }
-            } else {
-                revert("List update execution failed");
-            }
-        }
     }
 
     /**
