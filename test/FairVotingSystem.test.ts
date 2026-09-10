@@ -556,8 +556,10 @@ describe("Fair Voting System (1 Person = 1 Vote)", function () {
       await ethers.provider.send("evm_increaseTime", [7 * 24 * 60 * 60 + 60]); // 7 days + 1 minute buffer
       await ethers.provider.send("evm_mine", []);
 
-      // Execute proposal (should fail and return tokens)
+      // Execute proposal (should fail; deposits become claimable, not pushed)
       await vanguardGovernance.executeProposal(proposalId);
+      for (const s of [alice, bob, carol, dave])
+        await vanguardGovernance.connect(s).claimRefund(proposalId);
 
       // Check tokens were returned
       const aliceBalanceAfter = await governanceToken.balanceOf(alice.address);

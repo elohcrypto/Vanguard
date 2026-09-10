@@ -166,6 +166,7 @@ class MenuSystem {
     console.log("76. Create Proposal");
     console.log("77. Vote on Proposal");
     console.log("78. Execute Proposal");
+    console.log("78a. Claim Refund (from Rejected/Cancelled proposals)");
     console.log("79. Time Travel (Fast Forward 9 Days)");
     console.log("");
     console.log("📈 Governance Tools:");
@@ -505,6 +506,9 @@ class MenuSystem {
           break;
         case "78":
           await governance.executeProposal();
+          break;
+        case "78a":
+          await governance.claimRefund();
           break;
         case "79":
           await governance.timeTravel9Days();

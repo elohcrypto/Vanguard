@@ -1380,7 +1380,7 @@ class GovernanceModule {
               );
               const outcome = canExecuteNow
                 ? "✅ will PASS — callData executes, tokens burned"
-                : `❌ will FAIL thresholds (needs ${quorumPct}% quorum, ${approvalPct}% approval) — tokens refunded`;
+                : `❌ will FAIL thresholds (needs ${quorumPct}% quorum, ${approvalPct}% approval) — deposits become claimable (78a)`;
 
               console.log(`\n${i}. ${proposal.title}`);
               console.log(`   Type: ${type} | Status: ${status}`);
@@ -1447,7 +1447,7 @@ class GovernanceModule {
       console.log(
         result[3]
           ? "   Outcome if executed: PASS — callData runs, locked VGT burned 🔥"
-          : "   Outcome if executed: FAIL — proposal rejected, locked VGT refunded 💰",
+          : "   Outcome if executed: FAIL — proposal rejected, each deposit claimable via 78a 💰",
       );
 
       const confirm = await this.promptUser("\nExecute this proposal? (y/n): ");
@@ -1488,10 +1488,11 @@ class GovernanceModule {
         }
         displayError("PROPOSAL PASSED THE VOTE BUT ITS TARGET CALL REVERTED");
         console.log(`   Reason: ${why}`);
-        console.log("   Marked Rejected; every locked VGT deposit was refunded.");
+        console.log("   Marked Rejected. Each participant claims their own VGT (option 78a).");
         console.log("   This is terminal — submit a corrected proposal.");
       } else {
-        displayError("PROPOSAL REJECTED — thresholds not met, locked VGT refunded");
+        displayError("PROPOSAL REJECTED — thresholds not met");
+        console.log("   Each participant claims their own VGT deposit (option 78a).");
       }
       console.log(`   Transaction: ${tx.hash}`);
     } catch (error) {
@@ -2404,6 +2405,84 @@ class GovernanceModule {
     await tx.wait();
 
     displaySuccess(`Voting cost changed to ${newCost} VGT per vote`);
+  }
+
+  /**
+   * Option 78a: Claim Refund.
+   *
+   * Settlement (reject, cancel, execution failure) no longer pushes VGT
+   * back. It records what each participant is owed, and each one pulls it
+   * here. A participant the token refuses to pay (identity deleted, address
+   * frozen) blocks only their own claim, not everyone else's; before this,
+   * one such participant froze every deposit on the proposal forever.
+   */
+  async claimRefund() {
+    displaySection("CLAIM GOVERNANCE REFUND", "💰");
+
+    const vanguardGovernance = this.state.getContract("vanguardGovernance");
+    const governanceToken = this.state.getContract("governanceToken");
+    if (!vanguardGovernance || !governanceToken) {
+      displayError("Deploy Governance Token system first (option 74)");
+      return;
+    }
+
+    try {
+      const signers = this.state.signers;
+      const count = Number(await vanguardGovernance.proposalCount());
+      if (count === 0) {
+        displayError("No proposals exist yet");
+        return;
+      }
+
+      // Scan every settled proposal for every signer; list what is owed.
+      const claimable = [];
+      for (let id = 1; id <= count; id++) {
+        const [p] = await vanguardGovernance.getProposal(id);
+        const status = Number(p.status);
+        if (status !== 3 && status !== 5) continue; // Rejected, Cancelled
+        for (let i = 0; i < signers.length; i++) {
+          const owed = await vanguardGovernance.getClaimableRefund(id, signers[i].address);
+          if (owed > 0n) claimable.push({ id, i, owed, title: p.title, status });
+        }
+      }
+
+      if (claimable.length === 0) {
+        displayInfo("Nothing to claim: no settled proposal holds a deposit for any signer");
+        return;
+      }
+
+      console.log("\n📋 CLAIMABLE DEPOSITS:");
+      claimable.forEach((c, n) => {
+        console.log(
+          `${n + 1}. Proposal ${c.id} "${c.title}" (${c.status === 3 ? "Rejected" : "Cancelled"}) — signer ${c.i} ${signers[c.i].address.slice(0, 10)}… owed ${ethers.formatEther(c.owed)} VGT`,
+        );
+      });
+
+      const pick = await this.promptUser("\nClaim which (number, or 'all'): ");
+      const chosen =
+        pick.trim().toLowerCase() === "all"
+          ? claimable
+          : [claimable[parseInt(pick) - 1]].filter(Boolean);
+      if (chosen.length === 0) {
+        displayError("Invalid choice");
+        return;
+      }
+
+      for (const c of chosen) {
+        try {
+          const tx = await vanguardGovernance.connect(signers[c.i]).claimRefund(c.id);
+          await tx.wait();
+          displaySuccess(`Signer ${c.i} claimed ${ethers.formatEther(c.owed)} VGT from proposal ${c.id}`);
+        } catch (error) {
+          // The token's compliance gate can refuse this one recipient. That
+          // is the case the pull design exists for: nobody else is affected.
+          displayError(`Signer ${c.i} could not claim from proposal ${c.id}: ${error.message}`);
+          console.log("   Deposit stays claimable; retry once the signer is verified/unfrozen.");
+        }
+      }
+    } catch (error) {
+      displayError(`Claim failed: ${error.message}`);
+    }
   }
 }
 

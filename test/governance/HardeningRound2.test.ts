@@ -34,21 +34,26 @@ describe("Hardening round 2 — contract changes", () => {
       await gov.connect(bob).castVote(id, true, "yes");
       expect(await gov.getLockedTokens(id)).to.equal(ethers.parseEther("20"));
       // Before: cancel flipped status only; 20 VGT stayed in governance forever.
+      // Now: cancel settles (no transfer), and each participant pulls their own.
       await expect(gov.connect(owner).cancelProposal(id)).to.emit(gov, "ProposalCancelled").withArgs(id);
-      expect(await gt.balanceOf(alice.address)).to.equal(a0);
-      expect(await gt.balanceOf(bob.address)).to.equal(b0);
-      expect(await gt.balanceOf(govAddr)).to.equal(0n);
       expect(await gov.getLockedTokens(id)).to.equal(0n);
       const [p] = await gov.getProposal(id);
       expect(p.status).to.equal(5n);
+      await gov.connect(alice).claimRefund(id);
+      await gov.connect(bob).claimRefund(id);
+      expect(await gt.balanceOf(alice.address)).to.equal(a0);
+      expect(await gt.balanceOf(bob.address)).to.equal(b0);
+      expect(await gt.balanceOf(govAddr)).to.equal(0n);
     });
 
-    it("cannot be refunded twice via a later execute", async () => {
+    it("cannot be refunded twice via a later execute or a second claim", async () => {
       const { owner, alice, gov } = await govFixture();
       await gov.connect(alice).createProposal(0, "t", "d", owner.address, "0x");
       const id = await gov.proposalCount();
       await gov.connect(owner).cancelProposal(id);
       await expect(gov.executeProposal(id)).to.be.revertedWith("Proposal not active");
+      await gov.connect(alice).claimRefund(id);
+      await expect(gov.connect(alice).claimRefund(id)).to.be.revertedWith("Nothing to claim");
     });
   });
 
@@ -161,6 +166,7 @@ describe("Hardening round 2 — contract changes", () => {
       const [p] = await gov.getProposal(id);
       expect(p.status).to.equal(3n); // Rejected
       expect(await gov.getLockedTokens(id)).to.equal(0n);
+      for (const s of [alice, bob, carol]) await gov.connect(s).claimRefund(id);
       expect(await gt.balanceOf(alice.address)).to.equal(a0 + ethers.parseEther("10"));
       expect(await gt.balanceOf(bob.address)).to.equal(b0 + ethers.parseEther("10"));
       expect(await gt.balanceOf(carol.address)).to.equal(c0 + ethers.parseEther("10"));
@@ -229,4 +235,94 @@ describe("Hardening round 2 — contract changes", () => {
       expect(p.eligibleVotersAtCreation).to.equal(5n);
     });
   });
+
+  describe("R4: refunds are pulled, so one unpayable recipient cannot block the rest", () => {
+    const D = 9 * 86400 + 60;
+    async function rejectedWithTwoVoters() {
+      const { owner, alice, bob, carol, ir, gt, gov, govAddr } = await govFixture();
+      await gov.connect(alice).createProposal(0, "t", "d", owner.address, "0x");
+      const id = await gov.proposalCount();
+      await gov.connect(bob).castVote(id, false, "n");
+      await gov.connect(carol).castVote(id, false, "n");
+      await ethers.provider.send("evm_increaseTime", [D]);
+      await ethers.provider.send("evm_mine", []);
+      return { owner, alice, bob, carol, ir, gt, gov, govAddr, id };
+    }
+
+    it("settles even when a voter was de-verified, and the others can claim", async () => {
+      const { alice, bob, carol, ir, gt, gov, govAddr, id } = await rejectedWithTwoVoters();
+      await ir.deleteIdentity(bob.address);
+      const a0 = await gt.balanceOf(alice.address), c0 = await gt.balanceOf(carol.address);
+      // Before: executeProposal reverted "Recipient not verified" on bob's
+      // transfer, so alice's and carol's deposits were also stuck, forever.
+      await expect(gov.executeProposal(id)).to.emit(gov, "ProposalRejected").withArgs(id);
+      const [p] = await gov.getProposal(id);
+      expect(p.status).to.equal(3n);
+      // Nothing moved at settlement; every deposit is now claimable.
+      expect(await gt.balanceOf(govAddr)).to.equal(ethers.parseEther("30"));
+      expect(await gov.getClaimableRefund(id, alice.address)).to.equal(ethers.parseEther("10"));
+      expect(await gov.getClaimableRefund(id, bob.address)).to.equal(ethers.parseEther("10"));
+      expect(await gov.getClaimableRefund(id, carol.address)).to.equal(ethers.parseEther("10"));
+      await expect(gov.connect(alice).claimRefund(id)).to.emit(gov, "RefundClaimed").withArgs(id, alice.address, ethers.parseEther("10"));
+      await expect(gov.connect(carol).claimRefund(id)).to.emit(gov, "RefundClaimed").withArgs(id, carol.address, ethers.parseEther("10"));
+      expect(await gt.balanceOf(alice.address)).to.equal(a0 + ethers.parseEther("10"));
+      expect(await gt.balanceOf(carol.address)).to.equal(c0 + ethers.parseEther("10"));
+      // Bob cannot claim while de-verified; his deposit waits for him.
+      await expect(gov.connect(bob).claimRefund(id)).to.be.revertedWith("Recipient not verified");
+      expect(await gov.getClaimableRefund(id, bob.address)).to.equal(ethers.parseEther("10"));
+      expect(await gt.balanceOf(govAddr)).to.equal(ethers.parseEther("10"));
+      // Re-verified, he claims.
+      await ir.registerIdentity(bob.address, alice.address, 840);
+      await gov.connect(bob).claimRefund(id);
+      expect(await gt.balanceOf(govAddr)).to.equal(0n);
+    });
+
+    it("cancel and execution-failure settle the same way", async () => {
+      const { owner, alice, bob, ir, gt, gov, govAddr } = await govFixture();
+      // Cancel with a de-verified voter.
+      await gov.connect(alice).createProposal(0, "t", "d", owner.address, "0x");
+      const c = await gov.proposalCount();
+      await gov.connect(bob).castVote(c, true, "y");
+      await ir.deleteIdentity(bob.address);
+      await expect(gov.connect(owner).cancelProposal(c)).to.emit(gov, "ProposalCancelled").withArgs(c);
+      expect(await gov.getClaimableRefund(c, bob.address)).to.equal(ethers.parseEther("10"));
+      await ir.registerIdentity(bob.address, alice.address, 840);
+      // Execution failure with a de-verified voter.
+      const cd = gov.interface.encodeFunctionData("setVotingCost", [ethers.parseEther("5000")]);
+      await gov.connect(alice).createProposal(0, "bad", "d", govAddr, cd);
+      const e = await gov.proposalCount();
+      await gov.connect(bob).castVote(e, true, "y");
+      await ir.deleteIdentity(bob.address);
+      await ethers.provider.send("evm_increaseTime", [D]);
+      await ethers.provider.send("evm_mine", []);
+      await expect(gov.executeProposal(e)).to.emit(gov, "ProposalExecutionFailed");
+      expect(await gov.getClaimableRefund(e, bob.address)).to.equal(ethers.parseEther("10"));
+      expect(await gov.getClaimableRefund(e, alice.address)).to.equal(ethers.parseEther("10"));
+      await gov.connect(alice).claimRefund(c);
+      await gov.connect(alice).claimRefund(e);
+      expect(await gt.balanceOf(govAddr)).to.equal(ethers.parseEther("20")); // bob's two deposits wait
+    });
+
+    it("claim is once, only after settlement, and never on a passed proposal", async () => {
+      const { owner, alice, bob, carol, gt, gov, id } = await rejectedWithTwoVoters();
+      await expect(gov.connect(alice).claimRefund(id)).to.be.revertedWith("Proposal not settled");
+      await gov.executeProposal(id);
+      await gov.connect(alice).claimRefund(id);
+      await expect(gov.connect(alice).claimRefund(id)).to.be.revertedWith("Nothing to claim");
+      await expect(gov.connect(owner).claimRefund(id)).to.be.revertedWith("Nothing to claim");
+      // A passed proposal burns; there is nothing to claim.
+      await gov.connect(alice).createProposal(0, "ok", "d", owner.address, "0x");
+      const ok = await gov.proposalCount();
+      await gov.connect(bob).castVote(ok, true, "y");
+      await gov.connect(carol).castVote(ok, true, "y");
+      await ethers.provider.send("evm_increaseTime", [D]);
+      await ethers.provider.send("evm_mine", []);
+      const s0 = await gt.totalSupply();
+      await expect(gov.executeProposal(ok)).to.emit(gov, "ProposalExecuted");
+      expect(s0 - (await gt.totalSupply())).to.equal(ethers.parseEther("30"));
+      expect(await gov.getClaimableRefund(ok, bob.address)).to.equal(0n);
+      await expect(gov.connect(bob).claimRefund(ok)).to.be.revertedWith("Proposal not settled");
+    });
+  });
+
 });

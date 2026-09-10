@@ -489,7 +489,9 @@ describe("Governance → ComplianceRules Integration Test", function () {
       const [after] = await vanguardGovernance.getProposal(proposalId);
       expect(after.status, "3 = Rejected").to.equal(3n);
 
-      // Every participant gets their stake back, and nothing stays locked.
+      // Every participant pulls their stake back, and nothing stays locked.
+      await vanguardGovernance.connect(voter1).claimRefund(proposalId);
+      await vanguardGovernance.connect(voter2).claimRefund(proposalId);
       expect(
         await governanceToken.balanceOf(voter1.address),
         "proposer must be refunded",
@@ -534,6 +536,7 @@ describe("Governance → ComplianceRules Integration Test", function () {
 
       const [after] = await vanguardGovernance.getProposal(proposalId);
       expect(after.status, "3 = Rejected").to.equal(3n);
+      await vanguardGovernance.connect(voter1).claimRefund(proposalId);
       expect(
         await governanceToken.balanceOf(voter1.address),
         "proposer's stake must be returned",

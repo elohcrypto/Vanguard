@@ -130,7 +130,14 @@ contract VanguardGovernance is Ownable2Step, ReentrancyGuard {
     ///      product decision and only needs to block the freeze.
     uint256 public constant MAX_COST = 1000 * 10**18;
 
-    // Token locking tracking
+    // Token locking tracking.
+    //
+    // _lockedTokens is the aggregate: burned on pass, zeroed on settlement.
+    // _voterLockedTokens is per person. While the proposal is Active it is
+    // the deposit; once the proposal is Rejected or Cancelled it is the
+    // amount that person may claim via claimRefund(). Settlement never
+    // transfers VGT (see _settleWithRefund), so it cannot fail on a
+    // recipient the token refuses to pay.
     mapping(uint256 => uint256) private _lockedTokens; // proposalId => total locked tokens
     mapping(uint256 => mapping(address => uint256)) private _voterLockedTokens; // proposalId => voter => locked amount
     
@@ -153,7 +160,11 @@ contract VanguardGovernance is Ownable2Step, ReentrancyGuard {
     /// @param reason Raw revert data from the target (selector + args, or a
     ///        reason string), preserved so the cause can be decoded off-chain.
     event ProposalExecutionFailed(uint256 indexed proposalId, bytes reason);
+    /// @notice The proposal failed a threshold; deposits are claimable.
+    event ProposalRejected(uint256 indexed proposalId);
     event ProposalCancelled(uint256 indexed proposalId);
+    /// @notice A participant pulled their refund after settlement.
+    event RefundClaimed(uint256 indexed proposalId, address indexed claimant, uint256 amount);
     event ProposalThresholdsUpdated(ProposalType indexed proposalType);
     event ProposalCreationCostUpdated(uint256 oldCost, uint256 newCost);
 
@@ -393,7 +404,8 @@ contract VanguardGovernance is Ownable2Step, ReentrancyGuard {
      * @dev Settle a proposal after its voting period.
      * @notice Passes (quorum and approval for its type met, target call
      *         succeeds): locked tokens are burned. Fails a threshold, or the
-     *         target call reverts: locked tokens are returned to everyone.
+     *         target call reverts: the proposal is closed and every
+     *         participant's deposit becomes claimable via claimRefund().
      */
     function executeProposal(uint256 proposalId) external nonReentrant {
         Proposal storage proposal = _proposals[proposalId];
@@ -463,12 +475,11 @@ contract VanguardGovernance is Ownable2Step, ReentrancyGuard {
                     // and cancelProposal share one reentrancy lock, and
                     // OpenZeppelin's guard refuses guarded-calls-guarded.
                     //
-                    // Settle it instead: Rejected, refund, and log the target's
-                    // revert data so the failure is diagnosable. This makes a
-                    // failed execution terminal rather than retryable; the
-                    // proposer submits a new proposal.
-                    proposal.status = ProposalStatus.Rejected;
-                    _refundLockedTokens(proposalId);
+                    // Settle it instead: Rejected, deposits claimable, and log
+                    // the target's revert data so the failure is diagnosable.
+                    // This makes a failed execution terminal rather than
+                    // retryable; the proposer submits a new proposal.
+                    _settleWithRefund(proposalId, ProposalStatus.Rejected);
                     emit ProposalExecutionFailed(proposalId, reason);
                     return;
                 }
@@ -483,47 +494,60 @@ contract VanguardGovernance is Ownable2Step, ReentrancyGuard {
             proposal.status = ProposalStatus.Executed;
             emit ProposalExecuted(proposalId);
         } else {
-            // Proposal failed: RETURN locked tokens to voters
-            proposal.status = ProposalStatus.Rejected;
-            _refundLockedTokens(proposalId);
+            _settleWithRefund(proposalId, ProposalStatus.Rejected);
+            emit ProposalRejected(proposalId);
         }
     }
 
     /**
-     * @dev Return every VGT locked against a proposal to whoever locked it.
-     *      Shared by the reject branch above and by cancelProposal. Before
-     *      this existed, cancel only flipped the status, so a cancelled
-     *      proposal held its deposits forever: executeProposal requires
-     *      Active and there is no other withdrawal path.
+     * @dev Close a proposal without burning: set the terminal status and zero
+     *      the aggregate lock. Per-person deposits in _voterLockedTokens are
+     *      left in place and become claimable through claimRefund().
+     *
+     *      PULL, NOT PUSH. The previous helper transferred VGT to the
+     *      proposer and every voter inside settlement. Each VGT transfer
+     *      runs the token's compliance gate, so a single recipient the token
+     *      refused to pay (identity deleted, address frozen) reverted the
+     *      whole settlement and left EVERY participant's deposit locked
+     *      with no path out. Reproduced for the reject branch, the cancel
+     *      path and the execution-failure path. Recording claims instead
+     *      means settlement has no external call and cannot be blocked;
+     *      an unpayable participant blocks only their own claim, until
+     *      they are payable again.
      */
-    function _refundLockedTokens(uint256 proposalId) internal {
-        Proposal storage proposal = _proposals[proposalId];
-
-        // Zero the aggregate before any transfer (checks-effects-interactions);
-        // each per-voter slot is zeroed just before its own transfer below.
+    function _settleWithRefund(uint256 proposalId, ProposalStatus terminal) internal {
+        _proposals[proposalId].status = terminal;
         _lockedTokens[proposalId] = 0;
+    }
 
-        uint256 proposerTokens = _voterLockedTokens[proposalId][proposal.proposer];
-        if (proposerTokens > 0) {
-            _voterLockedTokens[proposalId][proposal.proposer] = 0;
-            require(
-                governanceToken.transfer(proposal.proposer, proposerTokens),
-                "Token return to proposer failed"
-            );
-        }
+    /**
+     * @notice Pull your deposit from a Rejected or Cancelled proposal.
+     * @dev Anyone with a recorded deposit may call. Once. The slot is zeroed
+     *      before the transfer (checks-effects-interactions); the guard is
+     *      belt and braces against a token that re-enters on transfer.
+     */
+    function claimRefund(uint256 proposalId) external nonReentrant {
+        ProposalStatus status = _proposals[proposalId].status;
+        require(
+            status == ProposalStatus.Rejected || status == ProposalStatus.Cancelled,
+            "Proposal not settled"
+        );
+        uint256 amount = _voterLockedTokens[proposalId][msg.sender];
+        require(amount > 0, "Nothing to claim");
+        _voterLockedTokens[proposalId][msg.sender] = 0;
+        require(governanceToken.transfer(msg.sender, amount), "Refund transfer failed");
+        emit RefundClaimed(proposalId, msg.sender, amount);
+    }
 
-        address[] memory voters = _proposalVoters[proposalId];
-        for (uint256 i = 0; i < voters.length; i++) {
-            address voter = voters[i];
-            uint256 voterTokens = _voterLockedTokens[proposalId][voter];
-            if (voterTokens > 0 && voter != proposal.proposer) {
-                _voterLockedTokens[proposalId][voter] = 0;
-                require(
-                    governanceToken.transfer(voter, voterTokens),
-                    "Token return to voter failed"
-                );
-            }
-        }
+    /**
+     * @notice VGT `account` may still pull from `proposalId`. Zero while the
+     *         proposal is Active (deposit not yet claimable), after a claim,
+     *         or on a proposal that passed (deposits were burned).
+     */
+    function getClaimableRefund(uint256 proposalId, address account) external view returns (uint256) {
+        ProposalStatus status = _proposals[proposalId].status;
+        if (status != ProposalStatus.Rejected && status != ProposalStatus.Cancelled) return 0;
+        return _voterLockedTokens[proposalId][account];
     }
     
     /**
@@ -536,8 +560,7 @@ contract VanguardGovernance is Ownable2Step, ReentrancyGuard {
             "Cannot cancel proposal"
         );
         
-        proposal.status = ProposalStatus.Cancelled;
-        _refundLockedTokens(proposalId);
+        _settleWithRefund(proposalId, ProposalStatus.Cancelled);
 
         emit ProposalCancelled(proposalId);
     }
