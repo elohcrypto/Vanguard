@@ -708,73 +708,102 @@ template ComplianceAggregation() {
 
 ### Fair Voting Implementation
 
+The listings below are condensed from `contracts/governance/VanguardGovernance.sol`.
+An earlier version of this section showed code that never existed in the
+repo (a `Succeeded` status, an `executionWindow`, `ParameterChange` and
+`UpgradeContract` types, `forVotes++`); it is replaced here with the shape
+that is actually deployed.
+
 **1 Person = 1 Vote Mechanism:**
 ```solidity
-function castVote(
-    uint256 proposalId,
-    bool support,
-    string calldata reason
-) external nonReentrant {
+function castVote(uint256 proposalId, bool support, string calldata reason)
+    external nonReentrant
+{
     Proposal storage proposal = _proposals[proposalId];
-    
-    // Validation
     require(proposal.status == ProposalStatus.Active, "Proposal not active");
     require(block.timestamp <= proposal.votingEnds, "Voting period ended");
     require(!_hasVoted[proposalId][msg.sender], "Already voted");
-    
-    // ✅ KYC/AML verification (prevents Sybil attacks)
+    require(msg.sender != proposal.proposer, "Proposer cannot vote on own proposal");
     require(identityRegistry.isVerified(msg.sender), "Must be KYC/AML verified");
-    
-    // ✅ Voting cost (prevents spam)
-    require(
-        governanceToken.balanceOf(msg.sender) >= votingCost,
-        "Insufficient tokens for voting"
-    );
-    
-    // Transfer voting cost
-    require(
-        governanceToken.transferFrom(msg.sender, address(this), votingCost),
-        "Token transfer failed"
-    );
-    
-    // ✅ Record vote (1 person = 1 vote, NOT weighted by tokens)
+    require(governanceToken.balanceOf(msg.sender) >= votingCost, "Insufficient tokens for voting");
+    require(governanceToken.transferFrom(msg.sender, address(this), votingCost), "Token transfer failed");
+
     _hasVoted[proposalId][msg.sender] = true;
-    
-    if (support) {
-        proposal.forVotes++;
-    } else {
-        proposal.againstVotes++;
-    }
-    
-    emit VoteCast(msg.sender, proposalId, support, reason);
+    _proposalVoters[proposalId].push(msg.sender);        // for the refund ledger
+    _lockedTokens[proposalId] += votingCost;
+    _voterLockedTokens[proposalId][msg.sender] = votingCost;
+
+    if (support) proposal.votesFor += 1; else proposal.votesAgainst += 1;   // 1 person = 1 vote
+    emit VoteCast(proposalId, msg.sender, support, 1, reason);
 }
 ```
 
-**Proposal Execution:**
+Eligibility is checked when the vote is cast. There is no snapshot: a
+voter verified and funded after the proposal was created may vote.
+
+**Proposal Execution (settles every outcome, reverts only on invalid calls):**
 ```solidity
 function executeProposal(uint256 proposalId) external nonReentrant {
     Proposal storage proposal = _proposals[proposalId];
-    
-    // Validation
-    require(proposal.status == ProposalStatus.Succeeded, "Proposal not succeeded");
-    require(block.timestamp >= proposal.executionTime, "Timelock not expired");
-    require(block.timestamp <= proposal.executionTime + executionWindow, "Execution window expired");
-    
-    // Mark as executed
-    proposal.status = ProposalStatus.Executed;
-    
-    // Execute based on proposal type
-    if (proposal.proposalType == ProposalType.ParameterChange) {
-        _executeParameterChange(proposal);
-    } else if (proposal.proposalType == ProposalType.UpgradeContract) {
-        _executeUpgrade(proposal);
-    } else if (proposal.proposalType == ProposalType.EmergencyAction) {
-        _executeEmergencyAction(proposal);
+    require(proposal.status == ProposalStatus.Active, "Proposal not active");
+    require(block.timestamp > proposal.votingEnds, "Voting period not ended");
+
+    ProposalThresholds memory t = proposalThresholds[proposal.proposalType];
+    uint256 totalVotes = proposal.votesFor + proposal.votesAgainst;
+    // Quorum is a share of eligible voters FROZEN at creation, not of supply.
+    bool quorumMet   = totalVotes * 10000 >= proposal.eligibleVotersAtCreation * t.quorumPercentage;
+    bool approvalMet = totalVotes > 0 && (proposal.votesFor * 10000) / totalVotes >= t.approvalPercentage;
+    bool passed      = totalVotes > 0 && quorumMet && approvalMet;
+
+    if (!passed) {
+        _settleWithRefund(proposalId, ProposalStatus.Rejected);   // deposits claimable
+        emit ProposalRejected(proposalId);
+        return;
     }
-    
-    emit ProposalExecuted(proposalId, msg.sender);
+
+    require(block.timestamp >= proposal.executionTime, "Execution delay not met");
+    (bool success, bytes memory reason) = isListType(proposal.proposalType)
+        ? _executeListUpdate(proposalId)                          // DynamicListManager call
+        : proposal.target.call(proposal.callData);
+
+    if (!success) {
+        _settleWithRefund(proposalId, ProposalStatus.Rejected);   // terminal; resubmit
+        emit ProposalExecutionFailed(proposalId, reason);         // target's raw revert data
+        return;
+    }
+
+    governanceToken.burn(_lockedTokens[proposalId]);
+    proposal.status = ProposalStatus.Executed;
+    emit ProposalExecuted(proposalId);
 }
 ```
+
+**Refunds are pulled, not pushed:**
+```solidity
+// Settlement only records; no transfer, so it cannot be blocked.
+function _settleWithRefund(uint256 proposalId, ProposalStatus terminal) internal {
+    _proposals[proposalId].status = terminal;
+    _lockedTokens[proposalId] = 0;                 // per-person amounts stay as the claim ledger
+}
+
+// Each participant pulls their own deposit, once, after settlement.
+function claimRefund(uint256 proposalId) external nonReentrant {
+    ProposalStatus s = _proposals[proposalId].status;
+    require(s == ProposalStatus.Rejected || s == ProposalStatus.Cancelled, "Proposal not settled");
+    uint256 amount = _voterLockedTokens[proposalId][msg.sender];
+    require(amount > 0, "Nothing to claim");
+    _voterLockedTokens[proposalId][msg.sender] = 0;
+    require(governanceToken.transfer(msg.sender, amount), "Refund transfer failed");
+    emit RefundClaimed(proposalId, msg.sender, amount);
+}
+```
+
+Every VGT transfer runs the token's compliance gate. Pushing refunds inside
+settlement meant one participant the token refused to pay (identity
+deleted, address frozen) reverted the whole settlement and trapped every
+other participant's deposit on that proposal. With the pull design an
+unpayable participant blocks only their own claim, until they are payable
+again.
 
 ---
 
@@ -875,7 +904,10 @@ function executeProposal(uint256 proposalId) external nonReentrant {
 4. **Governance Attacks:**
    - ✅ Proposal creation cost prevents spam
    - ✅ Voting cost prevents vote manipulation
-   - ✅ Timelock prevents immediate execution
+   - ✅ Execution delay prevents immediate execution
+   - ✅ Quorum denominator frozen at creation: registering or deleting identities mid-vote cannot move the bar
+   - ✅ Cost setters bounded (≤ 1000 VGT): the owner cannot price every holder out in one call
+   - ✅ Settlement has no external call: one unpayable participant cannot freeze others' deposits
 
 ---
 

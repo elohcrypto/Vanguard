@@ -262,8 +262,8 @@ npx hardhat coverage
 ### **5. Governance System**
 - ✅ **1 Person = 1 Vote**: Equal voting power for all verified users
 - ✅ **VGT Voting Fees**: 10 VGT proposal creation, 10 VGT per vote
-- ✅ **Token Burning**: Passed proposals burn tokens, failed proposals return them
-- ✅ **≥51% Approval**: Simple majority threshold for proposal passage
+- ✅ **Token Burning**: Passed proposals burn deposits; failed ones make them claimable per participant
+- ✅ **Per-Type Thresholds**: Quorum 10-30% of eligible voters and approval 60-75%, set per proposal type
 - ✅ **KYC/AML Required**: Only verified users can participate in governance
 
 ### **6. Enhanced Escrow System**
