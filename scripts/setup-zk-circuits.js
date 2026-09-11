@@ -1,5 +1,6 @@
 const fs = require("fs");
 const path = require("path");
+const crypto = require("crypto");
 const { exec } = require("child_process");
 const { promisify } = require("util");
 
@@ -13,6 +14,25 @@ const execAsync = promisify(exec);
 const CIRCUITS_DIR = path.join(__dirname, "../circuits");
 const BUILD_DIR = path.join(__dirname, "../build/circuits");
 const PTAU_FILE = path.join(BUILD_DIR, "powersOfTau28_hez_final_15.ptau");
+
+// Hermez ceremony output for circuits up to 2^15 constraints. Every public
+// mirror of it (Hermez S3, the GCS zkevm bucket, the PSE bucket) now returns
+// 403 or 404, so it is hosted on this repo's releases. A trusted-setup file
+// must never be taken on faith from any URL, ours included: the download is
+// verified against the BLAKE2b-512 published in the snarkjs README
+// (https://github.com/iden3/snarkjs#7-prepare-phase-2) before it is used,
+// and a pre-existing local file is verified the same way.
+const PTAU_URL =
+  "https://github.com/elohcrypto/Vanguard/releases/download/ptau-hez-final-15/powersOfTau28_hez_final_15.ptau";
+const PTAU_BLAKE2B =
+  "982372c867d229c236091f767e703253249a9b432c1710b4f326306bfa2428a1" +
+  "7b06240359606cfe4d580b10a5a1f63fbed499527069c18ae17060472969ae6e";
+
+function blake2b512(file) {
+  const h = crypto.createHash("blake2b512");
+  h.update(fs.readFileSync(file));
+  return h.digest("hex");
+}
 
 const CIRCUITS = [
   "whitelist_membership",
@@ -38,30 +58,45 @@ async function ensureDirectories() {
 }
 
 async function downloadPtau() {
-  console.log("⬇️  Downloading Powers of Tau file...");
+  console.log("⬇️  Powers of Tau file...");
 
   if (fs.existsSync(PTAU_FILE)) {
-    console.log("✅ Powers of Tau file already exists");
-    return;
+    // A stale or truncated file here (e.g. a CI cache entry from a bad
+    // download, or a different-power file copied in by hand) would make
+    // every zkey silently wrong. Verify it like a fresh download.
+    if (blake2b512(PTAU_FILE) === PTAU_BLAKE2B) {
+      console.log("✅ Powers of Tau file present, hash verified");
+      return;
+    }
+    console.log("⚠️  Existing Powers of Tau file has the wrong hash; replacing it");
+    fs.unlinkSync(PTAU_FILE);
   }
 
-  // Download ptau file (this is a trusted setup for circuits up to 2^15 constraints)
-  // Use Google Cloud Storage CDN as the Hermez S3 URL is no longer accessible
-  const ptauUrl =
-    "https://storage.googleapis.com/zkevm/ptau/powersOfTau28_hez_final_15.ptau";
   try {
-    await execAsync(`curl -fL -o ${PTAU_FILE} ${ptauUrl}`);
+    await execAsync(`curl -fL -o ${PTAU_FILE} ${PTAU_URL}`);
   } catch (error) {
     // Remove any partial download so a later run does not treat it as valid.
     if (fs.existsSync(PTAU_FILE)) fs.unlinkSync(PTAU_FILE);
     throw new Error(
-      `Could not download the Powers of Tau file from ${ptauUrl}\n` +
+      `Could not download the Powers of Tau file from ${PTAU_URL}\n` +
         `  ${error.message}\n` +
         `  A trusted setup file is required; there is no safe substitute.\n` +
-        `  Download it manually to: ${PTAU_FILE}`,
+        `  Download it manually to: ${PTAU_FILE}\n` +
+        `  and check: b2sum must print ${PTAU_BLAKE2B}`,
     );
   }
-  console.log("✅ Powers of Tau file downloaded");
+
+  const got = blake2b512(PTAU_FILE);
+  if (got !== PTAU_BLAKE2B) {
+    fs.unlinkSync(PTAU_FILE);
+    throw new Error(
+      `Downloaded Powers of Tau file failed verification.\n` +
+        `  expected BLAKE2b-512 ${PTAU_BLAKE2B}\n` +
+        `  got                  ${got}\n` +
+        `  The file was deleted. Do not proceed with an unverified trusted setup.`,
+    );
+  }
+  console.log("✅ Powers of Tau file downloaded, hash verified");
 }
 
 /**

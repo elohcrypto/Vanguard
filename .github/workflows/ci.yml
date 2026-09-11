@@ -57,13 +57,16 @@ jobs:
           ~/.cargo/bin/circom --version | grep -qE '\b2\.[0-9]+\.[0-9]+' \
             || { echo "::error::circom is not 2.x"; exit 1; }
 
-      # 37.8 MB trusted-setup file. Cached so CI does not re-download each run;
-      # setup:zk skips the download when the file is already present.
+      # 37.8 MB trusted-setup file, served from this repo's releases because
+      # every public mirror now 403s. Cached so CI does not re-download each
+      # run. setup:zk verifies the BLAKE2b-512 of whatever is on disk, cached
+      # or fresh, so a bad cache entry is replaced rather than trusted. The
+      # key carries the hash prefix: a different file is a different key.
       - name: Cache Powers of Tau
         uses: actions/cache@v4
         with:
           path: build/circuits/powersOfTau28_hez_final_15.ptau
-          key: ptau-hez-final-15
+          key: ptau-hez-final-15-982372c8
 
       # Static invariant: no setter or constructor may cast an address to a
       # contract interface without checking the address has code. Casting does

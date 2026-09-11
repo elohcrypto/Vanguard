@@ -208,8 +208,11 @@ contracts/privacy/verifiers/
 ### **1. Powers of Tau (.ptau)**
 - **File:** `powersOfTau28_hez_final_15.ptau`
 - **Purpose:** Trusted setup parameters for Groth16
-- **Size:** ~50 MB
-- **Source:** Hermez ceremony (trusted by Ethereum community)
+- **Size:** 37.8 MB
+- **Source:** Hermez ceremony (trusted by Ethereum community); served from
+  this repo's `ptau-hez-final-15` release since the public mirrors went dark.
+  BLAKE2b-512 `982372c8…69ae6e`, as published in the snarkjs README, is
+  checked by `setup:zk` before the file is used.
 - **Supports:** Circuits up to 2^15 constraints (~32,000)
 
 ### **2. R1CS (.r1cs)**
@@ -379,9 +382,14 @@ npx snarkjs --version
 # Install wget using Homebrew
 brew install wget
 
-# Or use curl instead
-curl -o build/circuits/powersOfTau28_hez_final_15.ptau \
-  https://hermez.s3-eu-west-1.amazonaws.com/powersOfTau28_hez_final_15.ptau
+# Or use curl instead. The Hermez S3 and GCS mirrors are gone (403); the
+# file is served from this repo's releases. setup:zk does this for you and
+# verifies the hash; if you fetch by hand, verify it yourself:
+curl -fL -o build/circuits/powersOfTau28_hez_final_15.ptau \
+  https://github.com/elohcrypto/Vanguard/releases/download/ptau-hez-final-15/powersOfTau28_hez_final_15.ptau
+b2sum build/circuits/powersOfTau28_hez_final_15.ptau
+# must print 982372c867d229c236091f767e703253249a9b432c1710b4f326306bfa2428a1
+#            7b06240359606cfe4d580b10a5a1f63fbed499527069c18ae17060472969ae6e
 ```
 
 ### **Issue 4: Build fails with "Out of memory"**
