@@ -501,6 +501,16 @@ class ContractDeployer {
       console.log("   ✅ ComplianceRules linked to IdentityRegistry for VSC");
       console.log("   ✅ REAL KYC/AML enforcement enabled for VSC transfers");
 
+      // The token must be an agent of the registry for wallet recovery:
+      // Token.recoveryAddress calls IdentityRegistry.moveIdentity, which is
+      // onlyAgent. Without this grant, every recovery reverts.
+      const txAgent = await this.state
+        .getContract("identityRegistry")
+        .addAgent(tokenAddr);
+      const receiptAgent = await txAgent.wait();
+      totalGasUsed += receiptAgent.gasUsed;
+      console.log("   ✅ Token granted agent role on IdentityRegistry (wallet recovery)");
+
       // Configure IdentityRegistry with ComplianceRules for jurisdiction validation
       console.log(
         "\n📝 Step 2.6: Configuring IdentityRegistry for jurisdiction validation...",
@@ -737,6 +747,30 @@ class ContractDeployer {
       await consensusOracle.waitForDeployment();
       this.state.consensusOracle = consensusOracle;
       this.state.setContract("consensusOracle", consensusOracle);
+
+      // Wire the BLACKLIST gate into the token's compliance, when both exist.
+      //
+      // Only the blacklist. The whitelist gate is default-deny: switching it on
+      // blocks every holder until each one is added to the oracle, which would
+      // silently break a running demo. Turn that on deliberately via the Oracle
+      // menu once the oracle is populated.
+      const rules = this.state.getContract("complianceRules");
+      const digitalToken = this.state.getContract("digitalToken");
+      if (rules && digitalToken && typeof rules.setBlacklistOracle === "function") {
+        const tokenAddr = await digitalToken.getAddress();
+        await (
+          await rules.setBlacklistOracle(tokenAddr, await blacklistOracle.getAddress())
+        ).wait();
+        console.log("   ✅ Blacklist oracle now gates VSC transfers");
+        console.log("   ℹ️  Whitelist gate left OFF (default-deny would block all holders)");
+      } else {
+        console.log(
+          "   ℹ️  Token or ComplianceRules not deployed yet — oracle gate not wired.",
+        );
+        console.log(
+          "      Deploy the token first, then re-run this step to enable blacklist gating.",
+        );
+      }
 
       displaySuccess("Oracle Management System deployed successfully!");
     } catch (error) {

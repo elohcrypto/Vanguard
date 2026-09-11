@@ -61,7 +61,12 @@ interface IMultiSigEscrowWallet {
 
     function signAsPayee() external;
 
-    function signAsInvestor() external;
+    /// @notice Investor co-signs, stating the direction explicitly.
+    /// @param releaseToPayee true pays the payee (requires payeeSigned),
+    ///        false refunds the payer (requires payerSigned). The direction is
+    ///        never inferred from who signed first: that let a payer pre-sign
+    ///        and divert an intended release into a refund to themselves.
+    function signAsInvestor(bool releaseToPayee) external;
 
     function manualRefund() external;
     

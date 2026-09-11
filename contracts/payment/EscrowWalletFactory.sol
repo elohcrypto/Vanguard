@@ -15,6 +15,9 @@ import "../compliance/interfaces/IComplianceRules.sol";
  * @dev Payer and Payee must have valid KYC/AML (OnchainID with verified identity)
  */
 contract EscrowWalletFactory is AccessControl, ReentrancyGuard {
+    /// @dev fundEscrowWallet: this escrow has already been funded once.
+    error EscrowAlreadyFunded(uint256 paymentId);
+
     // ========================================
     // ROLES
     // ========================================
@@ -320,6 +323,11 @@ contract EscrowWalletFactory is AccessControl, ReentrancyGuard {
             "Wallet not active"
         );
 
+        // Funding is once-only. `state == Active` above is true both BEFORE and
+        // AFTER funding, so it never stopped a second call: the extra transfer
+        // landed in a wallet that pays out fixed sums, stranding it forever.
+        if (wallet.funded()) revert EscrowAlreadyFunded(paymentId);
+
         // Calculate total amount
         uint256 amount = wallet.amount();
         uint256 investorFee = wallet.investorFee();
@@ -331,6 +339,10 @@ contract EscrowWalletFactory is AccessControl, ReentrancyGuard {
             vscToken.transferFrom(msg.sender, walletAddress, totalAmount),
             "Transfer failed"
         );
+
+        // Mark AFTER the transfer lands, so the flag can never be set for a
+        // funding that did not happen.
+        wallet.markFunded();
 
         emit FundsReceived(paymentId, msg.sender, totalAmount);
     }

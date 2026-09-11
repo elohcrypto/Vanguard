@@ -16,6 +16,11 @@ interface IIdentityRegistry {
 
     function deleteIdentity(address user) external;
 
+    /// @notice Move an existing registration to a new wallet (recovery path).
+    /// @dev Does not re-run jurisdiction validation: the user is already
+    ///      admitted, and re-validating would strand a since-sanctioned user.
+    function moveIdentity(address fromWallet, address toWallet) external;
+
     function updateCountry(address user, uint16 country) external;
 
     // Query Functions

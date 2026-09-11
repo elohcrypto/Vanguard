@@ -3,6 +3,8 @@ pragma solidity ^0.8.19;
 
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
+import {ECDSA} from "@openzeppelin/contracts/utils/cryptography/ECDSA.sol";
+import {MessageHashUtils} from "@openzeppelin/contracts/utils/cryptography/MessageHashUtils.sol";
 
 /**
  * @title MultiSigEscrowWallet
@@ -46,6 +48,16 @@ contract MultiSigEscrowWallet is ReentrancyGuard {
     
     ShipmentProof public shipmentProof;
     uint256 public constant DISPUTE_WINDOW = 14 days;
+
+    /// @dev Domain tag binding a shipment proof to this protocol.
+    string private constant PROOF_DOMAIN = "VanguardShipmentProof";
+
+    /// @dev The shipment proof was not signed by the payee for this escrow.
+    error ProofNotSignedByPayee();
+    /// @dev Investor asked to release, but the payee has not signed.
+    error PayeeHasNotSigned();
+    /// @dev Investor asked to refund, but the payer has not signed.
+    error PayerHasNotSigned();
     
     // ========================================
     // MULTI-SIGNATURE STATE (2-of-3)
@@ -64,6 +76,34 @@ contract MultiSigEscrowWallet is ReentrancyGuard {
     
     enum WalletState { Active, Released, Refunded, Disputed }
     WalletState public state;
+
+    /**
+     * @notice True once the factory has funded this escrow.
+     * @dev Funding was previously gated only on `state == Active` — the state
+     *      BOTH before and after funding — so fundEscrowWallet could run
+     *      repeatedly. Release and refund pay fixed sums (amount and the fees
+     *      are immutable), so each extra funding was stranded in the wallet
+     *      with no sweep function and no way out. This flag makes funding
+     *      idempotent: it removes the money-losing path rather than guarding it.
+     */
+    bool public funded;
+
+    /// @dev Only the factory may mark this escrow funded.
+    error OnlyFactory();
+    /// @dev This escrow has already been funded.
+    error AlreadyFunded();
+
+    /**
+     * @notice Record that the factory has funded this escrow.
+     * @dev Factory-only and callable once. The factory calls this AFTER the
+     *      transfer succeeds, so the flag can never be set for a transfer that
+     *      did not land.
+     */
+    function markFunded() external {
+        if (msg.sender != factory) revert OnlyFactory();
+        if (funded) revert AlreadyFunded();
+        funded = true;
+    }
     
     // ========================================
     // EVENTS
@@ -177,10 +217,20 @@ contract MultiSigEscrowWallet is ReentrancyGuard {
         require(bytes(data).length > 0, "Empty data");
         require(dataHash != bytes32(0), "Invalid hash");
         require(signature.length > 0, "Invalid signature");
-        
+
         // Verify the hash matches the data
         bytes32 computedHash = keccak256(bytes(data));
         require(computedHash == dataHash, "Hash mismatch");
+
+        // Verify the payee actually signed THIS proof for THIS escrow on THIS
+        // chain. Previously only `signature.length > 0` was checked, so any
+        // bytes passed, and a genuine signature was replayable across escrows
+        // and chains because nothing scoped it. ECDSA.recover also rejects the
+        // malleable high-s form that raw ecrecover accepts.
+        bytes32 digest = MessageHashUtils.toEthSignedMessageHash(
+            keccak256(abi.encode(PROOF_DOMAIN, address(this), block.chainid, dataHash))
+        );
+        if (ECDSA.recover(digest, signature) != payee) revert ProofNotSignedByPayee();
         
         shipmentProof = ShipmentProof({
             data: data,
@@ -226,7 +276,9 @@ contract MultiSigEscrowWallet is ReentrancyGuard {
         } else {
             // Investor decides payee deserves payment despite dispute
             state = WalletState.Active;
-            // Reset signatures to allow normal release process
+            // Reset ALL signatures. Leaving payerSigned set would re-arm the
+            // refund branch on a dispute resolved in the payee's favour.
+            payerSigned = false;
             payeeSigned = false;
             investorSigned = false;
         }
@@ -251,10 +303,10 @@ contract MultiSigEscrowWallet is ReentrancyGuard {
         payerSigned = true;
         emit PayerSigned(payer, block.timestamp);
 
-        // Auto-refund if investor also signed
-        if (investorSigned) {
-            _refundToPayer();
-        }
+        // No auto-refund, mirroring signAsPayee. The investor states the
+        // direction in signAsInvestor; a signature here is a precondition.
+        // (This branch was already unreachable — investorSigned implies a
+        // terminal state — but a dead path is a trap for the next edit.)
     }
 
     /**
@@ -274,33 +326,37 @@ contract MultiSigEscrowWallet is ReentrancyGuard {
         payeeSigned = true;
         emit PayeeSigned(payee, block.timestamp);
 
-        // Auto-release if investor also signed
-        if (investorSigned) {
-            _releaseToPayee();
-        }
+        // No auto-release. The investor states the direction explicitly in
+        // signAsInvestor; a signature here is a precondition, not a trigger.
     }
 
     /**
      * @notice Investor signs to approve transaction (2-of-3 multi-sig)
      * @dev Investor + Payer = Refund, Investor + Payee = Release
      */
-    function signAsInvestor() external nonReentrant {
+    function signAsInvestor(bool releaseToPayee) external nonReentrant {
         require(msg.sender == investor, "Only investor can sign");
         require(state == WalletState.Active, "Wallet not active");
         require(!investorSigned, "Already signed");
 
+        // The direction is an explicit argument, never inferred from who
+        // signed first. Inferring it let a payer pre-sign silently and divert
+        // an investor's intended release into a refund to themselves; the
+        // payee shipped and received nothing.
+        if (releaseToPayee) {
+            if (!payeeSigned) revert PayeeHasNotSigned();
+        } else {
+            if (!payerSigned) revert PayerHasNotSigned();
+        }
+
         investorSigned = true;
         emit InvestorSigned(investor, block.timestamp);
 
-        // Check which direction to go based on who else signed
-        if (payeeSigned) {
-            // Investor + Payee = Release to Payee
+        if (releaseToPayee) {
             _releaseToPayee();
-        } else if (payerSigned) {
-            // Investor + Payer = Refund to Payer
+        } else {
             _refundToPayer();
         }
-        // If neither signed yet, wait for one of them
     }
     
     // ========================================

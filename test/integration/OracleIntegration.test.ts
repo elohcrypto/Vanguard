@@ -502,6 +502,11 @@ describe("Oracle Integration with OnchainID and ERC-3643", function () {
     describe("🔄 Token Transfer Integration with Oracle Status", function () {
         let investor1OnchainID: string;
         let investor2OnchainID: string;
+        // The outer `token` is bound to ComplianceRegistry, a permissive test
+        // double that allows every transfer. These tests need real enforcement,
+        // so they run against their own token bound to ComplianceRules.
+        let complianceRules: any;
+        let gatedToken: any;
 
         beforeEach(async function () {
             // Setup two investors with OnchainIDs
@@ -537,6 +542,22 @@ describe("Oracle Integration with OnchainID and ERC-3643", function () {
 
             // Mint tokens to investor1
             await token.mint(investor1.address, ethers.parseEther("1000"));
+
+            // Enforcing stack: ComplianceRules + a token bound to it.
+            const ComplianceRulesFactory = await ethers.getContractFactory("ComplianceRules");
+            complianceRules = await ComplianceRulesFactory.deploy(owner.address, [840], []);
+            const TokenFactory = await ethers.getContractFactory("Token");
+            gatedToken = await TokenFactory.deploy(
+                "Gated Token",
+                "GTD",
+                await identityRegistry.getAddress(),
+                await complianceRules.getAddress()
+            );
+            await complianceRules.setTokenIdentityRegistry(
+                await gatedToken.getAddress(),
+                await identityRegistry.getAddress()
+            );
+            await gatedToken.mint(investor1.address, ethers.parseEther("1000"));
         });
 
         it("✅ Should allow transfer between whitelisted addresses", async function () {
@@ -559,33 +580,39 @@ describe("Oracle Integration with OnchainID and ERC-3643", function () {
         });
 
         it("🚫 Should block transfer to blacklisted address", async function () {
-            // Add investor1 to whitelist, investor2 to blacklist
+            // Point the token's ComplianceRules at the blacklist oracle. Without
+            // this the gate is off by design, and the transfer would go through.
+            await complianceRules.setBlacklistOracle(
+                await gatedToken.getAddress(),
+                await blacklistOracle.getAddress()
+            );
+
             await whitelistOracle.addToWhitelist(investor1.address, 4, 0, "KYC + AML Approved");
             await blacklistOracle.addToBlacklist(investor2.address, 2, 0, "AML Risk Detected");
-
-            // Verify oracle status
-            expect(await whitelistOracle.isWhitelisted(investor1.address)).to.be.true;
             expect(await blacklistOracle.isBlacklisted(investor2.address)).to.be.true;
 
-            // Note: Current token implementation doesn't integrate with oracle blacklist
-            // This test verifies oracle blacklist functionality works correctly
-            console.log("✅ Oracle blacklist functionality verified");
-            console.log("📝 Note: Token-oracle integration would require additional compliance module");
+            const before = await gatedToken.balanceOf(investor2.address);
+            await expect(
+                gatedToken.connect(investor1).transfer(investor2.address, ethers.parseEther("100"))
+            ).to.be.revertedWith("Compliance check failed");
+            expect(await gatedToken.balanceOf(investor2.address)).to.equal(before);
         });
 
         it("🚫 Should block transfer from blacklisted address", async function () {
-            // Add investor2 to whitelist, then blacklist investor1
+            await complianceRules.setBlacklistOracle(
+                await gatedToken.getAddress(),
+                await blacklistOracle.getAddress()
+            );
+
             await whitelistOracle.addToWhitelist(investor2.address, 4, 0, "KYC + AML Approved");
             await blacklistOracle.addToBlacklist(investor1.address, 1, 0, "Suspicious Activity");
-
-            // Verify oracle status
             expect(await blacklistOracle.isBlacklisted(investor1.address)).to.be.true;
-            expect(await whitelistOracle.isWhitelisted(investor2.address)).to.be.true;
 
-            // Note: Current token implementation doesn't integrate with oracle blacklist
-            // This test verifies oracle blacklist functionality works correctly
-            console.log("✅ Oracle blacklist functionality verified");
-            console.log("📝 Note: Token-oracle integration would require additional compliance module");
+            const before = await gatedToken.balanceOf(investor1.address);
+            await expect(
+                gatedToken.connect(investor1).transfer(investor2.address, ethers.parseEther("100"))
+            ).to.be.revertedWith("Compliance check failed");
+            expect(await gatedToken.balanceOf(investor1.address)).to.equal(before);
         });
     });
 

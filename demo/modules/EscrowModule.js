@@ -8,6 +8,7 @@
 
 const { displaySection, displaySuccess, displayError, displayWarning } = require('../utils/DisplayHelpers');
 const { advancePast, canJumpTime } = require('../utils/ChainTime');
+const { signShipmentProof } = require('../utils/ShipmentProof');
 const { ethers } = require('hardhat');
 
 /**
@@ -478,6 +479,17 @@ class EscrowModule {
             }
 
             const payer = await this.getSignerForAddress(payerAddress);
+
+            // Funding is once-only on chain. Check BEFORE approving: otherwise
+            // the operator burns gas on an approval and then hits a raw revert
+            // from the factory. A second funding used to silently succeed and
+            // strand the extra tokens in the wallet forever.
+            if (await wallet.funded()) {
+                displayWarning('This escrow is already funded - funding once is all it takes.');
+                console.log(`   Escrow balance: ${ethers.formatEther(await this.state.getContract('digitalToken').balanceOf(walletAddress))} VSC`);
+                return;
+            }
+
             const totalAmount = ethers.parseEther((parseFloat(selectedWallet.amount) * 1.05).toString());
 
             console.log(`\n💰 Approving ${ethers.formatEther(totalAmount)} VSC...`);
@@ -581,7 +593,7 @@ class EscrowModule {
             });
 
             const dataHash = ethers.keccak256(ethers.toUtf8Bytes(proofData));
-            const signature = await payee.signMessage(ethers.getBytes(dataHash));
+            const signature = await signShipmentProof(payee, walletAddress, dataHash);
 
             console.log('\n📝 Submitting shipment proof...');
             console.log(`   Tracking: TRK${Date.now()}`);
@@ -785,8 +797,31 @@ class EscrowModule {
             const isPayeeVerified = await identityRegistry.isVerified(payee);
             console.log(`   Payee Verified: ${isPayeeVerified ? '✅ YES' : '❌ NO'}`);
 
-            console.log('\n✍️ Investor signing...');
-            const tx = await wallet.connect(investor).signAsInvestor();
+            // The investor must state the direction. It used to be inferred from
+            // whoever signed first, which let a payer pre-sign and divert the
+            // release into a refund to themselves.
+            const payerSigned = await wallet.payerSigned();
+            const payeeSigned = await wallet.payeeSigned();
+            if (!payerSigned && !payeeSigned) {
+                displayWarning('Neither payer nor payee has signed yet - nothing for the investor to co-sign.');
+                return;
+            }
+            // Ask, do not infer. Deriving the direction from payeeSigned here
+            // would re-create in JavaScript the exact inference the contract
+            // fix removed: if only the payer had signed, the CLI would quietly
+            // pick "refund". The contract rejects a mismatched choice, but the
+            // operator must be the one making it.
+            console.log(`\n   Signatures so far: payer ${payerSigned ? '✅' : '❌'}  payee ${payeeSigned ? '✅' : '❌'}`);
+            console.log('   1: RELEASE to payee (requires payee signature)');
+            console.log('   2: REFUND to payer  (requires payer signature)');
+            const dir = (await this.promptUser('Investor decision (1/2): ')).trim();
+            if (dir !== '1' && dir !== '2') {
+                displayWarning('No decision made - nothing signed.');
+                return;
+            }
+            const releaseToPayee = dir === '1';
+            console.log(`\n✍️ Investor signing to ${releaseToPayee ? 'RELEASE to payee' : 'REFUND to payer'}...`);
+            const tx = await wallet.connect(investor).signAsInvestor(releaseToPayee);
             const receipt = await tx.wait();
 
             // Check if funds were released or refunded

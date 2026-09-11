@@ -46,10 +46,22 @@ class PrivacyModule {
             console.log('📦 Deploying Privacy & ZK Verification System...');
             console.log('🎯 Production-Ready ZK Proof System with Full Integration');
 
-            // Deploy ZKVerifierIntegrated (Primary ZK System with real Groth16 verifiers)
-            console.log('🌍 Deploying ZKVerifierIntegrated (Real ZK Verifiers)...');
+            // Deploy ZKVerifierIntegrated.
+            //
+            // testingMode is IMMUTABLE and defaults OFF. In testing mode every
+            // verify* call skips Groth16 and returns true for any non-zero
+            // public signal, so an all-zero proof verifies. This used to be
+            // hardcoded on while the log claimed "Real ZK Verifiers".
+            // Opt in deliberately with ZK_TESTING_MODE=1 when you want to drive
+            // the flow without generating real proofs.
+            const zkTestingMode = process.env.ZK_TESTING_MODE === '1';
+            console.log(
+                zkTestingMode
+                    ? '⚠️  Deploying ZKVerifierIntegrated in MOCK mode (ZK_TESTING_MODE=1) - proofs are NOT verified'
+                    : '🌍 Deploying ZKVerifierIntegrated (real Groth16 verification)...'
+            );
             const ZKVerifierIntegratedFactory = await ethers.getContractFactory('ZKVerifierIntegrated');
-            const zkVerifierIntegrated = await ZKVerifierIntegratedFactory.deploy(true);
+            const zkVerifierIntegrated = await ZKVerifierIntegratedFactory.deploy(zkTestingMode);
             await zkVerifierIntegrated.waitForDeployment();
             const zkVerifierIntegratedAddr = await zkVerifierIntegrated.getAddress();
             this.state.setContract('zkVerifierIntegrated', zkVerifierIntegrated);

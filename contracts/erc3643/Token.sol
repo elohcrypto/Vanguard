@@ -186,12 +186,19 @@ contract Token is IERC3643, ERC20, Ownable, Pausable {
         address _lostWallet,
         address _newWallet,
         address _investorOnchainID
-    ) external override onlyAgent returns (bool) {
+    ) external override onlyAgent whenNotPaused returns (bool) {
         require(_identityRegistry.identity(_lostWallet) == _investorOnchainID, "Invalid identity");
         require(_identityRegistry.identity(_newWallet) == address(0), "New wallet already has identity");
+        // The new wallet must be empty. _frozenTokens below is an assignment,
+        // and freezePartialTokens does not require an identity, so a wallet can
+        // hold frozen tokens with no identity registered; recovering into it
+        // would silently zero them.
+        require(balanceOf(_newWallet) == 0, "New wallet holds tokens");
+        require(_frozenTokens[_newWallet] == 0, "New wallet holds frozen tokens");
 
         uint256 balance = balanceOf(_lostWallet);
         uint256 frozenBalance = _frozenTokens[_lostWallet];
+        bool wasFrozen = _frozen[_lostWallet];
 
         // Transfer balance
         _transfer(_lostWallet, _newWallet, balance);
@@ -200,10 +207,21 @@ contract Token is IERC3643, ERC20, Ownable, Pausable {
         _frozenTokens[_newWallet] = frozenBalance;
         _frozenTokens[_lostWallet] = 0;
 
-        // Update identity registry
-        // Update identity - simplified for demo
-        // _identityRegistry.updateIdentity(_newWallet, _investorOnchainID);
-        _identityRegistry.deleteIdentity(_lostWallet);
+        // Carry the address-level freeze. Recovering a sanctioned wallet must
+        // not launder it into an unfrozen one.
+        _frozen[_newWallet] = wasFrozen;
+        _frozen[_lostWallet] = false;
+
+        // Move the identity atomically. This used to delete the old entry and
+        // never create the new one, leaving the recovered balance unspendable
+        // because every transfer requires isVerified(from).
+        //
+        // moveIdentity, not registerIdentity + deleteIdentity: recovery
+        // relocates an already-admitted user, so it must not re-run the
+        // jurisdiction check. A user sanctioned after joining is precisely who
+        // needs a recovery, and re-validating would strand their funds.
+        // It also leaves registeredIdentityCount untouched.
+        _identityRegistry.moveIdentity(_lostWallet, _newWallet);
 
         emit RecoverySuccess(_lostWallet, _newWallet, _investorOnchainID);
         return true;
