@@ -98,7 +98,8 @@ describe("Governance Token System", function () {
             ethers.ZeroAddress, // InvestorTypeRegistry
             await complianceRules.getAddress(),
             ethers.ZeroAddress, // OracleManager
-            ethers.ZeroAddress  // Token
+            ethers.ZeroAddress, // Token
+            1 // timeScale: mainnet schedule
         );
         await vanguardGovernance.waitForDeployment();
 

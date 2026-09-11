@@ -92,6 +92,7 @@ describe("Governance → ComplianceRules Integration Test", function () {
       await complianceRules.getAddress(),
       ethers.ZeroAddress, // OracleManager
       await token.getAddress(),
+      1, // timeScale: mainnet schedule
     );
     await vanguardGovernance.waitForDeployment();
 

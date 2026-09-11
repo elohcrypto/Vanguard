@@ -130,6 +130,7 @@ Vanguard/
 
 ### **System Overview & Architecture**
 - [System Overview](/docs/SYSTEM_OVERVIEW.md) - Complete system architecture (83 menu options, 5 ZK circuits, 32+ contracts)
+- [Testnet Demo](/docs/TESTNET_DEMO.md) - Role wallets from one mnemonic, governance time scale, local rehearsal before Sepolia
 - [Vanguard RWA StableCoin Ecosystem Guide](/docs/VANGUARD_RWA_TOKEN_ECOSYSTEM_GUIDE.md) - Complete ecosystem overview
 - [Technical Deep Dive](/docs/TECHNICAL_DEEP_DIVE.md) - In-depth technical analysis
 - [Working Demos](/docs/WORKING_DEMOS.md) - Verified working demos guide

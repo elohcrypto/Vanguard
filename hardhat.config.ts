@@ -36,18 +36,33 @@ const config: HardhatUserConfig = {
       gas: 12000000,
       blockGasLimit: 12000000,
       allowUnlimitedContractSize: true,
+      // With MNEMONIC set, the in-process node funds the same 12 role
+      // wallets the testnet uses, so a local rehearsal exercises the exact
+      // key-per-role separation. Without it, Hardhat's default accounts.
+      ...(process.env.MNEMONIC
+        ? { accounts: { mnemonic: process.env.MNEMONIC, count: 12 } }
+        : {}),
     },
     localhost: {
       url: "http://127.0.0.1:8545",
       chainId: 31337,
       gas: 12000000,
       blockGasLimit: 12000000,
+      ...(process.env.MNEMONIC
+        ? { accounts: { mnemonic: process.env.MNEMONIC, count: 12 } }
+        : {}),
     },
     sepolia: {
       url:
         process.env.SEPOLIA_RPC_URL ||
         "https://sepolia.infura.io/v3/YOUR_PROJECT_ID",
-      accounts: process.env.PRIVATE_KEY ? [process.env.PRIVATE_KEY] : [],
+      // Role wallets: one mnemonic, twelve derived keys. Falls back to a
+      // single PRIVATE_KEY for scripts that only need a deployer.
+      accounts: process.env.MNEMONIC
+        ? { mnemonic: process.env.MNEMONIC, count: 12 }
+        : process.env.PRIVATE_KEY
+          ? [process.env.PRIVATE_KEY]
+          : [],
       chainId: 11155111,
       gas: 8000000,
       gasPrice: 30000000000, // 30 gwei
