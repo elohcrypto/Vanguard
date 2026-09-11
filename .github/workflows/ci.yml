@@ -111,7 +111,7 @@ jobs:
       # error fails; warnings fail only when they RISE above the baseline.
       - name: Lint ratchet (no solhint errors, no NEW warnings)
         run: |
-          BASELINE=1356
+          BASELINE=1351
           npx solhint -f unix 'contracts/**/*.sol' > solhint.log 2>&1 || true
           errors=$(grep -c '\[Error/' solhint.log || true)
           warnings=$(grep -c '\[Warning/' solhint.log || true)
@@ -157,7 +157,8 @@ jobs:
       - name: Run tests
         run: npm test
 
-      # Coverage ratchet. Baseline measured at 63.73% lines with the full suite.
+      # Coverage ratchet. Baseline 65: measured at 65.54% lines on CI run
+      # 34552492375 (first baseline 63.73%; raised after the notice fired).
       # Fails only when the number DROPS below BASELINE; notices when it climbs
       # 2+ points so the baseline can be raised. The plugin compiles instrumented
       # bytecode into artifacts/; nothing else may compile in this tree while it
@@ -166,7 +167,7 @@ jobs:
       # cap that instrumented initcode exceeds.
       - name: Coverage ratchet (no DROP in line coverage)
         run: |
-          BASELINE=63
+          BASELINE=65
           npm run test:coverage > coverage.log 2>&1 || true
           lines=$(grep -E '^All files' coverage.log | awk -F'|' '{gsub(/ /,"",$5); print $5}')
           echo "line coverage: ${lines:-<none>}% (baseline $BASELINE)"
