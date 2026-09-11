@@ -209,7 +209,12 @@ contract Token is IERC3643, ERC20, Ownable, Pausable {
 
         // Carry the address-level freeze. Recovering a sanctioned wallet must
         // not launder it into an unfrozen one.
-        _frozen[_newWallet] = wasFrozen;
+        //
+        // OR, not assignment: the destination may carry its own administrative
+        // freeze. A plain assignment let an unfrozen source CLEAR a frozen
+        // destination, so recovering into a sanctioned address unfroze it and
+        // handed it the balance. A freeze on either wallet survives.
+        _frozen[_newWallet] = wasFrozen || _frozen[_newWallet];
         _frozen[_lostWallet] = false;
 
         // Move the identity atomically. This used to delete the old entry and

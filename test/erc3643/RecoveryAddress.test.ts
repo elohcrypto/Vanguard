@@ -91,6 +91,18 @@ describe("recoveryAddress", function () {
     expect(await idReg.investorCountry(fresh.address)).to.equal(643);
   });
 
+  // Found reviewing PR #4: the freeze carry-over was an ASSIGNMENT, so an
+  // unfrozen source CLEARED a frozen destination — recovering into a
+  // sanctioned address unfroze it and handed it the balance.
+  it("does not clear a freeze already on the destination wallet", async function () {
+    await token.setAddressFrozen(fresh.address, true);
+    expect(await token.isFrozen(lost.address), "source must be unfrozen for this case").to.be.false;
+
+    await token.recoveryAddress(lost.address, fresh.address, lostId);
+
+    expect(await token.isFrozen(fresh.address), "an administrative freeze must survive recovery").to.be.true;
+  });
+
   it("refuses to recover into a wallet that already holds tokens", async function () {
     await token.mint(other.address, E("50"));
     await expect(token.recoveryAddress(lost.address, other.address, lostId)).to.be.reverted;

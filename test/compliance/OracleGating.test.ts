@@ -271,6 +271,21 @@ describe("Oracle gating in ComplianceRules", function () {
         .to.emit(rules, "WhitelistOracleSet").withArgs(t, await wl.getAddress());
     });
 
+    // Found reviewing PR #4: the setters accepted any address with bytecode,
+    // but the gate calls isBlacklisted on EVERY transfer. An incompatible
+    // contract therefore bricked the token until an owner noticed and unset it.
+    it("rejects a contract that does not answer the oracle selector", async function () {
+      const t = await token.getAddress();
+      await expect(rules.setBlacklistOracle(t, await idReg.getAddress()))
+        .to.be.revertedWithCustomError(rules, "OracleIncompatible");
+      await expect(rules.setWhitelistOracle(t, await idReg.getAddress()))
+        .to.be.revertedWithCustomError(rules, "OracleIncompatible");
+
+      // and transfers keep working, because the bad oracle was never stored
+      expect(await rules.blacklistOracle(t)).to.equal(ethers.ZeroAddress);
+      await expect(token.connect(alice).transfer(bob.address, E(1))).to.not.be.reverted;
+    });
+
     it("rejects a non-contract oracle address", async function () {
       await expect(rules.setBlacklistOracle(await token.getAddress(), alice.address)).to.be.reverted;
     });

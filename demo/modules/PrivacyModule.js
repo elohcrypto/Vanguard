@@ -69,6 +69,17 @@ class PrivacyModule {
             this.state.setContract('zkVerifier', zkVerifierIntegrated);
             console.log(`✅ ZKVerifierIntegrated deployed: ${zkVerifierIntegratedAddr}`);
 
+            // Keep the APPLICATION's proof mode in step with the verifier's.
+            // testingMode is immutable, so a real-mode verifier paired with
+            // state.zkMode = 'mock' means every demo action generates a
+            // placeholder proof that Groth16 verification then rejects.
+            this.state.zkMode = zkTestingMode ? 'mock' : 'real';
+            console.log(`   ZK proof mode: ${this.state.zkMode.toUpperCase()} (matches the deployed verifier)`);
+            if (!zkTestingMode) {
+                console.log('   ℹ️  Real mode needs generated proofs - run `npm run setup:zk` first,');
+                console.log('      or set ZK_TESTING_MODE=1 to drive the flow with mock proofs.');
+            }
+
             // Deploy mock dependencies for PrivacyManager
             console.log('🔧 Deploying mock dependencies...');
             const MockComplianceRulesFactory = await ethers.getContractFactory('MockComplianceRules');

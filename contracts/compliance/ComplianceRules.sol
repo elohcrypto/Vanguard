@@ -95,6 +95,8 @@ contract ComplianceRules is IComplianceRules, Ownable, ReentrancyGuard {
     error InvalidTokenAddress();
     /// @dev An oracle must be a contract. address(0) is allowed: it disables the gate.
     error OracleNotAContract(address oracle);
+    /// @dev The oracle does not answer the selector this gate calls.
+    error OracleIncompatible(address oracle);
 
     event BlacklistOracleSet(address indexed token, address indexed oracle);
     event WhitelistOracleSet(address indexed token, address indexed oracle);
@@ -107,6 +109,16 @@ contract ComplianceRules is IComplianceRules, Ownable, ReentrancyGuard {
     function setBlacklistOracle(address token, address oracle) external onlyOwner {
         if (token == address(0)) revert InvalidTokenAddress();
         if (oracle != address(0) && oracle.code.length == 0) revert OracleNotAContract(oracle);
+        // Bytecode is not enough: the gate calls isBlacklisted on EVERY
+        // transfer, so an incompatible contract here bricks the token until an
+        // owner notices and unsets it. Probe the selector now and fail at
+        // configuration time, where the mistake is made.
+        if (oracle != address(0)) {
+            (bool ok, bytes memory ret) = oracle.staticcall(
+                abi.encodeWithSelector(IBlacklistOracleView.isBlacklisted.selector, address(this))
+            );
+            if (!ok || ret.length != 32) revert OracleIncompatible(oracle);
+        }
         blacklistOracle[token] = oracle;
         emit BlacklistOracleSet(token, oracle);
     }
@@ -120,6 +132,13 @@ contract ComplianceRules is IComplianceRules, Ownable, ReentrancyGuard {
     function setWhitelistOracle(address token, address oracle) external onlyOwner {
         if (token == address(0)) revert InvalidTokenAddress();
         if (oracle != address(0) && oracle.code.length == 0) revert OracleNotAContract(oracle);
+        // Same rationale as setBlacklistOracle: fail here, not on every transfer.
+        if (oracle != address(0)) {
+            (bool ok, bytes memory ret) = oracle.staticcall(
+                abi.encodeWithSelector(IWhitelistOracleView.isWhitelisted.selector, address(this))
+            );
+            if (!ok || ret.length != 32) revert OracleIncompatible(oracle);
+        }
         whitelistOracle[token] = oracle;
         emit WhitelistOracleSet(token, oracle);
     }
