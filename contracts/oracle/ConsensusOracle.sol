@@ -120,6 +120,7 @@ contract ConsensusOracle is IOracle, Ownable, ReentrancyGuard, Pausable {
 
     constructor(address _oracleManager, string memory _name, string memory _description) Ownable(msg.sender) {
         require(_oracleManager != address(0), "ConsensusOracle: Invalid oracle manager");
+        require(_oracleManager.code.length > 0, "ConsensusOracle: Oracle manager is not a contract");
 
         oracleManager = IOracleManager(_oracleManager);
         oracleName = _name;

@@ -86,8 +86,11 @@ contract PrivacyManager is Ownable, ReentrancyGuard {
 
     constructor(address _zkVerifier, address _complianceRules, address _oracleManager) Ownable(msg.sender) {
         require(_zkVerifier != address(0), "PrivacyManager: Invalid ZK verifier");
+        require(_zkVerifier.code.length > 0, "PrivacyManager: ZK verifier is not a contract");
         require(_complianceRules != address(0), "PrivacyManager: Invalid compliance rules");
+        require(_complianceRules.code.length > 0, "PrivacyManager: Compliance rules is not a contract");
         require(_oracleManager != address(0), "PrivacyManager: Invalid oracle manager");
+        require(_oracleManager.code.length > 0, "PrivacyManager: Oracle manager is not a contract");
 
         zkVerifier = IZKVerifier(_zkVerifier);
         complianceRules = IComplianceRules(_complianceRules);
@@ -365,6 +368,7 @@ contract PrivacyManager is Ownable, ReentrancyGuard {
      */
     function updateZKVerifier(address _zkVerifier) external onlyOwner {
         require(_zkVerifier != address(0), "PrivacyManager: Invalid ZK verifier");
+        require(_zkVerifier.code.length > 0, "PrivacyManager: ZK verifier is not a contract");
         zkVerifier = IZKVerifier(_zkVerifier);
     }
 
@@ -374,6 +378,7 @@ contract PrivacyManager is Ownable, ReentrancyGuard {
      */
     function updateComplianceRules(address _complianceRules) external onlyOwner {
         require(_complianceRules != address(0), "PrivacyManager: Invalid compliance rules");
+        require(_complianceRules.code.length > 0, "PrivacyManager: Compliance rules is not a contract");
         complianceRules = IComplianceRules(_complianceRules);
     }
 
@@ -383,6 +388,7 @@ contract PrivacyManager is Ownable, ReentrancyGuard {
      */
     function updateOracleManager(address _oracleManager) external onlyOwner {
         require(_oracleManager != address(0), "PrivacyManager: Invalid oracle manager");
+        require(_oracleManager.code.length > 0, "PrivacyManager: Oracle manager is not a contract");
         oracleManager = IOracleManager(_oracleManager);
     }
 

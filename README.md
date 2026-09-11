@@ -16,6 +16,14 @@ This project implements a **production-ready Vanguard RWA StableCoin (VSC)** sys
 
 **Current Status**: ✅ **PRODUCTION READY** - All 11 core requirements fully implemented
 
+> **Building from a fresh clone:** the ZK circuit artifacts are gitignored build output.
+> Run `npm run setup:zk` before `npm test`, or the 4 ZK test suites fail with `ENOENT`
+> (**23 failures** without them; **0 failures** with them — the pass count moves as tests
+> are added, so the failure count is the number to check).
+> `setup:zk` requires the **Rust circom 2.x** compiler — the `circom` npm package is the
+> deprecated 0.5.x JS build and cannot compile these circuits. See
+> [docs/ZK_CIRCUIT_BUILD_GUIDE.md](docs/ZK_CIRCUIT_BUILD_GUIDE.md).
+
 
 ## 🏗️ Project Structure
 
@@ -30,7 +38,6 @@ Vanguard/
 │   ├── investor/                # Investor type management
 │   ├── governance/              # Governance system (1 Person = 1 Vote)
 │   ├── payment/                 # Payment protocol with refunds
-│   ├── migrations/              # Contract migration scripts
 │   ├── upgradeable/             # Upgradeable contract patterns
 │   └── test/                    # Test contracts and helpers
 ├── circuits/                    # Zero-Knowledge Circuits 
@@ -182,7 +189,8 @@ npm run demo:interactive:proof  # Run main interactive demo (89 options)
 
 **Testing & Analysis**:
 ```bash
-npm run test        # Run tests with coverage report
+npm run test            # Run all tests
+npm run test:coverage   # Run all tests under solidity-coverage
 ```
 
 
@@ -253,9 +261,9 @@ npx hardhat coverage
 
 ### **5. Governance System**
 - ✅ **1 Person = 1 Vote**: Equal voting power for all verified users
-- ✅ **VGT Voting Fees**: 1,000 VGT proposal creation, 10 VGT per vote
-- ✅ **Token Burning**: Passed proposals burn tokens, failed proposals return them
-- ✅ **≥51% Approval**: Simple majority threshold for proposal passage
+- ✅ **VGT Voting Fees**: 10 VGT proposal creation, 10 VGT per vote
+- ✅ **Token Burning**: Passed proposals burn deposits; failed ones make them claimable per participant
+- ✅ **Per-Type Thresholds**: Quorum 10-30% of eligible voters and approval 60-75%, set per proposal type
 - ✅ **KYC/AML Required**: Only verified users can participate in governance
 
 ### **6. Enhanced Escrow System**

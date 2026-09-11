@@ -55,6 +55,7 @@ contract PaymentEscrow is IPaymentEscrow, Ownable, ReentrancyGuard, Pausable {
 
     constructor(address _vscToken, address _paymentProtocol) Ownable(msg.sender) {
         require(_vscToken != address(0), "Invalid VSC token");
+        require(_vscToken.code.length > 0, "PaymentEscrow: VSC token is not a contract");
         require(_paymentProtocol != address(0), "Invalid payment protocol");
 
         vscToken = IERC20(_vscToken);

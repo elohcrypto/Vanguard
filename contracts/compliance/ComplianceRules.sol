@@ -12,7 +12,10 @@ import "../erc3643/interfaces/IIdentityRegistry.sol";
  * @author CMTA UTXO Compliance Team
  */
 contract ComplianceRules is IComplianceRules, Ownable, ReentrancyGuard {
-    // ICompliance interface implementation
+    // Not an ICompliance implementer. It exposes canTransfer, the three
+    // hooks and isTrustedContract by name, which is what Token calls; the
+    // module functions ICompliance declares were empty stubs here and are
+    // gone. Contracts that need modules bind InvestorTypeCompliance.
     /**
      * @dev Check if a transfer is allowed based on all compliance rules
      * This is the main function called by Token contract
@@ -54,6 +57,16 @@ contract ComplianceRules is IComplianceRules, Ownable, ReentrancyGuard {
      */
     function isTrustedContract(address contractAddress) external view returns (bool) {
         return trustedContracts[contractAddress];
+    }
+
+    /**
+     * @notice Deployment marker read by scripts/deploy-helpers.ts before a Token
+     *         is bound to this contract. True: canTransfer enforces KYC and
+     *         jurisdiction rules. The permissive test double ComplianceRegistry
+     *         returns false, and a contract without this function is refused.
+     */
+    function isProductionCompliance() external pure returns (bool) {
+        return true;
     }
 
     function canTransfer(
@@ -158,30 +171,16 @@ contract ComplianceRules is IComplianceRules, Ownable, ReentrancyGuard {
         return true;
     }
 
-    function transferred(address /* from */, address /* to */, uint256 /* amount */) external {
-        // Hook for post-transfer actions if needed
-    }
+    // Token calls these three after every mint, burn and transfer through its
+    // ICompliance reference. They are intentionally empty: this contract keeps
+    // no per-transfer state, and all enforcement happens in canTransfer above.
+    // They carry no access control because there is nothing to protect. If a
+    // body is ever added, gate it (the Token is the only legitimate caller).
+    function transferred(address /* from */, address /* to */, uint256 /* amount */) external {}
 
-    function created(address /* to */, uint256 /* amount */) external {
-        // Hook for token creation if needed
-    }
+    function created(address /* to */, uint256 /* amount */) external {}
 
-    function destroyed(address /* from */, uint256 /* amount */) external {
-        // Hook for token destruction if needed
-    }
-
-    function addModule(address /* module */) external onlyOwner {
-        // Module management if needed
-    }
-
-    function removeModule(address /* module */) external onlyOwner {
-        // Module management if needed
-    }
-
-    function getModules() external pure returns (address[] memory) {
-        // Return empty array for now
-        return new address[](0);
-    }
+    function destroyed(address /* from */, uint256 /* amount */) external {}
     // Compliance rule structures
     struct JurisdictionRule {
         bool isActive;

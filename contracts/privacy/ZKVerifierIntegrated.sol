@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.20;
 
-import "@openzeppelin/contracts/access/Ownable.sol";
+import "@openzeppelin/contracts/access/Ownable2Step.sol";
 import "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
 import "./interfaces/IZKVerifier.sol";
 import "./verifiers/whitelist_membershipVerifier.sol";
@@ -15,7 +15,15 @@ import "./verifiers/compliance_aggregationVerifier.sol";
  * @dev Real ZK proof verifier using actual Groth16 verifier contracts
  * @notice This integrates with the real snarkjs-generated verifiers
  */
-contract ZKVerifierIntegrated is Ownable, ReentrancyGuard {
+/**
+ * @dev Uses Ownable2Step so ownership can migrate as governance matures —
+ * EOA today, multisig later, timelock after that — without redeploying.
+ * The two-step handover matters: with one-step Ownable, transferring to a
+ * wrong or non-responsive address permanently strands this contract, since
+ * updateVerifier and setProofCacheExpiry would become uncallable forever.
+ * Requiring acceptOwnership() proves the new owner exists and can act.
+ */
+contract ZKVerifierIntegrated is Ownable2Step, ReentrancyGuard {
     // Real verifier contracts
     WhitelistMembershipVerifier public whitelistVerifier;
     BlacklistMembershipVerifier public blacklistVerifier;
@@ -403,10 +411,32 @@ contract ZKVerifierIntegrated is Ownable, ReentrancyGuard {
      * @dev Update verifier contract for a specific proof type
      * @param proofType The type of proof ("whitelist", "jurisdiction", "accreditation", "compliance")
      * @param newVerifier Address of the new verifier contract
+     *
+     * @custom:security Owner can disable ZK verification with a single transaction.
+     * `testingMode` is immutable, so a deployed instance cannot be flipped into mock
+     * mode — but production verification delegates to the verifier addresses this
+     * function replaces. An owner who installs a contract whose `verifyProof` always
+     * returns true bypasses verification entirely, reaching the same outcome the
+     * immutable flag was meant to prevent. Immutability of `testingMode` therefore
+     * does NOT bound owner power.
+     *
+     * What is and is not guarded:
+     *   - NO timelock or delay on the swap (documented trust assumption)
+     *   - `newVerifier` must be a contract, but there is NO proof it implements
+     *     Groth16 correctly — only code presence is checked
+     *   - a `VerifierUpdated` event IS emitted, so swaps are observable on-chain
+     *     and can be monitored
+     *
+     * Demonstrated by test/privacy/VerifierSwapRisk.test.ts. Before mainnet, consider
+     * owning this contract with a TimelockController or multisig.
      */
     function updateVerifier(string memory proofType, address newVerifier) external onlyOwner {
         require(newVerifier != address(0), "ZKVerifierIntegrated: Invalid verifier address");
-        
+        // Reject addresses with no code. Without this, setting a verifier to an EOA
+        // succeeds here and instead reverts later inside every verify* call, bricking
+        // that proof type until someone traces the failure back to this setter.
+        require(newVerifier.code.length > 0, "ZKVerifierIntegrated: Verifier is not a contract");
+
         bytes32 proofHash = keccak256(abi.encodePacked(proofType));
 
         if (proofHash == keccak256(abi.encodePacked("whitelist"))) {

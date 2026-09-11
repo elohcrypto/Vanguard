@@ -38,13 +38,13 @@
 
 ALICE (Proposer)
    │
-   │ 1. Has 10,000 VGT tokens
+   │ 1. Has 10,000 VGT tokens and is KYC-verified
    │
-   ├─► Check balance ≥ proposalCreationCost (1,000 VGT)
+   ├─► Check balance ≥ proposalCreationCost (10 VGT)
    │   ✅ Balance: 10,000 VGT
    │
    ├─► Approve VGT tokens
-   │   approve(VanguardGovernance, 1,000 VGT)
+   │   approve(VanguardGovernance, 10 VGT)
    │
    ├─► Create proposal
    │   createListUpdateProposal(
@@ -57,8 +57,8 @@ ALICE (Proposer)
    │   )
    │
    ├─► VGT tokens transferred & locked
-   │   transferFrom(Alice, VanguardGovernance, 1,000 VGT)
-   │   _lockedTokens[proposalId] += 1,000 VGT
+   │   transferFrom(Alice, VanguardGovernance, 10 VGT)
+   │   _lockedTokens[proposalId] += 10 VGT
    │
    └─► Proposal created
        ✅ Proposal ID: 1
@@ -66,6 +66,8 @@ ALICE (Proposer)
        ✅ Voting starts NOW
        ✅ Voting ends: NOW + 5 days
        ✅ Execution time: votingEnds + 1 day
+       ✅ Eligible voters frozen: registeredIdentityCount() at this moment
+          (say 10 verified people; the quorum bar cannot move after this)
 ```
 
 ---
@@ -77,49 +79,52 @@ ALICE (Proposer)
 │  Community votes on Proposal #1                                  │
 └─────────────────────────────────────────────────────────────────┘
 
-DAY 1: ALICE votes FOR
+DAY 1: ALICE tries to vote FOR
    │
-   ├─► Check balance ≥ votingCost (100 VGT)
-   │   ✅ Balance: 9,000 VGT (10,000 - 1,000 locked)
+   └─► ❌ "Proposer cannot vote on own proposal"
+
+DAY 1: BOB votes FOR
+   │
+   ├─► Is KYC-verified; balance ≥ votingCost (10 VGT)
    │
    ├─► Approve VGT tokens
-   │   approve(VanguardGovernance, 100 VGT)
+   │   approve(VanguardGovernance, 10 VGT)
    │
    ├─► Cast vote
-   │   vote(proposalId: 1, support: true)
+   │   castVote(proposalId: 1, support: true, reason: "...")
    │
    ├─► VGT tokens locked
-   │   transferFrom(Alice, VanguardGovernance, 100 VGT)
-   │   _voterLockedTokens[1][Alice] = 100 VGT
+   │   transferFrom(Bob, VanguardGovernance, 10 VGT)
+   │   _voterLockedTokens[1][Bob] = 10 VGT
    │
    └─► Vote recorded
-       ✅ Votes FOR: 100 VGT
-       ✅ Votes AGAINST: 0 VGT
+       ✅ Votes FOR: 1        (1 person = 1 vote, balance irrelevant)
+       ✅ Votes AGAINST: 0
 
 DAY 2: CHARLIE votes FOR
    │
-   ├─► Has 50,000 VGT tokens
-   ├─► Locks 100 VGT for voting
+   ├─► Has 50,000 VGT tokens — still worth exactly 1 vote
+   ├─► Locks 10 VGT for voting
    │
    └─► Vote recorded
-       ✅ Votes FOR: 100 + 100 = 200 VGT
-       ✅ Votes AGAINST: 0 VGT
+       ✅ Votes FOR: 2
+       ✅ Votes AGAINST: 0
 
 DAY 3: DAVID votes AGAINST
    │
-   ├─► Has 20,000 VGT tokens
-   ├─► Locks 100 VGT for voting
+   ├─► Has 20,000 VGT tokens — still worth exactly 1 vote
+   ├─► Locks 10 VGT for voting
    │
    └─► Vote recorded
-       ✅ Votes FOR: 200 VGT
-       ✅ Votes AGAINST: 100 VGT
+       ✅ Votes FOR: 2
+       ✅ Votes AGAINST: 1
 
 DAY 5: Voting period ends
    │
    └─► Final tally
-       ✅ Total votes: 300 VGT
-       ✅ Votes FOR: 200 VGT (66.7%)
-       ✅ Votes AGAINST: 100 VGT (33.3%)
+       ✅ Total votes: 3 of 10 eligible (30% turnout)
+       ✅ Votes FOR: 2 (66.7%)
+       ✅ Votes AGAINST: 1 (33.3%)
 ```
 
 ---
@@ -140,23 +145,18 @@ ANYONE can execute (usually proposer)
    │   ✅ Current time ≥ executionTime
    │
    ├─► Calculate results
-   │   Total votes: 300 VGT
-   │   FOR votes: 200 VGT (66.7%)
-   │   AGAINST votes: 100 VGT (33.3%)
+   │   Total votes: 3
+   │   FOR: 2 (66.7%)   AGAINST: 1 (33.3%)
    │
    ├─► Check quorum (15% for AddToWhitelist)
-   │   Total VGT supply: 1,000,000
-   │   Required: 150,000 VGT (15%)
-   │   Actual: 300 VGT
-   │   ❌ QUORUM NOT MET (in this example)
-   │
-   │   [In real scenario with enough votes:]
-   │   Actual: 200,000 VGT
+   │   Denominator: eligible voters FROZEN at creation = 10
+   │   Required: 15% of 10 = 1.5 → 2 votes
+   │   Actual: 3 votes
    │   ✅ QUORUM MET
    │
    ├─► Check approval (60% for AddToWhitelist)
-   │   Required: 60% FOR votes
-   │   Actual: 66.7% FOR votes
+   │   Required: 60% FOR
+   │   Actual: 66.7% FOR
    │   ✅ APPROVAL MET
    │
    ├─► Execute proposal
@@ -166,14 +166,27 @@ ANYONE can execute (usually proposer)
    │       reason: "KYC/AML verified"
    │   )
    │
-   ├─► Burn locked tokens (proposal passed)
-   │   governanceToken.burn(1,100 VGT)
-   │   // 1,000 (proposal) + 100 (votes)
+   ├─► Manager call SUCCEEDS → burn locked tokens
+   │   governanceToken.burn(40 VGT)
+   │   // 10 (proposal) + 3 × 10 (votes)
    │
    └─► Proposal executed
        ✅ Status: EXECUTED
        ✅ Bob's status: WHITELISTED
        ✅ Locked tokens: BURNED
+
+   [If the manager call had REVERTED — e.g. governance not yet
+    authorised on the DynamicListManager:]
+   │
+   ├─► Status: REJECTED (terminal; resubmit once the cause is fixed)
+   ├─► Event: ProposalExecutionFailed(1, "Only owner or governance")
+   └─► Alice, Bob, Charlie, David each call claimRefund(1) for 10 VGT
+
+   [If a threshold had NOT been met:]
+   │
+   ├─► Status: REJECTED
+   ├─► Event: ProposalRejected(1)
+   └─► Same claim step
 ```
 
 ---
@@ -264,45 +277,46 @@ BOB tries to use old whitelist proof
 
 ### **Proposal Creation**
 ```
-Cost: 1,000 VGT (configurable)
+Cost: 10 VGT (owner-adjustable, ≤ 1000 VGT)
 
-If proposal PASSES:
+If proposal PASSES and its call succeeds:
    ✅ Tokens BURNED
    ✅ Reduces total supply
-   ✅ Increases scarcity
 
-If proposal FAILS:
-   ✅ Tokens RETURNED to proposer
+Otherwise (threshold not met, or the call reverted):
+   ✅ Proposer CLAIMS the deposit back via claimRefund(id)
    ✅ No penalty for failed proposals
 ```
 
 ### **Voting**
 ```
-Cost: 100 VGT per vote (configurable)
+Cost: 10 VGT per vote (owner-adjustable, ≤ 1000 VGT)
 
-If proposal PASSES:
-   ✅ All voting tokens BURNED
-   ✅ Rewards participation in successful governance
+If proposal PASSES and its call succeeds:
+   ✅ All voting deposits BURNED
 
-If proposal FAILS:
-   ✅ All voting tokens RETURNED
+Otherwise:
+   ✅ Each voter CLAIMS their deposit back via claimRefund(id)
    ✅ No penalty for voting on failed proposals
+   ✅ A voter the token cannot pay right now (de-verified, frozen)
+      blocks only their own claim, never the settlement
 ```
 
 ### **Example Scenario**
 ```
 Proposal #1: Add Bob to Whitelist
-   Proposer: Alice (1,000 VGT locked)
-   Voters:
-      - Alice: 100 VGT (FOR)
-      - Charlie: 100 VGT (FOR)
-      - David: 100 VGT (AGAINST)
-   
-   Total locked: 1,300 VGT
+   Proposer: Alice (10 VGT locked; may not vote on her own proposal)
+   Voters (1 vote each, 10 VGT locked each):
+      - Bob: FOR
+      - Charlie: FOR
+      - David: AGAINST
 
-Result: PASSED (66.7% approval)
-   ✅ 1,300 VGT BURNED
-   ✅ Total supply reduced by 1,300 VGT
+   Total locked: 40 VGT
+
+Result: PASSED (3 of 10 eligible = 30% turnout ≥ 15% quorum;
+                2 of 3 = 66.7% ≥ 60% approval)
+   ✅ 40 VGT BURNED
+   ✅ Total supply reduced by 40 VGT
    ✅ Bob added to whitelist
 ```
 
@@ -312,14 +326,15 @@ Result: PASSED (66.7% approval)
 
 ### **Voting Thresholds**
 
-| Proposal Type | Quorum | Approval | Example |
-|---------------|--------|----------|---------|
-| AddToWhitelist | 15% | 60% | 150k votes, 90k FOR |
-| RemoveFromWhitelist | 15% | 60% | 150k votes, 90k FOR |
-| AddToBlacklist | 20% | 70% | 200k votes, 140k FOR |
-| RemoveFromBlacklist | 20% | 65% | 200k votes, 130k FOR |
+| Proposal Type | Quorum | Approval | Example (100 eligible voters) |
+|---------------|--------|----------|-------------------------------|
+| AddToWhitelist | 15% | 60% | ≥15 voters, ≥60% of them FOR |
+| RemoveFromWhitelist | 15% | 60% | ≥15 voters, ≥60% of them FOR |
+| AddToBlacklist | 20% | 70% | ≥20 voters, ≥70% of them FOR |
+| RemoveFromBlacklist | 20% | 65% | ≥20 voters, ≥65% of them FOR |
 
-*Assuming 1M total VGT supply*
+*Quorum is a share of eligible (KYC-verified) voters counted when the
+proposal was created, not of VGT supply. Votes are one per person.*
 
 ### **Timeline**
 ```
@@ -331,8 +346,8 @@ Day 6+: Proposal can be executed
 
 ### **Costs**
 ```
-Proposal creation: 1,000 VGT
-Voting: 100 VGT per vote
+Proposal creation: 10 VGT   (owner-adjustable, 1 .. 1000)
+Voting:            10 VGT per vote (same bound)
 ```
 
 ---
@@ -349,7 +364,7 @@ Voting: 100 VGT per vote
 1. Create proposal (lock VGT)
 2. Community votes (lock VGT)
 3. Wait for voting period (5 days)
-4. Execute proposal (burn or return VGT)
+4. Execute proposal (burn on pass; otherwise each participant claims their VGT)
 5. Status change applied automatically
 
 **Try It**: Run Option 88 to see the complete lifecycle! 🚀

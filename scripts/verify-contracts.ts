@@ -1,9 +1,9 @@
-import { ethers } from "hardhat";
+import { network, run } from "hardhat";
 import * as fs from "fs";
 import * as path from "path";
 
 async function main() {
-    const networkName = ethers.provider.network?.name || "unknown";
+    const networkName = network.name;
     const deploymentsPath = path.join(__dirname, "..", "deployments", `${networkName}.json`);
 
     if (!fs.existsSync(deploymentsPath)) {
@@ -20,7 +20,7 @@ async function main() {
         console.log(`\n📋 Verifying ${contractName} at ${info.address}...`);
 
         try {
-            await ethers.run("verify:verify", {
+            await run("verify:verify", {
                 address: info.address,
                 constructorArguments: [], // Add constructor args if needed
             });

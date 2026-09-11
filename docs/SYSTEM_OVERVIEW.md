@@ -108,9 +108,9 @@ We have successfully implemented a **production-ready Vanguard StableCoin system
 - **Technology**: 1 Person = 1 Vote governance with VGT token-based voting fees
 - **Features**:
   - Equal voting power (1 Person = 1 Vote, not weighted by tokens)
-  - VGT token voting fees (1,000 VGT proposal creation, 10 VGT per vote)
-  - ≥51% approval threshold for proposal passage
-  - Token burning for passed proposals, return for failed proposals
+  - VGT token voting fees (10 VGT proposal creation, 10 VGT per vote, both owner-adjustable up to 1000 VGT)
+  - Per-type quorum (10-30% of eligible voters) and approval (60-75%) thresholds
+  - Token burning for passed proposals; failed ones settle and each participant claims their deposit
   - KYC/AML verification required for all governance participants
   - Parameter updates for ComplianceRules, InvestorTypeRegistry, Oracle settings
 - **Demo Options**: 79-88
@@ -216,7 +216,7 @@ We have successfully implemented a **production-ready Vanguard StableCoin system
 
 ### **Governance and Payment Systems**
 - ✅ 1 Person = 1 Vote governance (equal voting power for all)
-- ✅ VGT token-based voting fees (1,000 VGT proposal, 10 VGT vote)
+- ✅ VGT token-based voting fees (10 VGT proposal, 10 VGT vote)
 - ✅ 2-of-3 multisig escrow with investor-mediated dispute resolution
 - ✅ Payment protocol with multi-type refunds (Automatic/Manual/Dispute/Emergency)
 

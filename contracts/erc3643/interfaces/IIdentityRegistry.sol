@@ -25,6 +25,10 @@ interface IIdentityRegistry {
 
     function isVerified(address user) external view returns (bool);
 
+    /// @notice Number of registered identities — the eligible-voter denominator
+    ///         for 1-person-1-vote governance quorum.
+    function registeredIdentityCount() external view returns (uint256);
+
     // Batch Functions
     function batchRegisterIdentity(
         address[] memory users,

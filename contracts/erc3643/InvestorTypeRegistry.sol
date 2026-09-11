@@ -1,15 +1,31 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.19;
 
-import "@openzeppelin/contracts/access/Ownable.sol";
+import "@openzeppelin/contracts/access/Ownable2Step.sol";
 import "./interfaces/IInvestorTypeRegistry.sol";
 
 /**
  * @title InvestorTypeRegistry
  * @dev Registry for managing investor types and their associated limits and privileges
  * @author Vanguard StableCoin Team
+ *
+ * @custom:security Uses Ownable2Step, not Ownable. Ownership of this registry
+ * is intended to move to VanguardGovernance, which is a CONTRACT: one-step
+ * `transferOwnership` to an address that cannot call `acceptOwnership` — or to
+ * a mistyped address — would permanently strand `updateInvestorTypeConfig`,
+ * `setComplianceOfficer`, `authorizeToken` and `setGovernor`, with no recovery
+ * path. Two-step transfer makes the new owner prove it can act.
+ *
+ * @custom:security NOTE ON TWO GOVERNANCE LAYERS. This contract has its own
+ * proposal system (`proposeInvestorTypeUpdate` / `approveProposal` /
+ * `executeProposal`) gated on `_governors` and `requiredApprovals`. But
+ * `updateInvestorTypeConfig` is `onlyOwner` and bypasses it entirely. When
+ * VanguardGovernance owns this registry it changes config through that
+ * bypass — protected by the VanguardGovernance vote, NOT by the governors
+ * here. Do not read the presence of `approveProposal` as a second layer of
+ * protection on owner-initiated config changes.
  */
-contract InvestorTypeRegistry is IInvestorTypeRegistry, Ownable {
+contract InvestorTypeRegistry is IInvestorTypeRegistry, Ownable2Step {
     // State variables
     mapping(address => InvestorType) private _investorTypes;
     mapping(InvestorType => InvestorTypeConfig) private _typeConfigs;

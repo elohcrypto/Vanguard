@@ -43,8 +43,11 @@ contract ComplianceValidator is IComplianceValidator, Ownable, Pausable {
         address _owner
     ) Ownable(_owner) {
         require(_oracleManager != address(0), "Invalid oracle manager");
+        require(_oracleManager.code.length > 0, "ComplianceValidator: Oracle manager is not a contract");
         require(_identityRegistry != address(0), "Invalid identity registry");
+        require(_identityRegistry.code.length > 0, "ComplianceValidator: Identity registry is not a contract");
         require(_complianceRegistry != address(0), "Invalid compliance registry");
+        require(_complianceRegistry.code.length > 0, "ComplianceValidator: Compliance registry is not a contract");
 
         oracleManager = IOracleManager(_oracleManager);
         identityRegistry = IIdentityRegistry(_identityRegistry);

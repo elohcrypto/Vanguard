@@ -1,0 +1,227 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+# A newer push to the same branch cancels the older run.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CIRCOM_VERSION: v2.2.3
+
+jobs:
+  build-and-test:
+    runs-on: ubuntu-latest
+    # Local baseline: install ~20s, compile ~35s, setup:zk ~27s, tests ~5min
+    # (was ~9min before the Merkle builder went sparse; the first CI run
+    # timed out six proof tests at 60s each on the dense build). Runner is
+    # roughly 1.6x slower than the local baseline.
+    timeout-minutes: 30
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+
+      # Fails if package.json and package-lock.json disagree, which is the
+      # drift that broke this build before (an unbounded "typescript": ">=4.5.0"
+      # resolved to TypeScript 7 and crashed ts-node).
+      - name: Install dependencies
+        run: npm ci
+
+      # The circuits declare `pragma circom 2.0.0`; only the Rust compiler can
+      # build them. The `circom` npm package is the deprecated 0.5.x JS build.
+      - name: Cache circom binary
+        id: circom-cache
+        uses: actions/cache@v4
+        with:
+          path: ~/.cargo/bin/circom
+          key: circom-${{ runner.os }}-${{ env.CIRCOM_VERSION }}
+
+      - name: Build circom ${{ env.CIRCOM_VERSION }}
+        if: steps.circom-cache.outputs.cache-hit != 'true'
+        run: |
+          git clone --depth 1 --branch "$CIRCOM_VERSION" https://github.com/iden3/circom.git /tmp/circom
+          cargo build --release --manifest-path /tmp/circom/Cargo.toml
+          mkdir -p ~/.cargo/bin
+          cp /tmp/circom/target/release/circom ~/.cargo/bin/circom
+
+      - name: Verify circom is 2.x
+        run: |
+          ~/.cargo/bin/circom --version
+          ~/.cargo/bin/circom --version | grep -qE '\b2\.[0-9]+\.[0-9]+' \
+            || { echo "::error::circom is not 2.x"; exit 1; }
+
+      # 37.8 MB trusted-setup file, served from this repo's releases because
+      # every public mirror now 403s. Cached so CI does not re-download each
+      # run. setup:zk verifies the BLAKE2b-512 of whatever is on disk, cached
+      # or fresh, so a bad cache entry is replaced rather than trusted. The
+      # key carries the hash prefix: a different file is a different key.
+      - name: Cache Powers of Tau
+        uses: actions/cache@v4
+        with:
+          path: build/circuits/powersOfTau28_hez_final_15.ptau
+          key: ptau-hez-final-15-982372c8
+
+      # Static invariant: no setter or constructor may cast an address to a
+      # contract interface without checking the address has code. Casting does
+      # not validate, so a bad address is accepted here and reverts later inside
+      # the dependency call, with no reason string. Exits 1 on any finding.
+      # Runs before the build so a structural regression fails fast and cheap.
+      - name: Audit setter/constructor guards
+        run: node scripts/audit-setter-guards.js
+
+      - name: Compile contracts
+        run: npx hardhat compile
+
+      # Ratchet, same shape as the audit ratchet below. tsc is not a hard gate:
+      # 98 pre-existing errors, mostly typechain drift in oracle/ZK tests that
+      # the suite never sees because ts-node strips types. Fail only when the
+      # count RISES. Runs after compile because tsc reads typechain-types/,
+      # which compile regenerates; the count is 96 without it and 98 with it,
+      # so measuring at any other point compares against the wrong baseline.
+      - name: Typecheck ratchet (no NEW tsc errors)
+        run: |
+          BASELINE=98
+          test -d typechain-types || { echo "::error::typechain-types/ missing; compile did not generate it"; exit 1; }
+          npx tsc --noEmit --pretty false > tsc.log 2>&1 || true
+          count=$(grep -c 'error TS' tsc.log || true)
+          echo "tsc errors: $count (baseline $BASELINE)"
+          if [ "$count" -gt "$BASELINE" ]; then
+            echo "::error::tsc error count rose from $BASELINE to $count."
+            grep 'error TS' tsc.log
+            exit 1
+          fi
+          if [ "$count" -lt "$BASELINE" ]; then
+            echo "::notice::tsc error count dropped to $count — lower BASELINE in ci.yml."
+          fi
+
+      # Solhint's own exit code is not a gate: it exits 0 on errors, and its
+      # --max-warnings check is skipped when the first file reported has an
+      # error. Its stdout is also truncated under a pipe (process.exit before
+      # flush), so the report goes to a file and is counted from there. Any
+      # error fails; warnings fail only when they RISE above the baseline.
+      - name: Lint ratchet (no solhint errors, no NEW warnings)
+        run: |
+          BASELINE=1351
+          npx solhint -f unix 'contracts/**/*.sol' > solhint.log 2>&1 || true
+          errors=$(grep -c '\[Error/' solhint.log || true)
+          warnings=$(grep -c '\[Warning/' solhint.log || true)
+          echo "solhint: $errors errors, $warnings warnings (warning baseline $BASELINE)"
+          if [ "$errors" -gt 0 ]; then
+            echo "::error::solhint reported $errors error(s)."
+            grep '\[Error/' solhint.log
+            exit 1
+          fi
+          if [ "$warnings" -gt "$BASELINE" ]; then
+            echo "::error::solhint warning count rose from $BASELINE to $warnings."
+            exit 1
+          fi
+          if [ "$warnings" -lt "$BASELINE" ]; then
+            echo "::notice::solhint warnings dropped to $warnings — lower BASELINE in ci.yml."
+          fi
+
+      # `npm run` puts node_modules/.bin ahead of PATH, where the npm circom
+      # 0.5.x shim lives. CIRCOM_BIN pins the real compiler explicitly.
+      # $HOME rather than a literal path so this is not runner-specific.
+      - name: Build ZK circuits
+        run: CIRCOM_BIN="$HOME/.cargo/bin/circom" npm run setup:zk
+
+      # Regression guard for the silent-mock bug: setup:zk used to write
+      # placeholder files and overwrite the committed verifiers while exiting 0.
+      - name: Assert ZK artifacts are real
+        run: |
+          fail=0
+          for wasm in build/circuits/*/*_js/*.wasm; do
+            magic=$(xxd -p -l4 "$wasm")
+            if [ "$magic" != "0061736d" ]; then
+              echo "::error::$wasm is not WebAssembly (magic $magic; 'mock' is 6d6f636b)"
+              fail=1
+            fi
+          done
+          if ! git diff --quiet contracts/privacy/verifiers/; then
+            echo "::error::setup:zk modified committed verifier contracts"
+            git diff --stat contracts/privacy/verifiers/
+            fail=1
+          fi
+          exit $fail
+
+      - name: Run tests
+        run: npm test
+
+      # Coverage ratchet. Baseline 65: measured at 65.54% lines on CI run
+      # 34552492375 (first baseline 63.73%; raised after the notice fired).
+      # Fails only when the number DROPS below BASELINE; notices when it climbs
+      # 2+ points so the baseline can be raised. The plugin compiles instrumented
+      # bytecode into artifacts/; nothing else may compile in this tree while it
+      # runs, which is why this step follows "Run tests" rather than sharing it.
+      # DEPLOY_GAS_LIMIT (set by the npm script) lifts one hard-coded 10M deploy
+      # cap that instrumented initcode exceeds.
+      - name: Coverage ratchet (no DROP in line coverage)
+        run: |
+          BASELINE=65
+          npm run test:coverage > coverage.log 2>&1 || true
+          lines=$(grep -E '^All files' coverage.log | awk -F'|' '{gsub(/ /,"",$5); print $5}')
+          echo "line coverage: ${lines:-<none>}% (baseline $BASELINE)"
+          if [ -z "$lines" ]; then
+            echo "::error::coverage summary line not found; see coverage.log"
+            tail -20 coverage.log
+            exit 1
+          fi
+          if [ "$(printf '%s\n' "$lines" "$BASELINE" | sort -g | head -1)" != "$BASELINE" ]; then
+            echo "::error::line coverage ${lines}% dropped below baseline ${BASELINE}%."
+            exit 1
+          fi
+          if [ "$(printf '%s\n' "$lines" "$((BASELINE+2))" | sort -g | head -1)" = "$((BASELINE+2))" ]; then
+            echo "::notice::line coverage ${lines}% is 2+ points above baseline — raise BASELINE in ci.yml."
+          fi
+
+      # The demo wires contracts together the way an operator would — a path the
+      # unit tests do not cover. It cannot run interactively in CI (readline over
+      # a non-TTY pipe closes before the first prompt), so this drives the same
+      # ContractDeployer directly against a local node and reads the wiring back
+      # from chain. Exits non-zero on any mismatch.
+      - name: Demo deployment smoke test
+        run: |
+          npx hardhat node > /tmp/hardhat-node.log 2>&1 &
+          for i in $(seq 1 30); do
+            if curl -s -o /dev/null -m 1 -X POST -H "Content-Type: application/json" \
+                 --data '{"jsonrpc":"2.0","method":"eth_blockNumber","params":[],"id":1}' \
+                 http://127.0.0.1:8545; then break; fi
+            sleep 1
+          done
+          npx hardhat run scripts/demo-smoke.js --network localhost
+
+      # Blocks on critical (currently 0).
+      - name: Audit dependencies (critical blocks)
+        run: npm audit --audit-level=critical
+
+      # Ratchet: the 22 known highs are ReDoS/DoS in build tooling, pinned behind
+      # a hardhat-toolbox 4 -> 7 major bump (i.e. a Hardhat 2 -> 3 migration), so
+      # `npm audit fix` cannot clear them — verified: it changes nothing.
+      # Gating on `high` would be permanently red and quickly ignored. Instead
+      # fail only when the count RISES above the recorded baseline, so a newly
+      # introduced high is caught while the known backlog stays visible.
+      - name: Audit ratchet (no NEW high vulnerabilities)
+        run: |
+          BASELINE=22
+          count=$(npm audit --json 2>/dev/null \
+            | node -e "let s='';process.stdin.on('data',d=>s+=d).on('end',()=>{
+                console.log(JSON.parse(s).metadata.vulnerabilities.high)})")
+          echo "high vulnerabilities: $count (baseline $BASELINE)"
+          if [ "$count" -gt "$BASELINE" ]; then
+            echo "::error::High-severity count rose from $BASELINE to $count."
+            npm audit --audit-level=high || true
+            exit 1
+          fi
+          if [ "$count" -lt "$BASELINE" ]; then
+            echo "::notice::High count dropped to $count — lower BASELINE in ci.yml."
+          fi

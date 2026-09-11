@@ -53,6 +53,17 @@ contract Token is IERC3643, ERC20, Ownable, Pausable {
         address _identityRegistryAddress,
         address _complianceAddress
     ) ERC20(_name, _symbol) Ownable(msg.sender) {
+        // Same validation as the setters below. A constructor mistake is worse:
+        // the setters can be called again, but a token deployed with a bad
+        // dependency is permanently broken and must be redeployed.
+        require(_identityRegistryAddress != address(0), "Token: Identity registry is zero address");
+        require(
+            _identityRegistryAddress.code.length > 0,
+            "Token: Identity registry is not a contract"
+        );
+        require(_complianceAddress != address(0), "Token: Compliance is zero address");
+        require(_complianceAddress.code.length > 0, "Token: Compliance is not a contract");
+
         _identityRegistry = IIdentityRegistry(_identityRegistryAddress);
         _compliance = ICompliance(_complianceAddress);
         _agents[msg.sender] = true;
@@ -224,17 +235,31 @@ contract Token is IERC3643, ERC20, Ownable, Pausable {
         return _frozen[_userAddress];
     }
 
+    // These three setters replace contracts the transfer path calls on every
+    // transfer. Pointing one at an address with no code does not fail here: it
+    // reverts later inside transfer(), with no reason string, far from the cause.
+    // Validate at the setter so a bad address is rejected where it is supplied.
+
     function setIdentityRegistry(address _identityRegistryAddress) external override onlyOwner {
+        require(_identityRegistryAddress != address(0), "Token: Identity registry is zero address");
+        require(_identityRegistryAddress.code.length > 0, "Token: Identity registry is not a contract");
         _identityRegistry = IIdentityRegistry(_identityRegistryAddress);
         emit IdentityRegistryAdded(_identityRegistryAddress);
     }
 
     function setCompliance(address _complianceAddress) external override onlyOwner {
+        require(_complianceAddress != address(0), "Token: Compliance is zero address");
+        require(_complianceAddress.code.length > 0, "Token: Compliance is not a contract");
         _compliance = ICompliance(_complianceAddress);
         emit ComplianceAdded(_complianceAddress);
     }
 
     function setInvestorTypeRegistry(address _investorTypeRegistryAddress) external onlyOwner {
+        require(_investorTypeRegistryAddress != address(0), "Token: Investor type registry is zero address");
+        require(
+            _investorTypeRegistryAddress.code.length > 0,
+            "Token: Investor type registry is not a contract"
+        );
         _investorTypeRegistry = IInvestorTypeRegistry(_investorTypeRegistryAddress);
     }
 
@@ -242,13 +267,22 @@ contract Token is IERC3643, ERC20, Ownable, Pausable {
         return address(_investorTypeRegistry);
     }
 
-    // Agent management
+    // Agent management. Agents mint, burn, freeze and pause, so every change
+    // is on the log; a monitor that cannot see agent changes cannot audit
+    // supply. Not part of IERC3643, so the events are declared here.
+    event AgentAdded(address indexed agent);
+    event AgentRemoved(address indexed agent);
+    error ZeroAgent();
+
     function addAgent(address _agent) external onlyOwner {
+        if (_agent == address(0)) revert ZeroAgent();
         _agents[_agent] = true;
+        emit AgentAdded(_agent);
     }
 
     function removeAgent(address _agent) external onlyOwner {
         _agents[_agent] = false;
+        emit AgentRemoved(_agent);
     }
 
     function isAgent(address _agent) external view returns (bool) {

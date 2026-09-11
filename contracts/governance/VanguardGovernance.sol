@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.20;
 
-import "@openzeppelin/contracts/access/Ownable.sol";
+import "@openzeppelin/contracts/access/Ownable2Step.sol";
 import "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
 import "./GovernanceToken.sol";
 import "../erc3643/interfaces/IIdentityRegistry.sol";
@@ -14,7 +14,7 @@ import "../erc3643/interfaces/IInvestorTypeRegistry.sol";
  * @notice Voting power is based on governance token ownership
  * @notice Only approved addresses (holding governance tokens) can vote
  */
-contract VanguardGovernance is Ownable, ReentrancyGuard {
+contract VanguardGovernance is Ownable2Step, ReentrancyGuard {
     // Enums
     enum ProposalType {
         InvestorTypeConfig,
@@ -60,7 +60,16 @@ contract VanguardGovernance is Ownable, ReentrancyGuard {
         ProposalStatus status;
         uint256 votesFor;
         uint256 votesAgainst;
-        uint256 snapshotId;
+        // Eligible-voter count captured when the proposal was created.
+        //
+        // Quorum previously read identityRegistry.registeredIdentityCount() at
+        // EXECUTION time. Agents can register and delete identities while a
+        // vote is open, so the denominator — and therefore the outcome of an
+        // already-cast vote — could be changed after the fact: register
+        // identities to push a proposal below quorum, or delete them to lift
+        // it above. Freezing the count at creation makes the bar fixed for the
+        // life of the proposal.
+        uint256 eligibleVotersAtCreation;
     }
     
     // State variables
@@ -115,7 +124,20 @@ contract VanguardGovernance is Ownable, ReentrancyGuard {
     uint256 public proposalCreationCost = 10 * 10**18; // 10 VGT to create proposal
     uint256 public votingCost = 10 * 10**18; // 10 VGT per vote
 
-    // Token locking tracking
+    /// @dev Upper bound for both costs. Without it the owner could set a
+    ///      cost above every holder's balance and freeze governance with
+    ///      one call. 1000 VGT is 100x the default; the exact ceiling is a
+    ///      product decision and only needs to block the freeze.
+    uint256 public constant MAX_COST = 1000 * 10**18;
+
+    // Token locking tracking.
+    //
+    // _lockedTokens is the aggregate: burned on pass, zeroed on settlement.
+    // _voterLockedTokens is per person. While the proposal is Active it is
+    // the deposit; once the proposal is Rejected or Cancelled it is the
+    // amount that person may claim via claimRefund(). Settlement never
+    // transfers VGT (see _settleWithRefund), so it cannot fail on a
+    // recipient the token refuses to pay.
     mapping(uint256 => uint256) private _lockedTokens; // proposalId => total locked tokens
     mapping(uint256 => mapping(address => uint256)) private _voterLockedTokens; // proposalId => voter => locked amount
     
@@ -124,8 +146,7 @@ contract VanguardGovernance is Ownable, ReentrancyGuard {
         uint256 indexed proposalId,
         address indexed proposer,
         ProposalType proposalType,
-        string title,
-        uint256 snapshotId
+        string title
     );
     event VoteCast(
         uint256 indexed proposalId,
@@ -135,8 +156,20 @@ contract VanguardGovernance is Ownable, ReentrancyGuard {
         string reason
     );
     event ProposalExecuted(uint256 indexed proposalId);
+    /// @notice A passed proposal's target call reverted; deposits were refunded.
+    /// @param reason Raw revert data from the target (selector + args, or a
+    ///        reason string), preserved so the cause can be decoded off-chain.
+    event ProposalExecutionFailed(uint256 indexed proposalId, bytes reason);
+    /// @notice The proposal failed a threshold; deposits are claimable.
+    event ProposalRejected(uint256 indexed proposalId);
     event ProposalCancelled(uint256 indexed proposalId);
+    /// @notice A participant pulled their refund after settlement.
+    event RefundClaimed(uint256 indexed proposalId, address indexed claimant, uint256 amount);
     event ProposalThresholdsUpdated(ProposalType indexed proposalType);
+    event ProposalCreationCostUpdated(uint256 oldCost, uint256 newCost);
+
+    error CostOutOfRange(uint256 requested, uint256 max);
+    event VotingCostUpdated(uint256 oldCost, uint256 newCost);
     
     /**
      * @dev Constructor
@@ -149,6 +182,20 @@ contract VanguardGovernance is Ownable, ReentrancyGuard {
         address _oracleManager,
         address _token
     ) Ownable(msg.sender) {
+        // Only the two parameters cast to contract types are checked here. The
+        // rest are stored as plain addresses, so requiring code on them could
+        // reject a legitimate configuration.
+        require(_governanceToken != address(0), "VanguardGovernance: Governance token is zero address");
+        require(
+            _governanceToken.code.length > 0,
+            "VanguardGovernance: Governance token is not a contract"
+        );
+        require(_identityRegistry != address(0), "VanguardGovernance: Identity registry is zero address");
+        require(
+            _identityRegistry.code.length > 0,
+            "VanguardGovernance: Identity registry is not a contract"
+        );
+
         governanceToken = GovernanceToken(_governanceToken);
         identityRegistry = IIdentityRegistry(_identityRegistry);
         investorTypeRegistry = _investorTypeRegistry;
@@ -270,9 +317,6 @@ contract VanguardGovernance is Ownable, ReentrancyGuard {
             "Token transfer failed"
         );
 
-        // Create snapshot of current voting power
-        uint256 snapshotId = governanceToken.snapshot();
-
         ProposalThresholds memory thresholds = proposalThresholds[proposalType];
 
         uint256 proposalId = _nextProposalId++;
@@ -291,14 +335,14 @@ contract VanguardGovernance is Ownable, ReentrancyGuard {
             status: ProposalStatus.Active,
             votesFor: 0,
             votesAgainst: 0,
-            snapshotId: snapshotId
+            eligibleVotersAtCreation: identityRegistry.registeredIdentityCount()
         });
 
         // Track locked tokens
         _lockedTokens[proposalId] = proposalCreationCost;
         _voterLockedTokens[proposalId][msg.sender] = proposalCreationCost;
 
-        emit ProposalCreated(proposalId, msg.sender, proposalType, title, snapshotId);
+        emit ProposalCreated(proposalId, msg.sender, proposalType, title);
 
         return proposalId;
     }
@@ -357,9 +401,11 @@ contract VanguardGovernance is Ownable, ReentrancyGuard {
     }
     
     /**
-     * @dev Execute an approved proposal
-     * @notice If proposal passes (≥51%), locked tokens are burned
-     * @notice If proposal fails (<51%), locked tokens are returned to voters
+     * @dev Settle a proposal after its voting period.
+     * @notice Passes (quorum and approval for its type met, target call
+     *         succeeds): locked tokens are burned. Fails a threshold, or the
+     *         target call reverts: the proposal is closed and every
+     *         participant's deposit becomes claimable via claimRefund().
      */
     function executeProposal(uint256 proposalId) external nonReentrant {
         Proposal storage proposal = _proposals[proposalId];
@@ -368,28 +414,76 @@ contract VanguardGovernance is Ownable, ReentrancyGuard {
         require(block.timestamp > proposal.votingEnds, "Voting period not ended");
 
         uint256 totalVotes = proposal.votesFor + proposal.votesAgainst;
-        require(totalVotes > 0, "No votes cast");
 
-        // Calculate approval percentage (51% threshold)
-        uint256 approvalPercentage = (proposal.votesFor * 100) / totalVotes;
-        bool passed = approvalPercentage >= 51;
+        // Enforce the quorum and approval thresholds configured for this
+        // proposal type. Previously both were ignored: the check was a
+        // hardcoded 51% of votes cast, so a single voter was a 100% approval
+        // and could execute an arbitrary target.call(callData) below.
+        ProposalThresholds memory thresholds = proposalThresholds[proposal.proposalType];
+
+        // FAILING A THRESHOLD IS AN OUTCOME, NOT AN INVALID CALL.
+        //
+        // Quorum and "no votes cast" were both `require`s, which revert BEFORE
+        // the rejection branch below — the branch that returns every voter's
+        // and the proposer's locked VGT. A proposal with low turnout could
+        // therefore never be settled, and its deposits were trapped forever.
+        // That fires on the ordinary path: any proposal nobody bothers to vote
+        // on locked the proposer's stake permanently.
+        //
+        // Both are now folded into `passed`, so a failing proposal takes the
+        // refund branch and is marked Rejected. Only genuinely invalid calls
+        // (wrong status, voting still open) still revert.
+        //
+        // Quorum is a share of ELIGIBLE VOTERS, not of token supply: votes are
+        // counted one per verified person (votesFor += 1), so the denominator
+        // is the registered identity count — FROZEN AT CREATION, so that
+        // registering or deleting identities mid-vote cannot move the bar for
+        // a proposal already being voted on.
+        uint256 eligibleVoters = proposal.eligibleVotersAtCreation;
+        bool quorumMet = totalVotes * 10000 >= eligibleVoters * thresholds.quorumPercentage;
+
+        // Thresholds are basis points (2000 = 20%), so scale votes to match.
+        // Guard the division: totalVotes == 0 means nobody voted, which is a
+        // rejection, not a division by zero.
+        bool approvalMet = totalVotes > 0 &&
+            (proposal.votesFor * 10000) / totalVotes >= thresholds.approvalPercentage;
+
+        bool passed = totalVotes > 0 && quorumMet && approvalMet;
 
         if (passed) {
             // Proposal passed: Execute and BURN locked tokens
             require(block.timestamp >= proposal.executionTime, "Execution delay not met");
 
-            // Check if this is a list update proposal
+            bool success;
+            bytes memory reason;
             if (proposal.proposalType == ProposalType.AddToWhitelist ||
                 proposal.proposalType == ProposalType.RemoveFromWhitelist ||
                 proposal.proposalType == ProposalType.AddToBlacklist ||
                 proposal.proposalType == ProposalType.RemoveFromBlacklist) {
-
-                // Execute list update
-                _executeListUpdate(proposalId);
+                (success, reason) = _executeListUpdate(proposalId);
             } else {
-                // Execute regular proposal
-                (bool success, ) = proposal.target.call(proposal.callData);
-                require(success, "Proposal execution failed");
+                (success, reason) = proposal.target.call(proposal.callData);
+            }
+
+            if (!success) {
+                // A PASSED VOTE WHOSE TARGET CALL REVERTS IS AN OUTCOME.
+                //
+                // Both branches used to revert here (require(success) on
+                // the regular path; the list path re-raised the manager's
+                // revert). That left the proposal Active with every deposit
+                // locked and no path out: re-executing hit the same revert,
+                // and a rescue vote calling cancelProposal() also reverted
+                // because executeProposal and cancelProposal share one
+                // reentrancy lock, and OpenZeppelin's guard refuses
+                // guarded-calls-guarded.
+                //
+                // Settle it instead: Rejected, deposits claimable, and log
+                // the target's revert data so the failure is diagnosable.
+                // This makes a failed execution terminal rather than
+                // retryable; the proposer submits a new proposal.
+                _settleWithRefund(proposalId, ProposalStatus.Rejected);
+                emit ProposalExecutionFailed(proposalId, reason);
+                return;
             }
 
             // Burn all locked tokens
@@ -401,45 +495,74 @@ contract VanguardGovernance is Ownable, ReentrancyGuard {
             proposal.status = ProposalStatus.Executed;
             emit ProposalExecuted(proposalId);
         } else {
-            // Proposal failed: RETURN locked tokens to voters
-            proposal.status = ProposalStatus.Rejected;
-
-            // Return tokens to proposer
-            uint256 proposerTokens = _voterLockedTokens[proposalId][proposal.proposer];
-            if (proposerTokens > 0) {
-                require(
-                    governanceToken.transfer(proposal.proposer, proposerTokens),
-                    "Token return to proposer failed"
-                );
-            }
-
-            // Return tokens to all voters
-            address[] memory voters = _proposalVoters[proposalId];
-            for (uint256 i = 0; i < voters.length; i++) {
-                address voter = voters[i];
-                uint256 voterTokens = _voterLockedTokens[proposalId][voter];
-                if (voterTokens > 0 && voter != proposal.proposer) {
-                    require(
-                        governanceToken.transfer(voter, voterTokens),
-                        "Token return to voter failed"
-                    );
-                }
-            }
+            _settleWithRefund(proposalId, ProposalStatus.Rejected);
+            emit ProposalRejected(proposalId);
         }
+    }
+
+    /**
+     * @dev Close a proposal without burning: set the terminal status and zero
+     *      the aggregate lock. Per-person deposits in _voterLockedTokens are
+     *      left in place and become claimable through claimRefund().
+     *
+     *      PULL, NOT PUSH. The previous helper transferred VGT to the
+     *      proposer and every voter inside settlement. Each VGT transfer
+     *      runs the token's compliance gate, so a single recipient the token
+     *      refused to pay (identity deleted, address frozen) reverted the
+     *      whole settlement and left EVERY participant's deposit locked
+     *      with no path out. Reproduced for the reject branch, the cancel
+     *      path and the execution-failure path. Recording claims instead
+     *      means settlement has no external call and cannot be blocked;
+     *      an unpayable participant blocks only their own claim, until
+     *      they are payable again.
+     */
+    function _settleWithRefund(uint256 proposalId, ProposalStatus terminal) internal {
+        _proposals[proposalId].status = terminal;
+        _lockedTokens[proposalId] = 0;
+    }
+
+    /**
+     * @notice Pull your deposit from a Rejected or Cancelled proposal.
+     * @dev Anyone with a recorded deposit may call. Once. The slot is zeroed
+     *      before the transfer (checks-effects-interactions); the guard is
+     *      belt and braces against a token that re-enters on transfer.
+     */
+    function claimRefund(uint256 proposalId) external nonReentrant {
+        ProposalStatus status = _proposals[proposalId].status;
+        require(
+            status == ProposalStatus.Rejected || status == ProposalStatus.Cancelled,
+            "Proposal not settled"
+        );
+        uint256 amount = _voterLockedTokens[proposalId][msg.sender];
+        require(amount > 0, "Nothing to claim");
+        _voterLockedTokens[proposalId][msg.sender] = 0;
+        require(governanceToken.transfer(msg.sender, amount), "Refund transfer failed");
+        emit RefundClaimed(proposalId, msg.sender, amount);
+    }
+
+    /**
+     * @notice VGT `account` may still pull from `proposalId`. Zero while the
+     *         proposal is Active (deposit not yet claimable), after a claim,
+     *         or on a proposal that passed (deposits were burned).
+     */
+    function getClaimableRefund(uint256 proposalId, address account) external view returns (uint256) {
+        ProposalStatus status = _proposals[proposalId].status;
+        if (status != ProposalStatus.Rejected && status != ProposalStatus.Cancelled) return 0;
+        return _voterLockedTokens[proposalId][account];
     }
     
     /**
      * @dev Cancel a proposal (owner only)
      */
-    function cancelProposal(uint256 proposalId) external onlyOwner {
+    function cancelProposal(uint256 proposalId) external onlyOwner nonReentrant {
         Proposal storage proposal = _proposals[proposalId];
         require(
             proposal.status == ProposalStatus.Active || proposal.status == ProposalStatus.Pending,
             "Cannot cancel proposal"
         );
         
-        proposal.status = ProposalStatus.Cancelled;
-        
+        _settleWithRefund(proposalId, ProposalStatus.Cancelled);
+
         emit ProposalCancelled(proposalId);
     }
     
@@ -455,15 +578,42 @@ contract VanguardGovernance is Ownable, ReentrancyGuard {
         proposal = _proposals[proposalId];
         totalVotes = proposal.votesFor + proposal.votesAgainst;
 
-        uint256 totalVotingPower = governanceToken.getTotalVotingPower();
-        participationRate = totalVotingPower > 0 ? (totalVotes * 10000) / totalVotingPower : 0;
+        // Turnout is a share of ELIGIBLE VOTERS. Votes are counted one per
+        // verified person (votesFor += 1), so the denominator must be the
+        // registered identity count. It was previously getTotalVotingPower()
+        // (== totalSupply(), in wei), which made this a headcount divided by
+        // a wei amount: with 1e24 wei supply the result was always 0.
+        //
+        // Read the SNAPSHOT, not the live count — the same value
+        // executeProposal uses. Reading live here would let this view drift
+        // from enforcement as identities are added or removed, which is the
+        // advisory/enforcement divergence this function was fixed for once
+        // already.
+        uint256 eligibleVoters = proposal.eligibleVotersAtCreation;
+        participationRate = eligibleVoters > 0 ? (totalVotes * 10000) / eligibleVoters : 0;
 
-        // Check if proposal passed (≥51%)
-        bool passed = totalVotes > 0 && (proposal.votesFor * 100 / totalVotes) >= 51;
+        // This is the ADVISORY view a UI reads. It applies the same gates as
+        // executeProposal, so the two cannot disagree. It previously used a
+        // hardcoded 51% of votes cast and no quorum at all, while execution
+        // enforced the per-type thresholds.
+        //
+        // canExecute means "this proposal will PASS and run its callData". It
+        // does NOT mean "executeProposal will revert otherwise": a proposal
+        // that fails quorum or approval executes successfully via the refund
+        // branch and is marked Rejected. A UI must therefore keep offering the
+        // call when canExecute is false, or locked VGT can never be reclaimed.
+        ProposalThresholds memory thresholds = proposalThresholds[proposal.proposalType];
+
+        bool quorumMet = totalVotes * 10000 >= eligibleVoters * thresholds.quorumPercentage;
+        bool approved = totalVotes > 0 &&
+            (proposal.votesFor * 10000) / totalVotes >= thresholds.approvalPercentage;
 
         canExecute = proposal.status == ProposalStatus.Active &&
             block.timestamp > proposal.votingEnds &&
-            passed;
+            block.timestamp >= proposal.executionTime &&
+            totalVotes > 0 &&
+            quorumMet &&
+            approved;
     }
 
     /**
@@ -471,6 +621,8 @@ contract VanguardGovernance is Ownable, ReentrancyGuard {
      * @param newCost New cost in VGT tokens
      */
     function setProposalCreationCost(uint256 newCost) external onlyOwner {
+        if (newCost == 0 || newCost > MAX_COST) revert CostOutOfRange(newCost, MAX_COST);
+        emit ProposalCreationCostUpdated(proposalCreationCost, newCost);
         proposalCreationCost = newCost;
     }
 
@@ -479,6 +631,8 @@ contract VanguardGovernance is Ownable, ReentrancyGuard {
      * @param newCost New cost in VGT tokens
      */
     function setVotingCost(uint256 newCost) external onlyOwner {
+        if (newCost == 0 || newCost > MAX_COST) revert CostOutOfRange(newCost, MAX_COST);
+        emit VotingCostUpdated(votingCost, newCost);
         votingCost = newCost;
     }
 
@@ -514,14 +668,26 @@ contract VanguardGovernance is Ownable, ReentrancyGuard {
      * @dev Internal function to execute list update
      * @param proposalId Proposal ID
      */
-    function _executeListUpdate(uint256 proposalId) internal {
+    /**
+     * @dev Call the list manager for a list-update proposal and report the
+     *      outcome. Does NOT revert on a failed call: the caller settles the
+     *      proposal and logs `reason`, exactly as for a regular target call.
+     *
+     *      An unset manager is different in kind. Nothing was voted on that
+     *      could ever succeed, and the owner can fix it with
+     *      setDynamicListManager, so that case stays a revert and the
+     *      proposal stays Active: retryable once wired.
+     */
+    function _executeListUpdate(uint256 proposalId)
+        internal
+        returns (bool success, bytes memory reason)
+    {
         require(dynamicListManager != address(0), "DynamicListManager not set");
 
         Proposal storage proposal = _proposals[proposalId];
         ListUpdateProposal storage listUpdate = listUpdateProposals[proposalId];
 
-        // Import DynamicListManager interface
-        (bool success, bytes memory returnData) = dynamicListManager.call(
+        (success, reason) = dynamicListManager.call(
             abi.encodeWithSignature(
                 _getListUpdateFunctionSignature(proposal.proposalType),
                 listUpdate.targetUser,
@@ -529,19 +695,6 @@ contract VanguardGovernance is Ownable, ReentrancyGuard {
                 listUpdate.reason
             )
         );
-
-        if (!success) {
-            // If call failed, try to decode the error message
-            if (returnData.length > 0) {
-                // Bubble up the revert reason
-                assembly {
-                    let returndata_size := mload(returnData)
-                    revert(add(32, returnData), returndata_size)
-                }
-            } else {
-                revert("List update execution failed");
-            }
-        }
     }
 
     /**
@@ -605,9 +758,6 @@ contract VanguardGovernance is Ownable, ReentrancyGuard {
             "Token transfer failed"
         );
 
-        // Create snapshot for voting
-        uint256 snapshotId = governanceToken.snapshot();
-
         // Get thresholds for this proposal type
         ProposalThresholds memory thresholds = proposalThresholds[proposalType];
 
@@ -627,7 +777,7 @@ contract VanguardGovernance is Ownable, ReentrancyGuard {
             status: ProposalStatus.Active,
             votesFor: 0,
             votesAgainst: 0,
-            snapshotId: snapshotId
+            eligibleVotersAtCreation: identityRegistry.registeredIdentityCount()
         });
 
         // Store list update data
@@ -641,7 +791,7 @@ contract VanguardGovernance is Ownable, ReentrancyGuard {
         _lockedTokens[proposalId] = proposalCreationCost;
         _voterLockedTokens[proposalId][msg.sender] = proposalCreationCost;
 
-        emit ProposalCreated(proposalId, msg.sender, proposalType, title, snapshotId);
+        emit ProposalCreated(proposalId, msg.sender, proposalType, title);
 
         return proposalId;
     }

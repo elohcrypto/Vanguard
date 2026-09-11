@@ -6,19 +6,16 @@
     "scripts": {
         "compile": "hardhat compile",
         "test": "hardhat test",
-        "test:coverage": "hardhat coverage",
+        "test:coverage": "DEPLOY_GAS_LIMIT=16000000 hardhat coverage",
         "test:gas": "REPORT_GAS=true hardhat test",
         "node": "CHOKIDAR_USEPOLLING=true hardhat node",
         "clean": "hardhat clean",
-        "deploy:localhost": "hardhat run contracts/migrations/1_initial_migration.js --network localhost",
-        "deploy:sepolia": "hardhat run contracts/migrations/1_initial_migration.js --network sepolia",
-        "deploy:mainnet": "hardhat run contracts/migrations/1_initial_migration.js --network mainnet",
         "lint": "solhint 'contracts/**/*.sol'",
         "lint:fix": "solhint 'contracts/**/*.sol' --fix",
         "format": "prettier --write 'contracts/**/*.sol'",
         "size": "hardhat size-contracts",
         "demo:interactive:proof": "hardhat run demo/index.js --network localhost",
-        "demo:interactive:proof:old": "hardhat run demo/interactive-kyc-aml-utxo-proof.js.backup --network localhost",
+        "demo:drive": "./scripts/demo-drive.sh",
         "verify:zk": "node scripts/verify-zk-readiness.js",
         "setup:zk": "node scripts/setup-zk-circuits.js"
     },
@@ -37,7 +34,6 @@
     "devDependencies": {
         "@nomicfoundation/hardhat-chai-matchers": "^2.0.0",
         "@nomicfoundation/hardhat-ethers": "^3.0.0",
-        "@nomicfoundation/hardhat-foundry": "^1.1.0",
         "@nomicfoundation/hardhat-network-helpers": "^1.0.0",
         "@nomicfoundation/hardhat-toolbox": "^4.0.0",
         "@nomicfoundation/hardhat-verify": "^2.0.0",
@@ -57,7 +53,7 @@
         "solidity-coverage": "^0.8.5",
         "ts-node": ">=8.0.0",
         "typechain": "^8.3.0",
-        "typescript": ">=4.5.0"
+        "typescript": ">=4.5.0 <6"
     },
     "dependencies": {
         "@openzeppelin/contracts": "^5.0.0",

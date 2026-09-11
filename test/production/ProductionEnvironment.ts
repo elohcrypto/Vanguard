@@ -103,10 +103,15 @@ export class ProductionEnvironment {
         console.log("📦 Deploying production contracts...");
 
         // Deploy with realistic gas settings
-        // Note: Block gas limit is 12M, so we use 10M to stay under the limit
+        // 10M fits the plain network's 12M block limit. Under
+        // solidity-coverage the instrumented OnchainIDFactory initcode is
+        // ~1.9x larger and 10M runs out. Hardhat also enforces a per-tx cap
+        // of 2^24 (16,777,216) gas, so the override cannot exceed that;
+        // `npm run test:coverage` sets DEPLOY_GAS_LIMIT=16000000 and the
+        // plain run keeps the real constraint.
         const deployOptions = {
             gasPrice: this.networkConditions.gasPrice,
-            gasLimit: 10000000
+            gasLimit: Number(process.env.DEPLOY_GAS_LIMIT ?? 10000000)
         };
 
         // 1. Deploy OnchainIDFactory

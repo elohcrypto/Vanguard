@@ -2,9 +2,33 @@
 
 ## ✅ Status: READY for Both Mock and REAL Usage
 
-**Last Verified:** 2025-12-06  
+**Last Verified:** 2025-12-07  
 **All Circuits:** ✅ Operational  
 **Test Coverage:** 710/710 passing (100%)
+
+> ### ⚠️ Artifacts are not in the repository — build them first
+>
+> The `.wasm` / `.zkey` / `.r1cs` files described below are **gitignored build
+> output** (`.gitignore:55-68`). A fresh clone contains none of them, and the 4 ZK
+> test suites fail with `ENOENT` until they are generated:
+>
+> ```bash
+> # Requires Rust circom 2.x — see docs/ZK_CIRCUIT_BUILD_GUIDE.md
+> npm run setup:zk
+> ```
+>
+> **Measured on a clean checkout (2025-12-07):**
+>
+> | State | Result |
+> |-------|--------|
+> | Before `setup:zk` | **23 failing** (all `ENOENT`) |
+> | After `setup:zk` | **0 failing** |
+>
+> Pass counts are omitted deliberately: they move whenever tests are added, so a
+> figure written here goes stale. The failure count is the durable signal.
+>
+> All 23 failures are missing-artifact errors in the ZK suites; every compliance,
+> ERC-3643, oracle, governance, payment, and identity test passes either way.
 
 ---
 

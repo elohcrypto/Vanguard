@@ -7,9 +7,9 @@
 2. ✅ **KYC/AML Verification Required** (only verified investors can vote)
 3. ✅ **Proposal Creation Cost** (must pay VGT to create proposal)
 4. ✅ **Voting Cost** (must pay VGT to vote)
-5. ✅ **Token Locking & Burning/Returning**:
-   - If proposal passes (≥51%): Tokens are BURNED 🔥
-   - If proposal fails (<51%): Tokens are RETURNED 💰
+5. ✅ **Token Locking & Burning/Claiming**:
+   - If proposal passes (quorum + approval met, target call succeeds): Tokens are BURNED 🔥
+   - Otherwise: each participant CLAIMS their own deposit back 💰
 
 ---
 
@@ -23,12 +23,12 @@ Check: Is user KYC/AML verified? ✅
 ↓
 Check: Does user have enough VGT? (proposalCreationCost)
 ↓
-User pays 1000 VGT → LOCKED in governance contract
+User pays 10 VGT → LOCKED in governance contract
 ↓
 Proposal created ✅
 ```
 
-**Cost:** `proposalCreationCost` (default: 1,000 VGT)
+**Cost:** `proposalCreationCost` (default: 10 VGT)
 
 ---
 
@@ -53,63 +53,127 @@ Vote counted as 1 vote (equal weight) ✅
 ---
 
 ### **Step 3: Proposal Execution**
-```
-Voting period ends
-↓
-Calculate result: votesFor / totalVotes
-↓
-If ≥51% FOR:
-  ├─ Execute proposal ✅
-  ├─ BURN all locked tokens 🔥
-  └─ Status: Executed
 
-If <51% FOR:
-  ├─ Proposal fails ❌
-  ├─ RETURN all locked tokens to voters 💰
-  └─ Status: Rejected
+Two gates must both pass. There is **no single 51% rule** — thresholds are
+configured per proposal type (see the table below) and read from
+`proposalThresholds(type)` on chain.
+
 ```
+Voting period ends; ANYONE calls executeProposal(id)
+↓
+QUORUM:   totalVotes / eligibleVotersAtCreation  ≥  type quorum
+          (a share of ELIGIBLE VOTERS, frozen when the proposal was
+          created, so registering or deleting identities mid-vote
+          cannot move the bar)
+↓
+APPROVAL: votesFor / totalVotes  ≥  type approval
+↓
+Both met, and execution delay elapsed:
+  ├─ Call the target (or the DynamicListManager for list proposals)
+  │
+  ├─ Target call SUCCEEDS:
+  │    ├─ BURN all locked tokens 🔥
+  │    ├─ Status: Executed
+  │    └─ Event: ProposalExecuted(id)
+  │
+  └─ Target call REVERTS:
+       ├─ Status: Rejected (terminal; submit a corrected proposal)
+       ├─ Every deposit becomes CLAIMABLE 💰
+       └─ Event: ProposalExecutionFailed(id, reason)
+             `reason` is the target's raw revert data, so the cause
+             can be decoded off-chain
+
+Either threshold NOT met (including zero votes):
+  ├─ Status: Rejected
+  ├─ Every deposit becomes CLAIMABLE 💰
+  └─ Event: ProposalRejected(id)
+```
+
+> **executeProposal never reverts on an outcome.** A failed threshold, no
+> votes at all, and a target that rejects the call are all settled in one
+> mined transaction. It reverts only on an invalid call: wrong status,
+> voting still open, execution delay not yet elapsed for a passing
+> proposal, or the list manager address never configured. A UI must keep
+> offering "execute" on failing proposals; that is the only way to close
+> them and make the deposits claimable.
+
+### **Step 4: Claim Your Deposit**
+
+Settlement does **not** push VGT back. It records what each participant is
+owed, and each one pulls it:
+
+```solidity
+function claimRefund(uint256 proposalId) external            // once, after settlement
+function getClaimableRefund(uint256 proposalId, address a) external view returns (uint256)
+```
+
+Only Rejected and Cancelled proposals have anything to claim; a passed
+proposal burned its deposits. The claim runs the VGT transfer through the
+token's compliance gate, so a participant who is currently de-verified or
+frozen cannot claim **yet**. Their deposit waits for them and nobody else
+is affected. Before this, settlement pushed every refund in one loop, and
+one unpayable participant reverted the loop and froze everyone's deposit
+on that proposal forever.
+
+### **Configured thresholds**
+
+| Proposal type | Quorum | Approval |
+|---|---|---|
+| InvestorTypeConfig | 20% | 60% |
+| ComplianceRules | 25% | 65% |
+| OracleParameters | 20% | 60% |
+| TokenParameters | 30% | 70% |
+| SystemParameters | 25% | 65% |
+| EmergencyAction | 10% | 75% |
+| AddToWhitelist | 15% | 60% |
+| RemoveFromWhitelist | 15% | 60% |
+| AddToBlacklist | 20% | 70% |
+| RemoveFromBlacklist | 20% | 65% |
+
+Set once in `_initializeThresholds()`; there is no setter, so they cannot be
+changed after deployment.
 
 ---
 
 ## 💰 **Token Economics**
 
 ### **Proposal Creation:**
-- **Cost:** 1,000 VGT (governance-controlled)
+- **Cost:** 10 VGT (owner-adjustable, ≤ 1000 VGT)
 - **Locked:** Yes
-- **Returned if fails:** Yes
-- **Burned if passes:** Yes
+- **Claimable if it fails:** Yes, via `claimRefund`
+- **Burned if it passes:** Yes
 
 ### **Voting:**
-- **Cost:** 10 VGT per vote (governance-controlled)
+- **Cost:** 10 VGT per vote (owner-adjustable, ≤ 1000 VGT)
 - **Locked:** Yes
-- **Returned if fails:** Yes
-- **Burned if passes:** Yes
+- **Claimable if it fails:** Yes, via `claimRefund`
+- **Burned if it passes:** Yes
 
 ### **Example Scenario:**
 
 ```
 Proposal Created:
-├─ Proposer pays: 1,000 VGT (locked)
-└─ Total locked: 1,000 VGT
+├─ Proposer pays: 10 VGT (locked)
+└─ Total locked: 10 VGT
 
 Voting:
 ├─ User A votes FOR: pays 10 VGT (locked)
 ├─ User B votes FOR: pays 10 VGT (locked)
 ├─ User C votes AGAINST: pays 10 VGT (locked)
 ├─ User D votes FOR: pays 10 VGT (locked)
-└─ Total locked: 1,040 VGT
+└─ Total locked: 50 VGT
 
 Result:
 ├─ Votes: 3 FOR, 1 AGAINST
-├─ Percentage: 75% FOR (≥51%)
+├─ Percentage: 75% FOR (above this type's approval threshold)
 ├─ Status: PASSED ✅
-└─ Action: BURN 1,040 VGT 🔥
+└─ Action: BURN 50 VGT 🔥
 
 Alternative (Failed):
 ├─ Votes: 1 FOR, 3 AGAINST
-├─ Percentage: 25% FOR (<51%)
+├─ Percentage: 25% FOR (below this type's approval threshold)
 ├─ Status: FAILED ❌
-└─ Action: RETURN 1,040 VGT to all participants 💰
+└─ Action: RETURN 50 VGT to all participants 💰
 ```
 
 ---
@@ -159,20 +223,20 @@ Each user has 33.3% voting power! ✅ Fair!
 
 ## 🔥 **Token Burning vs Returning**
 
-### **If Proposal Passes (≥51%):**
+### **If Proposal Passes (quorum + approval both met):**
 ```
 Proposal Result: 75% FOR
 ↓
 All locked tokens are BURNED
 ↓
-Proposer: 1,000 VGT → BURNED 🔥
+Proposer: 10 VGT → BURNED 🔥
 Voter A: 10 VGT → BURNED 🔥
 Voter B: 10 VGT → BURNED 🔥
 Voter C: 10 VGT → BURNED 🔥
 Voter D: 10 VGT → BURNED 🔥
 ↓
-Total burned: 1,040 VGT
-Total supply decreased by 1,040 VGT
+Total burned: 50 VGT
+Total supply decreased by 50 VGT
 ```
 
 **Why burn?**
@@ -182,26 +246,27 @@ Total supply decreased by 1,040 VGT
 
 ---
 
-### **If Proposal Fails (<51%):**
+### **If Proposal Fails (a threshold not met, or the target call reverts):**
 ```
 Proposal Result: 25% FOR
 ↓
-All locked tokens are RETURNED
+executeProposal settles: status Rejected, nothing transferred
 ↓
-Proposer: 1,000 VGT → RETURNED 💰
-Voter A: 10 VGT → RETURNED 💰
-Voter B: 10 VGT → RETURNED 💰
-Voter C: 10 VGT → RETURNED 💰
-Voter D: 10 VGT → RETURNED 💰
+Proposer: 10 VGT → CLAIMABLE, pulls it with claimRefund(id) 💰
+Voter A: 10 VGT → CLAIMABLE 💰
+Voter B: 10 VGT → CLAIMABLE 💰
+Voter C: 10 VGT → CLAIMABLE 💰
+Voter D: 10 VGT → CLAIMABLE 💰
 ↓
-Total returned: 1,040 VGT
+Total claimable: 50 VGT
 No tokens burned
 ```
 
-**Why return?**
-- ✅ Fair to voters (didn't waste tokens on failed proposal)
-- ✅ Encourages participation
+**Why claim rather than push?**
+- ✅ Fair to voters (didn't waste tokens on a failed proposal)
 - ✅ No penalty for voting on failed proposals
+- ✅ One participant the token cannot pay (de-verified, frozen) blocks
+     only their own claim, never anyone else's settlement
 
 ---
 
@@ -214,18 +279,24 @@ function setProposalCreationCost(uint256 newCost) external onlyOwner
 
 **Example:**
 ```
-Current cost: 1,000 VGT
+Current cost: 10 VGT
 ↓
-Governance decides to increase to 5,000 VGT
+Owner raises it to 50 VGT (any value in 1 .. 1000 VGT)
 ↓
-New proposals now cost 5,000 VGT to create
+New proposals now cost 50 VGT to create
 ```
+
+Both setters revert with `CostOutOfRange` outside `1 <= cost <= MAX_COST`
+(1000 VGT) and emit the old and new values. The bound stops an owner from
+pricing every holder out of governance in one call.
 
 ---
 
 ### **Update Voting Cost:**
 ```solidity
 function setVotingCost(uint256 newCost) external onlyOwner
+// 0 < newCost <= MAX_COST (1000 VGT); emits VotingCostUpdated(old, new).
+// The bound stops an owner from pricing every holder out of governance.
 ```
 
 **Example:**
@@ -262,7 +333,7 @@ New votes now cost 5 VGT each
 **New State Variables:**
 ```solidity
 IIdentityRegistry public identityRegistry;
-uint256 public proposalCreationCost = 1000 * 10**18; // 1,000 VGT
+uint256 public proposalCreationCost = 10 * 10**18; // 10 VGT
 uint256 public votingCost = 10 * 10**18; // 10 VGT
 mapping(uint256 => uint256) private _lockedTokens;
 mapping(uint256 => mapping(address => uint256)) private _voterLockedTokens;
@@ -272,13 +343,16 @@ mapping(uint256 => address[]) private _proposalVoters;
 **Updated Functions:**
 - `createProposal()` - Charges creation cost, locks tokens
 - `castVote()` - Charges voting cost, locks tokens, 1 vote per person
-- `executeProposal()` - Burns tokens if passed, returns if failed
+- `executeProposal()` - Burns tokens if passed; otherwise settles and makes deposits claimable
 
 **New Functions:**
 - `setProposalCreationCost()` - Update creation cost
-- `setVotingCost()` - Update voting cost
-- `getLockedTokens()` - View locked tokens
-- `getVoterLockedTokens()` - View voter's locked tokens
+- `setVotingCost()` - Update voting cost (bounded, emits `VotingCostUpdated`)
+- `cancelProposal()` - Owner-only; settles like a rejection, deposits become claimable
+- `claimRefund()` - Pull your own deposit from a Rejected or Cancelled proposal (once)
+- `getClaimableRefund()` - View what an address may still claim from a proposal
+- `getLockedTokens()` - View total locked while Active (zero after settlement)
+- `getVoterLockedTokens()` - View one participant's locked or still-claimable amount
 
 ---
 
@@ -309,10 +383,10 @@ Option 80: Distribute Governance Tokens
 → Users need tokens to pay for proposals/voting
 ```
 
-### **Step 3: Create Proposal (Costs 1,000 VGT)**
+### **Step 3: Create Proposal (Costs 10 VGT)**
 ```bash
 Option 81: Create Governance Proposal
-→ User pays 1,000 VGT (locked)
+→ User pays 10 VGT (locked)
 → Proposal created
 ```
 
@@ -325,9 +399,12 @@ Option 82: Vote on Proposal
 
 ### **Step 5: Execute**
 ```bash
-Option 83: Execute Governance Proposal
-→ If ≥51% FOR: Burn all locked tokens
-→ If <51% FOR: Return all locked tokens
+Option 78: Execute Proposal
+→ Quorum AND approval met, target call succeeds: burn all locked tokens
+→ Otherwise: proposal Rejected, every deposit becomes claimable
+
+Option 78a: Claim Refund
+→ Each participant pulls their own deposit from Rejected/Cancelled proposals
 ```
 
 ---
@@ -347,7 +424,7 @@ Option 83: Execute Governance Proposal
 3. **Security**
    - ✅ KYC/AML required (prevents Sybil attacks)
    - ✅ Token locking (commitment to vote)
-   - ✅ Fair token return (no penalty for failed proposals)
+   - ✅ Fair deposit claim (no penalty for failed proposals)
 
 4. **Governance Control**
    - ✅ Adjustable costs
@@ -362,7 +439,7 @@ Option 83: Execute Governance Proposal
 - ✅ Equal voting power for all verified investors
 - ✅ Economic costs to prevent spam
 - ✅ Token burning for successful proposals (deflationary)
-- ✅ Token return for failed proposals (fair)
+- ✅ Deposits claimable after failed proposals (fair)
 - ✅ KYC/AML compliance
 - ✅ Democratic governance
 

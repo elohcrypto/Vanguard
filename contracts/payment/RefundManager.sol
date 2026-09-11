@@ -58,7 +58,9 @@ contract RefundManager is IRefundManager, Ownable, ReentrancyGuard, Pausable {
 
     constructor(address _paymentProtocol, address _paymentEscrow) Ownable(msg.sender) {
         require(_paymentProtocol != address(0), "Invalid payment protocol");
+        require(_paymentProtocol.code.length > 0, "RefundManager: Payment protocol is not a contract");
         require(_paymentEscrow != address(0), "Invalid payment escrow");
+        require(_paymentEscrow.code.length > 0, "RefundManager: Payment escrow is not a contract");
 
         paymentProtocol = IPaymentProtocol(_paymentProtocol);
         paymentEscrow = IPaymentEscrow(_paymentEscrow);
