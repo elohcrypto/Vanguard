@@ -257,6 +257,30 @@ describe("OnchainID", function () {
                     .and.to.not.emit(onchainID, "ExecutionPending");
             });
 
+            // Found reviewing PR #3: approvals were counted PER CALL, not per
+            // distinct approver, so one independent key satisfied a threshold
+            // of 3 by calling approve() twice. The configured N-of-M was never
+            // actually enforced.
+            it("Should reject a repeat approval from the same key", async function () {
+                const tok = await (await ethers.getContractFactory("MockToken")).deploy("M", "M", 0);
+                const idAddr = await onchainID.getAddress();
+                await tok.mint(idAddr, ethers.parseEther("1000"));
+                await onchainID.setExecutionThreshold(3);
+
+                const data = tok.interface.encodeFunctionData(
+                    "transfer", [user1.address, ethers.parseEther("1000")]
+                );
+                await (await onchainID.connect(user1).execute(await tok.getAddress(), 0, data)).wait();
+
+                // owner holds a MANAGEMENT key, so it satisfies onlyActionKey
+                await (await onchainID.connect(owner).approve(0, true)).wait();
+                await expect(onchainID.connect(owner).approve(0, true))
+                    .to.be.revertedWithCustomError(onchainID, "AlreadyApproved");
+
+                // 3-of-N unmet, so nothing moved
+                expect(await tok.balanceOf(idAddr)).to.equal(ethers.parseEther("1000"));
+            });
+
             it("Should refuse an execution threshold below 2", async function () {
                 await expect(onchainID.setExecutionThreshold(1))
                     .to.be.revertedWithCustomError(onchainID, "ThresholdAllowsSelfApproval");

@@ -118,6 +118,17 @@ contract OnchainID is IOnchainID, Ownable, ReentrancyGuard {
     /// @dev The requester of an execution may not also be its approver.
     error SelfApprovalNotAllowed();
 
+    /// @dev One approver, one approval: a key may not approve the same request twice.
+    error AlreadyApproved();
+
+    /**
+     * @dev Who has already approved a given request. Approvals were counted
+     *      PER CALL rather than per distinct approver, so one non-requester key
+     *      could call approve() repeatedly until any threshold was met, and the
+     *      configured N-of-M was never actually enforced. Caught reviewing PR #3.
+     */
+    mapping(uint256 => mapping(address => bool)) private _hasApproved;
+
     /**
      * @notice A request was created but has NOT run: it needs more approvals.
      * @param executionId     The pending request.
@@ -411,6 +422,12 @@ contract OnchainID is IOnchainID, Ownable, ReentrancyGuard {
             // everything the identity holds — collapsing the multi-key model
             // to 1-of-1. A MANAGEMENT key still auto-executes in execute().
             if (msg.sender == executionRequests[_id].requester) revert SelfApprovalNotAllowed();
+
+            // One approver, one approval. Approvals were counted PER CALL, so a
+            // single independent key satisfied any threshold above 2 by calling
+            // approve() repeatedly — the configured N-of-M was never enforced.
+            if (_hasApproved[_id][msg.sender]) revert AlreadyApproved();
+            _hasApproved[_id][msg.sender] = true;
 
             executionRequests[_id].approvals++;
             emit Approved(_id, true);
