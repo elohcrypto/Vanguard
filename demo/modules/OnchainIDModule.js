@@ -244,8 +244,8 @@ class OnchainIDModule {
 
             // Key management menu
             console.log('\n🔑 KEY MANAGEMENT OPTIONS:');
-            console.log('1. Add Management Key');
-            console.log('2. Add Action Key');
+            console.log('1. Add Management Key   (executes alone - use this for automation)');
+            console.log('2. Add Action Key       (PROPOSES only - needs a 2nd approver)');
             console.log('3. Add Claim Signer Key');
             console.log('4. Add Encryption Key');
             console.log('0. Back');
@@ -263,6 +263,13 @@ class OnchainIDModule {
                 case '2':
                     keyPurpose = 2; // ACTION_KEY
                     keyPurposeName = 'Action';
+                    // An action key proposes; it cannot approve its own
+                    // request (that would be 1-of-1 in disguise). Say so here,
+                    // where the choice is made, not after the fact.
+                    console.log('\n   ⚠️  An ACTION key can PROPOSE an execution but not run it alone.');
+                    console.log('      execute() leaves the request pending and emits ExecutionPending;');
+                    console.log('      a DIFFERENT key must then call approve(id, true).');
+                    console.log('      For unattended automation, add a MANAGEMENT key instead (option 1).');
                     break;
                 case '3':
                     keyPurpose = 3; // CLAIM_SIGNER_KEY
@@ -444,6 +451,11 @@ class OnchainIDModule {
             await tx.wait();
 
             displaySuccess(`${keyPurposeName} Key Added Successfully!`);
+            if (keyPurpose === 2) {
+                const threshold = await onchainID.executionThreshold();
+                console.log(`\n   🔐 Execution threshold: ${threshold} approvals.`);
+                console.log('      This key can propose; one other key must approve to execute.');
+            }
             console.log(`   Identity: ${selectedIdentity.address}`);
             console.log(`   ${keyInfo}`);
             console.log(`   Key Hash: ${keyHash}`);
