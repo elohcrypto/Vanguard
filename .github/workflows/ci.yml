@@ -17,7 +17,10 @@ env:
 jobs:
   build-and-test:
     runs-on: ubuntu-latest
-    # Local baseline: install ~20s, compile ~35s, setup:zk ~27s, tests ~9min.
+    # Local baseline: install ~20s, compile ~35s, setup:zk ~27s, tests ~5min
+    # (was ~9min before the Merkle builder went sparse; the first CI run
+    # timed out six proof tests at 60s each on the dense build). Runner is
+    # roughly 1.6x slower than the local baseline.
     timeout-minutes: 30
 
     steps:

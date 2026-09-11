@@ -46,46 +46,67 @@ class MerkleTreeBuilder {
     }
 
     /**
-     * Build Merkle tree from leaves
+     * Build Merkle tree from leaves.
+     *
+     * SPARSE. The tree has 2^levels leaf slots (2^20 = 1,048,576 at the
+     * default depth) but only `leaves.length` of them are non-zero. The
+     * previous implementation padded the leaf row to 2^levels and hashed
+     * every internal node: 1,048,575 Poseidon calls in JavaScript, ~37s on
+     * a fast desktop and over the 60s mocha timeout on a CI runner, to
+     * build a tree holding four leaves. A subtree containing only zero
+     * leaves has a hash that depends on its height alone, so those hashes
+     * are computed once per level (20 calls) and every node above the
+     * populated region is read from that table instead of computed.
+     *
+     * Root, proofs, and leaf indices are identical to the dense build; a
+     * test asserts this against a reference dense implementation.
+     *
      * @param {BigInt[]} leaves - Array of leaf values
-     * @returns {Array} Tree structure (array of levels)
+     * @returns {Array} Tree structure (array of levels, populated prefix only)
      */
     buildTree(leaves) {
         if (!this.poseidon) {
             throw new Error("MerkleTreeBuilder not initialized. Call initialize() first.");
         }
 
-        // Ensure we have at least one leaf
         if (leaves.length === 0) {
             leaves = [BigInt(0)];
         }
-
-        // Initialize tree with leaves
-        this.tree = [];
-        this.tree[0] = [...leaves];
-
-        // Pad leaves to power of 2
-        const targetSize = Math.pow(2, this.levels);
-        while (this.tree[0].length < targetSize) {
-            this.tree[0].push(BigInt(0));
+        if (leaves.length > Math.pow(2, this.levels)) {
+            throw new Error(`Too many leaves for a ${this.levels}-level tree`);
         }
 
-        // Build tree bottom-up
+        // zeros[h] = hash of a complete zero subtree of height h.
+        this.zeros = [BigInt(0)];
+        for (let h = 1; h <= this.levels; h++) {
+            this.zeros[h] = this.hash(this.zeros[h - 1], this.zeros[h - 1]);
+        }
+
+        // Each row holds only the nodes above populated leaves. Anything past
+        // row.length at height h is zeros[h] by construction.
+        this.tree = [];
+        this.tree[0] = [...leaves];
         for (let level = 0; level < this.levels; level++) {
-            const currentLevel = this.tree[level];
-            const nextLevel = [];
-
-            for (let i = 0; i < currentLevel.length; i += 2) {
-                const left = currentLevel[i] || BigInt(0);
-                const right = currentLevel[i + 1] || BigInt(0);
-                const hash = this.hash(left, right);
-                nextLevel.push(hash);
+            const cur = this.tree[level];
+            const next = [];
+            for (let i = 0; i < cur.length; i += 2) {
+                const left = cur[i];
+                const right = i + 1 < cur.length ? cur[i + 1] : this.zeros[level];
+                next.push(this.hash(left, right));
             }
-
-            this.tree[level + 1] = nextLevel;
+            this.tree[level + 1] = next;
         }
 
         return this.tree;
+    }
+
+    /**
+     * Node at (level, index); nodes beyond the populated prefix are the
+     * zero-subtree hash for that height.
+     */
+    _node(level, index) {
+        const row = this.tree[level];
+        return index < row.length ? row[index] : this.zeros[level];
     }
 
     /**
@@ -116,7 +137,7 @@ class MerkleTreeBuilder {
         for (let level = 0; level < this.levels; level++) {
             const isLeft = index % 2 === 0;
             const siblingIndex = isLeft ? index + 1 : index - 1;
-            const sibling = this.tree[level][siblingIndex] || BigInt(0);
+            const sibling = this._node(level, siblingIndex);
 
             pathElements.push(sibling);
             pathIndices.push(isLeft ? 0 : 1);
@@ -186,6 +207,8 @@ class MerkleTreeBuilder {
         return {
             levels: this.levels,
             maxLeaves: Math.pow(2, this.levels),
+            // Populated leaves, not the 2^levels slot count the dense build
+            // reported (every slot was materialised then, so the two agreed).
             currentLeaves: this.tree.length > 0 ? this.tree[0].length : 0,
             root: this.tree.length > 0 ? this.getRoot().toString() : null
         };
@@ -209,6 +232,11 @@ class MerkleTreeBuilder {
     importTree(data) {
         this.levels = data.levels;
         this.tree = data.tree.map(level => level.map(v => BigInt(v)));
+        // Rebuild the zero table; the exported rows are the populated prefix.
+        this.zeros = [BigInt(0)];
+        for (let h = 1; h <= this.levels; h++) {
+            this.zeros[h] = this.hash(this.zeros[h - 1], this.zeros[h - 1]);
+        }
     }
 
     /**
