@@ -13,7 +13,7 @@ describe("Hardening round 2 — contract changes", () => {
     const gt = await (await ethers.getContractFactory("GovernanceToken")).deploy(
       "VGT", "VGT", await ir.getAddress(), await cr.getAddress());
     const gov = await (await ethers.getContractFactory("VanguardGovernance")).deploy(
-      await gt.getAddress(), await ir.getAddress(), owner.address, owner.address, owner.address, owner.address);
+      await gt.getAddress(), await ir.getAddress(), owner.address, owner.address, owner.address, owner.address, 1);
     const govAddr = await gov.getAddress();
     await gt.addAgent(govAddr);
     for (const a of [owner.address, alice.address, bob.address, carol.address, govAddr])
@@ -384,6 +384,34 @@ describe("Hardening round 2 — contract changes", () => {
       await expect(gov.executeProposal(id)).to.be.revertedWith("DynamicListManager not set");
       const [p] = await gov.getProposal(id);
       expect(p.status).to.equal(1n); // still Active: retryable after wiring
+    });
+
+    it("timeScale divides every voting period and delay; 1 is the mainnet schedule", async () => {
+      const { owner, gt, ir } = await govFixture();
+      const F = await ethers.getContractFactory("VanguardGovernance");
+      const args = [await gt.getAddress(), await ir.getAddress(), owner.address, owner.address, owner.address, owner.address] as const;
+      const g1 = await F.deploy(...args, 1);
+      const g336 = await F.deploy(...args, 336);
+      const DAY = 86400n;
+      // Expected mainnet table, straight from _initializeThresholds.
+      const expect1: Record<number, [bigint, bigint]> = {
+        0: [7n * DAY, 2n * DAY], 1: [7n * DAY, 2n * DAY], 2: [7n * DAY, 2n * DAY], 3: [7n * DAY, 3n * DAY],
+        4: [7n * DAY, 2n * DAY], 5: [3n * DAY, 1n * DAY], 6: [5n * DAY, 1n * DAY], 7: [5n * DAY, 1n * DAY],
+        8: [5n * DAY, 1n * DAY], 9: [5n * DAY, 1n * DAY],
+      };
+      for (let t = 0; t <= 9; t++) {
+        const a = await g1.proposalThresholds(t), b = await g336.proposalThresholds(t);
+        expect([a.votingPeriod, a.executionDelay], `type ${t} @1`).to.deep.equal(expect1[t]);
+        expect([b.votingPeriod, b.executionDelay], `type ${t} @336`).to.deep.equal([expect1[t][0] / 336n, expect1[t][1] / 336n]);
+        // Percentages are never scaled.
+        expect(b.quorumPercentage).to.equal(a.quorumPercentage);
+        expect(b.approvalPercentage).to.equal(a.approvalPercentage);
+      }
+      expect(await g336.TIME_SCALE()).to.equal(336n);
+      // 7 days / 336 = 30 minutes exactly.
+      expect((await g336.proposalThresholds(0)).votingPeriod).to.equal(1800n);
+      await expect(F.deploy(...args, 0)).to.be.revertedWithCustomError(F, "TimeScaleOutOfRange").withArgs(0);
+      await expect(F.deploy(...args, 100001)).to.be.revertedWithCustomError(F, "TimeScaleOutOfRange").withArgs(100001);
     });
 
     it("control: a wired manager call executes, whitelists, and burns", async () => {

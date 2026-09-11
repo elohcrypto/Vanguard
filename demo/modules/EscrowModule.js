@@ -7,6 +7,7 @@
  */
 
 const { displaySection, displaySuccess, displayError, displayWarning } = require('../utils/DisplayHelpers');
+const { advancePast, canJumpTime } = require('../utils/ChainTime');
 const { ethers } = require('hardhat');
 
 /**
@@ -1418,6 +1419,13 @@ class EscrowModule {
                 return;
             }
 
+            // "13 of 14 days" is a dev-node demonstration of the window still
+            // being open. It has no meaning on a network that cannot jump, so
+            // there it is skipped rather than waited out.
+            if (!(await canJumpTime())) {
+                displayWarning('This network cannot jump time; the dispute window closes on its own after 14 days. Use 73b to wait for it.');
+                return;
+            }
             console.log('\n⏰ Advancing time by 13 days...');
             await ethers.provider.send('evm_increaseTime', [13 * 24 * 60 * 60]);
             await ethers.provider.send('evm_mine', []);
@@ -1461,9 +1469,22 @@ class EscrowModule {
                 return;
             }
 
-            console.log('\n⏰ Advancing time by 14 days + 1 hour...');
-            await ethers.provider.send('evm_increaseTime', [14 * 24 * 60 * 60 + 3600]);
-            await ethers.provider.send('evm_mine', []);
+            // Read the deadline from chain (shipment submittedAt + DISPUTE_WINDOW)
+            // for the latest wallet the demo knows has a submitted proof.
+            const wallets = Array.from(this.state.enhancedEscrowWallets?.values?.() ?? []);
+            const withProof = wallets.filter(w => w.state === 'ProofSubmitted');
+            let deadline = null;
+            if (withProof.length > 0) {
+                const esc = await ethers.getContractAt('MultiSigEscrowWallet', withProof[withProof.length - 1].address);
+                const proof = await esc.shipmentProof();
+                const win = await esc.DISPUTE_WINDOW();
+                if (proof.submittedAt > 0n) deadline = proof.submittedAt + win;
+            }
+            if (deadline === null) {
+                displayError('No escrow wallet with a submitted shipment proof; nothing to wait for (Option 67 first)');
+                return;
+            }
+            await advancePast(deadline, 'dispute window', { margin: 3600 });
 
             const latestBlock = await ethers.provider.getBlock('latest');
             const currentTime = new Date(latestBlock.timestamp * 1000);

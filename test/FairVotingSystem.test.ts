@@ -123,6 +123,7 @@ describe("Fair Voting System (1 Person = 1 Vote)", function () {
       await complianceRules.getAddress(),
       ethers.ZeroAddress, // Oracle manager
       await governanceToken.getAddress(), // Token
+      1, // timeScale: mainnet schedule
     );
     await vanguardGovernance.waitForDeployment();
 

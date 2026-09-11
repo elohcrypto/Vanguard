@@ -12,6 +12,7 @@ const {
   displaySuccess,
   displayError,
 } = require("../utils/DisplayHelpers");
+const { advancePast } = require("../utils/ChainTime");
 const { ethers } = require("hardhat");
 
 /**
@@ -127,6 +128,10 @@ class GovernanceModule {
         complianceRulesAddr,
         ethers.ZeroAddress, // Oracle manager
         tokenAddr,
+        // Governance time scale. 1 = mainnet schedule (7-day votes). On a
+        // network without evm_increaseTime set GOV_TIME_SCALE so a vote
+        // settles in minutes: 336 -> 30-minute voting, ~9-minute delay.
+        BigInt(process.env.GOV_TIME_SCALE || "1"),
       );
       await vanguardGovernance.waitForDeployment();
       const govAddr = await vanguardGovernance.getAddress();
@@ -1520,11 +1525,30 @@ class GovernanceModule {
         return;
       }
 
-      console.log("\n⏰ Advancing time by 9 days...");
-      await ethers.provider.send("evm_increaseTime", [9 * 24 * 60 * 60 + 60]);
-      await ethers.provider.send("evm_mine", []);
+      // Read the real deadline from the newest Active proposal rather than
+      // assuming 9 days: the contract may have been deployed with a
+      // timeScale, and a public network has to be WAITED out, not jumped.
+      const vanguardGovernance = this.state.getContract("vanguardGovernance");
+      if (!vanguardGovernance) {
+        displayError("Deploy Governance Token system first (option 74)");
+        return;
+      }
+      const count = Number(await vanguardGovernance.proposalCount());
+      let target = 0n;
+      for (let id = count; id >= 1; id--) {
+        const [p] = await vanguardGovernance.getProposal(id);
+        if (Number(p.status) === 1) { // Active
+          target = p.executionTime > p.votingEnds ? p.executionTime : p.votingEnds;
+          break;
+        }
+      }
+      if (target === 0n) {
+        displayError("No Active proposal to wait for");
+        return;
+      }
+      await advancePast(target, "voting period + execution delay");
 
-      displaySuccess("Time advanced successfully!");
+      displaySuccess("Past the deadline");
       console.log("   You can now execute proposals that have ended voting");
     } catch (error) {
       displayError(`Time travel failed: ${error.message}`);
@@ -2192,8 +2216,13 @@ class GovernanceModule {
       console.log(
         "\n⏰ Step 4: Advancing past the voting period and execution delay...",
       );
-      await ethers.provider.send("evm_increaseTime", [9 * 24 * 60 * 60 + 60]);
-      await ethers.provider.send("evm_mine", []);
+      {
+        const [p] = await vanguardGovernance.getProposal(proposalId);
+        await advancePast(
+          p.executionTime > p.votingEnds ? p.executionTime : p.votingEnds,
+          "voting period + execution delay",
+        );
+      }
 
       const [, , , canExecute] =
         await vanguardGovernance.getProposal(proposalId);

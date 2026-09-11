@@ -48,6 +48,7 @@ describe("VanguardGovernance — quorum enforcement", () => {
       owner.address,
       owner.address,
       owner.address,
+      1, // timeScale: mainnet schedule
     );
     await gov.waitForDeployment();
 
@@ -98,6 +99,7 @@ describe("VanguardGovernance — quorum enforcement", () => {
       owner.address,
       owner.address,
       owner.address,
+      1, // timeScale: mainnet schedule
     );
     await gov.waitForDeployment();
 

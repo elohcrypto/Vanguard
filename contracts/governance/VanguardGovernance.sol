@@ -120,6 +120,10 @@ contract VanguardGovernance is Ownable2Step, ReentrancyGuard {
 
     mapping(uint256 => ListUpdateProposal) public listUpdateProposals;
 
+    /// @notice Divisor applied to every proposal type's votingPeriod and
+    ///         executionDelay at construction. 1 = the mainnet schedule.
+    uint256 public immutable TIME_SCALE;
+
     // Economic parameters (governance-controlled)
     uint256 public proposalCreationCost = 10 * 10**18; // 10 VGT to create proposal
     uint256 public votingCost = 10 * 10**18; // 10 VGT per vote
@@ -169,6 +173,7 @@ contract VanguardGovernance is Ownable2Step, ReentrancyGuard {
     event ProposalCreationCostUpdated(uint256 oldCost, uint256 newCost);
 
     error CostOutOfRange(uint256 requested, uint256 max);
+    error TimeScaleOutOfRange(uint256 requested);
     event VotingCostUpdated(uint256 oldCost, uint256 newCost);
     
     /**
@@ -180,8 +185,14 @@ contract VanguardGovernance is Ownable2Step, ReentrancyGuard {
         address _investorTypeRegistry,
         address _complianceRules,
         address _oracleManager,
-        address _token
+        address _token,
+        uint256 _timeScale
     ) Ownable(msg.sender) {
+        // Divides every voting period and execution delay. 1 on mainnet.
+        // A testnet has no evm_increaseTime, so a 7-day vote would take
+        // 7 days; scale 336 makes it 30 minutes. Percentages are untouched.
+        if (_timeScale < 1 || _timeScale > 100_000) revert TimeScaleOutOfRange(_timeScale);
+        TIME_SCALE = _timeScale;
         // Only the two parameters cast to contract types are checked here. The
         // rest are stored as plain addresses, so requiring code on them could
         // reject a legitimate configuration.
@@ -214,80 +225,80 @@ contract VanguardGovernance is Ownable2Step, ReentrancyGuard {
         proposalThresholds[ProposalType.InvestorTypeConfig] = ProposalThresholds({
             quorumPercentage: 2000,
             approvalPercentage: 6000,
-            votingPeriod: 7 days,
-            executionDelay: 2 days
+            votingPeriod: 7 days / TIME_SCALE,
+            executionDelay: 2 days / TIME_SCALE
         });
         
         // ComplianceRules: 25% quorum, 65% approval, 7 days voting, 2 days delay
         proposalThresholds[ProposalType.ComplianceRules] = ProposalThresholds({
             quorumPercentage: 2500,
             approvalPercentage: 6500,
-            votingPeriod: 7 days,
-            executionDelay: 2 days
+            votingPeriod: 7 days / TIME_SCALE,
+            executionDelay: 2 days / TIME_SCALE
         });
         
         // OracleParameters: 20% quorum, 60% approval, 7 days voting, 2 days delay
         proposalThresholds[ProposalType.OracleParameters] = ProposalThresholds({
             quorumPercentage: 2000,
             approvalPercentage: 6000,
-            votingPeriod: 7 days,
-            executionDelay: 2 days
+            votingPeriod: 7 days / TIME_SCALE,
+            executionDelay: 2 days / TIME_SCALE
         });
         
         // TokenParameters: 30% quorum, 70% approval, 7 days voting, 3 days delay
         proposalThresholds[ProposalType.TokenParameters] = ProposalThresholds({
             quorumPercentage: 3000,
             approvalPercentage: 7000,
-            votingPeriod: 7 days,
-            executionDelay: 3 days
+            votingPeriod: 7 days / TIME_SCALE,
+            executionDelay: 3 days / TIME_SCALE
         });
         
         // SystemParameters: 25% quorum, 65% approval, 7 days voting, 2 days delay
         proposalThresholds[ProposalType.SystemParameters] = ProposalThresholds({
             quorumPercentage: 2500,
             approvalPercentage: 6500,
-            votingPeriod: 7 days,
-            executionDelay: 2 days
+            votingPeriod: 7 days / TIME_SCALE,
+            executionDelay: 2 days / TIME_SCALE
         });
         
         // EmergencyAction: 10% quorum, 75% approval, 3 days voting, 1 day delay
         proposalThresholds[ProposalType.EmergencyAction] = ProposalThresholds({
             quorumPercentage: 1000,
             approvalPercentage: 7500,
-            votingPeriod: 3 days,
-            executionDelay: 1 days
+            votingPeriod: 3 days / TIME_SCALE,
+            executionDelay: 1 days / TIME_SCALE
         });
 
         // AddToWhitelist: 15% quorum, 60% approval, 5 days voting, 1 day delay
         proposalThresholds[ProposalType.AddToWhitelist] = ProposalThresholds({
             quorumPercentage: 1500,
             approvalPercentage: 6000,
-            votingPeriod: 5 days,
-            executionDelay: 1 days
+            votingPeriod: 5 days / TIME_SCALE,
+            executionDelay: 1 days / TIME_SCALE
         });
 
         // RemoveFromWhitelist: 15% quorum, 60% approval, 5 days voting, 1 day delay
         proposalThresholds[ProposalType.RemoveFromWhitelist] = ProposalThresholds({
             quorumPercentage: 1500,
             approvalPercentage: 6000,
-            votingPeriod: 5 days,
-            executionDelay: 1 days
+            votingPeriod: 5 days / TIME_SCALE,
+            executionDelay: 1 days / TIME_SCALE
         });
 
         // AddToBlacklist: 20% quorum, 70% approval, 5 days voting, 1 day delay
         proposalThresholds[ProposalType.AddToBlacklist] = ProposalThresholds({
             quorumPercentage: 2000,
             approvalPercentage: 7000,
-            votingPeriod: 5 days,
-            executionDelay: 1 days
+            votingPeriod: 5 days / TIME_SCALE,
+            executionDelay: 1 days / TIME_SCALE
         });
 
         // RemoveFromBlacklist: 20% quorum, 65% approval, 5 days voting, 1 day delay
         proposalThresholds[ProposalType.RemoveFromBlacklist] = ProposalThresholds({
             quorumPercentage: 2000,
             approvalPercentage: 6500,
-            votingPeriod: 5 days,
-            executionDelay: 1 days
+            votingPeriod: 5 days / TIME_SCALE,
+            executionDelay: 1 days / TIME_SCALE
         });
     }
     
