@@ -410,8 +410,18 @@ describe("Hardening round 2 — contract changes", () => {
       expect(await g336.TIME_SCALE()).to.equal(336n);
       // 7 days / 336 = 30 minutes exactly.
       expect((await g336.proposalThresholds(0)).votingPeriod).to.equal(1800n);
+      // Ceiling: at the max scale the SHORTEST duration in the table (1 day)
+      // must still be >= 60s. Integer division floors, and a 0s delay or a
+      // 2s vote (seen at scale 100000) makes a proposal unvotable.
+      const gMax = await F.deploy(...args, 1440);
+      for (let t = 0; t <= 9; t++) {
+        const m = await gMax.proposalThresholds(t);
+        expect(m.votingPeriod, `type ${t} vote @1440`).to.be.at.least(60n);
+        expect(m.executionDelay, `type ${t} delay @1440`).to.be.at.least(60n);
+      }
+      expect((await gMax.proposalThresholds(5)).executionDelay).to.equal(60n); // 1 day / 1440
       await expect(F.deploy(...args, 0)).to.be.revertedWithCustomError(F, "TimeScaleOutOfRange").withArgs(0);
-      await expect(F.deploy(...args, 100001)).to.be.revertedWithCustomError(F, "TimeScaleOutOfRange").withArgs(100001);
+      await expect(F.deploy(...args, 1441)).to.be.revertedWithCustomError(F, "TimeScaleOutOfRange").withArgs(1441);
     });
 
     it("control: a wired manager call executes, whitelists, and burns", async () => {

@@ -1475,7 +1475,7 @@ class EscrowModule {
             const withProof = wallets.filter(w => w.state === 'ProofSubmitted');
             let deadline = null;
             if (withProof.length > 0) {
-                const esc = await ethers.getContractAt('MultiSigEscrowWallet', withProof[withProof.length - 1].address);
+                const esc = await ethers.getContractAt('MultiSigEscrowWallet', withProof[withProof.length - 1].walletAddress);
                 const proof = await esc.shipmentProof();
                 const win = await esc.DISPUTE_WINDOW();
                 if (proof.submittedAt > 0n) deadline = proof.submittedAt + win;

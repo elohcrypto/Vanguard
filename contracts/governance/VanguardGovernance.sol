@@ -191,7 +191,10 @@ contract VanguardGovernance is Ownable2Step, ReentrancyGuard {
         // Divides every voting period and execution delay. 1 on mainnet.
         // A testnet has no evm_increaseTime, so a 7-day vote would take
         // 7 days; scale 336 makes it 30 minutes. Percentages are untouched.
-        if (_timeScale < 1 || _timeScale > 100_000) revert TimeScaleOutOfRange(_timeScale);
+        // Ceiling 1440: the shortest duration in the table is 1 day, and
+        // integer division must leave it >= 60s. Beyond that a delay floors
+        // to 0 and a vote to a couple of seconds, which is unvotable.
+        if (_timeScale < 1 || _timeScale > 1440) revert TimeScaleOutOfRange(_timeScale);
         TIME_SCALE = _timeScale;
         // Only the two parameters cast to contract types are checked here. The
         // rest are stored as plain addresses, so requiring code on them could

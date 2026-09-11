@@ -35,14 +35,15 @@ Put the phrase in `.env` as `MNEMONIC`. It is gitignored. Never commit it.
 
 `VanguardGovernance` takes a `timeScale` constructor argument that divides
 every voting period and execution delay. `1` is the mainnet schedule
-(7-day votes). The percentages are never scaled. The demo reads
+(7-day votes); the ceiling is `1440`, at which the shortest duration in the
+table (1 day) is still 60 s. The percentages are never scaled. The demo reads
 `GOV_TIME_SCALE` from the environment at deploy time.
 
 | GOV_TIME_SCALE | InvestorTypeConfig vote | delay | Use |
 |---|---|---|---|
 | 1 | 7 days | 2 days | mainnet, tests |
 | 336 | 30 min | ~9 min | Sepolia walkthrough |
-| 10080 | 60 s | ~17 s | local rehearsal |
+| 1440 | 7 min | 1 min | local rehearsal (the ceiling) |
 
 ## Waiting instead of jumping
 
@@ -57,15 +58,17 @@ so on a network that cannot jump.
 
 ```bash
 MNEMONIC="<your phrase>" npx hardhat node          # funds the 12 role wallets
-GOV_TIME_SCALE=10080 npm run demo:interactive:proof  # in another terminal
+GOV_TIME_SCALE=1440 npm run demo:interactive:proof   # in another terminal
 ```
 
 Then walk: 1 (deploy), 74 (governance), 75 (distribute VGT to 6-8), 76
-(Alice proposes), 77 (Bob and Carol vote), 79 (wait ~80 s), 78 (execute),
+(Alice proposes), 77 (Bob and Carol vote), 79 (wait ~8 min), 78 (execute),
 78a (claim on a rejected one). Every action is signed by its role's key.
 
-Rehearsed on 2026-09-11 with the poll branch forced: a 60-second vote plus
-17-second delay waited 78 seconds of real time and executed. The
+Rehearsed on 2026-09-11 with the poll branch forced at a since-removed
+scale of 10080: a 60-second vote plus 17-second delay waited 78 seconds of
+real time and executed. The ceiling was then lowered to 1440 because at
+10080 the one-day delay was 8 s, below a public chain's block time. The
 unverified wallet at index 9 was rejected by `createProposal` from its own
 key.
 
