@@ -137,7 +137,7 @@ describe("Hardening round 2 — contract changes", () => {
       // setVotingCost call fails onlyOwner with OwnableUnauthorizedAccount.
       // That is exactly the shape of a real-world stuck proposal.
       const cd = gov.interface.encodeFunctionData("setVotingCost", [ethers.parseEther("5000")]);
-      await gov.connect(alice).createProposal(0, "bad", "d", govAddr, cd);
+      await gov.connect(alice).createProposal(4 /* SystemParameters: target is governance itself */, "bad", "d", govAddr, cd);
       const id = await gov.proposalCount();
       await gov.connect(bob).castVote(id, true, "y");
       await gov.connect(carol).castVote(id, true, "y");
@@ -186,7 +186,7 @@ describe("Hardening round 2 — contract changes", () => {
       const { alice, bob, carol, gt, gov, govAddr } = await govFixture();
       const supply0 = await gt.totalSupply();
       const cd = gov.interface.encodeFunctionData("setVotingCost", [ethers.parseEther("20")]);
-      await gov.connect(alice).createProposal(0, "ok", "d", govAddr, cd);
+      await gov.connect(alice).createProposal(4 /* SystemParameters: target is governance itself */, "ok", "d", govAddr, cd);
       const id = await gov.proposalCount();
       await gov.connect(bob).castVote(id, true, "y");
       await gov.connect(carol).castVote(id, true, "y");
@@ -199,7 +199,7 @@ describe("Hardening round 2 — contract changes", () => {
       // (Kept in this test so the "success" path is exercised, not assumed.)
       await gov.transferOwnership(govAddr);
       const cd2 = gov.interface.encodeFunctionData("acceptOwnership");
-      await gov.connect(alice).createProposal(0, "own", "d", govAddr, cd2);
+      await gov.connect(alice).createProposal(4 /* SystemParameters: target is governance itself */, "own", "d", govAddr, cd2);
       const id2 = await gov.proposalCount();
       await gov.connect(bob).castVote(id2, true, "y");
       await gov.connect(carol).castVote(id2, true, "y");
@@ -278,7 +278,7 @@ describe("Hardening round 2 — contract changes", () => {
     });
 
     it("cancel and execution-failure settle the same way", async () => {
-      const { owner, alice, bob, ir, gt, gov, govAddr } = await govFixture();
+      const { owner, alice, bob, carol, ir, gt, gov, govAddr } = await govFixture();
       // Cancel with a de-verified voter.
       await gov.connect(alice).createProposal(0, "t", "d", owner.address, "0x");
       const c = await gov.proposalCount();
@@ -289,9 +289,11 @@ describe("Hardening round 2 — contract changes", () => {
       await ir.registerIdentity(bob.address, alice.address, 840);
       // Execution failure with a de-verified voter.
       const cd = gov.interface.encodeFunctionData("setVotingCost", [ethers.parseEther("5000")]);
-      await gov.connect(alice).createProposal(0, "bad", "d", govAddr, cd);
+      await gov.connect(alice).createProposal(4 /* SystemParameters: target is governance itself */, "bad", "d", govAddr, cd);
       const e = await gov.proposalCount();
       await gov.connect(bob).castVote(e, true, "y");
+      // SystemParameters (governance targets itself) needs 25% quorum: 2 of 5.
+      await gov.connect(carol).castVote(e, true, "y");
       await ir.deleteIdentity(bob.address);
       await ethers.provider.send("evm_increaseTime", [D]);
       await ethers.provider.send("evm_mine", []);
@@ -300,6 +302,7 @@ describe("Hardening round 2 — contract changes", () => {
       expect(await gov.getClaimableRefund(e, alice.address)).to.equal(ethers.parseEther("10"));
       await gov.connect(alice).claimRefund(c);
       await gov.connect(alice).claimRefund(e);
+      await gov.connect(carol).claimRefund(e);
       expect(await gt.balanceOf(govAddr)).to.equal(ethers.parseEther("20")); // bob's two deposits wait
     });
 

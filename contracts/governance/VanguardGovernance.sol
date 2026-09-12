@@ -174,6 +174,12 @@ contract VanguardGovernance is Ownable2Step, ReentrancyGuard {
 
     error CostOutOfRange(uint256 requested, uint256 max);
     error TimeScaleOutOfRange(uint256 requested);
+    /// @notice `target` is not the contract this proposal type governs, or the
+    ///         type has no bound target. Thresholds are chosen by type, so an
+    ///         unbound target let any action run under the weakest tier.
+    error TargetNotBoundToType(ProposalType proposalType, address target);
+    /// @notice List types carry their own data; use createListUpdateProposal.
+    error UseListUpdateProposal(ProposalType proposalType);
     event VotingCostUpdated(uint256 oldCost, uint256 newCost);
     
     /**
@@ -220,6 +226,27 @@ contract VanguardGovernance is Ownable2Step, ReentrancyGuard {
         _initializeThresholds();
     }
     
+    /**
+     * @notice The single contract a proposal type may target. address(0) means
+     *         the type cannot be used with createProposal (EmergencyAction has
+     *         no bound target yet; list types go through createListUpdateProposal).
+     */
+    function boundTarget(ProposalType proposalType) public view returns (address) {
+        if (proposalType == ProposalType.InvestorTypeConfig) return investorTypeRegistry;
+        if (proposalType == ProposalType.ComplianceRules) return complianceRules;
+        if (proposalType == ProposalType.OracleParameters) return oracleManager;
+        if (proposalType == ProposalType.TokenParameters) return token;
+        if (proposalType == ProposalType.SystemParameters) return address(this);
+        return address(0);
+    }
+
+    function _isListType(ProposalType proposalType) internal pure returns (bool) {
+        return proposalType == ProposalType.AddToWhitelist ||
+            proposalType == ProposalType.RemoveFromWhitelist ||
+            proposalType == ProposalType.AddToBlacklist ||
+            proposalType == ProposalType.RemoveFromBlacklist;
+    }
+
     /**
      * @dev Initialize default thresholds for each proposal type
      */
@@ -318,6 +345,16 @@ contract VanguardGovernance is Ownable2Step, ReentrancyGuard {
     ) external nonReentrant returns (uint256) {
         // Check KYC/AML verification
         require(identityRegistry.isVerified(msg.sender), "Must be KYC/AML verified");
+
+        // Bind the type to the one contract it governs. Thresholds are looked up
+        // by type at execution, so with target free a proposer could submit a
+        // TokenParameters action (30%/70%/3d) as InvestorTypeConfig (20%/60%/2d)
+        // or EmergencyAction (10% quorum) and execute it under the weaker bar.
+        if (_isListType(proposalType)) revert UseListUpdateProposal(proposalType);
+        address expected = boundTarget(proposalType);
+        if (expected == address(0) || target != expected) {
+            revert TargetNotBoundToType(proposalType, target);
+        }
 
         // Check proposer has enough tokens for creation cost
         require(
