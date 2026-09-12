@@ -912,6 +912,51 @@ class EscrowModule {
         }
     }
 
+    /** Option 70a: Sweep tokens stranded in a settled escrow */
+    async sweepExcess() {
+        displaySection('SWEEP STRANDED TOKENS', '🧹');
+
+        // `funded` only stops a second FACTORY funding. Anyone can transfer
+        // straight to an escrow address, and release/refund pay fixed sums, so
+        // anything else that arrived stays behind. Once settled it can be swept
+        // back to the payer (or the platform fee wallet if no payer was set).
+        const settled = Array.from(this.state.enhancedEscrowWallets.values()).filter(w =>
+            w.state === 'Released' || w.state === 'Refunded'
+        );
+        if (settled.length === 0) {
+            displayError('No released or refunded wallets to sweep');
+            return;
+        }
+
+        const token = this.state.getContract('digitalToken');
+        console.log('\n📋 SETTLED WALLETS:');
+        for (const [index, w] of settled.entries()) {
+            const held = await token.balanceOf(w.walletAddress || w.address);
+            console.log(`${index}. Payment ID ${w.paymentId} - ${w.state} - holds ${ethers.formatEther(held)} VSC`);
+        }
+
+        const walletIndex = await this.promptUser('\nSelect wallet (number): ');
+        const selected = settled[parseInt(walletIndex)];
+        if (!selected) {
+            displayError('Invalid selection');
+            return;
+        }
+
+        try {
+            const wallet = await ethers.getContractAt('MultiSigEscrowWallet', selected.walletAddress || selected.address);
+            const receipt = await (await wallet.sweepExcess()).wait();
+            const swept = receipt.logs
+                .map(log => { try { return wallet.interface.parseLog(log); } catch (e) { return null; } })
+                .find(parsed => parsed && parsed.name === 'ExcessSwept');
+
+            displaySuccess('Stranded tokens returned');
+            console.log(`   To: ${swept.args.to}`);
+            console.log(`   Amount: ${ethers.formatEther(swept.args.amount)} VSC`);
+        } catch (error) {
+            displayError(`Sweep failed: ${error.message}`);
+        }
+    }
+
     /**
      * Helper: Get state emoji
      */
