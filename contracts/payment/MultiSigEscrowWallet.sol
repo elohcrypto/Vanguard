@@ -92,6 +92,10 @@ contract MultiSigEscrowWallet is ReentrancyGuard {
     error EscrowStillActive();  // sweepExcess: escrow not yet Released/Refunded
     error NothingToSweep();     // sweepExcess: balance is zero
     error SweepFailed();        // sweepExcess: token transfer returned false
+    /// @notice Investor tried to unilaterally refund after the payee shipped.
+    ///         Once proof exists a refund must go through raiseDispute (payer)
+    ///         then resolveDispute; a 1-of-3 investor cannot rug a performer.
+    error RefundBlockedAfterShipment();
 
     /// @notice Tokens beyond the escrow's own settlement were returned.
     event ExcessSwept(address indexed to, uint256 amount);
@@ -409,6 +413,11 @@ contract MultiSigEscrowWallet is ReentrancyGuard {
             state == WalletState.Active || state == WalletState.Disputed,
             "Cannot refund in current state"
         );
+        // Block a unilateral refund once the payee has shipped: that path let a
+        // 1-of-3 investor rug a payee who performed. A funded-but-not-shipped
+        // escrow may still be refunded; a shipped one must go through
+        // raiseDispute (payer) then resolveDispute.
+        if (state == WalletState.Active && shipmentProof.exists) revert RefundBlockedAfterShipment();
         
         _refundToPayer();
     }

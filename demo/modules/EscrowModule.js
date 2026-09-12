@@ -865,8 +865,10 @@ class EscrowModule {
     async manualRefund() {
         displaySection('INVESTOR: MANUAL REFUND', '🔄');
 
+        // manualRefund reverts once the payee has shipped (RefundBlockedAfterShipment).
+        // Offer it only for pre-shipment (Funded) or disputed escrows.
         const activeWallets = Array.from(this.state.enhancedEscrowWallets.values()).filter(w =>
-            w.state === 'Funded' || w.state === 'ProofSubmitted'
+            w.state === 'Funded' || w.state === 'Disputed'
         );
         if (activeWallets.length === 0) {
             displayError('No active wallets');
