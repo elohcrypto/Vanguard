@@ -147,12 +147,9 @@ describe("ZKVerifierIntegrated - Phase 2 Features", function() {
                 samplePublicSignals
             );
 
-            // Calculate proof hash (same as contract)
-            const proofHash = ethers.keccak256(
-                ethers.AbiCoder.defaultAbiCoder().encode(
-                    ["uint256[2]", "uint256[2][2]", "uint256[2]", "uint256[1]"],
-                    [sampleProof.a, sampleProof.b, sampleProof.c, samplePublicSignals]
-                )
+            // Cache key is bound to the circuit; ask the contract for it.
+            const proofHash = await zkVerifier.proofCacheKey(
+                "whitelist", sampleProof.a, sampleProof.b, sampleProof.c, samplePublicSignals
             );
 
             // Set very short expiry
