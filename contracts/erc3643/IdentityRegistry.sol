@@ -25,8 +25,20 @@ contract IdentityRegistry is IIdentityRegistry, Ownable {
      */
     uint256 public registeredIdentityCount;
 
+    /// @dev moveIdentity: the destination wallet is the zero address.
+    error InvalidNewWallet();
+    /// @dev moveIdentity: the source wallet has no registration to move.
+    error IdentityNotRegistered(address wallet);
+    /// @dev moveIdentity: the destination wallet is already registered.
+    error WalletAlreadyHasIdentity(address wallet);
+
     // Mapping from wallet address to country code
     mapping(address => uint16) private _countries;
+
+    // Identity a wallet held before moveIdentity relocated it. Lets sibling
+    // tokens on this registry verify a recovery source after the first token
+    // has already moved the identity. Cleared when the wallet is re-registered.
+    mapping(address => address) private _formerIdentity;
 
     // Mapping of authorized agents
     mapping(address => bool) private _agents;
@@ -67,11 +79,39 @@ contract IdentityRegistry is IIdentityRegistry, Ownable {
     }
 
     function registerIdentity(address _userAddress, address _identity, uint16 _country) external override onlyAgent {
+        _validateNewIdentity(_userAddress, _identity, _country);
+        _storeIdentity(_userAddress, _identity, _country);
+    }
+
+    /**
+     * @dev The single place an identity is created. Both registerIdentity and
+     *      batchRegisterIdentity route through here: the batch path used to
+     *      write the mappings directly, skipping the counter increment and the
+     *      jurisdiction check, which let the governance quorum denominator
+     *      drift below the real electorate and reach zero.
+     */
+    function _storeIdentity(address _userAddress, address _identity, uint16 _country) private {
+        _identities[_userAddress] = _identity;
+        _countries[_userAddress] = _country;
+        // A recycled wallet must not keep a stale "formerly belonged to" claim.
+        delete _formerIdentity[_userAddress];
+        // New registration only. updateIdentity replaces an existing entry and
+        // must not change the count.
+        registeredIdentityCount += 1;
+
+        emit IdentityStored(_userAddress, _identity);
+        emit CountryUpdated(_identity, _country);
+    }
+
+    /**
+     * @dev Shared validation for a new identity, including the jurisdiction
+     *      rule. Called by both registration paths.
+     */
+    function _validateNewIdentity(address _userAddress, address _identity, uint16 _country) private {
         require(_userAddress != address(0), "Invalid user address");
         require(_identity != address(0), "Invalid identity address");
         require(_identities[_userAddress] == address(0), "Identity already registered");
 
-        // ✅ ENFORCE: Jurisdiction rules at identity registration
         if (address(_complianceRules) != address(0) && _tokenForJurisdiction != address(0)) {
             (bool isValid, string memory reason) = _complianceRules.validateJurisdiction(
                 _tokenForJurisdiction,
@@ -83,15 +123,6 @@ contract IdentityRegistry is IIdentityRegistry, Ownable {
                 revert(string(abi.encodePacked("Country not allowed: ", reason)));
             }
         }
-
-        _identities[_userAddress] = _identity;
-        _countries[_userAddress] = _country;
-        // New registration only. updateIdentity replaces an existing entry and
-        // must not change the count.
-        registeredIdentityCount += 1;
-
-        emit IdentityStored(_userAddress, _identity);
-        emit CountryUpdated(_identity, _country);
     }
 
     function deleteIdentity(address _userAddress) external override onlyAgent {
@@ -107,6 +138,47 @@ contract IdentityRegistry is IIdentityRegistry, Ownable {
         }
 
         emit IdentityUnstored(_userAddress, identityAddr);
+    }
+
+    /**
+     * @notice Move an existing registration from one wallet to another.
+     * @dev For wallet RECOVERY, not for admitting a new investor. The user was
+     *      already admitted, so this deliberately does NOT re-run the
+     *      jurisdiction check: a user whose country is sanctioned after they
+     *      joined is exactly the person who most needs to recover a lost
+     *      wallet, and re-validating would strand their funds permanently.
+     *      The country travels with the user rather than being reset.
+     *
+     *      registeredIdentityCount is unchanged: one registration moves, none
+     *      is created or destroyed, so the governance quorum denominator is
+     *      unaffected.
+     */
+    function moveIdentity(address _fromWallet, address _toWallet) external override onlyAgent {
+        if (_toWallet == address(0)) revert InvalidNewWallet();
+        if (_identities[_fromWallet] == address(0)) revert IdentityNotRegistered(_fromWallet);
+        if (_identities[_toWallet] != address(0)) revert WalletAlreadyHasIdentity(_toWallet);
+
+        address identityAddr = _identities[_fromWallet];
+        uint16 country = _countries[_fromWallet];
+
+        _identities[_toWallet] = identityAddr;
+        _countries[_toWallet] = country;
+        delete _identities[_fromWallet];
+        delete _countries[_fromWallet];
+        // Remember whose wallet this was. Sibling tokens on the same registry
+        // recover AFTER the identity has moved, and need to prove the lost
+        // wallet really belonged to this identity rather than being any
+        // unregistered address that happens to hold tokens.
+        _formerIdentity[_fromWallet] = identityAddr;
+
+        emit IdentityStored(_toWallet, identityAddr);
+        emit CountryUpdated(identityAddr, country);
+        emit IdentityUnstored(_fromWallet, identityAddr);
+    }
+
+    /// @inheritdoc IIdentityRegistry
+    function formerIdentity(address _wallet) external view override returns (address) {
+        return _formerIdentity[_wallet];
     }
 
     function updateIdentity(address _userAddress, address _identity) external onlyAgent {
@@ -176,15 +248,8 @@ contract IdentityRegistry is IIdentityRegistry, Ownable {
         );
 
         for (uint i = 0; i < _userAddresses.length; i++) {
-            require(_userAddresses[i] != address(0), "Invalid user address");
-            require(_identityAddresses[i] != address(0), "Invalid identity address");
-            require(_identities[_userAddresses[i]] == address(0), "Identity already registered");
-
-            _identities[_userAddresses[i]] = _identityAddresses[i];
-            _countries[_userAddresses[i]] = _countryCodes[i];
-
-            emit IdentityStored(_userAddresses[i], _identityAddresses[i]);
-            emit CountryUpdated(_identityAddresses[i], _countryCodes[i]);
+            _validateNewIdentity(_userAddresses[i], _identityAddresses[i], _countryCodes[i]);
+            _storeIdentity(_userAddresses[i], _identityAddresses[i], _countryCodes[i]);
         }
     }
 

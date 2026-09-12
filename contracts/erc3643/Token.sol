@@ -186,24 +186,59 @@ contract Token is IERC3643, ERC20, Ownable, Pausable {
         address _lostWallet,
         address _newWallet,
         address _investorOnchainID
-    ) external override onlyAgent returns (bool) {
-        require(_identityRegistry.identity(_lostWallet) == _investorOnchainID, "Invalid identity");
-        require(_identityRegistry.identity(_newWallet) == address(0), "New wallet already has identity");
+    ) external override onlyAgent whenNotPaused returns (bool) {
+        // The registry is shared by every token, so a sibling token's recovery
+        // may already have moved this person's identity to the new wallet.
+        // Requiring identity(lost) == onchainID here made every token after the
+        // first revert "Invalid identity", stranding its balance on a wallet
+        // that could no longer transfer. Accept either "not moved yet" or
+        // "already moved from THIS wallet to exactly this identity". The
+        // formerIdentity check is what keeps the second case a recovery: without
+        // it any deregistered wallet holding tokens could be routed into the
+        // recovered wallet under a RecoverySuccess event.
+        address lostIdentity = _identityRegistry.identity(_lostWallet);
+        address newIdentity = _identityRegistry.identity(_newWallet);
+        bool identityAlreadyMoved = lostIdentity == address(0)
+            && newIdentity == _investorOnchainID
+            && _identityRegistry.formerIdentity(_lostWallet) == _investorOnchainID;
+        require(lostIdentity == _investorOnchainID || identityAlreadyMoved, "Invalid identity");
+        require(newIdentity == address(0) || identityAlreadyMoved, "New wallet already has identity");
 
         uint256 balance = balanceOf(_lostWallet);
         uint256 frozenBalance = _frozenTokens[_lostWallet];
+        bool wasFrozen = _frozen[_lostWallet];
 
         // Transfer balance
         _transfer(_lostWallet, _newWallet, balance);
 
-        // Transfer frozen tokens
-        _frozenTokens[_newWallet] = frozenBalance;
+        // Add, never assign: the new wallet may already hold frozen tokens
+        // (freezePartialTokens needs no identity, and a second-token recovery
+        // lands on a wallet already in use). An assignment zeroed them.
+        _frozenTokens[_newWallet] += frozenBalance;
         _frozenTokens[_lostWallet] = 0;
 
-        // Update identity registry
-        // Update identity - simplified for demo
-        // _identityRegistry.updateIdentity(_newWallet, _investorOnchainID);
-        _identityRegistry.deleteIdentity(_lostWallet);
+        // Carry the address-level freeze. Recovering a sanctioned wallet must
+        // not launder it into an unfrozen one.
+        //
+        // OR, not assignment: the destination may carry its own administrative
+        // freeze. A plain assignment let an unfrozen source CLEAR a frozen
+        // destination, so recovering into a sanctioned address unfroze it and
+        // handed it the balance. A freeze on either wallet survives.
+        _frozen[_newWallet] = wasFrozen || _frozen[_newWallet];
+        _frozen[_lostWallet] = false;
+
+        // Move the identity atomically. This used to delete the old entry and
+        // never create the new one, leaving the recovered balance unspendable
+        // because every transfer requires isVerified(from).
+        //
+        // moveIdentity, not registerIdentity + deleteIdentity: recovery
+        // relocates an already-admitted user, so it must not re-run the
+        // jurisdiction check. A user sanctioned after joining is precisely who
+        // needs a recovery, and re-validating would strand their funds.
+        // It also leaves registeredIdentityCount untouched.
+        if (!identityAlreadyMoved) {
+            _identityRegistry.moveIdentity(_lostWallet, _newWallet);
+        }
 
         emit RecoverySuccess(_lostWallet, _newWallet, _investorOnchainID);
         return true;

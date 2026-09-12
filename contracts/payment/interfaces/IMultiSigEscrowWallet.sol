@@ -40,6 +40,7 @@ interface IMultiSigEscrowWallet {
     event FundsRefunded(address indexed payer, uint256 totalAmount);
     event DisputeRaised(address indexed payer, uint256 timestamp);
     event DisputeResolved(address indexed investor, bool refunded);
+    event ExcessSwept(address indexed to, uint256 amount);
     
     // ========================================
     // FUNCTIONS
@@ -61,10 +62,19 @@ interface IMultiSigEscrowWallet {
 
     function signAsPayee() external;
 
-    function signAsInvestor() external;
+    /// @notice Investor co-signs, stating the direction explicitly.
+    /// @param releaseToPayee true pays the payee (requires payeeSigned),
+    ///        false refunds the payer (requires payerSigned). The direction is
+    ///        never inferred from who signed first: that let a payer pre-sign
+    ///        and divert an intended release into a refund to themselves.
+    function signAsInvestor(bool releaseToPayee) external;
 
     function manualRefund() external;
-    
+
+    /// @notice Return tokens that arrived outside the factory funding to the
+    ///         payer. Anyone may call it once the escrow is Released or Refunded.
+    function sweepExcess() external;
+
     // ========================================
     // VIEW FUNCTIONS
     // ========================================

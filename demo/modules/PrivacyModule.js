@@ -46,16 +46,49 @@ class PrivacyModule {
             console.log('📦 Deploying Privacy & ZK Verification System...');
             console.log('🎯 Production-Ready ZK Proof System with Full Integration');
 
-            // Deploy ZKVerifierIntegrated (Primary ZK System with real Groth16 verifiers)
-            console.log('🌍 Deploying ZKVerifierIntegrated (Real ZK Verifiers)...');
+            // Deploy ZKVerifierIntegrated.
+            //
+            // testingMode is IMMUTABLE and defaults OFF. In testing mode every
+            // verify* call skips Groth16 and returns true for any non-zero
+            // public signal, so an all-zero proof verifies. This used to be
+            // hardcoded on while the log claimed "Real ZK Verifiers".
+            // Opt in deliberately with ZK_TESTING_MODE=1 when you want to drive
+            // the flow without generating real proofs.
+            const zkTestingMode = process.env.ZK_TESTING_MODE === '1';
+            console.log(
+                zkTestingMode
+                    ? '⚠️  Deploying ZKVerifierIntegrated in MOCK mode (ZK_TESTING_MODE=1) - proofs are NOT verified'
+                    : '🌍 Deploying ZKVerifierIntegrated (real Groth16 verification)...'
+            );
             const ZKVerifierIntegratedFactory = await ethers.getContractFactory('ZKVerifierIntegrated');
-            const zkVerifierIntegrated = await ZKVerifierIntegratedFactory.deploy(true);
+            const zkVerifierIntegrated = await ZKVerifierIntegratedFactory.deploy(zkTestingMode);
             await zkVerifierIntegrated.waitForDeployment();
             const zkVerifierIntegratedAddr = await zkVerifierIntegrated.getAddress();
             this.state.setContract('zkVerifierIntegrated', zkVerifierIntegrated);
             this.state.zkVerifier = zkVerifierIntegrated;
             this.state.setContract('zkVerifier', zkVerifierIntegrated);
             console.log(`✅ ZKVerifierIntegrated deployed: ${zkVerifierIntegratedAddr}`);
+
+            // Keep the APPLICATION's proof mode in step with the verifier's.
+            // testingMode is immutable, so a real-mode verifier paired with
+            // state.zkMode = 'mock' means every demo action generates a
+            // placeholder proof that Groth16 verification then rejects.
+            this.state.zkMode = zkTestingMode ? 'mock' : 'real';
+            console.log(`   ZK proof mode: ${this.state.zkMode.toUpperCase()} (matches the deployed verifier)`);
+            if (!zkTestingMode) {
+                // The proof actions read state.realProofGenerator directly, and
+                // only the mode toggle ever populated it. Deploying straight into
+                // real mode therefore crashed every proof action on a null
+                // generator. Initialise it here, where the mode is decided.
+                try {
+                    await this.proofGenerator.initializeRealProofGenerator();
+                } catch (error) {
+                    console.log(`   ⚠️  Real proof generator failed to initialise: ${error.message}`);
+                    console.log('      Proof actions will fail until this is fixed, or redeploy with ZK_TESTING_MODE=1.');
+                }
+                console.log('   ℹ️  Real mode needs compiled circuits - run `npm run setup:zk` first,');
+                console.log('      or set ZK_TESTING_MODE=1 to drive the flow with mock proofs.');
+            }
 
             // Deploy mock dependencies for PrivacyManager
             console.log('🔧 Deploying mock dependencies...');

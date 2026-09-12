@@ -17,6 +17,7 @@
 
 const { ethers } = require("hardhat");
 const DemoState = require("../demo/core/DemoState");
+const { signShipmentProof } = require("../demo/utils/ShipmentProof");
 const ContractDeployer = require("../demo/core/ContractDeployer");
 const { EnhancedLogger } = require("../demo/logging");
 
@@ -325,7 +326,7 @@ async function main() {
     const wallet = await ethers.getContractAt("MultiSigEscrowWallet", wAddr);
     const proofData = JSON.stringify({ trackingNumber: "SMOKE-1", carrier: "UPS" });
     const dataHash = ethers.keccak256(ethers.toUtf8Bytes(proofData));
-    await wallet.connect(payee).submitShipmentProof(proofData, dataHash, await payee.signMessage(ethers.getBytes(dataHash)));
+    await wallet.connect(payee).submitShipmentProof(proofData, dataHash, await signShipmentProof(payee, wAddr, dataHash));
     state.setContract("escrowFactory", factory);
     state.enhancedEscrowWallets.set("1", { paymentId: "1", walletAddress: wAddr, payer: payer.address, payee: payee.address, investor: investor.address, amount: "1000", createdAt: new Date().toISOString(), state: "ProofSubmitted" });
     const esc = new EscrowModule(state, new EnhancedLogger(), async () => "y");

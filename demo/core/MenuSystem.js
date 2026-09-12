@@ -146,6 +146,7 @@ class MenuSystem {
     console.log("68. Payee: Sign Release");
     console.log("69. Investor: Sign Release");
     console.log("70. Investor: Manual Refund");
+    console.log("70a. Sweep Stranded Tokens (settled escrow)");
     console.log("71. View Escrow Wallet Status");
     console.log("71a. View All Parties Balances");
     console.log("72. Enhanced Escrow Dashboard");
@@ -462,6 +463,9 @@ class MenuSystem {
           break;
         case "70":
           await escrow.manualRefund();
+          break;
+        case "70a":
+          await escrow.sweepExcess();
           break;
         case "71":
           await escrow.viewEscrowStatus();

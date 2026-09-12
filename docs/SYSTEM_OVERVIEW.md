@@ -119,13 +119,15 @@ We have successfully implemented a **production-ready Vanguard StableCoin system
 ### **9. Enhanced Escrow System**
 - **Technology**: 2-of-3 multi-signature escrow wallets with dispute resolution
 - **Features**:
-  - One-time-use escrow wallets per payment
-  - 2-of-3 multisig (Investor MUST sign + Payer OR Payee)
-  - Shipment proof system with 14-day dispute window
-  - Investor-mediated dispute resolution
-  - Auto-distribution of fees (3% investor, 2% owner)
+  - One-time-use escrow wallets per payment, funded once through the factory
+  - 2-of-3 multisig (Investor MUST sign + Payer OR Payee); the investor states release or refund explicitly
+  - Payee-signed shipment proof bound to the escrow address and chain id, opening a 14-day dispute window
+  - Investor-mediated dispute resolution (refund, or reopen with all signatures cleared)
+  - Fees fixed at creation (3% investor, 2% owner), paid on release
+  - `sweepExcess()` returns tokens sent to a settled escrow outside the factory
   - KYC/AML verification for all parties
-- **Demo Options**: 61-73
+- **Demo Options**: 61-73 (70a sweeps a settled escrow)
+- **Workflow**: [Escrow Payment Workflow](SYSTEM_WORKFLOW_GUIDE.md#escrow-payment-workflow)
 - **Status**: ✅ **PRODUCTION READY**
 
 ### **10. Payment Protocol with Refunds**

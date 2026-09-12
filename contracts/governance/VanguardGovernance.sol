@@ -454,7 +454,12 @@ contract VanguardGovernance is Ownable2Step, ReentrancyGuard {
         // registering or deleting identities mid-vote cannot move the bar for
         // a proposal already being voted on.
         uint256 eligibleVoters = proposal.eligibleVotersAtCreation;
-        bool quorumMet = totalVotes * 10000 >= eligibleVoters * thresholds.quorumPercentage;
+        // A zero electorate makes the right-hand side 0, so ANY vote count
+        // would clear quorum. That is never a legitimate pass: an electorate of
+        // nobody cannot approve anything. Treat it as unmet, so the proposal
+        // settles as Rejected and deposits are refunded.
+        bool quorumMet = eligibleVoters > 0 &&
+            totalVotes * 10000 >= eligibleVoters * thresholds.quorumPercentage;
 
         // Thresholds are basis points (2000 = 20%), so scale votes to match.
         // Guard the division: totalVotes == 0 means nobody voted, which is a
@@ -497,6 +502,18 @@ contract VanguardGovernance is Ownable2Step, ReentrancyGuard {
                 // retryable; the proposer submits a new proposal.
                 _settleWithRefund(proposalId, ProposalStatus.Rejected);
                 emit ProposalExecutionFailed(proposalId, reason);
+                return;
+            }
+
+            // The target call may have settled THIS proposal. A self-owned
+            // governance cancels by vote through this very function, and a
+            // proposal whose callData is cancelProposal(itself) re-enters
+            // here: the inner call marks it Cancelled and zeroes the lock.
+            // Stamping Executed over that would strand every deposit —
+            // claimRefund only pays Rejected/Cancelled, and the lock is
+            // already 0 so nothing burns. Honour the inner settlement.
+            if (proposal.status != ProposalStatus.Active) {
+                emit ProposalExecuted(proposalId);
                 return;
             }
 
@@ -566,9 +583,19 @@ contract VanguardGovernance is Ownable2Step, ReentrancyGuard {
     }
     
     /**
-     * @dev Cancel a proposal (owner only)
+     * @dev Cancel a proposal (owner only).
+     *
+     * Deliberately NOT nonReentrant. executeProposal holds the same lock, so a
+     * self-owned governance — whose only way to call an onlyOwner function is
+     * through executeProposal — could never reach this, leaving the emergency
+     * brake permanently unreachable.
+     *
+     * Dropping the guard does open one re-entry: a proposal whose callData is
+     * cancelProposal(itself). executeProposal handles that by re-reading the
+     * status after the target call and honouring an inner settlement rather
+     * than overwriting it with Executed. See the check before the burn.
      */
-    function cancelProposal(uint256 proposalId) external onlyOwner nonReentrant {
+    function cancelProposal(uint256 proposalId) external onlyOwner {
         Proposal storage proposal = _proposals[proposalId];
         require(
             proposal.status == ProposalStatus.Active || proposal.status == ProposalStatus.Pending,
@@ -787,7 +814,11 @@ contract VanguardGovernance is Ownable2Step, ReentrancyGuard {
             proposer: msg.sender,
             createdAt: block.timestamp,
             votingEnds: block.timestamp + thresholds.votingPeriod,
-            executionTime: 0,
+            // Same timelock as every other proposal type. This was 0, which made
+            // the `block.timestamp >= executionTime` guard vacuous: a blacklist
+            // proposal executed the instant voting ended and the owner's cancel
+            // window never opened.
+            executionTime: block.timestamp + thresholds.votingPeriod + thresholds.executionDelay,
             status: ProposalStatus.Active,
             votesFor: 0,
             votesAgainst: 0,

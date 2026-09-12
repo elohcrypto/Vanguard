@@ -8,6 +8,7 @@
 
 const { displaySection, displaySuccess, displayError, displayWarning } = require('../utils/DisplayHelpers');
 const { advancePast, canJumpTime } = require('../utils/ChainTime');
+const { signShipmentProof } = require('../utils/ShipmentProof');
 const { ethers } = require('hardhat');
 
 /**
@@ -478,6 +479,17 @@ class EscrowModule {
             }
 
             const payer = await this.getSignerForAddress(payerAddress);
+
+            // Funding is once-only on chain. Check BEFORE approving: otherwise
+            // the operator burns gas on an approval and then hits a raw revert
+            // from the factory. A second funding used to silently succeed and
+            // strand the extra tokens in the wallet forever.
+            if (await wallet.funded()) {
+                displayWarning('This escrow is already funded - funding once is all it takes.');
+                console.log(`   Escrow balance: ${ethers.formatEther(await this.state.getContract('digitalToken').balanceOf(walletAddress))} VSC`);
+                return;
+            }
+
             const totalAmount = ethers.parseEther((parseFloat(selectedWallet.amount) * 1.05).toString());
 
             console.log(`\n💰 Approving ${ethers.formatEther(totalAmount)} VSC...`);
@@ -581,7 +593,7 @@ class EscrowModule {
             });
 
             const dataHash = ethers.keccak256(ethers.toUtf8Bytes(proofData));
-            const signature = await payee.signMessage(ethers.getBytes(dataHash));
+            const signature = await signShipmentProof(payee, walletAddress, dataHash);
 
             console.log('\n📝 Submitting shipment proof...');
             console.log(`   Tracking: TRK${Date.now()}`);
@@ -785,8 +797,31 @@ class EscrowModule {
             const isPayeeVerified = await identityRegistry.isVerified(payee);
             console.log(`   Payee Verified: ${isPayeeVerified ? '✅ YES' : '❌ NO'}`);
 
-            console.log('\n✍️ Investor signing...');
-            const tx = await wallet.connect(investor).signAsInvestor();
+            // The investor must state the direction. It used to be inferred from
+            // whoever signed first, which let a payer pre-sign and divert the
+            // release into a refund to themselves.
+            const payerSigned = await wallet.payerSigned();
+            const payeeSigned = await wallet.payeeSigned();
+            if (!payerSigned && !payeeSigned) {
+                displayWarning('Neither payer nor payee has signed yet - nothing for the investor to co-sign.');
+                return;
+            }
+            // Ask, do not infer. Deriving the direction from payeeSigned here
+            // would re-create in JavaScript the exact inference the contract
+            // fix removed: if only the payer had signed, the CLI would quietly
+            // pick "refund". The contract rejects a mismatched choice, but the
+            // operator must be the one making it.
+            console.log(`\n   Signatures so far: payer ${payerSigned ? '✅' : '❌'}  payee ${payeeSigned ? '✅' : '❌'}`);
+            console.log('   1: RELEASE to payee (requires payee signature)');
+            console.log('   2: REFUND to payer  (requires payer signature)');
+            const dir = (await this.promptUser('Investor decision (1/2): ')).trim();
+            if (dir !== '1' && dir !== '2') {
+                displayWarning('No decision made - nothing signed.');
+                return;
+            }
+            const releaseToPayee = dir === '1';
+            console.log(`\n✍️ Investor signing to ${releaseToPayee ? 'RELEASE to payee' : 'REFUND to payer'}...`);
+            const tx = await wallet.connect(investor).signAsInvestor(releaseToPayee);
             const receipt = await tx.wait();
 
             // Check if funds were released or refunded
@@ -874,6 +909,51 @@ class EscrowModule {
 
         } catch (error) {
             displayError(`Refund failed: ${error.message}`);
+        }
+    }
+
+    /** Option 70a: Sweep tokens stranded in a settled escrow */
+    async sweepExcess() {
+        displaySection('SWEEP STRANDED TOKENS', '🧹');
+
+        // `funded` only stops a second FACTORY funding. Anyone can transfer
+        // straight to an escrow address, and release/refund pay fixed sums, so
+        // anything else that arrived stays behind. Once settled it can be swept
+        // back to the payer (or the platform fee wallet if no payer was set).
+        const settled = Array.from(this.state.enhancedEscrowWallets.values()).filter(w =>
+            w.state === 'Released' || w.state === 'Refunded'
+        );
+        if (settled.length === 0) {
+            displayError('No released or refunded wallets to sweep');
+            return;
+        }
+
+        const token = this.state.getContract('digitalToken');
+        console.log('\n📋 SETTLED WALLETS:');
+        for (const [index, w] of settled.entries()) {
+            const held = await token.balanceOf(w.walletAddress || w.address);
+            console.log(`${index}. Payment ID ${w.paymentId} - ${w.state} - holds ${ethers.formatEther(held)} VSC`);
+        }
+
+        const walletIndex = await this.promptUser('\nSelect wallet (number): ');
+        const selected = settled[parseInt(walletIndex)];
+        if (!selected) {
+            displayError('Invalid selection');
+            return;
+        }
+
+        try {
+            const wallet = await ethers.getContractAt('MultiSigEscrowWallet', selected.walletAddress || selected.address);
+            const receipt = await (await wallet.sweepExcess()).wait();
+            const swept = receipt.logs
+                .map(log => { try { return wallet.interface.parseLog(log); } catch (e) { return null; } })
+                .find(parsed => parsed && parsed.name === 'ExcessSwept');
+
+            displaySuccess('Stranded tokens returned');
+            console.log(`   To: ${swept.args.to}`);
+            console.log(`   Amount: ${ethers.formatEther(swept.args.amount)} VSC`);
+        } catch (error) {
+            displayError(`Sweep failed: ${error.message}`);
         }
     }
 

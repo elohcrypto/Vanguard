@@ -6,6 +6,17 @@ import "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
 import "./interfaces/IComplianceRules.sol";
 import "../erc3643/interfaces/IIdentityRegistry.sol";
 
+/// @dev Read-only slice of BlacklistOracle. Declared here rather than imported
+///      so ComplianceRules cannot reach any state-changing oracle function.
+interface IBlacklistOracleView {
+    function isBlacklisted(address subject) external view returns (bool);
+}
+
+/// @dev Read-only slice of WhitelistOracle. Same rationale as above.
+interface IWhitelistOracleView {
+    function isWhitelisted(address subject) external view returns (bool);
+}
+
 /**
  * @title ComplianceRules
  * @dev Configurable compliance rule engine for UTXO compliance validation
@@ -59,6 +70,133 @@ contract ComplianceRules is IComplianceRules, Ownable, ReentrancyGuard {
         return trustedContracts[contractAddress];
     }
 
+    // ========================================
+    // ORACLE GATING (per token, opt-in)
+    // ========================================
+    //
+    // The blacklist and whitelist oracles are consulted on every transfer of a
+    // token that has one set. Both default to address(0) = OFF, because most
+    // deployments never stand up an oracle and must keep transferring; turning
+    // them on by default would brick every existing system on upgrade.
+    //
+    // Semantics, chosen deliberately:
+    //   blacklist -> DENY LIST. Set, and either party listed: block.
+    //   whitelist -> ALLOW LIST. Set, and either party NOT listed: block.
+    // The whitelist is therefore default-deny: switching it on blocks everyone
+    // until they are listed. That is the point of an allow list, but it means
+    // an operator must populate the oracle BEFORE pointing a live token at it.
+    // Blacklist wins over whitelist: a listed address is blocked even if it is
+    // also whitelisted.
+
+    mapping(address => address) public blacklistOracle;
+    mapping(address => address) public whitelistOracle;
+
+    /// @dev Oracle gates are per token; the zero address is not a token.
+    error InvalidTokenAddress();
+    /// @dev An oracle must be a contract. address(0) is allowed: it disables the gate.
+    error OracleNotAContract(address oracle);
+    /// @dev The oracle does not answer the selector this gate calls.
+    error OracleIncompatible(address oracle);
+
+    event BlacklistOracleSet(address indexed token, address indexed oracle);
+    event WhitelistOracleSet(address indexed token, address indexed oracle);
+
+    /**
+     * @dev Point a token at a blacklist oracle, or pass address(0) to disable.
+     * @param token The token whose transfers this oracle should gate.
+     * @param oracle BlacklistOracle address, or address(0) to turn the gate off.
+     */
+    function setBlacklistOracle(address token, address oracle) external onlyOwner {
+        if (token == address(0)) revert InvalidTokenAddress();
+        if (oracle != address(0) && oracle.code.length == 0) revert OracleNotAContract(oracle);
+        // Bytecode is not enough: the gate calls isBlacklisted on EVERY
+        // transfer, so an incompatible contract here bricks the token until an
+        // owner notices and unsets it. Probe the selector now and fail at
+        // configuration time, where the mistake is made.
+        if (oracle != address(0)) {
+            (bool ok, bytes memory ret) = oracle.staticcall(
+                abi.encodeWithSelector(IBlacklistOracleView.isBlacklisted.selector, address(this))
+            );
+            if (!ok || ret.length != 32) revert OracleIncompatible(oracle);
+        }
+        blacklistOracle[token] = oracle;
+        emit BlacklistOracleSet(token, oracle);
+    }
+
+    /**
+     * @dev Point a token at a whitelist oracle, or pass address(0) to disable.
+     *      Switching this on is default-deny: populate the oracle first.
+     * @param token The token whose transfers this oracle should gate.
+     * @param oracle WhitelistOracle address, or address(0) to turn the gate off.
+     */
+    function setWhitelistOracle(address token, address oracle) external onlyOwner {
+        if (token == address(0)) revert InvalidTokenAddress();
+        if (oracle != address(0) && oracle.code.length == 0) revert OracleNotAContract(oracle);
+        // Same rationale as setBlacklistOracle: fail here, not on every transfer.
+        if (oracle != address(0)) {
+            (bool ok, bytes memory ret) = oracle.staticcall(
+                abi.encodeWithSelector(IWhitelistOracleView.isWhitelisted.selector, address(this))
+            );
+            if (!ok || ret.length != 32) revert OracleIncompatible(oracle);
+        }
+        whitelistOracle[token] = oracle;
+        emit WhitelistOracleSet(token, oracle);
+    }
+
+    /**
+     * @dev Apply whichever oracle gates are configured for `token` to one pair.
+     *      Returns false to block. A gate with no oracle set is skipped.
+     */
+    function _oraclesAllow(address token, address from, address to) internal view returns (bool) {
+        if (!_blacklistAllows(token, from, to)) {
+            return false;
+        }
+        return _whitelistAllows(token, from, to);
+    }
+
+    /**
+     * @dev Blacklist (deny list) only. Split out because it is enforced on BOTH
+     *      the trusted-contract path and the normal path, while the whitelist
+     *      applies to the normal path alone. Keeping it separate means the
+     *      oracle is queried exactly once per transfer rather than twice.
+     */
+    function _blacklistAllows(address token, address from, address to) internal view returns (bool) {
+        // address(0) is the mint/burn counterparty, not a real party. Asking an
+        // oracle about it would block every mint, so each side is checked only
+        // when it is a real address.
+        address blOracle = blacklistOracle[token];
+        if (blOracle != address(0)) {
+            IBlacklistOracleView bl = IBlacklistOracleView(blOracle);
+            if (from != address(0) && bl.isBlacklisted(from)) {
+                return false;
+            }
+            if (to != address(0) && bl.isBlacklisted(to)) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    /**
+     * @dev Whitelist (allow list) only. Not applied to trusted-contract
+     *      transfers: an escrow wallet is a contract and will never appear on a
+     *      whitelist of investors, so enforcing it there blocks all escrow.
+     */
+    function _whitelistAllows(address token, address from, address to) internal view returns (bool) {
+        address wlOracle = whitelistOracle[token];
+        if (wlOracle != address(0)) {
+            IWhitelistOracleView wl = IWhitelistOracleView(wlOracle);
+            if (from != address(0) && !wl.isWhitelisted(from)) {
+                return false;
+            }
+            if (to != address(0) && !wl.isWhitelisted(to)) {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
     /**
      * @notice Deployment marker read by scripts/deploy-helpers.ts before a Token
      *         is bound to this contract. True: canTransfer enforces KYC and
@@ -74,12 +212,14 @@ contract ComplianceRules is IComplianceRules, Ownable, ReentrancyGuard {
         address to,
         uint256 /* amount */
     ) external view returns (bool) {
-        // Allow minting (from == address(0))
+        // Minting (from == address(0)): the recipient still faces the oracle
+        // gates, so tokens cannot be issued to a blacklisted address.
         if (from == address(0)) {
-            return true;
+            return _oraclesAllow(msg.sender, address(0), to);
         }
 
-        // Allow burning (to == address(0))
+        // Burning (to == address(0)): never gated. Burning is how an operator
+        // claws tokens back from a bad actor; gating it would strand them.
         if (to == address(0)) {
             return true;
         }
@@ -89,6 +229,16 @@ contract ComplianceRules is IComplianceRules, Ownable, ReentrancyGuard {
 
         // Check if we have an IdentityRegistry configured for this token
         address identityRegistryAddr = tokenIdentityRegistry[token];
+
+        // ✅ ENFORCE FIRST, UNCONDITIONALLY: the blacklist applies to everyone,
+        // on every path, whether or not an identity registry is wired for this
+        // token. It used to sit inside the registry block below, so an operator
+        // who set a blacklist oracle before setTokenIdentityRegistry got a
+        // silent no-op. It also sits ABOVE the trusted-contract bypass: a
+        // sanctioned address must not launder a transfer through an escrow.
+        if (!_blacklistAllows(token, from, to)) {
+            return false; // ❌ BLOCK: blacklisted party, no bypass
+        }
 
         // If IdentityRegistry is configured, verify both sender and recipient
         if (identityRegistryAddr != address(0)) {
@@ -114,6 +264,14 @@ contract ComplianceRules is IComplianceRules, Ownable, ReentrancyGuard {
                     return false;
                 }
 
+                // The whitelist applies to the non-trusted counterparty. The
+                // escrow wallet itself is exempt (a contract will never be on
+                // an investor allow list), but an UNLISTED investor must not be
+                // able to route around the allow list by going through escrow.
+                if (!_whitelistAllows(token, partyToCheck, address(0))) {
+                    return false;
+                }
+
                 // ✅ ALLOW: Trusted contracts bypass jurisdiction checks
                 // Rationale: The escrow wallet was created by a verified investor
                 // who already passed jurisdiction checks. The wallet inherits the
@@ -128,6 +286,15 @@ contract ComplianceRules is IComplianceRules, Ownable, ReentrancyGuard {
                 // - Escrow wallets enforce multi-sig release conditions
 
                 return true;
+            }
+
+            // ✅ ENFORCE: whitelist (allow list). The blacklist was already
+            // applied above, on every path including trusted contracts, so only
+            // the whitelist remains here. Checked before identity so a listed
+            // address is rejected even when it holds valid KYC. Off unless an
+            // oracle is set.
+            if (!_whitelistAllows(token, from, to)) {
+                return false; // ❌ BLOCK: whitelist gate
             }
 
             // ✅ ENFORCE: Recipient MUST be KYC/AML verified (NO BYPASS)
@@ -165,6 +332,12 @@ contract ComplianceRules is IComplianceRules, Ownable, ReentrancyGuard {
                     }
                 }
             }
+        }
+
+        // Registry not wired for this token: the blacklist already ran above.
+        // Still apply the whitelist so oracle gating never depends on wiring.
+        if (identityRegistryAddr == address(0) && !_whitelistAllows(token, from, to)) {
+            return false;
         }
 
         // All checks passed
@@ -320,12 +493,17 @@ contract ComplianceRules is IComplianceRules, Ownable, ReentrancyGuard {
 
         JurisdictionRule storage rule = jurisdictionRules[token];
 
-        // Clear existing mappings
-        for (uint256 i = 0; i < allowedCountries.length; i++) {
-            delete rule.allowedCountryMap[allowedCountries[i]];
+        // Clear the mappings for the rule that is being REPLACED. These loops
+        // must read the STORED arrays: iterating the incoming calldata deleted
+        // only the keys about to be re-set, so removals never took effect and
+        // an un-blocked country stayed blocked forever.
+        uint256[] storage previousAllowed = rule.allowedCountries;
+        for (uint256 i = 0; i < previousAllowed.length; i++) {
+            delete rule.allowedCountryMap[previousAllowed[i]];
         }
-        for (uint256 i = 0; i < blockedCountries.length; i++) {
-            delete rule.blockedCountryMap[blockedCountries[i]];
+        uint256[] storage previousBlocked = rule.blockedCountries;
+        for (uint256 i = 0; i < previousBlocked.length; i++) {
+            delete rule.blockedCountryMap[previousBlocked[i]];
         }
 
         // Set new rules
@@ -362,11 +540,15 @@ contract ComplianceRules is IComplianceRules, Ownable, ReentrancyGuard {
         InvestorTypeRule storage rule = investorTypeRules[token];
 
         // Clear existing mappings
-        for (uint256 i = 0; i < allowedTypes.length; i++) {
-            delete rule.allowedTypeMap[allowedTypes[i]];
+        // Same correction as setJurisdictionRule: clear what is stored, not
+        // what is arriving.
+        uint8[] storage previousAllowedTypes = rule.allowedTypes;
+        for (uint256 i = 0; i < previousAllowedTypes.length; i++) {
+            delete rule.allowedTypeMap[previousAllowedTypes[i]];
         }
-        for (uint256 i = 0; i < blockedTypes.length; i++) {
-            delete rule.blockedTypeMap[blockedTypes[i]];
+        uint8[] storage previousBlockedTypes = rule.blockedTypes;
+        for (uint256 i = 0; i < previousBlockedTypes.length; i++) {
+            delete rule.blockedTypeMap[previousBlockedTypes[i]];
         }
 
         // Set new rules

@@ -86,6 +86,7 @@ The system supports the following core workflows, each with comprehensive compli
 | **Token Minting** | Authorized token creation with compliance validation | ERC-3643 Token, Compliance Validator, Oracle Network |
 | **Token Transfer** | Peer-to-peer transfers with UTXO compliance | UTXO Compliance, Transfer Restrictions, Oracle Consensus |
 | **Token Payment** | Payment processing with atomic transfers | Payment Processor, Compliance Validator, Event Reporter |
+| **Escrow Payment** | Conditional payment held in a one-time escrow, settled 2-of-3 with an explicit direction | EscrowWalletFactory, MultiSigEscrowWallet, ComplianceRules (trusted contracts) |
 | **Token Burning** | Authorized token destruction and compliance tracking | Token Contract, UTXO Store, Regulatory Reporter |
 
 ## Table of Contents
@@ -94,9 +95,10 @@ The system supports the following core workflows, each with comprehensive compli
 2. [Token Minting Workflow](#token-minting-workflow)
 3. [Token Transfer Workflow](#token-transfer-workflow)
 4. [Token Payment Workflow](#token-payment-workflow)
-5. [Token Burning Workflow](#token-burning-workflow)
-6. [Compliance Monitoring](#compliance-monitoring)
-7. [Error Handling](#error-handling)
+5. [Escrow Payment Workflow](#escrow-payment-workflow)
+6. [Token Burning Workflow](#token-burning-workflow)
+7. [Compliance Monitoring](#compliance-monitoring)
+8. [Error Handling](#error-handling)
 
 ---
 
@@ -446,8 +448,8 @@ sequenceDiagram
 
 #### 2. Escrow Payment
 - **Use Case**: Conditional payments with release conditions
-- **Process**: Tokens held in smart contract escrow
-- **Compliance**: Escrow contract must be whitelisted
+- **Process**: Tokens held in a one-time `MultiSigEscrowWallet`; see [Escrow Payment Workflow](#escrow-payment-workflow)
+- **Compliance**: Escrow contract must be a trusted contract in ComplianceRules
 
 #### 3. Recurring Payment
 - **Use Case**: Subscription or installment payments
@@ -483,6 +485,102 @@ async fn process_payment(request: PaymentRequest) -> Result<PaymentResult> {
     }
 }
 ```
+
+---
+
+## Escrow Payment Workflow
+
+A conditional VSC payment between a **payer** and a **payee**, mediated by a registered **investor**. Each payment gets its own `MultiSigEscrowWallet`, deployed by `EscrowWalletFactory` and used exactly once. Demo options 61 to 73b.
+
+### Parties and money
+
+| Party | Does | Must be |
+|-------|------|---------|
+| Payer | Funds the escrow. May dispute. Signs to allow a refund. | KYC/AML verified. May be unknown at creation (marketplace): the first verified funder becomes the payer. |
+| Payee | Ships, submits the signed shipment proof, signs to allow a release. | KYC/AML verified. |
+| Investor | Creates the escrow, states the settlement direction, mediates disputes, may refund. | Registered on the factory (`registerInvestor`, `INVESTOR_ROLE`). |
+| Platform | Receives the owner fee. | Fee wallet set on the factory. |
+
+The escrow holds **amount + 3% investor fee + 2% owner fee**, all fixed at creation. A 1000 VSC payment is funded with 1050 VSC. On release the payee gets 1000, the investor fee wallet 30, the platform fee wallet 20. On refund the payer gets the full 1050 back.
+
+The escrow, the payer, and the payee are added to ComplianceRules as trusted contracts when the escrow is created (the demo does this; on your own deployment the ComplianceRules owner must). That is what lets VSC move in and out of a contract that has no identity of its own. The other party to every transfer is still checked.
+
+### Lifecycle
+
+```mermaid
+stateDiagram-v2
+    [*] --> Active : createEscrowWallet
+    Active --> Disputed : raiseDispute (payer, within 14 days of the proof)
+    Disputed --> Active : resolveDispute(false), all signatures cleared
+    Disputed --> Refunded : resolveDispute(true)
+    Active --> Released : signAsInvestor(true), needs payee signature
+    Active --> Refunded : signAsInvestor(false), needs payer signature
+    Active --> Refunded : manualRefund (investor)
+    Disputed --> Refunded : manualRefund (investor)
+    Released --> Released : sweepExcess
+    Refunded --> Refunded : sweepExcess
+```
+
+`Active`, `Released`, `Refunded`, `Disputed` are the on-chain states. Funding, the shipment proof, and the payer and payee signatures all happen while the escrow is `Active` and do not change its state; whether it has been funded is a separate on-chain flag, `funded`.
+
+### Steps
+
+**1. Deploy the factory (61).** Needs the ERC-3643 token (21). The demo also adds the platform fee wallet as a trusted contract here.
+
+**2. Register the investor (62).** The investor's fee wallet is set at registration and never changes. In the demo, onboard the investor through option 23 (steps 1 to 6) so they hold a multi-sig wallet, which is a trusted contract and can receive the fee. A user created through option 24 has no such wallet; the demo falls back to a reserved signer that is not verified, and the release later reverts with `Compliance check failed`.
+
+**3. Create the escrow (63).** The investor names the payer (or "Unknown" for a marketplace escrow), the payee, and the amount. The factory checks both known parties are verified, deploys the wallet, and emits `EscrowWalletCreated` with the payment id and wallet address.
+
+**4. Fund it (64).** The payer approves the factory for the total and calls `fundEscrowWallet(paymentId)`. The factory pulls the tokens in and then marks the wallet `funded`. **Funding is once only**: a second call reverts `EscrowAlreadyFunded`. The demo checks the flag before asking for the approval, so no gas is spent on a doomed attempt.
+
+**5. Ship and prove (65).** The payee submits the shipment data, its hash, and a signature. The contract recovers the signer from a digest that binds the string `VanguardShipmentProof`, **this escrow's address**, **the chain id**, and the hash, and requires it to be the payee. A signature copied from another escrow or another chain is rejected with `ProofNotSignedByPayee`. Submission starts the **14-day dispute window**.
+
+**6. Dispute window.** While it is open the payer may `raiseDispute` (66) and the payee cannot sign. The investor resolves (67): refund the payer, or reopen the escrow. Reopening clears **all three** signatures, so nothing signed before the dispute carries over. On a local node use 73b to jump past the window; on a real network it closes on its own.
+
+**7. Settle, 2-of-3 with an explicit direction.** The payee signs (68) once the window has closed; the payer may sign at any time while the escrow is active. Neither signature moves funds. The investor then signs (69) and **states the direction**:
+
+| Investor says | Requires | Result |
+|---------------|----------|--------|
+| release | payee has signed | amount to payee, fees to the two fee wallets, state `Released` |
+| refund | payer has signed | full total back to the payer, state `Refunded` |
+
+If the required counterparty signature is missing the call reverts (`PayeeHasNotSigned` / `PayerHasNotSigned`). The direction is never inferred from who signed first; that inference used to let a payer pre-sign and turn an intended release into a refund to themselves.
+
+**8. Manual refund (70).** The investor may refund the payer at any time while the escrow is `Active` or `Disputed`, without any other signature.
+
+**9. Sweep what settlement left behind (70a).** See below.
+
+### Why an escrow can hold more than it pays out, and what to do
+
+Release and refund pay **fixed** sums. Anything else that reaches the escrow address is not part of the settlement and stays there:
+
+| How tokens arrive | Stopped? | What happens |
+|-------------------|----------|--------------|
+| `fundEscrowWallet` through the factory | Yes, once only (`funded`) | Second call reverts. |
+| A plain `transfer(escrowAddress, x)` by any verified holder | No. The factory never sees it. | Lands in the escrow. Settlement ignores it. |
+
+Once the escrow is `Released` or `Refunded`, **anyone** may call `sweepExcess()`. It sends the entire remaining VSC balance to the payer, the party who funds escrows and the only one who plausibly paid twice. If no payer was ever set (a marketplace escrow settled purely from direct transfers) it goes to the platform fee wallet instead, never to the zero address. It reverts while the escrow is still active (`EscrowStillActive`) and when there is nothing to sweep (`NothingToSweep`). It only ever touches the one token the escrow was created for.
+
+Escrows deployed from earlier bytecode do not have this function. Tokens stranded in one of those need a separate recovery decision.
+
+### A demo run that shows the whole thing
+
+On a local node, this order works from a fresh start:
+
+```
+1 → 21 → 51 → 22 → 25/1/1          deploy, mint to the central bank
+24/1 Alice, 24/1 Bob               payer and payee
+23/1 Ivan, then 23/2 … 23/6 for Ivan   investor with a multi-sig fee wallet
+61 → 62 (Ivan) → 63 (Ivan, Alice → Bob, 1000)
+64                                  fund: escrow holds 1050
+   (send another 1050 straight to the escrow address, outside the factory)
+65 → 73b → 68 → 69/1                proof, close the window, payee signs, investor releases
+71                                  Released, escrow still holds 1050
+70a                                 "Stranded tokens returned … To: <Alice> Amount: 1050.0"
+71                                  escrow holds 0
+```
+
+Option 71 shows the on-chain state and every party's balance; 71a shows all balances at once.
 
 ---
 
