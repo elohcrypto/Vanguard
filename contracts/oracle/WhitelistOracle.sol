@@ -14,6 +14,9 @@ import "./interfaces/IOracleManager.sol";
  * @dev Oracle contract for managing whitelist consensus and attestations
  */
 contract WhitelistOracle is IOracle, Ownable, ReentrancyGuard, Pausable {
+    /// @notice A resolved consensus was replayed against an address the query
+    ///         was not raised for. Binds queryId consensus to its subject.
+    error QuerySubjectMismatch();
     using ECDSA for bytes32;
 
     struct WhitelistEntry {
@@ -305,6 +308,11 @@ contract WhitelistOracle is IOracle, Ownable, ReentrancyGuard, Pausable {
     function _updateWhitelistConsensus(address _subject, bytes32 _queryId, bool /* _result */) internal {
         // Get consensus from oracle manager
         (bool hasConsensus, bool consensusResult) = oracleManager.checkConsensus(_queryId);
+        // Bind the resolved consensus to the address it was raised for. Without
+        // this, a single active oracle self-signs an attestation naming any
+        // victim and replays a benign, already-resolved queryId to whitelist
+        // them: checkConsensus keys on queryId alone.
+        if (oracleManager.getQuerySubject(_queryId) != _subject) revert QuerySubjectMismatch();
 
         if (hasConsensus) {
             if (consensusResult && !whitelistEntries[_subject].isWhitelisted) {

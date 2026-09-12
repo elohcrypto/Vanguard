@@ -286,6 +286,14 @@ contract OracleManager is IOracleManager, Ownable, ReentrancyGuard, Pausable {
     }
 
     /**
+     * @dev Subject a query was raised for (address(0) if the query never existed).
+     *      Lets consumers reject a resolved consensus replayed at another subject.
+     */
+    function getQuerySubject(bytes32 _queryId) external view returns (address) {
+        return queries[_queryId].subject;
+    }
+
+    /**
      * @dev Get query result
      */
     function getQueryResult(

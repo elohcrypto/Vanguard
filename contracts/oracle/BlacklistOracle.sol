@@ -14,6 +14,9 @@ import "./interfaces/IOracleManager.sol";
  * @dev Oracle contract for managing blacklist consensus and attestations
  */
 contract BlacklistOracle is IOracle, Ownable, ReentrancyGuard, Pausable {
+    /// @notice A resolved consensus was replayed against an address the query
+    ///         was not raised for. Binds queryId consensus to its subject.
+    error QuerySubjectMismatch();
     using ECDSA for bytes32;
 
     enum SeverityLevel {
@@ -368,6 +371,11 @@ contract BlacklistOracle is IOracle, Ownable, ReentrancyGuard, Pausable {
     ) internal {
         // Get consensus from oracle manager
         (bool hasConsensus, bool consensusResult) = oracleManager.checkConsensus(_queryId);
+        // Bind the resolved consensus to the address it was raised for. Without
+        // this, a single active oracle self-signs an attestation naming any
+        // victim and replays a benign, already-resolved queryId to blacklist
+        // them: checkConsensus keys on queryId alone.
+        if (oracleManager.getQuerySubject(_queryId) != _subject) revert QuerySubjectMismatch();
 
         if (hasConsensus) {
             if (consensusResult && !blacklistEntries[_subject].isBlacklisted) {
