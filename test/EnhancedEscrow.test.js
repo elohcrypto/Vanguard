@@ -891,6 +891,41 @@ describe("Enhanced Escrow System", function () {
         });
     });
 
+    describe("Investor cannot be a counterparty (self-dealing)", function () {
+        beforeEach(async function () {
+            await factory.registerInvestor(investor.address, investorWallet.address);
+        });
+
+        it("rejects creating an escrow where the investor is the payee", async function () {
+            await expect(
+                factory.connect(investor).createEscrowWallet(payer.address, investor.address, PAYMENT_AMOUNT)
+            ).to.be.revertedWithCustomError(factory, "InvestorCannotBePayee");
+        });
+
+        it("rejects creating an escrow where the investor is the payer", async function () {
+            await expect(
+                factory.connect(investor).createEscrowWallet(investor.address, payee.address, PAYMENT_AMOUNT)
+            ).to.be.revertedWithCustomError(factory, "InvestorCannotBePayer");
+        });
+
+        it("still allows a normal three-party escrow", async function () {
+            await expect(
+                factory.connect(investor).createEscrowWallet(payer.address, payee.address, PAYMENT_AMOUNT)
+            ).to.not.be.reverted;
+        });
+
+        it("wallet constructor rejects investor == payee (defence in depth)", async function () {
+            const W = await ethers.getContractFactory("MultiSigEscrowWallet");
+            await expect(
+                W.deploy(
+                    1, payer.address, investor.address /* payee==investor */, investor.address,
+                    await vscToken.getAddress(), PAYMENT_AMOUNT, 0, 0,
+                    owner.address, investorWallet.address, ownerWallet.address
+                )
+            ).to.be.revertedWithCustomError(W, "InvestorCannotBePayee");
+        });
+    });
+
     describe("Fee Calculation", function () {
         it("Should calculate fees correctly", async function () {
             const fees = await factory.calculateFees(PAYMENT_AMOUNT);
