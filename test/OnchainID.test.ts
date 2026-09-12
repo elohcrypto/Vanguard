@@ -200,6 +200,93 @@ describe("OnchainID", function () {
                     .to.emit(onchainID, "Executed");
             });
 
+            // approve() used to execute on the FIRST approval with no check on
+            // who gave it, so one ACTION key could call execute() then
+            // approve() and move everything the identity held - collapsing the
+            // multi-key model to 1-of-1.
+            it("Should reject self-approval by the requester", async function () {
+                const tok = await (await ethers.getContractFactory("MockToken")).deploy("M", "M", 0);
+                const idAddr = await onchainID.getAddress();
+                await tok.mint(idAddr, ethers.parseEther("1000"));
+
+                const data = tok.interface.encodeFunctionData(
+                    "transfer", [user1.address, ethers.parseEther("1000")]
+                );
+                const id = await onchainID.connect(user1).execute(await tok.getAddress(), 0, data);
+                await id.wait();
+
+                await expect(onchainID.connect(user1).approve(0, true))
+                    .to.be.revertedWithCustomError(onchainID, "SelfApprovalNotAllowed");
+                expect(await tok.balanceOf(idAddr)).to.equal(ethers.parseEther("1000"));
+            });
+
+            it("Should execute once an independent key approves", async function () {
+                const tok = await (await ethers.getContractFactory("MockToken")).deploy("M", "M", 0);
+                const idAddr = await onchainID.getAddress();
+                await tok.mint(idAddr, ethers.parseEther("500"));
+
+                const data = tok.interface.encodeFunctionData(
+                    "transfer", [user1.address, ethers.parseEther("500")]
+                );
+                await (await onchainID.connect(user1).execute(await tok.getAddress(), 0, data)).wait();
+
+                // owner holds a MANAGEMENT key, which satisfies onlyActionKey
+                await (await onchainID.connect(owner).approve(0, true)).wait();
+                expect(await tok.balanceOf(idAddr)).to.equal(0n);
+            });
+
+            // A pending request must be visible. Without an event, an ACTION
+            // key's request looks the same as a successful one to the caller,
+            // and an integrator expecting 1-of-1 execution hangs with no signal.
+            it("Should emit ExecutionPending when a request needs an approver", async function () {
+                const target = await ethers.deployContract("MockTarget");
+                const data = target.interface.encodeFunctionData("setValue", [42]);
+
+                await expect(onchainID.connect(user1).execute(await target.getAddress(), 0, data))
+                    .to.emit(onchainID, "ExecutionPending")
+                    .withArgs(0, 1);
+            });
+
+            it("Should NOT emit ExecutionPending when it auto-executes", async function () {
+                const target = await ethers.deployContract("MockTarget");
+                const data = target.interface.encodeFunctionData("setValue", [7]);
+
+                // owner holds a MANAGEMENT key: runs immediately, nothing pending
+                await expect(onchainID.connect(owner).execute(await target.getAddress(), 0, data))
+                    .to.emit(onchainID, "Executed")
+                    .and.to.not.emit(onchainID, "ExecutionPending");
+            });
+
+            // Found reviewing PR #3: approvals were counted PER CALL, not per
+            // distinct approver, so one independent key satisfied a threshold
+            // of 3 by calling approve() twice. The configured N-of-M was never
+            // actually enforced.
+            it("Should reject a repeat approval from the same key", async function () {
+                const tok = await (await ethers.getContractFactory("MockToken")).deploy("M", "M", 0);
+                const idAddr = await onchainID.getAddress();
+                await tok.mint(idAddr, ethers.parseEther("1000"));
+                await onchainID.setExecutionThreshold(3);
+
+                const data = tok.interface.encodeFunctionData(
+                    "transfer", [user1.address, ethers.parseEther("1000")]
+                );
+                await (await onchainID.connect(user1).execute(await tok.getAddress(), 0, data)).wait();
+
+                // owner holds a MANAGEMENT key, so it satisfies onlyActionKey
+                await (await onchainID.connect(owner).approve(0, true)).wait();
+                await expect(onchainID.connect(owner).approve(0, true))
+                    .to.be.revertedWithCustomError(onchainID, "AlreadyApproved");
+
+                // 3-of-N unmet, so nothing moved
+                expect(await tok.balanceOf(idAddr)).to.equal(ethers.parseEther("1000"));
+            });
+
+            it("Should refuse an execution threshold below 2", async function () {
+                await expect(onchainID.setExecutionThreshold(1))
+                    .to.be.revertedWithCustomError(onchainID, "ThresholdAllowsSelfApproval");
+                expect(await onchainID.executionThreshold()).to.equal(2n);
+            });
+
             it("Should reject execution by unauthorized user", async function () {
                 const target = await ethers.deployContract("MockTarget");
                 const data = target.interface.encodeFunctionData("setValue", [42]);

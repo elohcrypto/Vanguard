@@ -98,6 +98,56 @@ contract OnchainID is IOnchainID, Ownable, ReentrancyGuard {
         bytes data;
         bool executed;
         uint256 approvals;
+        address requester;
+    }
+
+    /**
+     * @notice Approvals required before a pending execution request runs.
+     * @dev Two by default: the requester's own implicit approval plus one
+     *      independent approver. approve() previously executed on the FIRST
+     *      approval regardless of who gave it, so one ACTION key could both
+     *      request and approve. Settable by a MANAGEMENT key, but never below
+     *      2 — a threshold of 1 restores the vulnerability.
+     */
+    uint256 public executionThreshold = 2;
+
+    event ExecutionThresholdUpdated(uint256 oldThreshold, uint256 newThreshold);
+
+    /// @dev A threshold below 2 would let the requester approve their own request.
+    error ThresholdAllowsSelfApproval(uint256 requested);
+    /// @dev The requester of an execution may not also be its approver.
+    error SelfApprovalNotAllowed();
+
+    /// @dev One approver, one approval: a key may not approve the same request twice.
+    error AlreadyApproved();
+
+    /**
+     * @dev Who has already approved a given request. Approvals were counted
+     *      PER CALL rather than per distinct approver, so one non-requester key
+     *      could call approve() repeatedly until any threshold was met, and the
+     *      configured N-of-M was never actually enforced. Caught reviewing PR #3.
+     */
+    mapping(uint256 => mapping(address => bool)) private _hasApproved;
+
+    /**
+     * @notice A request was created but has NOT run: it needs more approvals.
+     * @param executionId     The pending request.
+     * @param approvalsNeeded How many further approvals are required.
+     * @dev Without this, a request from an ACTION key looked identical to a
+     *      successful one from the caller's side — no event said "still
+     *      waiting", so an integrator expecting 1-of-1 execution would hang
+     *      with no signal. Emitted only when the request does not auto-execute.
+     */
+    event ExecutionPending(uint256 indexed executionId, uint256 approvalsNeeded);
+
+    /**
+     * @notice Set how many approvals an execution request needs.
+     * @dev Management-key only. Floor of 2 is deliberate: see executionThreshold.
+     */
+    function setExecutionThreshold(uint256 _threshold) external onlyManagementKey {
+        if (_threshold < 2) revert ThresholdAllowsSelfApproval(_threshold);
+        emit ExecutionThresholdUpdated(executionThreshold, _threshold);
+        executionThreshold = _threshold;
     }
 
     /**
@@ -332,14 +382,26 @@ contract OnchainID is IOnchainID, Ownable, ReentrancyGuard {
             value: _value,
             data: _data,
             executed: false,
-            approvals: 1
+            approvals: 1,
+            requester: msg.sender
         });
 
         emit ExecutionRequested(executionId, _to, _value, _data);
 
-        // Auto-execute if sender is owner or has management key
+        // Auto-execute if sender is owner or has management key.
+        //
+        // THE OPERATING MODEL, stated once because it is easy to misread:
+        //   MANAGEMENT key (and the owner) -> executes immediately, 1-of-1.
+        //     This is where automation belongs: a relayer or bot holding a
+        //     management key is unaffected by executionThreshold.
+        //   ACTION key -> PROPOSES only. The request waits for an independent
+        //     approver, because approve() refuses self-approval. An action key
+        //     that could also approve itself would be 1-of-1 in disguise.
         if (msg.sender == owner() || keyHasPurpose(keccak256(abi.encodePacked(msg.sender)), MANAGEMENT_KEY)) {
             _executeRequest(executionId);
+        } else {
+            // Requester's own approval counts as the first, so one fewer is needed.
+            emit ExecutionPending(executionId, executionThreshold - 1);
         }
 
         return executionId;
@@ -353,11 +415,26 @@ contract OnchainID is IOnchainID, Ownable, ReentrancyGuard {
         require(!executionRequests[_id].executed, "OnchainID: Already executed");
 
         if (_approve) {
+            // An ACTION key may PROPOSE; it must not also be the one that
+            // approves its own proposal. This function used to execute on the
+            // first approval with no check on who was approving, so a single
+            // action key could call execute() then approve() and move
+            // everything the identity holds — collapsing the multi-key model
+            // to 1-of-1. A MANAGEMENT key still auto-executes in execute().
+            if (msg.sender == executionRequests[_id].requester) revert SelfApprovalNotAllowed();
+
+            // One approver, one approval. Approvals were counted PER CALL, so a
+            // single independent key satisfied any threshold above 2 by calling
+            // approve() repeatedly — the configured N-of-M was never enforced.
+            if (_hasApproved[_id][msg.sender]) revert AlreadyApproved();
+            _hasApproved[_id][msg.sender] = true;
+
             executionRequests[_id].approvals++;
             emit Approved(_id, true);
 
-            // Execute if enough approvals (simplified: 1 approval needed)
-            _executeRequest(_id);
+            if (executionRequests[_id].approvals >= executionThreshold) {
+                _executeRequest(_id);
+            }
         } else {
             emit Approved(_id, false);
         }
