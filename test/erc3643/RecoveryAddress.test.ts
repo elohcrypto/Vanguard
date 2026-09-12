@@ -103,9 +103,10 @@ describe("recoveryAddress", function () {
     expect(await token.isFrozen(fresh.address), "an administrative freeze must survive recovery").to.be.true;
   });
 
-  it("refuses to recover into a wallet that already holds tokens", async function () {
+  it("refuses to recover into a wallet registered to a different identity", async function () {
     await token.mint(other.address, E("50"));
-    await expect(token.recoveryAddress(lost.address, other.address, lostId)).to.be.reverted;
+    await expect(token.recoveryAddress(lost.address, other.address, lostId))
+      .to.be.revertedWith("New wallet already has identity");
   });
 
   it("reverts cleanly when the token is not an agent of the registry", async function () {
@@ -121,5 +122,64 @@ describe("recoveryAddress", function () {
   it("does not run while the token is paused", async function () {
     await token.pause();
     await expect(token.recoveryAddress(lost.address, fresh.address, lostId)).to.be.reverted;
+  });
+
+  // Found reviewing PR #4: the registry is shared by every token, so the first
+  // token's recovery moves the person's identity and every OTHER token then saw
+  // identity(lost) == 0 and reverted "Invalid identity", leaving those balances
+  // on a wallet that could never transfer again.
+  describe("with a second token on the same registry", function () {
+    let vgt: any;
+
+    beforeEach(async function () {
+      vgt = await (await ethers.getContractFactory("Token")).deploy(
+        "Gov", "VGT", await idReg.getAddress(), await rules.getAddress()
+      );
+      await rules.setTokenIdentityRegistry(await vgt.getAddress(), await idReg.getAddress());
+      await idReg.addAgent(await vgt.getAddress());
+      await vgt.mint(lost.address, E("50"));
+      await token.recoveryAddress(lost.address, fresh.address, lostId); // first token moves the identity
+    });
+
+    it("still recovers the second token, even if the new wallet already holds some", async function () {
+      await vgt.mint(fresh.address, E("5")); // the new wallet is already in use for this token
+      await vgt.freezePartialTokens(lost.address, E("20"));
+      await vgt.freezePartialTokens(fresh.address, E("1"));
+      const before = await idReg.registeredIdentityCount();
+
+      await expect(vgt.recoveryAddress(lost.address, fresh.address, lostId)).to.not.be.reverted;
+
+      expect(await vgt.balanceOf(fresh.address)).to.equal(E("55"));
+      expect(await vgt.balanceOf(lost.address)).to.equal(0n);
+      expect(await vgt.frozenTokens(fresh.address), "frozen tokens accumulate, not overwrite").to.equal(E("21"));
+      expect(await idReg.registeredIdentityCount()).to.equal(before);
+      await expect(vgt.connect(fresh).transfer(other.address, E("10"))).to.not.be.reverted;
+    });
+
+    it("refuses if the lost wallet has since been registered to someone else", async function () {
+      const OID = await ethers.getContractFactory("OnchainID");
+      await idReg.registerIdentity(lost.address, await (await OID.deploy(owner.address)).getAddress(), 840);
+      await expect(vgt.recoveryAddress(lost.address, fresh.address, lostId)).to.be.revertedWith("Invalid identity");
+    });
+
+    it("cannot pull an unrelated deregistered wallet into the recovered one", async function () {
+      // `other` holds tokens, then is offboarded: identity(other) == 0, exactly
+      // like the lost wallet after the first recovery. The sibling-token path
+      // must still prove the source wallet belonged to THIS identity.
+      await vgt.mint(other.address, E("30"));
+      await idReg.deleteIdentity(other.address);
+
+      await expect(vgt.recoveryAddress(other.address, fresh.address, lostId)).to.be.revertedWith("Invalid identity");
+      expect(await vgt.balanceOf(other.address)).to.equal(E("30"));
+    });
+
+    it("a recycled wallet does not keep the old identity's recovery claim", async function () {
+      const OID = await ethers.getContractFactory("OnchainID");
+      await idReg.registerIdentity(lost.address, await (await OID.deploy(owner.address)).getAddress(), 840);
+      await vgt.mint(lost.address, E("1")); // the new occupant's money
+      await idReg.deleteIdentity(lost.address);
+
+      await expect(vgt.recoveryAddress(lost.address, fresh.address, lostId)).to.be.revertedWith("Invalid identity");
+    });
   });
 });

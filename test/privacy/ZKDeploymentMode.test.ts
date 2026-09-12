@@ -42,4 +42,56 @@ describe("ZK deployment mode", function () {
       /Real ZK Verifiers/.test(src) && !/testingMode|zkTestingMode|MOCK/i.test(src);
     expect(claimsRealUnconditionally, "log must reflect the actual mode").to.be.false;
   });
+
+  // Found reviewing PR #4: deploying in real mode set state.zkMode = 'real' but
+  // nothing initialised the real proof generator, so every proof action in the
+  // default demo crashed on a null generator instead of generating a proof.
+  it("the demo initialises the real proof generator before using it (real mode)", async function () {
+    this.timeout(120_000);
+    const ContractDeployer = require("../../demo/core/ContractDeployer");
+    const DemoState = require("../../demo/core/DemoState");
+    const { EnhancedLogger } = require("../../demo/logging");
+    const PrivacyModule = require("../../demo/modules/PrivacyModule");
+
+    const state = new DemoState();
+    if (state.initialize) await state.initialize();
+    state.signers = await ethers.getSigners();
+    const deployer = new ContractDeployer(state, new EnhancedLogger());
+
+    // A stand-in for ProofGenerator: the only thing the demo may rely on is
+    // that initializeRealProofGenerator() populates state.realProofGenerator.
+    let generatorUsed = false;
+    const fakeProofGenerator = {
+      async initializeRealProofGenerator() {
+        state.realProofGenerator ??= {
+          async generateWhitelistProof() {
+            generatorUsed = true;
+            return { proof: { a: [0, 0], b: [[0, 0], [0, 0]], c: [0, 0] }, publicSignals: [1] };
+          },
+        };
+      },
+    };
+    const privacy = new PrivacyModule(state, new EnhancedLogger(), async () => "1", fakeProofGenerator);
+
+    const logged: string[] = [];
+    const origLog = console.log, origErr = console.error;
+    console.log = (...a: unknown[]) => { logged.push(a.join(" ")); };
+    console.error = (...a: unknown[]) => { logged.push(a.join(" ")); };
+    const prevMode = process.env.ZK_TESTING_MODE;
+    delete process.env.ZK_TESTING_MODE; // the default: real verifier
+    try {
+      await deployer.deployAllContracts();
+      await deployer.deployComplianceRules();
+      await deployer.deployOracleSystem();
+      await privacy.deployPrivacySystem();
+      expect(state.zkMode).to.equal("real");
+      await privacy.submitWhitelistMembershipProof();
+    } finally {
+      console.log = origLog; console.error = origErr;
+      if (prevMode !== undefined) process.env.ZK_TESTING_MODE = prevMode;
+    }
+
+    expect(logged.join("\n")).to.not.match(/Cannot read properties of null/);
+    expect(generatorUsed, "real-mode demo must generate through the real generator").to.be.true;
+  });
 });

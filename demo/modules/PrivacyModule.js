@@ -76,7 +76,17 @@ class PrivacyModule {
             this.state.zkMode = zkTestingMode ? 'mock' : 'real';
             console.log(`   ZK proof mode: ${this.state.zkMode.toUpperCase()} (matches the deployed verifier)`);
             if (!zkTestingMode) {
-                console.log('   ℹ️  Real mode needs generated proofs - run `npm run setup:zk` first,');
+                // The proof actions read state.realProofGenerator directly, and
+                // only the mode toggle ever populated it. Deploying straight into
+                // real mode therefore crashed every proof action on a null
+                // generator. Initialise it here, where the mode is decided.
+                try {
+                    await this.proofGenerator.initializeRealProofGenerator();
+                } catch (error) {
+                    console.log(`   ⚠️  Real proof generator failed to initialise: ${error.message}`);
+                    console.log('      Proof actions will fail until this is fixed, or redeploy with ZK_TESTING_MODE=1.');
+                }
+                console.log('   ℹ️  Real mode needs compiled circuits - run `npm run setup:zk` first,');
                 console.log('      or set ZK_TESTING_MODE=1 to drive the flow with mock proofs.');
             }
 

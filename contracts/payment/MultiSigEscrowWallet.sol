@@ -79,19 +79,22 @@ contract MultiSigEscrowWallet is ReentrancyGuard {
 
     /**
      * @notice True once the factory has funded this escrow.
-     * @dev Funding was previously gated only on `state == Active` — the state
-     *      BOTH before and after funding — so fundEscrowWallet could run
-     *      repeatedly. Release and refund pay fixed sums (amount and the fees
-     *      are immutable), so each extra funding was stranded in the wallet
-     *      with no sweep function and no way out. This flag makes funding
-     *      idempotent: it removes the money-losing path rather than guarding it.
+     * @dev Funding used to be gated only on `state == Active`, true both before
+     *      and after funding, so fundEscrowWallet ran repeatedly and each extra
+     *      funding was stranded (release and refund pay fixed sums). This flag
+     *      stops the factory path; anything else that arrives is returned by
+     *      sweepExcess once the escrow is settled.
      */
     bool public funded;
 
-    /// @dev Only the factory may mark this escrow funded.
-    error OnlyFactory();
-    /// @dev This escrow has already been funded.
-    error AlreadyFunded();
+    error OnlyFactory();        // markFunded: caller is not the factory
+    error AlreadyFunded();      // markFunded: already set
+    error EscrowStillActive();  // sweepExcess: escrow not yet Released/Refunded
+    error NothingToSweep();     // sweepExcess: balance is zero
+    error SweepFailed();        // sweepExcess: token transfer returned false
+
+    /// @notice Tokens beyond the escrow's own settlement were returned.
+    event ExcessSwept(address indexed to, uint256 amount);
 
     /**
      * @notice Record that the factory has funded this escrow.
@@ -409,7 +412,26 @@ contract MultiSigEscrowWallet is ReentrancyGuard {
         
         _refundToPayer();
     }
-    
+
+    /**
+     * @notice Return tokens that reached this escrow outside the factory's single
+     *         funding. `funded` only stops a second FACTORY funding; any verified
+     *         holder can transfer here directly, and release/refund pay fixed
+     *         sums, so the rest sat here forever. Anyone may call it once settled.
+     *         Goes to the payer, the party that funds escrows. If none ever
+     *         identified themselves (marketplace escrow settled from direct
+     *         transfers) it goes to the platform fee wallet, which release
+     *         already pays, rather than to address(0) where it would strand.
+     */
+    function sweepExcess() external nonReentrant {
+        if (state != WalletState.Released && state != WalletState.Refunded) revert EscrowStillActive();
+        uint256 excess = vscToken.balanceOf(address(this));
+        if (excess == 0) revert NothingToSweep();
+        address to = payerSet ? payer : ownerWallet;
+        if (!vscToken.transfer(to, excess)) revert SweepFailed();
+        emit ExcessSwept(to, excess);
+    }
+
     // ========================================
     // VIEW FUNCTIONS
     // ========================================

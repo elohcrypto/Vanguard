@@ -35,6 +35,11 @@ contract IdentityRegistry is IIdentityRegistry, Ownable {
     // Mapping from wallet address to country code
     mapping(address => uint16) private _countries;
 
+    // Identity a wallet held before moveIdentity relocated it. Lets sibling
+    // tokens on this registry verify a recovery source after the first token
+    // has already moved the identity. Cleared when the wallet is re-registered.
+    mapping(address => address) private _formerIdentity;
+
     // Mapping of authorized agents
     mapping(address => bool) private _agents;
 
@@ -88,6 +93,8 @@ contract IdentityRegistry is IIdentityRegistry, Ownable {
     function _storeIdentity(address _userAddress, address _identity, uint16 _country) private {
         _identities[_userAddress] = _identity;
         _countries[_userAddress] = _country;
+        // A recycled wallet must not keep a stale "formerly belonged to" claim.
+        delete _formerIdentity[_userAddress];
         // New registration only. updateIdentity replaces an existing entry and
         // must not change the count.
         registeredIdentityCount += 1;
@@ -146,7 +153,7 @@ contract IdentityRegistry is IIdentityRegistry, Ownable {
      *      is created or destroyed, so the governance quorum denominator is
      *      unaffected.
      */
-    function moveIdentity(address _fromWallet, address _toWallet) external onlyAgent {
+    function moveIdentity(address _fromWallet, address _toWallet) external override onlyAgent {
         if (_toWallet == address(0)) revert InvalidNewWallet();
         if (_identities[_fromWallet] == address(0)) revert IdentityNotRegistered(_fromWallet);
         if (_identities[_toWallet] != address(0)) revert WalletAlreadyHasIdentity(_toWallet);
@@ -158,10 +165,20 @@ contract IdentityRegistry is IIdentityRegistry, Ownable {
         _countries[_toWallet] = country;
         delete _identities[_fromWallet];
         delete _countries[_fromWallet];
+        // Remember whose wallet this was. Sibling tokens on the same registry
+        // recover AFTER the identity has moved, and need to prove the lost
+        // wallet really belonged to this identity rather than being any
+        // unregistered address that happens to hold tokens.
+        _formerIdentity[_fromWallet] = identityAddr;
 
         emit IdentityStored(_toWallet, identityAddr);
         emit CountryUpdated(identityAddr, country);
         emit IdentityUnstored(_fromWallet, identityAddr);
+    }
+
+    /// @inheritdoc IIdentityRegistry
+    function formerIdentity(address _wallet) external view override returns (address) {
+        return _formerIdentity[_wallet];
     }
 
     function updateIdentity(address _userAddress, address _identity) external onlyAgent {

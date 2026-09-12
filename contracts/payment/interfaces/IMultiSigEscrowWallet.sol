@@ -40,6 +40,7 @@ interface IMultiSigEscrowWallet {
     event FundsRefunded(address indexed payer, uint256 totalAmount);
     event DisputeRaised(address indexed payer, uint256 timestamp);
     event DisputeResolved(address indexed investor, bool refunded);
+    event ExcessSwept(address indexed to, uint256 amount);
     
     // ========================================
     // FUNCTIONS
@@ -69,7 +70,11 @@ interface IMultiSigEscrowWallet {
     function signAsInvestor(bool releaseToPayee) external;
 
     function manualRefund() external;
-    
+
+    /// @notice Return tokens that arrived outside the factory funding to the
+    ///         payer. Anyone may call it once the escrow is Released or Refunded.
+    function sweepExcess() external;
+
     // ========================================
     // VIEW FUNCTIONS
     // ========================================
