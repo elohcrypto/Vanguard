@@ -32,7 +32,7 @@ describe("Oracle consensus is bound to the query subject", function () {
         await blacklistOracle.waitForDeployment();
 
         for (const o of [oracle1, oracle2, oracle3]) {
-            await oracleManager.registerOracle(o.address, "o", "d", 500);
+            await oracleManager["registerOracle(address,string,string,uint256)"](o.address, "o", "d", 500);
         }
     });
 
