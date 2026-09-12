@@ -268,11 +268,13 @@ npx hardhat coverage
 - ✅ **KYC/AML Required**: Only verified users can participate in governance
 
 ### **6. Enhanced Escrow System**
-- ✅ **2-of-3 Multisig**: Investor MUST sign + (Payer OR Payee)
-- ✅ **One-Time-Use Wallets**: Unique escrow wallet per payment
-- ✅ **Dispute Resolution**: 14-day dispute window with investor mediation
-- ✅ **Fee Distribution**: Auto-distribution (3% investor, 2% owner)
-- ✅ **Shipment Proof**: Proof submission with dispute mechanism
+- ✅ **2-of-3 Multisig, Explicit Direction**: Investor MUST sign + (Payer OR Payee). The investor states release or refund; the matching counterparty signature must already be there, it is never inferred from who signed first
+- ✅ **One-Time-Use Wallets**: Unique escrow wallet per payment, funded once through the factory (`EscrowAlreadyFunded` on a second attempt)
+- ✅ **Verified Shipment Proof**: Signed by the payee and bound to the escrow address and chain id, so it cannot be replayed; opens the 14-day dispute window
+- ✅ **Dispute Resolution**: Payer may dispute within the window; the investor refunds or reopens with all signatures cleared
+- ✅ **Fee Distribution**: Fixed at creation (3% investor, 2% owner), paid on release
+- ✅ **Sweep**: Tokens sent to a settled escrow outside the factory are returned by `sweepExcess()` (demo option 70a)
+- 📖 Step by step, with the demo option for each step: [Escrow Payment Workflow](/docs/SYSTEM_WORKFLOW_GUIDE.md#escrow-payment-workflow)
 
 ### **7. Payment Protocol**
 - ✅ **Escrow-Based Payments**: VanguardPaymentProtocol with state management
