@@ -199,6 +199,11 @@ contract MultiSigEscrowWallet is ReentrancyGuard {
             msg.sender == investor || msg.sender == owner || msg.sender == factory,
             "Only investor, owner, or factory"
         );
+        // The constructor skips the investor/payer check for a marketplace
+        // escrow (payer unknown). Close the same invariant here: the factory's
+        // first-funder-becomes-payer path and a direct setPayer both land on
+        // this line, so an investor cannot make itself the payer later.
+        if (_payer == investor) revert InvestorCannotBePayer();
 
         payer = _payer;
         payerSet = true;

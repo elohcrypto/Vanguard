@@ -914,6 +914,29 @@ describe("Enhanced Escrow System", function () {
             ).to.not.be.reverted;
         });
 
+        // Qodo/Augment on PR #7: a marketplace escrow (payer unknown) skipped
+        // the constructor check, and setPayer accepted the investor.
+        it("marketplace: the investor cannot fund an unknown-payer escrow (would become payer)", async function () {
+            await factory.connect(investor).createEscrowWallet(ethers.ZeroAddress, payee.address, PAYMENT_AMOUNT);
+            const wallet = (await ethers.getContractFactory("MultiSigEscrowWallet")).attach(await factory.getWalletAddress(1));
+            const investorId = await (await ethers.getContractFactory("OnchainID")).deploy(investor.address);
+            await identityRegistry.registerIdentity(investor.address, await investorId.getAddress(), 840);
+            await vscToken.transfer(investor.address, TOTAL_AMOUNT);
+            await vscToken.connect(investor).approve(await factory.getAddress(), TOTAL_AMOUNT);
+            await expect(factory.connect(investor).fundEscrowWallet(1))
+                .to.be.revertedWithCustomError(wallet, "InvestorCannotBePayer");
+            expect(await wallet.payerSet()).to.equal(false);
+        });
+
+        it("marketplace: setPayer(investor) is rejected, a distinct payer is accepted", async function () {
+            await factory.connect(investor).createEscrowWallet(ethers.ZeroAddress, payee.address, PAYMENT_AMOUNT);
+            const wallet = (await ethers.getContractFactory("MultiSigEscrowWallet")).attach(await factory.getWalletAddress(1));
+            await expect(wallet.connect(investor).setPayer(investor.address))
+                .to.be.revertedWithCustomError(wallet, "InvestorCannotBePayer");
+            await wallet.connect(investor).setPayer(payer.address);
+            expect(await wallet.payer()).to.equal(payer.address);
+        });
+
         it("wallet constructor rejects investor == payee (defence in depth)", async function () {
             const W = await ethers.getContractFactory("MultiSigEscrowWallet");
             await expect(
