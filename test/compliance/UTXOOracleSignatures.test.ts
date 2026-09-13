@@ -28,14 +28,16 @@ describe("UTXOCompliance list updates: bound, nonced, distinct-signer, caller-ga
     utxoAddr = await utxo.getAddress();
   });
 
+  const WL_TAG = ethers.keccak256(ethers.toUtf8Bytes("UTXOCompliance.updateWhitelistStatus"));
+  const BL_TAG = ethers.keccak256(ethers.toUtf8Bytes("UTXOCompliance.updateBlacklistStatus"));
   async function wlSig(s: SignerWithAddress, u: string, w: boolean, tier: number, nonce: bigint) {
     const h = ethers.solidityPackedKeccak256(
-      ["address", "uint256", "address", "bool", "uint8", "uint256"], [utxoAddr, chainId, u, w, tier, nonce]);
+      ["bytes32", "address", "uint256", "address", "bool", "uint8", "uint256"], [WL_TAG, utxoAddr, chainId, u, w, tier, nonce]);
     return s.signMessage(ethers.getBytes(h));
   }
   async function blSig(s: SignerWithAddress, u: string, b: boolean, sev: number, reason: string, nonce: bigint) {
     const h = ethers.solidityPackedKeccak256(
-      ["address", "uint256", "address", "bool", "uint8", "string", "uint256"], [utxoAddr, chainId, u, b, sev, reason, nonce]);
+      ["bytes32", "address", "uint256", "address", "bool", "uint8", "string", "uint256"], [BL_TAG, utxoAddr, chainId, u, b, sev, reason, nonce]);
     return s.signMessage(ethers.getBytes(h));
   }
 
@@ -101,6 +103,40 @@ describe("UTXOCompliance list updates: bound, nonced, distinct-signer, caller-ga
       await expect(utxo.connect(o3).updateBlacklistStatus(user.address, true, sev, "r", s))
         .to.be.revertedWith("Invalid oracle signature");
     }
+  });
+
+  // Qodo on PR #10 (1): without an operation tag the whitelist(tier 4) and
+  // blacklist(severity 4, reason "") payloads packed to identical bytes, so an
+  // emergency oracle's pending WHITELIST signature could be replayed as a
+  // blacklist update by any other oracle, consuming the shared nonce.
+  it("an emergency oracle's whitelist signature cannot be consumed as a blacklist update", async () => {
+    await oracleManager.setEmergencyOracle(o3.address, true);
+    const n = await utxo.listNonce(user.address);
+    const wl = await wlSig(o3, user.address, true, 4, n); // approve tier 4
+    await expect(utxo.connect(o1).updateBlacklistStatus(user.address, true, 4, "", wl))
+      .to.be.revertedWith("Invalid oracle signature");
+    expect((await utxo.getBlacklistStatus(user.address)).isBlacklisted).to.equal(false);
+    expect(await utxo.listNonce(user.address)).to.equal(n); // nothing consumed
+  });
+
+  // Qodo on PR #10 (2): pausing clears only `active`; registration alone must
+  // not be enough for the caller, a whitelist signer, or the emergency signer.
+  it("a paused oracle can neither call nor sign", async () => {
+    const n = await utxo.listNonce(user.address);
+    const sigs = [await wlSig(o1, user.address, true, 2, n), await wlSig(o2, user.address, true, 2, n)];
+    await oracleManager.deactivateOracle(o2.address);
+    await expect(utxo.connect(o2).updateWhitelistStatus(user.address, true, 2, sigs))
+      .to.be.revertedWith("Unauthorized oracle");
+    await expect(utxo.connect(o1).updateWhitelistStatus(user.address, true, 2, sigs))
+      .to.be.revertedWithCustomError(utxo, "InactiveOracleSignature").withArgs(o2.address);
+    await oracleManager.setEmergencyOracle(o2.address, true);
+    const bl = await blSig(o2, user.address, true, 5, "r", n);
+    await expect(utxo.connect(o1).updateBlacklistStatus(user.address, true, 5, "r", bl))
+      .to.be.revertedWithCustomError(utxo, "InactiveOracleSignature").withArgs(o2.address);
+    // re-activated: the same whitelist set is accepted
+    await oracleManager.activateOracle(o2.address);
+    await expect(utxo.connect(o1).updateWhitelistStatus(user.address, true, 2, sigs))
+      .to.emit(utxo, "WhitelistStatusChanged");
   });
 
   it("blacklist: caller must be an oracle", async () => {

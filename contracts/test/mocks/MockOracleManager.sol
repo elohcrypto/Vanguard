@@ -33,6 +33,14 @@ contract MockOracleManager {
         return _oracleList.length;
     }
 
+    function deactivateOracle(address oracle) external {
+        _activeOracles[oracle] = false;
+    }
+
+    function activateOracle(address oracle) external {
+        _activeOracles[oracle] = true;
+    }
+
     function setEmergencyOracle(address oracle, bool isEmergency) external {
         _emergencyOracles[oracle] = isEmergency;
     }

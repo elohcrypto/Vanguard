@@ -43,9 +43,19 @@ contract UTXOCompliance is IUTXOCompliance, Ownable, ReentrancyGuard {
     ///         each successful update, so a signature set is single-use.
     mapping(address => uint256) public listNonce;
 
+    /// @dev Operation tags folded into each list-update digest. Whitelist and
+    ///      blacklist payloads otherwise pack to the same bytes (bool, uint8,
+    ///      nonce) when `reason` is empty, so an emergency oracle's whitelist
+    ///      signature could have been consumed as a blacklist update.
+    bytes32 public constant WHITELIST_UPDATE = keccak256("UTXOCompliance.updateWhitelistStatus");
+    bytes32 public constant BLACKLIST_UPDATE = keccak256("UTXOCompliance.updateBlacklistStatus");
+
     /// @notice Two of the supplied signatures recovered to the same oracle.
     ///         One key signing twice is not consensus.
     error DuplicateOracleSignature(address oracle);
+    /// @notice A recovered signer is registered but paused. Pausing must revoke
+    ///         an oracle's say, not just its registration status.
+    error InactiveOracleSignature(address oracle);
 
     // Modifiers
     modifier onlyValidUTXO(bytes32 utxoId) {
@@ -56,7 +66,9 @@ contract UTXOCompliance is IUTXOCompliance, Ownable, ReentrancyGuard {
 
     modifier onlyAuthorizedOracle() {
         require(
-            address(oracleManager) != address(0) && oracleManager.isRegisteredOracle(msg.sender),
+            address(oracleManager) != address(0) &&
+                oracleManager.isRegisteredOracle(msg.sender) &&
+                oracleManager.isActiveOracle(msg.sender),
             "Unauthorized oracle"
         );
         _;
@@ -416,12 +428,14 @@ contract UTXOCompliance is IUTXOCompliance, Ownable, ReentrancyGuard {
         // across UTXOCompliance deployments.
         address[] memory signingOracles = new address[](oracleSignatures.length);
         bytes32 messageHash = keccak256(
-            abi.encodePacked(address(this), block.chainid, user, isWhitelisted, tier, listNonce[user])
+            abi.encodePacked(WHITELIST_UPDATE, address(this), block.chainid, user, isWhitelisted, tier, listNonce[user])
         ).toEthSignedMessageHash();
 
         for (uint256 i = 0; i < oracleSignatures.length; i++) {
             address oracle = messageHash.recover(oracleSignatures[i]);
             require(oracleManager.isRegisteredOracle(oracle), "Invalid oracle signature");
+            // A paused oracle stays registered; pausing must revoke its say.
+            if (!oracleManager.isActiveOracle(oracle)) revert InactiveOracleSignature(oracle);
             // Consensus means DIFFERENT oracles: one signature supplied twice
             // used to count as two.
             for (uint256 j = 0; j < i; j++) {
@@ -455,11 +469,12 @@ contract UTXOCompliance is IUTXOCompliance, Ownable, ReentrancyGuard {
         // Digest binds this contract, chain and the user's nonce (see
         // updateWhitelistStatus).
         bytes32 messageHash = keccak256(
-            abi.encodePacked(address(this), block.chainid, user, isBlacklisted, severity, reason, listNonce[user])
+            abi.encodePacked(BLACKLIST_UPDATE, address(this), block.chainid, user, isBlacklisted, severity, reason, listNonce[user])
         ).toEthSignedMessageHash();
 
         address oracle = messageHash.recover(oracleSignature);
         require(oracleManager.isRegisteredOracle(oracle), "Invalid oracle signature");
+        if (!oracleManager.isActiveOracle(oracle)) revert InactiveOracleSignature(oracle);
 
         // This entry point takes ONE signature, so it is the emergency path by
         // definition and must always require an emergency oracle. The old gate
