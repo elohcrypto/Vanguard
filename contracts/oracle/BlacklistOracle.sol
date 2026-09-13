@@ -14,9 +14,12 @@ import "./interfaces/IOracleManager.sol";
  * @dev Oracle contract for managing blacklist consensus and attestations
  */
 contract BlacklistOracle is IOracle, Ownable, ReentrancyGuard, Pausable {
-    /// @notice A resolved consensus was replayed against an address the query
-    ///         was not raised for. Binds queryId consensus to its subject.
+    /// @notice A resolved consensus was replayed against an address, or under a
+    ///         policy, the query was not raised for. Binds queryId consensus to
+    ///         its subject and query type.
     error QuerySubjectMismatch();
+    /// @dev OracleManager.QUERY_TYPE_BLACKLIST: the only query type whose verdict this oracle applies.
+    uint8 private constant QUERY_TYPE_BLACKLIST = 2;
     using ECDSA for bytes32;
 
     enum SeverityLevel {
@@ -375,7 +378,11 @@ contract BlacklistOracle is IOracle, Ownable, ReentrancyGuard, Pausable {
         // this, a single active oracle self-signs an attestation naming any
         // victim and replays a benign, already-resolved queryId to blacklist
         // them: checkConsensus keys on queryId alone.
-        if (oracleManager.getQuerySubject(_queryId) != _subject) revert QuerySubjectMismatch();
+        // Bind to the subject AND the query type. Subject alone still let a
+        // resolved query of another kind (identity, compliance, whitelist)
+        // for this very subject be replayed as a blacklist verdict.
+        (address boundSubject, uint8 boundType) = oracleManager.getQueryBinding(_queryId);
+        if (boundSubject != _subject || boundType != QUERY_TYPE_BLACKLIST) revert QuerySubjectMismatch();
 
         if (hasConsensus) {
             if (consensusResult && !blacklistEntries[_subject].isBlacklisted) {

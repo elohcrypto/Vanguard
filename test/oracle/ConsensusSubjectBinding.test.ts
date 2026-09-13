@@ -6,7 +6,7 @@ import { OracleManager, WhitelistOracle, BlacklistOracle } from "../../typechain
 // A resolved consensus in OracleManager is keyed by queryId only. Both oracle
 // contracts read checkConsensus(queryId) and apply the verdict to whatever
 // `subject` the caller names, never checking the queryId was raised FOR that
-// subject. One active oracle can therefore self-sign an attestation that
+// subject, nor that it asked the question this oracle answers (query type). One active oracle can therefore self-sign an attestation that
 // points a benign, already-resolved query at any victim address.
 describe("Oracle consensus is bound to the query subject", function () {
     let oracleManager: OracleManager;
@@ -78,6 +78,28 @@ describe("Oracle consensus is bound to the query subject", function () {
         await expect(
             whitelistOracle.connect(oracle1).provideAttestation(victim.address, q, true, sig, "0x")
         ).to.be.revertedWithCustomError(whitelistOracle, "QuerySubjectMismatch");
+        expect(await whitelistOracle.isWhitelisted(victim.address)).to.equal(false);
+    });
+
+    // Augment on PR #5: subject binding alone let a resolved query of ANOTHER
+    // TYPE for the same subject be replayed as this oracle's verdict.
+    it("blacklist: rejects a resolved WHITELIST query for the same subject", async function () {
+        const q = await resolvedQuery(victim.address, WHITELIST, true); // KYC pass, not a blacklist finding
+        const sig = await sign(oracle1, victim.address, q, true);
+        await expect(
+            blacklistOracle.connect(oracle1).provideAttestation(victim.address, q, true, sig, "0x")
+        ).to.be.revertedWithCustomError(blacklistOracle, "QuerySubjectMismatch");
+        expect(await blacklistOracle.isBlacklisted(victim.address)).to.equal(false);
+    });
+
+    it("whitelist: rejects a resolved BLACKLIST/IDENTITY/COMPLIANCE query for the same subject", async function () {
+        for (const type of [BLACKLIST, 3, 4]) {
+            const q = await resolvedQuery(victim.address, type, true);
+            const sig = await sign(oracle1, victim.address, q, true);
+            await expect(
+                whitelistOracle.connect(oracle1).provideAttestation(victim.address, q, true, sig, "0x")
+            ).to.be.revertedWithCustomError(whitelistOracle, "QuerySubjectMismatch");
+        }
         expect(await whitelistOracle.isWhitelisted(victim.address)).to.equal(false);
     });
 
