@@ -638,14 +638,34 @@ contract ZKVerifierIntegrated is Ownable2Step, ReentrancyGuard {
         uint256[2][2] memory b,
         uint256[2] memory c,
         bytes memory packedSignals
-    ) internal pure returns (bytes32) {
-        return keccak256(abi.encodePacked(circuit, a, b, c, packedSignals));
+    ) internal view returns (bytes32) {
+        // The verifier INSTANCE is part of the key, not just the label: a
+        // proof accepted by the old verifier must not keep answering true from
+        // the cache after updateVerifier swaps in a new one. A rotation now
+        // invalidates every cached proof for that circuit at once.
+        return keccak256(abi.encodePacked(circuit, _verifierFor(circuit), a, b, c, packedSignals));
+    }
+
+    /// @dev Verifier contract currently bound to a circuit tag. testingMode has
+    ///      no verifier instance, so it keys on address(0).
+    function _verifierFor(string memory circuit) internal view returns (address) {
+        if (testingMode) return address(0);
+        bytes32 h = keccak256(bytes(circuit));
+        if (h == keccak256("whitelist")) return address(whitelistVerifier);
+        if (h == keccak256("blacklist")) return address(blacklistVerifier);
+        if (h == keccak256("jurisdiction")) return address(jurisdictionVerifier);
+        if (h == keccak256("accreditation")) return address(accreditationVerifier);
+        if (h == keccak256("compliance") || h == keccak256("compliance-proof")) return address(complianceVerifier);
+        return address(0);
     }
 
     /**
-     * @notice Cache key for a proof under a given circuit tag ("whitelist",
-     *         "blacklist", "jurisdiction", "accreditation", "compliance").
-     *         Callers of clearExpiredProofs compute keys with this.
+     * @notice Cache key for a proof under a given circuit tag: "whitelist"
+     *         (single and batch), "blacklist", "jurisdiction", "accreditation",
+     *         "compliance" (6-signal aggregation) or "compliance-proof"
+     *         (2-signal verifyComplianceProof). The key also folds in the
+     *         verifier instance bound to that tag, so it changes after
+     *         updateVerifier. Callers of clearExpiredProofs compute keys with this.
      */
     function proofCacheKey(
         string calldata circuit,
@@ -653,7 +673,7 @@ contract ZKVerifierIntegrated is Ownable2Step, ReentrancyGuard {
         uint256[2][2] calldata b,
         uint256[2] calldata c,
         uint256[] calldata publicSignals
-    ) external pure returns (bytes32) {
+    ) external view returns (bytes32) {
         return _proofCacheKey(circuit, a, b, c, abi.encodePacked(publicSignals));
     }
 

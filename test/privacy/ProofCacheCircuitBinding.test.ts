@@ -49,6 +49,25 @@ describe("Proof cache is bound to the circuit that verified it", () => {
     await expect(zk.verifyWhitelistMembership(a, b, c, [1])).to.emit(zk, "ProofCacheHit");
   });
 
+  // Augment on PR #9: the key used the tag, not the verifier instance, so a
+  // cached proof kept answering true after updateVerifier until expiry.
+  it("rotating a verifier invalidates proofs cached under the old one", async () => {
+    const zk = await deployReal();
+    await zk.verifyWhitelistMembership(a, b, c, [1]);
+    const keyBefore = await zk.proofCacheKey("whitelist", a, b, c, [1]);
+    // Swap to the default (rejecting) Groth16 verifier: the old acceptance must not survive.
+    const strict = await (await ethers.getContractFactory("WhitelistMembershipVerifier")).deploy();
+    await zk.updateVerifier("whitelist", await strict.getAddress());
+    expect(await zk.proofCacheKey("whitelist", a, b, c, [1])).to.not.equal(keyBefore);
+    expect(await zk.verifyWhitelistMembership.staticCall(a, b, c, [1])).to.equal(false);
+  });
+
+  it("the compliance-proof tag keys the 2-signal path, separate from compliance", async () => {
+    const zk = await deployReal();
+    expect(await zk.proofCacheKey("compliance-proof", a, b, c, [1, 2]))
+      .to.not.equal(await zk.proofCacheKey("compliance", a, b, c, [1, 2]));
+  });
+
   it("proofCacheKey exposes the bound key so clearExpiredProofs still works", async () => {
     const zk = await deployReal();
     await zk.verifyWhitelistMembership(a, b, c, [1]);
