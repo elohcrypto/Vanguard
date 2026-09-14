@@ -96,6 +96,8 @@ contract MultiSigEscrowWallet is ReentrancyGuard {
     ///         self-dealing at construction as defence in depth behind the factory.
     error InvestorCannotBePayee();
     error InvestorCannotBePayer();
+    /// @notice setPayer: the deferred (marketplace) payer is the payee.
+    error PayerCannotBePayee();
 
     /// @notice Tokens beyond the escrow's own settlement were returned.
     event ExcessSwept(address indexed to, uint256 amount);
@@ -204,6 +206,10 @@ contract MultiSigEscrowWallet is ReentrancyGuard {
         // first-funder-becomes-payer path and a direct setPayer both land on
         // this line, so an investor cannot make itself the payer later.
         if (_payer == investor) revert InvestorCannotBePayer();
+        // Mirror the factory's creation-time invariant: a marketplace payee
+        // must not fund the escrow and become its own payer, or it holds both
+        // shipment proof and the payer's signature/dispute.
+        if (_payer == payee) revert PayerCannotBePayee();
 
         payer = _payer;
         payerSet = true;

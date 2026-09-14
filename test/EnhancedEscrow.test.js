@@ -937,6 +937,20 @@ describe("Enhanced Escrow System", function () {
             expect(await wallet.payer()).to.equal(payer.address);
         });
 
+        // Integration review: the factory rejects payer == payee at creation, but a
+        // marketplace payee could fund first and become its own payer via setPayer.
+        it("marketplace: the payee cannot fund first and become its own payer", async function () {
+            await factory.connect(investor).createEscrowWallet(ethers.ZeroAddress, payee.address, PAYMENT_AMOUNT);
+            const wallet = (await ethers.getContractFactory("MultiSigEscrowWallet")).attach(await factory.getWalletAddress(1));
+            await vscToken.transfer(payee.address, TOTAL_AMOUNT);
+            await vscToken.connect(payee).approve(await factory.getAddress(), TOTAL_AMOUNT);
+            await expect(factory.connect(payee).fundEscrowWallet(1))
+                .to.be.revertedWithCustomError(wallet, "PayerCannotBePayee");
+            await expect(wallet.connect(investor).setPayer(payee.address))
+                .to.be.revertedWithCustomError(wallet, "PayerCannotBePayee");
+            expect(await wallet.payerSet()).to.equal(false);
+        });
+
         it("wallet constructor rejects investor == payee (defence in depth)", async function () {
             const W = await ethers.getContractFactory("MultiSigEscrowWallet");
             await expect(
