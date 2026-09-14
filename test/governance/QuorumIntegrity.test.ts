@@ -201,7 +201,7 @@ describe("cancelProposal under self-ownership", function () {
     }
     // Governance takes ownership of itself by vote.
     await gov.transferOwnership(govAddr);
-    await gov.connect(alice).createProposal(0, "self-own", "d", govAddr,
+    await gov.connect(alice).createProposal(4 /* SystemParameters: target is governance itself */, "self-own", "d", govAddr,
       gov.interface.encodeFunctionData("acceptOwnership"));
     await pass(1);
     await gov.executeProposal(1);
@@ -211,7 +211,7 @@ describe("cancelProposal under self-ownership", function () {
   it("a proposal can cancel ANOTHER proposal by vote (brake reachable)", async function () {
     await gov.connect(alice).createProposal(0, "victim", "d", owner.address, "0x");
     await gov.connect(bob).castVote(2, true, "");
-    await gov.connect(alice).createProposal(0, "cancel-2", "d", govAddr,
+    await gov.connect(alice).createProposal(4 /* SystemParameters: target is governance itself */, "cancel-2", "d", govAddr,
       gov.interface.encodeFunctionData("cancelProposal", [2]));
     await pass(3);
     await gov.executeProposal(3);
@@ -222,7 +222,7 @@ describe("cancelProposal under self-ownership", function () {
   });
 
   it("a proposal that cancels ITSELF cannot strand its deposits", async function () {
-    await gov.connect(alice).createProposal(0, "cancel-self", "d", govAddr,
+    await gov.connect(alice).createProposal(4 /* SystemParameters: target is governance itself */, "cancel-self", "d", govAddr,
       gov.interface.encodeFunctionData("cancelProposal", [2]));
     await pass(2);
     await gov.executeProposal(2);

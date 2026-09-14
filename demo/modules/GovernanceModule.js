@@ -114,6 +114,17 @@ class GovernanceModule {
       const investorTypeRegistryAddr = investorTypeRegistry
         ? await investorTypeRegistry.getAddress()
         : ethers.ZeroAddress;
+      if (!investorTypeRegistry) {
+        console.log(
+          "   ⚠️  No InvestorTypeRegistry deployed (option 51). Governance binds",
+        );
+        console.log(
+          "      InvestorTypeConfig proposals to the registry set HERE, so type-0",
+        );
+        console.log(
+          "      proposals and option 83b will be unavailable on this deployment.",
+        );
+      }
       const digitalToken = this.state.getContract("digitalToken");
       const tokenAddr = digitalToken
         ? await digitalToken.getAddress()
@@ -2083,6 +2094,18 @@ class GovernanceModule {
       console.log(`   Registry:      ${registryAddr}`);
       console.log(`   Owner:         ${ownerNow}`);
       console.log(`   Pending owner: ${pending}`);
+
+      const boundRegistry = await vanguardGovernance.boundTarget(0);
+      if (boundRegistry.toLowerCase() !== registryAddr.toLowerCase()) {
+        displayError(
+          "This governance was deployed against a different InvestorTypeRegistry.",
+        );
+        console.log(`   Bound InvestorTypeConfig target: ${boundRegistry}`);
+        console.log(
+          "   💡 Deploy the registry (option 51) BEFORE governance (option 74).",
+        );
+        return;
+      }
 
       if (ownerNow.toLowerCase() === govAddr.toLowerCase()) {
         console.log(

@@ -125,6 +125,18 @@ async function main() {
     async () => "n",
   );
 
+  // Deploy the InvestorTypeRegistry BEFORE governance, as option 51 precedes
+  // option 74 in the demo. VanguardGovernance binds each proposal type to the
+  // contract it governs at construction; a registry deployed afterwards is not
+  // the bound InvestorTypeConfig target and every proposal against it reverts
+  // TargetNotBoundToType.
+  const InvestorTypeRegistry = await ethers.getContractFactory(
+    "InvestorTypeRegistry",
+  );
+  const registry = await InvestorTypeRegistry.deploy();
+  await registry.waitForDeployment();
+  state.setContract("investorTypeRegistry", registry);
+
   const captured = [];
   const realLog = console.log;
   console.log = (...args) => captured.push(args.join(" "));
@@ -145,13 +157,6 @@ async function main() {
   //    a passed proposal. The registry is Ownable2Step and VanguardGovernance
   //    can only make external calls via executeProposal, so a bare
   //    transferOwnership must leave ownership where it was.
-  const InvestorTypeRegistry = await ethers.getContractFactory(
-    "InvestorTypeRegistry",
-  );
-  const registry = await InvestorTypeRegistry.deploy();
-  await registry.waitForDeployment();
-  state.setContract("investorTypeRegistry", registry);
-
   const govContract = state.getContract("vanguardGovernance");
   if (!govContract) {
     failures.push(
@@ -284,7 +289,12 @@ async function main() {
         await vgt.transfer(sgn.address, ethers.parseEther("100"));
       await vgt.connect(sgn).approve(govAddr2, ethers.MaxUint256);
     }
-    await govC.connect(alice).createProposal(0, "smoke wait", "d", owner.address, "0x");
+    // Type must match the target: a proposal against governance itself is
+    // SystemParameters (createProposal reverts TargetNotBoundToType otherwise).
+    // Governance has no fallback, so empty calldata would fail at execution;
+    // call a harmless view so the proposal EXECUTES and 79 can be checked.
+    await govC.connect(alice).createProposal(4, "smoke wait", "d", govAddr2,
+      govC.interface.encodeFunctionData("proposalCount"));
     const pid = await govC.proposalCount();
     await govC.connect(bob).castVote(pid, true, "y");
     await govC.connect(carol).castVote(pid, true, "y");

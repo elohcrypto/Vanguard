@@ -422,8 +422,8 @@ describe("Governance → ComplianceRules Integration Test", function () {
     it("Should reject a proposal that does not reach quorum", async function () {
       // Thresholds are set at construction and have no setter, so the
       // quorum cannot be raised. Instead grow the eligible-voter set
-      // until one vote is below the configured 20%: with >5 registered
-      // identities, 1 vote < 20%.
+      // until one vote is below the configured 25% (ComplianceRules tier):
+      // with >5 registered identities, 1 vote < 25%.
       const before = await identityRegistry.registeredIdentityCount();
       const signers = await ethers.getSigners();
       let added = 0;
@@ -448,7 +448,7 @@ describe("Governance → ComplianceRules Integration Test", function () {
       await vanguardGovernance
         .connect(voter1)
         .createProposal(
-          0,
+          1, // ComplianceRules: the bound target below is complianceRules
           "Low turnout proposal",
           "Only one voter participates",
           await complianceRules.getAddress(),
@@ -524,7 +524,7 @@ describe("Governance → ComplianceRules Integration Test", function () {
       await vanguardGovernance
         .connect(voter1)
         .createProposal(
-          0,
+          1, // ComplianceRules: the bound target below is complianceRules
           "Ignored proposal",
           "Nobody votes on this",
           await complianceRules.getAddress(),
@@ -570,7 +570,7 @@ describe("Governance → ComplianceRules Integration Test", function () {
       await vanguardGovernance
         .connect(voter1)
         .createProposal(
-          0,
+          1, // ComplianceRules: the bound target below is complianceRules
           "Snapshot test",
           "Quorum must use the creation-time count",
           await complianceRules.getAddress(),
@@ -639,7 +639,7 @@ describe("Governance → ComplianceRules Integration Test", function () {
       await vanguardGovernance
         .connect(voter1)
         .createProposal(
-          0,
+          1, // ComplianceRules: the bound target below is complianceRules
           "Advisory vs enforcement",
           "One voter only",
           await complianceRules.getAddress(),
