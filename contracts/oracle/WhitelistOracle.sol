@@ -14,6 +14,12 @@ import "./interfaces/IOracleManager.sol";
  * @dev Oracle contract for managing whitelist consensus and attestations
  */
 contract WhitelistOracle is IOracle, Ownable, ReentrancyGuard, Pausable {
+    /// @notice A resolved consensus was replayed against an address, or under a
+    ///         policy, the query was not raised for. Binds queryId consensus to
+    ///         its subject and query type.
+    error QuerySubjectMismatch();
+    /// @dev OracleManager.QUERY_TYPE_WHITELIST: the only query type whose verdict this oracle applies.
+    uint8 private constant QUERY_TYPE_WHITELIST = 1;
     using ECDSA for bytes32;
 
     struct WhitelistEntry {
@@ -305,6 +311,15 @@ contract WhitelistOracle is IOracle, Ownable, ReentrancyGuard, Pausable {
     function _updateWhitelistConsensus(address _subject, bytes32 _queryId, bool /* _result */) internal {
         // Get consensus from oracle manager
         (bool hasConsensus, bool consensusResult) = oracleManager.checkConsensus(_queryId);
+        // Bind the resolved consensus to the address it was raised for. Without
+        // this, a single active oracle self-signs an attestation naming any
+        // victim and replays a benign, already-resolved queryId to whitelist
+        // them: checkConsensus keys on queryId alone.
+        // Bind to the subject AND the query type. Subject alone still let a
+        // resolved query of another kind (identity, compliance, blacklist)
+        // for this very subject be replayed as a whitelist verdict.
+        (address boundSubject, uint8 boundType) = oracleManager.getQueryBinding(_queryId);
+        if (boundSubject != _subject || boundType != QUERY_TYPE_WHITELIST) revert QuerySubjectMismatch();
 
         if (hasConsensus) {
             if (consensusResult && !whitelistEntries[_subject].isWhitelisted) {

@@ -51,5 +51,12 @@ interface IOracleManager {
 
     function checkConsensus(bytes32 queryId) external view returns (bool hasConsensus, bool result);
 
+    /// @notice Subject and type an existing query was raised for; (address(0), 0)
+    ///         if unknown. Consumers bind a resolved consensus to the address AND
+    ///         the kind of question it answered, so one queryId cannot be replayed
+    ///         against another subject or another policy (a blacklist verdict is
+    ///         not a whitelist verdict).
+    function getQueryBinding(bytes32 queryId) external view returns (address subject, uint8 queryType);
+
     function submitQuery(address subject, uint8 queryType, bytes calldata data) external returns (bytes32 queryId);
 }
