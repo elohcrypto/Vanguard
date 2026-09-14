@@ -38,6 +38,11 @@ contract UTXOCompliance is IUTXOCompliance, Ownable, ReentrancyGuard {
     uint256 private _utxoCounter;
     uint256 public constant ORACLE_CONSENSUS_THRESHOLD = 2;
     uint256 public constant EMERGENCY_ORACLE_THRESHOLD = 1;
+    /// @notice Upper bound on signatures per whitelist update. The distinct-signer
+    ///         check is O(n^2); without a cap a registered oracle could submit
+    ///         thousands of signatures and burn the block gas limit. Matches
+    ///         OracleManager.MAX_ORACLES.
+    uint256 public constant MAX_ORACLE_SIGNATURES = 100;
 
     /// @notice Per-user nonce folded into every list-update digest. Bumped on
     ///         each successful update, so a signature set is single-use.
@@ -56,6 +61,8 @@ contract UTXOCompliance is IUTXOCompliance, Ownable, ReentrancyGuard {
     /// @notice A recovered signer is registered but paused. Pausing must revoke
     ///         an oracle's say, not just its registration status.
     error InactiveOracleSignature(address oracle);
+    /// @notice More than MAX_ORACLE_SIGNATURES supplied to a whitelist update.
+    error TooManyOracleSignatures();
 
     // Modifiers
     modifier onlyValidUTXO(bytes32 utxoId) {
@@ -422,6 +429,7 @@ contract UTXOCompliance is IUTXOCompliance, Ownable, ReentrancyGuard {
     ) external override onlyAuthorizedOracle {
         require(user != address(0), "Invalid user address");
         require(oracleSignatures.length >= ORACLE_CONSENSUS_THRESHOLD, "Insufficient oracle consensus");
+        if (oracleSignatures.length > MAX_ORACLE_SIGNATURES) revert TooManyOracleSignatures();
 
         // Digest binds this contract, chain and the user's nonce. The old one
         // (user, isWhitelisted, tier) was replayable forever, across chains and

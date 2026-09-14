@@ -139,6 +139,16 @@ describe("UTXOCompliance list updates: bound, nonced, distinct-signer, caller-ga
       .to.emit(utxo, "WhitelistStatusChanged");
   });
 
+  // Integration review: the distinct-signer loop is O(n^2); cap the array.
+  it("whitelist: rejects more than MAX_ORACLE_SIGNATURES signatures", async () => {
+    const max = Number(await utxo.MAX_ORACLE_SIGNATURES());
+    const n = await utxo.listNonce(user.address);
+    const one = await wlSig(o1, user.address, true, 2, n);
+    const tooMany = Array(max + 1).fill(one);
+    await expect(utxo.connect(o1).updateWhitelistStatus(user.address, true, 2, tooMany))
+      .to.be.revertedWithCustomError(utxo, "TooManyOracleSignatures");
+  });
+
   it("blacklist: caller must be an oracle", async () => {
     const n = await utxo.listNonce(user.address);
     const s = await blSig(o1, user.address, true, 4, "r", n);
