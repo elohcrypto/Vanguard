@@ -94,6 +94,11 @@ contract MultiSigEscrowWallet is ReentrancyGuard {
     error SweepFailed();        // sweepExcess: token transfer returned false
     /// @notice Investor coincides with a counterparty (payee/payer). Blocks
     ///         self-dealing at construction as defence in depth behind the factory.
+    /// @notice Investor tried to unilaterally refund after the payee shipped.
+    ///         Once proof exists a refund needs the payer as well (a dispute,
+    ///         or signAsPayer + signAsInvestor(false)); a 1-of-3 investor
+    ///         cannot rug a performer.
+    error RefundBlockedAfterShipment();
     error InvestorCannotBePayee();
     error InvestorCannotBePayer();
     /// @notice setPayer: the deferred (marketplace) payer is the payee.
@@ -426,6 +431,13 @@ contract MultiSigEscrowWallet is ReentrancyGuard {
             state == WalletState.Active || state == WalletState.Disputed,
             "Cannot refund in current state"
         );
+        // Block a unilateral refund once the payee has shipped: that path let a
+        // 1-of-3 investor rug a payee who performed. A funded-but-not-shipped
+        // escrow may still be refunded here. A shipped one needs a second
+        // party: either the payer disputes (raiseDispute, then resolveDispute
+        // or this function), or the payer counter-signs (signAsPayer, then
+        // signAsInvestor(false)).
+        if (state == WalletState.Active && shipmentProof.exists) revert RefundBlockedAfterShipment();
         
         _refundToPayer();
     }

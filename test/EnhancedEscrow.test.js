@@ -976,6 +976,56 @@ describe("Enhanced Escrow System", function () {
         });
     });
 
+    describe("Manual refund cannot rug a shipped payee", function () {
+        let wallet;
+
+        beforeEach(async function () {
+            await factory.registerInvestor(investor.address, investorWallet.address);
+            await factory.connect(investor).createEscrowWallet(
+                payer.address,
+                payee.address,
+                PAYMENT_AMOUNT
+            );
+            const walletAddress = await factory.getWalletAddress(1);
+            const MultiSigEscrowWallet = await ethers.getContractFactory("MultiSigEscrowWallet");
+            wallet = MultiSigEscrowWallet.attach(walletAddress);
+            await vscToken.connect(payer).approve(await factory.getAddress(), TOTAL_AMOUNT);
+            await factory.connect(payer).fundEscrowWallet(1);
+        });
+
+        async function ship() {
+            const data = JSON.stringify({ tracking: "1Z", carrier: "UPS" });
+            const hash = ethers.keccak256(ethers.toUtf8Bytes(data));
+            const sig = await signProof(payee, await wallet.getAddress(), hash);
+            await wallet.connect(payee).submitShipmentProof(data, hash, sig);
+        }
+
+        it("blocks manualRefund once the payee has shipped (Active + proof)", async function () {
+            await ship();
+            await expect(
+                wallet.connect(investor).manualRefund()
+            ).to.be.revertedWithCustomError(wallet, "RefundBlockedAfterShipment");
+            expect(await wallet.state()).to.equal(0); // still Active, funds untouched
+        });
+
+        it("still allows manualRefund before shipment (Active, no proof)", async function () {
+            const before = await vscToken.balanceOf(payer.address);
+            await wallet.connect(investor).manualRefund();
+            expect((await vscToken.balanceOf(payer.address)) - before).to.equal(TOTAL_AMOUNT);
+            expect(await wallet.state()).to.equal(2); // Refunded
+        });
+
+        it("still allows manualRefund on a raised dispute (Disputed)", async function () {
+            await ship();
+            await wallet.connect(payer).raiseDispute();
+            expect(await wallet.state()).to.equal(3); // Disputed
+            const before = await vscToken.balanceOf(payer.address);
+            await wallet.connect(investor).manualRefund();
+            expect((await vscToken.balanceOf(payer.address)) - before).to.equal(TOTAL_AMOUNT);
+            expect(await wallet.state()).to.equal(2); // Refunded
+        });
+    });
+
     describe("Fee Calculation", function () {
         it("Should calculate fees correctly", async function () {
             const fees = await factory.calculateFees(PAYMENT_AMOUNT);
