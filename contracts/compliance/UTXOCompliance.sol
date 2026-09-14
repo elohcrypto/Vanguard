@@ -38,6 +38,31 @@ contract UTXOCompliance is IUTXOCompliance, Ownable, ReentrancyGuard {
     uint256 private _utxoCounter;
     uint256 public constant ORACLE_CONSENSUS_THRESHOLD = 2;
     uint256 public constant EMERGENCY_ORACLE_THRESHOLD = 1;
+    /// @notice Upper bound on signatures per whitelist update. The distinct-signer
+    ///         check is O(n^2); without a cap a registered oracle could submit
+    ///         thousands of signatures and burn the block gas limit. Matches
+    ///         OracleManager.MAX_ORACLES.
+    uint256 public constant MAX_ORACLE_SIGNATURES = 100;
+
+    /// @notice Per-user nonce folded into every list-update digest. Bumped on
+    ///         each successful update, so a signature set is single-use.
+    mapping(address => uint256) public listNonce;
+
+    /// @dev Operation tags folded into each list-update digest. Whitelist and
+    ///      blacklist payloads otherwise pack to the same bytes (bool, uint8,
+    ///      nonce) when `reason` is empty, so an emergency oracle's whitelist
+    ///      signature could have been consumed as a blacklist update.
+    bytes32 public constant WHITELIST_UPDATE = keccak256("UTXOCompliance.updateWhitelistStatus");
+    bytes32 public constant BLACKLIST_UPDATE = keccak256("UTXOCompliance.updateBlacklistStatus");
+
+    /// @notice Two of the supplied signatures recovered to the same oracle.
+    ///         One key signing twice is not consensus.
+    error DuplicateOracleSignature(address oracle);
+    /// @notice A recovered signer is registered but paused. Pausing must revoke
+    ///         an oracle's say, not just its registration status.
+    error InactiveOracleSignature(address oracle);
+    /// @notice More than MAX_ORACLE_SIGNATURES supplied to a whitelist update.
+    error TooManyOracleSignatures();
 
     // Modifiers
     modifier onlyValidUTXO(bytes32 utxoId) {
@@ -48,7 +73,9 @@ contract UTXOCompliance is IUTXOCompliance, Ownable, ReentrancyGuard {
 
     modifier onlyAuthorizedOracle() {
         require(
-            address(oracleManager) != address(0) && oracleManager.isRegisteredOracle(msg.sender),
+            address(oracleManager) != address(0) &&
+                oracleManager.isRegisteredOracle(msg.sender) &&
+                oracleManager.isActiveOracle(msg.sender),
             "Unauthorized oracle"
         );
         _;
@@ -399,20 +426,33 @@ contract UTXOCompliance is IUTXOCompliance, Ownable, ReentrancyGuard {
         bool isWhitelisted,
         uint8 tier,
         bytes[] calldata oracleSignatures
-    ) external override {
+    ) external override onlyAuthorizedOracle {
         require(user != address(0), "Invalid user address");
         require(oracleSignatures.length >= ORACLE_CONSENSUS_THRESHOLD, "Insufficient oracle consensus");
+        if (oracleSignatures.length > MAX_ORACLE_SIGNATURES) revert TooManyOracleSignatures();
 
-        // Verify oracle signatures
+        // Digest binds this contract, chain and the user's nonce. The old one
+        // (user, isWhitelisted, tier) was replayable forever, across chains and
+        // across UTXOCompliance deployments.
         address[] memory signingOracles = new address[](oracleSignatures.length);
-        // Create message hash without timestamp to avoid timing issues
-        bytes32 messageHash = keccak256(abi.encodePacked(user, isWhitelisted, tier)).toEthSignedMessageHash();
+        bytes32 messageHash = keccak256(
+            abi.encodePacked(WHITELIST_UPDATE, address(this), block.chainid, user, isWhitelisted, tier, listNonce[user])
+        ).toEthSignedMessageHash();
 
         for (uint256 i = 0; i < oracleSignatures.length; i++) {
             address oracle = messageHash.recover(oracleSignatures[i]);
             require(oracleManager.isRegisteredOracle(oracle), "Invalid oracle signature");
+            // A paused oracle stays registered; pausing must revoke its say.
+            if (!oracleManager.isActiveOracle(oracle)) revert InactiveOracleSignature(oracle);
+            // Consensus means DIFFERENT oracles: one signature supplied twice
+            // used to count as two.
+            for (uint256 j = 0; j < i; j++) {
+                if (signingOracles[j] == oracle) revert DuplicateOracleSignature(oracle);
+            }
             signingOracles[i] = oracle;
         }
+
+        listNonce[user]++;
 
         // Update whitelist status
         _whitelistedUsers[user] = isWhitelisted;
@@ -431,21 +471,26 @@ contract UTXOCompliance is IUTXOCompliance, Ownable, ReentrancyGuard {
         uint8 severity,
         string calldata reason,
         bytes calldata oracleSignature
-    ) external override {
+    ) external override onlyAuthorizedOracle {
         require(user != address(0), "Invalid user address");
 
-        // Verify oracle signature
-        // Create message hash without timestamp to avoid timing issues
-        bytes32 messageHash = keccak256(abi.encodePacked(user, isBlacklisted, severity, reason))
-            .toEthSignedMessageHash();
+        // Digest binds this contract, chain and the user's nonce (see
+        // updateWhitelistStatus).
+        bytes32 messageHash = keccak256(
+            abi.encodePacked(BLACKLIST_UPDATE, address(this), block.chainid, user, isBlacklisted, severity, reason, listNonce[user])
+        ).toEthSignedMessageHash();
 
         address oracle = messageHash.recover(oracleSignature);
         require(oracleManager.isRegisteredOracle(oracle), "Invalid oracle signature");
+        if (!oracleManager.isActiveOracle(oracle)) revert InactiveOracleSignature(oracle);
 
-        // For critical severity, allow single oracle (emergency)
-        if (severity < 4) {
-            require(oracleManager.isEmergencyOracle(oracle), "Non-emergency oracle cannot blacklist without consensus");
-        }
+        // This entry point takes ONE signature, so it is the emergency path by
+        // definition and must always require an emergency oracle. The old gate
+        // was `if (severity < 4)`: it demanded an emergency oracle for LOW
+        // severity and let any single oracle write severity >= 4 unchecked.
+        require(oracleManager.isEmergencyOracle(oracle), "Non-emergency oracle cannot blacklist without consensus");
+
+        listNonce[user]++;
 
         // Update blacklist status
         _blacklistedUsers[user] = isBlacklisted;

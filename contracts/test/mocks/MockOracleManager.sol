@@ -10,6 +10,7 @@ contract MockOracleManager {
     mapping(address => bool) private _activeOracles;
     mapping(address => string) private _oracleNames;
     address[] private _oracleList;
+    mapping(address => bool) private _emergencyOracles;
 
     function registerOracle(address oracle, string memory name) external {
         if (!_registeredOracles[oracle]) {
@@ -30,6 +31,22 @@ contract MockOracleManager {
 
     function getOracleCount() external view returns (uint256) {
         return _oracleList.length;
+    }
+
+    function deactivateOracle(address oracle) external {
+        _activeOracles[oracle] = false;
+    }
+
+    function activateOracle(address oracle) external {
+        _activeOracles[oracle] = true;
+    }
+
+    function setEmergencyOracle(address oracle, bool isEmergency) external {
+        _emergencyOracles[oracle] = isEmergency;
+    }
+
+    function isEmergencyOracle(address oracle) external view returns (bool) {
+        return _emergencyOracles[oracle];
     }
 
     function checkConsensus(bytes32) external pure returns (bool, bool) {

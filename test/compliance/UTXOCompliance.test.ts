@@ -157,9 +157,11 @@ describe("UTXO Compliance System", function () {
     describe("Whitelist Management", function () {
         it("Should update whitelist status with oracle consensus", async function () {
             // Create oracle signatures (without timestamp as per contract implementation)
+            // Digest is bound to this contract, chain and the user's list nonce.
             const message = ethers.solidityPackedKeccak256(
-                ['address', 'bool', 'uint8'],
-                [user1.address, true, 2]
+                ['bytes32', 'address', 'uint256', 'address', 'bool', 'uint8', 'uint256'],
+                [await utxoCompliance.WHITELIST_UPDATE(), await utxoCompliance.getAddress(), (await ethers.provider.getNetwork()).chainId,
+                 user1.address, true, 2, await utxoCompliance.listNonce(user1.address)]
             );
 
             const signatures = [];
@@ -168,7 +170,7 @@ describe("UTXO Compliance System", function () {
                 signatures.push(signature);
             }
 
-            const tx = await utxoCompliance.updateWhitelistStatus(
+            const tx = await utxoCompliance.connect(oracle1).updateWhitelistStatus(
                 user1.address,
                 true,
                 2,
