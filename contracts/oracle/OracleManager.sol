@@ -286,6 +286,16 @@ contract OracleManager is IOracleManager, Ownable, ReentrancyGuard, Pausable {
     }
 
     /**
+     * @dev Subject and type a query was raised for ((address(0), 0) if the query
+     *      never existed). Lets consumers reject a resolved consensus replayed at
+     *      another subject or under another policy.
+     */
+    function getQueryBinding(bytes32 _queryId) external view returns (address subject, uint8 queryType) {
+        Query storage query = queries[_queryId];
+        return (query.subject, query.queryType);
+    }
+
+    /**
      * @dev Get query result
      */
     function getQueryResult(

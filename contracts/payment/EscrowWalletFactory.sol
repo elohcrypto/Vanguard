@@ -15,6 +15,11 @@ import "../compliance/interfaces/IComplianceRules.sol";
  * @dev Payer and Payee must have valid KYC/AML (OnchainID with verified identity)
  */
 contract EscrowWalletFactory is AccessControl, ReentrancyGuard {
+    /// @notice The creating investor named itself as payee or payer. An
+    ///         investor who is also a counterparty holds two of the three
+    ///         signatures plus dispute resolution and can take the funds.
+    error InvestorCannotBePayee();
+    error InvestorCannotBePayer();
     /// @dev fundEscrowWallet: this escrow has already been funded once.
     error EscrowAlreadyFunded(uint256 paymentId);
 
@@ -205,6 +210,10 @@ contract EscrowWalletFactory is AccessControl, ReentrancyGuard {
         // Note: payer can be address(0) for marketplace scenarios (unknown payer)
         require(payee != address(0), "Invalid payee");
         require(payer != payee, "Payer cannot be payee");
+        // The investor (msg.sender) must not also be a counterparty: that would
+        // give one party two of three signatures plus dispute resolution.
+        if (msg.sender == payee) revert InvestorCannotBePayee();
+        if (msg.sender == payer) revert InvestorCannotBePayer();
         require(amount > 0, "Invalid amount");
 
         // ✅ KYC/AML COMPLIANCE: Payee must be verified
