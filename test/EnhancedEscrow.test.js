@@ -947,6 +947,19 @@ describe("Enhanced Escrow System", function () {
                 )
             ).to.be.revertedWithCustomError(W, "InvestorCannotBePayee");
         });
+
+        // Augment on PR #7: the payer guard at construction was only reached
+        // through the factory, which rejects first. Exercise it directly.
+        it("wallet constructor rejects investor == payer (defence in depth)", async function () {
+            const W = await ethers.getContractFactory("MultiSigEscrowWallet");
+            await expect(
+                W.deploy(
+                    1, investor.address /* payer==investor */, payee.address, investor.address,
+                    await vscToken.getAddress(), PAYMENT_AMOUNT, 0, 0,
+                    owner.address, investorWallet.address, ownerWallet.address
+                )
+            ).to.be.revertedWithCustomError(W, "InvestorCannotBePayer");
+        });
     });
 
     describe("Fee Calculation", function () {
