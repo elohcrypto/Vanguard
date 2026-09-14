@@ -92,6 +92,12 @@ contract MultiSigEscrowWallet is ReentrancyGuard {
     error EscrowStillActive();  // sweepExcess: escrow not yet Released/Refunded
     error NothingToSweep();     // sweepExcess: balance is zero
     error SweepFailed();        // sweepExcess: token transfer returned false
+    /// @notice Investor coincides with a counterparty (payee/payer). Blocks
+    ///         self-dealing at construction as defence in depth behind the factory.
+    error InvestorCannotBePayee();
+    error InvestorCannotBePayer();
+    /// @notice setPayer: the deferred (marketplace) payer is the payee.
+    error PayerCannotBePayee();
 
     /// @notice Tokens beyond the escrow's own settlement were returned.
     event ExcessSwept(address indexed to, uint256 amount);
@@ -154,6 +160,8 @@ contract MultiSigEscrowWallet is ReentrancyGuard {
         // Note: _payer can be address(0) for marketplace scenarios (unknown payer)
         require(_payee != address(0), "Invalid payee");
         require(_investor != address(0), "Invalid investor");
+        if (_investor == _payee) revert InvestorCannotBePayee();
+        if (_payer != address(0) && _investor == _payer) revert InvestorCannotBePayer();
         require(_vscToken != address(0), "Invalid token");
         require(_vscToken.code.length > 0, "MultiSigEscrowWallet: VSC token is not a contract");
         require(_amount > 0, "Invalid amount");
@@ -193,6 +201,15 @@ contract MultiSigEscrowWallet is ReentrancyGuard {
             msg.sender == investor || msg.sender == owner || msg.sender == factory,
             "Only investor, owner, or factory"
         );
+        // The constructor skips the investor/payer check for a marketplace
+        // escrow (payer unknown). Close the same invariant here: the factory's
+        // first-funder-becomes-payer path and a direct setPayer both land on
+        // this line, so an investor cannot make itself the payer later.
+        if (_payer == investor) revert InvestorCannotBePayer();
+        // Mirror the factory's creation-time invariant: a marketplace payee
+        // must not fund the escrow and become its own payer, or it holds both
+        // shipment proof and the payer's signature/dispute.
+        if (_payer == payee) revert PayerCannotBePayee();
 
         payer = _payer;
         payerSet = true;
