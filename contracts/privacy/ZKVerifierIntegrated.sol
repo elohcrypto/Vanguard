@@ -92,7 +92,7 @@ contract ZKVerifierIntegrated is Ownable2Step, ReentrancyGuard {
         uint256[1] memory publicSignals
     ) external nonReentrant returns (bool) {
         // Gas Optimization: Check proof cache first
-        bytes32 proofHash = keccak256(abi.encodePacked(a, b, c, publicSignals));
+        bytes32 proofHash = _proofCacheKey("whitelist", a, b, c, abi.encodePacked(publicSignals));
         if (verifiedProofs[proofHash] && block.timestamp <= proofTimestamp[proofHash] + proofCacheExpiry) {
             emit ProofCacheHit(proofHash, "whitelist");
             return true; // Cached proof, ~5k gas instead of ~300k
@@ -149,7 +149,7 @@ contract ZKVerifierIntegrated is Ownable2Step, ReentrancyGuard {
 
         for (uint256 i = 0; i < proofsA.length; i++) {
             // Check cache first
-            bytes32 proofHash = keccak256(abi.encodePacked(proofsA[i], proofsB[i], proofsC[i], publicSignalsArray[i]));
+            bytes32 proofHash = _proofCacheKey("whitelist", proofsA[i], proofsB[i], proofsC[i], abi.encodePacked(publicSignalsArray[i]));
 
             if (verifiedProofs[proofHash] && block.timestamp <= proofTimestamp[proofHash] + proofCacheExpiry) {
                 results[i] = true;
@@ -199,7 +199,7 @@ contract ZKVerifierIntegrated is Ownable2Step, ReentrancyGuard {
         uint256[1] memory publicSignals
     ) external nonReentrant returns (bool) {
         // Gas Optimization: Check proof cache first
-        bytes32 proofHash = keccak256(abi.encodePacked(a, b, c, publicSignals));
+        bytes32 proofHash = _proofCacheKey("blacklist", a, b, c, abi.encodePacked(publicSignals));
         if (verifiedProofs[proofHash] && block.timestamp <= proofTimestamp[proofHash] + proofCacheExpiry) {
             emit ProofCacheHit(proofHash, "blacklist");
             return true; // Cached proof, ~5k gas instead of ~300k
@@ -243,7 +243,7 @@ contract ZKVerifierIntegrated is Ownable2Step, ReentrancyGuard {
         uint256[1] memory publicSignals
     ) external nonReentrant returns (bool) {
         // Gas Optimization: Check proof cache first
-        bytes32 proofHash = keccak256(abi.encodePacked(a, b, c, publicSignals));
+        bytes32 proofHash = _proofCacheKey("jurisdiction", a, b, c, abi.encodePacked(publicSignals));
         if (verifiedProofs[proofHash] && block.timestamp <= proofTimestamp[proofHash] + proofCacheExpiry) {
             emit ProofCacheHit(proofHash, "jurisdiction");
             return true; // Cached proof, ~5k gas instead of ~300k
@@ -287,7 +287,7 @@ contract ZKVerifierIntegrated is Ownable2Step, ReentrancyGuard {
         uint256[1] memory publicSignals
     ) external nonReentrant returns (bool) {
         // Gas Optimization: Check proof cache first
-        bytes32 proofHash = keccak256(abi.encodePacked(a, b, c, publicSignals));
+        bytes32 proofHash = _proofCacheKey("accreditation", a, b, c, abi.encodePacked(publicSignals));
         if (verifiedProofs[proofHash] && block.timestamp <= proofTimestamp[proofHash] + proofCacheExpiry) {
             emit ProofCacheHit(proofHash, "accreditation");
             return true; // Cached proof, ~5k gas instead of ~300k
@@ -331,7 +331,7 @@ contract ZKVerifierIntegrated is Ownable2Step, ReentrancyGuard {
         uint256[6] memory publicSignals
     ) external nonReentrant returns (bool) {
         // Gas Optimization: Check proof cache first
-        bytes32 proofHash = keccak256(abi.encodePacked(a, b, c, publicSignals));
+        bytes32 proofHash = _proofCacheKey("compliance", a, b, c, abi.encodePacked(publicSignals));
         if (verifiedProofs[proofHash] && block.timestamp <= proofTimestamp[proofHash] + proofCacheExpiry) {
             emit ProofCacheHit(proofHash, "compliance");
             return true; // Cached proof, ~5k gas instead of ~300k
@@ -377,7 +377,7 @@ contract ZKVerifierIntegrated is Ownable2Step, ReentrancyGuard {
         uint256[2] memory publicSignals // compliance_aggregation_fixed outputs 2 signals
     ) external nonReentrant returns (bool) {
         // Gas Optimization: Check proof cache first
-        bytes32 proofHash = keccak256(abi.encodePacked(a, b, c, publicSignals));
+        bytes32 proofHash = _proofCacheKey("compliance-proof", a, b, c, abi.encodePacked(publicSignals));
         if (verifiedProofs[proofHash] && block.timestamp <= proofTimestamp[proofHash] + proofCacheExpiry) {
             emit ProofCacheHit(proofHash, "compliance");
             return true; // Cached proof, ~5k gas instead of ~300k
@@ -622,6 +622,59 @@ contract ZKVerifierIntegrated is Ownable2Step, ReentrancyGuard {
 
         emit BatchProofsVerified(circuitIds.length, successCount);
         return (results, successCount);
+    }
+
+    /**
+     * @dev Cache key for a verified proof, BOUND TO THE CIRCUIT that verified it.
+     *      The key used to be keccak256(a, b, c, publicSignals) with no circuit id,
+     *      and every verify* function checked that shared cache before calling its
+     *      own verifier. Four circuits share the uint256[1] signal shape, so a proof
+     *      verified once under whitelist satisfied verifyBlacklistNonMembership on
+     *      the cache hit; the blacklist verifier was never called.
+     */
+    function _proofCacheKey(
+        string memory circuit,
+        uint256[2] memory a,
+        uint256[2][2] memory b,
+        uint256[2] memory c,
+        bytes memory packedSignals
+    ) internal view returns (bytes32) {
+        // The verifier INSTANCE is part of the key, not just the label: a
+        // proof accepted by the old verifier must not keep answering true from
+        // the cache after updateVerifier swaps in a new one. A rotation now
+        // invalidates every cached proof for that circuit at once.
+        return keccak256(abi.encodePacked(circuit, _verifierFor(circuit), a, b, c, packedSignals));
+    }
+
+    /// @dev Verifier contract currently bound to a circuit tag. testingMode has
+    ///      no verifier instance, so it keys on address(0).
+    function _verifierFor(string memory circuit) internal view returns (address) {
+        if (testingMode) return address(0);
+        bytes32 h = keccak256(bytes(circuit));
+        if (h == keccak256("whitelist")) return address(whitelistVerifier);
+        if (h == keccak256("blacklist")) return address(blacklistVerifier);
+        if (h == keccak256("jurisdiction")) return address(jurisdictionVerifier);
+        if (h == keccak256("accreditation")) return address(accreditationVerifier);
+        if (h == keccak256("compliance") || h == keccak256("compliance-proof")) return address(complianceVerifier);
+        return address(0);
+    }
+
+    /**
+     * @notice Cache key for a proof under a given circuit tag: "whitelist"
+     *         (single and batch), "blacklist", "jurisdiction", "accreditation",
+     *         "compliance" (6-signal aggregation) or "compliance-proof"
+     *         (2-signal verifyComplianceProof). The key also folds in the
+     *         verifier instance bound to that tag, so it changes after
+     *         updateVerifier. Callers of clearExpiredProofs compute keys with this.
+     */
+    function proofCacheKey(
+        string calldata circuit,
+        uint256[2] calldata a,
+        uint256[2][2] calldata b,
+        uint256[2] calldata c,
+        uint256[] calldata publicSignals
+    ) external view returns (bytes32) {
+        return _proofCacheKey(circuit, a, b, c, abi.encodePacked(publicSignals));
     }
 
     /**
