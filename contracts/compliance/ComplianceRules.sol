@@ -4,6 +4,7 @@ pragma solidity ^0.8.20;
 import "@openzeppelin/contracts/access/Ownable.sol";
 import "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
 import "./interfaces/IComplianceRules.sol";
+import "../erc3643/interfaces/ICompliance.sol";
 import "../erc3643/interfaces/IIdentityRegistry.sol";
 
 /// @dev Read-only slice of BlacklistOracle. Declared here rather than imported
@@ -22,11 +23,10 @@ interface IWhitelistOracleView {
  * @dev Configurable compliance rule engine for UTXO compliance validation
  * @author CMTA UTXO Compliance Team
  */
-contract ComplianceRules is IComplianceRules, Ownable, ReentrancyGuard {
-    // Not an ICompliance implementer. It exposes canTransfer, the three
-    // hooks and isTrustedContract by name, which is what Token calls; the
-    // module functions ICompliance declares were empty stubs here and are
-    // gone. Contracts that need modules bind InvestorTypeCompliance.
+contract ComplianceRules is IComplianceRules, IComplianceHooks, Ownable, ReentrancyGuard {
+    // Implements IComplianceHooks, the slice Token actually calls, so the
+    // compiler enforces it. Not a full ICompliance: the module functions
+    // that interface declares were empty stubs here and are gone.
     /**
      * @dev Check if a transfer is allowed based on all compliance rules
      * This is the main function called by Token contract
@@ -66,7 +66,12 @@ contract ComplianceRules is IComplianceRules, Ownable, ReentrancyGuard {
      * @dev Check if an address is a trusted contract
      * @param contractAddress Address to check
      */
-    function isTrustedContract(address contractAddress) external view returns (bool) {
+    function isTrustedContract(address contractAddress)
+        external
+        view
+        override(IComplianceRules, IComplianceHooks)
+        returns (bool)
+    {
         return trustedContracts[contractAddress];
     }
 

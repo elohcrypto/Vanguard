@@ -16,7 +16,7 @@ import "./interfaces/IInvestorTypeRegistry.sol";
 contract Token is IERC3643, ERC20, Ownable, Pausable {
     // State variables
     IIdentityRegistry private _identityRegistry;
-    ICompliance private _compliance;
+    IComplianceHooks private _compliance;
     IInvestorTypeRegistry private _investorTypeRegistry;
 
     // Frozen addresses
@@ -65,7 +65,7 @@ contract Token is IERC3643, ERC20, Ownable, Pausable {
         require(_complianceAddress.code.length > 0, "Token: Compliance is not a contract");
 
         _identityRegistry = IIdentityRegistry(_identityRegistryAddress);
-        _compliance = ICompliance(_complianceAddress);
+        _compliance = IComplianceHooks(_complianceAddress);
         _agents[msg.sender] = true;
 
         emit IdentityRegistryAdded(_identityRegistryAddress);
@@ -285,7 +285,7 @@ contract Token is IERC3643, ERC20, Ownable, Pausable {
     function setCompliance(address _complianceAddress) external override onlyOwner {
         require(_complianceAddress != address(0), "Token: Compliance is zero address");
         require(_complianceAddress.code.length > 0, "Token: Compliance is not a contract");
-        _compliance = ICompliance(_complianceAddress);
+        _compliance = IComplianceHooks(_complianceAddress);
         emit ComplianceAdded(_complianceAddress);
     }
 
