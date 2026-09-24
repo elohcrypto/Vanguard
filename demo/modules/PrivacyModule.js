@@ -115,46 +115,10 @@ class PrivacyModule {
             this.state.setContract('privacyManager', privacyManager);
             console.log(`✅ PrivacyManager deployed: ${privacyManagerAddr}`);
 
-            // Deploy ComplianceProofValidator
-            console.log('📋 Deploying ComplianceProofValidator...');
-            const ComplianceProofValidatorFactory = await ethers.getContractFactory('ComplianceProofValidator');
-            const complianceProofValidator = await ComplianceProofValidatorFactory.deploy(
-                zkVerifierIntegratedAddr,
-                privacyManagerAddr
-            );
-            await complianceProofValidator.waitForDeployment();
-            const complianceProofValidatorAddr = await complianceProofValidator.getAddress();
-            this.state.setContract('complianceProofValidator', complianceProofValidator);
-            console.log(`✅ ComplianceProofValidator deployed: ${complianceProofValidatorAddr}`);
-
-            // Deploy BlacklistProofValidator
-            console.log('🚫 Deploying BlacklistProofValidator...');
-            const BlacklistProofValidatorFactory = await ethers.getContractFactory('BlacklistProofValidator');
-            const blacklistProofValidator = await BlacklistProofValidatorFactory.deploy(
-                zkVerifierIntegratedAddr,
-                privacyManagerAddr
-            );
-            await blacklistProofValidator.waitForDeployment();
-            const blacklistProofValidatorAddr = await blacklistProofValidator.getAddress();
-            this.state.setContract('blacklistProofValidator', blacklistProofValidator);
-            console.log(`✅ BlacklistProofValidator deployed: ${blacklistProofValidatorAddr}`);
-
-            // Deploy AccreditationProofValidator
-            console.log('💰 Deploying AccreditationProofValidator...');
-            const AccreditationProofValidatorFactory = await ethers.getContractFactory('AccreditationProofValidator');
-            const accreditationProofValidator = await AccreditationProofValidatorFactory.deploy(zkVerifierIntegratedAddr);
-            await accreditationProofValidator.waitForDeployment();
-            const accreditationProofValidatorAddr = await accreditationProofValidator.getAddress();
-            this.state.setContract('accreditationProofValidator', accreditationProofValidator);
-            console.log(`✅ AccreditationProofValidator deployed: ${accreditationProofValidatorAddr}`);
-
             displaySuccess('PRODUCTION-READY PRIVACY & ZK VERIFICATION SYSTEM DEPLOYED!');
             console.log('📋 Complete ZK Proof System:');
             console.log(`   🌍 ZKVerifierIntegrated (Primary): ${zkVerifierIntegratedAddr}`);
             console.log(`   🕵️ PrivacyManager: ${privacyManagerAddr}`);
-            console.log(`   📋 ComplianceProofValidator: ${complianceProofValidatorAddr}`);
-            console.log(`   🚫 BlacklistProofValidator: ${blacklistProofValidatorAddr}`);
-            console.log(`   💰 AccreditationProofValidator: ${accreditationProofValidatorAddr}`);
             console.log('\n🔐 ZK Proof Capabilities:');
             console.log('   ✅ Whitelist Membership Proofs (Anonymous compliance)');
             console.log('   ✅ Blacklist Non-Membership Proofs (Privacy-preserving)');
@@ -1668,18 +1632,7 @@ class PrivacyModule {
             const testUser = this.state.identities?.values().next().value;
             if (testUser) {
                 console.log(`   Testing user: ${testUser.owner}`);
-
-                const complianceProofValidator = this.state.getContract('complianceProofValidator');
-                if (complianceProofValidator) {
-                    const isWhitelisted = await complianceProofValidator.verifyWhitelistMembership(testUser.owner);
-                    console.log(`   📋 Private Whitelist Status: ${isWhitelisted ? '✅ VERIFIED' : '❌ NOT VERIFIED'}`);
-                    console.log(`   🕵️ User identity: PROTECTED`);
-                    console.log(`   💸 Transfer Eligible: ${isWhitelisted ? '✅ YES' : '❌ NO'}`);
-
-                    if (!isWhitelisted) {
-                        console.log(`   💡 Submit whitelist proof (option 42) to enable transfers`);
-                    }
-                }
+                console.log(`   💡 Submit whitelist proof (option 42) to enable transfers`);
             } else {
                 console.log('   ⚠️  No users found. Create users first (option 24)');
             }
@@ -1720,8 +1673,8 @@ class PrivacyModule {
         console.log('-'.repeat(40));
         console.log(`🎯 Anonymous compliance verification using ${this.state.zkMode.toUpperCase()} ZK proofs`);
 
-        const complianceProofValidator = this.state.getContract('complianceProofValidator');
-        if (!complianceProofValidator) {
+        const zkVerifierIntegrated = this.state.getContract('zkVerifierIntegrated');
+        if (!zkVerifierIntegrated) {
             displayError('Please deploy Privacy & ZK Verification System first (option 41)');
             return;
         }
@@ -1893,7 +1846,6 @@ class PrivacyModule {
             console.log(`   🔢 Nullifier Hash: ${finalNullifierHash}`);
             console.log(`   ${this.state.zkMode === 'real' ? '🔐' : '🔧'} Mode: ${this.state.zkMode.toUpperCase()}`);
 
-            const zkVerifierIntegrated = this.state.getContract('zkVerifierIntegrated');
             const tx = await zkVerifierIntegrated.verifyWhitelistMembership(
                 proof.a,
                 proof.b,
@@ -1924,8 +1876,8 @@ class PrivacyModule {
         console.log('-'.repeat(40));
         console.log(`🎯 Privacy-preserving blacklist check using ${this.state.zkMode.toUpperCase()} ZK proofs`);
 
-        const blacklistProofValidator = this.state.getContract('blacklistProofValidator');
-        if (!blacklistProofValidator) {
+        const zkVerifierIntegrated = this.state.getContract('zkVerifierIntegrated');
+        if (!zkVerifierIntegrated) {
             displayError('Please deploy Privacy & ZK Verification System first (option 41)');
             return;
         }
@@ -2111,8 +2063,6 @@ class PrivacyModule {
             console.log(`   🎯 Challenge Hash (private): ${finalChallengeHash}`);
             console.log(`   ${this.state.zkMode === 'real' ? '🔐' : '🔧'} Mode: ${this.state.zkMode.toUpperCase()}`);
             console.log(`   ℹ️  Note: Only public signal (isNotBlacklisted=1) is sent to contract`);
-
-            const zkVerifierIntegrated = this.state.getContract('zkVerifierIntegrated');
 
             // The contract expects uint256[1] containing only the public signal (isNotBlacklisted)
             // The blacklistRoot, nullifierHash, and challengeHash are PRIVATE inputs to the circuit

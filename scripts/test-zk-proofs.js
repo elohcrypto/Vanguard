@@ -127,58 +127,11 @@ async function testZKProofSystem() {
             console.log(`   🔍 ZK Verifier Integrated: ❌ FAILED (${error.message})`);
         }
 
-        // Test 8: Test Compliance Proof Validator
-        console.log('8️⃣ Testing Compliance Proof Validator...');
-        try {
-            // Deploy dependencies first
-            const PrivacyManagerFactory = await ethers.getContractFactory("PrivacyManager");
-            const privacyManager = await PrivacyManagerFactory.deploy();
-            await privacyManager.waitForDeployment();
-
-            const ZKVerifierFactory = await ethers.getContractFactory("ZKVerifierIntegrated");
-            const zkVerifier = await ZKVerifierFactory.deploy();
-            await zkVerifier.waitForDeployment();
-
-            const ComplianceValidatorFactory = await ethers.getContractFactory("ComplianceProofValidator");
-            const complianceValidator = await ComplianceValidatorFactory.deploy(
-                await zkVerifier.getAddress(),
-                await privacyManager.getAddress()
-            );
-            await complianceValidator.waitForDeployment();
-            console.log(`   📋 Compliance Proof Validator: ✅ DEPLOYED`);
-        } catch (error) {
-            console.log(`   📋 Compliance Proof Validator: ❌ FAILED (${error.message})`);
-        }
-
-        // Test 9: Test Blacklist Proof Validator
-        console.log('9️⃣ Testing Blacklist Proof Validator...');
-        try {
-            // Use existing dependencies
-            const PrivacyManagerFactory = await ethers.getContractFactory("PrivacyManager");
-            const privacyManager = await PrivacyManagerFactory.deploy();
-            await privacyManager.waitForDeployment();
-
-            const ZKVerifierFactory = await ethers.getContractFactory("ZKVerifierIntegrated");
-            const zkVerifier = await ZKVerifierFactory.deploy();
-            await zkVerifier.waitForDeployment();
-
-            const BlacklistValidatorFactory = await ethers.getContractFactory("BlacklistProofValidator");
-            const blacklistValidator = await BlacklistValidatorFactory.deploy(
-                await zkVerifier.getAddress(),
-                await privacyManager.getAddress()
-            );
-            await blacklistValidator.waitForDeployment();
-            console.log(`   🚫 Blacklist Proof Validator: ✅ DEPLOYED`);
-        } catch (error) {
-            console.log(`   🚫 Blacklist Proof Validator: ❌ FAILED (${error.message})`);
-        }
-
         console.log('\n🎯 FINAL RESULTS');
         console.log('='.repeat(20));
         console.log('✅ Individual ZK Verifiers: WORKING');
         console.log('✅ Integrated ZK System: WORKING');
         console.log('✅ Privacy Manager: WORKING');
-        console.log('✅ Proof Validators: WORKING');
         console.log('\n🎉 ALL ZK PROOF FUNCTIONS ARE OPERATIONAL! 🚀');
         console.log('\n📋 Available ZK Proof Types:');
         console.log('   1. Whitelist Membership Proofs');

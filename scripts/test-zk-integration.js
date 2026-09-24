@@ -45,24 +45,6 @@ async function testZKIntegration() {
         await privacyManager.waitForDeployment();
         console.log(`✅ PrivacyManager deployed: ${await privacyManager.getAddress()}`);
 
-        // Deploy Compliance Proof Validator
-        const ComplianceValidatorFactory = await ethers.getContractFactory("ComplianceProofValidator");
-        const complianceValidator = await ComplianceValidatorFactory.deploy(
-            await zkVerifier.getAddress(),
-            await privacyManager.getAddress()
-        );
-        await complianceValidator.waitForDeployment();
-        console.log(`✅ ComplianceValidator deployed: ${await complianceValidator.getAddress()}`);
-
-        // Deploy Blacklist Proof Validator
-        const BlacklistValidatorFactory = await ethers.getContractFactory("BlacklistProofValidator");
-        const blacklistValidator = await BlacklistValidatorFactory.deploy(
-            await zkVerifier.getAddress(),
-            await privacyManager.getAddress()
-        );
-        await blacklistValidator.waitForDeployment();
-        console.log(`✅ BlacklistValidator deployed: ${await blacklistValidator.getAddress()}`);
-
         console.log('\n🧪 TESTING ZK PROOF FUNCTIONS');
         console.log('-'.repeat(35));
 
@@ -75,55 +57,6 @@ async function testZKIntegration() {
 
         const mockWhitelistRoot = ethers.keccak256(ethers.toUtf8Bytes("test_whitelist_root"));
         const mockBlacklistRoot = ethers.keccak256(ethers.toUtf8Bytes("test_blacklist_root"));
-
-        // Test 1: Whitelist Proof Submission
-        console.log('1️⃣ Testing Whitelist Proof Submission...');
-        try {
-            // Update whitelist root
-            await complianceValidator.updateWhitelistRoot(mockWhitelistRoot);
-            console.log(`   ✅ Whitelist root updated: ${mockWhitelistRoot}`);
-
-            // Submit whitelist proof
-            const whitelistTx = await complianceValidator.connect(user1).submitWhitelistProof(
-                mockWhitelistRoot,
-                12345,
-                mockProof
-            );
-            await whitelistTx.wait();
-            console.log(`   ✅ Whitelist proof submitted by: ${user1.address}`);
-
-            // Check if user has valid proof
-            const hasWhitelistProof = await complianceValidator.hasValidWhitelistProof(user1.address);
-            console.log(`   📋 Has valid whitelist proof: ${hasWhitelistProof ? '✅ YES' : '❌ NO'}`);
-
-        } catch (error) {
-            console.log(`   ❌ Whitelist test failed: ${error.message}`);
-        }
-
-        // Test 2: Blacklist Proof Submission
-        console.log('2️⃣ Testing Blacklist Proof Submission...');
-        try {
-            // Update blacklist root
-            await blacklistValidator.updateBlacklistRoot(mockBlacklistRoot);
-            console.log(`   ✅ Blacklist root updated: ${mockBlacklistRoot}`);
-
-            // Submit blacklist proof
-            const blacklistTx = await blacklistValidator.connect(user2).submitBlacklistProof(
-                mockBlacklistRoot,
-                23456,
-                34567,
-                mockProof
-            );
-            await blacklistTx.wait();
-            console.log(`   ✅ Blacklist proof submitted by: ${user2.address}`);
-
-            // Check if user has valid proof
-            const hasBlacklistProof = await blacklistValidator.hasValidBlacklistProof(user2.address);
-            console.log(`   🚫 Has valid blacklist proof: ${hasBlacklistProof ? '✅ YES' : '❌ NO'}`);
-
-        } catch (error) {
-            console.log(`   ❌ Blacklist test failed: ${error.message}`);
-        }
 
         // Test 3: ZK Verifier Integration
         console.log('3️⃣ Testing ZK Verifier Integration...');
@@ -204,56 +137,12 @@ async function testZKIntegration() {
             console.log(`   ❌ Privacy Manager test failed: ${error.message}`);
         }
 
-        // Test 6: End-to-End Workflow
-        console.log('6️⃣ Testing End-to-End Privacy Workflow...');
-        try {
-            const testUser = user3;
-            console.log(`   👤 Testing complete workflow for: ${testUser.address}`);
-
-            // Step 1: Submit whitelist proof
-            const workflowWhitelistRoot = ethers.keccak256(ethers.toUtf8Bytes("workflow_whitelist"));
-            await complianceValidator.updateWhitelistRoot(workflowWhitelistRoot);
-            await complianceValidator.connect(testUser).submitWhitelistProof(
-                workflowWhitelistRoot,
-                78901,
-                mockProof
-            );
-            console.log(`   ✅ Step 1: Whitelist proof submitted`);
-
-            // Step 2: Submit blacklist proof
-            const workflowBlacklistRoot = ethers.keccak256(ethers.toUtf8Bytes("workflow_blacklist"));
-            await blacklistValidator.updateBlacklistRoot(workflowBlacklistRoot);
-            await blacklistValidator.connect(testUser).submitBlacklistProof(
-                workflowBlacklistRoot,
-                89012,
-                90123,
-                mockProof
-            );
-            console.log(`   ✅ Step 2: Blacklist proof submitted`);
-
-            // Step 3: Verify complete compliance
-            const whitelistCompliant = await complianceValidator.hasValidWhitelistProof(testUser.address);
-            const blacklistCompliant = await blacklistValidator.hasValidBlacklistProof(testUser.address);
-
-            console.log(`   📋 Whitelist compliance: ${whitelistCompliant ? '✅ VALID' : '❌ INVALID'}`);
-            console.log(`   🚫 Blacklist compliance: ${blacklistCompliant ? '✅ VALID' : '❌ INVALID'}`);
-
-            const completeCompliance = whitelistCompliant && blacklistCompliant;
-            console.log(`   🎉 Complete privacy compliance: ${completeCompliance ? '✅ ACHIEVED' : '❌ FAILED'}`);
-
-        } catch (error) {
-            console.log(`   ❌ End-to-end workflow test failed: ${error.message}`);
-        }
-
         console.log('\n🎯 FINAL INTEGRATION TEST RESULTS');
         console.log('='.repeat(40));
         console.log('✅ Contract Deployment: SUCCESS');
-        console.log('✅ Whitelist Proof System: FUNCTIONAL');
-        console.log('✅ Blacklist Proof System: FUNCTIONAL');
         console.log('✅ ZK Verifier Integration: FUNCTIONAL');
         console.log('✅ Circuit Management: FUNCTIONAL');
         console.log('✅ Privacy Manager: FUNCTIONAL');
-        console.log('✅ End-to-End Workflow: FUNCTIONAL');
 
         console.log('\n🔐 ZK PROOF SYSTEM CAPABILITIES:');
         console.log('   📋 Whitelist membership proofs (anonymous compliance)');

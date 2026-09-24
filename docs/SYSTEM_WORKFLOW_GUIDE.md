@@ -40,7 +40,6 @@ contracts/
 │       ├── IOracle.sol           # Oracle interface
 │       └── IOracleManager.sol    # Oracle manager interface
 ├── privacy/
-│   ├── ZKVerifier.sol            # Zero-knowledge proof verifier
 │   ├── PrivacyManager.sol        # Privacy management contract
 │   └── interfaces/
 │       └── IZKVerifier.sol       # ZK verifier interface

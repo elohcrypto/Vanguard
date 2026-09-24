@@ -36,21 +36,6 @@ describe("Constructor guards — runtime behaviour", () => {
     // stored as a plain address and only ever compared against msg.sender for
     // access control, never called. An EOA there is a valid configuration.
     { name: "PaymentEscrow", args: (ok) => [ok, ok], guarded: [0] },
-    {
-      name: "AccreditationProofValidator",
-      args: (ok) => [ok],
-      guarded: [0],
-    },
-    {
-      name: "BlacklistProofValidator",
-      args: (ok) => [ok, ok],
-      guarded: [0, 1],
-    },
-    {
-      name: "ComplianceProofValidator",
-      args: (ok) => [ok, ok],
-      guarded: [0, 1],
-    },
   ];
 
   for (const { name, args, guarded } of CASES) {

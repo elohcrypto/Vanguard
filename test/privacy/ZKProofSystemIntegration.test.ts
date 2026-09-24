@@ -3,8 +3,6 @@ import { ethers } from "hardhat";
 import { SignerWithAddress } from "@nomicfoundation/hardhat-ethers/signers";
 import {
     ZKVerifierIntegrated,
-    ComplianceProofValidator,
-    BlacklistProofValidator,
     PrivacyManager,
     WhitelistMembershipVerifier,
     BlacklistMembershipVerifier,
@@ -21,8 +19,6 @@ describe("🔐 Complete ZK Proof System Integration Tests", function () {
 
     // ZK System Contracts
     let zkVerifier: ZKVerifierIntegrated;
-    let complianceProofValidator: ComplianceProofValidator;
-    let blacklistProofValidator: BlacklistProofValidator;
     let privacyManager: PrivacyManager;
 
     // Individual Verifier Contracts
@@ -111,26 +107,6 @@ describe("🔐 Complete ZK Proof System Integration Tests", function () {
         );
         await privacyManager.waitForDeployment();
         console.log(`   ✅ PrivacyManager: ${await privacyManager.getAddress()}`);
-
-        // Deploy Compliance Proof Validator
-        console.log("📦 Deploying Compliance Proof Validator...");
-        const ComplianceValidatorFactory = await ethers.getContractFactory("ComplianceProofValidator");
-        complianceProofValidator = await ComplianceValidatorFactory.deploy(
-            await zkVerifier.getAddress(),
-            await privacyManager.getAddress()
-        );
-        await complianceProofValidator.waitForDeployment();
-        console.log(`   ✅ ComplianceProofValidator: ${await complianceProofValidator.getAddress()}`);
-
-        // Deploy Blacklist Proof Validator
-        console.log("📦 Deploying Blacklist Proof Validator...");
-        const BlacklistValidatorFactory = await ethers.getContractFactory("BlacklistProofValidator");
-        blacklistProofValidator = await BlacklistValidatorFactory.deploy(
-            await zkVerifier.getAddress(),
-            await privacyManager.getAddress()
-        );
-        await blacklistProofValidator.waitForDeployment();
-        console.log(`   ✅ BlacklistProofValidator: ${await blacklistProofValidator.getAddress()}`);
 
         console.log("🎉 All contracts deployed successfully!\n");
     });
@@ -286,107 +262,6 @@ describe("🔐 Complete ZK Proof System Integration Tests", function () {
         });
     });
 
-    describe("3️⃣ Compliance Proof Validator Tests", function () {
-        it("Should update whitelist root", async function () {
-            console.log("🧪 Testing whitelist root update...");
-            
-            const tx = await complianceProofValidator.updateWhitelistRoot(mockWhitelistRoot);
-            const receipt = await tx.wait();
-            
-            console.log(`   ✅ Root updated: ${mockWhitelistRoot}`);
-            console.log(`   🔗 Transaction: ${receipt?.hash}`);
-            
-            const currentRoot = await complianceProofValidator.currentWhitelistRoot();
-            expect(currentRoot).to.equal(mockWhitelistRoot);
-        });
-
-        it("Should submit whitelist membership proof", async function () {
-            console.log("🧪 Testing whitelist proof submission...");
-            
-            const tx = await complianceProofValidator.connect(user1).submitWhitelistProof(
-                mockWhitelistRoot,
-                mockNullifier + 100,
-                mockProof
-            );
-            const receipt = await tx.wait();
-            
-            console.log(`   ✅ Proof submitted by: ${user1.address}`);
-            console.log(`   🔗 Transaction: ${receipt?.hash}`);
-
-            // Check if user has valid proof
-            const hasValidProof = await complianceProofValidator.hasValidWhitelistProof(user1.address);
-            console.log(`   📋 Has valid proof: ${hasValidProof}`);
-
-            expect(hasValidProof).to.be.true;
-        });
-
-        it("Should get user proof information", async function () {
-            console.log("🧪 Testing user proof information retrieval...");
-            
-            const proofInfo = await complianceProofValidator.getUserProofInfo(user1.address);
-            
-            console.log(`   📋 Merkle Root: ${proofInfo.merkleRoot}`);
-            console.log(`   🔢 Nullifier: ${proofInfo.nullifierHash}`);
-            console.log(`   ⏰ Timestamp: ${proofInfo.timestamp}`);
-            console.log(`   ✅ Is Valid: ${proofInfo.isValid}`);
-            
-            expect(proofInfo.isValid).to.be.true;
-        });
-    });
-
-    describe("4️⃣ Blacklist Proof Validator Tests", function () {
-        it("Should update blacklist root", async function () {
-            console.log("🧪 Testing blacklist root update...");
-            
-            const tx = await blacklistProofValidator.updateBlacklistRoot(mockBlacklistRoot);
-            const receipt = await tx.wait();
-            
-            console.log(`   ✅ Root updated: ${mockBlacklistRoot}`);
-            console.log(`   🔗 Transaction: ${receipt?.hash}`);
-            
-            const currentRoot = await blacklistProofValidator.currentBlacklistRoot();
-            expect(currentRoot).to.equal(mockBlacklistRoot);
-        });
-
-        it("Should submit blacklist non-membership proof", async function () {
-            console.log("🧪 Testing blacklist proof submission...");
-            
-            const tx = await blacklistProofValidator.connect(user2).submitBlacklistProof(
-                mockBlacklistRoot,
-                mockNullifier + 200,
-                mockChallenge + 100,
-                mockProof
-            );
-            const receipt = await tx.wait();
-            
-            console.log(`   ✅ Proof submitted by: ${user2.address}`);
-            console.log(`   🔗 Transaction: ${receipt?.hash}`);
-            
-            // Check if user has valid proof
-            const hasValidProof = await blacklistProofValidator.hasValidBlacklistProof(user2.address);
-            console.log(`   🚫 Has valid proof: ${hasValidProof}`);
-            
-            expect(hasValidProof).to.be.true;
-        });
-
-        it("Should generate challenge hash", async function () {
-            console.log("🧪 Testing challenge hash generation...");
-            
-            const timestamp = Math.floor(Date.now() / 1000);
-            const challengeHash = await blacklistProofValidator.generateChallengeHash(
-                user3.address,
-                timestamp
-            );
-            
-            console.log(`   🎯 Generated challenge: ${challengeHash}`);
-            console.log(`   👤 For user: ${user3.address}`);
-            console.log(`   ⏰ At timestamp: ${timestamp}`);
-            
-            expect(challengeHash).to.be.a('bigint');
-            expect(challengeHash).to.be.greaterThan(0);
-        });
-    });
-
     describe("5️⃣ Privacy Manager Integration Tests", function () {
         it("Should check user privacy settings", async function () {
             console.log("🧪 Testing privacy settings check...");
@@ -410,54 +285,6 @@ describe("🔐 Complete ZK Proof System Integration Tests", function () {
             } catch (error) {
                 console.log(`   ⚠️  Privacy validation requires setup (expected)`);
             }
-        });
-    });
-
-    describe("6️⃣ End-to-End Integration Tests", function () {
-        it("Should demonstrate complete privacy workflow", async function () {
-            console.log("🧪 Testing complete privacy workflow...");
-            
-            // Step 1: Submit whitelist proof
-            console.log("   1️⃣ Submitting whitelist proof...");
-            await complianceProofValidator.connect(user3).submitWhitelistProof(
-                mockWhitelistRoot,
-                mockNullifier + 300,
-                mockProof
-            );
-            
-            // Step 2: Submit blacklist proof
-            console.log("   2️⃣ Submitting blacklist non-membership proof...");
-            await blacklistProofValidator.connect(user3).submitBlacklistProof(
-                mockBlacklistRoot,
-                mockNullifier + 400,
-                mockChallenge + 200,
-                mockProof
-            );
-            
-            // Step 3: Verify both proofs are valid
-            console.log("   3️⃣ Verifying proof validity...");
-            const whitelistValid = await complianceProofValidator.hasValidWhitelistProof(user3.address);
-            const blacklistValid = await blacklistProofValidator.hasValidBlacklistProof(user3.address);
-            
-            console.log(`   ✅ Whitelist proof valid: ${whitelistValid}`);
-            console.log(`   ✅ Blacklist proof valid: ${blacklistValid}`);
-            console.log(`   🎉 Complete privacy compliance achieved!`);
-            
-            expect(whitelistValid).to.be.true;
-            expect(blacklistValid).to.be.true;
-        });
-
-        it("Should track system statistics", async function () {
-            console.log("🧪 Testing system statistics...");
-            
-            const whitelistProofCount = await complianceProofValidator.getTotalProofs();
-            const blacklistProofCount = await blacklistProofValidator.getTotalProofs();
-            
-            console.log(`   📊 Total whitelist proofs: ${whitelistProofCount}`);
-            console.log(`   📊 Total blacklist proofs: ${blacklistProofCount}`);
-            
-            expect(whitelistProofCount).to.be.greaterThan(0);
-            expect(blacklistProofCount).to.be.greaterThan(0);
         });
     });
 

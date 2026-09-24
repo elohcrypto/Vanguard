@@ -73,26 +73,6 @@ class ZKProofSystemDemo {
             await this.contracts.zkVerifier.waitForDeployment();
             console.log(`   ✅ ZKVerifier deployed`);
 
-            // Deploy Compliance Proof Validator
-            console.log('4️⃣ Deploying Compliance Proof Validator...');
-            const ComplianceValidatorFactory = await ethers.getContractFactory("ComplianceProofValidator");
-            this.contracts.complianceValidator = await ComplianceValidatorFactory.deploy(
-                await this.contracts.zkVerifier.getAddress(),
-                await this.contracts.privacyManager.getAddress()
-            );
-            await this.contracts.complianceValidator.waitForDeployment();
-            console.log(`   ✅ ComplianceValidator deployed`);
-
-            // Deploy Blacklist Proof Validator
-            console.log('5️⃣ Deploying Blacklist Proof Validator...');
-            const BlacklistValidatorFactory = await ethers.getContractFactory("BlacklistProofValidator");
-            this.contracts.blacklistValidator = await BlacklistValidatorFactory.deploy(
-                await this.contracts.zkVerifier.getAddress(),
-                await this.contracts.privacyManager.getAddress()
-            );
-            await this.contracts.blacklistValidator.waitForDeployment();
-            console.log(`   ✅ BlacklistValidator deployed`);
-
         } catch (error) {
             console.error('❌ Contract deployment failed:', error.message);
             throw error;
@@ -207,56 +187,6 @@ class ZKProofSystemDemo {
         return allPassed;
     }
 
-    async testProofValidators() {
-        console.log('\n📋 TESTING PROOF VALIDATORS');
-        console.log('-'.repeat(30));
-
-        const mockProof = this.createMockProof();
-        let allPassed = true;
-
-        try {
-            // Test Compliance Proof Validator
-            console.log('1️⃣ Testing Compliance Proof Validator...');
-            
-            const whitelistRoot = ethers.keccak256(ethers.toUtf8Bytes("test_whitelist_root"));
-            await this.contracts.complianceValidator.updateWhitelistRoot(whitelistRoot);
-            console.log(`   ✅ Whitelist root updated`);
-
-            const whitelistProofTx = await this.contracts.complianceValidator.connect(this.signers[1]).submitWhitelistProof(
-                whitelistRoot, 34567, mockProof
-            );
-            await whitelistProofTx.wait();
-            console.log(`   ✅ Whitelist proof submitted`);
-
-            const hasWhitelistProof = await this.contracts.complianceValidator.hasValidWhitelistProof(this.signers[1].address);
-            console.log(`   📋 Has valid whitelist proof: ${hasWhitelistProof ? '✅ YES' : '❌ NO'}`);
-
-            // Test Blacklist Proof Validator
-            console.log('2️⃣ Testing Blacklist Proof Validator...');
-            
-            const blacklistRoot = ethers.keccak256(ethers.toUtf8Bytes("test_blacklist_root"));
-            await this.contracts.blacklistValidator.updateBlacklistRoot(blacklistRoot);
-            console.log(`   ✅ Blacklist root updated`);
-
-            const blacklistProofTx = await this.contracts.blacklistValidator.connect(this.signers[2]).submitBlacklistProof(
-                blacklistRoot, 45678, 89012, mockProof
-            );
-            await blacklistProofTx.wait();
-            console.log(`   ✅ Blacklist proof submitted`);
-
-            const hasBlacklistProof = await this.contracts.blacklistValidator.hasValidBlacklistProof(this.signers[2].address);
-            console.log(`   🚫 Has valid blacklist proof: ${hasBlacklistProof ? '✅ YES' : '❌ NO'}`);
-
-            this.testResults.push({ test: 'Proof Validators', result: hasWhitelistProof && hasBlacklistProof });
-
-        } catch (error) {
-            console.error('❌ Proof validator test failed:', error.message);
-            allPassed = false;
-        }
-
-        return allPassed;
-    }
-
     async testEndToEndWorkflow() {
         console.log('\n🎯 TESTING END-TO-END PRIVACY WORKFLOW');
         console.log('-'.repeat(40));
@@ -268,33 +198,26 @@ class ZKProofSystemDemo {
             const user = this.signers[3];
             console.log(`👤 Testing complete workflow for user: ${user.address}`);
 
-            // Step 1: Submit whitelist proof
+            // Step 1: Submit whitelist proof through the integrated verifier
             console.log('1️⃣ Submitting whitelist membership proof...');
-            const whitelistRoot = ethers.keccak256(ethers.toUtf8Bytes("workflow_whitelist"));
-            await this.contracts.complianceValidator.updateWhitelistRoot(whitelistRoot);
-            await this.contracts.complianceValidator.connect(user).submitWhitelistProof(
-                whitelistRoot, 56789, mockProof
+            await this.contracts.zkVerifier.connect(user).verifyWhitelistMembership(
+                mockProof.a, mockProof.b, mockProof.c, [56789]
             );
             console.log(`   ✅ Whitelist proof submitted`);
 
-            // Step 2: Submit blacklist proof
+            // Step 2: Submit blacklist proof through the integrated verifier
             console.log('2️⃣ Submitting blacklist non-membership proof...');
-            const blacklistRoot = ethers.keccak256(ethers.toUtf8Bytes("workflow_blacklist"));
-            await this.contracts.blacklistValidator.updateBlacklistRoot(blacklistRoot);
-            await this.contracts.blacklistValidator.connect(user).submitBlacklistProof(
-                blacklistRoot, 67890, 12345, mockProof
+            await this.contracts.zkVerifier.connect(user).verifyBlacklistNonMembership(
+                mockProof.a, mockProof.b, mockProof.c, [1]
             );
             console.log(`   ✅ Blacklist proof submitted`);
 
             // Step 3: Verify complete compliance
             console.log('3️⃣ Verifying complete privacy compliance...');
-            const whitelistValid = await this.contracts.complianceValidator.hasValidWhitelistProof(user.address);
-            const blacklistValid = await this.contracts.blacklistValidator.hasValidBlacklistProof(user.address);
+            const userProofCount = await this.contracts.zkVerifier.userProofCount(user.address);
+            const completeCompliance = userProofCount > 0n;
 
-            console.log(`   📋 Whitelist compliance: ${whitelistValid ? '✅ VALID' : '❌ INVALID'}`);
-            console.log(`   🚫 Blacklist compliance: ${blacklistValid ? '✅ VALID' : '❌ INVALID'}`);
-
-            const completeCompliance = whitelistValid && blacklistValid;
+            console.log(`   📋 User proof count: ${userProofCount}`);
             console.log(`   🎉 Complete privacy compliance: ${completeCompliance ? '✅ ACHIEVED' : '❌ FAILED'}`);
 
             this.testResults.push({ test: 'End-to-End Workflow', result: completeCompliance });
@@ -316,7 +239,6 @@ class ZKProofSystemDemo {
         const results = [];
         results.push(await this.testIndividualVerifiers());
         results.push(await this.testIntegratedVerifier());
-        results.push(await this.testProofValidators());
         results.push(await this.testEndToEndWorkflow());
 
         this.printFinalResults(results);
@@ -331,8 +253,7 @@ class ZKProofSystemDemo {
         console.log('\n🧪 Test Categories:');
         console.log(`   1️⃣ Individual Verifiers: ${results[0] ? '✅ PASS' : '❌ FAIL'}`);
         console.log(`   2️⃣ Integrated Verifier: ${results[1] ? '✅ PASS' : '❌ FAIL'}`);
-        console.log(`   3️⃣ Proof Validators: ${results[2] ? '✅ PASS' : '❌ FAIL'}`);
-        console.log(`   4️⃣ End-to-End Workflow: ${results[3] ? '✅ PASS' : '❌ FAIL'}`);
+        console.log(`   3️⃣ End-to-End Workflow: ${results[2] ? '✅ PASS' : '❌ FAIL'}`);
 
         console.log('\n📋 Individual Test Results:');
         this.testResults.forEach((test, index) => {

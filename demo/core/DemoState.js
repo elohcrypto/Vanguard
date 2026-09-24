@@ -175,18 +175,6 @@ class DemoState {
         this.privacyManager = null;
         
         /**
-         * @property {Object|null} complianceProofValidator - Compliance proof validator
-         * @type {Object|null}
-         */
-        this.complianceProofValidator = null;
-        
-        /**
-         * @property {Object|null} accreditationProofValidator - Accreditation proof validator
-         * @type {Object|null}
-         */
-        this.accreditationProofValidator = null;
-        
-        /**
          * @property {Map} privacyConfig - Privacy configuration settings
          * @type {Map<string, any>}
          */
