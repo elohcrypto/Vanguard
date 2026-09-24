@@ -31,16 +31,6 @@ describe("Constructor guards — runtime behaviour", () => {
     guarded: number[];
   }> = [
     { name: "PrivacyManager", args: (ok) => [ok, ok, ok], guarded: [0, 1, 2] },
-    {
-      name: "ComplianceValidator",
-      args: (ok, owner) => [ok, ok, ok, owner],
-      guarded: [0, 1, 2],
-    },
-    {
-      name: "UTXOCompliance",
-      args: (ok, owner) => [ok, ok, ok, owner],
-      guarded: [0, 1, 2],
-    },
     { name: "RefundManager", args: (ok) => [ok, ok], guarded: [0, 1] },
     // PaymentEscrow arg #1 (_paymentProtocol) is deliberately NOT guarded: it is
     // stored as a plain address and only ever compared against msg.sender for

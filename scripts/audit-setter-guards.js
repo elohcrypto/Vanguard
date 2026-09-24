@@ -87,12 +87,6 @@ function findUnguardedSetters() {
         // defined result instead of bubbling an empty revert. The defect this
         // audit exists to catch — a silent late failure with no reason string —
         // cannot occur, so a code check would add nothing.
-        //
-        // ComplianceValidator.validateClaims is the case that forced this: it
-        // is `view`, stores nothing, returns (false, 0) for address(0), and
-        // wraps the call in try/catch. Requiring code there would reject a bad
-        // address with a revert where the contract deliberately answers
-        // "claims are invalid".
         const castVar = new RegExp(
           `(\\w+)\\s*=\\s*(?:I[A-Z]\\w+|[A-Z]\\w+)\\(\\s*${param}\\s*\\)`,
         ).exec(body);

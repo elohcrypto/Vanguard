@@ -236,7 +236,7 @@ We have successfully implemented a **production-ready Vanguard StableCoin system
 - **Oracle System**: 4 contracts (Manager, Whitelist, Blacklist, Consensus)
 - **ComplianceRules**: 1 comprehensive validation contract
 - **Privacy System**: 7 contracts (ZKVerifier, PrivacyManager, 5 Validators)
-- **Investor Type System**: 2 contracts (InvestorTypeRegistry, InvestorTypeCompliance)
+- **Investor Type System**: 1 contract (InvestorTypeRegistry)
 - **Governance System**: 2 contracts (VanguardGovernance, GovernanceToken)
 - **Enhanced Escrow System**: 2 contracts (EscrowWalletFactory, MultiSigEscrowWallet)
 - **Payment Protocol**: 3 contracts (VanguardPaymentProtocol, PaymentEscrow, RefundManager)

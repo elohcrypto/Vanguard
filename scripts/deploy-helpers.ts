@@ -171,8 +171,7 @@ export class DeploymentHelper {
         `Refusing to bind compliance at ${complianceAddress}: it reports ` +
           `isProductionCompliance() == false (a permissive test double whose ` +
           `canTransfer always returns true).\n` +
-          `  Bind an enforcing implementation instead: ComplianceRules, ` +
-          `ComplianceValidator, or InvestorTypeCompliance.`,
+          `  Bind an enforcing implementation instead: ComplianceRules.`,
       );
     }
 

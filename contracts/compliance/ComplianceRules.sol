@@ -20,8 +20,7 @@ interface IWhitelistOracleView {
 
 /**
  * @title ComplianceRules
- * @dev Configurable compliance rule engine for UTXO compliance validation
- * @author CMTA UTXO Compliance Team
+ * @dev Configurable compliance rule engine bound to Token via IComplianceHooks
  */
 contract ComplianceRules is IComplianceRules, IComplianceHooks, Ownable, ReentrancyGuard {
     // Implements IComplianceHooks, the slice Token actually calls, so the

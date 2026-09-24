@@ -12,57 +12,66 @@ import { SignerWithAddress } from "@nomicfoundation/hardhat-ethers/signers";
 // PENDING until Phase 2: observed RED on 2026-09-23 (4 of 4 fail: deployer owns
 // everything, guardian cannot pause). Change `describe.skip` to `describe` in Task 2.4.
 describe.skip("Deployer holds no power after handover (plan Task 0.3)", function () {
-    let deployer: SignerWithAddress;
-    let governance: SignerWithAddress; // stands in for VanguardGovernance until Task 2.4
-    let ops: SignerWithAddress;
-    let guardian: SignerWithAddress;
-    let token: any;
-    let identityRegistry: any;
-    let complianceRules: any;
-    let oracleManager: any;
+  let deployer: SignerWithAddress;
+  let governance: SignerWithAddress; // stands in for VanguardGovernance until Task 2.4
+  let ops: SignerWithAddress;
+  let guardian: SignerWithAddress;
+  let token: any;
+  let identityRegistry: any;
+  let complianceRules: any;
+  let oracleManager: any;
 
-    async function handover(): Promise<void> {
-        // Task 2.4 wires the real ceremony here. Intentionally empty so the
-        // assertions below describe the target state, not today's state.
+  async function handover(): Promise<void> {
+    // Task 2.4 wires the real ceremony here. Intentionally empty so the
+    // assertions below describe the target state, not today's state.
+  }
+
+  beforeEach(async function () {
+    [deployer, governance, ops, guardian] = await ethers.getSigners();
+
+    identityRegistry = await (
+      await ethers.getContractFactory("IdentityRegistry")
+    ).deploy();
+    complianceRules = await (
+      await ethers.getContractFactory("ComplianceRules")
+    ).deploy(deployer.address, [840, 344], []);
+    token = await (
+      await ethers.getContractFactory("Token")
+    ).deploy(
+      "Vanguard StableCoin",
+      "VSC",
+      await identityRegistry.getAddress(),
+      await complianceRules.getAddress(),
+    );
+    oracleManager = await (
+      await ethers.getContractFactory("OracleManager")
+    ).deploy();
+
+    await handover();
+  });
+
+  it("governance owns Token, IdentityRegistry, ComplianceRules and OracleManager", async function () {
+    for (const c of [token, identityRegistry, complianceRules, oracleManager]) {
+      expect(await c.owner()).to.equal(governance.address);
     }
+  });
 
-    beforeEach(async function () {
-        [deployer, governance, ops, guardian] = await ethers.getSigners();
+  it("the deployer is no longer an agent or rule administrator", async function () {
+    expect(await token.isAgent(deployer.address)).to.equal(false);
+    expect(await identityRegistry.isAgent(deployer.address)).to.equal(false);
+    expect(await complianceRules.ruleAdministrators(deployer.address)).to.equal(
+      false,
+    );
+  });
 
-        identityRegistry = await (await ethers.getContractFactory("IdentityRegistry")).deploy();
-        complianceRules = await (await ethers.getContractFactory("ComplianceRules")).deploy(
-            deployer.address, [840, 344], []
-        );
-        token = await (await ethers.getContractFactory("Token")).deploy(
-            "Vanguard StableCoin", "VSC",
-            await identityRegistry.getAddress(),
-            await complianceRules.getAddress()
-        );
-        oracleManager = await (await ethers.getContractFactory("OracleManager")).deploy();
+  it("the ops multisig holds the agent roles", async function () {
+    expect(await token.isAgent(ops.address)).to.equal(true);
+    expect(await identityRegistry.isAgent(ops.address)).to.equal(true);
+  });
 
-        await handover();
-    });
-
-    it("governance owns Token, IdentityRegistry, ComplianceRules and OracleManager", async function () {
-        for (const c of [token, identityRegistry, complianceRules, oracleManager]) {
-            expect(await c.owner()).to.equal(governance.address);
-        }
-    });
-
-    it("the deployer is no longer an agent or rule administrator", async function () {
-        expect(await token.isAgent(deployer.address)).to.equal(false);
-        expect(await identityRegistry.isAgent(deployer.address)).to.equal(false);
-        expect(await complianceRules.ruleAdministrators(deployer.address)).to.equal(false);
-    });
-
-    it("the ops multisig holds the agent roles", async function () {
-        expect(await token.isAgent(ops.address)).to.equal(true);
-        expect(await identityRegistry.isAgent(ops.address)).to.equal(true);
-    });
-
-    it("the guardian can pause the token but cannot unpause it", async function () {
-        await token.connect(guardian).pause();
-        expect(await token.paused()).to.equal(true);
-        await expect(token.connect(guardian).unpause()).to.be.reverted;
-    });
+  it("the guardian can pause the token but cannot unpause it", async function () {
+    await token.connect(guardian).pause();
+    expect(await token.paused()).to.equal(true);
+    await expect(token.connect(guardian).unpause()).to.be.reverted;
+  });
 });

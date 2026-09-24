@@ -39,13 +39,6 @@ contracts/
 │   └── interfaces/
 │       ├── IOracle.sol           # Oracle interface
 │       └── IOracleManager.sol    # Oracle manager interface
-├── compliance/
-│   ├── UTXOCompliance.sol        # UTXO compliance contract
-│   ├── ComplianceValidator.sol   # Compliance validation contract
-│   ├── TransferRestrictions.sol  # Transfer restrictions contract
-│   └── interfaces/
-│       ├── IUTXOCompliance.sol   # UTXO compliance interface
-│       └── IComplianceValidator.sol # Compliance validator interface
 ├── privacy/
 │   ├── ZKVerifier.sol            # Zero-knowledge proof verifier
 │   ├── PrivacyManager.sol        # Privacy management contract

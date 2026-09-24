@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.20;
 
-import "./interfaces/ICompliance.sol";
+import "../../erc3643/interfaces/ICompliance.sol";
 
 /**
  * @title ComplianceRegistry
@@ -12,7 +12,7 @@ import "./interfaces/ICompliance.sol";
  * token mechanics without standing up the full compliance stack.
  *
  * For real deployments bind one of the enforcing ICompliance implementations
- * instead: ComplianceRules, ComplianceValidator, or InvestorTypeCompliance.
+ * instead: ComplianceRules.
  *
  * `isProductionCompliance()` returns false so deployment scripts and Token can
  * detect this contract and refuse it. Any real implementation must return true.
