@@ -38,7 +38,6 @@ Vanguard/
 │   ├── investor/                # Investor type management
 │   ├── governance/              # Governance system (1 Person = 1 Vote)
 │   ├── payment/                 # Payment protocol with refunds
-│   ├── upgradeable/             # Upgradeable contract patterns
 │   └── test/                    # Test contracts and helpers
 ├── circuits/                    # Zero-Knowledge Circuits 
 │   ├── whitelist_membership.circom          # Whitelist membership proof
@@ -106,12 +105,6 @@ Vanguard/
 7. ✅ Transfer Limits - Type-specific transfer and holding limits
 8. ✅ Whitelist Tiers - Required tiers per investor type
 9. ✅ Large Transfer Detection - Compliance officer notifications
-
-### **Payment Protocol** 
-10. ✅ VanguardPaymentProtocol - Escrow-based payment system
-11. ✅ PaymentEscrow - Secure fund holding
-12. ✅ RefundManager - Multi-type refunds (Automatic/Manual/Dispute/Emergency)
-13. ✅ Payment State Management - Complete payment lifecycle
 
 ### **Governance & Escrow**
 14. ✅ VanguardGovernance - 1 Person = 1 Vote governance
@@ -275,12 +268,6 @@ npx hardhat coverage
 - ✅ **Fee Distribution**: Fixed at creation (3% investor, 2% owner), paid on release
 - ✅ **Sweep**: Tokens sent to a settled escrow outside the factory are returned by `sweepExcess()` (demo option 70a)
 - 📖 Step by step, with the demo option for each step: [Escrow Payment Workflow](/docs/SYSTEM_WORKFLOW_GUIDE.md#escrow-payment-workflow)
-
-### **7. Payment Protocol**
-- ✅ **Escrow-Based Payments**: VanguardPaymentProtocol with state management
-- ✅ **Multi-Type Refunds**: Automatic/Manual/Dispute/Emergency refunds
-- ✅ **Payment Escrow**: Secure fund holding with fee management
-- ✅ **Compliance Integration**: Full integration with ComplianceRules and IdentityRegistry
 
 ### **8. Token Lifecycle Management**
 - ✅ **Issuer-Only Minting**: Exclusive minting authority with economic rationale
