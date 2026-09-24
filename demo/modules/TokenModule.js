@@ -12,6 +12,7 @@
  */
 
 const { displaySection, displayInfo, displaySuccess, displayError, displayProgress } = require('../utils/DisplayHelpers');
+const { attestKyc } = require('../utils/Kyc');
 const { ethers } = require('hardhat');
 
 /**
@@ -157,7 +158,6 @@ class TokenModule {
 
             // Step 2: Register in IdentityRegistry on-chain
             console.log('\n📝 Step 2: Registering Central Bank in IdentityRegistry on blockchain...');
-            console.log(`   💡 Central Bank is pre-authorized - no KYC/AML claims needed`);
             const tx2 = await this.state.getContract('identityRegistry').registerIdentity(
                 signer.address,
                 identityAddress,
@@ -170,6 +170,17 @@ class TokenModule {
             console.log(`   🧱 Block Number: ${receipt2.blockNumber}`);
             console.log(`   ⛽ Gas Used: ${receipt2.gasUsed.toLocaleString()}`);
             console.log(`   🌍 Country Code: ${centralBankCountry} (${countryName})`);
+
+            // Registration alone no longer verifies: the required KYC topic
+            // must be attested through the trusted ClaimIssuer.
+            console.log('\n📝 Step 2b: Attesting Central Bank KYC claim on blockchain...');
+            await attestKyc(
+                this.state.getContract('kycIssuer'),
+                this.state.signers[2],
+                identityAddress,
+                'central-bank',
+            );
+            console.log('   ✅ KYC Claim Issued');
 
             // Step 3: Add as agent to Token contract (allows minting)
             console.log('\n📝 Step 3: Granting minting authority on blockchain...');
@@ -381,18 +392,11 @@ class TokenModule {
             console.log(`   ✅ OnchainID Created: ${identityAddress}`);
             console.log(`   ⛽ Gas Used: ${receipt1.gasUsed.toLocaleString()}`);
 
-            // Step 2: Issue KYC claim
+            // Step 2: Issue KYC claim through the trusted ClaimIssuer.
             // NOTE: KYC issuer uses signers[2] (from ContractDeployer.js)
             console.log('\n📝 Step 2: Issuing KYC claim on blockchain...');
-            const kycData = ethers.AbiCoder.defaultAbiCoder().encode(
-                ['string', 'string', 'uint256'],
-                ['NORMAL', userName, Date.now()]
-            );
             const kycIssuer = this.state.getContract('kycIssuer');
-            const tx2 = await kycIssuer.connect(this.state.signers[2]).issueClaim(
-                identityAddress, 1, 1, kycData, '', 0
-            );
-            const receipt2 = await tx2.wait();
+            const receipt2 = await attestKyc(kycIssuer, this.state.signers[2], identityAddress, `normal:${userName}`);
             totalGasUsed += receipt2.gasUsed;
             console.log(`   ✅ KYC Claim Issued`);
             console.log(`   ⛽ Gas Used: ${receipt2.gasUsed.toLocaleString()}`);
@@ -1464,25 +1468,11 @@ class TokenModule {
             const identityAddress = await onchainIDFactory.getIdentityByOwner(signer.address);
             console.log(`   🆔 OnchainID Created: ${identityAddress}`);
 
-            // Step 2: Issue KYC claim on blockchain
-            // NOTE: KYC issuer uses signers[2] (from ContractDeployer.js)
+            // Step 2: Issue KYC claim on blockchain through the trusted
+            // ClaimIssuer. NOTE: KYC issuer uses signers[2] (from ContractDeployer.js)
             console.log('\n📝 Step 2: Issuing KYC claim on blockchain...');
-            const kycTopic = 1;
-            const kycData = ethers.AbiCoder.defaultAbiCoder().encode(
-                ['string', 'string'],
-                ['RETAIL', userName]
-            );
-
             const kycIssuer = this.state.getContract('kycIssuer');
-            const tx2 = await kycIssuer.connect(this.state.signers[2]).issueClaim(
-                identityAddress,
-                kycTopic,
-                1, // scheme: ECDSA signature
-                kycData,
-                '', // uri: empty for now
-                0  // validTo: 0 = no expiry
-            );
-            const receipt2 = await tx2.wait();
+            const receipt2 = await attestKyc(kycIssuer, this.state.signers[2], identityAddress, `retail:${userName}`);
             totalGasUsed += receipt2.gasUsed;
 
             console.log(`   ✅ Transaction Hash: ${receipt2.hash}`);
@@ -1848,12 +1838,30 @@ class TokenModule {
                     console.log(`   OnchainID: ${centralBank.onchainId}`);
                     console.log(`   Country Code: ${countryCode}`);
 
-                    const tx = await identityRegistry.registerIdentity(
-                        centralBank.address,
+                    try {
+                        const tx = await identityRegistry.registerIdentity(
+                            centralBank.address,
+                            centralBank.onchainId,
+                            countryCode
+                        );
+                        await tx.wait();
+                    } catch (registerError) {
+                        // Already registered is fine here — the wallet may be
+                        // missing only the KYC claim below, not the registration.
+                        if (!/already registered/i.test(registerError.message)) {
+                            throw registerError;
+                        }
+                    }
+
+                    // Registration alone no longer verifies: attest the
+                    // required KYC claim through the trusted ClaimIssuer.
+                    console.log(`\n📝 Attesting Central Bank KYC claim...`);
+                    await attestKyc(
+                        this.state.getContract('kycIssuer'),
+                        this.state.signers[2],
                         centralBank.onchainId,
-                        countryCode
+                        'central-bank-repair',
                     );
-                    await tx.wait();
 
                     // Verify again
                     const nowVerified = await identityRegistry.isVerified(centralBank.address);

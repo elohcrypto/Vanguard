@@ -7,6 +7,7 @@
  */
 
 const { displayInfo, displaySection, displaySuccess, displayError } = require('../utils/DisplayHelpers');
+const { attestKyc } = require('../utils/Kyc');
 const { ethers } = require('hardhat');
 
 /**
@@ -618,17 +619,11 @@ class DynamicListModule {
                 console.log(`   ✅ OnchainID created: ${identityAddress}`);
             }
 
-            // Step 2: Issue KYC claim
+            // Step 2: Issue KYC claim through the trusted ClaimIssuer, the
+            // only path IdentityRegistry.isVerified() accepts.
             const kycIssuer = this.state.getContract('kycIssuer');
             console.log('   📝 Issuing KYC claim...');
-            const kycData = ethers.AbiCoder.defaultAbiCoder().encode(
-                ['string', 'string', 'uint256'],
-                ['VERIFIED', `Signer ${signerIndex}`, Date.now()]
-            );
-            const kycTx = await kycIssuer.connect(this.state.signers[2]).issueClaim(
-                identityAddress, 1, 1, kycData, '', 0
-            );
-            await kycTx.wait();
+            await attestKyc(kycIssuer, this.state.signers[2], identityAddress, `signer:${signerIndex}`);
             console.log('   ✅ KYC claim issued');
 
             // Step 3: Issue AML claim

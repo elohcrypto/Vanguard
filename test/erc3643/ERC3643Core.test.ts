@@ -5,8 +5,6 @@ import {
     Token,
     IdentityRegistry,
     ComplianceRegistry,
-    TrustedIssuersRegistry,
-    ClaimTopicsRegistry,
     OnchainIDFactory,
     OnchainID,
     ClaimIssuer
@@ -16,8 +14,6 @@ describe("ERC-3643 Core Implementation", function () {
     let token: Token;
     let identityRegistry: IdentityRegistry;
     let complianceRegistry: ComplianceRegistry;
-    let trustedIssuersRegistry: TrustedIssuersRegistry;
-    let claimTopicsRegistry: ClaimTopicsRegistry;
     let onchainIDFactory: OnchainIDFactory;
     let claimIssuer: ClaimIssuer;
 
@@ -55,14 +51,6 @@ describe("ERC-3643 Core Implementation", function () {
         complianceRegistry = await ComplianceRegistry.deploy();
         await complianceRegistry.waitForDeployment();
 
-        const TrustedIssuersRegistry = await ethers.getContractFactory("TrustedIssuersRegistry");
-        trustedIssuersRegistry = await TrustedIssuersRegistry.deploy();
-        await trustedIssuersRegistry.waitForDeployment();
-
-        const ClaimTopicsRegistry = await ethers.getContractFactory("ClaimTopicsRegistry");
-        claimTopicsRegistry = await ClaimTopicsRegistry.deploy();
-        await claimTopicsRegistry.waitForDeployment();
-
         // Deploy ERC-3643 Token
         const Token = await ethers.getContractFactory("Token");
         const complianceRegistryAddress = await complianceRegistry.getAddress();
@@ -78,14 +66,6 @@ describe("ERC-3643 Core Implementation", function () {
         // Add agent
         await token.addAgent(agent.address);
         await identityRegistry.addAgent(agent.address);
-
-        // Setup trusted issuers and claim topics
-        await trustedIssuersRegistry.addTrustedIssuer(
-            await claimIssuer.getAddress(),
-            [CLAIM_TOPIC_KYC, CLAIM_TOPIC_AML]
-        );
-        await claimTopicsRegistry.addClaimTopic(CLAIM_TOPIC_KYC);
-        await claimTopicsRegistry.addClaimTopic(CLAIM_TOPIC_AML);
 
         // Create OnchainIDs for investors
         const salt1 = ethers.randomBytes(32);
@@ -242,28 +222,6 @@ describe("ERC-3643 Core Implementation", function () {
             await token.connect(investor1).transfer(investor2.address, ethers.parseEther("400"));
             expect(await token.balanceOf(investor1.address)).to.equal(ethers.parseEther("600"));
             expect(await token.getFreeBalance(investor1.address)).to.equal(ethers.parseEther("100"));
-        });
-    });
-
-    describe("Registry Management", function () {
-        it("Should manage trusted issuers correctly", async function () {
-            const trustedIssuers = await trustedIssuersRegistry.getTrustedIssuers();
-            expect(trustedIssuers).to.include(await claimIssuer.getAddress());
-
-            expect(await trustedIssuersRegistry.isTrustedIssuer(await claimIssuer.getAddress())).to.be.true;
-
-            const claimTopics = await trustedIssuersRegistry.getTrustedIssuerClaimTopics(await claimIssuer.getAddress());
-            expect(claimTopics).to.include(BigInt(CLAIM_TOPIC_KYC));
-            expect(claimTopics).to.include(BigInt(CLAIM_TOPIC_AML));
-        });
-
-        it("Should manage claim topics correctly", async function () {
-            const claimTopics = await claimTopicsRegistry.getClaimTopics();
-            expect(claimTopics).to.include(BigInt(CLAIM_TOPIC_KYC));
-            expect(claimTopics).to.include(BigInt(CLAIM_TOPIC_AML));
-
-            expect(await claimTopicsRegistry.isClaimTopicRequired(CLAIM_TOPIC_KYC)).to.be.true;
-            expect(await claimTopicsRegistry.isClaimTopicRequired(999)).to.be.false;
         });
     });
 

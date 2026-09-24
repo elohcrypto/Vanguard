@@ -12,6 +12,7 @@
 
 const { ethers } = require("hardhat");
 const { DeploymentHelper } = require("../../scripts/deploy-helpers");
+const { KYC_TOPIC } = require("../utils/Kyc");
 const {
   displaySection,
   displaySuccess,
@@ -347,6 +348,15 @@ class ContractDeployer {
       identityRegistry,
       [],
     );
+
+    // Require a KYC claim from the trusted KYC issuer before a wallet
+    // verifies. Without this, isVerified() would pass on registration alone.
+    const kycIssuer = this.state.getContract("kycIssuer");
+    const kycIssuerAddr = await kycIssuer.getAddress();
+    await identityRegistry.addClaimTopic(KYC_TOPIC);
+    console.log(`   ✅ Required claim topic: KYC (${KYC_TOPIC})`);
+    await identityRegistry.addTrustedIssuer(kycIssuerAddr, [KYC_TOPIC]);
+    console.log(`   ✅ Trusted issuer for KYC: ${kycIssuerAddr}`);
   }
 
   /**
@@ -468,7 +478,13 @@ class ContractDeployer {
       const complianceAddr = await this.state
         .getContract("complianceRules")
         .getAddress();
-      await DeploymentHelper.assertProductionCompliance(complianceAddr);
+      const identityRegistryAddr = await this.state
+        .getContract("identityRegistry")
+        .getAddress();
+      await DeploymentHelper.assertProductionCompliance(
+        complianceAddr,
+        identityRegistryAddr,
+      );
 
       // Deploy ERC-3643 compliant Digital Token
       console.log("\n📝 Step 2: Deploying ERC-3643 Token...");

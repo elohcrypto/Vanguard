@@ -23,17 +23,6 @@ This directory contains the complete implementation of ERC-3643 (T-REX) standard
 - Token binding for secure compliance enforcement
 - Module management for extensible compliance logic
 
-### 4. **TrustedIssuersRegistry.sol** - Claim Issuer Management
-- Management of authorized claim issuers
-- Claim topic assignment per issuer
-- Dynamic issuer addition/removal with claim topic updates
-- Efficient lookup for claim validation
-
-### 5. **ClaimTopicsRegistry.sol** - Required Claims Management
-- Definition of required claim types for token operations
-- Dynamic claim topic management
-- Integration with compliance validation flow
-
 ## 🔗 Interface Definitions
 
 All contracts implement comprehensive interfaces located in `interfaces/`:
@@ -41,8 +30,6 @@ All contracts implement comprehensive interfaces located in `interfaces/`:
 - **IERC3643.sol** - Core T-REX token interface
 - **IIdentityRegistry.sol** - Identity management interface
 - **ICompliance.sol** - Compliance validation interface
-- **ITrustedIssuersRegistry.sol** - Trusted issuers interface
-- **IClaimTopicsRegistry.sol** - Claim topics interface
 
 ## 🎯 Key Features Implemented
 
@@ -77,8 +64,6 @@ All contracts implement comprehensive interfaces located in `interfaces/`:
 // 1. Deploy registries
 IdentityRegistry identityRegistry = new IdentityRegistry();
 ComplianceRegistry compliance = new ComplianceRegistry(address(identityRegistry));
-TrustedIssuersRegistry trustedIssuers = new TrustedIssuersRegistry();
-ClaimTopicsRegistry claimTopics = new ClaimTopicsRegistry();
 
 // 2. Deploy token
 Token token = new Token(

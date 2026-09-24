@@ -139,10 +139,16 @@ export class DeploymentHelper {
    * is refused.
    *
    * @param complianceAddress address of the ICompliance implementation
-   * @throws if the contract explicitly identifies as non-production
+   * @param identityRegistryAddress optional IdentityRegistry bound to the
+   *   same Token; when given, refuses to proceed if it has zero required
+   *   claim topics configured (registration alone would then verify any
+   *   wallet). Omitted by tests that rely on the permissive default.
+   * @throws if the contract explicitly identifies as non-production, or if
+   *   identityRegistryAddress is given and has no required claim topics
    */
   static async assertProductionCompliance(
     complianceAddress: string,
+    identityRegistryAddress?: string,
   ): Promise<void> {
     const probe = await ethers.getContractAt(
       ["function isProductionCompliance() view returns (bool)"],
@@ -178,5 +184,26 @@ export class DeploymentHelper {
     console.log(
       `✅ Compliance at ${complianceAddress} reports production-ready`,
     );
+
+    if (identityRegistryAddress) {
+      const registry = await ethers.getContractAt(
+        ["function getClaimTopics() view returns (uint256[])"],
+        identityRegistryAddress,
+      );
+      const topics = await registry.getClaimTopics();
+      if (topics.length === 0) {
+        throw new Error(
+          `Refusing to bind compliance: IdentityRegistry at ` +
+            `${identityRegistryAddress} has no required claim topics ` +
+            `(getClaimTopics() is empty). Registration alone would verify ` +
+            `every wallet. Call addClaimTopic(...) and addTrustedIssuer(...) ` +
+            `before binding a Token in production.`,
+        );
+      }
+      console.log(
+        `✅ IdentityRegistry at ${identityRegistryAddress} requires ` +
+          `${topics.length} claim topic(s)`,
+      );
+    }
   }
 }

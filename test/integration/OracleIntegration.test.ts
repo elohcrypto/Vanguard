@@ -11,9 +11,7 @@ import {
     ClaimIssuer,
     Token,
     IdentityRegistry,
-    ComplianceRegistry,
-    TrustedIssuersRegistry,
-    ClaimTopicsRegistry
+    ComplianceRegistry
 } from "../../typechain-types";
 
 describe("Oracle Integration with OnchainID and ERC-3643", function () {
@@ -28,8 +26,6 @@ describe("Oracle Integration with OnchainID and ERC-3643", function () {
     let token: Token;
     let identityRegistry: IdentityRegistry;
     let complianceRegistry: ComplianceRegistry;
-    let trustedIssuersRegistry: TrustedIssuersRegistry;
-    let claimTopicsRegistry: ClaimTopicsRegistry;
 
     // Signers
     let owner: SignerWithAddress;
@@ -100,14 +96,6 @@ describe("Oracle Integration with OnchainID and ERC-3643", function () {
         await claimIssuer.addIssuerKey(amlProviderKey, 3, 1);
 
         // Deploy ERC-3643 System
-        const TrustedIssuersRegistryFactory = await ethers.getContractFactory("TrustedIssuersRegistry");
-        trustedIssuersRegistry = await TrustedIssuersRegistryFactory.deploy();
-        await trustedIssuersRegistry.waitForDeployment();
-
-        const ClaimTopicsRegistryFactory = await ethers.getContractFactory("ClaimTopicsRegistry");
-        claimTopicsRegistry = await ClaimTopicsRegistryFactory.deploy();
-        await claimTopicsRegistry.waitForDeployment();
-
         const IdentityRegistryFactory = await ethers.getContractFactory("IdentityRegistry");
         identityRegistry = await IdentityRegistryFactory.deploy();
         await identityRegistry.waitForDeployment();
@@ -138,16 +126,6 @@ describe("Oracle Integration with OnchainID and ERC-3643", function () {
         // Setup emergency oracle for blacklist
         await blacklistOracle.setEmergencyOracle(oracle1.address, true);
 
-        // Setup trusted issuers
-        await trustedIssuersRegistry.addTrustedIssuer(await claimIssuer.getAddress(), [KYC_CLAIM_TOPIC, AML_CLAIM_TOPIC]);
-        await trustedIssuersRegistry.addTrustedIssuer(kycProvider.address, [KYC_CLAIM_TOPIC]);
-        await trustedIssuersRegistry.addTrustedIssuer(amlProvider.address, [AML_CLAIM_TOPIC]);
-
-        // Setup claim topics
-        await claimTopicsRegistry.addClaimTopic(KYC_CLAIM_TOPIC);
-        await claimTopicsRegistry.addClaimTopic(AML_CLAIM_TOPIC);
-        await claimTopicsRegistry.addClaimTopic(COUNTRY_CLAIM_TOPIC);
-        await claimTopicsRegistry.addClaimTopic(INVESTOR_TYPE_CLAIM_TOPIC);
     });
 
     describe("📋 KYC/AML Claim Integration with Oracle Whitelist", function () {

@@ -13,6 +13,7 @@ const {
   displayError,
 } = require("../utils/DisplayHelpers");
 const { advancePast } = require("../utils/ChainTime");
+const { attestKyc } = require("../utils/Kyc");
 const { ethers } = require("hardhat");
 
 /**
@@ -189,11 +190,14 @@ class GovernanceModule {
 
       // Issue KYC and AML claims for governance contract
       // NOTE: KYC issuer uses signers[2], AML issuer uses signers[3] (from ContractDeployer.js)
-      const kycData = ethers.hexlify(ethers.toUtf8Bytes("GOVERNANCE_CONTRACT"));
-      await this.state
-        .getContract("kycIssuer")
-        .connect(this.state.signers[2])
-        .issueClaim(govIdentityAddress, 1, 1, kycData, "", 0);
+      // KYC must go through ClaimIssuer.issueClaim on the required topic
+      // (attestKyc) — IdentityRegistry.isVerified() requires it.
+      await attestKyc(
+        this.state.getContract("kycIssuer"),
+        this.state.signers[2],
+        govIdentityAddress,
+        "governance",
+      );
       const amlData = ethers.hexlify(ethers.toUtf8Bytes("GOVERNANCE_CONTRACT"));
       await this.state
         .getContract("amlIssuer")

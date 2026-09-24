@@ -10,9 +10,7 @@ import {
     ClaimIssuer,
     Token,
     IdentityRegistry,
-    ComplianceRegistry,
-    TrustedIssuersRegistry,
-    ClaimTopicsRegistry
+    ComplianceRegistry
 } from "../../typechain-types";
 
 describe("Oracle-ERC3643 Integration Tests", function () {
@@ -25,8 +23,6 @@ describe("Oracle-ERC3643 Integration Tests", function () {
     let token: Token;
     let identityRegistry: IdentityRegistry;
     let complianceRegistry: ComplianceRegistry;
-    let trustedIssuersRegistry: TrustedIssuersRegistry;
-    let claimTopicsRegistry: ClaimTopicsRegistry;
 
     // OnchainID contracts
     let onchainIDFactory: OnchainIDFactory;
@@ -94,14 +90,6 @@ describe("Oracle-ERC3643 Integration Tests", function () {
         await claimIssuer.waitForDeployment();
 
         // Deploy ERC-3643 registries
-        const TrustedIssuersRegistryFactory = await ethers.getContractFactory("TrustedIssuersRegistry");
-        trustedIssuersRegistry = await TrustedIssuersRegistryFactory.deploy();
-        await trustedIssuersRegistry.waitForDeployment();
-
-        const ClaimTopicsRegistryFactory = await ethers.getContractFactory("ClaimTopicsRegistry");
-        claimTopicsRegistry = await ClaimTopicsRegistryFactory.deploy();
-        await claimTopicsRegistry.waitForDeployment();
-
         const IdentityRegistryFactory = await ethers.getContractFactory("IdentityRegistry");
         identityRegistry = await IdentityRegistryFactory.deploy();
         await identityRegistry.waitForDeployment();
@@ -142,12 +130,6 @@ describe("Oracle-ERC3643 Integration Tests", function () {
 
         // Set emergency oracle for blacklist
         await blacklistOracle.setEmergencyOracle(oracle2.address, true);
-
-        // Setup ERC-3643 registries
-        await trustedIssuersRegistry.addTrustedIssuer(await claimIssuer.getAddress(), [KYC_CLAIM_TOPIC, AML_CLAIM_TOPIC, COUNTRY_CLAIM_TOPIC]);
-        await claimTopicsRegistry.addClaimTopic(KYC_CLAIM_TOPIC);
-        await claimTopicsRegistry.addClaimTopic(AML_CLAIM_TOPIC);
-        await claimTopicsRegistry.addClaimTopic(COUNTRY_CLAIM_TOPIC);
 
         // Set token agent
         await token.addAgent(tokenAgent.address);

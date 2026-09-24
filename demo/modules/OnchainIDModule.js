@@ -13,6 +13,7 @@
 
 const { ethers } = require('hardhat');
 const { displaySection, displaySuccess, displayError, displayInfo } = require('../utils/DisplayHelpers');
+const { attestKyc } = require('../utils/Kyc');
 
 /**
  * @class OnchainIDModule
@@ -1056,41 +1057,22 @@ class OnchainIDModule {
                 }
             }
 
-            // Step 3: Issue KYC claim
-            const kycIssuer = this.state.signers[1]; // KYC issuer
-            const claimTopics = [1]; // KYC topic
-            const claimData = ethers.AbiCoder.defaultAbiCoder().encode(
-                ['uint256', 'bool'],
-                [countryCode, true]
-            );
+            // Step 3: Issue KYC claim through the trusted ClaimIssuer. A claim
+            // added directly on the OnchainID with addClaim(...) does NOT
+            // verify — IdentityRegistry.isVerified() only accepts claims
+            // signed by a trusted issuer via ClaimIssuer.issueClaim.
+            const kycIssuerContract = this.state.getContract('kycIssuer');
+            const kycIssuerSigner = this.state.signers[2]; // ClaimIssuer owner, see ContractDeployer.js
 
             console.log('\n📝 Issuing KYC claim on-chain...');
-            const OnchainID = await ethers.getContractFactory('OnchainID');
-            const identityContract = OnchainID.attach(identity.address);
-
-            await this.logger.logTransaction(
-                'KYC Claim Issuance',
-                identityContract.connect(kycIssuer).addClaim(
-                    claimTopics[0],
-                    1, // scheme
-                    kycIssuer.address,
-                    '0x', // signature
-                    claimData,
-                    ''
-                ),
-                {
-                    identity: identity.address,
-                    topic: claimTopics[0],
-                    issuer: kycIssuer.address,
-                    countryCode: countryCode
-                }
-            );
+            await attestKyc(kycIssuerContract, kycIssuerSigner, identity.address, `country:${countryCode}`);
+            const kycIssuerAddr = await kycIssuerContract.getAddress();
 
             // Store claim in state
             this.state.claims.set(`${identity.address}_KYC`, {
                 type: 'KYC',
                 identity: identity.address,
-                issuer: kycIssuer.address,
+                issuer: kycIssuerAddr,
                 countryCode: countryCode,
                 status: 'ISSUED',
                 issuedAt: new Date().toISOString()
@@ -1099,7 +1081,7 @@ class OnchainIDModule {
             displaySuccess('KYC CLAIM ISSUED SUCCESSFULLY!');
             console.log(`   Identity: ${identity.address}`);
             console.log(`   Country Code: ${countryCode}`);
-            console.log(`   Issuer: ${kycIssuer.address}`);
+            console.log(`   Issuer: ${kycIssuerAddr}`);
 
         } catch (error) {
             displayError(`KYC claim issuance failed: ${error.message}`);
