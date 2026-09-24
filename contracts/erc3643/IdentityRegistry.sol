@@ -5,6 +5,8 @@ import "@openzeppelin/contracts/access/Ownable.sol";
 import "./interfaces/IIdentityRegistry.sol";
 import "./interfaces/IInvestorTypeRegistry.sol";
 import "../compliance/interfaces/IComplianceRules.sol";
+import "../onchain_id/interfaces/IOnchainID.sol";
+import "../onchain_id/interfaces/IClaimIssuer.sol";
 
 /**
  * @title IdentityRegistry
@@ -43,12 +45,6 @@ contract IdentityRegistry is IIdentityRegistry, Ownable {
     // Mapping of authorized agents
     mapping(address => bool) private _agents;
 
-    // Array of bound tokens
-    address[] private _tokensBound;
-
-    // Mapping to check if token is bound
-    mapping(address => bool) private _isTokenBound;
-
     // Investor Type Registry integration
     IInvestorTypeRegistry private _investorTypeRegistry;
 
@@ -58,11 +54,32 @@ contract IdentityRegistry is IIdentityRegistry, Ownable {
     // Token address for jurisdiction validation
     address private _tokenForJurisdiction;
 
+    // ---- Required claims (folds ClaimTopicsRegistry + TrustedIssuersRegistry) ----
+    // A wallet is verified only if its identity carries, for EVERY required
+    // topic, a claim from an issuer trusted for that topic which that issuer
+    // still reports as valid (not revoked, not expired).
+    uint256[] private _claimTopics;
+    mapping(uint256 => bool) private _isRequiredTopic;
+    mapping(uint256 => address[]) private _trustedIssuersForTopic;
+    mapping(address => mapping(uint256 => bool)) private _issuerHasTopic;
+    mapping(address => uint256[]) private _issuerTopics;
+
+    // ponytail: bounded loops in isVerified. Raise if a topic needs more
+    // issuers or an identity legitimately carries more claims per topic.
+    uint256 public constant MAX_TRUSTED_ISSUERS_PER_TOPIC = 8;
+    uint256 public constant MAX_CLAIMS_SCANNED_PER_TOPIC = 8;
+
+    error TooManyTrustedIssuers(uint256 topic);
+    error IssuerNotAContract(address issuer);
+
+    event ClaimTopicAdded(uint256 indexed topic);
+    event ClaimTopicRemoved(uint256 indexed topic);
+    event TrustedIssuerAdded(address indexed issuer, uint256[] topics);
+    event TrustedIssuerRemoved(address indexed issuer);
+
     // Events
     event IdentityUnstored(address indexed userAddress, address indexed identity);
     event IdentityModified(address indexed oldIdentity, address indexed newIdentity);
-    event IdentityRegistryBound(address indexed token);
-    event IdentityRegistryUnbound(address indexed token);
     event InvestorTypeRegistryUpdated(address indexed oldRegistry, address indexed newRegistry);
     event ComplianceRulesUpdated(address indexed oldRules, address indexed newRules);
     event IdentityRegistrationRejected(address indexed userAddress, uint16 country, string reason);
@@ -207,34 +224,131 @@ contract IdentityRegistry is IIdentityRegistry, Ownable {
         return _countries[_userAddress];
     }
 
+    /**
+     * @dev Verified = registered by an agent AND holding a live claim from a
+     *      trusted issuer on every required topic. With no required topics,
+     *      registration alone suffices (T-REX semantics); production binding
+     *      must assert that topics are configured.
+     */
     function isVerified(address _userAddress) external view override returns (bool) {
-        return _identities[_userAddress] != address(0);
+        address id = _identities[_userAddress];
+        if (id == address(0)) return false;
+        uint256 n = _claimTopics.length;
+        for (uint256 t = 0; t < n; t++) {
+            if (!_hasValidClaim(id, _claimTopics[t])) return false;
+        }
+        return true;
     }
 
-    function bindIdentityRegistry(address _token) external onlyAgent {
-        require(_token != address(0), "Invalid token address");
-        require(!_isTokenBound[_token], "Token already bound");
+    // ---- Required-claim configuration (owner = governance after handover) ----
 
-        _tokensBound.push(_token);
-        _isTokenBound[_token] = true;
-
-        emit IdentityRegistryBound(_token);
+    function addClaimTopic(uint256 _topic) external onlyOwner {
+        require(!_isRequiredTopic[_topic], "Topic already required");
+        _isRequiredTopic[_topic] = true;
+        _claimTopics.push(_topic);
+        emit ClaimTopicAdded(_topic);
     }
 
-    function unbindIdentityRegistry(address _token) external onlyAgent {
-        require(_isTokenBound[_token], "Token not bound");
+    function removeClaimTopic(uint256 _topic) external onlyOwner {
+        require(_isRequiredTopic[_topic], "Topic not required");
+        _isRequiredTopic[_topic] = false;
+        _removeFromList(_claimTopics, _topic);
+        emit ClaimTopicRemoved(_topic);
+    }
 
-        // Remove from array
-        for (uint i = 0; i < _tokensBound.length; i++) {
-            if (_tokensBound[i] == _token) {
-                _tokensBound[i] = _tokensBound[_tokensBound.length - 1];
-                _tokensBound.pop();
-                break;
+    function addTrustedIssuer(address _issuer, uint256[] calldata _topics) external onlyOwner {
+        if (_issuer.code.length == 0) revert IssuerNotAContract(_issuer);
+        require(_topics.length > 0, "No topics");
+        for (uint256 i = 0; i < _topics.length; i++) {
+            uint256 topic = _topics[i];
+            if (_issuerHasTopic[_issuer][topic]) continue;
+            if (_trustedIssuersForTopic[topic].length >= MAX_TRUSTED_ISSUERS_PER_TOPIC) {
+                revert TooManyTrustedIssuers(topic);
             }
+            _issuerHasTopic[_issuer][topic] = true;
+            _trustedIssuersForTopic[topic].push(_issuer);
+            _issuerTopics[_issuer].push(topic);
+        }
+        emit TrustedIssuerAdded(_issuer, _topics);
+    }
+
+    function removeTrustedIssuer(address _issuer) external onlyOwner {
+        uint256[] storage topics = _issuerTopics[_issuer];
+        require(topics.length > 0, "Issuer not trusted");
+        for (uint256 i = 0; i < topics.length; i++) {
+            _issuerHasTopic[_issuer][topics[i]] = false;
+            _removeAddressFromList(_trustedIssuersForTopic[topics[i]], _issuer);
+        }
+        delete _issuerTopics[_issuer];
+        emit TrustedIssuerRemoved(_issuer);
+    }
+
+    function getClaimTopics() external view returns (uint256[] memory) {
+        return _claimTopics;
+    }
+
+    function getTrustedIssuersForClaimTopic(uint256 _topic) external view returns (address[] memory) {
+        return _trustedIssuersForTopic[_topic];
+    }
+
+    function isTrustedIssuer(address _issuer, uint256 _topic) external view returns (bool) {
+        return _issuerHasTopic[_issuer][_topic];
+    }
+
+    /**
+     * @dev True if `id` carries a claim on `topic` from a trusted issuer that
+     *      the issuer still reports valid. Reads the claim the identity holds,
+     *      recomputes the issuer-side id from (issuer, identity, topic, data),
+     *      and asks the issuer. A self-added claim naming a trusted issuer
+     *      fails here because the issuer has no record of it.
+     */
+    function _hasValidClaim(address id, uint256 topic) private view returns (bool) {
+        if (_trustedIssuersForTopic[topic].length == 0) return false;
+        // A high-level call to a non-contract reverts in the caller, outside
+        // try/catch, so check first. Wallets registered with a non-identity
+        // address are simply unverified.
+        if (id.code.length == 0) return false;
+
+        bytes32[] memory claimIds;
+        try IOnchainID(id).getClaimIdsByTopic(topic) returns (bytes32[] memory ids) {
+            claimIds = ids;
+        } catch {
+            return false;
         }
 
-        _isTokenBound[_token] = false;
-        emit IdentityRegistryUnbound(_token);
+        uint256 n = claimIds.length;
+        if (n > MAX_CLAIMS_SCANNED_PER_TOPIC) n = MAX_CLAIMS_SCANNED_PER_TOPIC;
+        for (uint256 i = 0; i < n; i++) {
+            (uint256 foundTopic, , address issuer, , bytes memory data, ) = IOnchainID(id).getClaim(claimIds[i]);
+            if (foundTopic != topic || !_issuerHasTopic[issuer][topic]) continue;
+            bytes32 issuerClaimId = keccak256(abi.encodePacked(issuer, id, topic, data));
+            try IClaimIssuer(issuer).isClaimValid(issuerClaimId) returns (bool ok) {
+                if (ok) return true;
+            } catch {}
+        }
+        return false;
+    }
+
+    function _removeFromList(uint256[] storage list, uint256 value) private {
+        uint256 len = list.length;
+        for (uint256 i = 0; i < len; i++) {
+            if (list[i] == value) {
+                list[i] = list[len - 1];
+                list.pop();
+                return;
+            }
+        }
+    }
+
+    function _removeAddressFromList(address[] storage list, address value) private {
+        uint256 len = list.length;
+        for (uint256 i = 0; i < len; i++) {
+            if (list[i] == value) {
+                list[i] = list[len - 1];
+                list.pop();
+                return;
+            }
+        }
     }
 
     function batchRegisterIdentity(
@@ -269,13 +383,6 @@ contract IdentityRegistry is IIdentityRegistry, Ownable {
     }
 
     // Additional utility functions
-    function getTokensBound() external view returns (address[] memory) {
-        return _tokensBound;
-    }
-
-    function isTokenBound(address _token) external view returns (bool) {
-        return _isTokenBound[_token];
-    }
 
     /**
      * @dev Set investor type registry

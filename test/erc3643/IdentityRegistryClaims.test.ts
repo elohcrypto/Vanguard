@@ -11,9 +11,9 @@ import {
 // "Verified" must mean "holds a live claim from a trusted issuer on every
 // required topic", not "an agent called registerIdentity". They fail today and
 // are made to pass in Phase 1 (Tasks 1.1-1.4).
-// PENDING until Phase 1: observed RED on 2026-09-23 (4 of 5 fail: registration
-// alone verifies). Change `describe.skip` to `describe` in Task 1.3.
-describe.skip("IdentityRegistry.isVerified requires trusted-issuer claims (plan Task 0.2)", function () {
+// Observed RED on 2026-09-23 (4 of 5 failed: registration alone verified);
+// made GREEN by Phase 1 (claim-checking isVerified).
+describe("IdentityRegistry.isVerified requires trusted-issuer claims (plan Task 0.2)", function () {
   const KYC_TOPIC = 6;
   const KYC_DATA = ethers.toUtf8Bytes("kyc:passed");
 
@@ -52,9 +52,9 @@ describe.skip("IdentityRegistry.isVerified requires trusted-issuer claims (plan 
     // The agent binds wallet, identity and country. That alone must not verify.
     await registry.registerIdentity(investor.address, identityAddr, 344);
 
-    // Phase 1 (Task 1.2) adds the required topic and the trusted issuer here:
-    // await registry.addClaimTopic(KYC_TOPIC);
-    // await registry.addTrustedIssuer(await kycIssuer.getAddress(), [KYC_TOPIC]);
+    // The registry owner names the required topic and who may attest to it.
+    await registry.addClaimTopic(KYC_TOPIC);
+    await registry.addTrustedIssuer(await kycIssuer.getAddress(), [KYC_TOPIC]);
   });
 
   it("is NOT verified when the wallet is registered but holds no claim", async function () {
