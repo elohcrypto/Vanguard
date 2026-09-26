@@ -98,4 +98,76 @@ describe("IdentityRegistry.isVerified requires trusted-issuer claims (plan Task 
 
     expect(await registry.isVerified(investor.address)).to.equal(false);
   });
+
+  // Plan 2026-09-25-zk-kyc-ownership-cleanup-v2, section 2.3, Task 1R.1: a
+  // registry with zero required topics must fail closed, not verify by
+  // registration alone.
+  it("is NOT verified when the registry has no required topics", async function () {
+    const freshRegistry = await (
+      await ethers.getContractFactory("IdentityRegistry")
+    ).deploy();
+
+    // No addClaimTopic call: this registry requires nothing.
+    await freshRegistry.registerIdentity(investor.address, identityAddr, 344);
+
+    expect(await freshRegistry.isVerified(investor.address)).to.equal(false);
+  });
+
+  // Plan section 2.3, Task 1R.8 / Decision D16: the claim scan is bounded at
+  // MAX_CLAIMS_SCANNED_PER_TOPIC (8). An identity owner can bury their own
+  // valid claim behind junk self-claims naming the trusted issuer, but that
+  // issuer never recorded those junk claims so they were never going to
+  // validate anyway — the point demonstrated here is that the scan never
+  // even reaches the real, valid claim once 8 claims precede it.
+  it("an identity owner can bury their own valid claim behind the scan cap (documented self-DoS)", async function () {
+    const identity = await ethers.getContractAt("OnchainID", identityAddr);
+    const kycIssuerAddr = await kycIssuer.getAddress();
+
+    // OnchainID.addClaim appends to claimsByTopic[topic] in call order and
+    // getClaimIdsByTopic returns that same order, so these 8 junk claims
+    // occupy indices 0-7 and the real claim issued afterwards lands at
+    // index 8 — outside the first-8 window _hasValidClaim scans.
+    const junkClaimIds: string[] = [];
+    for (let i = 0; i < 8; i++) {
+      const junkData = ethers.toUtf8Bytes(`junk-claim-${i}`);
+      await identity
+        .connect(investor)
+        .addClaim(KYC_TOPIC, 1, kycIssuerAddr, "0x", junkData, "");
+      // OnchainID.addClaim: claimId = keccak256(abi.encodePacked(issuer, topic, data))
+      junkClaimIds.push(
+        ethers.solidityPackedKeccak256(
+          ["address", "uint256", "bytes"],
+          [kycIssuerAddr, KYC_TOPIC, junkData],
+        ),
+      );
+    }
+
+    await kycIssuer
+      .connect(kycProvider)
+      .issueClaim(identityAddr, KYC_TOPIC, 1, KYC_DATA, "", 0);
+
+    expect(await registry.isVerified(investor.address)).to.equal(false);
+
+    for (const claimId of junkClaimIds) {
+      await identity.connect(investor).removeClaim(claimId);
+    }
+
+    expect(await registry.isVerified(investor.address)).to.equal(true);
+  });
+
+  // Plan section 2.3, Task 1R.8: a claim issued by an issuer the registry
+  // does not trust for the topic must not verify the wallet, regardless of
+  // whether the claim itself is otherwise valid.
+  it("a claim from an untrusted issuer does not verify", async function () {
+    const untrustedIssuer = await (
+      await ethers.getContractFactory("ClaimIssuer")
+    ).deploy(kycProvider.address, "Untrusted Issuer", "Not trusted by this registry");
+
+    // Deliberately never call registry.addTrustedIssuer for this issuer.
+    await untrustedIssuer
+      .connect(kycProvider)
+      .issueClaim(identityAddr, KYC_TOPIC, 1, KYC_DATA, "", 0);
+
+    expect(await registry.isVerified(investor.address)).to.equal(false);
+  });
 });

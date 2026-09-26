@@ -67,6 +67,7 @@ contract IdentityRegistry is IIdentityRegistry, Ownable {
     // ponytail: bounded loops in isVerified. Raise if a topic needs more
     // issuers or an identity legitimately carries more claims per topic.
     uint256 public constant MAX_TRUSTED_ISSUERS_PER_TOPIC = 8;
+    // ponytail: bounded scan; an identity owner can bury their own valid claim behind 8 junk claims (self-DoS only). Upgrade path: T-REX ids keccak256(abi.encode(issuer, topic)), one claim per issuer per topic.
     uint256 public constant MAX_CLAIMS_SCANNED_PER_TOPIC = 8;
 
     error TooManyTrustedIssuers(uint256 topic);
@@ -226,14 +227,15 @@ contract IdentityRegistry is IIdentityRegistry, Ownable {
 
     /**
      * @dev Verified = registered by an agent AND holding a live claim from a
-     *      trusted issuer on every required topic. With no required topics,
-     *      registration alone suffices (T-REX semantics); production binding
-     *      must assert that topics are configured.
+     *      trusted issuer on every required topic. A registry with no required
+     *      topics verifies nobody (fail closed; T-REX would verify everyone).
+     *      The deploy guard in scripts/deploy-helpers.ts is the second line.
      */
     function isVerified(address _userAddress) external view override returns (bool) {
         address id = _identities[_userAddress];
         if (id == address(0)) return false;
         uint256 n = _claimTopics.length;
+        if (n == 0) return false;
         for (uint256 t = 0; t < n; t++) {
             if (!_hasValidClaim(id, _claimTopics[t])) return false;
         }
