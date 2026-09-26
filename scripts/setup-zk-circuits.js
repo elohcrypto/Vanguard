@@ -68,7 +68,9 @@ async function downloadPtau() {
       console.log("✅ Powers of Tau file present, hash verified");
       return;
     }
-    console.log("⚠️  Existing Powers of Tau file has the wrong hash; replacing it");
+    console.log(
+      "⚠️  Existing Powers of Tau file has the wrong hash; replacing it",
+    );
     fs.unlinkSync(PTAU_FILE);
   }
 

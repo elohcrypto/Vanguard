@@ -1,4 +1,4 @@
-const { ethers } = require('hardhat');
+const { ethers } = require("hardhat");
 
 /**
  * Sign a shipment proof for a specific escrow wallet.
@@ -16,9 +16,9 @@ async function signShipmentProof(signer, walletAddress, dataHash) {
   const { chainId } = await ethers.provider.getNetwork();
   const digest = ethers.keccak256(
     ethers.AbiCoder.defaultAbiCoder().encode(
-      ['string', 'address', 'uint256', 'bytes32'],
-      ['VanguardShipmentProof', walletAddress, chainId, dataHash]
-    )
+      ["string", "address", "uint256", "bytes32"],
+      ["VanguardShipmentProof", walletAddress, chainId, dataHash],
+    ),
   );
   return signer.signMessage(ethers.getBytes(digest));
 }
