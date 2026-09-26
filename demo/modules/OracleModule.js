@@ -31,118 +31,20 @@ class OracleModule {
     displaySection("DEPLOY ORACLE MANAGEMENT SYSTEM", "🏗️");
 
     try {
-      // Deploy Oracle Manager
-      console.log("📦 Deploying Oracle Manager...");
-      const OracleManagerFactory =
-        await ethers.getContractFactory("OracleManager");
-      const oracleManager = await OracleManagerFactory.deploy();
-      await oracleManager.waitForDeployment();
-      this.state.setContract("oracleManager", oracleManager);
+      // One oracle deploy path (Task 2A.1): ContractDeployer.deployOracleSystem
+      // is the only implementation that binds the blacklist oracle into
+      // ComplianceRules (see setBlacklistOracle there). This module used to
+      // duplicate the whole deployment and never did that binding.
+      await this.deployer.deployOracleSystem();
+
+      const oracleManager = this.state.getContract("oracleManager");
+      const whitelistOracle = this.state.getContract("whitelistOracle");
+      const blacklistOracle = this.state.getContract("blacklistOracle");
+      const consensusOracle = this.state.getContract("consensusOracle");
       this.state.oracleManager = oracleManager; // Alias
-      console.log(
-        `✅ Oracle Manager deployed: ${await oracleManager.getAddress()}`,
-      );
-
-      // Deploy Whitelist Oracle
-      console.log("📦 Deploying Whitelist Oracle...");
-      const WhitelistOracleFactory =
-        await ethers.getContractFactory("WhitelistOracle");
-      const whitelistOracle = await WhitelistOracleFactory.deploy(
-        await oracleManager.getAddress(),
-        "Whitelist Oracle",
-        "Oracle for managing whitelist consensus and attestations",
-      );
-      await whitelistOracle.waitForDeployment();
-      this.state.setContract("whitelistOracle", whitelistOracle);
       this.state.whitelistOracle = whitelistOracle; // Alias
-      console.log(
-        `✅ Whitelist Oracle deployed: ${await whitelistOracle.getAddress()}`,
-      );
-
-      // Deploy Blacklist Oracle
-      console.log("📦 Deploying Blacklist Oracle...");
-      const BlacklistOracleFactory =
-        await ethers.getContractFactory("BlacklistOracle");
-      const blacklistOracle = await BlacklistOracleFactory.deploy(
-        await oracleManager.getAddress(),
-        "Blacklist Oracle",
-        "Oracle for managing blacklist consensus and attestations",
-      );
-      await blacklistOracle.waitForDeployment();
-      this.state.setContract("blacklistOracle", blacklistOracle);
       this.state.blacklistOracle = blacklistOracle; // Alias
-      console.log(
-        `✅ Blacklist Oracle deployed: ${await blacklistOracle.getAddress()}`,
-      );
-
-      // Deploy Consensus Oracle
-      console.log("📦 Deploying Consensus Oracle...");
-      const ConsensusOracleFactory =
-        await ethers.getContractFactory("ConsensusOracle");
-      const consensusOracle = await ConsensusOracleFactory.deploy(
-        await oracleManager.getAddress(),
-        "Consensus Oracle",
-        "Oracle implementing M-of-N consensus mechanism for oracle attestations",
-      );
-      await consensusOracle.waitForDeployment();
-      this.state.setContract("consensusOracle", consensusOracle);
       this.state.consensusOracle = consensusOracle; // Alias
-      console.log(
-        `✅ Consensus Oracle deployed: ${await consensusOracle.getAddress()}`,
-      );
-
-      // Register oracles in the manager
-      console.log("\n🔧 Registering oracles in manager...");
-
-      // Register KYC Oracle (signer[1])
-      await oracleManager.registerOracle(
-        this.state.signers[1].address,
-        "KYC_ORACLE",
-        "KYC verification oracle for identity validation",
-        100, // Initial reputation
-      );
-      console.log(`✅ KYC Oracle registered: ${this.state.signers[1].address}`);
-
-      // Register AML Oracle (signer[2])
-      await oracleManager.registerOracle(
-        this.state.signers[2].address,
-        "AML_ORACLE",
-        "AML screening oracle for anti-money laundering checks",
-        100, // Initial reputation
-      );
-      console.log(`✅ AML Oracle registered: ${this.state.signers[2].address}`);
-
-      // Register Compliance Oracle (signer[3])
-      await oracleManager.registerOracle(
-        this.state.signers[3].address,
-        "COMPLIANCE_ORACLE",
-        "Compliance validation oracle for regulatory checks",
-        100, // Initial reputation
-      );
-      console.log(
-        `✅ Compliance Oracle registered: ${this.state.signers[3].address}`,
-      );
-
-      // Store oracle configurations
-      this.state.oracleConfig.set("kyc", {
-        address: this.state.signers[1].address,
-        role: "KYC_ORACLE",
-        reputation: 100,
-      });
-      this.state.oracleConfig.set("aml", {
-        address: this.state.signers[2].address,
-        role: "AML_ORACLE",
-        reputation: 100,
-      });
-      this.state.oracleConfig.set("compliance", {
-        address: this.state.signers[3].address,
-        role: "COMPLIANCE_ORACLE",
-        reputation: 100,
-      });
-
-      // Set consensus threshold
-      await oracleManager.setConsensusThreshold(2); // 2 out of 3 oracles
-      console.log("✅ Consensus threshold set to 2/3");
 
       displaySuccess("ORACLE MANAGEMENT SYSTEM DEPLOYED SUCCESSFULLY!");
       console.log("📊 System Status:");

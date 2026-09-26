@@ -526,6 +526,12 @@ class ContractDeployer {
       console.log("   ✅ ComplianceRules linked to IdentityRegistry for VSC");
       console.log("   ✅ REAL KYC/AML enforcement enabled for VSC transfers");
 
+      // Task 2A.4b: the binding above is the only thing that flips
+      // ComplianceRules.isProductionCompliance(tokenAddr) to true (fail
+      // closed otherwise per Task 2A.4). Assert it right here so a silently
+      // skipped or reordered bind is caught at deploy time.
+      await DeploymentHelper.assertTokenCompliant(complianceAddr, tokenAddr);
+
       // The token must be an agent of the registry for wallet recovery:
       // Token.recoveryAddress calls IdentityRegistry.moveIdentity, which is
       // onlyAgent. Without this grant, every recovery reverts.
@@ -567,7 +573,7 @@ class ContractDeployer {
       if (!this.state.getContract("investorTypeRegistry")) {
         console.log(`   ⚠️  InvestorTypeRegistry not deployed yet`);
         console.log(
-          `   💡 Deploy it first using option 51, then reconnect using option 52`,
+          `   💡 Deploy it now using option 51 — it wires itself to this token automatically`,
         );
         console.log(
           `   ⚠️  Transfer limits will NOT be enforced until registry is connected!`,
@@ -774,6 +780,51 @@ class ContractDeployer {
       await consensusOracle.waitForDeployment();
       this.state.consensusOracle = consensusOracle;
       this.state.setContract("consensusOracle", consensusOracle);
+
+      // Register oracles in the manager. Menu options 32+ (registration,
+      // whitelist/blacklist, consensus voting) read these signer roles and
+      // this.state.oracleConfig; both used to exist only in the menu-only
+      // OracleModule.deployOracleSystem, which never bound the blacklist
+      // oracle into ComplianceRules. Folded here so there is one deploy path.
+      displayProgress("Registering oracles in manager...");
+      await oracleManager.registerOracle(
+        this.state.signers[1].address,
+        "KYC_ORACLE",
+        "KYC verification oracle for identity validation",
+        100, // Initial reputation
+      );
+      await oracleManager.registerOracle(
+        this.state.signers[2].address,
+        "AML_ORACLE",
+        "AML screening oracle for anti-money laundering checks",
+        100, // Initial reputation
+      );
+      await oracleManager.registerOracle(
+        this.state.signers[3].address,
+        "COMPLIANCE_ORACLE",
+        "Compliance validation oracle for regulatory checks",
+        100, // Initial reputation
+      );
+      console.log("   ✅ KYC/AML/Compliance oracles registered (3)");
+
+      this.state.oracleConfig.set("kyc", {
+        address: this.state.signers[1].address,
+        role: "KYC_ORACLE",
+        reputation: 100,
+      });
+      this.state.oracleConfig.set("aml", {
+        address: this.state.signers[2].address,
+        role: "AML_ORACLE",
+        reputation: 100,
+      });
+      this.state.oracleConfig.set("compliance", {
+        address: this.state.signers[3].address,
+        role: "COMPLIANCE_ORACLE",
+        reputation: 100,
+      });
+
+      await oracleManager.setConsensusThreshold(2); // 2 out of 3 oracles
+      console.log("   ✅ Consensus threshold set to 2/3");
 
       // Wire the BLACKLIST gate into the token's compliance, when both exist.
       //

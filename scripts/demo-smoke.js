@@ -138,6 +138,40 @@ async function main() {
     }
   }
 
+  // 3b. Task 2A.1: the one oracle deploy path (ContractDeployer.deployOracleSystem,
+  //     now the only implementation) must bind the blacklist oracle into
+  //     ComplianceRules for this token.
+  const rulesForOracle = state.getContract("complianceRules");
+  const blacklistOracleContract = state.getContract("blacklistOracle");
+  if (token && rulesForOracle && blacklistOracleContract) {
+    const tokenAddr = await token.getAddress();
+    const boundOracle = await rulesForOracle.blacklistOracle(tokenAddr);
+    const expectedOracle = await blacklistOracleContract.getAddress();
+    if (boundOracle.toLowerCase() !== expectedOracle.toLowerCase()) {
+      failures.push(
+        `rules.blacklistOracle(token) = ${boundOracle}, expected ${expectedOracle}`,
+      );
+    }
+  }
+
+  // 3c. Task 2A.4b: the token-aware compliance marker must be true once
+  //     setTokenIdentityRegistry bound a registry for this token
+  //     (deployDigitalTokenSystem asserts this too via assertTokenCompliant;
+  //     re-read it here as an independent, on-chain confirmation).
+  if (token && rulesForOracle) {
+    const tokenAddr = await token.getAddress();
+    // Overloaded on-chain (isProductionCompliance() and
+    // isProductionCompliance(address)); bracket-call to disambiguate, same
+    // as test/compliance/FailClosed.test.ts.
+    const isProdForToken =
+      await rulesForOracle["isProductionCompliance(address)"](tokenAddr);
+    if (!isProdForToken) {
+      failures.push(
+        `rules.isProductionCompliance(token) = false, expected true after setTokenIdentityRegistry`,
+      );
+    }
+  }
+
   // 4. The governance demo must report facts read from the chain, not
   //    literals. It previously printed vote COUNTS through formatEther
   //    ("0.000000000000000003 VGT" for 3 votes), "Type: undefined" for
@@ -163,6 +197,25 @@ async function main() {
   const registry = await InvestorTypeRegistry.deploy();
   await registry.waitForDeployment();
   state.setContract("investorTypeRegistry", registry);
+
+  // Task 2A.2: this script deploys InvestorTypeRegistry directly rather than
+  // via InvestorTypeModule.deployInvestorTypeSystem (option 51), so wire it
+  // to the token here the same way that module now does at the end of its
+  // deploy call.
+  if (token) {
+    const registryAddr = await registry.getAddress();
+    await (await token.setInvestorTypeRegistry(registryAddr)).wait();
+    const wiredRegistry = await token.investorTypeRegistry();
+    if (wiredRegistry === ethers.ZeroAddress) {
+      failures.push(
+        "token.investorTypeRegistry() is zero after setInvestorTypeRegistry",
+      );
+    } else if (wiredRegistry.toLowerCase() !== registryAddr.toLowerCase()) {
+      failures.push(
+        `token.investorTypeRegistry() = ${wiredRegistry}, expected ${registryAddr}`,
+      );
+    }
+  }
 
   const captured = [];
   const realLog = console.log;

@@ -103,6 +103,38 @@ class InvestorTypeModule {
         console.log(`   🗳️ Governance: Not integrated (owner-based control)`);
         console.log(`   💡 Deploy Option 74 for democratic governance`);
       }
+
+      // Task 2A.2: wire the registry into the Token whenever one already
+      // exists, regardless of deploy order (option 21 then 51, or 51 then
+      // 21 — option 21 does the symmetric call when the registry exists
+      // first). Without this, ContractDeployer.js used to point operators at
+      // option 52, a read-only dashboard that never calls
+      // token.setInvestorTypeRegistry.
+      const token =
+        this.state.getContract("token") ||
+        this.state.getContract("digitalToken");
+      if (token) {
+        console.log("\n🔗 Connecting InvestorTypeRegistry to VSC token...");
+        try {
+          const tx = await token.setInvestorTypeRegistry(registryAddress);
+          await tx.wait();
+          const wired = await token.investorTypeRegistry();
+          console.log(`   ✅ Token.investorTypeRegistry(): ${wired}`);
+          if (wired.toLowerCase() !== registryAddress.toLowerCase()) {
+            console.log(
+              `   ⚠️  Readback (${wired}) does not match deployed registry (${registryAddress})`,
+            );
+          }
+        } catch (error) {
+          console.log(
+            `⚠️ Failed to connect InvestorTypeRegistry to token: ${error.message}`,
+          );
+        }
+      } else {
+        console.log(
+          "\n💡 No VSC token deployed yet — connect automatically once option 21 deploys it",
+        );
+      }
     } catch (error) {
       displayError(`Investor Type System deployment failed: ${error.message}`);
     }

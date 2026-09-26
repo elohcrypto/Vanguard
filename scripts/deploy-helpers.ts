@@ -246,4 +246,53 @@ export class DeploymentHelper {
       );
     }
   }
+
+  /**
+   * Task 2A.4b: assert the token-aware compliance marker is set for a
+   * specific token, not just that the compliance contract is production
+   * grade in general. `isProductionCompliance(address)` on ComplianceRules
+   * returns true only once `setTokenIdentityRegistry` has bound a registry
+   * for that token (fail-closed otherwise per Task 2A.4/G1/G8). Call this
+   * right after that binding step so a silently-skipped bind is caught here
+   * instead of surfacing later as every transfer reverting.
+   *
+   * @param complianceAddress address of the ComplianceRules implementing
+   *   isProductionCompliance(address)
+   * @param tokenAddress the token that must have a bound IdentityRegistry
+   * @throws if the marker reports false for this token
+   */
+  static async assertTokenCompliant(
+    complianceAddress: string,
+    tokenAddress: string,
+  ): Promise<void> {
+    const probe = await ethers.getContractAt(
+      ["function isProductionCompliance(address) view returns (bool)"],
+      complianceAddress,
+    );
+
+    let isCompliant: boolean;
+    try {
+      isCompliant = await probe.isProductionCompliance(tokenAddress);
+    } catch {
+      throw new Error(
+        `Refusing to proceed: compliance at ${complianceAddress} does not ` +
+          `implement isProductionCompliance(address). Every enforcing ` +
+          `implementation in this repo does (ComplianceRules).`,
+      );
+    }
+
+    if (!isCompliant) {
+      throw new Error(
+        `Refusing to proceed: compliance at ${complianceAddress} reports ` +
+          `isProductionCompliance(${tokenAddress}) == false — no ` +
+          `IdentityRegistry is bound for this token, so canTransfer fails ` +
+          `closed for every non-mint transfer. Call setTokenIdentityRegistry ` +
+          `for this token first.`,
+      );
+    }
+
+    console.log(
+      `✅ Compliance at ${complianceAddress} reports token ${tokenAddress} production-ready`,
+    );
+  }
 }
