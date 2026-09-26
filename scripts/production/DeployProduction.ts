@@ -3,7 +3,10 @@ import {
   OnchainIDFactory,
   ClaimIssuer,
   KeyManager,
+  IdentityRegistry,
+  ComplianceRules,
 } from "../../typechain-types";
+import { DeploymentHelper } from "../deploy-helpers";
 
 /**
  * Production Deployment Script
@@ -16,6 +19,8 @@ interface DeploymentConfig {
   gasPrice: bigint;
   gasLimit: number;
   confirmations: number;
+  kycTopic: number;
+  amlTopic: number;
   kycProvider: {
     name: string;
     description: string;
@@ -31,17 +36,23 @@ interface DeploymentResult {
   keyManager: KeyManager;
   kycIssuer: ClaimIssuer;
   amlIssuer: ClaimIssuer;
+  identityRegistry: IdentityRegistry;
+  complianceRules: ComplianceRules;
   addresses: {
     factory: string;
     keyManager: string;
     kycIssuer: string;
     amlIssuer: string;
+    identityRegistry: string;
+    complianceRules: string;
   };
   gasUsed: {
     factory: bigint;
     keyManager: bigint;
     kycIssuer: bigint;
     amlIssuer: bigint;
+    identityRegistry: bigint;
+    complianceRules: bigint;
     total: bigint;
   };
   deploymentCost: {
@@ -56,20 +67,27 @@ async function main(): Promise<DeploymentResult> {
 
   const [deployer] = await ethers.getSigners();
   const deployerBalance = await ethers.provider.getBalance(deployer.address);
+  const network = await ethers.provider.getNetwork();
 
   console.log(`📋 Deployment Configuration:`);
   console.log(`   Deployer: ${deployer.address}`);
   console.log(`   Balance: ${ethers.formatEther(deployerBalance)} ETH`);
-  console.log(`   Network: ${(await ethers.provider.getNetwork()).name}`);
-  console.log(`   Chain ID: ${(await ethers.provider.getNetwork()).chainId}`);
+  console.log(`   Network: ${network.name}`);
+  console.log(`   Chain ID: ${network.chainId}`);
 
   // Production configuration
   const config: DeploymentConfig = {
     deploymentFee: ethers.parseEther("0.01"), // 0.01 ETH per identity
     feeRecipient: deployer.address,
     gasPrice: ethers.parseUnits("20", "gwei"), // 20 gwei
-    gasLimit: 5000000, // 5M gas limit
-    confirmations: 3, // Wait for 3 confirmations
+    gasLimit: 10000000, // 10M; OnchainIDFactory alone needs more than 5M to deploy (pre-existing, unrelated to this change)
+    // Hardhat's ephemeral in-memory network only mines a new block when a
+    // transaction is sent, so waiting for more than 1 confirmation here
+    // hangs forever (pre-existing, unrelated to this change; mirrors
+    // ProductionEnvironment.ts's minConfirmations workaround).
+    confirmations: network.name === "hardhat" ? 1 : 3,
+    kycTopic: 6, // OnchainID.KYC_TOPIC
+    amlTopic: 7, // OnchainID.AML_TOPIC
     kycProvider: {
       name: "Global KYC Solutions Ltd",
       description:
@@ -93,7 +111,7 @@ async function main(): Promise<DeploymentResult> {
   console.log(`   Confirmations: ${config.confirmations}`);
 
   // Verify sufficient balance
-  const estimatedCost = config.gasPrice * BigInt(config.gasLimit * 4); // 4 contracts
+  const estimatedCost = config.gasPrice * BigInt(config.gasLimit * 6); // 6 contracts
   if (deployerBalance < estimatedCost) {
     throw new Error(
       `Insufficient balance. Need at least ${ethers.formatEther(estimatedCost)} ETH`,
@@ -110,6 +128,8 @@ async function main(): Promise<DeploymentResult> {
     keyManager: BigInt(0),
     kycIssuer: BigInt(0),
     amlIssuer: BigInt(0),
+    identityRegistry: BigInt(0),
+    complianceRules: BigInt(0),
     total: BigInt(0),
   };
 
@@ -210,12 +230,62 @@ async function main(): Promise<DeploymentResult> {
   console.log(`✅ AML Issuer deployed at: ${amlIssuerAddress}`);
   console.log(`   Gas used: ${gasUsed.amlIssuer.toLocaleString()}`);
 
+  // 5. Deploy IdentityRegistry
+  console.log("\n🪪 Deploying IdentityRegistry...");
+  const IdentityRegistryFactory =
+    await ethers.getContractFactory("IdentityRegistry");
+  const identityRegistry =
+    await IdentityRegistryFactory.deploy(deploymentOptions);
+
+  console.log(
+    `   Transaction hash: ${identityRegistry.deploymentTransaction()?.hash}`,
+  );
+  console.log("   Waiting for confirmations...");
+
+  await identityRegistry.waitForDeployment();
+  const identityRegistryReceipt = await identityRegistry
+    .deploymentTransaction()
+    ?.wait(config.confirmations);
+  gasUsed.identityRegistry = identityRegistryReceipt?.gasUsed || BigInt(0);
+
+  const identityRegistryAddress = await identityRegistry.getAddress();
+  console.log(`✅ IdentityRegistry deployed at: ${identityRegistryAddress}`);
+  console.log(`   Gas used: ${gasUsed.identityRegistry.toLocaleString()}`);
+
+  // 6. Deploy ComplianceRules
+  console.log("\n⚖️  Deploying ComplianceRules...");
+  const ComplianceRulesFactory =
+    await ethers.getContractFactory("ComplianceRules");
+  const complianceRules = await ComplianceRulesFactory.deploy(
+    deployer.address,
+    [],
+    [],
+    deploymentOptions,
+  );
+
+  console.log(
+    `   Transaction hash: ${complianceRules.deploymentTransaction()?.hash}`,
+  );
+  console.log("   Waiting for confirmations...");
+
+  await complianceRules.waitForDeployment();
+  const complianceRulesReceipt = await complianceRules
+    .deploymentTransaction()
+    ?.wait(config.confirmations);
+  gasUsed.complianceRules = complianceRulesReceipt?.gasUsed || BigInt(0);
+
+  const complianceRulesAddress = await complianceRules.getAddress();
+  console.log(`✅ ComplianceRules deployed at: ${complianceRulesAddress}`);
+  console.log(`   Gas used: ${gasUsed.complianceRules.toLocaleString()}`);
+
   // Calculate total gas used
   gasUsed.total =
     gasUsed.factory +
     gasUsed.keyManager +
     gasUsed.kycIssuer +
-    gasUsed.amlIssuer;
+    gasUsed.amlIssuer +
+    gasUsed.identityRegistry +
+    gasUsed.complianceRules;
 
   console.log("\n⚙️  Configuring System...");
   console.log("-".repeat(40));
@@ -236,19 +306,54 @@ async function main(): Promise<DeploymentResult> {
   await setRecipientTx.wait(config.confirmations);
   console.log(`   Fee recipient set to: ${config.feeRecipient}`);
 
-  // Configure KeyManager
-  console.log("\n🔐 Configuring KeyManager...");
-  const setRecoveryTimelockTx = await keyManager
+  // Configure IdentityRegistry: require KYC and AML claims from the
+  // deployed issuers before any wallet verifies. A registry with no
+  // required topics would verify anyone who registers. This runs before
+  // KeyManager configuration below since the two are independent and the
+  // registry must never be left unconfigured if a later step fails.
+  console.log("\n🪪 Configuring IdentityRegistry...");
+  const addKycTopicTx = await identityRegistry
     .connect(deployer)
-    .setRecoveryTimelock(48 * 60 * 60, deploymentOptions); // 48 hours
-  await setRecoveryTimelockTx.wait(config.confirmations);
-  console.log("   Recovery timelock set to: 48 hours");
+    .addClaimTopic(config.kycTopic, deploymentOptions);
+  await addKycTopicTx.wait(config.confirmations);
+  console.log(`   Required claim topic added: KYC (${config.kycTopic})`);
 
-  const setKeyRotationTimelockTx = await keyManager
+  const addAmlTopicTx = await identityRegistry
     .connect(deployer)
-    .setKeyRotationTimelock(24 * 60 * 60, deploymentOptions); // 24 hours
-  await setKeyRotationTimelockTx.wait(config.confirmations);
-  console.log("   Key rotation timelock set to: 24 hours");
+    .addClaimTopic(config.amlTopic, deploymentOptions);
+  await addAmlTopicTx.wait(config.confirmations);
+  console.log(`   Required claim topic added: AML (${config.amlTopic})`);
+
+  const addKycIssuerTx = await identityRegistry
+    .connect(deployer)
+    .addTrustedIssuer(kycIssuerAddress, [config.kycTopic], deploymentOptions);
+  await addKycIssuerTx.wait(config.confirmations);
+  console.log(`   Trusted issuer added for KYC topic: ${kycIssuerAddress}`);
+
+  const addAmlIssuerTx = await identityRegistry
+    .connect(deployer)
+    .addTrustedIssuer(amlIssuerAddress, [config.amlTopic], deploymentOptions);
+  await addAmlIssuerTx.wait(config.confirmations);
+  console.log(`   Trusted issuer added for AML topic: ${amlIssuerAddress}`);
+
+  // Refuse to proceed if the registry or compliance ended up permissive.
+  await DeploymentHelper.assertProductionCompliance(
+    complianceRulesAddress,
+    identityRegistryAddress,
+  );
+
+  // Configure KeyManager: RECOVERY_TIMELOCK (48h) and DEFAULT_TIMELOCK (24h)
+  // are fixed contract constants, not configurable — KeyManager exposes no
+  // setRecoveryTimelock/setKeyRotationTimelock setters (only a per-identity
+  // setCustomTimelock override). Read and log them so this step stays
+  // informative without pretending to configure something immutable.
+  console.log("\n🔐 Configuring KeyManager...");
+  const recoveryTimelock = await keyManager.RECOVERY_TIMELOCK();
+  const keyRotationTimelock = await keyManager.DEFAULT_TIMELOCK();
+  console.log(`   Recovery timelock: ${recoveryTimelock} seconds (fixed)`);
+  console.log(
+    `   Key rotation timelock: ${keyRotationTimelock} seconds (fixed)`,
+  );
 
   console.log("\n✅ System Configuration Complete!");
 
@@ -276,12 +381,20 @@ async function main(): Promise<DeploymentResult> {
   const keyManagerCode = await ethers.provider.getCode(keyManagerAddress);
   const kycIssuerCode = await ethers.provider.getCode(kycIssuerAddress);
   const amlIssuerCode = await ethers.provider.getCode(amlIssuerAddress);
+  const identityRegistryCode = await ethers.provider.getCode(
+    identityRegistryAddress,
+  );
+  const complianceRulesCode = await ethers.provider.getCode(
+    complianceRulesAddress,
+  );
 
   if (
     factoryCode === "0x" ||
     keyManagerCode === "0x" ||
     kycIssuerCode === "0x" ||
-    amlIssuerCode === "0x"
+    amlIssuerCode === "0x" ||
+    identityRegistryCode === "0x" ||
+    complianceRulesCode === "0x"
   ) {
     throw new Error(
       "Contract verification failed - one or more contracts not deployed properly",
@@ -300,9 +413,6 @@ async function main(): Promise<DeploymentResult> {
   console.log(`   Deployment fee: ${ethers.formatEther(currentFee)} ETH ✅`);
   console.log(`   Fee recipient: ${currentRecipient} ✅`);
 
-  const recoveryTimelock = await keyManager.recoveryTimelock();
-  const keyRotationTimelock = await keyManager.keyRotationTimelock();
-
   console.log(`   Recovery timelock: ${recoveryTimelock} seconds ✅`);
   console.log(`   Key rotation timelock: ${keyRotationTimelock} seconds ✅`);
 
@@ -314,11 +424,15 @@ async function main(): Promise<DeploymentResult> {
     keyManager,
     kycIssuer,
     amlIssuer,
+    identityRegistry,
+    complianceRules,
     addresses: {
       factory: factoryAddress,
       keyManager: keyManagerAddress,
       kycIssuer: kycIssuerAddress,
       amlIssuer: amlIssuerAddress,
+      identityRegistry: identityRegistryAddress,
+      complianceRules: complianceRulesAddress,
     },
     gasUsed,
     deploymentCost: {
@@ -333,6 +447,8 @@ async function main(): Promise<DeploymentResult> {
   console.log(`🔐 KeyManager: ${keyManagerAddress}`);
   console.log(`📋 KYC Issuer: ${kycIssuerAddress}`);
   console.log(`🔍 AML Issuer: ${amlIssuerAddress}`);
+  console.log(`🪪 IdentityRegistry: ${identityRegistryAddress}`);
+  console.log(`⚖️  ComplianceRules: ${complianceRulesAddress}`);
   console.log(
     `💰 Total Cost: ${deploymentResult.deploymentCost.eth} ETH (~$${deploymentResult.deploymentCost.usd})`,
   );
@@ -344,8 +460,8 @@ async function main(): Promise<DeploymentResult> {
   // Save deployment info to file
   const deploymentInfo = {
     timestamp: new Date().toISOString(),
-    network: (await ethers.provider.getNetwork()).name,
-    chainId: (await ethers.provider.getNetwork()).chainId,
+    network: network.name,
+    chainId: network.chainId.toString(),
     deployer: deployer.address,
     addresses: deploymentResult.addresses,
     gasUsed: {
@@ -353,6 +469,8 @@ async function main(): Promise<DeploymentResult> {
       keyManager: gasUsed.keyManager.toString(),
       kycIssuer: gasUsed.kycIssuer.toString(),
       amlIssuer: gasUsed.amlIssuer.toString(),
+      identityRegistry: gasUsed.identityRegistry.toString(),
+      complianceRules: gasUsed.complianceRules.toString(),
       total: gasUsed.total.toString(),
     },
     deploymentCost: deploymentResult.deploymentCost,

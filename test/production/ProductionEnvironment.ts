@@ -5,6 +5,7 @@ import {
   OnchainIDFactory,
   ClaimIssuer,
   KeyManager,
+  IdentityRegistry,
 } from "../../typechain-types";
 
 /**
@@ -18,6 +19,7 @@ export class ProductionEnvironment {
   public kycIssuer!: ClaimIssuer;
   public amlIssuer!: ClaimIssuer;
   public complianceIssuer!: ClaimIssuer;
+  public identityRegistry!: IdentityRegistry;
 
   // Network actors
   public admin!: SignerWithAddress;
@@ -169,6 +171,15 @@ export class ProductionEnvironment {
     console.log(
       `   Compliance Issuer: ${await this.complianceIssuer.getAddress()}`,
     );
+
+    // 6. Deploy IdentityRegistry
+    const IdentityRegistryFactory =
+      await ethers.getContractFactory("IdentityRegistry");
+    this.identityRegistry = await IdentityRegistryFactory.deploy(deployOptions);
+    await this.identityRegistry.waitForDeployment();
+    console.log(
+      `   IdentityRegistry: ${await this.identityRegistry.getAddress()}`,
+    );
   }
 
   private async configureSystem(): Promise<void> {
@@ -185,6 +196,29 @@ export class ProductionEnvironment {
     // Configure key manager (KeyManager uses constants for timelocks)
     // DEFAULT_TIMELOCK = 24 hours and RECOVERY_TIMELOCK = 48 hours are built-in constants
     // We can set custom timelocks for specific identities if needed using setCustomTimelock
+
+    // Configure IdentityRegistry: require KYC and AML claims from the
+    // deployed issuers before any wallet verifies. A registry with no
+    // required topics would verify anyone who registers.
+    await this.identityRegistry
+      .connect(this.admin)
+      .addClaimTopic(this.config.kycTopic);
+    await this.identityRegistry
+      .connect(this.admin)
+      .addClaimTopic(this.config.amlTopic);
+    await this.identityRegistry
+      .connect(this.admin)
+      .addTrustedIssuer(await this.kycIssuer.getAddress(), [
+        this.config.kycTopic,
+      ]);
+    await this.identityRegistry
+      .connect(this.admin)
+      .addTrustedIssuer(await this.amlIssuer.getAddress(), [
+        this.config.amlTopic,
+      ]);
+    console.log(
+      "   IdentityRegistry requires KYC and AML claims from trusted issuers",
+    );
 
     console.log("   System configuration complete");
   }

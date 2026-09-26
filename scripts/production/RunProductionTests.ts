@@ -2,6 +2,7 @@ import { exec } from "child_process";
 import { promisify } from "util";
 import * as fs from "fs";
 import * as path from "path";
+import { deployProduction } from "./DeployProduction";
 
 const execAsync = promisify(exec);
 
@@ -211,9 +212,6 @@ class ProductionTestRunner {
         duration: Date.now() - startTime,
         gasUsed: this.extractGasUsage(stdout),
       });
-
-      suite.passedTests = suite.tests.filter((t) => t.passed).length;
-      suite.failedTests = suite.tests.filter((t) => !t.passed).length;
     } catch (error: any) {
       suite.tests.push({
         name: "Contract Deployment",
@@ -221,9 +219,70 @@ class ProductionTestRunner {
         duration: Date.now() - startTime,
         error: error.message,
       });
-      suite.failedTests = 1;
     }
 
+    // Verify the deployed IdentityRegistry cannot verify everyone: it
+    // must require both KYC (topic 6) and AML (topic 7) claims from the
+    // deployed issuers. The subprocess deploy above runs in its own
+    // ephemeral node, so its addresses are unreachable here; deploy
+    // in-process once more, purely to read back the configuration.
+    const registryCheckStart = Date.now();
+    try {
+      const deployment = await deployProduction();
+      const topics = (await deployment.identityRegistry.getClaimTopics()).map(
+        (t: bigint) => Number(t),
+      );
+      const kycIssuerAddress = (
+        await deployment.kycIssuer.getAddress()
+      ).toLowerCase();
+      const amlIssuerAddress = (
+        await deployment.amlIssuer.getAddress()
+      ).toLowerCase();
+      const kycTrustedIssuers = (
+        await deployment.identityRegistry.getTrustedIssuersForClaimTopic(6)
+      ).map((a: string) => a.toLowerCase());
+      const amlTrustedIssuers = (
+        await deployment.identityRegistry.getTrustedIssuersForClaimTopic(7)
+      ).map((a: string) => a.toLowerCase());
+
+      const topicsOk =
+        topics.length === 2 && topics.includes(6) && topics.includes(7);
+      const kycOk = kycTrustedIssuers.includes(kycIssuerAddress);
+      const amlOk = amlTrustedIssuers.includes(amlIssuerAddress);
+      const passed = topicsOk && kycOk && amlOk;
+
+      if (!passed) {
+        console.error(
+          `❌ IdentityRegistry misconfigured: getClaimTopics()=${JSON.stringify(topics)} ` +
+            `(expected [6, 7]); trusted issuers for topic 6=${JSON.stringify(kycTrustedIssuers)} ` +
+            `(expected to include ${kycIssuerAddress}); trusted issuers for topic 7=` +
+            `${JSON.stringify(amlTrustedIssuers)} (expected to include ${amlIssuerAddress})`,
+        );
+      }
+
+      suite.tests.push({
+        name: "IdentityRegistry requires KYC and AML claim topics with trusted issuers",
+        passed,
+        duration: Date.now() - registryCheckStart,
+        gasUsed: Number(deployment.gasUsed.total),
+        error: passed
+          ? undefined
+          : "IdentityRegistry does not require topics 6 and 7 with the deployed KYC/AML issuers trusted",
+      });
+    } catch (error: any) {
+      console.error(
+        `❌ IdentityRegistry configuration check failed: ${error.message}`,
+      );
+      suite.tests.push({
+        name: "IdentityRegistry requires KYC and AML claim topics with trusted issuers",
+        passed: false,
+        duration: Date.now() - registryCheckStart,
+        error: error.message,
+      });
+    }
+
+    suite.passedTests = suite.tests.filter((t) => t.passed).length;
+    suite.failedTests = suite.tests.filter((t) => !t.passed).length;
     suite.totalDuration = Date.now() - startTime;
     return suite;
   }
