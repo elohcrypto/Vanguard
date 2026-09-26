@@ -225,11 +225,14 @@ contract ComplianceRules is IComplianceRules, IComplianceHooks, Ownable, Reentra
         address to,
         uint256 /* amount */
     ) external view returns (bool) {
+        // Rule: identity is Token's gate (ERC-3643); compliance checks lists,
+        // jurisdiction, and the non-escrow counterparty on the trusted path.
+        // Token verifies both parties itself, so they are not re-verified here.
+        //
         // Minting (from == address(0)): the recipient still faces the oracle
         // gates, so tokens cannot be issued to a blacklisted address. When a
-        // registry is bound, the recipient must also be verified and pass the
-        // country rule. Without a registry, mint keeps oracle gating only
-        // (Token checks the recipient's identity itself).
+        // registry is bound, the recipient must also pass the country rule.
+        // Identity is Token's gate (mint() verifies the recipient).
         if (from == address(0)) {
             if (!_oraclesAllow(msg.sender, address(0), to)) {
                 return false;
@@ -239,7 +242,7 @@ contract ComplianceRules is IComplianceRules, IComplianceHooks, Ownable, Reentra
                 return true;
             }
             IIdentityRegistry mintRegistry = IIdentityRegistry(mintRegistryAddr);
-            return mintRegistry.isVerified(to) && _countryAllowed(msg.sender, mintRegistry, to);
+            return _countryAllowed(msg.sender, mintRegistry, to);
         }
 
         // Burning (to == address(0)): never gated. Burning is how an operator
@@ -273,9 +276,10 @@ contract ComplianceRules is IComplianceRules, IComplianceHooks, Ownable, Reentra
         IIdentityRegistry identityRegistry = IIdentityRegistry(identityRegistryAddr);
 
         // Trusted contracts (escrow wallets) skip the KYC and whitelist checks
-        // for THEMSELVES only. The non-trusted counterparty must still be
-        // verified, pass the whitelist, and pass the country rule: an escrow
-        // must not carry funds to or from a blocked jurisdiction.
+        // for THEMSELVES only. Token skips identity on trusted transfers, so
+        // this is the one path where compliance verifies identity: the
+        // non-escrow counterparty must be verified, pass the whitelist, and
+        // pass the country rule (no funds to or from a blocked jurisdiction).
         if (trustedContracts[from] || trustedContracts[to]) {
             address partyToCheck = trustedContracts[from] ? to : from;
 
@@ -300,22 +304,14 @@ contract ComplianceRules is IComplianceRules, IComplianceHooks, Ownable, Reentra
 
         // ✅ ENFORCE: whitelist (allow list). The blacklist was already
         // applied above, on every path including trusted contracts, so only
-        // the whitelist remains here. Checked before identity so a listed
-        // address is rejected even when it holds valid KYC. Off unless an
-        // oracle is set.
+        // the whitelist remains here. Off unless an oracle is set.
         if (!_whitelistAllows(token, from, to)) {
             return false; // ❌ BLOCK: whitelist gate
         }
 
-        // ✅ ENFORCE: Recipient MUST be KYC/AML verified (NO BYPASS)
-        if (!identityRegistry.isVerified(to)) {
-            return false; // ❌ BLOCK: Recipient not verified
-        }
-
-        // ✅ ENFORCE: Sender MUST be KYC/AML verified (NO BYPASS)
-        if (!identityRegistry.isVerified(from)) {
-            return false; // ❌ BLOCK: Sender not verified
-        }
+        // Identity is Token's gate (ERC-3643): Token._checkTransfer verifies
+        // both parties before calling here, so compliance checks lists and
+        // jurisdiction only on the normal path.
 
         // ✅ ENFORCE: Jurisdiction rules for both parties
         return _countryAllowed(token, identityRegistry, from) && _countryAllowed(token, identityRegistry, to);

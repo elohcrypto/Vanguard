@@ -7,12 +7,14 @@ pragma solidity ^0.8.19;
  */
 contract MockIdentityRegistry {
     mapping(address => address) public identity;
-    mapping(address => uint256) public investorCountry;
+    // uint16 to match IIdentityRegistry.investorCountry, which ComplianceRules
+    // calls for its country rule when a token is bound to this mock.
+    mapping(address => uint16) public investorCountry;
     mapping(address => bool) private _verified;
 
     function registerIdentity(address user, address identityContract, uint256 country) external {
         identity[user] = identityContract;
-        investorCountry[user] = country;
+        investorCountry[user] = uint16(country);
         _verified[user] = true;
     }
 

@@ -75,12 +75,10 @@ async function measureTransfer(
  * Scenario A: Token bound to MockIdentityRegistry, the permissive test
  * double — since 788b742 a real IdentityRegistry with zero required
  * topics verifies nobody, so it cannot serve as the baseline. Compliance
- * is deployed but never bound via setTokenIdentityRegistry: the mock
- * doesn't implement IIdentityRegistry.investorCountry with a matching
- * return type (uint256 vs uint16), which would revert the jurisdiction
- * check. Unbound, ComplianceRules falls back to its disabled (no oracle)
- * whitelist/blacklist gate and always allows; Token's own isVerified gate
- * still runs against the mock.
+ * is bound to the same mock via setTokenIdentityRegistry (ComplianceRules
+ * fails closed when unbound), so A runs the full production path —
+ * Token's isVerified gate plus compliance's list and country checks —
+ * with a registry that verifies at mapping-read cost.
  */
 async function runBaselineScenario(
   deployer: SignerWithAddress,
@@ -92,7 +90,16 @@ async function runBaselineScenario(
   ).deploy();
   await registry.waitForDeployment();
   const registryAddr = await registry.getAddress();
-  const { token } = await deployTokenWithCompliance(deployer, registryAddr);
+  const { token, compliance } = await deployTokenWithCompliance(
+    deployer,
+    registryAddr,
+  );
+  await (
+    await compliance.setTokenIdentityRegistry(
+      await token.getAddress(),
+      registryAddr,
+    )
+  ).wait();
 
   await registry.registerIdentity(sender.address, sender.address, 0);
   await registry.registerIdentity(recipient.address, recipient.address, 0);

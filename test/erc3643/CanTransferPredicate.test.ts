@@ -122,6 +122,17 @@ describe("Token.canTransfer is a predicate", function () {
       ).to.be.revertedWith("Recipient frozen");
     });
 
+    it("Sender not verified outranks Insufficient balance (Task 2A.7)", async function () {
+      // Compliance now runs before the balance check; the identity reason
+      // must still win when the sender is unverified AND overspends.
+      await idReg.deleteIdentity(alice.address);
+      expect(await token.canTransfer(alice.address, bob.address, E("101"))).to
+        .be.false;
+      await expect(
+        token.connect(alice).transfer(bob.address, E("101")),
+      ).to.be.revertedWith("Sender not verified");
+    });
+
     it("Insufficient balance", async function () {
       await expect(
         token.connect(alice).transfer(bob.address, E("101")),

@@ -80,21 +80,21 @@ key.
 3. `GOV_TIME_SCALE=336 npx hardhat run demo/index.js --network sepolia`.
 4. Same menu walk. Option 79 waits about 40 minutes of real time.
 
-## Transfer gas by required claim topics (measured 2026-09-26)
+## Transfer gas by required claim topics
 
-`Token.transfer` calls `IdentityRegistry.isVerified` twice (sender and
-recipient), and `ComplianceRules.canTransfer` calls it twice more once a
-registry is bound to the token. `isVerified` loops over every required
-claim topic, so the cost scales with how many topics a deployment
-requires. `scripts/gas-analysis.ts` measures a real second transfer (after
-a warm-up transfer) for three deployments: a token bound to the permissive
-`MockIdentityRegistry` test double as a baseline (a real `IdentityRegistry`
-with zero required topics verifies nobody as of 788b742, so it cannot
-serve as "no verification"), one required topic (KYC), and two (KYC+AML).
-`ComplianceRules` is deployed in all three but is only bound via
-`setTokenIdentityRegistry` for the real-registry scenarios — the mock does
-not implement `IIdentityRegistry.investorCountry` with a matching return
-type, so binding it there would revert the jurisdiction check.
+`Token.transfer` verifies each party once (`IdentityRegistry.isVerified` on
+sender and recipient); `ComplianceRules.canTransfer` verifies only the escrow
+counterparty on trusted transfers. `scripts/gas-analysis.ts` measures a real
+second transfer (after a warm-up) for three deployments: the permissive
+`MockIdentityRegistry` with compliance bound to it as the baseline, one
+required topic (KYC), and two (KYC+AML). The remaining cost is one cold
+`isVerified` walk per party per topic: three external calls
+(`IdentityRegistry -> OnchainID -> ClaimIssuer`) plus a claim-struct copy.
+The two-topic delta is still about 7x the 40,000 gas tolerance, so the next
+lever is plan v2 decision D17 (verified-until cache) or a leaner claim read
+on OnchainID.
+
+**Before Task 2A.7 (measured 2026-09-26):**
 
 | Scenario | transfer gasUsed | delta vs A | isVerified est. |
 |---|---|---|---|
@@ -109,5 +109,19 @@ verified-until cache — each additional required topic adds a full
 per verified party, not just a single storage read. Re-run with
 `npm run gas:claims` (fresh in-process Hardhat network, no external node
 needed).
+
+**After Task 2A.7 (measured 2026-09-27):**
+
+| Scenario | transfer gasUsed | delta vs A | isVerified est. |
+|---|---|---|---|
+| A: MockIdentityRegistry (baseline) | 93,696 | 0 | 23,938 |
+| B: IdentityRegistry, 1 topic (KYC) | 244,732 | +151,036 | 104,428 |
+| C: IdentityRegistry, 2 topics (KYC+AML) | 386,716 | +293,020 | 179,670 |
+
+Task 2A.7 made Token the single identity gate (ERC-3643 shape), so
+`ComplianceRules.canTransfer` no longer re-verifies sender and recipient on
+the normal path (two `isVerified` calls per transfer instead of four), and
+scenario A now binds `ComplianceRules` to the mock (whose `investorCountry`
+returns `uint16`), which is why the baseline rose while B and C fell.
 
 Deploying all eleven contracts costs under 0.01 ETH at 1.3 gwei.
