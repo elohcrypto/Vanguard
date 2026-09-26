@@ -1,6 +1,12 @@
 import { expect } from "chai";
 import { ethers } from "hardhat";
 import { SignerWithAddress } from "@nomicfoundation/hardhat-ethers/signers";
+import {
+  attest,
+  configureKyc,
+  KYC_TOPIC as REGISTRY_KYC_TOPIC,
+  AML_TOPIC as REGISTRY_AML_TOPIC,
+} from "./helpers/kyc";
 
 describe("Governance Token KYC/AML Restriction Test", function () {
   let governanceToken: any;
@@ -51,6 +57,13 @@ describe("Governance Token KYC/AML Restriction Test", function () {
       await ethers.getContractFactory("IdentityRegistry");
     identityRegistry = await IdentityRegistry.deploy();
     await identityRegistry.waitForDeployment();
+    // Registration alone no longer verifies (plan Task 1R.2): require
+    // both the KYC and AML topics this fixture already issues claims for.
+    await configureKyc(
+      identityRegistry,
+      await kycIssuer.getAddress(),
+      await amlIssuer.getAddress(),
+    );
 
     // Deploy ComplianceRules
     const ComplianceRules = await ethers.getContractFactory("ComplianceRules");
@@ -108,6 +121,8 @@ describe("Governance Token KYC/AML Restriction Test", function () {
     await amlIssuer.issueClaim(identityAddress, AML_TOPIC, 1, amlData, "", 0);
 
     await identityRegistry.registerIdentity(signer.address, identityAddress, 0);
+    await attest(kycIssuer, owner, identityAddress, REGISTRY_KYC_TOPIC);
+    await attest(amlIssuer, owner, identityAddress, REGISTRY_AML_TOPIC);
   }
 
   async function setupKYCOnlyIdentity(signer: SignerWithAddress) {
@@ -123,6 +138,10 @@ describe("Governance Token KYC/AML Restriction Test", function () {
     await kycIssuer.issueClaim(identityAddress, KYC_TOPIC, 1, kycData, "", 0);
 
     await identityRegistry.registerIdentity(signer.address, identityAddress, 0);
+    // Deliberately only the registry-required KYC topic: this fixture
+    // exercises a wallet missing AML, so it must stay unverified for
+    // that topic (plan Task 1R.2).
+    await attest(kycIssuer, owner, identityAddress, REGISTRY_KYC_TOPIC);
   }
 
   async function setupAMLOnlyIdentity(signer: SignerWithAddress) {
@@ -138,6 +157,10 @@ describe("Governance Token KYC/AML Restriction Test", function () {
     await amlIssuer.issueClaim(identityAddress, AML_TOPIC, 1, amlData, "", 0);
 
     await identityRegistry.registerIdentity(signer.address, identityAddress, 0);
+    // Deliberately only the registry-required AML topic: this fixture
+    // exercises a wallet missing KYC, so it must stay unverified for
+    // that topic (plan Task 1R.2).
+    await attest(amlIssuer, owner, identityAddress, REGISTRY_AML_TOPIC);
   }
 
   describe("🔒 KYC/AML Verification Requirements", function () {
@@ -217,22 +240,20 @@ describe("Governance Token KYC/AML Restriction Test", function () {
       console.log("=".repeat(60));
 
       console.log("\n📊 User has KYC but missing AML");
-      // NOTE: Current IdentityRegistry.isVerified() only checks if user is registered,
-      // not if they have valid KYC/AML claims. So KYC-only users will pass.
-      // This is a known limitation - full claim validation would require additional checks.
-      await governanceToken.distributeGovernanceTokens(
-        [kycOnlyUser.address],
-        [VGT(10000)],
-      );
-      console.log(
-        "   ⚠️  Distribution ALLOWED (IdentityRegistry only checks registration, not claims)",
-      );
+      // The registry now requires every configured claim topic (plan
+      // Task 1R.2): a wallet missing the AML claim is not verified, so
+      // this genuinely reverts instead of the previous permissive pass.
+      await expect(
+        governanceToken.distributeGovernanceTokens(
+          [kycOnlyUser.address],
+          [VGT(10000)],
+        ),
+      ).to.be.revertedWith("Recipient not verified");
+      console.log("   ✅ Distribution REJECTED (missing AML claim)");
 
       const balance = await governanceToken.balanceOf(kycOnlyUser.address);
-      expect(balance).to.equal(VGT(10000));
-      console.log(
-        "\n⚠️  KYC-ONLY USER CAN HOLD VGT (limitation of current implementation)",
-      );
+      expect(balance).to.equal(0);
+      console.log("\n✅ KYC-ONLY USER CANNOT HOLD VGT!");
     });
 
     it("Should REJECT AML-only user (no KYC) from receiving governance tokens", async function () {
@@ -240,22 +261,20 @@ describe("Governance Token KYC/AML Restriction Test", function () {
       console.log("=".repeat(60));
 
       console.log("\n📊 User has AML but missing KYC");
-      // NOTE: Current IdentityRegistry.isVerified() only checks if user is registered,
-      // not if they have valid KYC/AML claims. So AML-only users will pass.
-      // This is a known limitation - full claim validation would require additional checks.
-      await governanceToken.distributeGovernanceTokens(
-        [amlOnlyUser.address],
-        [VGT(10000)],
-      );
-      console.log(
-        "   ⚠️  Distribution ALLOWED (IdentityRegistry only checks registration, not claims)",
-      );
+      // The registry now requires every configured claim topic (plan
+      // Task 1R.2): a wallet missing the KYC claim is not verified, so
+      // this genuinely reverts instead of the previous permissive pass.
+      await expect(
+        governanceToken.distributeGovernanceTokens(
+          [amlOnlyUser.address],
+          [VGT(10000)],
+        ),
+      ).to.be.revertedWith("Recipient not verified");
+      console.log("   ✅ Distribution REJECTED (missing KYC claim)");
 
       const balance = await governanceToken.balanceOf(amlOnlyUser.address);
-      expect(balance).to.equal(VGT(10000));
-      console.log(
-        "\n⚠️  AML-ONLY USER CAN HOLD VGT (limitation of current implementation)",
-      );
+      expect(balance).to.equal(0);
+      console.log("\n✅ AML-ONLY USER CANNOT HOLD VGT!");
     });
   });
 

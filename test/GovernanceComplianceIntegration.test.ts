@@ -2,6 +2,12 @@ import { expect } from "chai";
 import { ethers } from "hardhat";
 import { SignerWithAddress } from "@nomicfoundation/hardhat-ethers/signers";
 import { time } from "@nomicfoundation/hardhat-network-helpers";
+import {
+  attest,
+  configureKyc,
+  KYC_TOPIC as REGISTRY_KYC_TOPIC,
+  AML_TOPIC as REGISTRY_AML_TOPIC,
+} from "./helpers/kyc";
 
 describe("Governance → ComplianceRules Integration Test", function () {
   let governanceToken: any;
@@ -52,6 +58,13 @@ describe("Governance → ComplianceRules Integration Test", function () {
       await ethers.getContractFactory("IdentityRegistry");
     identityRegistry = await IdentityRegistry.deploy();
     await identityRegistry.waitForDeployment();
+    // Registration alone no longer verifies (plan Task 1R.2): the registry
+    // requires both the KYC and AML topics it already has issuers for.
+    await configureKyc(
+      identityRegistry,
+      await kycIssuer.getAddress(),
+      await amlIssuer.getAddress(),
+    );
 
     // Deploy ComplianceRules
     const ComplianceRules = await ethers.getContractFactory("ComplianceRules");
@@ -145,6 +158,8 @@ describe("Governance → ComplianceRules Integration Test", function () {
       govIdentityAddress,
       0,
     );
+    await attest(kycIssuer, owner, govIdentityAddress, REGISTRY_KYC_TOPIC);
+    await attest(amlIssuer, owner, govIdentityAddress, REGISTRY_AML_TOPIC);
 
     // Setup identities for owner and voters
     await setupIdentity(owner);
@@ -169,6 +184,10 @@ describe("Governance → ComplianceRules Integration Test", function () {
     await amlIssuer.issueClaim(identityAddress, AML_TOPIC, 1, amlData, "", 0);
 
     await identityRegistry.registerIdentity(signer.address, identityAddress, 0);
+    // Attest the topics the registry actually requires (plan Task 1R.2),
+    // separate from the local KYC_TOPIC/AML_TOPIC (1/2) claims above.
+    await attest(kycIssuer, owner, identityAddress, REGISTRY_KYC_TOPIC);
+    await attest(amlIssuer, owner, identityAddress, REGISTRY_AML_TOPIC);
   }
 
   describe("Complete Governance → ComplianceRules Update Workflow", function () {

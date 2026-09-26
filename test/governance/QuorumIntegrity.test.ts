@@ -1,6 +1,7 @@
 import { expect } from "chai";
 import { ethers } from "hardhat";
 import { SignerWithAddress } from "@nomicfoundation/hardhat-ethers/signers";
+import { attest, configureKyc } from "../helpers/kyc";
 
 /**
  * Quorum denominator integrity.
@@ -14,7 +15,7 @@ import { SignerWithAddress } from "@nomicfoundation/hardhat-ethers/signers";
 describe("Quorum denominator integrity", function () {
   let owner: SignerWithAddress;
   let signers: SignerWithAddress[];
-  let idReg: any, rules: any;
+  let idReg: any, rules: any, kycIssuer: any;
 
   beforeEach(async function () {
     signers = await ethers.getSigners();
@@ -26,6 +27,11 @@ describe("Quorum denominator integrity", function () {
       await ethers.getContractFactory("ComplianceRules")
     ).deploy(owner.address, [840], [643]);
     await idReg.addAgent(owner.address);
+
+    kycIssuer = await (
+      await ethers.getContractFactory("ClaimIssuer")
+    ).deploy(owner.address, "KYC Issuer", "Trusted KYC attestations");
+    await configureKyc(idReg, await kycIssuer.getAddress());
   });
 
   async function newId(who: SignerWithAddress): Promise<string> {
@@ -56,21 +62,22 @@ describe("Quorum denominator integrity", function () {
   });
 
   it("the counter matches the real electorate across mixed paths", async function () {
-    for (let i = 1; i <= 3; i++)
-      await idReg.registerIdentity(
-        signers[i].address,
-        await newId(signers[i]),
-        840,
-      );
+    for (let i = 1; i <= 3; i++) {
+      const id = await newId(signers[i]);
+      await idReg.registerIdentity(signers[i].address, id, 840);
+      await attest(kycIssuer, owner, id);
+    }
     const addrs = [],
       ids = [],
       cc = [];
     for (let i = 4; i <= 9; i++) {
+      const id = await newId(signers[i]);
       addrs.push(signers[i].address);
-      ids.push(await newId(signers[i]));
+      ids.push(id);
       cc.push(840);
     }
     await idReg.batchRegisterIdentity(addrs, ids, cc);
+    for (const id of ids) await attest(kycIssuer, owner, id);
 
     expect(await idReg.registeredIdentityCount()).to.equal(
       BigInt(await countVerified(1, 9)),
@@ -78,21 +85,22 @@ describe("Quorum denominator integrity", function () {
   });
 
   it("deleting batch-registered identities cannot drive the counter below the electorate", async function () {
-    for (let i = 1; i <= 3; i++)
-      await idReg.registerIdentity(
-        signers[i].address,
-        await newId(signers[i]),
-        840,
-      );
+    for (let i = 1; i <= 3; i++) {
+      const id = await newId(signers[i]);
+      await idReg.registerIdentity(signers[i].address, id, 840);
+      await attest(kycIssuer, owner, id);
+    }
     const addrs = [],
       ids = [],
       cc = [];
     for (let i = 4; i <= 9; i++) {
+      const id = await newId(signers[i]);
       addrs.push(signers[i].address);
-      ids.push(await newId(signers[i]));
+      ids.push(id);
       cc.push(840);
     }
     await idReg.batchRegisterIdentity(addrs, ids, cc);
+    for (const id of ids) await attest(kycIssuer, owner, id);
 
     for (let i = 4; i <= 9; i++) await idReg.deleteIdentity(signers[i].address);
 
@@ -193,12 +201,15 @@ describe("List-update proposals honour the execution delay", function () {
     );
     await rules.addTrustedContract(await gov.getAddress());
 
+    const kycIssuer = await (
+      await ethers.getContractFactory("ClaimIssuer")
+    ).deploy(owner.address, "KYC Issuer", "Trusted KYC attestations");
+    await configureKyc(idReg, await kycIssuer.getAddress());
+
     const OID = await ethers.getContractFactory("OnchainID");
-    await idReg.registerIdentity(
-      alice.address,
-      await (await OID.deploy(alice.address)).getAddress(),
-      840,
-    );
+    const aliceId = await (await OID.deploy(alice.address)).getAddress();
+    await idReg.registerIdentity(alice.address, aliceId, 840);
+    await attest(kycIssuer, owner, aliceId);
     await vgt.mint(alice.address, ethers.parseEther("1000"));
     await vgt.connect(alice).approve(await gov.getAddress(), ethers.MaxUint256);
 
@@ -303,13 +314,17 @@ describe("cancelProposal under self-ownership", function () {
       await idReg.getAddress(),
     );
     await rules.addTrustedContract(govAddr);
+
+    const kycIssuer = await (
+      await ethers.getContractFactory("ClaimIssuer")
+    ).deploy(owner.address, "KYC Issuer", "Trusted KYC attestations");
+    await configureKyc(idReg, await kycIssuer.getAddress());
+
     const OID = await ethers.getContractFactory("OnchainID");
     for (const w of [alice, bob, carol]) {
-      await idReg.registerIdentity(
-        w.address,
-        await (await OID.deploy(w.address)).getAddress(),
-        840,
-      );
+      const id = await (await OID.deploy(w.address)).getAddress();
+      await idReg.registerIdentity(w.address, id, 840);
+      await attest(kycIssuer, owner, id);
       await vgt.mint(w.address, E("1000"));
       await vgt.connect(w).approve(govAddr, ethers.MaxUint256);
     }

@@ -1,5 +1,6 @@
 const { expect } = require("chai");
 const { ethers } = require("hardhat");
+const { attest, configureKyc } = require("./helpers/kyc");
 
 describe("Transfer Limits Verification - 8,000 Yuan Max", function () {
   let token, identityRegistry, compliance, investorTypeRegistry;
@@ -25,22 +26,36 @@ describe("Transfer Limits Verification - 8,000 Yuan Max", function () {
     onchainID2 = await OnchainID.deploy(investor2.address);
     bankOnchainID = await OnchainID.deploy(bank.address);
 
+    // Require a KYC claim topic on the registry so registration alone no
+    // longer verifies a wallet (plan Task 1R.2), then attest every wallet
+    // this suite expects to transact.
+    const ClaimIssuer = await ethers.getContractFactory("ClaimIssuer");
+    const kycIssuer = await ClaimIssuer.deploy(
+      owner.address,
+      "KYC Issuer",
+      "Trusted KYC attestations",
+    );
+    await configureKyc(identityRegistry, await kycIssuer.getAddress());
+
     // Register identities
     await identityRegistry.registerIdentity(
       investor1.address,
       onchainID1.target,
       156,
     ); // China
+    await attest(kycIssuer, owner, onchainID1.target);
     await identityRegistry.registerIdentity(
       investor2.address,
       onchainID2.target,
       156,
     ); // China
+    await attest(kycIssuer, owner, onchainID2.target);
     await identityRegistry.registerIdentity(
       bank.address,
       bankOnchainID.target,
       156,
     ); // China
+    await attest(kycIssuer, owner, bankOnchainID.target);
 
     // Deploy Compliance
     const Compliance = await ethers.getContractFactory("ComplianceRegistry");

@@ -1,6 +1,12 @@
 import { expect } from "chai";
 import { ethers } from "hardhat";
 import { SignerWithAddress } from "@nomicfoundation/hardhat-ethers/signers";
+import {
+  attest,
+  configureKyc,
+  KYC_TOPIC as REGISTRY_KYC_TOPIC,
+  AML_TOPIC as REGISTRY_AML_TOPIC,
+} from "./helpers/kyc";
 
 describe("🔒 VSC & VGT Compliance Control - Complete Proof", function () {
   let vscToken: any;
@@ -47,6 +53,13 @@ describe("🔒 VSC & VGT Compliance Control - Complete Proof", function () {
     const IdentityRegistry =
       await ethers.getContractFactory("IdentityRegistry");
     identityRegistry = await IdentityRegistry.deploy();
+    // Registration alone no longer verifies (plan Task 1R.2): require
+    // both the KYC and AML topics this fixture already issues claims for.
+    await configureKyc(
+      identityRegistry,
+      await kycIssuer.getAddress(),
+      await amlIssuer.getAddress(),
+    );
 
     const ComplianceRules = await ethers.getContractFactory("ComplianceRules");
     complianceRules = await ComplianceRules.deploy(
@@ -118,6 +131,8 @@ describe("🔒 VSC & VGT Compliance Control - Complete Proof", function () {
       0,
     );
     await identityRegistry.registerIdentity(signer.address, identityAddress, 0);
+    await attest(kycIssuer, owner, identityAddress, REGISTRY_KYC_TOPIC);
+    await attest(amlIssuer, owner, identityAddress, REGISTRY_AML_TOPIC);
   }
 
   describe("🎯 COMPLETE COMPLIANCE CONTROL PROOF", function () {

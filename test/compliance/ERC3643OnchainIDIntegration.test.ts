@@ -8,6 +8,7 @@ import {
   Token,
   ComplianceRegistry,
 } from "../../typechain-types";
+import { attest, configureKyc } from "../helpers/kyc";
 
 describe("ERC-3643 and OnchainID Integration Tests", function () {
   let onchainIDFactory: OnchainIDFactory;
@@ -51,6 +52,7 @@ describe("ERC-3643 and OnchainID Integration Tests", function () {
       await ethers.getContractFactory("IdentityRegistry");
     identityRegistry = await IdentityRegistryFactory.deploy();
     await identityRegistry.waitForDeployment();
+    await configureKyc(identityRegistry, await kycIssuer.getAddress());
 
     // Deploy Compliance Registry
     const ComplianceRegistryFactory =
@@ -105,6 +107,7 @@ describe("ERC-3643 and OnchainID Integration Tests", function () {
         identityAddress,
         840, // US country code
       );
+      await attest(kycIssuer, kycProvider, identityAddress);
 
       // Verify registration
       const isVerified = await identityRegistry.isVerified(investor1.address);
@@ -216,6 +219,7 @@ describe("ERC-3643 and OnchainID Integration Tests", function () {
         investor1Identity,
         840, // US
       );
+      await attest(kycIssuer, kycProvider, investor1Identity);
 
       // Set up investor2
       const salt2 = ethers.randomBytes(32);
@@ -229,6 +233,7 @@ describe("ERC-3643 and OnchainID Integration Tests", function () {
         investor2Identity,
         826, // UK
       );
+      await attest(kycIssuer, kycProvider, investor2Identity);
     });
 
     it("should mint tokens to verified investors", async function () {

@@ -1,5 +1,6 @@
 import { expect } from "chai";
 import { ethers } from "hardhat";
+import { attest, configureKyc } from "../helpers/kyc";
 
 // Thresholds are looked up by proposalType at execution, but nothing bound the
 // type to the target. A TokenParameters action (30% quorum, 70% approval, 3-day
@@ -42,9 +43,19 @@ describe("Proposal type is bound to its target", () => {
     );
     const govAddr = await gov.getAddress();
     await gt.addAgent(govAddr);
+
+    const kycIssuer = await (
+      await ethers.getContractFactory("ClaimIssuer")
+    ).deploy(owner.address, "KYC Issuer", "Trusted KYC attestations");
+    await configureKyc(ir, await kycIssuer.getAddress());
+
+    const OID = await ethers.getContractFactory("OnchainID");
     // Governance receives the VGT deposit, so it needs an identity too.
-    for (const a of [owner.address, alice.address, govAddr])
-      await ir.registerIdentity(a, owner.address, 840);
+    for (const a of [owner.address, alice.address, govAddr]) {
+      const id = await OID.deploy(a);
+      await ir.registerIdentity(a, await id.getAddress(), 840);
+      await attest(kycIssuer, owner, await id.getAddress());
+    }
     await gt.transfer(alice.address, ethers.parseEther("1000"));
     await gt.connect(alice).approve(govAddr, ethers.MaxUint256);
     return { alice, itr, rules, oracleMgr, tokenSlot, gov, govAddr };
@@ -128,8 +139,18 @@ describe("Proposal type is bound to its target", () => {
       ethers.ZeroAddress,
       1,
     );
-    for (const a of [owner.address, alice.address])
-      await ir.registerIdentity(a, owner.address, 840);
+
+    const kycIssuer2 = await (
+      await ethers.getContractFactory("ClaimIssuer")
+    ).deploy(owner.address, "KYC Issuer", "Trusted KYC attestations");
+    await configureKyc(ir, await kycIssuer2.getAddress());
+
+    const OID2 = await ethers.getContractFactory("OnchainID");
+    for (const a of [owner.address, alice.address]) {
+      const id = await OID2.deploy(a);
+      await ir.registerIdentity(a, await id.getAddress(), 840);
+      await attest(kycIssuer2, owner, await id.getAddress());
+    }
     await gt.transfer(alice.address, ethers.parseEther("100"));
     await gt.connect(alice).approve(await gov.getAddress(), ethers.MaxUint256);
     await expect(

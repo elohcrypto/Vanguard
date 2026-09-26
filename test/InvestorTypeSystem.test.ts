@@ -2,6 +2,7 @@ import { expect } from "chai";
 import { ethers } from "hardhat";
 import { SignerWithAddress } from "@nomicfoundation/hardhat-ethers/signers";
 import { InvestorTypeRegistry, IdentityRegistry } from "../typechain-types";
+import { configureKyc } from "./helpers/kyc";
 
 describe("Investor Type System", function () {
   let investorTypeRegistry: InvestorTypeRegistry;
@@ -42,6 +43,15 @@ describe("Investor Type System", function () {
       await ethers.getContractFactory("IdentityRegistry");
     identityRegistry = await IdentityRegistryFactory.deploy();
     await identityRegistry.waitForDeployment();
+
+    // Registration alone no longer verifies (plan Task 1R.2). This suite
+    // never asserts isVerified/mint/transfer, so no wallet here needs a
+    // claim, but the registry still requires a configured KYC issuer so it
+    // is not left running in permissive mode.
+    const kycIssuer = await (
+      await ethers.getContractFactory("ClaimIssuer")
+    ).deploy(owner.address, "KYC Issuer", "Trusted KYC attestations");
+    await configureKyc(identityRegistry, await kycIssuer.getAddress());
 
     // Set up compliance officer
     await investorTypeRegistry.setComplianceOfficer(

@@ -12,6 +12,7 @@ import {
   IdentityRegistry,
   ComplianceRegistry,
 } from "../../typechain-types";
+import { attest, configureKyc } from "../helpers/kyc";
 
 describe("Oracle-ERC3643 Integration Tests", function () {
   let oracleManager: OracleManager;
@@ -108,6 +109,9 @@ describe("Oracle-ERC3643 Integration Tests", function () {
       await ethers.getContractFactory("IdentityRegistry");
     identityRegistry = await IdentityRegistryFactory.deploy();
     await identityRegistry.waitForDeployment();
+    // Registration alone no longer verifies (plan Task 1R.2): require the
+    // topic this fixture's claimIssuer is trusted for.
+    await configureKyc(identityRegistry, await claimIssuer.getAddress());
 
     const ComplianceRegistryFactory =
       await ethers.getContractFactory("ComplianceRegistry");
@@ -227,6 +231,7 @@ describe("Oracle-ERC3643 Integration Tests", function () {
       );
 
       console.log("✅ Identity registered in ERC-3643 registry");
+      await attest(claimIssuer, kycProvider, onchainIDAddress!);
 
       // Step 4: Oracle consensus to add to whitelist
       await whitelistOracle.addToWhitelist(
@@ -395,13 +400,18 @@ describe("Oracle-ERC3643 Integration Tests", function () {
         840,
       );
 
-      // The identity is registered (isVerified only checks if identity exists)
+      // The identity is registered, but its only claim is at the registry's
+      // required topic issued with rejection data — isClaimValid has no
+      // notion of claim *content*, only revocation/expiry, so this claim
+      // alone WOULD satisfy the topic requirement. It does not here because
+      // it was never issued at the registry's required topic (KYC_CLAIM_TOPIC
+      // above is a local narrative topic, not the one configureKyc requires),
+      // so the wallet correctly stays unverified (plan Task 1R.2).
       const isVerified = await identityRegistry.isVerified(investor2.address);
-      expect(isVerified).to.be.true; // Identity exists, but claims indicate rejection
-
-      // In a real implementation, the claim content would be checked
-      // For this test, we verify the KYC rejection claim was issued
-      console.log("✅ Identity registered with KYC rejection claim");
+      expect(isVerified).to.be.false;
+      console.log(
+        "✅ Identity registered but correctly NOT verified (no claim on the required topic)",
+      );
 
       // Step 4: Verify investor is NOT whitelisted
       const isWhitelisted = await whitelistOracle.isWhitelisted(
@@ -643,6 +653,7 @@ describe("Oracle-ERC3643 Integration Tests", function () {
         onchainIDAddress!,
         840,
       );
+      await attest(claimIssuer, kycProvider, onchainIDAddress!);
       await whitelistOracle.addToWhitelist(
         investor1.address,
         4,

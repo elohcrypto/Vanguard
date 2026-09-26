@@ -1,6 +1,7 @@
 import { expect } from "chai";
 import { ethers } from "hardhat";
 import { SignerWithAddress } from "@nomicfoundation/hardhat-ethers/signers";
+import { attest, configureKyc } from "../helpers/kyc";
 
 /**
  * Oracle gating (#issue: oracles existed but nothing read them).
@@ -40,10 +41,16 @@ describe("Oracle gating in ComplianceRules", function () {
     );
     await idReg.addAgent(owner.address);
 
+    const kycIssuer = await (
+      await ethers.getContractFactory("ClaimIssuer")
+    ).deploy(owner.address, "KYC Issuer", "Trusted KYC attestations");
+    await configureKyc(idReg, await kycIssuer.getAddress());
+
     const OID = await ethers.getContractFactory("OnchainID");
     for (const who of [alice, bob]) {
       const id = await OID.deploy(who.address);
       await idReg.registerIdentity(who.address, await id.getAddress(), 840);
+      await attest(kycIssuer, owner, await id.getAddress());
     }
     await token.mint(alice.address, E(1000));
 

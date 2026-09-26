@@ -9,6 +9,7 @@ import {
   OnchainID,
   ClaimIssuer,
 } from "../../typechain-types";
+import { attest, configureKyc } from "../helpers/kyc";
 
 describe("ERC-3643 Core Implementation", function () {
   let token: Token;
@@ -50,6 +51,7 @@ describe("ERC-3643 Core Implementation", function () {
       await ethers.getContractFactory("IdentityRegistry");
     identityRegistry = await IdentityRegistry.deploy();
     await identityRegistry.waitForDeployment();
+    await configureKyc(identityRegistry, await claimIssuer.getAddress());
 
     const identityRegistryAddress = await identityRegistry.getAddress();
 
@@ -111,6 +113,7 @@ describe("ERC-3643 Core Implementation", function () {
         investor1OnchainIDAddress,
         COUNTRY_US,
       );
+    await attest(claimIssuer, owner, investor1OnchainIDAddress);
     await identityRegistry
       .connect(agent)
       .registerIdentity(
@@ -118,6 +121,7 @@ describe("ERC-3643 Core Implementation", function () {
         investor2OnchainIDAddress,
         COUNTRY_UK,
       );
+    await attest(claimIssuer, owner, investor2OnchainIDAddress);
   });
 
   describe("Identity Registry", function () {

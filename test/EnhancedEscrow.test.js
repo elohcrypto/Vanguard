@@ -1,12 +1,14 @@
 const { expect } = require("chai");
 const { ethers } = require("hardhat");
 const { time } = require("@nomicfoundation/hardhat-network-helpers");
+const { attest, configureKyc } = require("./helpers/kyc");
 
 describe("Enhanced Escrow System", function () {
   let vscToken;
   let factory;
   let identityRegistry;
   let complianceRules;
+  let kycIssuer;
   let payerIdentity, payeeIdentity;
   let owner, investor, payer, payee, investorWallet, ownerWallet;
   let signers;
@@ -67,18 +69,31 @@ describe("Enhanced Escrow System", function () {
     payeeIdentity = await OnchainID.deploy(payee.address);
     await payeeIdentity.waitForDeployment();
 
+    // Deploy a KYC issuer and require its claim topic on the registry so
+    // registration alone no longer verifies a wallet (plan Task 1R.2).
+    const ClaimIssuer = await ethers.getContractFactory("ClaimIssuer");
+    kycIssuer = await ClaimIssuer.deploy(
+      owner.address,
+      "KYC Issuer",
+      "Trusted KYC attestations",
+    );
+    await kycIssuer.waitForDeployment();
+    await configureKyc(identityRegistry, await kycIssuer.getAddress());
+
     // Register payer and payee in IdentityRegistry (KYC/AML verified)
     await identityRegistry.registerIdentity(
       payer.address,
       await payerIdentity.getAddress(),
       840, // USA country code
     );
+    await attest(kycIssuer, owner, await payerIdentity.getAddress());
 
     await identityRegistry.registerIdentity(
       payee.address,
       await payeeIdentity.getAddress(),
       840, // USA country code
     );
+    await attest(kycIssuer, owner, await payeeIdentity.getAddress());
 
     // Deploy EscrowWalletFactory with IdentityRegistry and ComplianceRules
     const EscrowWalletFactory = await ethers.getContractFactory(
@@ -1073,6 +1088,7 @@ describe("Enhanced Escrow System", function () {
         await investorId.getAddress(),
         840,
       );
+      await attest(kycIssuer, owner, await investorId.getAddress());
       await vscToken.transfer(investor.address, TOTAL_AMOUNT);
       await vscToken
         .connect(investor)

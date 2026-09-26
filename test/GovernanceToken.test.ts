@@ -2,6 +2,12 @@ import { expect } from "chai";
 import { ethers } from "hardhat";
 import { SignerWithAddress } from "@nomicfoundation/hardhat-ethers/signers";
 import { time } from "@nomicfoundation/hardhat-network-helpers";
+import {
+  attest,
+  configureKyc,
+  KYC_TOPIC as REGISTRY_KYC_TOPIC,
+  AML_TOPIC as REGISTRY_AML_TOPIC,
+} from "./helpers/kyc";
 
 describe("Governance Token System", function () {
   let governanceToken: any;
@@ -52,6 +58,13 @@ describe("Governance Token System", function () {
       await ethers.getContractFactory("IdentityRegistry");
     identityRegistry = await IdentityRegistry.deploy();
     await identityRegistry.waitForDeployment();
+    // Registration alone no longer verifies (plan Task 1R.2): require
+    // both the KYC and AML topics this fixture already issues claims for.
+    await configureKyc(
+      identityRegistry,
+      await kycIssuer.getAddress(),
+      await amlIssuer.getAddress(),
+    );
 
     // Deploy ComplianceRules
     const ComplianceRules = await ethers.getContractFactory("ComplianceRules");
@@ -97,6 +110,8 @@ describe("Governance Token System", function () {
       ownerIdentityAddress,
       0,
     );
+    await attest(kycIssuer, owner, ownerIdentityAddress, REGISTRY_KYC_TOPIC);
+    await attest(amlIssuer, owner, ownerIdentityAddress, REGISTRY_AML_TOPIC);
 
     // Deploy GovernanceToken
     const GovernanceToken = await ethers.getContractFactory("GovernanceToken");
@@ -181,6 +196,8 @@ describe("Governance Token System", function () {
       govIdentityAddress,
       0,
     );
+    await attest(kycIssuer, owner, govIdentityAddress, REGISTRY_KYC_TOPIC);
+    await attest(amlIssuer, owner, govIdentityAddress, REGISTRY_AML_TOPIC);
 
     // Setup identities for voters (owner already set up earlier)
     await setupIdentity(voter1);
@@ -222,6 +239,8 @@ describe("Governance Token System", function () {
 
     // Register in IdentityRegistry
     await identityRegistry.registerIdentity(signer.address, identityAddress, 0);
+    await attest(kycIssuer, owner, identityAddress, REGISTRY_KYC_TOPIC);
+    await attest(amlIssuer, owner, identityAddress, REGISTRY_AML_TOPIC);
   }
 
   describe("GovernanceToken Deployment", function () {

@@ -9,6 +9,7 @@ import {
   ClaimIssuer,
   InvestorTypeRegistry,
 } from "../typechain-types";
+import { attest, configureKyc } from "./helpers/kyc";
 
 /**
  * Complete an Ownable2Step handover on behalf of a CONTRACT nominee.
@@ -83,6 +84,7 @@ describe("Fair Voting System (1 Person = 1 Vote)", function () {
       await ethers.getContractFactory("IdentityRegistry");
     identityRegistry = await IdentityRegistry.deploy();
     await identityRegistry.waitForDeployment();
+    await configureKyc(identityRegistry, await claimIssuer.getAddress());
 
     // Deploy ComplianceRules
     const ComplianceRules = await ethers.getContractFactory("ComplianceRules");
@@ -192,6 +194,9 @@ describe("Fair Voting System (1 Person = 1 Vote)", function () {
         identityAddress,
         0,
       );
+      // Registration alone no longer verifies: attest the topic the
+      // registry actually requires (plan Task 1R.2).
+      await attest(claimIssuer, owner, identityAddress);
 
       return identityAddress;
     };
@@ -221,6 +226,7 @@ describe("Fair Voting System (1 Person = 1 Vote)", function () {
     );
 
     await identityRegistry.registerIdentity(govAddress, govIdentityAddress, 0);
+    await attest(claimIssuer, owner, govIdentityAddress);
 
     // Owner already has 1M tokens from constructor mint
     // Distribute VGT tokens to users (compliance-checked transfers)

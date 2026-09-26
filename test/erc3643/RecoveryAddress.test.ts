@@ -1,6 +1,7 @@
 import { expect } from "chai";
 import { ethers } from "hardhat";
 import { SignerWithAddress } from "@nomicfoundation/hardhat-ethers/signers";
+import { attest, configureKyc } from "../helpers/kyc";
 
 /**
  * Wallet recovery must leave the new wallet usable.
@@ -21,7 +22,7 @@ describe("recoveryAddress", function () {
     lost: SignerWithAddress,
     fresh: SignerWithAddress,
     other: SignerWithAddress;
-  let idReg: any, rules: any, token: any, lostId: string;
+  let idReg: any, rules: any, token: any, lostId: string, kycIssuer: any;
   const E = (n: string) => ethers.parseEther(n);
 
   beforeEach(async function () {
@@ -48,14 +49,18 @@ describe("recoveryAddress", function () {
     await idReg.addAgent(owner.address);
     await idReg.addAgent(await token.getAddress());
 
+    kycIssuer = await (
+      await ethers.getContractFactory("ClaimIssuer")
+    ).deploy(owner.address, "KYC Issuer", "Trusted KYC attestations");
+    await configureKyc(idReg, await kycIssuer.getAddress());
+
     const OID = await ethers.getContractFactory("OnchainID");
     lostId = await (await OID.deploy(lost.address)).getAddress();
     await idReg.registerIdentity(lost.address, lostId, 840);
-    await idReg.registerIdentity(
-      other.address,
-      await (await OID.deploy(other.address)).getAddress(),
-      840,
-    );
+    await attest(kycIssuer, owner, lostId);
+    const otherId = await (await OID.deploy(other.address)).getAddress();
+    await idReg.registerIdentity(other.address, otherId, 840);
+    await attest(kycIssuer, owner, otherId);
     await token.mint(lost.address, E("1000"));
   });
 
@@ -240,11 +245,9 @@ describe("recoveryAddress", function () {
 
     it("a recycled wallet does not keep the old identity's recovery claim", async function () {
       const OID = await ethers.getContractFactory("OnchainID");
-      await idReg.registerIdentity(
-        lost.address,
-        await (await OID.deploy(owner.address)).getAddress(),
-        840,
-      );
+      const recycledId = await (await OID.deploy(owner.address)).getAddress();
+      await idReg.registerIdentity(lost.address, recycledId, 840);
+      await attest(kycIssuer, owner, recycledId);
       await vgt.mint(lost.address, E("1")); // the new occupant's money
       await idReg.deleteIdentity(lost.address);
 

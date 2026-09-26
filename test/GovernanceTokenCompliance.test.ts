@@ -1,6 +1,12 @@
 import { expect } from "chai";
 import { ethers } from "hardhat";
 import { SignerWithAddress } from "@nomicfoundation/hardhat-ethers/signers";
+import {
+  attest,
+  configureKyc,
+  KYC_TOPIC as REGISTRY_KYC_TOPIC,
+  AML_TOPIC as REGISTRY_AML_TOPIC,
+} from "./helpers/kyc";
 
 describe("🔒 Governance Token Compliance - Complete Proof", function () {
   let governanceToken: any;
@@ -43,6 +49,13 @@ describe("🔒 Governance Token Compliance - Complete Proof", function () {
     const IdentityRegistry =
       await ethers.getContractFactory("IdentityRegistry");
     identityRegistry = await IdentityRegistry.deploy();
+    // Registration alone no longer verifies (plan Task 1R.2): require
+    // both the KYC and AML topics this fixture already issues claims for.
+    await configureKyc(
+      identityRegistry,
+      await kycIssuer.getAddress(),
+      await amlIssuer.getAddress(),
+    );
 
     // Use REAL ComplianceRules contract
     const ComplianceRules = await ethers.getContractFactory("ComplianceRules");
@@ -82,6 +95,8 @@ describe("🔒 Governance Token Compliance - Complete Proof", function () {
       ownerIdentityAddress,
       0,
     );
+    await attest(kycIssuer, owner, ownerIdentityAddress, REGISTRY_KYC_TOPIC);
+    await attest(amlIssuer, owner, ownerIdentityAddress, REGISTRY_AML_TOPIC);
 
     const GovernanceToken = await ethers.getContractFactory("GovernanceToken");
     governanceToken = await GovernanceToken.deploy(
@@ -129,6 +144,8 @@ describe("🔒 Governance Token Compliance - Complete Proof", function () {
       0,
     );
     await identityRegistry.registerIdentity(signer.address, identityAddress, 0);
+    await attest(kycIssuer, owner, identityAddress, REGISTRY_KYC_TOPIC);
+    await attest(amlIssuer, owner, identityAddress, REGISTRY_AML_TOPIC);
   }
 
   describe("🎯 COMPLETE COMPLIANCE PROOF", function () {

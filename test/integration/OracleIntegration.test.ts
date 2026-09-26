@@ -13,6 +13,7 @@ import {
   IdentityRegistry,
   ComplianceRegistry,
 } from "../../typechain-types";
+import { attest, configureKyc } from "../helpers/kyc";
 
 describe("Oracle Integration with OnchainID and ERC-3643", function () {
   // Contract instances
@@ -119,6 +120,9 @@ describe("Oracle Integration with OnchainID and ERC-3643", function () {
       await ethers.getContractFactory("IdentityRegistry");
     identityRegistry = await IdentityRegistryFactory.deploy();
     await identityRegistry.waitForDeployment();
+    // Registration alone no longer verifies (plan Task 1R.2): require the
+    // topic this fixture's claimIssuer is trusted for.
+    await configureKyc(identityRegistry, await claimIssuer.getAddress());
 
     const ComplianceRegistryFactory =
       await ethers.getContractFactory("ComplianceRegistry");
@@ -290,6 +294,7 @@ describe("Oracle Integration with OnchainID and ERC-3643", function () {
         onchainIDAddress,
         840,
       ); // US country code
+      await attest(claimIssuer, owner, onchainIDAddress);
 
       // Verify integration
       expect(await whitelistOracle.isWhitelisted(investor1.address)).to.be.true;
@@ -689,11 +694,13 @@ describe("Oracle Integration with OnchainID and ERC-3643", function () {
         investor1OnchainID,
         840,
       );
+      await attest(claimIssuer, owner, investor1OnchainID);
       await identityRegistry.registerIdentity(
         investor2.address,
         investor2OnchainID,
         840,
       );
+      await attest(claimIssuer, owner, investor2OnchainID);
 
       // Mint tokens to investor1
       await token.mint(investor1.address, ethers.parseEther("1000"));
@@ -1016,6 +1023,7 @@ describe("Oracle Integration with OnchainID and ERC-3643", function () {
         onchainIDAddress,
         840,
       );
+      await attest(claimIssuer, owner, onchainIDAddress);
       console.log("✅ Registered in ERC-3643 Identity Registry");
 
       // Step 6: Mint tokens

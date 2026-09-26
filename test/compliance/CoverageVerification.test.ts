@@ -8,6 +8,7 @@ import {
   Token,
   ComplianceRegistry,
 } from "../../typechain-types";
+import { attest, configureKyc } from "../helpers/kyc";
 
 describe("95% Test Coverage Verification", function () {
   let onchainIDFactory: OnchainIDFactory;
@@ -42,6 +43,7 @@ describe("95% Test Coverage Verification", function () {
       await ethers.getContractFactory("IdentityRegistry");
     identityRegistry = await IdentityRegistryFactory.deploy();
     await identityRegistry.waitForDeployment();
+    await configureKyc(identityRegistry, await claimIssuer.getAddress());
 
     const ComplianceRegistryFactory =
       await ethers.getContractFactory("ComplianceRegistry");
@@ -122,6 +124,7 @@ describe("95% Test Coverage Verification", function () {
         identityAddress,
         840, // US
       );
+      await attest(claimIssuer, owner, identityAddress);
     });
 
     it("should test token minting and transfers", async function () {
@@ -199,6 +202,11 @@ describe("95% Test Coverage Verification", function () {
         "", // uri
         0, // No expiry
       );
+
+      // 3b. Attest the KYC topic the registry actually requires (topic 1
+      // above is a separate, unconfigured topic exercised for claim-issuance
+      // coverage only).
+      await attest(claimIssuer, owner, identityAddress);
 
       // 4. Mint tokens
       const mintAmount = ethers.parseEther("1000");

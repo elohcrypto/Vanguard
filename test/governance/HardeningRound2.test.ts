@@ -1,5 +1,6 @@
 import { expect } from "chai";
 import { ethers } from "hardhat";
+import { attest, configureKyc } from "../helpers/kyc";
 
 /**
  * One behavioural test per contract change in hardening round 2. Each was
@@ -30,19 +31,44 @@ describe("Hardening round 2 — contract changes", () => {
     );
     const govAddr = await gov.getAddress();
     await gt.addAgent(govAddr);
-    for (const a of [
-      owner.address,
-      alice.address,
-      bob.address,
-      carol.address,
-      govAddr,
-    ])
-      await ir.registerIdentity(a, owner.address, 840);
+
+    const kycIssuer = await (
+      await ethers.getContractFactory("ClaimIssuer")
+    ).deploy(owner.address, "KYC Issuer", "Trusted KYC attestations");
+    await configureKyc(ir, await kycIssuer.getAddress());
+
+    const OID = await ethers.getContractFactory("OnchainID");
+    const ids: Record<string, string> = {};
+    const named: [string, string][] = [
+      ["owner", owner.address],
+      ["alice", alice.address],
+      ["bob", bob.address],
+      ["carol", carol.address],
+      ["gov", govAddr],
+    ];
+    for (const [key, addr] of named) {
+      const id = await (await OID.deploy(addr)).getAddress();
+      await ir.registerIdentity(addr, id, 840);
+      await attest(kycIssuer, owner, id);
+      ids[key] = id;
+    }
     for (const s of [alice, bob, carol]) {
       await gt.transfer(s.address, ethers.parseEther("1000"));
       await gt.connect(s).approve(govAddr, ethers.MaxUint256);
     }
-    return { owner, alice, bob, carol, ir, cr, gt, gov, govAddr };
+    return {
+      owner,
+      alice,
+      bob,
+      carol,
+      ir,
+      cr,
+      gt,
+      gov,
+      govAddr,
+      kycIssuer,
+      ids,
+    };
   }
 
   describe("B1: cancelProposal refunds every locked VGT", () => {
@@ -381,7 +407,7 @@ describe("Hardening round 2 — contract changes", () => {
   describe("R4: refunds are pulled, so one unpayable recipient cannot block the rest", () => {
     const D = 9 * 86400 + 60;
     async function rejectedWithTwoVoters() {
-      const { owner, alice, bob, carol, ir, gt, gov, govAddr } =
+      const { owner, alice, bob, carol, ir, gt, gov, govAddr, ids } =
         await govFixture();
       await gov.connect(alice).createProposal(0, "t", "d", owner.address, "0x");
       const id = await gov.proposalCount();
@@ -389,11 +415,11 @@ describe("Hardening round 2 — contract changes", () => {
       await gov.connect(carol).castVote(id, false, "n");
       await ethers.provider.send("evm_increaseTime", [D]);
       await ethers.provider.send("evm_mine", []);
-      return { owner, alice, bob, carol, ir, gt, gov, govAddr, id };
+      return { owner, alice, bob, carol, ir, gt, gov, govAddr, ids, id };
     }
 
     it("settles even when a voter was de-verified, and the others can claim", async () => {
-      const { alice, bob, carol, ir, gt, gov, govAddr, id } =
+      const { alice, bob, carol, ir, gt, gov, govAddr, ids, id } =
         await rejectedWithTwoVoters();
       await ir.deleteIdentity(bob.address);
       const a0 = await gt.balanceOf(alice.address),
@@ -436,14 +462,16 @@ describe("Hardening round 2 — contract changes", () => {
         ethers.parseEther("10"),
       );
       expect(await gt.balanceOf(govAddr)).to.equal(ethers.parseEther("10"));
-      // Re-verified, he claims.
-      await ir.registerIdentity(bob.address, alice.address, 840);
+      // Re-verified, he claims: re-register with his original (already
+      // attested) identity, not a bare EOA the registry would treat as
+      // unverifiable once claim topics are required.
+      await ir.registerIdentity(bob.address, ids.bob, 840);
       await gov.connect(bob).claimRefund(id);
       expect(await gt.balanceOf(govAddr)).to.equal(0n);
     });
 
     it("cancel and execution-failure settle the same way", async () => {
-      const { owner, alice, bob, carol, ir, gt, gov, govAddr } =
+      const { owner, alice, bob, carol, ir, gt, gov, govAddr, ids } =
         await govFixture();
       // Cancel with a de-verified voter.
       await gov.connect(alice).createProposal(0, "t", "d", owner.address, "0x");
@@ -456,7 +484,7 @@ describe("Hardening round 2 — contract changes", () => {
       expect(await gov.getClaimableRefund(c, bob.address)).to.equal(
         ethers.parseEther("10"),
       );
-      await ir.registerIdentity(bob.address, alice.address, 840);
+      await ir.registerIdentity(bob.address, ids.bob, 840);
       // Execution failure with a de-verified voter.
       const cd = gov.interface.encodeFunctionData("setVotingCost", [
         ethers.parseEther("5000"),

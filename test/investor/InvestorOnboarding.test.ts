@@ -10,6 +10,12 @@ import {
   OnchainID,
   ClaimIssuer,
 } from "../../typechain-types";
+import {
+  attest,
+  configureKyc,
+  KYC_TOPIC as REGISTRY_KYC_TOPIC,
+  AML_TOPIC as REGISTRY_AML_TOPIC,
+} from "../helpers/kyc";
 
 describe("Investor Onboarding System", function () {
   let multiSigWallet: MultiSigWallet;
@@ -59,6 +65,13 @@ describe("Investor Onboarding System", function () {
       await ethers.getContractFactory("IdentityRegistry");
     identityRegistry = await IdentityRegistryFactory.deploy();
     await identityRegistry.waitForDeployment();
+    // Registration alone no longer verifies (plan Task 1R.2): require
+    // both the KYC and AML topics this fixture already issues claims for.
+    await configureKyc(
+      identityRegistry,
+      await kycIssuer.getAddress(),
+      await amlIssuer.getAddress(),
+    );
 
     // Deploy InvestorTypeRegistry
     const InvestorTypeRegistryFactory = await ethers.getContractFactory(
@@ -113,6 +126,18 @@ describe("Investor Onboarding System", function () {
       ethers.toUtf8Bytes("AML verified"),
       "",
       0,
+    );
+    await attest(
+      kycIssuer,
+      owner,
+      await onchainID.getAddress(),
+      REGISTRY_KYC_TOPIC,
+    );
+    await attest(
+      amlIssuer,
+      owner,
+      await onchainID.getAddress(),
+      REGISTRY_AML_TOPIC,
     );
 
     // Deploy InvestorRequestManager
@@ -183,6 +208,18 @@ describe("Investor Onboarding System", function () {
       await walletIdentity.getAddress(),
       840, // US
     );
+    await attest(
+      kycIssuer,
+      owner,
+      await walletIdentity.getAddress(),
+      REGISTRY_KYC_TOPIC,
+    );
+    await attest(
+      amlIssuer,
+      owner,
+      await walletIdentity.getAddress(),
+      REGISTRY_AML_TOPIC,
+    );
   }
 
   describe("MultiSigWallet", function () {
@@ -207,6 +244,18 @@ describe("Investor Onboarding System", function () {
         await multiSigWallet.getAddress(),
         await walletIdentity.getAddress(),
         840, // US
+      );
+      await attest(
+        kycIssuer,
+        owner,
+        await walletIdentity.getAddress(),
+        REGISTRY_KYC_TOPIC,
+      );
+      await attest(
+        amlIssuer,
+        owner,
+        await walletIdentity.getAddress(),
+        REGISTRY_AML_TOPIC,
       );
     });
 
@@ -314,9 +363,10 @@ describe("Investor Onboarding System", function () {
     });
 
     it("Should not allow request without KYC/AML", async function () {
-      // NOTE: Current IdentityRegistry.isVerified() only checks if user is registered,
-      // not if they have valid KYC/AML claims. So this test will pass even without claims.
-      // This is a known limitation of the current implementation.
+      // The registry now requires a live claim on its configured topics
+      // (plan Task 1R.2): a wallet that is only registered, with no
+      // claim, is not verified, so requestInvestorStatus genuinely
+      // reverts instead of the previous permissive pass.
 
       // Register user without KYC/AML
       const OnchainIDFactory = await ethers.getContractFactory("OnchainID");
@@ -329,10 +379,12 @@ describe("Investor Onboarding System", function () {
         840,
       );
 
-      // User can request investor status because they're registered
-      await investorRequestManager.connect(otherUser).requestInvestorStatus(1);
+      // Registered but unattested: request must be rejected.
+      await expect(
+        investorRequestManager.connect(otherUser).requestInvestorStatus(1),
+      ).to.be.revertedWith("KYC/AML verification required");
       expect(await investorRequestManager.hasActiveRequest(otherUser.address))
-        .to.be.true;
+        .to.be.false;
     });
 
     it("Should create multi-sig wallet for user", async function () {
