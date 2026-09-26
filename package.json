@@ -17,7 +17,8 @@
         "demo:interactive:proof": "hardhat run demo/index.js --network localhost",
         "demo:drive": "./scripts/demo-drive.sh",
         "verify:zk": "node scripts/verify-zk-readiness.js",
-        "setup:zk": "node scripts/setup-zk-circuits.js"
+        "setup:zk": "node scripts/setup-zk-circuits.js",
+        "gas:claims": "hardhat run scripts/gas-analysis.ts"
     },
     "keywords": [
         "blockchain",
