@@ -187,7 +187,10 @@ export class DeploymentHelper {
 
     if (identityRegistryAddress) {
       const registry = await ethers.getContractAt(
-        ["function getClaimTopics() view returns (uint256[])"],
+        [
+          "function getClaimTopics() view returns (uint256[])",
+          "function getTrustedIssuersForClaimTopic(uint256) view returns (address[])",
+        ],
         identityRegistryAddress,
       );
       const topics = await registry.getClaimTopics();
@@ -203,6 +206,44 @@ export class DeploymentHelper {
       console.log(
         `✅ IdentityRegistry at ${identityRegistryAddress} requires ` +
           `${topics.length} claim topic(s)`,
+      );
+
+      // Task 1R.3: KYC (6) alone is not enough — AML (7) must be required
+      // too, and each of the two must have at least one trusted issuer, or
+      // a wallet could verify while missing one of the two checks.
+      const topicNumbers: number[] = topics.map((t: bigint) => Number(t));
+      const REQUIRED_TOPICS: { name: string; topic: number }[] = [
+        { name: "KYC", topic: 6 },
+        { name: "AML", topic: 7 },
+      ];
+      const missing = REQUIRED_TOPICS.filter(
+        (t: { name: string; topic: number }) =>
+          !topicNumbers.includes(t.topic),
+      );
+      if (missing.length > 0) {
+        throw new Error(
+          `Refusing to bind compliance: IdentityRegistry at ` +
+            `${identityRegistryAddress} does not require ` +
+            `${missing.map((t) => `${t.name} (${t.topic})`).join(" and ")} ` +
+            `(getClaimTopics() = [${topicNumbers.join(", ")}]). A wallet ` +
+            `missing that claim would still verify. Call addClaimTopic(...) ` +
+            `for it before binding a Token in production.`,
+        );
+      }
+      for (const { name, topic } of REQUIRED_TOPICS) {
+        const issuers = await registry.getTrustedIssuersForClaimTopic(topic);
+        if (issuers.length === 0) {
+          throw new Error(
+            `Refusing to bind compliance: IdentityRegistry at ` +
+              `${identityRegistryAddress} requires the ${name} claim topic ` +
+              `(${topic}) but has no trusted issuer registered for it. Call ` +
+              `addTrustedIssuer(...) before binding a Token in production.`,
+          );
+        }
+      }
+      console.log(
+        `✅ IdentityRegistry at ${identityRegistryAddress} requires KYC (6) ` +
+          `and AML (7), each with a trusted issuer`,
       );
     }
   }

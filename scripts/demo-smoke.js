@@ -18,7 +18,7 @@
 const { ethers } = require("hardhat");
 const DemoState = require("../demo/core/DemoState");
 const { signShipmentProof } = require("../demo/utils/ShipmentProof");
-const { attestKyc } = require("../demo/utils/Kyc");
+const { attestAll } = require("../demo/utils/Kyc");
 const ContractDeployer = require("../demo/core/ContractDeployer");
 const { EnhancedLogger } = require("../demo/logging");
 
@@ -78,6 +78,32 @@ async function main() {
     const addr = await c.getAddress();
     if ((await ethers.provider.getCode(addr)) === "0x") {
       failures.push(`${name}: no code at ${addr}`);
+    }
+  }
+
+  // 1b. Both KYC (6) and AML (7) are required claim topics, each with its
+  //     trusted issuer wired (plan Task 1R.3). Without this, KYC alone
+  //     would still verify a wallet that never had an AML claim issued.
+  {
+    const identityRegistry = state.getContract("identityRegistry");
+    const amlIssuer = state.getContract("amlIssuer");
+    const topics = (await identityRegistry.getClaimTopics()).map(Number);
+    if (topics.length !== 2 || topics[0] !== 6 || topics[1] !== 7) {
+      failures.push(
+        `identityRegistry.getClaimTopics() = [${topics.join(", ")}], expected [6, 7]`,
+      );
+    }
+    const amlTrustedIssuers =
+      await identityRegistry.getTrustedIssuersForClaimTopic(7);
+    const amlIssuerAddr = await amlIssuer.getAddress();
+    if (
+      !amlTrustedIssuers
+        .map((a) => a.toLowerCase())
+        .includes(amlIssuerAddr.toLowerCase())
+    ) {
+      failures.push(
+        `getTrustedIssuersForClaimTopic(7) = [${amlTrustedIssuers.join(", ")}], expected to include AML issuer ${amlIssuerAddr}`,
+      );
     }
   }
 
@@ -188,7 +214,6 @@ async function main() {
     const proposalFee = await govContract.proposalCreationCost();
     const voteFee = await govContract.votingCost();
     const stake = proposalFee + voteFee;
-    const kycIssuer0 = state.getContract("kycIssuer");
     const OID0 = await ethers.getContractFactory("OnchainID");
 
     for (let i = 0; i < 4; i++) {
@@ -196,14 +221,10 @@ async function main() {
       if (!(await idReg.isVerified(s.address))) {
         // A real OnchainID is required: isVerified() reads claims off the
         // identity contract, and registration alone no longer verifies.
+        // Both KYC and AML topics are required (Task 1R.3).
         const id = await OID0.deploy(s.address);
         await idReg.registerIdentity(s.address, await id.getAddress(), 840);
-        await attestKyc(
-          kycIssuer0,
-          state.signers[2],
-          await id.getAddress(),
-          `voter:${i}`,
-        );
+        await attestAll(state, await id.getAddress(), `voter:${i}`);
       }
       if ((await vgt.balanceOf(s.address)) < stake) {
         await vgt.distributeGovernanceTokens([s.address], [stake * 2n]);
@@ -291,17 +312,11 @@ async function main() {
     const govAddr2 = await govC.getAddress();
     // Register + fund three investors so a proposal can pass.
     const OID = await ethers.getContractFactory("OnchainID");
-    const kycIssuer1 = state.getContract("kycIssuer");
     for (const sgn of [alice, bob, carol]) {
       if (!(await idReg.isVerified(sgn.address))) {
         const id = await OID.deploy(sgn.address);
         await idReg.registerIdentity(sgn.address, await id.getAddress(), 840);
-        await attestKyc(
-          kycIssuer1,
-          state.signers[2],
-          await id.getAddress(),
-          `investor:${sgn.address}`,
-        );
+        await attestAll(state, await id.getAddress(), `investor:${sgn.address}`);
       }
       if ((await vgt.balanceOf(sgn.address)) < ethers.parseEther("50"))
         await vgt.transfer(sgn.address, ethers.parseEther("100"));
@@ -370,12 +385,7 @@ async function main() {
       if (!(await idReg.isVerified(sgn.address))) {
         const id = await OID.deploy(sgn.address);
         await idReg.registerIdentity(sgn.address, await id.getAddress(), 840);
-        await attestKyc(
-          kycIssuer1,
-          state.signers[2],
-          await id.getAddress(),
-          `escrow:${sgn.address}`,
-        );
+        await attestAll(state, await id.getAddress(), `escrow:${sgn.address}`);
       }
     }
     const factory = await (

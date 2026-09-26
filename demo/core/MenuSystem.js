@@ -43,7 +43,7 @@ class MenuSystem {
       "1a. 🚀 ONE-CLICK: Deploy Everything (core + compliance + token + investor types + governance)",
     );
     console.log("");
-    console.log("🆔 === ONCHAINID MANAGEMENT (Options 2-10) ===");
+    console.log("🆔 === ONCHAINID MANAGEMENT (Options 2-11) ===");
     console.log("2.  Create Management Keys");
     console.log("3.  Create OnchainID for User");
     console.log("4.  Review Identity Keys");
@@ -53,6 +53,7 @@ class MenuSystem {
     console.log("8.  Review Claim Status & History");
     console.log("9.  Create UTXO with KYC/AML Data");
     console.log("10. Verify UTXO Contains Compliance Data");
+    console.log("11. Demo: KYC Claim Expiry (Short-Lived Claim)");
     console.log("");
     console.log("⚖️  === COMPLIANCE RULES ENGINE (Options 13-20) ===");
     console.log("13. Deploy ComplianceRules Contract");
@@ -253,6 +254,9 @@ class MenuSystem {
           break;
         case "10":
           await onchainID.verifyUTXOCompliance();
+          break;
+        case "11":
+          await onchainID.demoClaimExpiry();
           break;
 
         // Compliance (13-20)

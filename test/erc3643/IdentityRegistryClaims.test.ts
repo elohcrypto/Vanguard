@@ -161,7 +161,11 @@ describe("IdentityRegistry.isVerified requires trusted-issuer claims (plan Task 
   it("a claim from an untrusted issuer does not verify", async function () {
     const untrustedIssuer = await (
       await ethers.getContractFactory("ClaimIssuer")
-    ).deploy(kycProvider.address, "Untrusted Issuer", "Not trusted by this registry");
+    ).deploy(
+      kycProvider.address,
+      "Untrusted Issuer",
+      "Not trusted by this registry",
+    );
 
     // Deliberately never call registry.addTrustedIssuer for this issuer.
     await untrustedIssuer

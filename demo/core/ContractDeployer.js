@@ -12,7 +12,7 @@
 
 const { ethers } = require("hardhat");
 const { DeploymentHelper } = require("../../scripts/deploy-helpers");
-const { KYC_TOPIC } = require("../utils/Kyc");
+const { KYC_TOPIC, AML_TOPIC } = require("../utils/Kyc");
 const {
   displaySection,
   displaySuccess,
@@ -357,6 +357,15 @@ class ContractDeployer {
     console.log(`   ✅ Required claim topic: KYC (${KYC_TOPIC})`);
     await identityRegistry.addTrustedIssuer(kycIssuerAddr, [KYC_TOPIC]);
     console.log(`   ✅ Trusted issuer for KYC: ${kycIssuerAddr}`);
+
+    // Require an AML claim from the trusted AML issuer as well (plan Task
+    // 1R.3): both deployed issuers gate transfers, not just KYC.
+    const amlIssuer = this.state.getContract("amlIssuer");
+    const amlIssuerAddr = await amlIssuer.getAddress();
+    await identityRegistry.addClaimTopic(AML_TOPIC);
+    console.log(`   ✅ Required claim topic: AML (${AML_TOPIC})`);
+    await identityRegistry.addTrustedIssuer(amlIssuerAddr, [AML_TOPIC]);
+    console.log(`   ✅ Trusted issuer for AML: ${amlIssuerAddr}`);
   }
 
   /**

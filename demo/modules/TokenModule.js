@@ -18,7 +18,7 @@ const {
   displayError,
   displayProgress,
 } = require("../utils/DisplayHelpers");
-const { attestKyc } = require("../utils/Kyc");
+const { attestAll } = require("../utils/Kyc");
 const { ethers } = require("hardhat");
 
 /**
@@ -192,18 +192,14 @@ class TokenModule {
       console.log(`   ⛽ Gas Used: ${receipt2.gasUsed.toLocaleString()}`);
       console.log(`   🌍 Country Code: ${centralBankCountry} (${countryName})`);
 
-      // Registration alone no longer verifies: the required KYC topic
-      // must be attested through the trusted ClaimIssuer.
+      // Registration alone no longer verifies: the required KYC and AML
+      // topics must both be attested through the trusted ClaimIssuers.
       console.log(
-        "\n📝 Step 2b: Attesting Central Bank KYC claim on blockchain...",
+        "\n📝 Step 2b: Attesting Central Bank KYC/AML claims on blockchain...",
       );
-      await attestKyc(
-        this.state.getContract("kycIssuer"),
-        this.state.signers[2],
-        identityAddress,
-        "central-bank",
-      );
+      await attestAll(this.state, identityAddress, "central-bank");
       console.log("   ✅ KYC Claim Issued");
+      console.log("   ✅ AML Claim Issued");
 
       // Step 3: Add as agent to Token contract (allows minting)
       console.log("\n📝 Step 3: Granting minting authority on blockchain...");
@@ -436,33 +432,19 @@ class TokenModule {
       console.log(`   ✅ OnchainID Created: ${identityAddress}`);
       console.log(`   ⛽ Gas Used: ${receipt1.gasUsed.toLocaleString()}`);
 
-      // Step 2: Issue KYC claim through the trusted ClaimIssuer.
-      // NOTE: KYC issuer uses signers[2] (from ContractDeployer.js)
+      // Step 2 & 3: Issue KYC and AML claims through the trusted
+      // ClaimIssuers (KYC issuer owner: signers[2], AML issuer owner:
+      // signers[3] — see ContractDeployer.js).
       console.log("\n📝 Step 2: Issuing KYC claim on blockchain...");
-      const kycIssuer = this.state.getContract("kycIssuer");
-      const receipt2 = await attestKyc(
-        kycIssuer,
-        this.state.signers[2],
+      console.log("\n📝 Step 3: Issuing AML claim on blockchain...");
+      const { kyc: receipt2, aml: receipt3 } = await attestAll(
+        this.state,
         identityAddress,
         `normal:${userName}`,
       );
-      totalGasUsed += receipt2.gasUsed;
+      totalGasUsed += receipt2.gasUsed + receipt3.gasUsed;
       console.log(`   ✅ KYC Claim Issued`);
       console.log(`   ⛽ Gas Used: ${receipt2.gasUsed.toLocaleString()}`);
-
-      // Step 3: Issue AML claim
-      // NOTE: AML issuer uses signers[3] (from ContractDeployer.js)
-      console.log("\n📝 Step 3: Issuing AML claim on blockchain...");
-      const amlData = ethers.AbiCoder.defaultAbiCoder().encode(
-        ["string", "uint256", "uint256"],
-        ["APPROVED", 85, Date.now()],
-      );
-      const amlIssuer = this.state.getContract("amlIssuer");
-      const tx3 = await amlIssuer
-        .connect(this.state.signers[3])
-        .issueClaim(identityAddress, 2, 1, amlData, "", 0);
-      const receipt3 = await tx3.wait();
-      totalGasUsed += receipt3.gasUsed;
       console.log(`   ✅ AML Claim Issued`);
       console.log(`   ⛽ Gas Used: ${receipt3.gasUsed.toLocaleString()}`);
 
@@ -1770,42 +1752,20 @@ class TokenModule {
       );
       console.log(`   🆔 OnchainID Created: ${identityAddress}`);
 
-      // Step 2: Issue KYC claim on blockchain through the trusted
-      // ClaimIssuer. NOTE: KYC issuer uses signers[2] (from ContractDeployer.js)
+      // Step 2 & 3: Issue KYC and AML claims on blockchain through the
+      // trusted ClaimIssuers (KYC issuer owner: signers[2], AML issuer
+      // owner: signers[3] — see ContractDeployer.js).
       console.log("\n📝 Step 2: Issuing KYC claim on blockchain...");
-      const kycIssuer = this.state.getContract("kycIssuer");
-      const receipt2 = await attestKyc(
-        kycIssuer,
-        this.state.signers[2],
+      console.log("\n📝 Step 3: Issuing AML claim on blockchain...");
+      const { kyc: receipt2, aml: receipt3 } = await attestAll(
+        this.state,
         identityAddress,
         `retail:${userName}`,
       );
-      totalGasUsed += receipt2.gasUsed;
+      totalGasUsed += receipt2.gasUsed + receipt3.gasUsed;
 
       console.log(`   ✅ Transaction Hash: ${receipt2.hash}`);
       console.log(`   ⛽ Gas Used: ${receipt2.gasUsed.toLocaleString()}`);
-
-      // Step 3: Issue AML claim on blockchain
-      // NOTE: AML issuer uses signers[3] (from ContractDeployer.js)
-      console.log("\n📝 Step 3: Issuing AML claim on blockchain...");
-      const amlTopic = 2;
-      const amlData = ethers.AbiCoder.defaultAbiCoder().encode(
-        ["string", "string"],
-        ["APPROVED", userName],
-      );
-
-      const amlIssuer = this.state.getContract("amlIssuer");
-      const tx3 = await amlIssuer.connect(this.state.signers[3]).issueClaim(
-        identityAddress,
-        amlTopic,
-        1, // scheme: ECDSA signature
-        amlData,
-        "", // uri: empty for now
-        0, // validTo: 0 = no expiry
-      );
-      const receipt3 = await tx3.wait();
-      totalGasUsed += receipt3.gasUsed;
-
       console.log(`   ✅ Transaction Hash: ${receipt3.hash}`);
       console.log(`   ⛽ Gas Used: ${receipt3.gasUsed.toLocaleString()}`);
 
@@ -2182,11 +2142,10 @@ class TokenModule {
           }
 
           // Registration alone no longer verifies: attest the
-          // required KYC claim through the trusted ClaimIssuer.
-          console.log(`\n📝 Attesting Central Bank KYC claim...`);
-          await attestKyc(
-            this.state.getContract("kycIssuer"),
-            this.state.signers[2],
+          // required KYC and AML claims through the trusted ClaimIssuers.
+          console.log(`\n📝 Attesting Central Bank KYC/AML claims...`);
+          await attestAll(
+            this.state,
             centralBank.onchainId,
             "central-bank-repair",
           );

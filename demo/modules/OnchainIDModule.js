@@ -18,7 +18,7 @@ const {
   displayError,
   displayInfo,
 } = require("../utils/DisplayHelpers");
-const { attestKyc } = require("../utils/Kyc");
+const { attestKyc, attestAml, attestAll } = require("../utils/Kyc");
 
 /**
  * @class OnchainIDModule
@@ -1042,7 +1042,80 @@ class OnchainIDModule {
   }
 
   /**
-   * Option 11: Show complete proof
+   * Option 11: Demo claim expiry. Issues a KYC claim valid for 60 seconds,
+   * advances the local node past it, and shows isVerified() flip false then
+   * true again after re-attestation (plan Task 1R.6).
+   *
+   * @returns {Promise<void>}
+   */
+  async demoClaimExpiry() {
+    displaySection("DEMO: KYC CLAIM EXPIRY", "⏳");
+    if (this.state.identities.size === 0) {
+      displayError("Please create OnchainID first (option 3)");
+      return;
+    }
+    const identityArray = Array.from(this.state.identities.values());
+    console.log("\n🆔 Available Identities:");
+    identityArray.forEach((id, i) =>
+      console.log(`   ${i}: ${id.address} (Owner: ${id.owner})`),
+    );
+    const idx = parseInt(
+      await this.promptUser(
+        `Select identity (0-${identityArray.length - 1}): `,
+      ),
+    );
+    const identity = identityArray[idx];
+    if (!identity) {
+      displayError("Invalid identity selection");
+      return;
+    }
+
+    try {
+      const registry = this.state.getContract("identityRegistry");
+      if ((await registry.identity(identity.owner)) === ethers.ZeroAddress) {
+        await registry.registerIdentity(identity.owner, identity.address, 840);
+      }
+      // AML is required too (Task 1R.3): without it isVerified() never
+      // returns true regardless of the KYC claim below.
+      await attestAml(
+        this.state.getContract("amlIssuer"),
+        this.state.signers[3],
+        identity.address,
+        "expiry-demo",
+      );
+      const issueKyc = (label, validTo) =>
+        attestKyc(
+          this.state.getContract("kycIssuer"),
+          this.state.signers[2],
+          identity.address,
+          label,
+          validTo,
+        );
+      const verified = () => registry.isVerified(identity.owner);
+      const shortValidTo =
+        (await ethers.provider.getBlock("latest")).timestamp + 60;
+
+      await issueKyc("expiry-demo-short", shortValidTo);
+      console.log(
+        `\n✅ Short-lived KYC claim issued (60s). isVerified: ${await verified()}`,
+      );
+
+      console.log("\n⏰ Advancing chain time by 120 seconds...");
+      await ethers.provider.send("evm_increaseTime", [120]);
+      await ethers.provider.send("evm_mine", []);
+      console.log(`❌ After expiry. isVerified: ${await verified()}`);
+
+      await issueKyc("expiry-demo-renewed");
+      console.log(
+        `✅ Re-attested with default validity. isVerified: ${await verified()}`,
+      );
+    } catch (error) {
+      displayError(`Claim expiry demo failed: ${error.message}`);
+    }
+  }
+
+  /**
+   * Option 12: Show complete proof
    *
    * @returns {Promise<void>}
    */
@@ -1055,7 +1128,7 @@ class OnchainIDModule {
   }
 
   /**
-   * Option 12: Run automated full test
+   * Option 13: Run automated full test
    *
    * @returns {Promise<void>}
    */
@@ -1169,21 +1242,17 @@ class OnchainIDModule {
         }
       }
 
-      // Step 3: Issue KYC claim through the trusted ClaimIssuer. A claim
-      // added directly on the OnchainID with addClaim(...) does NOT
-      // verify — IdentityRegistry.isVerified() only accepts claims
-      // signed by a trusted issuer via ClaimIssuer.issueClaim.
-      const kycIssuerContract = this.state.getContract("kycIssuer");
-      const kycIssuerSigner = this.state.signers[2]; // ClaimIssuer owner, see ContractDeployer.js
-
-      console.log("\n📝 Issuing KYC claim on-chain...");
-      await attestKyc(
-        kycIssuerContract,
-        kycIssuerSigner,
-        identity.address,
-        `country:${countryCode}`,
-      );
-      const kycIssuerAddr = await kycIssuerContract.getAddress();
+      // Step 3: Issue KYC and AML claims through the trusted ClaimIssuers.
+      // A claim added directly on the OnchainID with addClaim(...) does NOT
+      // verify — IdentityRegistry.isVerified() only accepts claims signed
+      // by a trusted issuer via ClaimIssuer.issueClaim, and it now requires
+      // both topics (plan Task 1R.3), so a KYC-only attestation here would
+      // leave the identity unverified.
+      console.log("\n📝 Issuing KYC and AML claims on-chain...");
+      await attestAll(this.state, identity.address, `country:${countryCode}`);
+      const kycIssuerAddr = await this.state
+        .getContract("kycIssuer")
+        .getAddress();
 
       // Store claim in state
       this.state.claims.set(`${identity.address}_KYC`, {

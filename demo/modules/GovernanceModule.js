@@ -13,7 +13,7 @@ const {
   displayError,
 } = require("../utils/DisplayHelpers");
 const { advancePast } = require("../utils/ChainTime");
-const { attestKyc } = require("../utils/Kyc");
+const { attestAll } = require("../utils/Kyc");
 const { ethers } = require("hardhat");
 
 /**
@@ -188,21 +188,10 @@ class GovernanceModule {
         `   ✅ OnchainID created for governance contract: ${govIdentityAddress}`,
       );
 
-      // Issue KYC and AML claims for governance contract
-      // NOTE: KYC issuer uses signers[2], AML issuer uses signers[3] (from ContractDeployer.js)
-      // KYC must go through ClaimIssuer.issueClaim on the required topic
-      // (attestKyc) — IdentityRegistry.isVerified() requires it.
-      await attestKyc(
-        this.state.getContract("kycIssuer"),
-        this.state.signers[2],
-        govIdentityAddress,
-        "governance",
-      );
-      const amlData = ethers.hexlify(ethers.toUtf8Bytes("GOVERNANCE_CONTRACT"));
-      await this.state
-        .getContract("amlIssuer")
-        .connect(this.state.signers[3])
-        .issueClaim(govIdentityAddress, 2, 1, amlData, "", 0);
+      // Issue KYC and AML claims for the governance contract identity. Both
+      // must go through ClaimIssuer.issueClaim on the required topics
+      // (attestAll) — IdentityRegistry.isVerified() requires both.
+      await attestAll(this.state, govIdentityAddress, "governance");
       console.log("   ✅ KYC and AML claims issued to governance contract");
 
       // Get the first allowed country from the whitelist (or 0 if no whitelist)
