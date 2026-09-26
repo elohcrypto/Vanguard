@@ -198,7 +198,12 @@ async function main() {
         // identity contract, and registration alone no longer verifies.
         const id = await OID0.deploy(s.address);
         await idReg.registerIdentity(s.address, await id.getAddress(), 840);
-        await attestKyc(kycIssuer0, state.signers[2], await id.getAddress(), `voter:${i}`);
+        await attestKyc(
+          kycIssuer0,
+          state.signers[2],
+          await id.getAddress(),
+          `voter:${i}`,
+        );
       }
       if ((await vgt.balanceOf(s.address)) < stake) {
         await vgt.distributeGovernanceTokens([s.address], [stake * 2n]);
@@ -291,7 +296,12 @@ async function main() {
       if (!(await idReg.isVerified(sgn.address))) {
         const id = await OID.deploy(sgn.address);
         await idReg.registerIdentity(sgn.address, await id.getAddress(), 840);
-        await attestKyc(kycIssuer1, state.signers[2], await id.getAddress(), `investor:${sgn.address}`);
+        await attestKyc(
+          kycIssuer1,
+          state.signers[2],
+          await id.getAddress(),
+          `investor:${sgn.address}`,
+        );
       }
       if ((await vgt.balanceOf(sgn.address)) < ethers.parseEther("50"))
         await vgt.transfer(sgn.address, ethers.parseEther("100"));
@@ -301,66 +311,142 @@ async function main() {
     // SystemParameters (createProposal reverts TargetNotBoundToType otherwise).
     // Governance has no fallback, so empty calldata would fail at execution;
     // call a harmless view so the proposal EXECUTES and 79 can be checked.
-    await govC.connect(alice).createProposal(4, "smoke wait", "d", govAddr2,
-      govC.interface.encodeFunctionData("proposalCount"));
+    await govC
+      .connect(alice)
+      .createProposal(
+        4,
+        "smoke wait",
+        "d",
+        govAddr2,
+        govC.interface.encodeFunctionData("proposalCount"),
+      );
     const pid = await govC.proposalCount();
     await govC.connect(bob).castVote(pid, true, "y");
     await govC.connect(carol).castVote(pid, true, "y");
-    const yesGov = new GovernanceModule(state, new EnhancedLogger(), async () => "y");
+    const yesGov = new GovernanceModule(
+      state,
+      new EnhancedLogger(),
+      async () => "y",
+    );
     const l79 = [];
     const rl79 = console.log;
     console.log = (...a) => l79.push(a.join(" "));
-    try { await yesGov.timeTravel9Days(); } finally { console.log = rl79; }
+    try {
+      await yesGov.timeTravel9Days();
+    } finally {
+      console.log = rl79;
+    }
     const [pAfter] = await govC.getProposal(pid);
     const nowTs = (await ethers.provider.getBlock("latest")).timestamp;
     if (!(nowTs > Number(pAfter.executionTime))) {
-      failures.push(`option 79 did not advance past the proposal deadline; output: ${l79.join(" | ").slice(0, 200)}`);
+      failures.push(
+        `option 79 did not advance past the proposal deadline; output: ${l79.join(" | ").slice(0, 200)}`,
+      );
     } else {
       const rc = await (await govC.executeProposal(pid)).wait();
-      const names = rc.logs.map((l) => { try { return govC.interface.parseLog(l)?.name; } catch { return null; } }).filter(Boolean);
-      if (!names.includes("ProposalExecuted")) failures.push(`after option 79, executeProposal emitted ${names.join(",")} not ProposalExecuted`);
+      const names = rc.logs
+        .map((l) => {
+          try {
+            return govC.interface.parseLog(l)?.name;
+          } catch {
+            return null;
+          }
+        })
+        .filter(Boolean);
+      if (!names.includes("ProposalExecuted"))
+        failures.push(
+          `after option 79, executeProposal emitted ${names.join(",")} not ProposalExecuted`,
+        );
     }
 
     // Escrow: mirror test/EnhancedEscrow.test.js setup, then drive 73b.
     const EscrowModule = require("../demo/modules/EscrowModule");
     const [, investor, payer, payee, investorWallet, ownerWallet] = signers;
-    const vsc = await (await ethers.getContractFactory("MockToken")).deploy("VSC", "VSC", ethers.parseEther("1000000"));
+    const vsc = await (
+      await ethers.getContractFactory("MockToken")
+    ).deploy("VSC", "VSC", ethers.parseEther("1000000"));
     const rules = state.getContract("complianceRules");
     for (const sgn of [payer, payee]) {
       if (!(await idReg.isVerified(sgn.address))) {
         const id = await OID.deploy(sgn.address);
         await idReg.registerIdentity(sgn.address, await id.getAddress(), 840);
-        await attestKyc(kycIssuer1, state.signers[2], await id.getAddress(), `escrow:${sgn.address}`);
+        await attestKyc(
+          kycIssuer1,
+          state.signers[2],
+          await id.getAddress(),
+          `escrow:${sgn.address}`,
+        );
       }
     }
-    const factory = await (await ethers.getContractFactory("EscrowWalletFactory")).deploy(
-      await vsc.getAddress(), ownerWallet.address, await idReg.getAddress(), await rules.getAddress());
+    const factory = await (
+      await ethers.getContractFactory("EscrowWalletFactory")
+    ).deploy(
+      await vsc.getAddress(),
+      ownerWallet.address,
+      await idReg.getAddress(),
+      await rules.getAddress(),
+    );
     await factory.registerInvestor(investor.address, investorWallet.address);
     const total = ethers.parseEther("1050");
     await vsc.transfer(payer.address, ethers.parseEther("10000"));
-    await factory.connect(investor).createEscrowWallet(payer.address, payee.address, ethers.parseEther("1000"));
+    await factory
+      .connect(investor)
+      .createEscrowWallet(
+        payer.address,
+        payee.address,
+        ethers.parseEther("1000"),
+      );
     const wAddr = await factory.getWalletAddress(1);
     await vsc.connect(payer).approve(await factory.getAddress(), total);
     await factory.connect(payer).fundEscrowWallet(1);
     const wallet = await ethers.getContractAt("MultiSigEscrowWallet", wAddr);
-    const proofData = JSON.stringify({ trackingNumber: "SMOKE-1", carrier: "UPS" });
+    const proofData = JSON.stringify({
+      trackingNumber: "SMOKE-1",
+      carrier: "UPS",
+    });
     const dataHash = ethers.keccak256(ethers.toUtf8Bytes(proofData));
-    await wallet.connect(payee).submitShipmentProof(proofData, dataHash, await signShipmentProof(payee, wAddr, dataHash));
+    await wallet
+      .connect(payee)
+      .submitShipmentProof(
+        proofData,
+        dataHash,
+        await signShipmentProof(payee, wAddr, dataHash),
+      );
     state.setContract("escrowFactory", factory);
-    state.enhancedEscrowWallets.set("1", { paymentId: "1", walletAddress: wAddr, payer: payer.address, payee: payee.address, investor: investor.address, amount: "1000", createdAt: new Date().toISOString(), state: "ProofSubmitted" });
+    state.enhancedEscrowWallets.set("1", {
+      paymentId: "1",
+      walletAddress: wAddr,
+      payer: payer.address,
+      payee: payee.address,
+      investor: investor.address,
+      amount: "1000",
+      createdAt: new Date().toISOString(),
+      state: "ProofSubmitted",
+    });
     const esc = new EscrowModule(state, new EnhancedLogger(), async () => "y");
     const l73 = [];
     const rl73 = console.log;
     console.log = (...a) => l73.push(a.join(" "));
-    try { await esc.timeTravel14Days(); } finally { console.log = rl73; }
+    try {
+      await esc.timeTravel14Days();
+    } finally {
+      console.log = rl73;
+    }
     const proof = await wallet.shipmentProof();
     const win = await wallet.DISPUTE_WINDOW();
     const ts2 = (await ethers.provider.getBlock("latest")).timestamp;
     if (!(ts2 > Number(proof.submittedAt + win))) {
-      failures.push(`option 73b did not advance past the dispute window; output: ${l73.join(" | ").slice(0, 300)}`);
+      failures.push(
+        `option 73b did not advance past the dispute window; output: ${l73.join(" | ").slice(0, 300)}`,
+      );
     } else {
-      try { await wallet.connect(payee).signAsPayee(); }
-      catch (e) { failures.push(`after option 73b, payee release reverted: ${e.message.slice(0, 120)}`); }
+      try {
+        await wallet.connect(payee).signAsPayee();
+      } catch (e) {
+        failures.push(
+          `after option 73b, payee release reverted: ${e.message.slice(0, 120)}`,
+        );
+      }
     }
   }
 

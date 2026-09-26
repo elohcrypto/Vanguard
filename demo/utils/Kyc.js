@@ -7,7 +7,7 @@
  * `identity.addClaim(...)` does NOT verify.
  */
 
-const { ethers } = require('hardhat');
+const { ethers } = require("hardhat");
 
 /** Claim topic ID for KYC, matches OnchainID.KYC_TOPIC (contracts/onchain_id/OnchainID.sol). */
 const KYC_TOPIC = 6;
@@ -22,17 +22,15 @@ const KYC_TOPIC = 6;
  * @returns {Promise<Object>} The transaction receipt.
  */
 async function attestKyc(kycIssuer, issuerSigner, identityAddress, label) {
-    const tx = await kycIssuer
-        .connect(issuerSigner)
-        .issueClaim(
-            identityAddress,
-            KYC_TOPIC,
-            1, // scheme: ECDSA
-            ethers.toUtf8Bytes('kyc:' + label),
-            '', // uri
-            0, // validTo: no expiry
-        );
-    return tx.wait();
+  const tx = await kycIssuer.connect(issuerSigner).issueClaim(
+    identityAddress,
+    KYC_TOPIC,
+    1, // scheme: ECDSA
+    ethers.toUtf8Bytes("kyc:" + label),
+    "", // uri
+    0, // validTo: no expiry
+  );
+  return tx.wait();
 }
 
 module.exports = { attestKyc, KYC_TOPIC };

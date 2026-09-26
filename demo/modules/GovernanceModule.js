@@ -1275,8 +1275,12 @@ class GovernanceModule {
         // AFTER proposal creation cannot vote") — verified false on chain.
         displayError("No signer is both verified and able to pay the vote fee");
         console.log("\n💡 SOLUTION:");
-        console.log("   1. Verify the signer (KYC) and distribute VGT (option 75)");
-        console.log("   2. Then vote — eligibility is checked when the vote is cast");
+        console.log(
+          "   1. Verify the signer (KYC) and distribute VGT (option 75)",
+        );
+        console.log(
+          "   2. Then vote — eligibility is checked when the vote is cast",
+        );
         return;
       }
 
@@ -1493,7 +1497,8 @@ class GovernanceModule {
           continue;
         }
         if (parsed?.name === "ProposalExecuted") outcome.executed = true;
-        if (parsed?.name === "ProposalExecutionFailed") outcome.failed = parsed.args.reason;
+        if (parsed?.name === "ProposalExecutionFailed")
+          outcome.failed = parsed.args.reason;
       }
 
       if (outcome.executed) {
@@ -1508,11 +1513,15 @@ class GovernanceModule {
         }
         displayError("PROPOSAL PASSED THE VOTE BUT ITS TARGET CALL REVERTED");
         console.log(`   Reason: ${why}`);
-        console.log("   Marked Rejected. Each participant claims their own VGT (option 78a).");
+        console.log(
+          "   Marked Rejected. Each participant claims their own VGT (option 78a).",
+        );
         console.log("   This is terminal — submit a corrected proposal.");
       } else {
         displayError("PROPOSAL REJECTED — thresholds not met");
-        console.log("   Each participant claims their own VGT deposit (option 78a).");
+        console.log(
+          "   Each participant claims their own VGT deposit (option 78a).",
+        );
       }
       console.log(`   Transaction: ${tx.hash}`);
     } catch (error) {
@@ -1552,8 +1561,10 @@ class GovernanceModule {
       let target = 0n;
       for (let id = count; id >= 1; id--) {
         const [p] = await vanguardGovernance.getProposal(id);
-        if (Number(p.status) === 1) { // Active
-          target = p.executionTime > p.votingEnds ? p.executionTime : p.votingEnds;
+        if (Number(p.status) === 1) {
+          // Active
+          target =
+            p.executionTime > p.votingEnds ? p.executionTime : p.votingEnds;
           break;
         }
       }
@@ -2497,13 +2508,19 @@ class GovernanceModule {
         const status = Number(p.status);
         if (status !== 3 && status !== 5) continue; // Rejected, Cancelled
         for (let i = 0; i < signers.length; i++) {
-          const owed = await vanguardGovernance.getClaimableRefund(id, signers[i].address);
-          if (owed > 0n) claimable.push({ id, i, owed, title: p.title, status });
+          const owed = await vanguardGovernance.getClaimableRefund(
+            id,
+            signers[i].address,
+          );
+          if (owed > 0n)
+            claimable.push({ id, i, owed, title: p.title, status });
         }
       }
 
       if (claimable.length === 0) {
-        displayInfo("Nothing to claim: no settled proposal holds a deposit for any signer");
+        displayInfo(
+          "Nothing to claim: no settled proposal holds a deposit for any signer",
+        );
         return;
       }
 
@@ -2526,14 +2543,22 @@ class GovernanceModule {
 
       for (const c of chosen) {
         try {
-          const tx = await vanguardGovernance.connect(signers[c.i]).claimRefund(c.id);
+          const tx = await vanguardGovernance
+            .connect(signers[c.i])
+            .claimRefund(c.id);
           await tx.wait();
-          displaySuccess(`Signer ${c.i} claimed ${ethers.formatEther(c.owed)} VGT from proposal ${c.id}`);
+          displaySuccess(
+            `Signer ${c.i} claimed ${ethers.formatEther(c.owed)} VGT from proposal ${c.id}`,
+          );
         } catch (error) {
           // The token's compliance gate can refuse this one recipient. That
           // is the case the pull design exists for: nobody else is affected.
-          displayError(`Signer ${c.i} could not claim from proposal ${c.id}: ${error.message}`);
-          console.log("   Deposit stays claimable; retry once the signer is verified/unfrozen.");
+          displayError(
+            `Signer ${c.i} could not claim from proposal ${c.id}: ${error.message}`,
+          );
+          console.log(
+            "   Deposit stays claimable; retry once the signer is verified/unfrozen.",
+          );
         }
       }
     } catch (error) {

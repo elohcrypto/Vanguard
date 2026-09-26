@@ -525,7 +525,9 @@ class ContractDeployer {
         .addAgent(tokenAddr);
       const receiptAgent = await txAgent.wait();
       totalGasUsed += receiptAgent.gasUsed;
-      console.log("   ✅ Token granted agent role on IdentityRegistry (wallet recovery)");
+      console.log(
+        "   ✅ Token granted agent role on IdentityRegistry (wallet recovery)",
+      );
 
       // Configure IdentityRegistry with ComplianceRules for jurisdiction validation
       console.log(
@@ -772,13 +774,22 @@ class ContractDeployer {
       // menu once the oracle is populated.
       const rules = this.state.getContract("complianceRules");
       const digitalToken = this.state.getContract("digitalToken");
-      if (rules && digitalToken && typeof rules.setBlacklistOracle === "function") {
+      if (
+        rules &&
+        digitalToken &&
+        typeof rules.setBlacklistOracle === "function"
+      ) {
         const tokenAddr = await digitalToken.getAddress();
         await (
-          await rules.setBlacklistOracle(tokenAddr, await blacklistOracle.getAddress())
+          await rules.setBlacklistOracle(
+            tokenAddr,
+            await blacklistOracle.getAddress(),
+          )
         ).wait();
         console.log("   ✅ Blacklist oracle now gates VSC transfers");
-        console.log("   ℹ️  Whitelist gate left OFF (default-deny would block all holders)");
+        console.log(
+          "   ℹ️  Whitelist gate left OFF (default-deny would block all holders)",
+        );
       } else {
         console.log(
           "   ℹ️  Token or ComplianceRules not deployed yet — oracle gate not wired.",
