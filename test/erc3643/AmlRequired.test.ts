@@ -6,7 +6,13 @@ import {
   IdentityRegistry,
   OnchainIDFactory,
 } from "../../typechain-types";
-import { configureKyc, attest, deployIdentity, KYC_TOPIC, AML_TOPIC } from "../helpers/kyc";
+import {
+  configureKyc,
+  attest,
+  deployIdentity,
+  KYC_TOPIC,
+  AML_TOPIC,
+} from "../helpers/kyc";
 
 // Plan .omc/plans/2026-09-25-zk-kyc-ownership-cleanup-v2.md, section 2.3,
 // Task 1R.3: AML (topic 7) is a required claim topic with its own trusted
@@ -66,14 +72,7 @@ describe("IdentityRegistry.isVerified requires both KYC and AML claims (plan Tas
   });
 
   it("is NOT verified with an AML claim only", async function () {
-    await attest(
-      amlIssuer,
-      amlProvider,
-      identityAddr,
-      AML_TOPIC,
-      0,
-      AML_DATA,
-    );
+    await attest(amlIssuer, amlProvider, identityAddr, AML_TOPIC, 0, AML_DATA);
 
     expect(await registry.isVerified(investor.address)).to.equal(false);
   });

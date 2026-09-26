@@ -316,7 +316,11 @@ async function main() {
       if (!(await idReg.isVerified(sgn.address))) {
         const id = await OID.deploy(sgn.address);
         await idReg.registerIdentity(sgn.address, await id.getAddress(), 840);
-        await attestAll(state, await id.getAddress(), `investor:${sgn.address}`);
+        await attestAll(
+          state,
+          await id.getAddress(),
+          `investor:${sgn.address}`,
+        );
       }
       if ((await vgt.balanceOf(sgn.address)) < ethers.parseEther("50"))
         await vgt.transfer(sgn.address, ethers.parseEther("100"));

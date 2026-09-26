@@ -217,8 +217,7 @@ export class DeploymentHelper {
         { name: "AML", topic: 7 },
       ];
       const missing = REQUIRED_TOPICS.filter(
-        (t: { name: string; topic: number }) =>
-          !topicNumbers.includes(t.topic),
+        (t: { name: string; topic: number }) => !topicNumbers.includes(t.topic),
       );
       if (missing.length > 0) {
         throw new Error(
