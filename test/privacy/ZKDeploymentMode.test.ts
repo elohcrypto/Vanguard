@@ -12,35 +12,60 @@ import { ethers } from "hardhat";
  */
 describe("ZK deployment mode", function () {
   it("rejects a garbage proof when testingMode is off", async function () {
-    const v = await (await ethers.getContractFactory("ZKVerifierIntegrated")).deploy(false);
+    const v = await (
+      await ethers.getContractFactory("ZKVerifierIntegrated")
+    ).deploy(false);
     const ok = await v.verifyWhitelistMembership.staticCall(
-      [0, 0], [[0, 0], [0, 0]], [0, 0], [1]
+      [0, 0],
+      [
+        [0, 0],
+        [0, 0],
+      ],
+      [0, 0],
+      [1],
     );
     expect(ok, "a zero proof must not verify").to.be.false;
   });
 
   it("accepts a garbage proof when testingMode is on (why it must not be the default)", async function () {
-    const v = await (await ethers.getContractFactory("ZKVerifierIntegrated")).deploy(true);
+    const v = await (
+      await ethers.getContractFactory("ZKVerifierIntegrated")
+    ).deploy(true);
     const ok = await v.verifyWhitelistMembership.staticCall(
-      [0, 0], [[0, 0], [0, 0]], [0, 0], [1]
+      [0, 0],
+      [
+        [0, 0],
+        [0, 0],
+      ],
+      [0, 0],
+      [1],
     );
-    expect(ok, "testingMode is a mock and must never be the production default").to.be.true;
+    expect(ok, "testingMode is a mock and must never be the production default")
+      .to.be.true;
   });
 
   it("the demo does not hardcode testingMode on", async function () {
-    const src = require("fs").readFileSync("demo/modules/PrivacyModule.js", "utf8");
+    const src = require("fs").readFileSync(
+      "demo/modules/PrivacyModule.js",
+      "utf8",
+    );
     const m = src.match(/ZKVerifierIntegratedFactory\.deploy\(([^)]*)\)/);
     expect(m, "ZKVerifierIntegrated deployment not found").to.not.be.null;
     expect(m![1].trim(), "must not be a hardcoded true").to.not.equal("true");
   });
 
   it("the demo labels mock mode honestly", async function () {
-    const src = require("fs").readFileSync("demo/modules/PrivacyModule.js", "utf8");
+    const src = require("fs").readFileSync(
+      "demo/modules/PrivacyModule.js",
+      "utf8",
+    );
     // The old log said "Real ZK Verifiers" while deploying the mock. Whatever
     // the wording, it must be derived from the flag, not asserted blindly.
     const claimsRealUnconditionally =
-      /Real ZK Verifiers/.test(src) && !/testingMode|zkTestingMode|MOCK/i.test(src);
-    expect(claimsRealUnconditionally, "log must reflect the actual mode").to.be.false;
+      /Real ZK Verifiers/.test(src) &&
+      !/testingMode|zkTestingMode|MOCK/i.test(src);
+    expect(claimsRealUnconditionally, "log must reflect the actual mode").to.be
+      .false;
   });
 
   // Found reviewing PR #4: deploying in real mode set state.zkMode = 'real' but
@@ -66,17 +91,37 @@ describe("ZK deployment mode", function () {
         state.realProofGenerator ??= {
           async generateWhitelistProof() {
             generatorUsed = true;
-            return { proof: { a: [0, 0], b: [[0, 0], [0, 0]], c: [0, 0] }, publicSignals: [1] };
+            return {
+              proof: {
+                a: [0, 0],
+                b: [
+                  [0, 0],
+                  [0, 0],
+                ],
+                c: [0, 0],
+              },
+              publicSignals: [1],
+            };
           },
         };
       },
     };
-    const privacy = new PrivacyModule(state, new EnhancedLogger(), async () => "1", fakeProofGenerator);
+    const privacy = new PrivacyModule(
+      state,
+      new EnhancedLogger(),
+      async () => "1",
+      fakeProofGenerator,
+    );
 
     const logged: string[] = [];
-    const origLog = console.log, origErr = console.error;
-    console.log = (...a: unknown[]) => { logged.push(a.join(" ")); };
-    console.error = (...a: unknown[]) => { logged.push(a.join(" ")); };
+    const origLog = console.log,
+      origErr = console.error;
+    console.log = (...a: unknown[]) => {
+      logged.push(a.join(" "));
+    };
+    console.error = (...a: unknown[]) => {
+      logged.push(a.join(" "));
+    };
     const prevMode = process.env.ZK_TESTING_MODE;
     delete process.env.ZK_TESTING_MODE; // the default: real verifier
     try {
@@ -87,11 +132,15 @@ describe("ZK deployment mode", function () {
       expect(state.zkMode).to.equal("real");
       await privacy.submitWhitelistMembershipProof();
     } finally {
-      console.log = origLog; console.error = origErr;
+      console.log = origLog;
+      console.error = origErr;
       if (prevMode !== undefined) process.env.ZK_TESTING_MODE = prevMode;
     }
 
     expect(logged.join("\n")).to.not.match(/Cannot read properties of null/);
-    expect(generatorUsed, "real-mode demo must generate through the real generator").to.be.true;
+    expect(
+      generatorUsed,
+      "real-mode demo must generate through the real generator",
+    ).to.be.true;
   });
 });

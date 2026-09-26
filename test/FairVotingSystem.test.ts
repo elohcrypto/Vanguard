@@ -762,9 +762,8 @@ describe("Fair Voting System (1 Person = 1 Vote)", function () {
       );
 
       // Step 2: a real proposal to call acceptOwnership().
-      const callData = investorTypeRegistry.interface.encodeFunctionData(
-        "acceptOwnership",
-      );
+      const callData =
+        investorTypeRegistry.interface.encodeFunctionData("acceptOwnership");
       const before = await vanguardGovernance.proposalCount();
       await vanguardGovernance.connect(alice).createProposal(
         0, // InvestorTypeConfig: 20% quorum, 60% approval

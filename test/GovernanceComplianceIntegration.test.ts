@@ -445,15 +445,13 @@ describe("Governance → ComplianceRules Integration Test", function () {
         );
 
       const callData = "0x";
-      await vanguardGovernance
-        .connect(voter1)
-        .createProposal(
-          1, // ComplianceRules: the bound target below is complianceRules
-          "Low turnout proposal",
-          "Only one voter participates",
-          await complianceRules.getAddress(),
-          callData,
-        );
+      await vanguardGovernance.connect(voter1).createProposal(
+        1, // ComplianceRules: the bound target below is complianceRules
+        "Low turnout proposal",
+        "Only one voter participates",
+        await complianceRules.getAddress(),
+        callData,
+      );
       const proposalId = 1;
 
       // A single vote from someone other than the proposer (proposers
@@ -521,15 +519,13 @@ describe("Governance → ComplianceRules Integration Test", function () {
         );
 
       const before = await governanceToken.balanceOf(voter1.address);
-      await vanguardGovernance
-        .connect(voter1)
-        .createProposal(
-          1, // ComplianceRules: the bound target below is complianceRules
-          "Ignored proposal",
-          "Nobody votes on this",
-          await complianceRules.getAddress(),
-          "0x",
-        );
+      await vanguardGovernance.connect(voter1).createProposal(
+        1, // ComplianceRules: the bound target below is complianceRules
+        "Ignored proposal",
+        "Nobody votes on this",
+        await complianceRules.getAddress(),
+        "0x",
+      );
       const proposalId = 1;
 
       await time.increase(9 * 24 * 60 * 60);
@@ -567,15 +563,13 @@ describe("Governance → ComplianceRules Integration Test", function () {
 
       const eligibleAtCreation =
         await identityRegistry.registeredIdentityCount();
-      await vanguardGovernance
-        .connect(voter1)
-        .createProposal(
-          1, // ComplianceRules: the bound target below is complianceRules
-          "Snapshot test",
-          "Quorum must use the creation-time count",
-          await complianceRules.getAddress(),
-          "0x",
-        );
+      await vanguardGovernance.connect(voter1).createProposal(
+        1, // ComplianceRules: the bound target below is complianceRules
+        "Snapshot test",
+        "Quorum must use the creation-time count",
+        await complianceRules.getAddress(),
+        "0x",
+      );
       const proposalId = 1;
 
       const [created] = await vanguardGovernance.getProposal(proposalId);
@@ -636,15 +630,13 @@ describe("Governance → ComplianceRules Integration Test", function () {
           await vanguardGovernance.getAddress(),
           ethers.parseEther("1000"),
         );
-      await vanguardGovernance
-        .connect(voter1)
-        .createProposal(
-          1, // ComplianceRules: the bound target below is complianceRules
-          "Advisory vs enforcement",
-          "One voter only",
-          await complianceRules.getAddress(),
-          "0x",
-        );
+      await vanguardGovernance.connect(voter1).createProposal(
+        1, // ComplianceRules: the bound target below is complianceRules
+        "Advisory vs enforcement",
+        "One voter only",
+        await complianceRules.getAddress(),
+        "0x",
+      );
       const proposalId = 1;
 
       await governanceToken.transfer(voter2.address, ethers.parseEther("1000"));

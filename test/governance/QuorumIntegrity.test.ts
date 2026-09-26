@@ -19,42 +19,79 @@ describe("Quorum denominator integrity", function () {
   beforeEach(async function () {
     signers = await ethers.getSigners();
     owner = signers[0];
-    idReg = await (await ethers.getContractFactory("IdentityRegistry")).deploy();
-    rules = await (await ethers.getContractFactory("ComplianceRules")).deploy(owner.address, [840], [643]);
+    idReg = await (
+      await ethers.getContractFactory("IdentityRegistry")
+    ).deploy();
+    rules = await (
+      await ethers.getContractFactory("ComplianceRules")
+    ).deploy(owner.address, [840], [643]);
     await idReg.addAgent(owner.address);
   });
 
   async function newId(who: SignerWithAddress): Promise<string> {
-    const id = await (await ethers.getContractFactory("OnchainID")).deploy(who.address);
+    const id = await (
+      await ethers.getContractFactory("OnchainID")
+    ).deploy(who.address);
     return await id.getAddress();
   }
 
   async function countVerified(from: number, to: number): Promise<number> {
     let n = 0;
-    for (let i = from; i <= to; i++) if (await idReg.isVerified(signers[i].address)) n++;
+    for (let i = from; i <= to; i++)
+      if (await idReg.isVerified(signers[i].address)) n++;
     return n;
   }
 
   it("batch registration increments the counter", async function () {
-    const addrs = [], ids = [], cc = [];
-    for (let i = 1; i <= 5; i++) { addrs.push(signers[i].address); ids.push(await newId(signers[i])); cc.push(840); }
+    const addrs = [],
+      ids = [],
+      cc = [];
+    for (let i = 1; i <= 5; i++) {
+      addrs.push(signers[i].address);
+      ids.push(await newId(signers[i]));
+      cc.push(840);
+    }
     await idReg.batchRegisterIdentity(addrs, ids, cc);
     expect(await idReg.registeredIdentityCount()).to.equal(5n);
   });
 
   it("the counter matches the real electorate across mixed paths", async function () {
-    for (let i = 1; i <= 3; i++) await idReg.registerIdentity(signers[i].address, await newId(signers[i]), 840);
-    const addrs = [], ids = [], cc = [];
-    for (let i = 4; i <= 9; i++) { addrs.push(signers[i].address); ids.push(await newId(signers[i])); cc.push(840); }
+    for (let i = 1; i <= 3; i++)
+      await idReg.registerIdentity(
+        signers[i].address,
+        await newId(signers[i]),
+        840,
+      );
+    const addrs = [],
+      ids = [],
+      cc = [];
+    for (let i = 4; i <= 9; i++) {
+      addrs.push(signers[i].address);
+      ids.push(await newId(signers[i]));
+      cc.push(840);
+    }
     await idReg.batchRegisterIdentity(addrs, ids, cc);
 
-    expect(await idReg.registeredIdentityCount()).to.equal(BigInt(await countVerified(1, 9)));
+    expect(await idReg.registeredIdentityCount()).to.equal(
+      BigInt(await countVerified(1, 9)),
+    );
   });
 
   it("deleting batch-registered identities cannot drive the counter below the electorate", async function () {
-    for (let i = 1; i <= 3; i++) await idReg.registerIdentity(signers[i].address, await newId(signers[i]), 840);
-    const addrs = [], ids = [], cc = [];
-    for (let i = 4; i <= 9; i++) { addrs.push(signers[i].address); ids.push(await newId(signers[i])); cc.push(840); }
+    for (let i = 1; i <= 3; i++)
+      await idReg.registerIdentity(
+        signers[i].address,
+        await newId(signers[i]),
+        840,
+      );
+    const addrs = [],
+      ids = [],
+      cc = [];
+    for (let i = 4; i <= 9; i++) {
+      addrs.push(signers[i].address);
+      ids.push(await newId(signers[i]));
+      cc.push(840);
+    }
     await idReg.batchRegisterIdentity(addrs, ids, cc);
 
     for (let i = 4; i <= 9; i++) await idReg.deleteIdentity(signers[i].address);
@@ -68,11 +105,20 @@ describe("Quorum denominator integrity", function () {
     // 643 is on this token's blocked list; the single path rejects it, and the
     // batch path must not be a way around that check.
     await rules.setJurisdictionRule(await idReg.getAddress(), [840], [643]);
-    await idReg.setComplianceRules(await rules.getAddress(), await idReg.getAddress());
+    await idReg.setComplianceRules(
+      await rules.getAddress(),
+      await idReg.getAddress(),
+    );
 
-    await expect(idReg.registerIdentity(signers[1].address, await newId(signers[1]), 643)).to.be.reverted;
     await expect(
-      idReg.batchRegisterIdentity([signers[2].address], [await newId(signers[2])], [643])
+      idReg.registerIdentity(signers[1].address, await newId(signers[1]), 643),
+    ).to.be.reverted;
+    await expect(
+      idReg.batchRegisterIdentity(
+        [signers[2].address],
+        [await newId(signers[2])],
+        [643],
+      ),
     ).to.be.reverted;
   });
 });
@@ -92,7 +138,8 @@ describe("Quorum denominator integrity", function () {
 describe("Zero electorate cannot satisfy quorum", function () {
   it("requires a non-empty electorate for quorum", async function () {
     const src = require("fs").readFileSync(
-      "contracts/governance/VanguardGovernance.sol", "utf8"
+      "contracts/governance/VanguardGovernance.sol",
+      "utf8",
     );
     // The guard must be part of the quorum expression itself, not a comment.
     const m = src.match(/bool quorumMet =([\s\S]{0,200}?);/);
@@ -113,36 +160,73 @@ describe("List-update proposals honour the execution delay", function () {
   it("sets a real execution time, not zero", async function () {
     const [owner, alice] = await ethers.getSigners();
 
-    const idReg = await (await ethers.getContractFactory("IdentityRegistry")).deploy();
-    const rules = await (await ethers.getContractFactory("ComplianceRules")).deploy(owner.address, [840], []);
-    const vgt = await (await ethers.getContractFactory("GovernanceToken")).deploy(
-      "Vanguard Governance", "VGT", await idReg.getAddress(), await rules.getAddress()
+    const idReg = await (
+      await ethers.getContractFactory("IdentityRegistry")
+    ).deploy();
+    const rules = await (
+      await ethers.getContractFactory("ComplianceRules")
+    ).deploy(owner.address, [840], []);
+    const vgt = await (
+      await ethers.getContractFactory("GovernanceToken")
+    ).deploy(
+      "Vanguard Governance",
+      "VGT",
+      await idReg.getAddress(),
+      await rules.getAddress(),
     );
-    const gov = await (await ethers.getContractFactory("VanguardGovernance")).deploy(
-      await vgt.getAddress(), await idReg.getAddress(), owner.address,
-      await rules.getAddress(), owner.address, await vgt.getAddress(), 1440
+    const gov = await (
+      await ethers.getContractFactory("VanguardGovernance")
+    ).deploy(
+      await vgt.getAddress(),
+      await idReg.getAddress(),
+      owner.address,
+      await rules.getAddress(),
+      owner.address,
+      await vgt.getAddress(),
+      1440,
     );
     await idReg.addAgent(owner.address);
     await vgt.addAgent(owner.address);
-    await rules.setTokenIdentityRegistry(await vgt.getAddress(), await idReg.getAddress());
+    await rules.setTokenIdentityRegistry(
+      await vgt.getAddress(),
+      await idReg.getAddress(),
+    );
     await rules.addTrustedContract(await gov.getAddress());
 
     const OID = await ethers.getContractFactory("OnchainID");
-    await idReg.registerIdentity(alice.address, await (await OID.deploy(alice.address)).getAddress(), 840);
+    await idReg.registerIdentity(
+      alice.address,
+      await (await OID.deploy(alice.address)).getAddress(),
+      840,
+    );
     await vgt.mint(alice.address, ethers.parseEther("1000"));
     await vgt.connect(alice).approve(await gov.getAddress(), ethers.MaxUint256);
 
-    const dlm = await (await ethers.getContractFactory("DynamicListManager")).deploy(owner.address);
+    const dlm = await (
+      await ethers.getContractFactory("DynamicListManager")
+    ).deploy(owner.address);
     await gov.setDynamicListManager(await dlm.getAddress());
 
     // ProposalType.AddToBlacklist
-    await gov.connect(alice).createListUpdateProposal(
-      6, "blacklist bob", "sanctions", alice.address, 0, "test"
-    );
+    await gov
+      .connect(alice)
+      .createListUpdateProposal(
+        6,
+        "blacklist bob",
+        "sanctions",
+        alice.address,
+        0,
+        "test",
+      );
     const [p] = await gov.getProposal(1);
 
-    expect(p.executionTime, "executionTime must not be zero").to.be.greaterThan(0n);
-    expect(p.executionTime, "delay must sit after voting ends").to.be.greaterThan(p.votingEnds);
+    expect(p.executionTime, "executionTime must not be zero").to.be.greaterThan(
+      0n,
+    );
+    expect(
+      p.executionTime,
+      "delay must sit after voting ends",
+    ).to.be.greaterThan(p.votingEnds);
   });
 });
 
@@ -163,56 +247,102 @@ describe("List-update proposals honour the execution delay", function () {
  * stamping Executed over it.
  */
 describe("cancelProposal under self-ownership", function () {
-  let owner: SignerWithAddress, alice: SignerWithAddress, bob: SignerWithAddress, carol: SignerWithAddress;
+  let owner: SignerWithAddress,
+    alice: SignerWithAddress,
+    bob: SignerWithAddress,
+    carol: SignerWithAddress;
   let gov: any, vgt: any, govAddr: string;
   const E = ethers.parseEther;
-  const S = ["Pending", "Active", "Approved", "Rejected", "Executed", "Cancelled"];
+  const S = [
+    "Pending",
+    "Active",
+    "Approved",
+    "Rejected",
+    "Executed",
+    "Cancelled",
+  ];
 
   async function pass(id: number) {
     await gov.connect(bob).castVote(id, true, "");
     await gov.connect(carol).castVote(id, true, "");
     const [p] = await gov.getProposal(id);
-    await ethers.provider.send("evm_increaseTime", [Number(p.executionTime - p.createdAt) + 5]);
+    await ethers.provider.send("evm_increaseTime", [
+      Number(p.executionTime - p.createdAt) + 5,
+    ]);
     await ethers.provider.send("evm_mine", []);
   }
 
   beforeEach(async function () {
     [owner, alice, bob, carol] = await ethers.getSigners();
-    const idReg = await (await ethers.getContractFactory("IdentityRegistry")).deploy();
-    const rules = await (await ethers.getContractFactory("ComplianceRules")).deploy(owner.address, [840], []);
-    vgt = await (await ethers.getContractFactory("GovernanceToken")).deploy(
-      "VGT", "VGT", await idReg.getAddress(), await rules.getAddress()
-    );
-    gov = await (await ethers.getContractFactory("VanguardGovernance")).deploy(
-      await vgt.getAddress(), await idReg.getAddress(), owner.address,
-      await rules.getAddress(), owner.address, await vgt.getAddress(), 1440
+    const idReg = await (
+      await ethers.getContractFactory("IdentityRegistry")
+    ).deploy();
+    const rules = await (
+      await ethers.getContractFactory("ComplianceRules")
+    ).deploy(owner.address, [840], []);
+    vgt = await (
+      await ethers.getContractFactory("GovernanceToken")
+    ).deploy("VGT", "VGT", await idReg.getAddress(), await rules.getAddress());
+    gov = await (
+      await ethers.getContractFactory("VanguardGovernance")
+    ).deploy(
+      await vgt.getAddress(),
+      await idReg.getAddress(),
+      owner.address,
+      await rules.getAddress(),
+      owner.address,
+      await vgt.getAddress(),
+      1440,
     );
     govAddr = await gov.getAddress();
     await idReg.addAgent(owner.address);
     await vgt.addAgent(owner.address);
     await vgt.addAgent(govAddr);
-    await rules.setTokenIdentityRegistry(await vgt.getAddress(), await idReg.getAddress());
+    await rules.setTokenIdentityRegistry(
+      await vgt.getAddress(),
+      await idReg.getAddress(),
+    );
     await rules.addTrustedContract(govAddr);
     const OID = await ethers.getContractFactory("OnchainID");
     for (const w of [alice, bob, carol]) {
-      await idReg.registerIdentity(w.address, await (await OID.deploy(w.address)).getAddress(), 840);
+      await idReg.registerIdentity(
+        w.address,
+        await (await OID.deploy(w.address)).getAddress(),
+        840,
+      );
       await vgt.mint(w.address, E("1000"));
       await vgt.connect(w).approve(govAddr, ethers.MaxUint256);
     }
     // Governance takes ownership of itself by vote.
     await gov.transferOwnership(govAddr);
-    await gov.connect(alice).createProposal(4 /* SystemParameters: target is governance itself */, "self-own", "d", govAddr,
-      gov.interface.encodeFunctionData("acceptOwnership"));
+    await gov
+      .connect(alice)
+      .createProposal(
+        4 /* SystemParameters: target is governance itself */,
+        "self-own",
+        "d",
+        govAddr,
+        gov.interface.encodeFunctionData("acceptOwnership"),
+      );
     await pass(1);
     await gov.executeProposal(1);
     expect(await gov.owner()).to.equal(govAddr);
   });
 
   it("a proposal can cancel ANOTHER proposal by vote (brake reachable)", async function () {
-    await gov.connect(alice).createProposal(0, "victim", "d", owner.address, "0x");
+    await gov
+      .connect(alice)
+      .createProposal(0, "victim", "d", owner.address, "0x");
     await gov.connect(bob).castVote(2, true, "");
-    await gov.connect(alice).createProposal(4 /* SystemParameters: target is governance itself */, "cancel-2", "d", govAddr,
-      gov.interface.encodeFunctionData("cancelProposal", [2]));
+    await gov
+      .connect(alice)
+      .createProposal(
+        4 /* SystemParameters: target is governance itself */,
+        "cancel-2",
+        "d",
+        govAddr,
+        gov.interface.encodeFunctionData("cancelProposal", [2]),
+      );
     await pass(3);
     await gov.executeProposal(3);
 
@@ -222,8 +352,15 @@ describe("cancelProposal under self-ownership", function () {
   });
 
   it("a proposal that cancels ITSELF cannot strand its deposits", async function () {
-    await gov.connect(alice).createProposal(4 /* SystemParameters: target is governance itself */, "cancel-self", "d", govAddr,
-      gov.interface.encodeFunctionData("cancelProposal", [2]));
+    await gov
+      .connect(alice)
+      .createProposal(
+        4 /* SystemParameters: target is governance itself */,
+        "cancel-self",
+        "d",
+        govAddr,
+        gov.interface.encodeFunctionData("cancelProposal", [2]),
+      );
     await pass(2);
     await gov.executeProposal(2);
 
@@ -232,8 +369,15 @@ describe("cancelProposal under self-ownership", function () {
     // Every deposit must end up either burned or claimed. Nothing may remain
     // sitting in the contract with no path out.
     for (const w of [alice, bob, carol]) {
-      try { await gov.connect(w).claimRefund(2); } catch { /* burned path is also fine */ }
+      try {
+        await gov.connect(w).claimRefund(2);
+      } catch {
+        /* burned path is also fine */
+      }
     }
-    expect(await vgt.balanceOf(govAddr), `stranded deposits, status=${S[Number(p2.status)]}`).to.equal(0n);
+    expect(
+      await vgt.balanceOf(govAddr),
+      `stranded deposits, status=${S[Number(p2.status)]}`,
+    ).to.equal(0n);
   });
 });

@@ -21,7 +21,9 @@ describe("Compliance rule revocation", function () {
 
   beforeEach(async function () {
     [owner] = await ethers.getSigners();
-    rules = await (await ethers.getContractFactory("ComplianceRules")).deploy(owner.address, [], []);
+    rules = await (
+      await ethers.getContractFactory("ComplianceRules")
+    ).deploy(owner.address, [], []);
   });
 
   describe("jurisdiction", function () {
@@ -32,8 +34,14 @@ describe("Compliance rule revocation", function () {
       // Governance votes to drop Canada.
       await rules.setJurisdictionRule(TOKEN, [840], []);
 
-      expect((await rules.validateJurisdiction(TOKEN, 840))[0], "US must stay allowed").to.be.true;
-      expect((await rules.validateJurisdiction(TOKEN, 124))[0], "CA must now be refused").to.be.false;
+      expect(
+        (await rules.validateJurisdiction(TOKEN, 840))[0],
+        "US must stay allowed",
+      ).to.be.true;
+      expect(
+        (await rules.validateJurisdiction(TOKEN, 124))[0],
+        "CA must now be refused",
+      ).to.be.false;
     });
 
     it("un-blocking a country takes effect", async function () {
@@ -43,7 +51,10 @@ describe("Compliance rule revocation", function () {
       // Sanctions lifted: 643 moves to the allow list, block list emptied.
       await rules.setJurisdictionRule(TOKEN, [840, 643], []);
 
-      expect((await rules.validateJurisdiction(TOKEN, 643))[0], "643 must no longer be blocked").to.be.true;
+      expect(
+        (await rules.validateJurisdiction(TOKEN, 643))[0],
+        "643 must no longer be blocked",
+      ).to.be.true;
     });
 
     it("a country can be blocked, un-blocked, and blocked again", async function () {
@@ -61,7 +72,10 @@ describe("Compliance rule revocation", function () {
 
       // Every country NOT in the new array must be refused.
       for (const c of [124, 826]) {
-        expect((await rules.validateJurisdiction(TOKEN, c))[0], `country ${c} should be refused`).to.be.false;
+        expect(
+          (await rules.validateJurisdiction(TOKEN, c))[0],
+          `country ${c} should be refused`,
+        ).to.be.false;
       }
     });
   });
@@ -73,8 +87,14 @@ describe("Compliance rule revocation", function () {
 
       await rules.setInvestorTypeRule(TOKEN, [1], [], 0);
 
-      expect((await rules.validateInvestorType(TOKEN, 1, 0))[0], "type 1 must stay allowed").to.be.true;
-      expect((await rules.validateInvestorType(TOKEN, 2, 0))[0], "type 2 must now be refused").to.be.false;
+      expect(
+        (await rules.validateInvestorType(TOKEN, 1, 0))[0],
+        "type 1 must stay allowed",
+      ).to.be.true;
+      expect(
+        (await rules.validateInvestorType(TOKEN, 2, 0))[0],
+        "type 2 must now be refused",
+      ).to.be.false;
     });
 
     it("un-blocking an investor type takes effect", async function () {
@@ -83,7 +103,10 @@ describe("Compliance rule revocation", function () {
 
       await rules.setInvestorTypeRule(TOKEN, [1, 2], [], 0);
 
-      expect((await rules.validateInvestorType(TOKEN, 2, 0))[0], "type 2 must no longer be blocked").to.be.true;
+      expect(
+        (await rules.validateInvestorType(TOKEN, 2, 0))[0],
+        "type 2 must no longer be blocked",
+      ).to.be.true;
     });
   });
 });

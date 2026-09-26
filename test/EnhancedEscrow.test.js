@@ -3,1183 +3,1392 @@ const { ethers } = require("hardhat");
 const { time } = require("@nomicfoundation/hardhat-network-helpers");
 
 describe("Enhanced Escrow System", function () {
-    let vscToken;
-    let factory;
-    let identityRegistry;
-    let complianceRules;
-    let payerIdentity, payeeIdentity;
-    let owner, investor, payer, payee, investorWallet, ownerWallet;
-    let signers;
+  let vscToken;
+  let factory;
+  let identityRegistry;
+  let complianceRules;
+  let payerIdentity, payeeIdentity;
+  let owner, investor, payer, payee, investorWallet, ownerWallet;
+  let signers;
 
-    const INITIAL_SUPPLY = ethers.parseEther("1000000");
-    const PAYMENT_AMOUNT = ethers.parseEther("1000");
-    const INVESTOR_FEE = ethers.parseEther("30"); // 3%
-    const OWNER_FEE = ethers.parseEther("20"); // 2%
-    const TOTAL_AMOUNT = ethers.parseEther("1050"); // 1000 + 30 + 20
+  const INITIAL_SUPPLY = ethers.parseEther("1000000");
+  const PAYMENT_AMOUNT = ethers.parseEther("1000");
+  const INVESTOR_FEE = ethers.parseEther("30"); // 3%
+  const OWNER_FEE = ethers.parseEther("20"); // 2%
+  const TOTAL_AMOUNT = ethers.parseEther("1050"); // 1000 + 30 + 20
 
-    // A shipment proof is bound to the escrow address, the chain and the data.
-    // Signing the bare dataHash is no longer accepted: an unscoped signature
-    // was replayable across escrows and chains.
-    async function signProof(signer, walletAddress, dataHash) {
-        const { chainId } = await ethers.provider.getNetwork();
-        const digest = ethers.keccak256(
-            ethers.AbiCoder.defaultAbiCoder().encode(
-                ["string", "address", "uint256", "bytes32"],
-                ["VanguardShipmentProof", walletAddress, chainId, dataHash]
-            )
+  // A shipment proof is bound to the escrow address, the chain and the data.
+  // Signing the bare dataHash is no longer accepted: an unscoped signature
+  // was replayable across escrows and chains.
+  async function signProof(signer, walletAddress, dataHash) {
+    const { chainId } = await ethers.provider.getNetwork();
+    const digest = ethers.keccak256(
+      ethers.AbiCoder.defaultAbiCoder().encode(
+        ["string", "address", "uint256", "bytes32"],
+        ["VanguardShipmentProof", walletAddress, chainId, dataHash],
+      ),
+    );
+    return signer.signMessage(ethers.getBytes(digest));
+  }
+
+  beforeEach(async function () {
+    signers = await ethers.getSigners();
+    [owner, investor, payer, payee, investorWallet, ownerWallet] = signers;
+
+    // Deploy mock VSC token
+    const MockToken = await ethers.getContractFactory("MockToken");
+    vscToken = await MockToken.deploy(
+      "VanguardStableCoin",
+      "VSC",
+      INITIAL_SUPPLY,
+    );
+    await vscToken.waitForDeployment();
+
+    // Deploy IdentityRegistry for KYC/AML compliance
+    const IdentityRegistry =
+      await ethers.getContractFactory("IdentityRegistry");
+    identityRegistry = await IdentityRegistry.deploy();
+    await identityRegistry.waitForDeployment();
+
+    // Deploy ComplianceRules
+    const ComplianceRules = await ethers.getContractFactory("ComplianceRules");
+    complianceRules = await ComplianceRules.deploy(
+      owner.address,
+      [840, 826, 756], // Allowed countries: USA, UK, Switzerland
+      [], // No blocked countries
+    );
+    await complianceRules.waitForDeployment();
+
+    // Deploy OnchainID for payer and payee
+    const OnchainID = await ethers.getContractFactory("OnchainID");
+    payerIdentity = await OnchainID.deploy(payer.address);
+    await payerIdentity.waitForDeployment();
+
+    payeeIdentity = await OnchainID.deploy(payee.address);
+    await payeeIdentity.waitForDeployment();
+
+    // Register payer and payee in IdentityRegistry (KYC/AML verified)
+    await identityRegistry.registerIdentity(
+      payer.address,
+      await payerIdentity.getAddress(),
+      840, // USA country code
+    );
+
+    await identityRegistry.registerIdentity(
+      payee.address,
+      await payeeIdentity.getAddress(),
+      840, // USA country code
+    );
+
+    // Deploy EscrowWalletFactory with IdentityRegistry and ComplianceRules
+    const EscrowWalletFactory = await ethers.getContractFactory(
+      "EscrowWalletFactory",
+    );
+    factory = await EscrowWalletFactory.deploy(
+      await vscToken.getAddress(),
+      ownerWallet.address,
+      await identityRegistry.getAddress(),
+      await complianceRules.getAddress(),
+    );
+    await factory.waitForDeployment();
+
+    // Transfer tokens to payer
+    await vscToken.transfer(payer.address, ethers.parseEther("10000"));
+  });
+
+  describe("Deployment", function () {
+    it("Should deploy factory with correct parameters", async function () {
+      expect(await factory.vscToken()).to.equal(await vscToken.getAddress());
+      expect(await factory.owner()).to.equal(owner.address);
+      expect(await factory.ownerWallet()).to.equal(ownerWallet.address);
+    });
+
+    it("Should have correct fee rates", async function () {
+      expect(await factory.INVESTOR_FEE_RATE()).to.equal(300); // 3%
+      expect(await factory.OWNER_FEE_RATE()).to.equal(200); // 2%
+      expect(await factory.TOTAL_FEE_RATE()).to.equal(500); // 5%
+    });
+  });
+
+  describe("Investor Registration", function () {
+    it("Should register investor successfully", async function () {
+      await factory.registerInvestor(investor.address, investorWallet.address);
+
+      const profile = await factory.getInvestorProfile(investor.address);
+      expect(profile.investorAddress).to.equal(investor.address);
+      expect(profile.walletAddress).to.equal(investorWallet.address);
+      expect(profile.isActive).to.be.true;
+      expect(profile.totalEscrowsCreated).to.equal(0);
+    });
+
+    it("Should check if address is investor", async function () {
+      await factory.registerInvestor(investor.address, investorWallet.address);
+      expect(await factory.isInvestor(investor.address)).to.be.true;
+      expect(await factory.isInvestor(payer.address)).to.be.false;
+    });
+
+    it("Should not allow duplicate registration", async function () {
+      await factory.registerInvestor(investor.address, investorWallet.address);
+      await expect(
+        factory.registerInvestor(investor.address, investorWallet.address),
+      ).to.be.revertedWith("Already registered");
+    });
+
+    it("Should deactivate investor", async function () {
+      await factory.registerInvestor(investor.address, investorWallet.address);
+      await factory.deactivateInvestor(investor.address);
+
+      expect(await factory.isInvestor(investor.address)).to.be.false;
+    });
+  });
+
+  describe("Escrow Wallet Creation", function () {
+    beforeEach(async function () {
+      await factory.registerInvestor(investor.address, investorWallet.address);
+    });
+
+    it("Should create escrow wallet successfully", async function () {
+      const tx = await factory
+        .connect(investor)
+        .createEscrowWallet(payer.address, payee.address, PAYMENT_AMOUNT);
+
+      const receipt = await tx.wait();
+      const event = receipt.logs.find((log) => {
+        try {
+          return factory.interface.parseLog(log).name === "EscrowWalletCreated";
+        } catch (e) {
+          return false;
+        }
+      });
+
+      expect(event).to.not.be.undefined;
+    });
+
+    it("Should assign unique payment ID", async function () {
+      await factory
+        .connect(investor)
+        .createEscrowWallet(payer.address, payee.address, PAYMENT_AMOUNT);
+
+      const walletAddress = await factory.getWalletAddress(1);
+      expect(walletAddress).to.not.equal(ethers.ZeroAddress);
+    });
+
+    it("Should deploy wallet with correct parameters", async function () {
+      await factory
+        .connect(investor)
+        .createEscrowWallet(payer.address, payee.address, PAYMENT_AMOUNT);
+
+      const walletAddress = await factory.getWalletAddress(1);
+      const MultiSigEscrowWallet = await ethers.getContractFactory(
+        "MultiSigEscrowWallet",
+      );
+      const wallet = MultiSigEscrowWallet.attach(walletAddress);
+
+      expect(await wallet.paymentId()).to.equal(1);
+      expect(await wallet.payer()).to.equal(payer.address);
+      expect(await wallet.payee()).to.equal(payee.address);
+      expect(await wallet.investor()).to.equal(investor.address);
+      expect(await wallet.amount()).to.equal(PAYMENT_AMOUNT);
+      expect(await wallet.investorFee()).to.equal(INVESTOR_FEE);
+      expect(await wallet.ownerFee()).to.equal(OWNER_FEE);
+    });
+
+    it("Should only allow registered investors to create wallets", async function () {
+      await expect(
+        factory
+          .connect(payer)
+          .createEscrowWallet(payer.address, payee.address, PAYMENT_AMOUNT),
+      ).to.be.reverted;
+    });
+
+    it("Should update investor statistics", async function () {
+      await factory
+        .connect(investor)
+        .createEscrowWallet(payer.address, payee.address, PAYMENT_AMOUNT);
+
+      const profile = await factory.getInvestorProfile(investor.address);
+      expect(profile.totalEscrowsCreated).to.equal(1);
+    });
+
+    it("Should reject payee without KYC/AML", async function () {
+      const unverifiedPayee = signers[10];
+
+      await expect(
+        factory
+          .connect(investor)
+          .createEscrowWallet(
+            payer.address,
+            unverifiedPayee.address,
+            PAYMENT_AMOUNT,
+          ),
+      ).to.be.revertedWith("Payee must have valid KYC/AML (OnchainID)");
+    });
+
+    it("Should reject payer without KYC/AML (known payer)", async function () {
+      const unverifiedPayer = signers[11];
+
+      await expect(
+        factory
+          .connect(investor)
+          .createEscrowWallet(
+            unverifiedPayer.address,
+            payee.address,
+            PAYMENT_AMOUNT,
+          ),
+      ).to.be.revertedWith("Payer must have valid KYC/AML (OnchainID)");
+    });
+
+    it("Should allow unknown payer (address(0)) for marketplace", async function () {
+      const tx = await factory
+        .connect(investor)
+        .createEscrowWallet(ethers.ZeroAddress, payee.address, PAYMENT_AMOUNT);
+
+      const receipt = await tx.wait();
+      const event = receipt.logs.find((log) => {
+        try {
+          return factory.interface.parseLog(log).name === "EscrowWalletCreated";
+        } catch (e) {
+          return false;
+        }
+      });
+
+      expect(event).to.not.be.undefined;
+    });
+  });
+
+  describe("Funding Escrow Wallet", function () {
+    let walletAddress;
+
+    beforeEach(async function () {
+      await factory.registerInvestor(investor.address, investorWallet.address);
+      await factory
+        .connect(investor)
+        .createEscrowWallet(payer.address, payee.address, PAYMENT_AMOUNT);
+      walletAddress = await factory.getWalletAddress(1);
+    });
+
+    it("Should fund escrow wallet successfully", async function () {
+      await vscToken
+        .connect(payer)
+        .approve(await factory.getAddress(), TOTAL_AMOUNT);
+      await factory.connect(payer).fundEscrowWallet(1);
+
+      const balance = await vscToken.balanceOf(walletAddress);
+      expect(balance).to.equal(TOTAL_AMOUNT);
+    });
+
+    // Funding used to be gated only on `state == Active`, which is true
+    // both before AND after funding. A second call therefore went through
+    // and the extra tokens were stranded: release and refund pay fixed
+    // sums (amount and fees are immutable) and there is no sweep.
+    it("rejects a second funding of the same escrow", async function () {
+      await vscToken
+        .connect(payer)
+        .approve(await factory.getAddress(), TOTAL_AMOUNT * 3n);
+      await factory.connect(payer).fundEscrowWallet(1);
+      const W = await ethers.getContractFactory("MultiSigEscrowWallet");
+      expect(await W.attach(walletAddress).funded()).to.be.true;
+
+      await expect(
+        factory.connect(payer).fundEscrowWallet(1),
+      ).to.be.revertedWithCustomError(factory, "EscrowAlreadyFunded");
+
+      expect(await vscToken.balanceOf(walletAddress)).to.equal(TOTAL_AMOUNT);
+    });
+
+    it("leaves no stranded balance after release", async function () {
+      await vscToken
+        .connect(payer)
+        .approve(await factory.getAddress(), TOTAL_AMOUNT * 3n);
+      await factory.connect(payer).fundEscrowWallet(1);
+      try {
+        await factory.connect(payer).fundEscrowWallet(1);
+      } catch (e) {
+        /* must revert */
+      }
+
+      const W = await ethers.getContractFactory("MultiSigEscrowWallet");
+      const wallet = W.attach(walletAddress);
+      const data = "shipped";
+      const dataHash = ethers.keccak256(ethers.toUtf8Bytes(data));
+      await wallet
+        .connect(payee)
+        .submitShipmentProof(
+          data,
+          dataHash,
+          await signProof(payee, walletAddress, dataHash),
         );
-        return signer.signMessage(ethers.getBytes(digest));
+      await time.increase(15 * 24 * 60 * 60);
+      await wallet.connect(payee).signAsPayee();
+      await wallet.connect(investor).signAsInvestor(true);
+
+      expect(await vscToken.balanceOf(walletAddress)).to.equal(0n);
+    });
+
+    it("markFunded is callable only by the factory", async function () {
+      const W = await ethers.getContractFactory("MultiSigEscrowWallet");
+      const wallet = W.attach(walletAddress);
+      await expect(
+        wallet.connect(payer).markFunded(),
+      ).to.be.revertedWithCustomError(wallet, "OnlyFactory");
+    });
+
+    // Found reviewing PR #4: `funded` stops a second FACTORY funding, but
+    // any verified holder can transfer straight to the escrow. Release and
+    // refund pay fixed sums, so whatever else arrived sat there forever.
+    it("returns tokens sent directly to the escrow to the payer once settled", async function () {
+      const W = await ethers.getContractFactory("MultiSigEscrowWallet");
+      const wallet = W.attach(walletAddress);
+      await vscToken.connect(payer).transfer(walletAddress, TOTAL_AMOUNT); // direct, not via factory
+      await vscToken
+        .connect(payer)
+        .approve(await factory.getAddress(), TOTAL_AMOUNT);
+      await factory.connect(payer).fundEscrowWallet(1);
+      expect(await vscToken.balanceOf(walletAddress)).to.equal(
+        TOTAL_AMOUNT * 2n,
+      );
+
+      const data = "shipped";
+      const dataHash = ethers.keccak256(ethers.toUtf8Bytes(data));
+      await wallet
+        .connect(payee)
+        .submitShipmentProof(
+          data,
+          dataHash,
+          await signProof(payee, walletAddress, dataHash),
+        );
+      await time.increase(15 * 24 * 60 * 60);
+      await wallet.connect(payee).signAsPayee();
+      await wallet.connect(investor).signAsInvestor(true);
+      expect(
+        await vscToken.balanceOf(walletAddress),
+        "release pays fixed sums",
+      ).to.equal(TOTAL_AMOUNT);
+
+      const before = await vscToken.balanceOf(payer.address);
+      await expect(wallet.connect(signers[9]).sweepExcess()) // anyone may trigger it
+        .to.emit(wallet, "ExcessSwept")
+        .withArgs(payer.address, TOTAL_AMOUNT);
+      expect(await vscToken.balanceOf(walletAddress)).to.equal(0n);
+      expect((await vscToken.balanceOf(payer.address)) - before).to.equal(
+        TOTAL_AMOUNT,
+      );
+    });
+
+    it("does not sweep while the escrow is still live", async function () {
+      const W = await ethers.getContractFactory("MultiSigEscrowWallet");
+      const wallet = W.attach(walletAddress);
+      await vscToken.connect(payer).transfer(walletAddress, TOTAL_AMOUNT);
+      await expect(wallet.sweepExcess()).to.be.revertedWithCustomError(
+        wallet,
+        "EscrowStillActive",
+      );
+    });
+
+    it("sweeps to the platform fee wallet when no payer ever identified themselves", async function () {
+      // Marketplace escrow settled purely from direct transfers: payer is
+      // still address(0), where a transfer would revert and strand it.
+      // The fee wallet is the fallback because release already pays it.
+      await factory
+        .connect(investor)
+        .createEscrowWallet(ethers.ZeroAddress, payee.address, PAYMENT_AMOUNT);
+      const W = await ethers.getContractFactory("MultiSigEscrowWallet");
+      const wallet = W.attach(await factory.getWalletAddress(2));
+      await vscToken
+        .connect(payer)
+        .transfer(
+          await wallet.getAddress(),
+          TOTAL_AMOUNT + ethers.parseEther("3"),
+        );
+
+      const data = "shipped";
+      const dataHash = ethers.keccak256(ethers.toUtf8Bytes(data));
+      await wallet
+        .connect(payee)
+        .submitShipmentProof(
+          data,
+          dataHash,
+          await signProof(payee, await wallet.getAddress(), dataHash),
+        );
+      await time.increase(15 * 24 * 60 * 60);
+      await wallet.connect(payee).signAsPayee();
+      await wallet.connect(investor).signAsInvestor(true);
+      expect(await wallet.payerSet()).to.be.false;
+
+      await expect(wallet.sweepExcess())
+        .to.emit(wallet, "ExcessSwept")
+        .withArgs(ownerWallet.address, ethers.parseEther("3"));
+    });
+
+    it("sweeps after a refund too, and only once", async function () {
+      const W = await ethers.getContractFactory("MultiSigEscrowWallet");
+      const wallet = W.attach(walletAddress);
+      await vscToken
+        .connect(payer)
+        .transfer(walletAddress, ethers.parseEther("7"));
+      await vscToken
+        .connect(payer)
+        .approve(await factory.getAddress(), TOTAL_AMOUNT);
+      await factory.connect(payer).fundEscrowWallet(1);
+      await wallet.connect(investor).manualRefund();
+
+      const before = await vscToken.balanceOf(payer.address);
+      await wallet.sweepExcess();
+      expect((await vscToken.balanceOf(payer.address)) - before).to.equal(
+        ethers.parseEther("7"),
+      );
+      await expect(wallet.sweepExcess()).to.be.revertedWithCustomError(
+        wallet,
+        "NothingToSweep",
+      );
+    });
+
+    it("Should only allow payer to fund", async function () {
+      await vscToken
+        .connect(payee)
+        .approve(await factory.getAddress(), TOTAL_AMOUNT);
+      await expect(
+        factory.connect(payee).fundEscrowWallet(1),
+      ).to.be.revertedWith("Only payer can fund");
+    });
+
+    it("Should reject funding from unverified payer", async function () {
+      const unverifiedPayer = signers[12];
+      await vscToken.transfer(unverifiedPayer.address, TOTAL_AMOUNT);
+
+      // Create wallet with unknown payer
+      await factory
+        .connect(investor)
+        .createEscrowWallet(ethers.ZeroAddress, payee.address, PAYMENT_AMOUNT);
+
+      await vscToken
+        .connect(unverifiedPayer)
+        .approve(await factory.getAddress(), TOTAL_AMOUNT);
+      await expect(
+        factory.connect(unverifiedPayer).fundEscrowWallet(2),
+      ).to.be.revertedWith("Payer must have valid KYC/AML (OnchainID)");
+    });
+  });
+
+  describe("Shipment Proof Submission", function () {
+    let wallet;
+    let walletAddress;
+
+    beforeEach(async function () {
+      await factory.registerInvestor(investor.address, investorWallet.address);
+      await factory
+        .connect(investor)
+        .createEscrowWallet(payer.address, payee.address, PAYMENT_AMOUNT);
+      walletAddress = await factory.getWalletAddress(1);
+
+      const MultiSigEscrowWallet = await ethers.getContractFactory(
+        "MultiSigEscrowWallet",
+      );
+      wallet = MultiSigEscrowWallet.attach(walletAddress);
+
+      // Fund the wallet
+      await vscToken
+        .connect(payer)
+        .approve(await factory.getAddress(), TOTAL_AMOUNT);
+      await factory.connect(payer).fundEscrowWallet(1);
+    });
+
+    it("Should submit shipment proof successfully", async function () {
+      const proofData = JSON.stringify({
+        trackingNumber: "1Z999AA10123456784",
+        carrier: "UPS",
+        shipDate: "2024-01-15",
+        photos: ["ipfs://Qm..."],
+      });
+
+      const dataHash = ethers.keccak256(ethers.toUtf8Bytes(proofData));
+      const signature = await signProof(
+        payee,
+        await wallet.getAddress(),
+        dataHash,
+      );
+
+      await wallet
+        .connect(payee)
+        .submitShipmentProof(proofData, dataHash, signature);
+
+      const proof = await wallet.getShipmentProof();
+      expect(proof.exists).to.be.true;
+      expect(proof.data).to.equal(proofData);
+      expect(proof.dataHash).to.equal(dataHash);
+    });
+
+    it("Should only allow payee to submit proof", async function () {
+      const proofData = "test";
+      const dataHash = ethers.keccak256(ethers.toUtf8Bytes(proofData));
+      const signature = "0x00";
+
+      await expect(
+        wallet
+          .connect(payer)
+          .submitShipmentProof(proofData, dataHash, signature),
+      ).to.be.revertedWith("Only payee can submit proof");
+    });
+
+    it("Should verify hash matches data", async function () {
+      const proofData = "test data";
+      const wrongHash = ethers.keccak256(ethers.toUtf8Bytes("wrong data"));
+      const signature = "0x00";
+
+      await expect(
+        wallet
+          .connect(payee)
+          .submitShipmentProof(proofData, wrongHash, signature),
+      ).to.be.revertedWith("Hash mismatch");
+    });
+  });
+
+  describe("Dispute Window", function () {
+    let wallet;
+
+    beforeEach(async function () {
+      await factory.registerInvestor(investor.address, investorWallet.address);
+      await factory
+        .connect(investor)
+        .createEscrowWallet(payer.address, payee.address, PAYMENT_AMOUNT);
+      const walletAddress = await factory.getWalletAddress(1);
+
+      const MultiSigEscrowWallet = await ethers.getContractFactory(
+        "MultiSigEscrowWallet",
+      );
+      wallet = MultiSigEscrowWallet.attach(walletAddress);
+
+      await vscToken
+        .connect(payer)
+        .approve(await factory.getAddress(), TOTAL_AMOUNT);
+      await factory.connect(payer).fundEscrowWallet(1);
+
+      // Submit proof
+      const proofData = "test";
+      const dataHash = ethers.keccak256(ethers.toUtf8Bytes(proofData));
+      const signature = await signProof(
+        payee,
+        await wallet.getAddress(),
+        dataHash,
+      );
+      await wallet
+        .connect(payee)
+        .submitShipmentProof(proofData, dataHash, signature);
+    });
+
+    it("Should allow payer to raise dispute within 14 days", async function () {
+      await wallet.connect(payer).raiseDispute();
+      expect(await wallet.state()).to.equal(3); // Disputed
+    });
+
+    it("Should not allow dispute after 14 days", async function () {
+      await time.increase(15 * 24 * 60 * 60); // 15 days
+
+      await expect(wallet.connect(payer).raiseDispute()).to.be.revertedWith(
+        "Dispute window closed",
+      );
+    });
+
+    it("Should check if dispute window is open", async function () {
+      expect(await wallet.isDisputeWindowOpen()).to.be.true;
+
+      await time.increase(15 * 24 * 60 * 60);
+      expect(await wallet.isDisputeWindowOpen()).to.be.false;
+    });
+  });
+
+  describe("Dispute Resolution", function () {
+    let wallet;
+
+    beforeEach(async function () {
+      await factory.registerInvestor(investor.address, investorWallet.address);
+      await factory
+        .connect(investor)
+        .createEscrowWallet(payer.address, payee.address, PAYMENT_AMOUNT);
+      const walletAddress = await factory.getWalletAddress(1);
+
+      const MultiSigEscrowWallet = await ethers.getContractFactory(
+        "MultiSigEscrowWallet",
+      );
+      wallet = MultiSigEscrowWallet.attach(walletAddress);
+
+      await vscToken
+        .connect(payer)
+        .approve(await factory.getAddress(), TOTAL_AMOUNT);
+      await factory.connect(payer).fundEscrowWallet(1);
+
+      const proofData = "test";
+      const dataHash = ethers.keccak256(ethers.toUtf8Bytes(proofData));
+      const signature = await signProof(
+        payee,
+        await wallet.getAddress(),
+        dataHash,
+      );
+      await wallet
+        .connect(payee)
+        .submitShipmentProof(proofData, dataHash, signature);
+
+      await wallet.connect(payer).raiseDispute();
+    });
+
+    it("Should allow investor to resolve dispute with refund", async function () {
+      const payerBalanceBefore = await vscToken.balanceOf(payer.address);
+
+      await wallet.connect(investor).resolveDispute(true);
+
+      const payerBalanceAfter = await vscToken.balanceOf(payer.address);
+      expect(payerBalanceAfter - payerBalanceBefore).to.equal(TOTAL_AMOUNT);
+      expect(await wallet.state()).to.equal(2); // Refunded
+    });
+
+    it("Should allow investor to resolve dispute without refund", async function () {
+      await wallet.connect(investor).resolveDispute(false);
+      expect(await wallet.state()).to.equal(0); // Active
+    });
+
+    it("Should only allow investor to resolve", async function () {
+      await expect(
+        wallet.connect(payer).resolveDispute(true),
+      ).to.be.revertedWith("Only investor can resolve");
+    });
+  });
+
+  describe("Multi-Signature Release (2-of-3)", function () {
+    let wallet;
+
+    beforeEach(async function () {
+      await factory.registerInvestor(investor.address, investorWallet.address);
+      await factory
+        .connect(investor)
+        .createEscrowWallet(payer.address, payee.address, PAYMENT_AMOUNT);
+      const walletAddress = await factory.getWalletAddress(1);
+
+      const MultiSigEscrowWallet = await ethers.getContractFactory(
+        "MultiSigEscrowWallet",
+      );
+      wallet = MultiSigEscrowWallet.attach(walletAddress);
+
+      await vscToken
+        .connect(payer)
+        .approve(await factory.getAddress(), TOTAL_AMOUNT);
+      await factory.connect(payer).fundEscrowWallet(1);
+
+      const proofData = "test";
+      const dataHash = ethers.keccak256(ethers.toUtf8Bytes(proofData));
+      const signature = await signProof(
+        payee,
+        await wallet.getAddress(),
+        dataHash,
+      );
+      await wallet
+        .connect(payee)
+        .submitShipmentProof(proofData, dataHash, signature);
+
+      // Wait 14 days
+      await time.increase(15 * 24 * 60 * 60);
+    });
+
+    it("Should allow payer to sign (for refund path)", async function () {
+      await wallet.connect(payer).signAsPayer();
+      expect(await wallet.payerSigned()).to.be.true;
+    });
+
+    it("Should allow payee to sign after dispute window", async function () {
+      await wallet.connect(payee).signAsPayee();
+      expect(await wallet.payeeSigned()).to.be.true;
+    });
+
+    it("Should allow investor to sign", async function () {
+      await wallet.connect(payee).signAsPayee();
+      await wallet.connect(investor).signAsInvestor(true);
+      expect(await wallet.investorSigned()).to.be.true;
+    });
+
+    it("Should not allow payee signing during dispute window", async function () {
+      // Create new wallet
+      await factory
+        .connect(investor)
+        .createEscrowWallet(payer.address, payee.address, PAYMENT_AMOUNT);
+      const walletAddress2 = await factory.getWalletAddress(2);
+      const MultiSigEscrowWallet = await ethers.getContractFactory(
+        "MultiSigEscrowWallet",
+      );
+      const wallet2 = MultiSigEscrowWallet.attach(walletAddress2);
+
+      await vscToken
+        .connect(payer)
+        .approve(await factory.getAddress(), TOTAL_AMOUNT);
+      await factory.connect(payer).fundEscrowWallet(2);
+
+      const proofData = "test";
+      const dataHash = ethers.keccak256(ethers.toUtf8Bytes(proofData));
+      const signature = await signProof(
+        payee,
+        await wallet2.getAddress(),
+        dataHash,
+      );
+      await wallet2
+        .connect(payee)
+        .submitShipmentProof(proofData, dataHash, signature);
+
+      await expect(wallet2.connect(payee).signAsPayee()).to.be.revertedWith(
+        "Dispute window still open",
+      );
+    });
+
+    it("Should auto-release to payee when investor + payee sign", async function () {
+      const payeeBalanceBefore = await vscToken.balanceOf(payee.address);
+      const investorBalanceBefore = await vscToken.balanceOf(
+        investorWallet.address,
+      );
+      const ownerBalanceBefore = await vscToken.balanceOf(ownerWallet.address);
+
+      await wallet.connect(payee).signAsPayee();
+      await wallet.connect(investor).signAsInvestor(true);
+
+      const payeeBalanceAfter = await vscToken.balanceOf(payee.address);
+      const investorBalanceAfter = await vscToken.balanceOf(
+        investorWallet.address,
+      );
+      const ownerBalanceAfter = await vscToken.balanceOf(ownerWallet.address);
+
+      expect(payeeBalanceAfter - payeeBalanceBefore).to.equal(PAYMENT_AMOUNT);
+      expect(investorBalanceAfter - investorBalanceBefore).to.equal(
+        INVESTOR_FEE,
+      );
+      expect(ownerBalanceAfter - ownerBalanceBefore).to.equal(OWNER_FEE);
+      expect(await wallet.state()).to.equal(1); // Released
+    });
+
+    it("Should auto-refund to payer when investor + payer sign", async function () {
+      const payerBalanceBefore = await vscToken.balanceOf(payer.address);
+
+      await wallet.connect(payer).signAsPayer();
+      await wallet.connect(investor).signAsInvestor(false);
+
+      const payerBalanceAfter = await vscToken.balanceOf(payer.address);
+      expect(payerBalanceAfter - payerBalanceBefore).to.equal(TOTAL_AMOUNT);
+      expect(await wallet.state()).to.equal(2); // Refunded
+    });
+
+    it("Should prioritize payee release if investor signs after payee", async function () {
+      const payeeBalanceBefore = await vscToken.balanceOf(payee.address);
+
+      await wallet.connect(payee).signAsPayee();
+      await wallet.connect(investor).signAsInvestor(true);
+
+      const payeeBalanceAfter = await vscToken.balanceOf(payee.address);
+      expect(payeeBalanceAfter - payeeBalanceBefore).to.equal(PAYMENT_AMOUNT);
+      expect(await wallet.state()).to.equal(1); // Released
+    });
+
+    it("Should refund if investor signs after payer", async function () {
+      const payerBalanceBefore = await vscToken.balanceOf(payer.address);
+
+      await wallet.connect(payer).signAsPayer();
+      await wallet.connect(investor).signAsInvestor(false);
+
+      const payerBalanceAfter = await vscToken.balanceOf(payer.address);
+      expect(payerBalanceAfter - payerBalanceBefore).to.equal(TOTAL_AMOUNT);
+      expect(await wallet.state()).to.equal(2); // Refunded
+    });
+
+    it("Should check if ready for signatures", async function () {
+      expect(await wallet.isReadyForSignatures()).to.be.true;
+    });
+  });
+
+  describe("Shipment proof signature is verified on-chain", function () {
+    // The proof used to be accepted on `signature.length > 0` alone: no
+    // ecrecover, and nothing binding it to this wallet or chain. A payee
+    // could release funds on a fabricated proof, and a real signature was
+    // replayable across escrows because it was scoped to nothing.
+    let wallet, walletAddr, chainId;
+    const DATA = "shipped";
+
+    // The signed payload binds the escrow, the chain and the content.
+    async function proofSignature(signer, addr, id, dataHash) {
+      const digest = ethers.keccak256(
+        ethers.AbiCoder.defaultAbiCoder().encode(
+          ["string", "address", "uint256", "bytes32"],
+          ["VanguardShipmentProof", addr, id, dataHash],
+        ),
+      );
+      return signer.signMessage(ethers.getBytes(digest));
     }
 
     beforeEach(async function () {
-        signers = await ethers.getSigners();
-        [owner, investor, payer, payee, investorWallet, ownerWallet] = signers;
+      await factory.registerInvestor(investor.address, investorWallet.address);
+      await factory
+        .connect(investor)
+        .createEscrowWallet(payer.address, payee.address, PAYMENT_AMOUNT);
+      walletAddr = await factory.getWalletAddress(1);
+      const F = await ethers.getContractFactory("MultiSigEscrowWallet");
+      wallet = F.attach(walletAddr);
+      await vscToken
+        .connect(payer)
+        .approve(await factory.getAddress(), TOTAL_AMOUNT);
+      await factory.connect(payer).fundEscrowWallet(1);
+      chainId = (await ethers.provider.getNetwork()).chainId;
+    });
 
-        // Deploy mock VSC token
-        const MockToken = await ethers.getContractFactory("MockToken");
-        vscToken = await MockToken.deploy("VanguardStableCoin", "VSC", INITIAL_SUPPLY);
-        await vscToken.waitForDeployment();
+    it("accepts a correctly scoped signature from the payee", async function () {
+      const dh = ethers.keccak256(ethers.toUtf8Bytes(DATA));
+      const sig = await proofSignature(payee, walletAddr, chainId, dh);
+      await expect(wallet.connect(payee).submitShipmentProof(DATA, dh, sig)).to
+        .not.be.reverted;
+      expect((await wallet.shipmentProof()).exists).to.be.true;
+    });
 
-        // Deploy IdentityRegistry for KYC/AML compliance
-        const IdentityRegistry = await ethers.getContractFactory("IdentityRegistry");
-        identityRegistry = await IdentityRegistry.deploy();
-        await identityRegistry.waitForDeployment();
+    it("rejects a fabricated signature", async function () {
+      const dh = ethers.keccak256(ethers.toUtf8Bytes(DATA));
+      const junk = "0x" + "11".repeat(65);
+      await expect(wallet.connect(payee).submitShipmentProof(DATA, dh, junk)).to
+        .be.reverted;
+    });
 
-        // Deploy ComplianceRules
-        const ComplianceRules = await ethers.getContractFactory("ComplianceRules");
-        complianceRules = await ComplianceRules.deploy(
-            owner.address,
-            [840, 826, 756], // Allowed countries: USA, UK, Switzerland
-            [] // No blocked countries
+    it("rejects a signature from someone other than the payee", async function () {
+      const dh = ethers.keccak256(ethers.toUtf8Bytes(DATA));
+      const sig = await proofSignature(payer, walletAddr, chainId, dh);
+      await expect(
+        wallet.connect(payee).submitShipmentProof(DATA, dh, sig),
+      ).to.be.revertedWithCustomError(wallet, "ProofNotSignedByPayee");
+    });
+
+    it("rejects a signature replayed from a different escrow wallet", async function () {
+      await factory
+        .connect(investor)
+        .createEscrowWallet(payer.address, payee.address, PAYMENT_AMOUNT);
+      const otherAddr = await factory.getWalletAddress(2);
+      const dh = ethers.keccak256(ethers.toUtf8Bytes(DATA));
+      // Genuine payee signature, but scoped to the OTHER wallet.
+      const sig = await proofSignature(payee, otherAddr, chainId, dh);
+      await expect(
+        wallet.connect(payee).submitShipmentProof(DATA, dh, sig),
+      ).to.be.revertedWithCustomError(wallet, "ProofNotSignedByPayee");
+    });
+
+    it("rejects a signature scoped to a different chain", async function () {
+      const dh = ethers.keccak256(ethers.toUtf8Bytes(DATA));
+      const sig = await proofSignature(payee, walletAddr, 999999n, dh);
+      await expect(
+        wallet.connect(payee).submitShipmentProof(DATA, dh, sig),
+      ).to.be.revertedWithCustomError(wallet, "ProofNotSignedByPayee");
+    });
+  });
+
+  describe("Investor intent is explicit (misdirection regression)", function () {
+    // The investor used to express no intent: signAsInvestor() inferred the
+    // direction from whoever signed first. A payer could pre-sign silently,
+    // and the investor's release then refunded the payer instead of paying
+    // the payee who had shipped. Direction is now an explicit argument.
+    let wallet;
+
+    beforeEach(async function () {
+      await factory.registerInvestor(investor.address, investorWallet.address);
+      await factory
+        .connect(investor)
+        .createEscrowWallet(payer.address, payee.address, PAYMENT_AMOUNT);
+      const MultiSigEscrowWallet = await ethers.getContractFactory(
+        "MultiSigEscrowWallet",
+      );
+      wallet = MultiSigEscrowWallet.attach(await factory.getWalletAddress(1));
+
+      await vscToken
+        .connect(payer)
+        .approve(await factory.getAddress(), TOTAL_AMOUNT);
+      await factory.connect(payer).fundEscrowWallet(1);
+
+      const proofData = "shipped";
+      const dataHash = ethers.keccak256(ethers.toUtf8Bytes(proofData));
+      const signature = await signProof(
+        payee,
+        await wallet.getAddress(),
+        dataHash,
+      );
+      await wallet
+        .connect(payee)
+        .submitShipmentProof(proofData, dataHash, signature);
+      await time.increase(15 * 24 * 60 * 60);
+    });
+
+    it("a pre-signing payer cannot divert the investor's release", async function () {
+      // The attack: payer signs first, quietly. The investor then signs
+      // intending to pay the payee.
+      await wallet.connect(payer).signAsPayer();
+
+      const payeeBefore = await vscToken.balanceOf(payee.address);
+      const payerBefore = await vscToken.balanceOf(payer.address);
+
+      await wallet.connect(payee).signAsPayee();
+      await wallet.connect(investor).signAsInvestor(true); // true = release to payee
+
+      expect((await vscToken.balanceOf(payee.address)) - payeeBefore).to.equal(
+        PAYMENT_AMOUNT,
+      );
+      expect((await vscToken.balanceOf(payer.address)) - payerBefore).to.equal(
+        0n,
+      );
+      expect(await wallet.state()).to.equal(1); // Released
+    });
+
+    it("releasing to the payee requires the payee's signature", async function () {
+      await expect(
+        wallet.connect(investor).signAsInvestor(true),
+      ).to.be.revertedWithCustomError(wallet, "PayeeHasNotSigned");
+    });
+
+    it("refunding the payer requires the payer's signature", async function () {
+      await expect(
+        wallet.connect(investor).signAsInvestor(false),
+      ).to.be.revertedWithCustomError(wallet, "PayerHasNotSigned");
+    });
+
+    it("an explicit refund still works when the payer has signed", async function () {
+      await wallet.connect(payer).signAsPayer();
+      const payerBefore = await vscToken.balanceOf(payer.address);
+      await wallet.connect(investor).signAsInvestor(false);
+      expect((await vscToken.balanceOf(payer.address)) - payerBefore).to.equal(
+        TOTAL_AMOUNT,
+      );
+      expect(await wallet.state()).to.equal(2); // Refunded
+    });
+
+    it("resolving a dispute for the payee clears the payer's stale signature", async function () {
+      // Needs its own wallet: the shared setup has already advanced past
+      // the dispute window, and raiseDispute requires it to still be open.
+      await factory
+        .connect(investor)
+        .createEscrowWallet(payer.address, payee.address, PAYMENT_AMOUNT);
+      const MultiSigEscrowWallet = await ethers.getContractFactory(
+        "MultiSigEscrowWallet",
+      );
+      const w2 = MultiSigEscrowWallet.attach(await factory.getWalletAddress(2));
+      await vscToken
+        .connect(payer)
+        .approve(await factory.getAddress(), TOTAL_AMOUNT);
+      await factory.connect(payer).fundEscrowWallet(2);
+      const d = "shipped";
+      const dh = ethers.keccak256(ethers.toUtf8Bytes(d));
+      await w2
+        .connect(payee)
+        .submitShipmentProof(
+          d,
+          dh,
+          await signProof(payee, await w2.getAddress(), dh),
         );
-        await complianceRules.waitForDeployment();
 
-        // Deploy OnchainID for payer and payee
-        const OnchainID = await ethers.getContractFactory("OnchainID");
-        payerIdentity = await OnchainID.deploy(payer.address);
-        await payerIdentity.waitForDeployment();
+      await w2.connect(payer).signAsPayer();
+      await w2.connect(payer).raiseDispute();
+      await w2.connect(investor).resolveDispute(false); // payee deserves payment
 
-        payeeIdentity = await OnchainID.deploy(payee.address);
-        await payeeIdentity.waitForDeployment();
+      expect(await w2.payerSigned()).to.be.false;
+      await expect(
+        w2.connect(investor).signAsInvestor(false),
+      ).to.be.revertedWithCustomError(w2, "PayerHasNotSigned");
+    });
+  });
 
-        // Register payer and payee in IdentityRegistry (KYC/AML verified)
-        await identityRegistry.registerIdentity(
-            payer.address,
-            await payerIdentity.getAddress(),
-            840 // USA country code
-        );
+  describe("Manual Refund", function () {
+    let wallet;
 
-        await identityRegistry.registerIdentity(
-            payee.address,
-            await payeeIdentity.getAddress(),
-            840 // USA country code
-        );
+    beforeEach(async function () {
+      await factory.registerInvestor(investor.address, investorWallet.address);
+      await factory
+        .connect(investor)
+        .createEscrowWallet(payer.address, payee.address, PAYMENT_AMOUNT);
+      const walletAddress = await factory.getWalletAddress(1);
 
-        // Deploy EscrowWalletFactory with IdentityRegistry and ComplianceRules
-        const EscrowWalletFactory = await ethers.getContractFactory("EscrowWalletFactory");
-        factory = await EscrowWalletFactory.deploy(
-            await vscToken.getAddress(),
-            ownerWallet.address,
-            await identityRegistry.getAddress(),
-            await complianceRules.getAddress()
-        );
-        await factory.waitForDeployment();
+      const MultiSigEscrowWallet = await ethers.getContractFactory(
+        "MultiSigEscrowWallet",
+      );
+      wallet = MultiSigEscrowWallet.attach(walletAddress);
 
-        // Transfer tokens to payer
-        await vscToken.transfer(payer.address, ethers.parseEther("10000"));
+      await vscToken
+        .connect(payer)
+        .approve(await factory.getAddress(), TOTAL_AMOUNT);
+      await factory.connect(payer).fundEscrowWallet(1);
     });
 
-    describe("Deployment", function () {
-        it("Should deploy factory with correct parameters", async function () {
-            expect(await factory.vscToken()).to.equal(await vscToken.getAddress());
-            expect(await factory.owner()).to.equal(owner.address);
-            expect(await factory.ownerWallet()).to.equal(ownerWallet.address);
-        });
+    it("Should allow investor to manually refund", async function () {
+      const payerBalanceBefore = await vscToken.balanceOf(payer.address);
 
-        it("Should have correct fee rates", async function () {
-            expect(await factory.INVESTOR_FEE_RATE()).to.equal(300); // 3%
-            expect(await factory.OWNER_FEE_RATE()).to.equal(200); // 2%
-            expect(await factory.TOTAL_FEE_RATE()).to.equal(500); // 5%
-        });
+      await wallet.connect(investor).manualRefund();
+
+      const payerBalanceAfter = await vscToken.balanceOf(payer.address);
+      expect(payerBalanceAfter - payerBalanceBefore).to.equal(TOTAL_AMOUNT);
+      expect(await wallet.state()).to.equal(2); // Refunded
     });
 
-    describe("Investor Registration", function () {
-        it("Should register investor successfully", async function () {
-            await factory.registerInvestor(investor.address, investorWallet.address);
+    it("Should only allow investor to manually refund", async function () {
+      await expect(wallet.connect(payer).manualRefund()).to.be.revertedWith(
+        "Only investor can refund",
+      );
+    });
+  });
 
-            const profile = await factory.getInvestorProfile(investor.address);
-            expect(profile.investorAddress).to.equal(investor.address);
-            expect(profile.walletAddress).to.equal(investorWallet.address);
-            expect(profile.isActive).to.be.true;
-            expect(profile.totalEscrowsCreated).to.equal(0);
-        });
-
-        it("Should check if address is investor", async function () {
-            await factory.registerInvestor(investor.address, investorWallet.address);
-            expect(await factory.isInvestor(investor.address)).to.be.true;
-            expect(await factory.isInvestor(payer.address)).to.be.false;
-        });
-
-        it("Should not allow duplicate registration", async function () {
-            await factory.registerInvestor(investor.address, investorWallet.address);
-            await expect(
-                factory.registerInvestor(investor.address, investorWallet.address)
-            ).to.be.revertedWith("Already registered");
-        });
-
-        it("Should deactivate investor", async function () {
-            await factory.registerInvestor(investor.address, investorWallet.address);
-            await factory.deactivateInvestor(investor.address);
-
-            expect(await factory.isInvestor(investor.address)).to.be.false;
-        });
+  describe("Investor cannot be a counterparty (self-dealing)", function () {
+    beforeEach(async function () {
+      await factory.registerInvestor(investor.address, investorWallet.address);
     });
 
-    describe("Escrow Wallet Creation", function () {
-        beforeEach(async function () {
-            await factory.registerInvestor(investor.address, investorWallet.address);
-        });
-
-        it("Should create escrow wallet successfully", async function () {
-            const tx = await factory.connect(investor).createEscrowWallet(
-                payer.address,
-                payee.address,
-                PAYMENT_AMOUNT
-            );
-
-            const receipt = await tx.wait();
-            const event = receipt.logs.find(log => {
-                try {
-                    return factory.interface.parseLog(log).name === 'EscrowWalletCreated';
-                } catch (e) {
-                    return false;
-                }
-            });
-
-            expect(event).to.not.be.undefined;
-        });
-
-        it("Should assign unique payment ID", async function () {
-            await factory.connect(investor).createEscrowWallet(
-                payer.address,
-                payee.address,
-                PAYMENT_AMOUNT
-            );
-
-            const walletAddress = await factory.getWalletAddress(1);
-            expect(walletAddress).to.not.equal(ethers.ZeroAddress);
-        });
-
-        it("Should deploy wallet with correct parameters", async function () {
-            await factory.connect(investor).createEscrowWallet(
-                payer.address,
-                payee.address,
-                PAYMENT_AMOUNT
-            );
-
-            const walletAddress = await factory.getWalletAddress(1);
-            const MultiSigEscrowWallet = await ethers.getContractFactory("MultiSigEscrowWallet");
-            const wallet = MultiSigEscrowWallet.attach(walletAddress);
-
-            expect(await wallet.paymentId()).to.equal(1);
-            expect(await wallet.payer()).to.equal(payer.address);
-            expect(await wallet.payee()).to.equal(payee.address);
-            expect(await wallet.investor()).to.equal(investor.address);
-            expect(await wallet.amount()).to.equal(PAYMENT_AMOUNT);
-            expect(await wallet.investorFee()).to.equal(INVESTOR_FEE);
-            expect(await wallet.ownerFee()).to.equal(OWNER_FEE);
-        });
-
-        it("Should only allow registered investors to create wallets", async function () {
-            await expect(
-                factory.connect(payer).createEscrowWallet(
-                    payer.address,
-                    payee.address,
-                    PAYMENT_AMOUNT
-                )
-            ).to.be.reverted;
-        });
-
-        it("Should update investor statistics", async function () {
-            await factory.connect(investor).createEscrowWallet(
-                payer.address,
-                payee.address,
-                PAYMENT_AMOUNT
-            );
-
-            const profile = await factory.getInvestorProfile(investor.address);
-            expect(profile.totalEscrowsCreated).to.equal(1);
-        });
-
-        it("Should reject payee without KYC/AML", async function () {
-            const unverifiedPayee = signers[10];
-
-            await expect(
-                factory.connect(investor).createEscrowWallet(
-                    payer.address,
-                    unverifiedPayee.address,
-                    PAYMENT_AMOUNT
-                )
-            ).to.be.revertedWith("Payee must have valid KYC/AML (OnchainID)");
-        });
-
-        it("Should reject payer without KYC/AML (known payer)", async function () {
-            const unverifiedPayer = signers[11];
-
-            await expect(
-                factory.connect(investor).createEscrowWallet(
-                    unverifiedPayer.address,
-                    payee.address,
-                    PAYMENT_AMOUNT
-                )
-            ).to.be.revertedWith("Payer must have valid KYC/AML (OnchainID)");
-        });
-
-        it("Should allow unknown payer (address(0)) for marketplace", async function () {
-            const tx = await factory.connect(investor).createEscrowWallet(
-                ethers.ZeroAddress,
-                payee.address,
-                PAYMENT_AMOUNT
-            );
-
-            const receipt = await tx.wait();
-            const event = receipt.logs.find(log => {
-                try {
-                    return factory.interface.parseLog(log).name === 'EscrowWalletCreated';
-                } catch (e) {
-                    return false;
-                }
-            });
-
-            expect(event).to.not.be.undefined;
-        });
+    it("rejects creating an escrow where the investor is the payee", async function () {
+      await expect(
+        factory
+          .connect(investor)
+          .createEscrowWallet(payer.address, investor.address, PAYMENT_AMOUNT),
+      ).to.be.revertedWithCustomError(factory, "InvestorCannotBePayee");
     });
 
-    describe("Funding Escrow Wallet", function () {
-        let walletAddress;
-
-        beforeEach(async function () {
-            await factory.registerInvestor(investor.address, investorWallet.address);
-            await factory.connect(investor).createEscrowWallet(
-                payer.address,
-                payee.address,
-                PAYMENT_AMOUNT
-            );
-            walletAddress = await factory.getWalletAddress(1);
-        });
-
-        it("Should fund escrow wallet successfully", async function () {
-            await vscToken.connect(payer).approve(await factory.getAddress(), TOTAL_AMOUNT);
-            await factory.connect(payer).fundEscrowWallet(1);
-
-            const balance = await vscToken.balanceOf(walletAddress);
-            expect(balance).to.equal(TOTAL_AMOUNT);
-        });
-
-        // Funding used to be gated only on `state == Active`, which is true
-        // both before AND after funding. A second call therefore went through
-        // and the extra tokens were stranded: release and refund pay fixed
-        // sums (amount and fees are immutable) and there is no sweep.
-        it("rejects a second funding of the same escrow", async function () {
-            await vscToken.connect(payer).approve(await factory.getAddress(), TOTAL_AMOUNT * 3n);
-            await factory.connect(payer).fundEscrowWallet(1);
-            const W = await ethers.getContractFactory("MultiSigEscrowWallet");
-            expect(await W.attach(walletAddress).funded()).to.be.true;
-
-            await expect(
-                factory.connect(payer).fundEscrowWallet(1)
-            ).to.be.revertedWithCustomError(factory, "EscrowAlreadyFunded");
-
-            expect(await vscToken.balanceOf(walletAddress)).to.equal(TOTAL_AMOUNT);
-        });
-
-        it("leaves no stranded balance after release", async function () {
-            await vscToken.connect(payer).approve(await factory.getAddress(), TOTAL_AMOUNT * 3n);
-            await factory.connect(payer).fundEscrowWallet(1);
-            try { await factory.connect(payer).fundEscrowWallet(1); } catch (e) { /* must revert */ }
-
-            const W = await ethers.getContractFactory("MultiSigEscrowWallet");
-            const wallet = W.attach(walletAddress);
-            const data = "shipped";
-            const dataHash = ethers.keccak256(ethers.toUtf8Bytes(data));
-            await wallet.connect(payee).submitShipmentProof(
-                data, dataHash, await signProof(payee, walletAddress, dataHash)
-            );
-            await time.increase(15 * 24 * 60 * 60);
-            await wallet.connect(payee).signAsPayee();
-            await wallet.connect(investor).signAsInvestor(true);
-
-            expect(await vscToken.balanceOf(walletAddress)).to.equal(0n);
-        });
-
-        it("markFunded is callable only by the factory", async function () {
-            const W = await ethers.getContractFactory("MultiSigEscrowWallet");
-            const wallet = W.attach(walletAddress);
-            await expect(wallet.connect(payer).markFunded())
-                .to.be.revertedWithCustomError(wallet, "OnlyFactory");
-        });
-
-        // Found reviewing PR #4: `funded` stops a second FACTORY funding, but
-        // any verified holder can transfer straight to the escrow. Release and
-        // refund pay fixed sums, so whatever else arrived sat there forever.
-        it("returns tokens sent directly to the escrow to the payer once settled", async function () {
-            const W = await ethers.getContractFactory("MultiSigEscrowWallet");
-            const wallet = W.attach(walletAddress);
-            await vscToken.connect(payer).transfer(walletAddress, TOTAL_AMOUNT); // direct, not via factory
-            await vscToken.connect(payer).approve(await factory.getAddress(), TOTAL_AMOUNT);
-            await factory.connect(payer).fundEscrowWallet(1);
-            expect(await vscToken.balanceOf(walletAddress)).to.equal(TOTAL_AMOUNT * 2n);
-
-            const data = "shipped";
-            const dataHash = ethers.keccak256(ethers.toUtf8Bytes(data));
-            await wallet.connect(payee).submitShipmentProof(
-                data, dataHash, await signProof(payee, walletAddress, dataHash)
-            );
-            await time.increase(15 * 24 * 60 * 60);
-            await wallet.connect(payee).signAsPayee();
-            await wallet.connect(investor).signAsInvestor(true);
-            expect(await vscToken.balanceOf(walletAddress), "release pays fixed sums").to.equal(TOTAL_AMOUNT);
-
-            const before = await vscToken.balanceOf(payer.address);
-            await expect(wallet.connect(signers[9]).sweepExcess()) // anyone may trigger it
-                .to.emit(wallet, "ExcessSwept").withArgs(payer.address, TOTAL_AMOUNT);
-            expect(await vscToken.balanceOf(walletAddress)).to.equal(0n);
-            expect(await vscToken.balanceOf(payer.address) - before).to.equal(TOTAL_AMOUNT);
-        });
-
-        it("does not sweep while the escrow is still live", async function () {
-            const W = await ethers.getContractFactory("MultiSigEscrowWallet");
-            const wallet = W.attach(walletAddress);
-            await vscToken.connect(payer).transfer(walletAddress, TOTAL_AMOUNT);
-            await expect(wallet.sweepExcess()).to.be.revertedWithCustomError(wallet, "EscrowStillActive");
-        });
-
-        it("sweeps to the platform fee wallet when no payer ever identified themselves", async function () {
-            // Marketplace escrow settled purely from direct transfers: payer is
-            // still address(0), where a transfer would revert and strand it.
-            // The fee wallet is the fallback because release already pays it.
-            await factory.connect(investor).createEscrowWallet(ethers.ZeroAddress, payee.address, PAYMENT_AMOUNT);
-            const W = await ethers.getContractFactory("MultiSigEscrowWallet");
-            const wallet = W.attach(await factory.getWalletAddress(2));
-            await vscToken.connect(payer).transfer(await wallet.getAddress(), TOTAL_AMOUNT + ethers.parseEther("3"));
-
-            const data = "shipped";
-            const dataHash = ethers.keccak256(ethers.toUtf8Bytes(data));
-            await wallet.connect(payee).submitShipmentProof(
-                data, dataHash, await signProof(payee, await wallet.getAddress(), dataHash)
-            );
-            await time.increase(15 * 24 * 60 * 60);
-            await wallet.connect(payee).signAsPayee();
-            await wallet.connect(investor).signAsInvestor(true);
-            expect(await wallet.payerSet()).to.be.false;
-
-            await expect(wallet.sweepExcess())
-                .to.emit(wallet, "ExcessSwept").withArgs(ownerWallet.address, ethers.parseEther("3"));
-        });
-
-        it("sweeps after a refund too, and only once", async function () {
-            const W = await ethers.getContractFactory("MultiSigEscrowWallet");
-            const wallet = W.attach(walletAddress);
-            await vscToken.connect(payer).transfer(walletAddress, ethers.parseEther("7"));
-            await vscToken.connect(payer).approve(await factory.getAddress(), TOTAL_AMOUNT);
-            await factory.connect(payer).fundEscrowWallet(1);
-            await wallet.connect(investor).manualRefund();
-
-            const before = await vscToken.balanceOf(payer.address);
-            await wallet.sweepExcess();
-            expect(await vscToken.balanceOf(payer.address) - before).to.equal(ethers.parseEther("7"));
-            await expect(wallet.sweepExcess()).to.be.revertedWithCustomError(wallet, "NothingToSweep");
-        });
-
-        it("Should only allow payer to fund", async function () {
-            await vscToken.connect(payee).approve(await factory.getAddress(), TOTAL_AMOUNT);
-            await expect(
-                factory.connect(payee).fundEscrowWallet(1)
-            ).to.be.revertedWith("Only payer can fund");
-        });
-
-        it("Should reject funding from unverified payer", async function () {
-            const unverifiedPayer = signers[12];
-            await vscToken.transfer(unverifiedPayer.address, TOTAL_AMOUNT);
-
-            // Create wallet with unknown payer
-            await factory.connect(investor).createEscrowWallet(
-                ethers.ZeroAddress,
-                payee.address,
-                PAYMENT_AMOUNT
-            );
-
-            await vscToken.connect(unverifiedPayer).approve(await factory.getAddress(), TOTAL_AMOUNT);
-            await expect(
-                factory.connect(unverifiedPayer).fundEscrowWallet(2)
-            ).to.be.revertedWith("Payer must have valid KYC/AML (OnchainID)");
-        });
+    it("rejects creating an escrow where the investor is the payer", async function () {
+      await expect(
+        factory
+          .connect(investor)
+          .createEscrowWallet(investor.address, payee.address, PAYMENT_AMOUNT),
+      ).to.be.revertedWithCustomError(factory, "InvestorCannotBePayer");
     });
 
-    describe("Shipment Proof Submission", function () {
-        let wallet;
-        let walletAddress;
-
-        beforeEach(async function () {
-            await factory.registerInvestor(investor.address, investorWallet.address);
-            await factory.connect(investor).createEscrowWallet(
-                payer.address,
-                payee.address,
-                PAYMENT_AMOUNT
-            );
-            walletAddress = await factory.getWalletAddress(1);
-
-            const MultiSigEscrowWallet = await ethers.getContractFactory("MultiSigEscrowWallet");
-            wallet = MultiSigEscrowWallet.attach(walletAddress);
-
-            // Fund the wallet
-            await vscToken.connect(payer).approve(await factory.getAddress(), TOTAL_AMOUNT);
-            await factory.connect(payer).fundEscrowWallet(1);
-        });
-
-        it("Should submit shipment proof successfully", async function () {
-            const proofData = JSON.stringify({
-                trackingNumber: "1Z999AA10123456784",
-                carrier: "UPS",
-                shipDate: "2024-01-15",
-                photos: ["ipfs://Qm..."]
-            });
-
-            const dataHash = ethers.keccak256(ethers.toUtf8Bytes(proofData));
-            const signature = await signProof(payee, await wallet.getAddress(), dataHash);
-
-            await wallet.connect(payee).submitShipmentProof(proofData, dataHash, signature);
-
-            const proof = await wallet.getShipmentProof();
-            expect(proof.exists).to.be.true;
-            expect(proof.data).to.equal(proofData);
-            expect(proof.dataHash).to.equal(dataHash);
-        });
-
-        it("Should only allow payee to submit proof", async function () {
-            const proofData = "test";
-            const dataHash = ethers.keccak256(ethers.toUtf8Bytes(proofData));
-            const signature = "0x00";
-
-            await expect(
-                wallet.connect(payer).submitShipmentProof(proofData, dataHash, signature)
-            ).to.be.revertedWith("Only payee can submit proof");
-        });
-
-        it("Should verify hash matches data", async function () {
-            const proofData = "test data";
-            const wrongHash = ethers.keccak256(ethers.toUtf8Bytes("wrong data"));
-            const signature = "0x00";
-
-            await expect(
-                wallet.connect(payee).submitShipmentProof(proofData, wrongHash, signature)
-            ).to.be.revertedWith("Hash mismatch");
-        });
+    it("still allows a normal three-party escrow", async function () {
+      await expect(
+        factory
+          .connect(investor)
+          .createEscrowWallet(payer.address, payee.address, PAYMENT_AMOUNT),
+      ).to.not.be.reverted;
     });
 
-    describe("Dispute Window", function () {
-        let wallet;
-
-        beforeEach(async function () {
-            await factory.registerInvestor(investor.address, investorWallet.address);
-            await factory.connect(investor).createEscrowWallet(
-                payer.address,
-                payee.address,
-                PAYMENT_AMOUNT
-            );
-            const walletAddress = await factory.getWalletAddress(1);
-
-            const MultiSigEscrowWallet = await ethers.getContractFactory("MultiSigEscrowWallet");
-            wallet = MultiSigEscrowWallet.attach(walletAddress);
-
-            await vscToken.connect(payer).approve(await factory.getAddress(), TOTAL_AMOUNT);
-            await factory.connect(payer).fundEscrowWallet(1);
-
-            // Submit proof
-            const proofData = "test";
-            const dataHash = ethers.keccak256(ethers.toUtf8Bytes(proofData));
-            const signature = await signProof(payee, await wallet.getAddress(), dataHash);
-            await wallet.connect(payee).submitShipmentProof(proofData, dataHash, signature);
-        });
-
-        it("Should allow payer to raise dispute within 14 days", async function () {
-            await wallet.connect(payer).raiseDispute();
-            expect(await wallet.state()).to.equal(3); // Disputed
-        });
-
-        it("Should not allow dispute after 14 days", async function () {
-            await time.increase(15 * 24 * 60 * 60); // 15 days
-
-            await expect(
-                wallet.connect(payer).raiseDispute()
-            ).to.be.revertedWith("Dispute window closed");
-        });
-
-        it("Should check if dispute window is open", async function () {
-            expect(await wallet.isDisputeWindowOpen()).to.be.true;
-
-            await time.increase(15 * 24 * 60 * 60);
-            expect(await wallet.isDisputeWindowOpen()).to.be.false;
-        });
+    // Qodo/Augment on PR #7: a marketplace escrow (payer unknown) skipped
+    // the constructor check, and setPayer accepted the investor.
+    it("marketplace: the investor cannot fund an unknown-payer escrow (would become payer)", async function () {
+      await factory
+        .connect(investor)
+        .createEscrowWallet(ethers.ZeroAddress, payee.address, PAYMENT_AMOUNT);
+      const wallet = (
+        await ethers.getContractFactory("MultiSigEscrowWallet")
+      ).attach(await factory.getWalletAddress(1));
+      const investorId = await (
+        await ethers.getContractFactory("OnchainID")
+      ).deploy(investor.address);
+      await identityRegistry.registerIdentity(
+        investor.address,
+        await investorId.getAddress(),
+        840,
+      );
+      await vscToken.transfer(investor.address, TOTAL_AMOUNT);
+      await vscToken
+        .connect(investor)
+        .approve(await factory.getAddress(), TOTAL_AMOUNT);
+      await expect(
+        factory.connect(investor).fundEscrowWallet(1),
+      ).to.be.revertedWithCustomError(wallet, "InvestorCannotBePayer");
+      expect(await wallet.payerSet()).to.equal(false);
     });
 
-    describe("Dispute Resolution", function () {
-        let wallet;
-
-        beforeEach(async function () {
-            await factory.registerInvestor(investor.address, investorWallet.address);
-            await factory.connect(investor).createEscrowWallet(
-                payer.address,
-                payee.address,
-                PAYMENT_AMOUNT
-            );
-            const walletAddress = await factory.getWalletAddress(1);
-
-            const MultiSigEscrowWallet = await ethers.getContractFactory("MultiSigEscrowWallet");
-            wallet = MultiSigEscrowWallet.attach(walletAddress);
-
-            await vscToken.connect(payer).approve(await factory.getAddress(), TOTAL_AMOUNT);
-            await factory.connect(payer).fundEscrowWallet(1);
-
-            const proofData = "test";
-            const dataHash = ethers.keccak256(ethers.toUtf8Bytes(proofData));
-            const signature = await signProof(payee, await wallet.getAddress(), dataHash);
-            await wallet.connect(payee).submitShipmentProof(proofData, dataHash, signature);
-
-            await wallet.connect(payer).raiseDispute();
-        });
-
-        it("Should allow investor to resolve dispute with refund", async function () {
-            const payerBalanceBefore = await vscToken.balanceOf(payer.address);
-
-            await wallet.connect(investor).resolveDispute(true);
-
-            const payerBalanceAfter = await vscToken.balanceOf(payer.address);
-            expect(payerBalanceAfter - payerBalanceBefore).to.equal(TOTAL_AMOUNT);
-            expect(await wallet.state()).to.equal(2); // Refunded
-        });
-
-        it("Should allow investor to resolve dispute without refund", async function () {
-            await wallet.connect(investor).resolveDispute(false);
-            expect(await wallet.state()).to.equal(0); // Active
-        });
-
-        it("Should only allow investor to resolve", async function () {
-            await expect(
-                wallet.connect(payer).resolveDispute(true)
-            ).to.be.revertedWith("Only investor can resolve");
-        });
+    it("marketplace: setPayer(investor) is rejected, a distinct payer is accepted", async function () {
+      await factory
+        .connect(investor)
+        .createEscrowWallet(ethers.ZeroAddress, payee.address, PAYMENT_AMOUNT);
+      const wallet = (
+        await ethers.getContractFactory("MultiSigEscrowWallet")
+      ).attach(await factory.getWalletAddress(1));
+      await expect(
+        wallet.connect(investor).setPayer(investor.address),
+      ).to.be.revertedWithCustomError(wallet, "InvestorCannotBePayer");
+      await wallet.connect(investor).setPayer(payer.address);
+      expect(await wallet.payer()).to.equal(payer.address);
     });
 
-    describe("Multi-Signature Release (2-of-3)", function () {
-        let wallet;
-
-        beforeEach(async function () {
-            await factory.registerInvestor(investor.address, investorWallet.address);
-            await factory.connect(investor).createEscrowWallet(
-                payer.address,
-                payee.address,
-                PAYMENT_AMOUNT
-            );
-            const walletAddress = await factory.getWalletAddress(1);
-
-            const MultiSigEscrowWallet = await ethers.getContractFactory("MultiSigEscrowWallet");
-            wallet = MultiSigEscrowWallet.attach(walletAddress);
-
-            await vscToken.connect(payer).approve(await factory.getAddress(), TOTAL_AMOUNT);
-            await factory.connect(payer).fundEscrowWallet(1);
-
-            const proofData = "test";
-            const dataHash = ethers.keccak256(ethers.toUtf8Bytes(proofData));
-            const signature = await signProof(payee, await wallet.getAddress(), dataHash);
-            await wallet.connect(payee).submitShipmentProof(proofData, dataHash, signature);
-
-            // Wait 14 days
-            await time.increase(15 * 24 * 60 * 60);
-        });
-
-        it("Should allow payer to sign (for refund path)", async function () {
-            await wallet.connect(payer).signAsPayer();
-            expect(await wallet.payerSigned()).to.be.true;
-        });
-
-        it("Should allow payee to sign after dispute window", async function () {
-            await wallet.connect(payee).signAsPayee();
-            expect(await wallet.payeeSigned()).to.be.true;
-        });
-
-        it("Should allow investor to sign", async function () {
-            await wallet.connect(payee).signAsPayee();
-            await wallet.connect(investor).signAsInvestor(true);
-            expect(await wallet.investorSigned()).to.be.true;
-        });
-
-        it("Should not allow payee signing during dispute window", async function () {
-            // Create new wallet
-            await factory.connect(investor).createEscrowWallet(
-                payer.address,
-                payee.address,
-                PAYMENT_AMOUNT
-            );
-            const walletAddress2 = await factory.getWalletAddress(2);
-            const MultiSigEscrowWallet = await ethers.getContractFactory("MultiSigEscrowWallet");
-            const wallet2 = MultiSigEscrowWallet.attach(walletAddress2);
-
-            await vscToken.connect(payer).approve(await factory.getAddress(), TOTAL_AMOUNT);
-            await factory.connect(payer).fundEscrowWallet(2);
-
-            const proofData = "test";
-            const dataHash = ethers.keccak256(ethers.toUtf8Bytes(proofData));
-            const signature = await signProof(payee, await wallet2.getAddress(), dataHash);
-            await wallet2.connect(payee).submitShipmentProof(proofData, dataHash, signature);
-
-            await expect(
-                wallet2.connect(payee).signAsPayee()
-            ).to.be.revertedWith("Dispute window still open");
-        });
-
-        it("Should auto-release to payee when investor + payee sign", async function () {
-            const payeeBalanceBefore = await vscToken.balanceOf(payee.address);
-            const investorBalanceBefore = await vscToken.balanceOf(investorWallet.address);
-            const ownerBalanceBefore = await vscToken.balanceOf(ownerWallet.address);
-
-            await wallet.connect(payee).signAsPayee();
-            await wallet.connect(investor).signAsInvestor(true);
-
-            const payeeBalanceAfter = await vscToken.balanceOf(payee.address);
-            const investorBalanceAfter = await vscToken.balanceOf(investorWallet.address);
-            const ownerBalanceAfter = await vscToken.balanceOf(ownerWallet.address);
-
-            expect(payeeBalanceAfter - payeeBalanceBefore).to.equal(PAYMENT_AMOUNT);
-            expect(investorBalanceAfter - investorBalanceBefore).to.equal(INVESTOR_FEE);
-            expect(ownerBalanceAfter - ownerBalanceBefore).to.equal(OWNER_FEE);
-            expect(await wallet.state()).to.equal(1); // Released
-        });
-
-        it("Should auto-refund to payer when investor + payer sign", async function () {
-            const payerBalanceBefore = await vscToken.balanceOf(payer.address);
-
-            await wallet.connect(payer).signAsPayer();
-            await wallet.connect(investor).signAsInvestor(false);
-
-            const payerBalanceAfter = await vscToken.balanceOf(payer.address);
-            expect(payerBalanceAfter - payerBalanceBefore).to.equal(TOTAL_AMOUNT);
-            expect(await wallet.state()).to.equal(2); // Refunded
-        });
-
-        it("Should prioritize payee release if investor signs after payee", async function () {
-            const payeeBalanceBefore = await vscToken.balanceOf(payee.address);
-
-            await wallet.connect(payee).signAsPayee();
-            await wallet.connect(investor).signAsInvestor(true);
-
-            const payeeBalanceAfter = await vscToken.balanceOf(payee.address);
-            expect(payeeBalanceAfter - payeeBalanceBefore).to.equal(PAYMENT_AMOUNT);
-            expect(await wallet.state()).to.equal(1); // Released
-        });
-
-        it("Should refund if investor signs after payer", async function () {
-            const payerBalanceBefore = await vscToken.balanceOf(payer.address);
-
-            await wallet.connect(payer).signAsPayer();
-            await wallet.connect(investor).signAsInvestor(false);
-
-            const payerBalanceAfter = await vscToken.balanceOf(payer.address);
-            expect(payerBalanceAfter - payerBalanceBefore).to.equal(TOTAL_AMOUNT);
-            expect(await wallet.state()).to.equal(2); // Refunded
-        });
-
-        it("Should check if ready for signatures", async function () {
-            expect(await wallet.isReadyForSignatures()).to.be.true;
-        });
+    // Integration review: the factory rejects payer == payee at creation, but a
+    // marketplace payee could fund first and become its own payer via setPayer.
+    it("marketplace: the payee cannot fund first and become its own payer", async function () {
+      await factory
+        .connect(investor)
+        .createEscrowWallet(ethers.ZeroAddress, payee.address, PAYMENT_AMOUNT);
+      const wallet = (
+        await ethers.getContractFactory("MultiSigEscrowWallet")
+      ).attach(await factory.getWalletAddress(1));
+      await vscToken.transfer(payee.address, TOTAL_AMOUNT);
+      await vscToken
+        .connect(payee)
+        .approve(await factory.getAddress(), TOTAL_AMOUNT);
+      await expect(
+        factory.connect(payee).fundEscrowWallet(1),
+      ).to.be.revertedWithCustomError(wallet, "PayerCannotBePayee");
+      await expect(
+        wallet.connect(investor).setPayer(payee.address),
+      ).to.be.revertedWithCustomError(wallet, "PayerCannotBePayee");
+      expect(await wallet.payerSet()).to.equal(false);
     });
 
-    describe("Shipment proof signature is verified on-chain", function () {
-        // The proof used to be accepted on `signature.length > 0` alone: no
-        // ecrecover, and nothing binding it to this wallet or chain. A payee
-        // could release funds on a fabricated proof, and a real signature was
-        // replayable across escrows because it was scoped to nothing.
-        let wallet, walletAddr, chainId;
-        const DATA = "shipped";
-
-        // The signed payload binds the escrow, the chain and the content.
-        async function proofSignature(signer, addr, id, dataHash) {
-            const digest = ethers.keccak256(
-                ethers.AbiCoder.defaultAbiCoder().encode(
-                    ["string", "address", "uint256", "bytes32"],
-                    ["VanguardShipmentProof", addr, id, dataHash]
-                )
-            );
-            return signer.signMessage(ethers.getBytes(digest));
-        }
-
-        beforeEach(async function () {
-            await factory.registerInvestor(investor.address, investorWallet.address);
-            await factory.connect(investor).createEscrowWallet(
-                payer.address, payee.address, PAYMENT_AMOUNT
-            );
-            walletAddr = await factory.getWalletAddress(1);
-            const F = await ethers.getContractFactory("MultiSigEscrowWallet");
-            wallet = F.attach(walletAddr);
-            await vscToken.connect(payer).approve(await factory.getAddress(), TOTAL_AMOUNT);
-            await factory.connect(payer).fundEscrowWallet(1);
-            chainId = (await ethers.provider.getNetwork()).chainId;
-        });
-
-        it("accepts a correctly scoped signature from the payee", async function () {
-            const dh = ethers.keccak256(ethers.toUtf8Bytes(DATA));
-            const sig = await proofSignature(payee, walletAddr, chainId, dh);
-            await expect(wallet.connect(payee).submitShipmentProof(DATA, dh, sig))
-                .to.not.be.reverted;
-            expect((await wallet.shipmentProof()).exists).to.be.true;
-        });
-
-        it("rejects a fabricated signature", async function () {
-            const dh = ethers.keccak256(ethers.toUtf8Bytes(DATA));
-            const junk = "0x" + "11".repeat(65);
-            await expect(wallet.connect(payee).submitShipmentProof(DATA, dh, junk))
-                .to.be.reverted;
-        });
-
-        it("rejects a signature from someone other than the payee", async function () {
-            const dh = ethers.keccak256(ethers.toUtf8Bytes(DATA));
-            const sig = await proofSignature(payer, walletAddr, chainId, dh);
-            await expect(wallet.connect(payee).submitShipmentProof(DATA, dh, sig))
-                .to.be.revertedWithCustomError(wallet, "ProofNotSignedByPayee");
-        });
-
-        it("rejects a signature replayed from a different escrow wallet", async function () {
-            await factory.connect(investor).createEscrowWallet(
-                payer.address, payee.address, PAYMENT_AMOUNT
-            );
-            const otherAddr = await factory.getWalletAddress(2);
-            const dh = ethers.keccak256(ethers.toUtf8Bytes(DATA));
-            // Genuine payee signature, but scoped to the OTHER wallet.
-            const sig = await proofSignature(payee, otherAddr, chainId, dh);
-            await expect(wallet.connect(payee).submitShipmentProof(DATA, dh, sig))
-                .to.be.revertedWithCustomError(wallet, "ProofNotSignedByPayee");
-        });
-
-        it("rejects a signature scoped to a different chain", async function () {
-            const dh = ethers.keccak256(ethers.toUtf8Bytes(DATA));
-            const sig = await proofSignature(payee, walletAddr, 999999n, dh);
-            await expect(wallet.connect(payee).submitShipmentProof(DATA, dh, sig))
-                .to.be.revertedWithCustomError(wallet, "ProofNotSignedByPayee");
-        });
+    it("wallet constructor rejects investor == payee (defence in depth)", async function () {
+      const W = await ethers.getContractFactory("MultiSigEscrowWallet");
+      await expect(
+        W.deploy(
+          1,
+          payer.address,
+          investor.address /* payee==investor */,
+          investor.address,
+          await vscToken.getAddress(),
+          PAYMENT_AMOUNT,
+          0,
+          0,
+          owner.address,
+          investorWallet.address,
+          ownerWallet.address,
+        ),
+      ).to.be.revertedWithCustomError(W, "InvestorCannotBePayee");
     });
 
-    describe("Investor intent is explicit (misdirection regression)", function () {
-        // The investor used to express no intent: signAsInvestor() inferred the
-        // direction from whoever signed first. A payer could pre-sign silently,
-        // and the investor's release then refunded the payer instead of paying
-        // the payee who had shipped. Direction is now an explicit argument.
-        let wallet;
+    // Augment on PR #7: the payer guard at construction was only reached
+    // through the factory, which rejects first. Exercise it directly.
+    it("wallet constructor rejects investor == payer (defence in depth)", async function () {
+      const W = await ethers.getContractFactory("MultiSigEscrowWallet");
+      await expect(
+        W.deploy(
+          1,
+          investor.address /* payer==investor */,
+          payee.address,
+          investor.address,
+          await vscToken.getAddress(),
+          PAYMENT_AMOUNT,
+          0,
+          0,
+          owner.address,
+          investorWallet.address,
+          ownerWallet.address,
+        ),
+      ).to.be.revertedWithCustomError(W, "InvestorCannotBePayer");
+    });
+  });
 
-        beforeEach(async function () {
-            await factory.registerInvestor(investor.address, investorWallet.address);
-            await factory.connect(investor).createEscrowWallet(
-                payer.address,
-                payee.address,
-                PAYMENT_AMOUNT
-            );
-            const MultiSigEscrowWallet = await ethers.getContractFactory("MultiSigEscrowWallet");
-            wallet = MultiSigEscrowWallet.attach(await factory.getWalletAddress(1));
+  describe("Manual refund cannot rug a shipped payee", function () {
+    let wallet;
 
-            await vscToken.connect(payer).approve(await factory.getAddress(), TOTAL_AMOUNT);
-            await factory.connect(payer).fundEscrowWallet(1);
-
-            const proofData = "shipped";
-            const dataHash = ethers.keccak256(ethers.toUtf8Bytes(proofData));
-            const signature = await signProof(payee, await wallet.getAddress(), dataHash);
-            await wallet.connect(payee).submitShipmentProof(proofData, dataHash, signature);
-            await time.increase(15 * 24 * 60 * 60);
-        });
-
-        it("a pre-signing payer cannot divert the investor's release", async function () {
-            // The attack: payer signs first, quietly. The investor then signs
-            // intending to pay the payee.
-            await wallet.connect(payer).signAsPayer();
-
-            const payeeBefore = await vscToken.balanceOf(payee.address);
-            const payerBefore = await vscToken.balanceOf(payer.address);
-
-            await wallet.connect(payee).signAsPayee();
-            await wallet.connect(investor).signAsInvestor(true); // true = release to payee
-
-            expect(await vscToken.balanceOf(payee.address) - payeeBefore).to.equal(PAYMENT_AMOUNT);
-            expect(await vscToken.balanceOf(payer.address) - payerBefore).to.equal(0n);
-            expect(await wallet.state()).to.equal(1); // Released
-        });
-
-        it("releasing to the payee requires the payee's signature", async function () {
-            await expect(wallet.connect(investor).signAsInvestor(true))
-                .to.be.revertedWithCustomError(wallet, "PayeeHasNotSigned");
-        });
-
-        it("refunding the payer requires the payer's signature", async function () {
-            await expect(wallet.connect(investor).signAsInvestor(false))
-                .to.be.revertedWithCustomError(wallet, "PayerHasNotSigned");
-        });
-
-        it("an explicit refund still works when the payer has signed", async function () {
-            await wallet.connect(payer).signAsPayer();
-            const payerBefore = await vscToken.balanceOf(payer.address);
-            await wallet.connect(investor).signAsInvestor(false);
-            expect(await vscToken.balanceOf(payer.address) - payerBefore).to.equal(TOTAL_AMOUNT);
-            expect(await wallet.state()).to.equal(2); // Refunded
-        });
-
-        it("resolving a dispute for the payee clears the payer's stale signature", async function () {
-            // Needs its own wallet: the shared setup has already advanced past
-            // the dispute window, and raiseDispute requires it to still be open.
-            await factory.connect(investor).createEscrowWallet(
-                payer.address, payee.address, PAYMENT_AMOUNT
-            );
-            const MultiSigEscrowWallet = await ethers.getContractFactory("MultiSigEscrowWallet");
-            const w2 = MultiSigEscrowWallet.attach(await factory.getWalletAddress(2));
-            await vscToken.connect(payer).approve(await factory.getAddress(), TOTAL_AMOUNT);
-            await factory.connect(payer).fundEscrowWallet(2);
-            const d = "shipped";
-            const dh = ethers.keccak256(ethers.toUtf8Bytes(d));
-            await w2.connect(payee).submitShipmentProof(d, dh, await signProof(payee, await w2.getAddress(), dh));
-
-            await w2.connect(payer).signAsPayer();
-            await w2.connect(payer).raiseDispute();
-            await w2.connect(investor).resolveDispute(false); // payee deserves payment
-
-            expect(await w2.payerSigned()).to.be.false;
-            await expect(w2.connect(investor).signAsInvestor(false))
-                .to.be.revertedWithCustomError(w2, "PayerHasNotSigned");
-        });
-
-
+    beforeEach(async function () {
+      await factory.registerInvestor(investor.address, investorWallet.address);
+      await factory
+        .connect(investor)
+        .createEscrowWallet(payer.address, payee.address, PAYMENT_AMOUNT);
+      const walletAddress = await factory.getWalletAddress(1);
+      const MultiSigEscrowWallet = await ethers.getContractFactory(
+        "MultiSigEscrowWallet",
+      );
+      wallet = MultiSigEscrowWallet.attach(walletAddress);
+      await vscToken
+        .connect(payer)
+        .approve(await factory.getAddress(), TOTAL_AMOUNT);
+      await factory.connect(payer).fundEscrowWallet(1);
     });
 
-    describe("Manual Refund", function () {
-        let wallet;
+    async function ship() {
+      const data = JSON.stringify({ tracking: "1Z", carrier: "UPS" });
+      const hash = ethers.keccak256(ethers.toUtf8Bytes(data));
+      const sig = await signProof(payee, await wallet.getAddress(), hash);
+      await wallet.connect(payee).submitShipmentProof(data, hash, sig);
+    }
 
-        beforeEach(async function () {
-            await factory.registerInvestor(investor.address, investorWallet.address);
-            await factory.connect(investor).createEscrowWallet(
-                payer.address,
-                payee.address,
-                PAYMENT_AMOUNT
-            );
-            const walletAddress = await factory.getWalletAddress(1);
-
-            const MultiSigEscrowWallet = await ethers.getContractFactory("MultiSigEscrowWallet");
-            wallet = MultiSigEscrowWallet.attach(walletAddress);
-
-            await vscToken.connect(payer).approve(await factory.getAddress(), TOTAL_AMOUNT);
-            await factory.connect(payer).fundEscrowWallet(1);
-        });
-
-        it("Should allow investor to manually refund", async function () {
-            const payerBalanceBefore = await vscToken.balanceOf(payer.address);
-
-            await wallet.connect(investor).manualRefund();
-
-            const payerBalanceAfter = await vscToken.balanceOf(payer.address);
-            expect(payerBalanceAfter - payerBalanceBefore).to.equal(TOTAL_AMOUNT);
-            expect(await wallet.state()).to.equal(2); // Refunded
-        });
-
-        it("Should only allow investor to manually refund", async function () {
-            await expect(
-                wallet.connect(payer).manualRefund()
-            ).to.be.revertedWith("Only investor can refund");
-        });
+    it("blocks manualRefund once the payee has shipped (Active + proof)", async function () {
+      await ship();
+      await expect(
+        wallet.connect(investor).manualRefund(),
+      ).to.be.revertedWithCustomError(wallet, "RefundBlockedAfterShipment");
+      expect(await wallet.state()).to.equal(0); // still Active, funds untouched
     });
 
-    describe("Investor cannot be a counterparty (self-dealing)", function () {
-        beforeEach(async function () {
-            await factory.registerInvestor(investor.address, investorWallet.address);
-        });
-
-        it("rejects creating an escrow where the investor is the payee", async function () {
-            await expect(
-                factory.connect(investor).createEscrowWallet(payer.address, investor.address, PAYMENT_AMOUNT)
-            ).to.be.revertedWithCustomError(factory, "InvestorCannotBePayee");
-        });
-
-        it("rejects creating an escrow where the investor is the payer", async function () {
-            await expect(
-                factory.connect(investor).createEscrowWallet(investor.address, payee.address, PAYMENT_AMOUNT)
-            ).to.be.revertedWithCustomError(factory, "InvestorCannotBePayer");
-        });
-
-        it("still allows a normal three-party escrow", async function () {
-            await expect(
-                factory.connect(investor).createEscrowWallet(payer.address, payee.address, PAYMENT_AMOUNT)
-            ).to.not.be.reverted;
-        });
-
-        // Qodo/Augment on PR #7: a marketplace escrow (payer unknown) skipped
-        // the constructor check, and setPayer accepted the investor.
-        it("marketplace: the investor cannot fund an unknown-payer escrow (would become payer)", async function () {
-            await factory.connect(investor).createEscrowWallet(ethers.ZeroAddress, payee.address, PAYMENT_AMOUNT);
-            const wallet = (await ethers.getContractFactory("MultiSigEscrowWallet")).attach(await factory.getWalletAddress(1));
-            const investorId = await (await ethers.getContractFactory("OnchainID")).deploy(investor.address);
-            await identityRegistry.registerIdentity(investor.address, await investorId.getAddress(), 840);
-            await vscToken.transfer(investor.address, TOTAL_AMOUNT);
-            await vscToken.connect(investor).approve(await factory.getAddress(), TOTAL_AMOUNT);
-            await expect(factory.connect(investor).fundEscrowWallet(1))
-                .to.be.revertedWithCustomError(wallet, "InvestorCannotBePayer");
-            expect(await wallet.payerSet()).to.equal(false);
-        });
-
-        it("marketplace: setPayer(investor) is rejected, a distinct payer is accepted", async function () {
-            await factory.connect(investor).createEscrowWallet(ethers.ZeroAddress, payee.address, PAYMENT_AMOUNT);
-            const wallet = (await ethers.getContractFactory("MultiSigEscrowWallet")).attach(await factory.getWalletAddress(1));
-            await expect(wallet.connect(investor).setPayer(investor.address))
-                .to.be.revertedWithCustomError(wallet, "InvestorCannotBePayer");
-            await wallet.connect(investor).setPayer(payer.address);
-            expect(await wallet.payer()).to.equal(payer.address);
-        });
-
-        // Integration review: the factory rejects payer == payee at creation, but a
-        // marketplace payee could fund first and become its own payer via setPayer.
-        it("marketplace: the payee cannot fund first and become its own payer", async function () {
-            await factory.connect(investor).createEscrowWallet(ethers.ZeroAddress, payee.address, PAYMENT_AMOUNT);
-            const wallet = (await ethers.getContractFactory("MultiSigEscrowWallet")).attach(await factory.getWalletAddress(1));
-            await vscToken.transfer(payee.address, TOTAL_AMOUNT);
-            await vscToken.connect(payee).approve(await factory.getAddress(), TOTAL_AMOUNT);
-            await expect(factory.connect(payee).fundEscrowWallet(1))
-                .to.be.revertedWithCustomError(wallet, "PayerCannotBePayee");
-            await expect(wallet.connect(investor).setPayer(payee.address))
-                .to.be.revertedWithCustomError(wallet, "PayerCannotBePayee");
-            expect(await wallet.payerSet()).to.equal(false);
-        });
-
-        it("wallet constructor rejects investor == payee (defence in depth)", async function () {
-            const W = await ethers.getContractFactory("MultiSigEscrowWallet");
-            await expect(
-                W.deploy(
-                    1, payer.address, investor.address /* payee==investor */, investor.address,
-                    await vscToken.getAddress(), PAYMENT_AMOUNT, 0, 0,
-                    owner.address, investorWallet.address, ownerWallet.address
-                )
-            ).to.be.revertedWithCustomError(W, "InvestorCannotBePayee");
-        });
-
-        // Augment on PR #7: the payer guard at construction was only reached
-        // through the factory, which rejects first. Exercise it directly.
-        it("wallet constructor rejects investor == payer (defence in depth)", async function () {
-            const W = await ethers.getContractFactory("MultiSigEscrowWallet");
-            await expect(
-                W.deploy(
-                    1, investor.address /* payer==investor */, payee.address, investor.address,
-                    await vscToken.getAddress(), PAYMENT_AMOUNT, 0, 0,
-                    owner.address, investorWallet.address, ownerWallet.address
-                )
-            ).to.be.revertedWithCustomError(W, "InvestorCannotBePayer");
-        });
+    it("still allows manualRefund before shipment (Active, no proof)", async function () {
+      const before = await vscToken.balanceOf(payer.address);
+      await wallet.connect(investor).manualRefund();
+      expect((await vscToken.balanceOf(payer.address)) - before).to.equal(
+        TOTAL_AMOUNT,
+      );
+      expect(await wallet.state()).to.equal(2); // Refunded
     });
 
-    describe("Manual refund cannot rug a shipped payee", function () {
-        let wallet;
+    it("still allows manualRefund on a raised dispute (Disputed)", async function () {
+      await ship();
+      await wallet.connect(payer).raiseDispute();
+      expect(await wallet.state()).to.equal(3); // Disputed
+      const before = await vscToken.balanceOf(payer.address);
+      await wallet.connect(investor).manualRefund();
+      expect((await vscToken.balanceOf(payer.address)) - before).to.equal(
+        TOTAL_AMOUNT,
+      );
+      expect(await wallet.state()).to.equal(2); // Refunded
+    });
+  });
 
-        beforeEach(async function () {
-            await factory.registerInvestor(investor.address, investorWallet.address);
-            await factory.connect(investor).createEscrowWallet(
-                payer.address,
-                payee.address,
-                PAYMENT_AMOUNT
-            );
-            const walletAddress = await factory.getWalletAddress(1);
-            const MultiSigEscrowWallet = await ethers.getContractFactory("MultiSigEscrowWallet");
-            wallet = MultiSigEscrowWallet.attach(walletAddress);
-            await vscToken.connect(payer).approve(await factory.getAddress(), TOTAL_AMOUNT);
-            await factory.connect(payer).fundEscrowWallet(1);
-        });
+  describe("Fee Calculation", function () {
+    it("Should calculate fees correctly", async function () {
+      const fees = await factory.calculateFees(PAYMENT_AMOUNT);
 
-        async function ship() {
-            const data = JSON.stringify({ tracking: "1Z", carrier: "UPS" });
-            const hash = ethers.keccak256(ethers.toUtf8Bytes(data));
-            const sig = await signProof(payee, await wallet.getAddress(), hash);
-            await wallet.connect(payee).submitShipmentProof(data, hash, sig);
-        }
+      expect(fees.investorFee).to.equal(INVESTOR_FEE);
+      expect(fees.ownerFee).to.equal(OWNER_FEE);
+      expect(fees.totalFee).to.equal(INVESTOR_FEE + OWNER_FEE);
+      expect(fees.totalAmount).to.equal(TOTAL_AMOUNT);
+    });
+  });
 
-        it("blocks manualRefund once the payee has shipped (Active + proof)", async function () {
-            await ship();
-            await expect(
-                wallet.connect(investor).manualRefund()
-            ).to.be.revertedWithCustomError(wallet, "RefundBlockedAfterShipment");
-            expect(await wallet.state()).to.equal(0); // still Active, funds untouched
-        });
+  describe("Unknown Payer (Marketplace Scenario)", function () {
+    let wallet;
+    let walletAddress;
 
-        it("still allows manualRefund before shipment (Active, no proof)", async function () {
-            const before = await vscToken.balanceOf(payer.address);
-            await wallet.connect(investor).manualRefund();
-            expect((await vscToken.balanceOf(payer.address)) - before).to.equal(TOTAL_AMOUNT);
-            expect(await wallet.state()).to.equal(2); // Refunded
-        });
-
-        it("still allows manualRefund on a raised dispute (Disputed)", async function () {
-            await ship();
-            await wallet.connect(payer).raiseDispute();
-            expect(await wallet.state()).to.equal(3); // Disputed
-            const before = await vscToken.balanceOf(payer.address);
-            await wallet.connect(investor).manualRefund();
-            expect((await vscToken.balanceOf(payer.address)) - before).to.equal(TOTAL_AMOUNT);
-            expect(await wallet.state()).to.equal(2); // Refunded
-        });
+    beforeEach(async function () {
+      await factory.registerInvestor(investor.address, investorWallet.address);
     });
 
-    describe("Fee Calculation", function () {
-        it("Should calculate fees correctly", async function () {
-            const fees = await factory.calculateFees(PAYMENT_AMOUNT);
+    it("Should create wallet with unknown payer (address(0))", async function () {
+      await factory.connect(investor).createEscrowWallet(
+        ethers.ZeroAddress, // Unknown payer
+        payee.address,
+        PAYMENT_AMOUNT,
+      );
 
-            expect(fees.investorFee).to.equal(INVESTOR_FEE);
-            expect(fees.ownerFee).to.equal(OWNER_FEE);
-            expect(fees.totalFee).to.equal(INVESTOR_FEE + OWNER_FEE);
-            expect(fees.totalAmount).to.equal(TOTAL_AMOUNT);
-        });
+      walletAddress = await factory.getWalletAddress(1);
+      const MultiSigEscrowWallet = await ethers.getContractFactory(
+        "MultiSigEscrowWallet",
+      );
+      wallet = MultiSigEscrowWallet.attach(walletAddress);
+
+      expect(await wallet.payer()).to.equal(ethers.ZeroAddress);
+      expect(await wallet.payerSet()).to.be.false;
     });
 
-    describe("Unknown Payer (Marketplace Scenario)", function () {
-        let wallet;
-        let walletAddress;
+    it("Should set payer on first funding", async function () {
+      await factory
+        .connect(investor)
+        .createEscrowWallet(ethers.ZeroAddress, payee.address, PAYMENT_AMOUNT);
 
-        beforeEach(async function () {
-            await factory.registerInvestor(investor.address, investorWallet.address);
-        });
+      walletAddress = await factory.getWalletAddress(1);
+      const MultiSigEscrowWallet = await ethers.getContractFactory(
+        "MultiSigEscrowWallet",
+      );
+      wallet = MultiSigEscrowWallet.attach(walletAddress);
 
-        it("Should create wallet with unknown payer (address(0))", async function () {
-            await factory.connect(investor).createEscrowWallet(
-                ethers.ZeroAddress,  // Unknown payer
-                payee.address,
-                PAYMENT_AMOUNT
-            );
+      // First buyer funds (becomes the payer automatically)
+      await vscToken
+        .connect(payer)
+        .approve(await factory.getAddress(), TOTAL_AMOUNT);
+      await factory.connect(payer).fundEscrowWallet(1);
 
-            walletAddress = await factory.getWalletAddress(1);
-            const MultiSigEscrowWallet = await ethers.getContractFactory("MultiSigEscrowWallet");
-            wallet = MultiSigEscrowWallet.attach(walletAddress);
-
-            expect(await wallet.payer()).to.equal(ethers.ZeroAddress);
-            expect(await wallet.payerSet()).to.be.false;
-        });
-
-        it("Should set payer on first funding", async function () {
-            await factory.connect(investor).createEscrowWallet(
-                ethers.ZeroAddress,
-                payee.address,
-                PAYMENT_AMOUNT
-            );
-
-            walletAddress = await factory.getWalletAddress(1);
-            const MultiSigEscrowWallet = await ethers.getContractFactory("MultiSigEscrowWallet");
-            wallet = MultiSigEscrowWallet.attach(walletAddress);
-
-            // First buyer funds (becomes the payer automatically)
-            await vscToken.connect(payer).approve(await factory.getAddress(), TOTAL_AMOUNT);
-            await factory.connect(payer).fundEscrowWallet(1);
-
-            expect(await wallet.payer()).to.equal(payer.address);
-            expect(await wallet.payerSet()).to.be.true;
-        });
-
-        it("Should not allow setting payer twice", async function () {
-            await factory.connect(investor).createEscrowWallet(
-                ethers.ZeroAddress,
-                payee.address,
-                PAYMENT_AMOUNT
-            );
-
-            walletAddress = await factory.getWalletAddress(1);
-            const MultiSigEscrowWallet = await ethers.getContractFactory("MultiSigEscrowWallet");
-            wallet = MultiSigEscrowWallet.attach(walletAddress);
-
-            await wallet.connect(investor).setPayer(payer.address);
-
-            await expect(
-                wallet.connect(investor).setPayer(payee.address)
-            ).to.be.revertedWith("Payer already set");
-        });
-
-        it("Should complete marketplace flow with unknown payer", async function () {
-            // Create wallet for seller (payer unknown)
-            await factory.connect(investor).createEscrowWallet(
-                ethers.ZeroAddress,
-                payee.address,
-                PAYMENT_AMOUNT
-            );
-
-            walletAddress = await factory.getWalletAddress(1);
-            const MultiSigEscrowWallet = await ethers.getContractFactory("MultiSigEscrowWallet");
-            wallet = MultiSigEscrowWallet.attach(walletAddress);
-
-            // Buyer pays (becomes payer automatically via factory)
-            await vscToken.connect(payer).approve(await factory.getAddress(), TOTAL_AMOUNT);
-            await factory.connect(payer).fundEscrowWallet(1);
-
-            // Verify payer was set
-            expect(await wallet.payer()).to.equal(payer.address);
-            expect(await wallet.payerSet()).to.be.true;
-
-            // Seller ships
-            const proofData = "test";
-            const dataHash = ethers.keccak256(ethers.toUtf8Bytes(proofData));
-            const signature = await signProof(payee, await wallet.getAddress(), dataHash);
-            await wallet.connect(payee).submitShipmentProof(proofData, dataHash, signature);
-
-            // Wait 14 days
-            await time.increase(15 * 24 * 60 * 60);
-
-            // Both sign
-            const payeeBalanceBefore = await vscToken.balanceOf(payee.address);
-            await wallet.connect(payee).signAsPayee();
-            await wallet.connect(investor).signAsInvestor(true);
-
-            const payeeBalanceAfter = await vscToken.balanceOf(payee.address);
-            expect(payeeBalanceAfter - payeeBalanceBefore).to.equal(PAYMENT_AMOUNT);
-        });
+      expect(await wallet.payer()).to.equal(payer.address);
+      expect(await wallet.payerSet()).to.be.true;
     });
 
-    describe("Wallet Status", function () {
-        let wallet;
+    it("Should not allow setting payer twice", async function () {
+      await factory
+        .connect(investor)
+        .createEscrowWallet(ethers.ZeroAddress, payee.address, PAYMENT_AMOUNT);
 
-        beforeEach(async function () {
-            await factory.registerInvestor(investor.address, investorWallet.address);
-            await factory.connect(investor).createEscrowWallet(
-                payer.address,
-                payee.address,
-                PAYMENT_AMOUNT
-            );
-            const walletAddress = await factory.getWalletAddress(1);
+      walletAddress = await factory.getWalletAddress(1);
+      const MultiSigEscrowWallet = await ethers.getContractFactory(
+        "MultiSigEscrowWallet",
+      );
+      wallet = MultiSigEscrowWallet.attach(walletAddress);
 
-            const MultiSigEscrowWallet = await ethers.getContractFactory("MultiSigEscrowWallet");
-            wallet = MultiSigEscrowWallet.attach(walletAddress);
+      await wallet.connect(investor).setPayer(payer.address);
 
-            await vscToken.connect(payer).approve(await factory.getAddress(), TOTAL_AMOUNT);
-            await factory.connect(payer).fundEscrowWallet(1);
-        });
-
-        it("Should get wallet status correctly", async function () {
-            const status = await wallet.getWalletStatus();
-
-            expect(status.currentState).to.equal(0); // Active
-            expect(status.payerIsSet).to.be.true;
-            expect(status.proofSubmitted).to.be.false;
-            expect(status.disputeWindowOpen).to.be.false;
-            expect(status.readyForSignatures).to.be.false;
-            expect(status.payerHasSigned).to.be.false;
-            expect(status.payeeHasSigned).to.be.false;
-            expect(status.investorHasSigned).to.be.false;
-        });
-
-        it("Should update status after proof submission", async function () {
-            const proofData = "test";
-            const dataHash = ethers.keccak256(ethers.toUtf8Bytes(proofData));
-            const signature = await signProof(payee, await wallet.getAddress(), dataHash);
-            await wallet.connect(payee).submitShipmentProof(proofData, dataHash, signature);
-
-            const status = await wallet.getWalletStatus();
-
-            expect(status.proofSubmitted).to.be.true;
-            expect(status.disputeWindowOpen).to.be.true;
-            expect(status.readyForSignatures).to.be.false;
-        });
+      await expect(
+        wallet.connect(investor).setPayer(payee.address),
+      ).to.be.revertedWith("Payer already set");
     });
+
+    it("Should complete marketplace flow with unknown payer", async function () {
+      // Create wallet for seller (payer unknown)
+      await factory
+        .connect(investor)
+        .createEscrowWallet(ethers.ZeroAddress, payee.address, PAYMENT_AMOUNT);
+
+      walletAddress = await factory.getWalletAddress(1);
+      const MultiSigEscrowWallet = await ethers.getContractFactory(
+        "MultiSigEscrowWallet",
+      );
+      wallet = MultiSigEscrowWallet.attach(walletAddress);
+
+      // Buyer pays (becomes payer automatically via factory)
+      await vscToken
+        .connect(payer)
+        .approve(await factory.getAddress(), TOTAL_AMOUNT);
+      await factory.connect(payer).fundEscrowWallet(1);
+
+      // Verify payer was set
+      expect(await wallet.payer()).to.equal(payer.address);
+      expect(await wallet.payerSet()).to.be.true;
+
+      // Seller ships
+      const proofData = "test";
+      const dataHash = ethers.keccak256(ethers.toUtf8Bytes(proofData));
+      const signature = await signProof(
+        payee,
+        await wallet.getAddress(),
+        dataHash,
+      );
+      await wallet
+        .connect(payee)
+        .submitShipmentProof(proofData, dataHash, signature);
+
+      // Wait 14 days
+      await time.increase(15 * 24 * 60 * 60);
+
+      // Both sign
+      const payeeBalanceBefore = await vscToken.balanceOf(payee.address);
+      await wallet.connect(payee).signAsPayee();
+      await wallet.connect(investor).signAsInvestor(true);
+
+      const payeeBalanceAfter = await vscToken.balanceOf(payee.address);
+      expect(payeeBalanceAfter - payeeBalanceBefore).to.equal(PAYMENT_AMOUNT);
+    });
+  });
+
+  describe("Wallet Status", function () {
+    let wallet;
+
+    beforeEach(async function () {
+      await factory.registerInvestor(investor.address, investorWallet.address);
+      await factory
+        .connect(investor)
+        .createEscrowWallet(payer.address, payee.address, PAYMENT_AMOUNT);
+      const walletAddress = await factory.getWalletAddress(1);
+
+      const MultiSigEscrowWallet = await ethers.getContractFactory(
+        "MultiSigEscrowWallet",
+      );
+      wallet = MultiSigEscrowWallet.attach(walletAddress);
+
+      await vscToken
+        .connect(payer)
+        .approve(await factory.getAddress(), TOTAL_AMOUNT);
+      await factory.connect(payer).fundEscrowWallet(1);
+    });
+
+    it("Should get wallet status correctly", async function () {
+      const status = await wallet.getWalletStatus();
+
+      expect(status.currentState).to.equal(0); // Active
+      expect(status.payerIsSet).to.be.true;
+      expect(status.proofSubmitted).to.be.false;
+      expect(status.disputeWindowOpen).to.be.false;
+      expect(status.readyForSignatures).to.be.false;
+      expect(status.payerHasSigned).to.be.false;
+      expect(status.payeeHasSigned).to.be.false;
+      expect(status.investorHasSigned).to.be.false;
+    });
+
+    it("Should update status after proof submission", async function () {
+      const proofData = "test";
+      const dataHash = ethers.keccak256(ethers.toUtf8Bytes(proofData));
+      const signature = await signProof(
+        payee,
+        await wallet.getAddress(),
+        dataHash,
+      );
+      await wallet
+        .connect(payee)
+        .submitShipmentProof(proofData, dataHash, signature);
+
+      const status = await wallet.getWalletStatus();
+
+      expect(status.proofSubmitted).to.be.true;
+      expect(status.disputeWindowOpen).to.be.true;
+      expect(status.readyForSignatures).to.be.false;
+    });
+  });
 });
-

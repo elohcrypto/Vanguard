@@ -22,7 +22,8 @@ function denseBuild(builder, leaves) {
     tree[l + 1] = next;
   }
   const proof = (idx) => {
-    const pathElements = [], pathIndices = [];
+    const pathElements = [],
+      pathIndices = [];
     for (let l = 0; l < levels; l++) {
       const left = idx % 2 === 0;
       pathElements.push(tree[l][left ? idx + 1 : idx - 1] ?? 0n);
@@ -37,17 +38,34 @@ function denseBuild(builder, leaves) {
 describe("MerkleTreeBuilder (sparse)", function () {
   this.timeout(60000);
 
-  for (const [levels, n] of [[4, 1], [4, 3], [4, 16], [8, 37], [10, 100]]) {
+  for (const [levels, n] of [
+    [4, 1],
+    [4, 3],
+    [4, 16],
+    [8, 37],
+    [10, 100],
+  ]) {
     it(`matches the dense reference at ${levels} levels, ${n} leaves`, async () => {
       const ids = Array.from({ length: n }, (_, i) => BigInt(i * 7919 + 13));
       const s = await MerkleTreeBuilder.createFromIdentities(ids, levels);
-      const d = denseBuild(s, ids.map((id) => s.hashSingle(id)));
+      const d = denseBuild(
+        s,
+        ids.map((id) => s.hashSingle(id)),
+      );
       expect(s.getRoot()).to.equal(d.root);
       for (let i = 0; i < n; i++) {
-        const ps = s.getProof(i), pd = d.proof(i);
+        const ps = s.getProof(i),
+          pd = d.proof(i);
         expect(ps.pathElements).to.deep.equal(pd.pathElements);
         expect(ps.pathIndices).to.deep.equal(pd.pathIndices);
-        expect(s.verifyProof(s.hashSingle(ids[i]), s.getRoot(), ps.pathElements, ps.pathIndices)).to.equal(true);
+        expect(
+          s.verifyProof(
+            s.hashSingle(ids[i]),
+            s.getRoot(),
+            ps.pathElements,
+            ps.pathIndices,
+          ),
+        ).to.equal(true);
       }
       expect(s.findLeafIndex(s.hashSingle(ids[n - 1]))).to.equal(n - 1);
       expect(s.findLeafIndex(424242n)).to.equal(-1);
@@ -65,7 +83,12 @@ describe("MerkleTreeBuilder (sparse)", function () {
     // The dense build took ~37s here and timed out on CI. Generous bound so a
     // slow runner passes; a regression to dense would be two orders over it.
     const t = Date.now();
-    const s = await MerkleTreeBuilder.createFromIdentities([11111n, 12345n, 33333n, 44444n]);
+    const s = await MerkleTreeBuilder.createFromIdentities([
+      11111n,
+      12345n,
+      33333n,
+      44444n,
+    ]);
     expect(Date.now() - t).to.be.below(5000);
     expect(s.getStats().levels).to.equal(20);
     expect(s.getStats().maxLeaves).to.equal(2 ** 20);
