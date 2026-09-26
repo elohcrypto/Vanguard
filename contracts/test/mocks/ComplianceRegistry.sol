@@ -40,6 +40,10 @@ contract ComplianceRegistry is ICompliance {
         return true;
     }
 
+    function canReceive(address /* to */) external pure override returns (bool) {
+        return true;
+    }
+
     function transferred(address from, address to, uint256 amount) external override {
         // Mock implementation - do nothing
     }

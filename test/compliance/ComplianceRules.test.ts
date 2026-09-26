@@ -2,6 +2,7 @@ import { expect } from "chai";
 import { ethers } from "hardhat";
 import { SignerWithAddress } from "@nomicfoundation/hardhat-ethers/signers";
 import { ComplianceRules } from "../../typechain-types";
+import { attest, configureKyc } from "../helpers/kyc";
 
 describe("ComplianceRules", function () {
   let complianceRules: ComplianceRules;
@@ -568,6 +569,106 @@ describe("ComplianceRules", function () {
         );
       expect(aggregatedLevel).to.equal(3);
       expect(isValid).to.be.true;
+    });
+  });
+
+  // Task 2A.5: the default blocked list always applies, trusted and mint paths
+  // check country, and a per-token rule can be cleared.
+  describe("Country checks on every path", function () {
+    let rules: any, idReg: any;
+    let escrow: SignerWithAddress,
+      usHolder: SignerWithAddress,
+      usHolder2: SignerWithAddress,
+      ruHolder: SignerWithAddress;
+
+    beforeEach(async function () {
+      const signers = await ethers.getSigners();
+      [escrow, usHolder, usHolder2, ruHolder] = signers.slice(6, 10);
+
+      rules = await (
+        await ethers.getContractFactory("ComplianceRules")
+      ).deploy(owner.address, [COUNTRY_US, COUNTRY_UK], [COUNTRY_SANCTIONED]);
+      await rules.setRuleAdministrator(admin.address, true);
+      await rules.authorizeToken(tokenContract.address, true);
+
+      idReg = await (
+        await ethers.getContractFactory("IdentityRegistry")
+      ).deploy();
+      await idReg.addAgent(owner.address);
+      const kycIssuer = await (
+        await ethers.getContractFactory("ClaimIssuer")
+      ).deploy(owner.address, "KYC Issuer", "Trusted KYC attestations");
+      await configureKyc(idReg, await kycIssuer.getAddress());
+      const OID = await ethers.getContractFactory("OnchainID");
+      for (const [who, country] of [
+        [usHolder, COUNTRY_US],
+        [usHolder2, COUNTRY_US],
+        [ruHolder, COUNTRY_SANCTIONED],
+      ] as [SignerWithAddress, number][]) {
+        const id = await OID.deploy(who.address);
+        await idReg.registerIdentity(
+          who.address,
+          await id.getAddress(),
+          country,
+        );
+        await attest(kycIssuer, owner, await id.getAddress());
+      }
+
+      await rules.setTokenIdentityRegistry(
+        tokenContract.address,
+        await idReg.getAddress(),
+      );
+      await rules.addTrustedContract(escrow.address);
+    });
+
+    // canTransfer reads msg.sender as the token.
+    const can = (from: string, to: string) =>
+      rules.connect(tokenContract).canTransfer(from, to, 1);
+
+    it("refuses an escrow counterparty from a blocked country on the trusted path", async function () {
+      expect(await idReg.isVerified(ruHolder.address)).to.equal(true);
+      expect(await can(escrow.address, ruHolder.address)).to.equal(false);
+      expect(await can(ruHolder.address, escrow.address)).to.equal(false);
+      expect(await can(escrow.address, usHolder.address)).to.equal(true);
+    });
+
+    it("refuses a mint to a holder whose country was blocked after registration", async function () {
+      expect(await can(ethers.ZeroAddress, usHolder.address)).to.equal(true);
+      await rules
+        .connect(admin)
+        .setJurisdictionRule(tokenContract.address, [], [COUNTRY_US]);
+      expect(await can(ethers.ZeroAddress, usHolder.address)).to.equal(false);
+    });
+
+    it("an empty per-token rule still blocks a default-blocked country", async function () {
+      await rules
+        .connect(admin)
+        .setJurisdictionRule(tokenContract.address, [], []);
+      expect(await can(usHolder.address, ruHolder.address)).to.equal(false);
+      const [ok] = await rules.validateJurisdiction(
+        tokenContract.address,
+        COUNTRY_SANCTIONED,
+      );
+      expect(ok).to.equal(false);
+      expect(await can(usHolder.address, usHolder2.address)).to.equal(true);
+    });
+
+    it("clearJurisdictionRule restores the default rule", async function () {
+      await rules
+        .connect(admin)
+        .setJurisdictionRule(tokenContract.address, [], [COUNTRY_US]);
+      expect(await can(usHolder.address, usHolder2.address)).to.equal(false);
+
+      await expect(
+        rules.connect(admin).clearJurisdictionRule(tokenContract.address),
+      )
+        .to.emit(rules, "JurisdictionRuleCleared")
+        .withArgs(tokenContract.address);
+      expect(await can(usHolder.address, usHolder2.address)).to.equal(true);
+      expect(await can(usHolder.address, ruHolder.address)).to.equal(false);
+      await expect(
+        rules.connect(user).clearJurisdictionRule(tokenContract.address),
+      ).to.be.revertedWith("ComplianceRules: Only governance can update rules");
     });
   });
 });

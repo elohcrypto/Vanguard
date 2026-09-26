@@ -173,6 +173,40 @@ describe("recoveryAddress", function () {
       .be.reverted;
   });
 
+  // Task 2A.6: recovery moved the balance with _transfer and never asked
+  // compliance, so a balance could be recovered into a blacklisted wallet.
+  describe("with a blacklist oracle bound to the token", function () {
+    let bl: any;
+
+    beforeEach(async function () {
+      const om = await (
+        await ethers.getContractFactory("OracleManager")
+      ).deploy();
+      bl = await (
+        await ethers.getContractFactory("BlacklistOracle")
+      ).deploy(await om.getAddress(), "BL", "blacklist");
+      await rules.setBlacklistOracle(
+        await token.getAddress(),
+        await bl.getAddress(),
+      );
+    });
+
+    it("refuses to recover into a blacklisted wallet", async function () {
+      await bl.addToBlacklist(fresh.address, 2, 0, "AML risk");
+      await expect(
+        token.recoveryAddress(lost.address, fresh.address, lostId),
+      ).to.be.revertedWith("Recovery blocked by compliance");
+      expect(await token.balanceOf(lost.address)).to.equal(E("1000"));
+      expect(await idReg.identity(lost.address)).to.equal(lostId);
+    });
+
+    it("still recovers into a clean wallet", async function () {
+      await expect(token.recoveryAddress(lost.address, fresh.address, lostId))
+        .to.not.be.reverted;
+      expect(await token.balanceOf(fresh.address)).to.equal(E("1000"));
+    });
+  });
+
   // Found reviewing PR #4: the registry is shared by every token, so the first
   // token's recovery moves the person's identity and every OTHER token then saw
   // identity(lost) == 0 and reverted "Invalid identity", leaving those balances

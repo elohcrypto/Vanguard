@@ -234,21 +234,14 @@ describe("Governance Token KYC/AML Restriction Test", function () {
       expect(isVerified).to.be.false;
 
       console.log("\n📊 Checking if transfer is allowed...");
-      // canTransfer reverts for unverified users instead of returning false
-      try {
+      // canTransfer is a predicate: false for unverified users
+      expect(
         await governanceToken.canTransfer(
           owner.address,
           unverifiedUser.address,
           VGT(10000),
-        );
-        console.log("   ❌ UNEXPECTED: canTransfer did not revert");
-        expect.fail("Should have reverted");
-      } catch (error: any) {
-        console.log(
-          `   ✅ canTransfer reverted: ${error.message.includes("Recipient not verified") ? "Recipient not verified" : error.message}`,
-        );
-        expect(error.message).to.include("Recipient not verified");
-      }
+        ),
+      ).to.equal(false);
 
       console.log("\n📊 Attempting to distribute governance tokens...");
       try {

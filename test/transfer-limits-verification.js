@@ -134,13 +134,10 @@ describe("Transfer Limits Verification - 8,000 Yuan Max", function () {
     });
 
     it("Should verify transfer limit is enforced in canTransfer check", async function () {
-      // Check that canTransfer reverts for over-limit amounts
-      try {
-        await token.canTransfer(bank.address, investor2.address, OVER_LIMIT);
-        expect.fail("Should have reverted");
-      } catch (error) {
-        expect(error.message).to.include("Transfer amount limit exceeded");
-      }
+      // canTransfer is a predicate: false for over-limit amounts
+      expect(
+        await token.canTransfer(bank.address, investor2.address, OVER_LIMIT),
+      ).to.equal(false);
 
       // Check that canTransfer returns true for under-limit amounts
       const canTransferUnder = await token.canTransfer(
@@ -184,17 +181,14 @@ describe("Transfer Limits Verification - 8,000 Yuan Max", function () {
     });
 
     it("Should verify investor transfer limit in canTransfer check", async function () {
-      // Check that canTransfer reverts for over-limit amounts
-      try {
+      // canTransfer is a predicate: false for over-limit amounts
+      expect(
         await token.canTransfer(
           investor1.address,
           investor2.address,
           OVER_LIMIT,
-        );
-        expect.fail("Should have reverted");
-      } catch (error) {
-        expect(error.message).to.include("Transfer amount limit exceeded");
-      }
+        ),
+      ).to.equal(false);
 
       // Check that canTransfer returns true for under-limit amounts
       const canTransferUnder = await token.canTransfer(
@@ -282,18 +276,15 @@ describe("Transfer Limits Verification - 8,000 Yuan Max", function () {
       );
       expect(canTransferExact).to.be.true;
 
-      // Test 1 wei over the limit - should revert
+      // Test 1 wei over the limit - should return false
       const overByOne = exactLimit + 1n;
-      try {
+      expect(
         await token.canTransfer(
           investor1.address,
           investor2.address,
           overByOne,
-        );
-        expect.fail("Should have reverted");
-      } catch (error) {
-        expect(error.message).to.include("Transfer amount limit exceeded");
-      }
+        ),
+      ).to.equal(false);
     });
 
     it("Should verify limits apply to all transfer methods", async function () {

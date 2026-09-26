@@ -10,6 +10,10 @@ pragma solidity ^0.8.20;
 interface IComplianceHooks {
     function canTransfer(address from, address to, uint256 amount) external view returns (bool);
 
+    /// @notice Oracle blacklist/whitelist gate for the calling token on a
+    ///         recipient; no identity or jurisdiction. Used by wallet recovery.
+    function canReceive(address to) external view returns (bool);
+
     function transferred(address from, address to, uint256 amount) external;
 
     function created(address to, uint256 amount) external;

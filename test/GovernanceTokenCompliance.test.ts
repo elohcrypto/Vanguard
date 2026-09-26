@@ -393,17 +393,14 @@ describe("🔒 Governance Token Compliance - Complete Proof", function () {
       );
       expect(toVerified).to.be.true;
 
-      // canTransfer reverts for unverified users instead of returning false
-      try {
+      // canTransfer is a predicate: false for unverified users
+      expect(
         await governanceToken.canTransfer(
           owner.address,
           unverifiedUser.address,
           VGT(100),
-        );
-        expect.fail("Should have reverted");
-      } catch (error: any) {
-        expect(error.message).to.include("Recipient not verified");
-      }
+        ),
+      ).to.equal(false);
     });
 
     it("✅ Voting power equals token balance", async function () {

@@ -211,15 +211,35 @@ contract ComplianceRules is IComplianceRules, IComplianceHooks, Ownable, Reentra
         return true;
     }
 
+    /**
+     * @notice Token-aware marker: true only once an IdentityRegistry is bound
+     *         for `token`. Without one, canTransfer refuses every non-mint,
+     *         non-burn transfer for that token (fail closed).
+     */
+    function isProductionCompliance(address token) external view returns (bool) {
+        return tokenIdentityRegistry[token] != address(0);
+    }
+
     function canTransfer(
         address from,
         address to,
         uint256 /* amount */
     ) external view returns (bool) {
         // Minting (from == address(0)): the recipient still faces the oracle
-        // gates, so tokens cannot be issued to a blacklisted address.
+        // gates, so tokens cannot be issued to a blacklisted address. When a
+        // registry is bound, the recipient must also be verified and pass the
+        // country rule. Without a registry, mint keeps oracle gating only
+        // (Token checks the recipient's identity itself).
         if (from == address(0)) {
-            return _oraclesAllow(msg.sender, address(0), to);
+            if (!_oraclesAllow(msg.sender, address(0), to)) {
+                return false;
+            }
+            address mintRegistryAddr = tokenIdentityRegistry[msg.sender];
+            if (mintRegistryAddr == address(0)) {
+                return true;
+            }
+            IIdentityRegistry mintRegistry = IIdentityRegistry(mintRegistryAddr);
+            return mintRegistry.isVerified(to) && _countryAllowed(msg.sender, mintRegistry, to);
         }
 
         // Burning (to == address(0)): never gated. Burning is how an operator
@@ -244,108 +264,100 @@ contract ComplianceRules is IComplianceRules, IComplianceHooks, Ownable, Reentra
             return false; // ❌ BLOCK: blacklisted party, no bypass
         }
 
-        // If IdentityRegistry is configured, verify both sender and recipient
-        if (identityRegistryAddr != address(0)) {
-            IIdentityRegistry identityRegistry = IIdentityRegistry(identityRegistryAddr);
+        // ✅ FAIL CLOSED: without a bound IdentityRegistry nobody can be
+        // verified, so no transfer passes. Mint (oracle gating) and burn are
+        // handled above.
+        if (identityRegistryAddr == address(0)) {
+            return false; // ❌ BLOCK: no identity registry bound for this token
+        }
+        IIdentityRegistry identityRegistry = IIdentityRegistry(identityRegistryAddr);
 
-            // ✅ ALLOW: Trusted contracts (escrow wallets) can bypass KYC/AML AND jurisdiction
-            // This is safe because:
-            // 1. Only owner can add trusted contracts
-            // 2. Escrow wallets are created by verified investors who already passed jurisdiction checks
-            // 3. Escrow wallets enforce their own multi-sig rules
-            // 4. The investor who created the wallet is compliant, so the wallet inherits compliance
-            if (trustedContracts[from] || trustedContracts[to]) {
-                // Still check jurisdiction rules for the non-trusted party
-                address partyToCheck = trustedContracts[from] ? to : from;
+        // Trusted contracts (escrow wallets) skip the KYC and whitelist checks
+        // for THEMSELVES only. The non-trusted counterparty must still be
+        // verified, pass the whitelist, and pass the country rule: an escrow
+        // must not carry funds to or from a blocked jurisdiction.
+        if (trustedContracts[from] || trustedContracts[to]) {
+            address partyToCheck = trustedContracts[from] ? to : from;
 
-                // If the other party is also trusted, allow
-                if (trustedContracts[partyToCheck]) {
-                    return true;
-                }
-
-                // Check if the non-trusted party is verified
-                if (!identityRegistry.isVerified(partyToCheck)) {
-                    return false;
-                }
-
-                // The whitelist applies to the non-trusted counterparty. The
-                // escrow wallet itself is exempt (a contract will never be on
-                // an investor allow list), but an UNLISTED investor must not be
-                // able to route around the allow list by going through escrow.
-                if (!_whitelistAllows(token, partyToCheck, address(0))) {
-                    return false;
-                }
-
-                // ✅ ALLOW: Trusted contracts bypass jurisdiction checks
-                // Rationale: The escrow wallet was created by a verified investor
-                // who already passed jurisdiction checks. The wallet inherits the
-                // investor's compliance status. We only verify that the other party
-                // (payer/payee) has valid KYC/AML, but we don't check their jurisdiction
-                // because the escrow wallet acts as a trusted intermediary.
-                //
-                // Security: This is safe because:
-                // - Only owner can add trusted contracts
-                // - Escrow wallets are created by compliant investors
-                // - Payer/Payee must still be KYC/AML verified
-                // - Escrow wallets enforce multi-sig release conditions
-
+            // Both parties trusted: contract-to-contract move, nothing to check.
+            if (trustedContracts[partyToCheck]) {
                 return true;
             }
 
-            // ✅ ENFORCE: whitelist (allow list). The blacklist was already
-            // applied above, on every path including trusted contracts, so only
-            // the whitelist remains here. Checked before identity so a listed
-            // address is rejected even when it holds valid KYC. Off unless an
-            // oracle is set.
-            if (!_whitelistAllows(token, from, to)) {
-                return false; // ❌ BLOCK: whitelist gate
+            if (!identityRegistry.isVerified(partyToCheck)) {
+                return false; // ❌ BLOCK: counterparty not verified
             }
 
-            // ✅ ENFORCE: Recipient MUST be KYC/AML verified (NO BYPASS)
-            if (!identityRegistry.isVerified(to)) {
-                return false; // ❌ BLOCK: Recipient not verified
+            // The escrow wallet itself is exempt from the whitelist (a contract
+            // will never be on an investor allow list), but an UNLISTED investor
+            // must not route around the allow list by going through escrow.
+            if (!_whitelistAllows(token, partyToCheck, address(0))) {
+                return false;
             }
 
-            // ✅ ENFORCE: Sender MUST be KYC/AML verified (NO BYPASS)
-            if (!identityRegistry.isVerified(from)) {
-                return false; // ❌ BLOCK: Sender not verified
-            }
-
-            // ✅ ENFORCE: Jurisdiction rules (check sender and recipient countries)
-            JurisdictionRule storage jurisdictionRule = _getJurisdictionRule(token);
-            if (jurisdictionRule.isActive) {
-                // Check sender's country
-                uint16 senderCountry = identityRegistry.investorCountry(from);
-                if (jurisdictionRule.blockedCountryMap[senderCountry]) {
-                    return false; // ❌ BLOCK: Sender country is blocked
-                }
-                if (jurisdictionRule.allowedCountries.length > 0) {
-                    if (!jurisdictionRule.allowedCountryMap[senderCountry]) {
-                        return false; // ❌ BLOCK: Sender country not in allowed list
-                    }
-                }
-
-                // Check recipient's country
-                uint16 recipientCountry = identityRegistry.investorCountry(to);
-                if (jurisdictionRule.blockedCountryMap[recipientCountry]) {
-                    return false; // ❌ BLOCK: Recipient country is blocked
-                }
-                if (jurisdictionRule.allowedCountries.length > 0) {
-                    if (!jurisdictionRule.allowedCountryMap[recipientCountry]) {
-                        return false; // ❌ BLOCK: Recipient country not in allowed list
-                    }
-                }
-            }
+            return _countryAllowed(token, identityRegistry, partyToCheck);
         }
 
-        // Registry not wired for this token: the blacklist already ran above.
-        // Still apply the whitelist so oracle gating never depends on wiring.
-        if (identityRegistryAddr == address(0) && !_whitelistAllows(token, from, to)) {
-            return false;
+        // ✅ ENFORCE: whitelist (allow list). The blacklist was already
+        // applied above, on every path including trusted contracts, so only
+        // the whitelist remains here. Checked before identity so a listed
+        // address is rejected even when it holds valid KYC. Off unless an
+        // oracle is set.
+        if (!_whitelistAllows(token, from, to)) {
+            return false; // ❌ BLOCK: whitelist gate
         }
 
-        // All checks passed
-        return true;
+        // ✅ ENFORCE: Recipient MUST be KYC/AML verified (NO BYPASS)
+        if (!identityRegistry.isVerified(to)) {
+            return false; // ❌ BLOCK: Recipient not verified
+        }
+
+        // ✅ ENFORCE: Sender MUST be KYC/AML verified (NO BYPASS)
+        if (!identityRegistry.isVerified(from)) {
+            return false; // ❌ BLOCK: Sender not verified
+        }
+
+        // ✅ ENFORCE: Jurisdiction rules for both parties
+        return _countryAllowed(token, identityRegistry, from) && _countryAllowed(token, identityRegistry, to);
+    }
+
+    /**
+     * @notice Oracle gate only (blacklist, then whitelist) for the calling
+     *         token on `to`. No identity or jurisdiction: wallet recovery moves
+     *         the same holder's balance, so it re-checks the lists alone.
+     */
+    function canReceive(address to) external view returns (bool) {
+        return _oraclesAllow(msg.sender, address(0), to);
+    }
+
+    /**
+     * @dev Country rule for one party, as recorded in the token's registry.
+     */
+    function _countryAllowed(address token, IIdentityRegistry registry, address party) private view returns (bool) {
+        return _countryVerdict(token, registry.investorCountry(party)) == 0;
+    }
+
+    /**
+     * @dev 0 = allowed, 1 = blocked, 2 = not in allowed list. The default
+     *      blocked list (sanctions) always applies; a per-token rule, when
+     *      active, is checked on top of it and cannot remove it. With no
+     *      per-token rule the full default rule (blocked, then allowed) applies.
+     */
+    function _countryVerdict(address token, uint256 country) private view returns (uint8) {
+        if (defaultJurisdictionRule.blockedCountryMap[country]) {
+            return 1;
+        }
+        JurisdictionRule storage rule = _getJurisdictionRule(token);
+        if (!rule.isActive) {
+            return 0;
+        }
+        if (rule.blockedCountryMap[country]) {
+            return 1;
+        }
+        if (rule.allowedCountries.length > 0 && !rule.allowedCountryMap[country]) {
+            return 2;
+        }
+        return 0;
     }
 
     // Token calls these three after every mint, burn and transfer through its
@@ -420,6 +432,7 @@ contract ComplianceRules is IComplianceRules, IComplianceHooks, Ownable, Reentra
 
     // Events
     event JurisdictionRuleUpdated(address indexed token, uint256[] allowedCountries, uint256[] blockedCountries);
+    event JurisdictionRuleCleared(address indexed token);
     event InvestorTypeRuleUpdated(address indexed token, uint8[] allowedTypes, uint8[] blockedTypes);
     event HoldingPeriodRuleUpdated(address indexed token, uint256 minimumHoldingPeriod, uint256 transferCooldown);
     event ComplianceLevelRuleUpdated(address indexed token, uint8 minimumLevel, uint8 maximumLevel);
@@ -470,6 +483,7 @@ contract ComplianceRules is IComplianceRules, IComplianceHooks, Ownable, Reentra
     ) external onlyOwner {
         require(token != address(0), "ComplianceRules: Invalid token address");
         require(identityRegistry != address(0), "ComplianceRules: Invalid identity registry address");
+        require(identityRegistry.code.length > 0, "ComplianceRules: registry is not a contract");
 
         tokenIdentityRegistry[token] = identityRegistry;
         emit TokenIdentityRegistrySet(token, identityRegistry);
@@ -525,6 +539,26 @@ contract ComplianceRules is IComplianceRules, IComplianceHooks, Ownable, Reentra
         }
 
         emit JurisdictionRuleUpdated(token, allowedCountries, blockedCountries);
+    }
+
+    /**
+     * @dev Remove a token's own jurisdiction rule so the default rule applies
+     *      again. Clears the stored arrays and lookup maps.
+     */
+    function clearJurisdictionRule(address token) external onlyGovernance {
+        require(token != address(0), "ComplianceRules: Invalid token address");
+        JurisdictionRule storage rule = jurisdictionRules[token];
+        for (uint256 i = 0; i < rule.allowedCountries.length; i++) {
+            delete rule.allowedCountryMap[rule.allowedCountries[i]];
+        }
+        for (uint256 i = 0; i < rule.blockedCountries.length; i++) {
+            delete rule.blockedCountryMap[rule.blockedCountries[i]];
+        }
+        delete rule.allowedCountries;
+        delete rule.blockedCountries;
+        rule.isActive = false;
+        rule.lastUpdated = block.timestamp;
+        emit JurisdictionRuleCleared(token);
     }
 
     /**
@@ -632,24 +666,15 @@ contract ComplianceRules is IComplianceRules, IComplianceHooks, Ownable, Reentra
         address token,
         uint256 countryCode
     ) external view override returns (bool isValid, string memory reason) {
-        JurisdictionRule storage rule = _getJurisdictionRule(token);
-
-        if (!rule.isActive) {
-            return (true, "No jurisdiction rules active");
-        }
-
-        // Check if country is blocked
-        if (rule.blockedCountryMap[countryCode]) {
+        // Same rule canTransfer applies: default blocked list always, then the
+        // per-token rule when active.
+        uint8 verdict = _countryVerdict(token, countryCode);
+        if (verdict == 1) {
             return (false, "Country is blocked");
         }
-
-        // If allowed countries list exists, check if country is allowed
-        if (rule.allowedCountries.length > 0) {
-            if (!rule.allowedCountryMap[countryCode]) {
-                return (false, "Country not in allowed list");
-            }
+        if (verdict == 2) {
+            return (false, "Country not in allowed list");
         }
-
         return (true, "Jurisdiction validation passed");
     }
 

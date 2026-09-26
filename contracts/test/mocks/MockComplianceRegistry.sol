@@ -10,6 +10,10 @@ contract MockComplianceRegistry {
         return true; // Always allow for demo
     }
 
+    function canReceive(address /* to */) external pure returns (bool) {
+        return true;
+    }
+
     function transferred(address from, address to, uint256 amount) external {
         // Mock implementation - do nothing
     }
