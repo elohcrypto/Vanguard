@@ -15,6 +15,7 @@ import {
   configureKyc,
   KYC_TOPIC as REGISTRY_KYC_TOPIC,
   AML_TOPIC as REGISTRY_AML_TOPIC,
+  issueSigned,
 } from "../helpers/kyc";
 
 describe("Investor Onboarding System", function () {
@@ -110,19 +111,21 @@ describe("Investor Onboarding System", function () {
     );
 
     // Issue KYC and AML claims
-    await kycIssuer.issueClaim(
+    await issueSigned(
+      kycIssuer,
+      owner,
       await onchainID.getAddress(),
       1, // KYC topic
-      1, // scheme
       ethers.toUtf8Bytes("KYC verified"),
       "",
       0,
     );
 
-    await amlIssuer.issueClaim(
+    await issueSigned(
+      amlIssuer,
+      owner,
       await onchainID.getAddress(),
       2, // AML topic
-      1, // scheme
       ethers.toUtf8Bytes("AML verified"),
       "",
       0,

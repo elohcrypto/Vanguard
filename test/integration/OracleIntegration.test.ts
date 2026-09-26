@@ -13,7 +13,7 @@ import {
   IdentityRegistry,
   ComplianceRegistry,
 } from "../../typechain-types";
-import { attest, configureKyc } from "../helpers/kyc";
+import { attest, configureKyc, issueSigned } from "../helpers/kyc";
 
 describe("Oracle Integration with OnchainID and ERC-3643", function () {
   // Contract instances
@@ -198,10 +198,11 @@ describe("Oracle Integration with OnchainID and ERC-3643", function () {
         ["John Doe", "US", Date.now()],
       );
 
-      const tx1 = await claimIssuer.connect(kycProvider).issueClaim(
+      const tx1 = await issueSigned(
+        claimIssuer,
+        kycProvider,
         onchainIDAddress,
         KYC_CLAIM_TOPIC,
-        1, // scheme
         kycClaimData,
         "", // uri
         Math.floor(Date.now() / 1000) + 86400, // validTo (24 hours from now)
@@ -347,10 +348,11 @@ describe("Oracle Integration with OnchainID and ERC-3643", function () {
         ["AML_CLEAR", Date.now(), true],
       );
 
-      const tx3 = await claimIssuer.connect(amlProvider).issueClaim(
+      const tx3 = await issueSigned(
+        claimIssuer,
+        amlProvider,
         onchainIDAddress,
         AML_CLAIM_TOPIC,
-        1, // scheme
         amlClaimData,
         "", // uri
         Math.floor(Date.now() / 1000) + 86400, // validTo (24 hours from now)
@@ -981,10 +983,11 @@ describe("Oracle Integration with OnchainID and ERC-3643", function () {
         ["string", "string", "uint256"],
         ["John Doe", "US", Date.now()],
       );
-      const tx4 = await claimIssuer.connect(kycProvider).issueClaim(
+      const tx4 = await issueSigned(
+        claimIssuer,
+        kycProvider,
         onchainIDAddress,
         KYC_CLAIM_TOPIC,
-        1,
         kycClaimData,
         "", // uri
         Math.floor(Date.now() / 1000) + 86400, // validTo (24 hours from now)
@@ -997,10 +1000,11 @@ describe("Oracle Integration with OnchainID and ERC-3643", function () {
         ["string", "uint256", "bool"],
         ["AML_CLEAR", Date.now(), true],
       );
-      const tx5 = await claimIssuer.connect(amlProvider).issueClaim(
+      const tx5 = await issueSigned(
+        claimIssuer,
+        amlProvider,
         onchainIDAddress,
         AML_CLAIM_TOPIC,
-        1,
         amlClaimData,
         "", // uri
         Math.floor(Date.now() / 1000) + 86400, // validTo (24 hours from now)

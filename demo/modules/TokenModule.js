@@ -18,7 +18,7 @@ const {
   displayError,
   displayProgress,
 } = require("../utils/DisplayHelpers");
-const { attestAll } = require("../utils/Kyc");
+const { attestAll, signClaim } = require("../utils/Kyc");
 const { ethers } = require("hardhat");
 
 /**
@@ -1919,13 +1919,21 @@ class TokenModule {
       );
 
       const kycIssuer = this.state.getContract("kycIssuer");
-      const tx2 = await kycIssuer.connect(this.state.signers[2]).issueClaim(
+      const kycSigner = this.state.signers[2];
+      const kycSig = await signClaim(
+        kycSigner,
+        identityAddress,
+        kycTopic,
+        kycData,
+      );
+      const tx2 = await kycIssuer.connect(kycSigner).issueClaim(
         identityAddress,
         kycTopic,
         1, // scheme: ECDSA signature
         kycData,
         "", // uri: empty for now
         0, // validTo: 0 = no expiry
+        kycSig,
       );
       const receipt2 = await tx2.wait();
       totalGasUsed += receipt2.gasUsed;

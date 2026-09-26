@@ -9,7 +9,7 @@ import {
   ClaimIssuer,
   InvestorTypeRegistry,
 } from "../typechain-types";
-import { attest, configureKyc } from "./helpers/kyc";
+import { attest, configureKyc, issueSigned } from "./helpers/kyc";
 
 /**
  * Complete an Ownable2Step handover on behalf of a CONTRACT nominee.
@@ -179,10 +179,11 @@ describe("Fair Voting System (1 Person = 1 Vote)", function () {
       const kycData = ethers.hexlify(ethers.toUtf8Bytes("KYC_APPROVED"));
       const validTo = 0; // No expiration
 
-      await claimIssuer.issueClaim(
+      await issueSigned(
+        claimIssuer,
+        owner,
         identityAddress,
         1, // KYC topic
-        1, // ECDSA scheme
         kycData,
         "", // URI
         validTo,
@@ -216,10 +217,11 @@ describe("Fair Voting System (1 Person = 1 Vote)", function () {
       await onchainIDFactory.getIdentityByOwner(govAddress);
 
     const kycData = ethers.hexlify(ethers.toUtf8Bytes("KYC_APPROVED"));
-    await claimIssuer.issueClaim(
+    await issueSigned(
+      claimIssuer,
+      owner,
       govIdentityAddress,
       1, // KYC topic
-      1, // ECDSA scheme
       kycData,
       "", // URI
       0, // No expiration

@@ -8,7 +8,7 @@ import {
   Token,
   ComplianceRegistry,
 } from "../../typechain-types";
-import { attest, configureKyc } from "../helpers/kyc";
+import { attest, configureKyc, issueSigned } from "../helpers/kyc";
 
 describe("ERC-3643 and OnchainID Integration Tests", function () {
   let onchainIDFactory: OnchainIDFactory;
@@ -145,10 +145,11 @@ describe("ERC-3643 and OnchainID Integration Tests", function () {
 
     it("should issue KYC claims to OnchainID", async function () {
       // Issue KYC claim
-      await kycIssuer.connect(kycProvider).issueClaim(
+      await issueSigned(
+        kycIssuer,
+        kycProvider,
         investor1Identity,
         CLAIM_TOPICS.KYC,
-        1, // scheme
         ethers.toUtf8Bytes("KYC verified for US investor"),
         "", // uri
         0, // No expiry
@@ -170,16 +171,15 @@ describe("ERC-3643 and OnchainID Integration Tests", function () {
 
     it("should handle claim revocation", async function () {
       // Issue KYC claim
-      await kycIssuer
-        .connect(kycProvider)
-        .issueClaim(
-          investor1Identity,
-          CLAIM_TOPICS.KYC,
-          1,
-          ethers.toUtf8Bytes("KYC verified"),
-          "",
-          0,
-        );
+      await issueSigned(
+        kycIssuer,
+        kycProvider,
+        investor1Identity,
+        CLAIM_TOPICS.KYC,
+        ethers.toUtf8Bytes("KYC verified"),
+        "",
+        0,
+      );
 
       // Get claim ID from OnchainID
       const onchainID = await ethers.getContractAt(

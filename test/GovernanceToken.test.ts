@@ -7,6 +7,7 @@ import {
   configureKyc,
   KYC_TOPIC as REGISTRY_KYC_TOPIC,
   AML_TOPIC as REGISTRY_AML_TOPIC,
+  issueSigned,
 } from "./helpers/kyc";
 
 describe("Governance Token System", function () {
@@ -86,20 +87,22 @@ describe("Governance Token System", function () {
     );
 
     const ownerKycData = ethers.hexlify(ethers.toUtf8Bytes("KYC_APPROVED"));
-    await kycIssuer.issueClaim(
+    await issueSigned(
+      kycIssuer,
+      owner,
       ownerIdentityAddress,
       KYC_TOPIC,
-      1,
       ownerKycData,
       "",
       0,
     );
 
     const ownerAmlData = ethers.hexlify(ethers.toUtf8Bytes("AML_APPROVED"));
-    await amlIssuer.issueClaim(
+    await issueSigned(
+      amlIssuer,
+      owner,
       ownerIdentityAddress,
       AML_TOPIC,
-      1,
       ownerAmlData,
       "",
       0,
@@ -172,19 +175,21 @@ describe("Governance Token System", function () {
 
     // Issue KYC and AML claims for governance contract
     const kycData = ethers.hexlify(ethers.toUtf8Bytes("GOVERNANCE_CONTRACT"));
-    await kycIssuer.issueClaim(
+    await issueSigned(
+      kycIssuer,
+      owner,
       govIdentityAddress,
       KYC_TOPIC,
-      1,
       kycData,
       "",
       0,
     );
     const amlData = ethers.hexlify(ethers.toUtf8Bytes("GOVERNANCE_CONTRACT"));
-    await amlIssuer.issueClaim(
+    await issueSigned(
+      amlIssuer,
+      owner,
       govIdentityAddress,
       AML_TOPIC,
-      1,
       amlData,
       "",
       0,
@@ -217,10 +222,11 @@ describe("Governance Token System", function () {
 
     // Issue KYC claim
     const kycData = ethers.hexlify(ethers.toUtf8Bytes("KYC_APPROVED"));
-    await kycIssuer.issueClaim(
+    await issueSigned(
+      kycIssuer,
+      owner,
       identityAddress,
       KYC_TOPIC,
-      1, // scheme
       kycData,
       "",
       0,
@@ -228,10 +234,11 @@ describe("Governance Token System", function () {
 
     // Issue AML claim
     const amlData = ethers.hexlify(ethers.toUtf8Bytes("AML_APPROVED"));
-    await amlIssuer.issueClaim(
+    await issueSigned(
+      amlIssuer,
+      owner,
       identityAddress,
       AML_TOPIC,
-      1, // scheme
       amlData,
       "",
       0,

@@ -37,6 +37,46 @@ export async function configureKyc(
 }
 
 /**
+ * EIP-191 signature by `signer` over keccak256(abi.encodePacked(identity,
+ * topic, data)), the payload ClaimIssuer.issueClaim and verifyClaim check.
+ */
+export async function signClaim(
+  signer: SignerWithAddress,
+  identityAddr: string,
+  topic: number | bigint,
+  data: Uint8Array | string,
+): Promise<string> {
+  return signer.signMessage(
+    ethers.getBytes(
+      ethers.solidityPackedKeccak256(
+        ["address", "uint256", "bytes"],
+        [identityAddr, topic, data],
+      ),
+    ),
+  );
+}
+
+/**
+ * Issues a claim from `issuer`, sent and signed by `issuerSigner`, with the
+ * given scheme data, uri and expiry. Returns the transaction so callers can
+ * assert on events or reverts.
+ */
+export async function issueSigned(
+  issuer: ClaimIssuer,
+  issuerSigner: SignerWithAddress,
+  identityAddr: string,
+  topic: number | bigint,
+  data: Uint8Array | string,
+  uri: string = "",
+  validTo: number | bigint = 0,
+) {
+  const sig = await signClaim(issuerSigner, identityAddr, topic, data);
+  return issuer
+    .connect(issuerSigner)
+    .issueClaim(identityAddr, topic, 1, data, uri, validTo, sig);
+}
+
+/**
  * Issues a claim from `issuer` (signed by `issuerSigner`) onto the
  * identity at `identityAddr` for `topic`.
  */
@@ -48,9 +88,15 @@ export async function attest(
   validTo: number = 0,
   data: Uint8Array = KYC_DATA,
 ): Promise<void> {
-  await issuer
-    .connect(issuerSigner)
-    .issueClaim(identityAddr, topic, 1, data, "", validTo);
+  await issueSigned(
+    issuer,
+    issuerSigner,
+    identityAddr,
+    topic,
+    data,
+    "",
+    validTo,
+  );
 }
 
 /**

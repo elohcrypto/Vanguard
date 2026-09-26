@@ -7,6 +7,7 @@ import {
   configureKyc,
   KYC_TOPIC as REGISTRY_KYC_TOPIC,
   AML_TOPIC as REGISTRY_AML_TOPIC,
+  issueSigned,
 } from "./helpers/kyc";
 
 describe("Governance → ComplianceRules Integration Test", function () {
@@ -135,19 +136,21 @@ describe("Governance → ComplianceRules Integration Test", function () {
     );
 
     const kycData = ethers.hexlify(ethers.toUtf8Bytes("GOVERNANCE_CONTRACT"));
-    await kycIssuer.issueClaim(
+    await issueSigned(
+      kycIssuer,
+      owner,
       govIdentityAddress,
       KYC_TOPIC,
-      1,
       kycData,
       "",
       0,
     );
     const amlData = ethers.hexlify(ethers.toUtf8Bytes("GOVERNANCE_CONTRACT"));
-    await amlIssuer.issueClaim(
+    await issueSigned(
+      amlIssuer,
+      owner,
       govIdentityAddress,
       AML_TOPIC,
-      1,
       amlData,
       "",
       0,
@@ -178,10 +181,26 @@ describe("Governance → ComplianceRules Integration Test", function () {
     );
 
     const kycData = ethers.hexlify(ethers.toUtf8Bytes("KYC_APPROVED"));
-    await kycIssuer.issueClaim(identityAddress, KYC_TOPIC, 1, kycData, "", 0);
+    await issueSigned(
+      kycIssuer,
+      owner,
+      identityAddress,
+      KYC_TOPIC,
+      kycData,
+      "",
+      0,
+    );
 
     const amlData = ethers.hexlify(ethers.toUtf8Bytes("AML_APPROVED"));
-    await amlIssuer.issueClaim(identityAddress, AML_TOPIC, 1, amlData, "", 0);
+    await issueSigned(
+      amlIssuer,
+      owner,
+      identityAddress,
+      AML_TOPIC,
+      amlData,
+      "",
+      0,
+    );
 
     await identityRegistry.registerIdentity(signer.address, identityAddress, 0);
     // Attest the topics the registry actually requires (plan Task 1R.2),

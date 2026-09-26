@@ -5,6 +5,7 @@ import {
   ProductionEnvironment,
   ProductionUtils,
 } from "./ProductionEnvironment";
+import { issueSigned } from "../helpers/kyc";
 
 /**
  * Production Simulation Test Suite
@@ -339,16 +340,15 @@ describe("🏭 Production Simulation - OnchainID System", function () {
         ["string"],
         [JSON.stringify(accreditationData)],
       );
-      await prodEnv.complianceIssuer
-        .connect(prodEnv.complianceOfficer)
-        .issueClaim(
-          institutionalAddress,
-          prodEnv.config.accreditationTopic,
-          prodEnv.config.ecdsaScheme,
-          claimData,
-          `https://compliance-provider.com/accreditation/${institutionalAddress}`,
-          Math.floor(Date.now() / 1000) + prodEnv.config.claimValidityPeriod,
-        );
+      await issueSigned(
+        prodEnv.complianceIssuer,
+        prodEnv.complianceOfficer,
+        institutionalAddress,
+        prodEnv.config.accreditationTopic,
+        claimData,
+        `https://compliance-provider.com/accreditation/${institutionalAddress}`,
+        Math.floor(Date.now() / 1000) + prodEnv.config.claimValidityPeriod,
+      );
 
       console.log("✅ Advanced institutional compliance configured");
 

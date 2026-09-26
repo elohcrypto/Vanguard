@@ -8,7 +8,7 @@ import {
   Token,
   ComplianceRegistry,
 } from "../../typechain-types";
-import { attest, configureKyc } from "../helpers/kyc";
+import { attest, configureKyc, issueSigned } from "../helpers/kyc";
 
 describe("95% Test Coverage Verification", function () {
   let onchainIDFactory: OnchainIDFactory;
@@ -91,10 +91,11 @@ describe("95% Test Coverage Verification", function () {
       );
 
       // Test claim issuance
-      await claimIssuer.issueClaim(
+      await issueSigned(
+        claimIssuer,
+        owner,
         identityAddress,
         1, // KYC topic
-        1, // scheme
         ethers.toUtf8Bytes("KYC verified"),
         "", // uri
         0, // No expiry
@@ -194,10 +195,11 @@ describe("95% Test Coverage Verification", function () {
       );
 
       // 3. Issue KYC claim
-      await claimIssuer.issueClaim(
+      await issueSigned(
+        claimIssuer,
+        owner,
         identityAddress,
         1, // KYC topic
-        1, // scheme
         ethers.toUtf8Bytes("KYC verified"),
         "", // uri
         0, // No expiry

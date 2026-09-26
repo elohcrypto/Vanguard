@@ -2,6 +2,7 @@ import { expect } from "chai";
 import { ethers } from "hardhat";
 import { SignerWithAddress } from "@nomicfoundation/hardhat-ethers/signers";
 import { ClaimIssuer, OnchainID } from "../typechain-types";
+import { issueSigned, signClaim } from "./helpers/kyc";
 
 describe("ClaimIssuer", function () {
   let claimIssuer: ClaimIssuer;
@@ -204,10 +205,11 @@ describe("ClaimIssuer", function () {
 
     describe("issueClaim", function () {
       it("Should allow claim signer to issue claim", async function () {
-        const tx = await claimIssuer.connect(claimSigner).issueClaim(
+        const tx = await issueSigned(
+          claimIssuer,
+          claimSigner,
           await onchainID.getAddress(),
           KYC_TOPIC,
-          ECDSA_SCHEME,
           claimData,
           "https://example.com/kyc",
           0, // No expiry
@@ -230,31 +232,29 @@ describe("ClaimIssuer", function () {
 
       it("Should allow owner to issue claim", async function () {
         await expect(
-          claimIssuer
-            .connect(owner)
-            .issueClaim(
-              await onchainID.getAddress(),
-              KYC_TOPIC,
-              ECDSA_SCHEME,
-              claimData,
-              "https://example.com/kyc",
-              0,
-            ),
+          issueSigned(
+            claimIssuer,
+            owner,
+            await onchainID.getAddress(),
+            KYC_TOPIC,
+            claimData,
+            "https://example.com/kyc",
+            0,
+          ),
         ).to.emit(claimIssuer, "ClaimIssued");
       });
 
       it("Should reject claim issuance by unauthorized user", async function () {
         await expect(
-          claimIssuer
-            .connect(unauthorized)
-            .issueClaim(
-              await onchainID.getAddress(),
-              KYC_TOPIC,
-              ECDSA_SCHEME,
-              claimData,
-              "https://example.com/kyc",
-              0,
-            ),
+          issueSigned(
+            claimIssuer,
+            unauthorized,
+            await onchainID.getAddress(),
+            KYC_TOPIC,
+            claimData,
+            "https://example.com/kyc",
+            0,
+          ),
         ).to.be.revertedWith(
           "ClaimIssuer: Sender does not have claim signer key",
         );
@@ -262,31 +262,29 @@ describe("ClaimIssuer", function () {
 
       it("Should reject claim with zero identity", async function () {
         await expect(
-          claimIssuer
-            .connect(claimSigner)
-            .issueClaim(
-              ethers.ZeroAddress,
-              KYC_TOPIC,
-              ECDSA_SCHEME,
-              claimData,
-              "https://example.com/kyc",
-              0,
-            ),
+          issueSigned(
+            claimIssuer,
+            claimSigner,
+            ethers.ZeroAddress,
+            KYC_TOPIC,
+            claimData,
+            "https://example.com/kyc",
+            0,
+          ),
         ).to.be.revertedWith("ClaimIssuer: Invalid identity");
       });
 
       it("Should reject claim with empty data", async function () {
         await expect(
-          claimIssuer
-            .connect(claimSigner)
-            .issueClaim(
-              await onchainID.getAddress(),
-              KYC_TOPIC,
-              ECDSA_SCHEME,
-              "0x",
-              "https://example.com/kyc",
-              0,
-            ),
+          issueSigned(
+            claimIssuer,
+            claimSigner,
+            await onchainID.getAddress(),
+            KYC_TOPIC,
+            "0x",
+            "https://example.com/kyc",
+            0,
+          ),
         ).to.be.revertedWith("ClaimIssuer: Empty claim data");
       });
 
@@ -294,16 +292,15 @@ describe("ClaimIssuer", function () {
         await claimIssuer.connect(owner).setActive(false);
 
         await expect(
-          claimIssuer
-            .connect(claimSigner)
-            .issueClaim(
-              await onchainID.getAddress(),
-              KYC_TOPIC,
-              ECDSA_SCHEME,
-              claimData,
-              "https://example.com/kyc",
-              0,
-            ),
+          issueSigned(
+            claimIssuer,
+            claimSigner,
+            await onchainID.getAddress(),
+            KYC_TOPIC,
+            claimData,
+            "https://example.com/kyc",
+            0,
+          ),
         ).to.be.revertedWith("ClaimIssuer: Issuer is not active");
       });
     });
@@ -319,10 +316,22 @@ describe("ClaimIssuer", function () {
         const data = [claimData, claimData];
         const uris = ["https://example.com/kyc", "https://example.com/aml"];
         const validTos = [0, 0];
+        const sigs = [
+          await signClaim(claimSigner, identities[0], KYC_TOPIC, claimData),
+          await signClaim(claimSigner, identities[1], AML_TOPIC, claimData),
+        ];
 
         const tx = await claimIssuer
           .connect(claimSigner)
-          .batchIssueClaims(identities, topics, schemes, data, uris, validTos);
+          .batchIssueClaims(
+            identities,
+            topics,
+            schemes,
+            data,
+            uris,
+            validTos,
+            sigs,
+          );
         const receipt = await tx.wait();
 
         // Check that claims were issued by checking events
@@ -341,8 +350,97 @@ describe("ClaimIssuer", function () {
         await expect(
           claimIssuer
             .connect(claimSigner)
-            .batchIssueClaims(identities, topics, [], [], [], []),
+            .batchIssueClaims(identities, topics, [], [], [], [], []),
         ).to.be.revertedWith("ClaimIssuer: Array length mismatch");
+      });
+
+      it("Should revert the whole batch if one signature is bad", async function () {
+        const id = await onchainID.getAddress();
+        const good = await signClaim(claimSigner, id, KYC_TOPIC, claimData);
+        const bad = await signClaim(unauthorized, id, AML_TOPIC, claimData);
+
+        await expect(
+          claimIssuer
+            .connect(claimSigner)
+            .batchIssueClaims(
+              [id, id],
+              [KYC_TOPIC, AML_TOPIC],
+              [ECDSA_SCHEME, ECDSA_SCHEME],
+              [claimData, claimData],
+              ["", ""],
+              [0, 0],
+              [good, bad],
+            ),
+        ).to.be.revertedWith(
+          "ClaimIssuer: Signer does not have claim signer key",
+        );
+        expect(await claimIssuer.getClaimsByTopic(KYC_TOPIC)).to.have.length(0);
+      });
+    });
+
+    describe("signed issuance (D15)", function () {
+      // issueClaim stores the caller-supplied ECDSA signature and only
+      // accepts it if the recovered signer holds a CLAIM_SIGNER or
+      // MANAGEMENT key (or is the owner), the same rule verifyClaim applies.
+      it("Should reject a signature from a key with no signing purpose", async function () {
+        const id = await onchainID.getAddress();
+        const sig = await signClaim(unauthorized, id, KYC_TOPIC, claimData);
+        await expect(
+          claimIssuer
+            .connect(claimSigner)
+            .issueClaim(id, KYC_TOPIC, ECDSA_SCHEME, claimData, "", 0, sig),
+        ).to.be.revertedWith(
+          "ClaimIssuer: Signer does not have claim signer key",
+        );
+      });
+
+      it("Should reject a malformed signature", async function () {
+        const id = await onchainID.getAddress();
+        await expect(
+          claimIssuer
+            .connect(claimSigner)
+            .issueClaim(
+              id,
+              KYC_TOPIC,
+              ECDSA_SCHEME,
+              claimData,
+              "",
+              0,
+              "0x1234",
+            ),
+        ).to.be.revertedWithCustomError(
+          claimIssuer,
+          "ECDSAInvalidSignatureLength",
+        );
+      });
+
+      it("Should reject a valid signature over different claim data", async function () {
+        const id = await onchainID.getAddress();
+        const sig = await signClaim(claimSigner, id, AML_TOPIC, claimData);
+        await expect(
+          claimIssuer
+            .connect(claimSigner)
+            .issueClaim(id, KYC_TOPIC, ECDSA_SCHEME, claimData, "", 0, sig),
+        ).to.be.revertedWith(
+          "ClaimIssuer: Signer does not have claim signer key",
+        );
+      });
+
+      it("Should store a signature that verifyClaim accepts, before and after revocation", async function () {
+        const id = await onchainID.getAddress();
+        await issueSigned(claimIssuer, claimSigner, id, KYC_TOPIC, claimData);
+        const [claimId] = await claimIssuer.getClaimsByTopic(KYC_TOPIC);
+        const stored = (await claimIssuer.issuedClaims(claimId)).signature;
+
+        expect(await claimIssuer.isClaimValid(claimId)).to.be.true;
+        expect(await claimIssuer.verifyClaim(id, KYC_TOPIC, claimData, stored))
+          .to.be.true;
+
+        // Revocation kills the record, not the signature.
+        await claimIssuer.connect(claimSigner).revokeClaim(claimId);
+        expect(await claimIssuer.isClaimValid(claimId)).to.be.false;
+        expect(await claimIssuer.verifyClaim(id, KYC_TOPIC, claimData, stored))
+          .to.be.true;
       });
     });
 
@@ -350,16 +448,15 @@ describe("ClaimIssuer", function () {
       let claimId: string;
 
       beforeEach(async function () {
-        await claimIssuer
-          .connect(claimSigner)
-          .issueClaim(
-            await onchainID.getAddress(),
-            KYC_TOPIC,
-            ECDSA_SCHEME,
-            claimData,
-            "https://example.com/kyc",
-            0,
-          );
+        await issueSigned(
+          claimIssuer,
+          claimSigner,
+          await onchainID.getAddress(),
+          KYC_TOPIC,
+          claimData,
+          "https://example.com/kyc",
+          0,
+        );
 
         const claimIds = await claimIssuer.getClaimsByTopic(KYC_TOPIC);
         claimId = claimIds[0];
@@ -471,16 +568,15 @@ describe("ClaimIssuer", function () {
       let claimId: string;
 
       beforeEach(async function () {
-        await claimIssuer
-          .connect(claimSigner)
-          .issueClaim(
-            await onchainID.getAddress(),
-            KYC_TOPIC,
-            ECDSA_SCHEME,
-            claimData,
-            "https://example.com/kyc",
-            0,
-          );
+        await issueSigned(
+          claimIssuer,
+          claimSigner,
+          await onchainID.getAddress(),
+          KYC_TOPIC,
+          claimData,
+          "https://example.com/kyc",
+          0,
+        );
 
         const claimIds = await claimIssuer.getClaimsByTopic(KYC_TOPIC);
         claimId = claimIds[0];
@@ -505,16 +601,15 @@ describe("ClaimIssuer", function () {
       it("Should return false for expired claim", async function () {
         // Issue a claim that expires in 1 second
         const expiryTime = Math.floor(Date.now() / 1000) + 1;
-        await claimIssuer
-          .connect(claimSigner)
-          .issueClaim(
-            await onchainID.getAddress(),
-            AML_TOPIC,
-            ECDSA_SCHEME,
-            claimData,
-            "https://example.com/aml",
-            expiryTime,
-          );
+        await issueSigned(
+          claimIssuer,
+          claimSigner,
+          await onchainID.getAddress(),
+          AML_TOPIC,
+          claimData,
+          "https://example.com/aml",
+          expiryTime,
+        );
 
         const amlClaimIds = await claimIssuer.getClaimsByTopic(AML_TOPIC);
         const expiredClaimId = amlClaimIds[0];
@@ -533,27 +628,25 @@ describe("ClaimIssuer", function () {
       const claimData = ethers.solidityPacked(["string"], ["Test claim data"]);
 
       // Issue claims for different topics and identities
-      await claimIssuer
-        .connect(claimSigner)
-        .issueClaim(
-          await onchainID.getAddress(),
-          KYC_TOPIC,
-          ECDSA_SCHEME,
-          claimData,
-          "https://example.com/kyc",
-          0,
-        );
+      await issueSigned(
+        claimIssuer,
+        claimSigner,
+        await onchainID.getAddress(),
+        KYC_TOPIC,
+        claimData,
+        "https://example.com/kyc",
+        0,
+      );
 
-      await claimIssuer
-        .connect(claimSigner)
-        .issueClaim(
-          await onchainID.getAddress(),
-          AML_TOPIC,
-          ECDSA_SCHEME,
-          claimData,
-          "https://example.com/aml",
-          0,
-        );
+      await issueSigned(
+        claimIssuer,
+        claimSigner,
+        await onchainID.getAddress(),
+        AML_TOPIC,
+        claimData,
+        "https://example.com/aml",
+        0,
+      );
     });
 
     describe("getClaimsByIdentity", function () {
@@ -685,26 +778,24 @@ describe("ClaimIssuer", function () {
         const claimData = ethers.solidityPacked(["string"], ["Test claim"]);
 
         // Issue some claims
-        await claimIssuer
-          .connect(claimSigner)
-          .issueClaim(
-            await onchainID.getAddress(),
-            KYC_TOPIC,
-            ECDSA_SCHEME,
-            claimData,
-            "",
-            0,
-          );
-        await claimIssuer
-          .connect(claimSigner)
-          .issueClaim(
-            await onchainID.getAddress(),
-            AML_TOPIC,
-            ECDSA_SCHEME,
-            claimData,
-            "",
-            0,
-          );
+        await issueSigned(
+          claimIssuer,
+          claimSigner,
+          await onchainID.getAddress(),
+          KYC_TOPIC,
+          claimData,
+          "",
+          0,
+        );
+        await issueSigned(
+          claimIssuer,
+          claimSigner,
+          await onchainID.getAddress(),
+          AML_TOPIC,
+          claimData,
+          "",
+          0,
+        );
 
         // Revoke one claim
         const claimIds = await claimIssuer.getClaimsByTopic(KYC_TOPIC);
@@ -728,16 +819,15 @@ describe("ClaimIssuer", function () {
       );
 
       // Issue claim through ClaimIssuer
-      await claimIssuer
-        .connect(claimSigner)
-        .issueClaim(
-          await onchainID.getAddress(),
-          KYC_TOPIC,
-          ECDSA_SCHEME,
-          claimData,
-          "https://example.com/integration",
-          0,
-        );
+      await issueSigned(
+        claimIssuer,
+        claimSigner,
+        await onchainID.getAddress(),
+        KYC_TOPIC,
+        claimData,
+        "https://example.com/integration",
+        0,
+      );
 
       // Verify claim exists in OnchainID
       const claimIds = await onchainID.getClaimIdsByTopic(KYC_TOPIC);
@@ -760,16 +850,15 @@ describe("ClaimIssuer", function () {
       );
 
       // 1. Issue claim
-      await claimIssuer
-        .connect(claimSigner)
-        .issueClaim(
-          await onchainID.getAddress(),
-          KYC_TOPIC,
-          ECDSA_SCHEME,
-          claimData,
-          "https://example.com/lifecycle",
-          0,
-        );
+      await issueSigned(
+        claimIssuer,
+        claimSigner,
+        await onchainID.getAddress(),
+        KYC_TOPIC,
+        claimData,
+        "https://example.com/lifecycle",
+        0,
+      );
 
       // 2. Verify claim is valid
       const claimIds = await claimIssuer.getClaimsByTopic(KYC_TOPIC);

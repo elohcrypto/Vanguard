@@ -12,7 +12,7 @@ import {
   IdentityRegistry,
   ComplianceRegistry,
 } from "../../typechain-types";
-import { attest, configureKyc } from "../helpers/kyc";
+import { attest, configureKyc, issueSigned } from "../helpers/kyc";
 
 describe("Oracle-ERC3643 Integration Tests", function () {
   let oracleManager: OracleManager;
@@ -212,10 +212,11 @@ describe("Oracle-ERC3643 Integration Tests", function () {
         ["KYC_VERIFIED", "US", Date.now()],
       );
 
-      await claimIssuer.connect(kycProvider).issueClaim(
+      await issueSigned(
+        claimIssuer,
+        kycProvider,
         onchainIDAddress!,
         KYC_CLAIM_TOPIC,
-        1, // scheme
         kycClaimData,
         "https://kyc-provider.com/claims",
         0, // validTo (0 = no expiration)
@@ -293,16 +294,15 @@ describe("Oracle-ERC3643 Integration Tests", function () {
         ["KYC_VERIFIED", "US", Date.now()],
       );
 
-      await claimIssuer
-        .connect(kycProvider)
-        .issueClaim(
-          onchainIDAddress!,
-          KYC_CLAIM_TOPIC,
-          1,
-          kycClaimData,
-          "https://kyc-provider.com/claims",
-          0,
-        );
+      await issueSigned(
+        claimIssuer,
+        kycProvider,
+        onchainIDAddress!,
+        KYC_CLAIM_TOPIC,
+        kycClaimData,
+        "https://kyc-provider.com/claims",
+        0,
+      );
 
       // Add to whitelist
       await whitelistOracle.addToWhitelist(
@@ -318,16 +318,15 @@ describe("Oracle-ERC3643 Integration Tests", function () {
         ["AML_CLEARED", "No suspicious activity detected", Date.now(), true],
       );
 
-      await claimIssuer
-        .connect(kycProvider)
-        .issueClaim(
-          onchainIDAddress!,
-          AML_CLAIM_TOPIC,
-          1,
-          amlClaimData,
-          "https://aml-provider.com/claims",
-          0,
-        );
+      await issueSigned(
+        claimIssuer,
+        kycProvider,
+        onchainIDAddress!,
+        AML_CLAIM_TOPIC,
+        amlClaimData,
+        "https://aml-provider.com/claims",
+        0,
+      );
 
       console.log("✅ AML Claim issued successfully");
 
@@ -380,16 +379,15 @@ describe("Oracle-ERC3643 Integration Tests", function () {
         ["KYC_REJECTED", "Insufficient documentation", Date.now()],
       );
 
-      await claimIssuer
-        .connect(kycProvider)
-        .issueClaim(
-          onchainIDAddress!,
-          KYC_CLAIM_TOPIC,
-          1,
-          kycRejectionData,
-          "https://kyc-provider.com/rejections",
-          0,
-        );
+      await issueSigned(
+        claimIssuer,
+        kycProvider,
+        onchainIDAddress!,
+        KYC_CLAIM_TOPIC,
+        kycRejectionData,
+        "https://kyc-provider.com/rejections",
+        0,
+      );
 
       console.log("✅ KYC Rejection claim issued");
 
@@ -451,16 +449,15 @@ describe("Oracle-ERC3643 Integration Tests", function () {
         ["KYC_VERIFIED", "US", Date.now()],
       );
 
-      await claimIssuer
-        .connect(kycProvider)
-        .issueClaim(
-          onchainIDAddress!,
-          KYC_CLAIM_TOPIC,
-          1,
-          kycClaimData,
-          "https://kyc-provider.com/claims",
-          0,
-        );
+      await issueSigned(
+        claimIssuer,
+        kycProvider,
+        onchainIDAddress!,
+        KYC_CLAIM_TOPIC,
+        kycClaimData,
+        "https://kyc-provider.com/claims",
+        0,
+      );
 
       // Initially add to whitelist
       await whitelistOracle.addToWhitelist(
@@ -481,16 +478,15 @@ describe("Oracle-ERC3643 Integration Tests", function () {
         ],
       );
 
-      await claimIssuer
-        .connect(kycProvider)
-        .issueClaim(
-          onchainIDAddress!,
-          AML_CLAIM_TOPIC,
-          1,
-          amlRejectionData,
-          "https://aml-provider.com/flags",
-          0,
-        );
+      await issueSigned(
+        claimIssuer,
+        kycProvider,
+        onchainIDAddress!,
+        AML_CLAIM_TOPIC,
+        amlRejectionData,
+        "https://aml-provider.com/flags",
+        0,
+      );
 
       console.log("✅ AML Rejection claim issued");
 
@@ -637,16 +633,15 @@ describe("Oracle-ERC3643 Integration Tests", function () {
         ["KYC_VERIFIED", "US", Date.now()],
       );
 
-      await claimIssuer
-        .connect(kycProvider)
-        .issueClaim(
-          onchainIDAddress!,
-          KYC_CLAIM_TOPIC,
-          1,
-          kycClaimData,
-          "https://kyc-provider.com/claims",
-          0,
-        );
+      await issueSigned(
+        claimIssuer,
+        kycProvider,
+        onchainIDAddress!,
+        KYC_CLAIM_TOPIC,
+        kycClaimData,
+        "https://kyc-provider.com/claims",
+        0,
+      );
 
       await identityRegistry.registerIdentity(
         investor1.address,

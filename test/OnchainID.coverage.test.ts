@@ -8,6 +8,7 @@ import {
   KeyManager,
 } from "../typechain-types";
 import { TestHelpers } from "./helpers/TestHelpers";
+import { issueSigned, signClaim } from "./helpers/kyc";
 
 /**
  * Comprehensive test suite for OnchainID system coverage
@@ -119,23 +120,41 @@ describe("OnchainID System - Coverage Tests", function () {
 
       // Claim issuance errors
       await expect(
-        claimIssuer
-          .connect(user1)
-          .issueClaim(await onchainID.getAddress(), 6, 1, claimData, "", 0),
+        issueSigned(
+          claimIssuer,
+          user1,
+          await onchainID.getAddress(),
+          6,
+          claimData,
+          "",
+          0,
+        ),
       ).to.be.revertedWith(
         "ClaimIssuer: Sender does not have claim signer key",
       );
 
       await expect(
-        claimIssuer
-          .connect(owner)
-          .issueClaim(ethers.ZeroAddress, 6, 1, claimData, "", 0),
+        issueSigned(
+          claimIssuer,
+          owner,
+          ethers.ZeroAddress,
+          6,
+          claimData,
+          "",
+          0,
+        ),
       ).to.be.revertedWith("ClaimIssuer: Invalid identity");
 
       await expect(
-        claimIssuer
-          .connect(owner)
-          .issueClaim(await onchainID.getAddress(), 6, 1, "0x", "", 0),
+        issueSigned(
+          claimIssuer,
+          owner,
+          await onchainID.getAddress(),
+          6,
+          "0x",
+          "",
+          0,
+        ),
       ).to.be.revertedWith("ClaimIssuer: Empty claim data");
     });
 
@@ -191,9 +210,15 @@ describe("OnchainID System - Coverage Tests", function () {
 
       // 3. Issue claims
       const claimData = TestHelpers.createClaimData("KYC verified");
-      await claimIssuer
-        .connect(claimSigner)
-        .issueClaim(identityAddress, 6, 1, claimData, "https://example.com", 0);
+      await issueSigned(
+        claimIssuer,
+        claimSigner,
+        identityAddress,
+        6,
+        claimData,
+        "https://example.com",
+        0,
+      );
 
       // 4. Set up compliance
       await identity
@@ -281,6 +306,11 @@ describe("OnchainID System - Coverage Tests", function () {
       const uris = ["https://kyc.com", "https://aml.com"];
       const validTos = [0, 0];
 
+      const claimSigs = [
+        await signClaim(claimSigner, identityAddresses[0], topics[0], data[0]),
+        await signClaim(claimSigner, identityAddresses[1], topics[1], data[1]),
+      ];
+
       await claimIssuer
         .connect(claimSigner)
         .batchIssueClaims(
@@ -290,6 +320,7 @@ describe("OnchainID System - Coverage Tests", function () {
           data,
           uris,
           validTos,
+          claimSigs,
         );
 
       // Verify claims were issued
@@ -428,9 +459,15 @@ describe("OnchainID System - Coverage Tests", function () {
 
       // Issue claim (this function has nonReentrant modifier)
       await expect(
-        claimIssuer
-          .connect(claimSigner)
-          .issueClaim(await onchainID.getAddress(), 6, 1, claimData, "", 0),
+        issueSigned(
+          claimIssuer,
+          claimSigner,
+          await onchainID.getAddress(),
+          6,
+          claimData,
+          "",
+          0,
+        ),
       ).to.not.be.reverted;
     });
   });
@@ -464,9 +501,15 @@ describe("OnchainID System - Coverage Tests", function () {
       await claimIssuer.connect(owner).addIssuerKey(claimSignerKey, 3, 1);
 
       await expect(
-        claimIssuer
-          .connect(claimSigner)
-          .issueClaim(await onchainID.getAddress(), 6, 1, claimData, "", 0),
+        issueSigned(
+          claimIssuer,
+          claimSigner,
+          await onchainID.getAddress(),
+          6,
+          claimData,
+          "",
+          0,
+        ),
       ).to.emit(claimIssuer, "ClaimIssued");
 
       // Test KeyManager events

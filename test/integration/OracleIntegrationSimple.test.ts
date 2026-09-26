@@ -1,6 +1,7 @@
 import { expect } from "chai";
 import { ethers } from "hardhat";
 import { SignerWithAddress } from "@nomicfoundation/hardhat-ethers/signers";
+import { issueSigned } from "../helpers/kyc";
 
 describe("Oracle Integration - Core Functionality Test", function () {
   let oracleManager: any;
@@ -141,10 +142,11 @@ describe("Oracle Integration - Core Functionality Test", function () {
         ["John Doe", "US", Date.now()],
       );
 
-      await claimIssuer.connect(kycProvider).issueClaim(
+      await issueSigned(
+        claimIssuer,
+        kycProvider,
         onchainIDAddress,
         KYC_CLAIM_TOPIC,
-        1, // scheme
         kycClaimData,
         "", // uri
         Math.floor(Date.now() / 1000) + 365 * 24 * 60 * 60, // validTo (1 year from now)
@@ -214,10 +216,11 @@ describe("Oracle Integration - Core Functionality Test", function () {
         ["AML_CLEAR", Date.now(), true],
       );
 
-      await claimIssuer.connect(kycProvider).issueClaim(
+      await issueSigned(
+        claimIssuer,
+        kycProvider,
         onchainIDAddress,
         AML_CLAIM_TOPIC,
-        1, // scheme
         amlClaimData,
         "", // uri
         Math.floor(Date.now() / 1000) + 365 * 24 * 60 * 60, // validTo (1 year from now)

@@ -140,6 +140,8 @@ contract ClaimIssuer is Ownable, ReentrancyGuard {
      * @param _data The claim data
      * @param _uri The claim URI
      * @param _validTo Expiry timestamp (0 for no expiry)
+     * @param _signature EIP-191 signature over keccak256(abi.encodePacked(identity, topic, data))
+     *        by a claim-signer or management key (or the owner); stored and passed to the OnchainID
      * @return claimId The ID of the issued claim
      */
     function issueClaim(
@@ -148,14 +150,12 @@ contract ClaimIssuer is Ownable, ReentrancyGuard {
         uint256 _scheme,
         bytes calldata _data,
         string calldata _uri,
-        uint256 _validTo
+        uint256 _validTo,
+        bytes calldata _signature
     ) external onlyClaimSigner whenActive nonReentrant returns (bytes32 claimId) {
         require(_identity != address(0), "ClaimIssuer: Invalid identity");
         require(_data.length > 0, "ClaimIssuer: Empty claim data");
-
-        // Generate claim signature
-        bytes32 dataHash = keccak256(abi.encodePacked(_identity, _topic, _data));
-        bytes memory signature = _signClaim(dataHash);
+        _requireTrustedSignature(keccak256(abi.encodePacked(_identity, _topic, _data)), _signature);
 
         // Generate claim ID
         claimId = keccak256(abi.encodePacked(address(this), _identity, _topic, _data));
@@ -165,7 +165,7 @@ contract ClaimIssuer is Ownable, ReentrancyGuard {
             identity: _identity,
             topic: _topic,
             scheme: _scheme,
-            signature: signature,
+            signature: _signature,
             data: _data,
             uri: _uri,
             issuedAt: block.timestamp,
@@ -180,8 +180,8 @@ contract ClaimIssuer is Ownable, ReentrancyGuard {
         allClaims.push(claimId);
 
         // Add claim to the OnchainID contract
-        try IOnchainID(_identity).addClaim(_topic, _scheme, address(this), signature, _data, _uri) {
-            emit ClaimIssued(_identity, _topic, claimId, address(this), signature, _data);
+        try IOnchainID(_identity).addClaim(_topic, _scheme, address(this), _signature, _data, _uri) {
+            emit ClaimIssued(_identity, _topic, claimId, address(this), _signature, _data);
         } catch {
             // Revert the storage changes if adding to OnchainID fails
             delete issuedClaims[claimId];
@@ -202,6 +202,7 @@ contract ClaimIssuer is Ownable, ReentrancyGuard {
      * @param _data Array of claim data
      * @param _uris Array of claim URIs
      * @param _validTos Array of expiry timestamps
+     * @param _signatures Array of signatures, one per claim, same rule as `issueClaim`
      * @return claimIds Array of issued claim IDs
      */
     function batchIssueClaims(
@@ -210,14 +211,16 @@ contract ClaimIssuer is Ownable, ReentrancyGuard {
         uint256[] calldata _schemes,
         bytes[] calldata _data,
         string[] calldata _uris,
-        uint256[] calldata _validTos
+        uint256[] calldata _validTos,
+        bytes[] calldata _signatures
     ) external onlyClaimSigner whenActive nonReentrant returns (bytes32[] memory claimIds) {
         require(
             _identities.length == _topics.length &&
                 _topics.length == _schemes.length &&
                 _schemes.length == _data.length &&
                 _data.length == _uris.length &&
-                _uris.length == _validTos.length,
+                _uris.length == _validTos.length &&
+                _validTos.length == _signatures.length,
             "ClaimIssuer: Array length mismatch"
         );
 
@@ -239,15 +242,13 @@ contract ClaimIssuer is Ownable, ReentrancyGuard {
             bytes32 claimId = keccak256(abi.encodePacked(address(this), _identities[i], _topics[i], _data[i]));
             claimIds[i] = claimId;
 
-            // Generate claim signature
-            bytes32 dataHash = keccak256(abi.encodePacked(_identities[i], _topics[i], _data[i]));
-            bytes memory signature = _signClaim(dataHash);
+            _requireTrustedSignature(keccak256(abi.encodePacked(_identities[i], _topics[i], _data[i])), _signatures[i]);
 
             issuedClaims[claimId] = IssuedClaim({
                 identity: _identities[i],
                 topic: _topics[i],
                 scheme: _schemes[i],
-                signature: signature,
+                signature: _signatures[i],
                 data: _data[i],
                 uri: _uris[i],
                 issuedAt: block.timestamp,
@@ -260,7 +261,7 @@ contract ClaimIssuer is Ownable, ReentrancyGuard {
             claimsByTopic[_topics[i]].push(claimId);
             allClaims.push(claimId);
 
-            emit ClaimIssued(_identities[i], _topics[i], claimId, address(this), signature, _data[i]);
+            emit ClaimIssued(_identities[i], _topics[i], claimId, address(this), _signatures[i], _data[i]);
         }
 
         return claimIds;
@@ -513,14 +514,17 @@ contract ClaimIssuer is Ownable, ReentrancyGuard {
     }
 
     /**
-     * @dev Internal function to sign a claim
+     * @dev Require `_sig` to be an EIP-191 signature over keccak256(identity, topic, data)
+     *      by a key allowed to sign claims: same rule as `onlyClaimSigner`, applied to the signer.
      */
-    function _signClaim(bytes32 _dataHash) internal view returns (bytes memory signature) {
-        // In a real implementation, this would use a secure signing mechanism
-        // For this POC, we'll create a mock signature
-        bytes32 ethSignedMessageHash = MessageHashUtils.toEthSignedMessageHash(_dataHash);
-
-        // This is a simplified signature - in production, use proper key management
-        return abi.encodePacked(ethSignedMessageHash, address(this));
+    function _requireTrustedSignature(bytes32 _dataHash, bytes calldata _sig) internal view {
+        address signer = ECDSA.recover(MessageHashUtils.toEthSignedMessageHash(_dataHash), _sig);
+        bytes32 signerKey = keccak256(abi.encodePacked(signer));
+        require(
+            _hasKeyPurpose(signerKey, CLAIM_SIGNER_KEY) ||
+                _hasKeyPurpose(signerKey, MANAGEMENT_KEY) ||
+                signer == owner(),
+            "ClaimIssuer: Signer does not have claim signer key"
+        );
     }
 }

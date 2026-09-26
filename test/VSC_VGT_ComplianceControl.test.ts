@@ -6,6 +6,7 @@ import {
   configureKyc,
   KYC_TOPIC as REGISTRY_KYC_TOPIC,
   AML_TOPIC as REGISTRY_AML_TOPIC,
+  issueSigned,
 } from "./helpers/kyc";
 
 describe("🔒 VSC & VGT Compliance Control - Complete Proof", function () {
@@ -114,18 +115,20 @@ describe("🔒 VSC & VGT Compliance Control - Complete Proof", function () {
       signer.address,
     );
 
-    await kycIssuer.issueClaim(
+    await issueSigned(
+      kycIssuer,
+      owner,
       identityAddress,
       KYC_TOPIC,
-      1,
       ethers.hexlify(ethers.toUtf8Bytes("KYC_OK")),
       "",
       0,
     );
-    await amlIssuer.issueClaim(
+    await issueSigned(
+      amlIssuer,
+      owner,
       identityAddress,
       AML_TOPIC,
-      1,
       ethers.hexlify(ethers.toUtf8Bytes("AML_OK")),
       "",
       0,

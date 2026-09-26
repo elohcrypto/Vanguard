@@ -6,6 +6,7 @@ import {
   configureKyc,
   KYC_TOPIC as REGISTRY_KYC_TOPIC,
   AML_TOPIC as REGISTRY_AML_TOPIC,
+  issueSigned,
 } from "./helpers/kyc";
 
 describe("🔒 Governance Token Compliance - Complete Proof", function () {
@@ -74,18 +75,20 @@ describe("🔒 Governance Token Compliance - Complete Proof", function () {
     const ownerIdentityAddress = await onchainIDFactory.getIdentityByOwner(
       owner.address,
     );
-    await kycIssuer.issueClaim(
+    await issueSigned(
+      kycIssuer,
+      owner,
       ownerIdentityAddress,
       KYC_TOPIC,
-      1,
       ethers.hexlify(ethers.toUtf8Bytes("KYC_OK")),
       "",
       0,
     );
-    await amlIssuer.issueClaim(
+    await issueSigned(
+      amlIssuer,
+      owner,
       ownerIdentityAddress,
       AML_TOPIC,
-      1,
       ethers.hexlify(ethers.toUtf8Bytes("AML_OK")),
       "",
       0,
@@ -127,18 +130,20 @@ describe("🔒 Governance Token Compliance - Complete Proof", function () {
       signer.address,
     );
 
-    await kycIssuer.issueClaim(
+    await issueSigned(
+      kycIssuer,
+      owner,
       identityAddress,
       KYC_TOPIC,
-      1,
       ethers.hexlify(ethers.toUtf8Bytes("KYC_OK")),
       "",
       0,
     );
-    await amlIssuer.issueClaim(
+    await issueSigned(
+      amlIssuer,
+      owner,
       identityAddress,
       AML_TOPIC,
-      1,
       ethers.hexlify(ethers.toUtf8Bytes("AML_OK")),
       "",
       0,

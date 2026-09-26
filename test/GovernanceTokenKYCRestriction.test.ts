@@ -6,6 +6,7 @@ import {
   configureKyc,
   KYC_TOPIC as REGISTRY_KYC_TOPIC,
   AML_TOPIC as REGISTRY_AML_TOPIC,
+  issueSigned,
 } from "./helpers/kyc";
 
 describe("Governance Token KYC/AML Restriction Test", function () {
@@ -115,10 +116,26 @@ describe("Governance Token KYC/AML Restriction Test", function () {
     );
 
     const kycData = ethers.hexlify(ethers.toUtf8Bytes("KYC_APPROVED"));
-    await kycIssuer.issueClaim(identityAddress, KYC_TOPIC, 1, kycData, "", 0);
+    await issueSigned(
+      kycIssuer,
+      owner,
+      identityAddress,
+      KYC_TOPIC,
+      kycData,
+      "",
+      0,
+    );
 
     const amlData = ethers.hexlify(ethers.toUtf8Bytes("AML_APPROVED"));
-    await amlIssuer.issueClaim(identityAddress, AML_TOPIC, 1, amlData, "", 0);
+    await issueSigned(
+      amlIssuer,
+      owner,
+      identityAddress,
+      AML_TOPIC,
+      amlData,
+      "",
+      0,
+    );
 
     await identityRegistry.registerIdentity(signer.address, identityAddress, 0);
     await attest(kycIssuer, owner, identityAddress, REGISTRY_KYC_TOPIC);
@@ -135,7 +152,15 @@ describe("Governance Token KYC/AML Restriction Test", function () {
     );
 
     const kycData = ethers.hexlify(ethers.toUtf8Bytes("KYC_APPROVED"));
-    await kycIssuer.issueClaim(identityAddress, KYC_TOPIC, 1, kycData, "", 0);
+    await issueSigned(
+      kycIssuer,
+      owner,
+      identityAddress,
+      KYC_TOPIC,
+      kycData,
+      "",
+      0,
+    );
 
     await identityRegistry.registerIdentity(signer.address, identityAddress, 0);
     // Deliberately only the registry-required KYC topic: this fixture
@@ -154,7 +179,15 @@ describe("Governance Token KYC/AML Restriction Test", function () {
     );
 
     const amlData = ethers.hexlify(ethers.toUtf8Bytes("AML_APPROVED"));
-    await amlIssuer.issueClaim(identityAddress, AML_TOPIC, 1, amlData, "", 0);
+    await issueSigned(
+      amlIssuer,
+      owner,
+      identityAddress,
+      AML_TOPIC,
+      amlData,
+      "",
+      0,
+    );
 
     await identityRegistry.registerIdentity(signer.address, identityAddress, 0);
     // Deliberately only the registry-required AML topic: this fixture

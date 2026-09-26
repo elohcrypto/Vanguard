@@ -6,6 +6,7 @@ import {
   IdentityRegistry,
   OnchainIDFactory,
 } from "../../typechain-types";
+import { issueSigned } from "../helpers/kyc";
 
 // Guard tests from .omc/plans/2026-09-23-zk-kyc-ownership-cleanup.md, Task 0.2.
 // "Verified" must mean "holds a live claim from a trusted issuer on every
@@ -71,17 +72,29 @@ describe("IdentityRegistry.isVerified requires trusted-issuer claims (plan Task 
   });
 
   it("IS verified once the trusted issuer has issued the claim", async function () {
-    await kycIssuer
-      .connect(kycProvider)
-      .issueClaim(identityAddr, KYC_TOPIC, 1, KYC_DATA, "", 0);
+    await issueSigned(
+      kycIssuer,
+      kycProvider,
+      identityAddr,
+      KYC_TOPIC,
+      KYC_DATA,
+      "",
+      0,
+    );
 
     expect(await registry.isVerified(investor.address)).to.equal(true);
   });
 
   it("is NOT verified after the issuer revokes the claim", async function () {
-    await kycIssuer
-      .connect(kycProvider)
-      .issueClaim(identityAddr, KYC_TOPIC, 1, KYC_DATA, "", 0);
+    await issueSigned(
+      kycIssuer,
+      kycProvider,
+      identityAddr,
+      KYC_TOPIC,
+      KYC_DATA,
+      "",
+      0,
+    );
     await kycIssuer.connect(kycProvider).revokeClaim(issuerClaimId());
 
     expect(await registry.isVerified(investor.address)).to.equal(false);
@@ -89,9 +102,15 @@ describe("IdentityRegistry.isVerified requires trusted-issuer claims (plan Task 
 
   it("is NOT verified once the claim has expired", async function () {
     const now = (await ethers.provider.getBlock("latest"))!.timestamp;
-    await kycIssuer
-      .connect(kycProvider)
-      .issueClaim(identityAddr, KYC_TOPIC, 1, KYC_DATA, "", now + 100);
+    await issueSigned(
+      kycIssuer,
+      kycProvider,
+      identityAddr,
+      KYC_TOPIC,
+      KYC_DATA,
+      "",
+      now + 100,
+    );
 
     await ethers.provider.send("evm_increaseTime", [200]);
     await ethers.provider.send("evm_mine", []);
@@ -142,9 +161,15 @@ describe("IdentityRegistry.isVerified requires trusted-issuer claims (plan Task 
       );
     }
 
-    await kycIssuer
-      .connect(kycProvider)
-      .issueClaim(identityAddr, KYC_TOPIC, 1, KYC_DATA, "", 0);
+    await issueSigned(
+      kycIssuer,
+      kycProvider,
+      identityAddr,
+      KYC_TOPIC,
+      KYC_DATA,
+      "",
+      0,
+    );
 
     expect(await registry.isVerified(investor.address)).to.equal(false);
 
@@ -168,9 +193,15 @@ describe("IdentityRegistry.isVerified requires trusted-issuer claims (plan Task 
     );
 
     // Deliberately never call registry.addTrustedIssuer for this issuer.
-    await untrustedIssuer
-      .connect(kycProvider)
-      .issueClaim(identityAddr, KYC_TOPIC, 1, KYC_DATA, "", 0);
+    await issueSigned(
+      untrustedIssuer,
+      kycProvider,
+      identityAddr,
+      KYC_TOPIC,
+      KYC_DATA,
+      "",
+      0,
+    );
 
     expect(await registry.isVerified(investor.address)).to.equal(false);
   });

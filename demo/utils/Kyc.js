@@ -32,6 +32,24 @@ async function defaultValidTo() {
 }
 
 /**
+ * Sign a claim the way ClaimIssuer.issueClaim/verifyClaim expect: EIP-191
+ * over keccak256(abi.encodePacked(identity, topic, data)).
+ *
+ * @param {Object} signer - Signer holding the issuer's management/claim-signer key.
+ * @param {string} identityAddress - The OnchainID contract address.
+ * @param {number} topic - Claim topic.
+ * @param {Uint8Array} data - Claim data bytes.
+ * @returns {Promise<string>} The 65-byte signature, hex.
+ */
+async function signClaim(signer, identityAddress, topic, data) {
+  const hash = ethers.solidityPackedKeccak256(
+    ["address", "uint256", "bytes"],
+    [identityAddress, topic, data],
+  );
+  return signer.signMessage(ethers.getBytes(hash));
+}
+
+/**
  * Issue a KYC claim (topic 6) on an identity through its trusted ClaimIssuer.
  *
  * @param {Object} kycIssuer - The deployed KYC ClaimIssuer contract instance.
@@ -50,13 +68,16 @@ async function attestKyc(
   validTo,
 ) {
   const expiry = validTo === undefined ? await defaultValidTo() : validTo;
+  const data = ethers.toUtf8Bytes("kyc:" + label);
+  const sig = await signClaim(issuerSigner, identityAddress, KYC_TOPIC, data);
   const tx = await kycIssuer.connect(issuerSigner).issueClaim(
     identityAddress,
     KYC_TOPIC,
     1, // scheme: ECDSA
-    ethers.toUtf8Bytes("kyc:" + label),
+    data,
     "", // uri
     expiry,
+    sig,
   );
   return tx.wait();
 }
@@ -80,13 +101,16 @@ async function attestAml(
   validTo,
 ) {
   const expiry = validTo === undefined ? await defaultValidTo() : validTo;
+  const data = ethers.toUtf8Bytes("aml:" + label);
+  const sig = await signClaim(issuerSigner, identityAddress, AML_TOPIC, data);
   const tx = await amlIssuer.connect(issuerSigner).issueClaim(
     identityAddress,
     AML_TOPIC,
     1, // scheme: ECDSA
-    ethers.toUtf8Bytes("aml:" + label),
+    data,
     "", // uri
     expiry,
+    sig,
   );
   return tx.wait();
 }
@@ -126,6 +150,7 @@ async function attestAll(state, identityAddress, label, validTo) {
 }
 
 module.exports = {
+  signClaim,
   attestKyc,
   attestAml,
   attestAll,
