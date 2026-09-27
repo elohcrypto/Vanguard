@@ -10,7 +10,7 @@ import { attest, configureKyc, KYC_TOPIC } from "../helpers/kyc";
 describe("IdentityRegistry is governable by proposal", function () {
   const T = {
     ComplianceRules: 1,
-    IdentityRegistryParameters: 10,
+    IdentityRegistryParameters: 7,
   };
   const S = [
     "Pending",

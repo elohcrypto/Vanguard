@@ -159,10 +159,9 @@ describe("Zero electorate cannot satisfy quorum", function () {
 /**
  * List-update proposals must honour the execution delay.
  *
- * `createListUpdateProposal` hardcoded `executionTime: 0` while the regular
- * path computed `votingEnds + executionDelay`. The guard
- * `block.timestamp >= executionTime` is vacuously true for 0, so blacklisting
- * executed the instant voting ended and the cancel window never opened.
+ * The old `createListUpdateProposal` hardcoded `executionTime: 0`, so the
+ * `block.timestamp >= executionTime` guard was vacuous and blacklisting ran
+ * the instant voting ended. Now createProposal(ListUpdate, ...) (plan 2D.1).
  */
 describe("List-update proposals honour the execution delay", function () {
   it("sets a real execution time, not zero", async function () {
@@ -218,17 +217,15 @@ describe("List-update proposals honour the execution delay", function () {
     ).deploy(owner.address);
     await gov.setDynamicListManager(await dlm.getAddress());
 
-    // ProposalType.AddToBlacklist
-    await gov
-      .connect(alice)
-      .createListUpdateProposal(
-        6,
-        "blacklist bob",
-        "sanctions",
-        alice.address,
-        0,
-        "test",
-      );
+    // ProposalType.ListUpdate (6): a plain call on the manager.
+    const cd = dlm.interface.encodeFunctionData("addToBlacklist", [
+      alice.address,
+      0,
+      2,
+      "test",
+    ]);
+    const dlmAddr = await dlm.getAddress();
+    await gov.connect(alice).createProposal(6, "bl", "d", dlmAddr, cd);
     const [p] = await gov.getProposal(1);
 
     expect(p.executionTime, "executionTime must not be zero").to.be.greaterThan(

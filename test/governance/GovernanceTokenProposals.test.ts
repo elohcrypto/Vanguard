@@ -10,7 +10,7 @@ import { attest, configureKyc } from "../helpers/kyc";
 describe("GovernanceToken is governable by proposal", function () {
   const T = {
     TokenParameters: 3,
-    GovernanceTokenParameters: 11,
+    GovernanceTokenParameters: 8,
   };
   const S = [
     "Pending",

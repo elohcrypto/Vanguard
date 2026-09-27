@@ -125,10 +125,7 @@ on that proposal forever.
 | TokenParameters | 30% | 70% |
 | SystemParameters | 25% | 65% |
 | EmergencyAction | 10% | 75% |
-| AddToWhitelist | 15% | 60% |
-| RemoveFromWhitelist | 15% | 60% |
-| AddToBlacklist | 20% | 70% |
-| RemoveFromBlacklist | 20% | 65% |
+| ListUpdate | 20% | 70% |
 | IdentityRegistryParameters | 25% | 65% |
 | GovernanceTokenParameters | 30% | 70% |
 

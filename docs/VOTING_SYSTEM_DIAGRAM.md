@@ -47,13 +47,12 @@ ALICE (Proposer)
    │   approve(VanguardGovernance, 10 VGT)
    │
    ├─► Create proposal
-   │   createListUpdateProposal(
-   │       proposalType: AddToWhitelist,
+   │   createProposal(
+   │       proposalType: ListUpdate,
    │       title: "Add Bob to Whitelist",
    │       description: "Bob passed KYC/AML",
-   │       targetUser: 0xBob...,
-   │       targetIdentity: 123456,
-   │       reason: "KYC/AML verified"
+   │       target: dynamicListManager,
+   │       callData: addToWhitelist(0xBob..., 123456, tier 1, "KYC/AML verified")
    │   )
    │
    ├─► VGT tokens transferred & locked
@@ -110,21 +109,21 @@ DAY 2: CHARLIE votes FOR
        ✅ Votes FOR: 2
        ✅ Votes AGAINST: 0
 
-DAY 3: DAVID votes AGAINST
+DAY 3: DAVID votes FOR
    │
    ├─► Has 20,000 VGT tokens — still worth exactly 1 vote
    ├─► Locks 10 VGT for voting
    │
    └─► Vote recorded
-       ✅ Votes FOR: 2
-       ✅ Votes AGAINST: 1
+       ✅ Votes FOR: 3
+       ✅ Votes AGAINST: 0
 
 DAY 5: Voting period ends
    │
    └─► Final tally
        ✅ Total votes: 3 of 10 eligible (30% turnout)
-       ✅ Votes FOR: 2 (66.7%)
-       ✅ Votes AGAINST: 1 (33.3%)
+       ✅ Votes FOR: 3 (100%)
+       ✅ Votes AGAINST: 0 (0%)
 ```
 
 ---
@@ -146,25 +145,27 @@ ANYONE can execute (usually proposer)
    │
    ├─► Calculate results
    │   Total votes: 3
-   │   FOR: 2 (66.7%)   AGAINST: 1 (33.3%)
+   │   FOR: 3 (100%)   AGAINST: 0 (0%)
    │
-   ├─► Check quorum (15% for AddToWhitelist)
+   ├─► Check quorum (20% for ListUpdate)
    │   Denominator: eligible voters FROZEN at creation = 10
-   │   Required: 15% of 10 = 1.5 → 2 votes
+   │   Required: 20% of 10 = 2 votes
    │   Actual: 3 votes
    │   ✅ QUORUM MET
    │
-   ├─► Check approval (60% for AddToWhitelist)
-   │   Required: 60% FOR
-   │   Actual: 66.7% FOR
+   ├─► Check approval (70% for ListUpdate)
+   │   Required: 70% FOR
+   │   Actual: 100% FOR
    │   ✅ APPROVAL MET
    │
    ├─► Execute proposal
    │   dynamicListManager.addToWhitelist(
    │       user: 0xBob...,
    │       identity: 123456,
+   │       tier: 1,
    │       reason: "KYC/AML verified"
    │   )
+   │   └─► whitelistOracle.addToWhitelist(0xBob..., 1, 0, "KYC/AML verified")
    │
    ├─► Manager call SUCCEEDS → burn locked tokens
    │   governanceToken.burn(40 VGT)
@@ -172,7 +173,7 @@ ANYONE can execute (usually proposer)
    │
    └─► Proposal executed
        ✅ Status: EXECUTED
-       ✅ Bob's status: WHITELISTED
+       ✅ Bob whitelisted in WhitelistOracle (the list transfers check)
        ✅ Locked tokens: BURNED
 
    [If the manager call had REVERTED — e.g. governance not yet
@@ -309,12 +310,12 @@ Proposal #1: Add Bob to Whitelist
    Voters (1 vote each, 10 VGT locked each):
       - Bob: FOR
       - Charlie: FOR
-      - David: AGAINST
+      - David: FOR
 
    Total locked: 40 VGT
 
-Result: PASSED (3 of 10 eligible = 30% turnout ≥ 15% quorum;
-                2 of 3 = 66.7% ≥ 60% approval)
+Result: PASSED (3 of 10 eligible = 30% turnout ≥ 20% quorum;
+                3 of 3 = 100% ≥ 70% approval)
    ✅ 40 VGT BURNED
    ✅ Total supply reduced by 40 VGT
    ✅ Bob added to whitelist
@@ -328,10 +329,7 @@ Result: PASSED (3 of 10 eligible = 30% turnout ≥ 15% quorum;
 
 | Proposal Type | Quorum | Approval | Example (100 eligible voters) |
 |---------------|--------|----------|-------------------------------|
-| AddToWhitelist | 15% | 60% | ≥15 voters, ≥60% of them FOR |
-| RemoveFromWhitelist | 15% | 60% | ≥15 voters, ≥60% of them FOR |
-| AddToBlacklist | 20% | 70% | ≥20 voters, ≥70% of them FOR |
-| RemoveFromBlacklist | 20% | 65% | ≥20 voters, ≥65% of them FOR |
+| ListUpdate | 20% | 70% | ≥20 voters, ≥70% of them FOR |
 | IdentityRegistryParameters | 25% | 65% | ≥25 voters, ≥65% of them FOR |
 | GovernanceTokenParameters | 30% | 70% | ≥30 voters, ≥70% of them FOR |
 

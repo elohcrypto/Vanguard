@@ -14,7 +14,7 @@ describe("Proposal type is bound to its target", () => {
     TokenParameters: 3,
     SystemParameters: 4,
     EmergencyAction: 5,
-    AddToWhitelist: 6,
+    ListUpdate: 6,
   };
 
   async function fixture() {
@@ -89,13 +89,33 @@ describe("Proposal type is bound to its target", () => {
     }
   });
 
-  it("routes list types to createListUpdateProposal", async () => {
+  it("ListUpdate is unproposable until a DynamicListManager is set", async () => {
     const { alice, gov, govAddr } = await fixture();
+    expect(await gov.boundTarget(T.ListUpdate)).to.equal(ethers.ZeroAddress);
+    for (const target of [ethers.ZeroAddress, govAddr]) {
+      await expect(
+        gov.connect(alice).createProposal(T.ListUpdate, "t", "d", target, "0x"),
+      )
+        .to.be.revertedWithCustomError(gov, "TargetNotBoundToType")
+        .withArgs(T.ListUpdate, target);
+    }
+  });
+
+  it("a ListUpdate proposal targeting governance reverts; the manager is accepted", async () => {
+    const { alice, gov, govAddr } = await fixture();
+    const [, , , , , , manager] = await ethers.getSigners();
+    await gov.setDynamicListManager(manager.address);
+    expect(await gov.boundTarget(T.ListUpdate)).to.equal(manager.address);
+    await expect(
+      gov.connect(alice).createProposal(T.ListUpdate, "t", "d", govAddr, "0x"),
+    )
+      .to.be.revertedWithCustomError(gov, "TargetNotBoundToType")
+      .withArgs(T.ListUpdate, govAddr);
     await expect(
       gov
         .connect(alice)
-        .createProposal(T.AddToWhitelist, "t", "d", govAddr, "0x"),
-    ).to.be.revertedWithCustomError(gov, "UseListUpdateProposal");
+        .createProposal(T.ListUpdate, "t", "d", manager.address, "0x"),
+    ).to.not.be.reverted;
   });
 
   it("accepts every type against its own bound target", async () => {

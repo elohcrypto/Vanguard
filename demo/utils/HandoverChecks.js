@@ -7,28 +7,32 @@
 
 const { ethers } = require("hardhat");
 
-const plan = (key, proposalType, label, typeName) => ({
+const plan = (key, proposalType, label, typeName, opts = {}) => ({
   key,
   proposalType,
   label,
   typeName,
+  // Optional entries are skipped when the caller passes no contract for them.
+  optional: Boolean(opts.optional),
 });
 /** One acceptOwnership() vote per contract governance was nominated for. */
 const ACCEPTANCE_PLAN = [
   plan("token", 3, "Token", "TokenParameters"),
-  plan("governanceToken", 11, "GovernanceToken", "GovernanceTokenParameters"),
-  plan(
-    "identityRegistry",
-    10,
-    "IdentityRegistry",
-    "IdentityRegistryParameters",
-  ),
+  plan("governanceToken", 8, "GovernanceToken", "GovernanceTokenParameters"),
+  plan("identityRegistry", 7, "IdentityRegistry", "IdentityRegistryParameters"),
   plan("complianceRules", 1, "ComplianceRules", "ComplianceRules"),
   plan("oracleManager", 2, "OracleManager", "OracleParameters"),
+  // Demo option 84; absent in deployments that never ran it (plan 2D.1).
+  plan("dynamicListManager", 6, "DynamicListManager", "ListUpdate", {
+    optional: true,
+  }),
   plan("governance", 4, "VanguardGovernance", "SystemParameters"),
 ];
-/** [contract, label] for the six contracts governance ends up owning. */
-const core = (o) => ACCEPTANCE_PLAN.map((e) => [o[e.key], e.label]);
+/** The plan entries that apply to `o`: optional ones only when given. */
+const planFor = (o) =>
+  ACCEPTANCE_PLAN.filter((e) => !(e.optional && o[e.key] == null));
+/** [contract, label] for every contract governance ends up owning. */
+const core = (o) => planFor(o).map((e) => [o[e.key], e.label]);
 
 async function addrOf(x) {
   if (typeof x === "string") return x;
@@ -81,6 +85,12 @@ async function assertHandoverComplete(o) {
     await o.identityRegistry.isAgent(ops),
   );
   add("guardian set on Token", same(await o.token.guardian(), guardian));
+  if (o.dynamicListManager) {
+    add(
+      "DynamicListManager governanceContract is governance",
+      same(await o.dynamicListManager.governanceContract(), govAddr),
+    );
+  }
   if (o.investorTypeRegistry) {
     const reg = o.investorTypeRegistry;
     add(
@@ -116,6 +126,7 @@ async function assertHandoverComplete(o) {
 
 module.exports = {
   ACCEPTANCE_PLAN,
+  planFor,
   core,
   addrOf,
   same,

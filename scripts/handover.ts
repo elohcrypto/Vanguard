@@ -10,6 +10,7 @@
  *     "complianceRules": "0x..",
  *     "oracleManager": "0x..", "governance": "0x..",
  *     "investorTypeRegistry": "0x..",          // optional
+ *     "dynamicListManager": "0x..",            // optional, demo option 84
  *     "oracles": ["0x..", "0x..", "0x.."],      // optional, one-step Ownable
  *     "issuers": ["0x..", "0x.."],              // optional, ClaimIssuer
  *     "ops": 10, "guardian": 11, "proposer": 1, "voters": [2, 3, 6]
@@ -71,6 +72,9 @@ async function main(): Promise<void> {
     oracleManager: await at("OracleManager", cfg.oracleManager),
     investorTypeRegistry: cfg.investorTypeRegistry
       ? await at("InvestorTypeRegistry", cfg.investorTypeRegistry)
+      : undefined,
+    dynamicListManager: cfg.dynamicListManager
+      ? await at("DynamicListManager", cfg.dynamicListManager)
       : undefined,
     oracles: await Promise.all(
       (cfg.oracles || []).map((a: string) =>

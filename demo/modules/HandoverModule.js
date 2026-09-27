@@ -29,6 +29,7 @@ const STATE_KEY = {
   identityRegistry: "identityRegistry",
   complianceRules: "complianceRules",
   oracleManager: "oracleManager",
+  dynamicListManager: "dynamicListManager",
   governance: "vanguardGovernance",
 };
 
@@ -83,6 +84,8 @@ class HandoverModule {
       complianceRules: s.getContract("complianceRules"),
       oracleManager: s.getContract("oracleManager"),
       investorTypeRegistry: s.getContract("investorTypeRegistry") || undefined,
+      // Optional: only when option 84 deployed it.
+      dynamicListManager: s.getContract("dynamicListManager") || undefined,
       oracles: pick(["whitelistOracle", "blacklistOracle", "consensusOracle"]),
       issuers: pick(["kycIssuer", "amlIssuer"]),
     };
@@ -132,7 +135,9 @@ class HandoverModule {
     for (const e of ACCEPTANCE_PLAN) {
       const c = this.state.getContract(STATE_KEY[e.key]);
       if (!c) {
-        summary.push(`   ⚠️  ${e.label}: not deployed`);
+        summary.push(
+          `   ⚠️  ${e.label}: not deployed${e.optional ? " (optional)" : ""}`,
+        );
         continue;
       }
       const before = await c.owner();

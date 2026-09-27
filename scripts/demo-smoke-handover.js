@@ -73,6 +73,8 @@ async function runHandoverSmoke(state, failures) {
     complianceRules: c("complianceRules"),
     oracleManager,
     investorTypeRegistry: c("investorTypeRegistry"),
+    // The smoke does not deploy DynamicListManager (option 84); optional in the plan.
+    dynamicListManager: undefined,
     oracles: ["whitelistOracle", "blacklistOracle", "consensusOracle"].map(c),
     issuers: [c("kycIssuer"), c("amlIssuer")],
   };

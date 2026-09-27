@@ -9,6 +9,8 @@
  *
  * Order: (1) grant ops/guardian, hand over issuers; (2) oracles to ops; (5)
  * deployer drops its roles; (3) nominate governance; (4) accept by vote.
+ * The oracles' list-manager writer role is not touched here: option 84 sets
+ * it while the deployer owns the oracles, and after the handover ops does.
  * Every transaction is followed by a state assertion; any mismatch throws.
  */
 
@@ -16,6 +18,7 @@ const { ethers } = require("hardhat");
 const { advancePast } = require("./ChainTime");
 const {
   ACCEPTANCE_PLAN,
+  planFor,
   core,
   addrOf,
   same,
@@ -80,7 +83,7 @@ async function handoverDeployerPowers(o) {
   // Governance must be bound to every contract it is about to own, or the
   // acceptOwnership vote in step 4 can never be proposed. Checked before any
   // transaction so a mis-ordered deployment leaves no partial handover.
-  for (const e of ACCEPTANCE_PLAN.filter((x) => x.key !== "governance")) {
+  for (const e of planFor(o).filter((x) => x.key !== "governance")) {
     const want = await addrOf(o[e.key]);
     const got = await o.governance.boundTarget(e.proposalType);
     check(
@@ -134,6 +137,15 @@ async function handoverDeployerPowers(o) {
     () => o.complianceRules.ruleAdministrators(govAddr),
     `ComplianceRules rule administrator: governance ${govAddr}`,
   );
+  // The manager's writes by vote need governance as its governanceContract.
+  const dlm = o.dynamicListManager;
+  if (dlm && !same(await dlm.governanceContract(), govAddr)) {
+    await apply(
+      dlm.connect(d).setGovernanceContract(govAddr),
+      async () => same(await dlm.governanceContract(), govAddr),
+      `DynamicListManager governanceContract: governance ${govAddr}`,
+    );
+  }
 
   for (const issuer of o.issuers || []) {
     const label = await issuerLabel(issuer);
@@ -380,7 +392,7 @@ async function acceptAllByVote({
     await castAcceptanceVotes(governance, id, voters);
     await settleProposal(governance, id, label);
   };
-  for (const e of ACCEPTANCE_PLAN) {
+  for (const e of planFor(contracts)) {
     const c = contracts[e.key];
     check(c, `no contract given for ${e.label}`);
     if (same(await c.owner(), govAddr)) {

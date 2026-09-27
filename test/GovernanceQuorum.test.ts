@@ -103,10 +103,11 @@ describe("VanguardGovernance — quorum enforcement", () => {
     );
     await gov.waitForDeployment();
 
-    // Ten ProposalType values; every one must define a real bar. A zero quorum
+    // Nine ProposalType values (0-8 after the list types collapsed into
+    // ListUpdate, plan 2D.1); every one must define a real bar. A zero quorum
     // would make that type executable by a single voter, which is the
     // vulnerability the behavioural tests guard against.
-    for (let t = 0; t < 10; t++) {
+    for (let t = 0; t < 9; t++) {
       const th = await gov.proposalThresholds(t);
       expect(th.quorumPercentage, `type ${t} quorum`).to.be.greaterThan(0n);
       expect(th.approvalPercentage, `type ${t} approval`).to.be.greaterThan(

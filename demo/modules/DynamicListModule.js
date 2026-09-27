@@ -65,6 +65,7 @@ class DynamicListModule {
         await vanguardGovernance.setDynamicListManager(address);
       await setListMgrTx.wait();
       console.log("✅ DynamicListManager registered with Governance");
+      await this._wireOracles(dynamicListManager, address);
 
       console.log("\n📊 DEPLOYMENT SUMMARY:");
       console.log("=".repeat(70));
@@ -89,6 +90,54 @@ class DynamicListModule {
     } catch (error) {
       displayError(`Deployment failed: ${error.message}`);
     }
+  }
+
+  /**
+   * Option 84, plan 2D.1: the manager writes the WhitelistOracle/BlacklistOracle
+   * that ComplianceRules reads, so it needs them set and the writer role.
+   * @private
+   */
+  async _wireOracles(manager, address) {
+    const wl = this.state.getContract("whitelistOracle");
+    const bl = this.state.getContract("blacklistOracle");
+    if (!wl || !bl) {
+      displayError(
+        "WhitelistOracle/BlacklistOracle not deployed: every list update will revert ('oracles not set') until option 31 runs and option 84 is re-run",
+      );
+      return;
+    }
+    await (
+      await manager.setOracles(await wl.getAddress(), await bl.getAddress())
+    ).wait();
+    console.log("✅ Manager writes WhitelistOracle and BlacklistOracle");
+    for (const [oracle, name] of [
+      [wl, "WhitelistOracle"],
+      [bl, "BlacklistOracle"],
+    ]) {
+      const owner = await oracle.owner();
+      const signer = this.state.signers.find(
+        (x) => x.address.toLowerCase() === owner.toLowerCase(),
+      );
+      if (!signer) {
+        console.log(
+          `⚠️  ${name} is owned by ${owner}, not a local wallet. List updates revert until the owner calls ${name}(${await oracle.getAddress()}).setListManager(${address})`,
+        );
+        continue;
+      }
+      await (await oracle.connect(signer).setListManager(address)).wait();
+      if ((await oracle.listManager()).toLowerCase() !== address.toLowerCase())
+        throw new Error(`${name}.setListManager did not apply`);
+      console.log(`✅ ${name} writer role granted to the manager`);
+    }
+  }
+
+  /** Prompt with a visible default; the oracles need a tier/severity. */
+  async _askNumber(question, def, min, max) {
+    const raw = (await this.promptUser(`${question} [${def}]: `)).trim();
+    const n = raw === "" ? def : Number(raw);
+    if (!Number.isInteger(n) || n < min || n > max)
+      throw new Error(`${question}: expected ${min}-${max}, got "${raw}"`);
+    return n;
   }
 
   /** Option 85: Manage Whitelist/Blacklist Status */
@@ -291,21 +340,19 @@ class DynamicListModule {
 
       if (typeChoice === "0") return;
 
-      // Map choice to proposal type enum value
-      const proposalTypeMap = {
-        1: 6, // AddToWhitelist
-        2: 7, // RemoveFromWhitelist
-        3: 8, // AddToBlacklist
-        4: 9, // RemoveFromBlacklist
+      // One proposal type (ListUpdate = 6, plan 2D.1); the choice picks the
+      // manager function the proposal calls.
+      const fnByChoice = {
+        1: ["addToWhitelist", "Add to Whitelist"],
+        2: ["removeFromWhitelist", "Remove from Whitelist"],
+        3: ["addToBlacklist", "Add to Blacklist"],
+        4: ["removeFromBlacklist", "Remove from Blacklist"],
       };
-
-      const proposalType = proposalTypeMap[typeChoice];
-      const proposalTypeNames = {
-        6: "Add to Whitelist",
-        7: "Remove from Whitelist",
-        8: "Add to Blacklist",
-        9: "Remove from Blacklist",
-      };
+      if (!fnByChoice[typeChoice]) {
+        displayError(`Invalid choice "${typeChoice}"`);
+        return;
+      }
+      const [fn, fnLabel] = fnByChoice[typeChoice];
 
       // Select target user
       console.log("\n👤 SELECT TARGET USER:");
@@ -318,10 +365,34 @@ class DynamicListModule {
 
       // Get reason
       const reason = await this.promptUser("Reason for this change: ");
+      let args = [targetUser, targetIdentity, reason];
+      if (fn === "addToWhitelist")
+        args = [
+          targetUser,
+          targetIdentity,
+          await this._askNumber("Whitelist tier (1-5)", 1, 1, 5),
+          reason,
+        ];
+      if (fn === "addToBlacklist")
+        args = [
+          targetUser,
+          targetIdentity,
+          await this._askNumber(
+            "Severity (0 LOW, 1 MEDIUM, 2 HIGH, 3 CRITICAL)",
+            1,
+            0,
+            3,
+          ),
+          reason,
+        ];
+      const callData = dynamicListManager.interface.encodeFunctionData(
+        fn,
+        args,
+      );
 
       // Get proposal details
-      const title = `${proposalTypeNames[proposalType]}: User ${userChoice}`;
-      const description = `Proposal to ${proposalTypeNames[proposalType].toLowerCase()} for user ${targetUser}. Reason: ${reason}`;
+      const title = `${fnLabel}: User ${userChoice}`;
+      const description = `Proposal to ${fnLabel.toLowerCase()} for user ${targetUser}. Reason: ${reason}`;
 
       // Check and approve tokens
       const governanceToken = this.state.getContract("governanceToken");
@@ -347,13 +418,12 @@ class DynamicListModule {
 
       // Create proposal
       console.log("\n📝 Creating governance proposal...");
-      const tx = await vanguardGovernance.createListUpdateProposal(
-        proposalType,
+      const tx = await vanguardGovernance.createProposal(
+        6, // ListUpdate
         title,
         description,
-        targetUser,
-        targetIdentity,
-        reason,
+        await dynamicListManager.getAddress(),
+        callData,
       );
       await tx.wait();
 
@@ -363,7 +433,7 @@ class DynamicListModule {
       displaySuccess("PROPOSAL CREATED!");
       console.log("=".repeat(70));
       console.log(`   Proposal ID: ${proposalId}`);
-      console.log(`   Type: ${proposalTypeNames[proposalType]}`);
+      console.log(`   Type: ListUpdate -> ${fn}`);
       console.log(`   Target User: ${targetUser}`);
       console.log(`   Target Identity: ${targetIdentity}`);
       console.log(`   Reason: ${reason}`);
@@ -372,7 +442,9 @@ class DynamicListModule {
       console.log("📊 Next Steps:");
       console.log("   1. Community votes on this proposal (option 77)");
       console.log("   2. After voting period, execute proposal (option 78)");
-      console.log("   3. User status will be updated automatically");
+      console.log(
+        "   3. The manager writes the WhitelistOracle/BlacklistOracle that transfers check",
+      );
     } catch (error) {
       displayError(`Error: ${error.message}`);
     }
@@ -483,6 +555,7 @@ class DynamicListModule {
       const addWhitelistTx = await dynamicListManager.addToWhitelist(
         targetUser,
         targetIdentity,
+        await this._askNumber("Whitelist tier (1-5)", 1, 1, 5),
         "Initial approval - user passed KYC/AML",
       );
       await addWhitelistTx.wait();
@@ -507,6 +580,12 @@ class DynamicListModule {
       const addBlacklistTx = await dynamicListManager.addToBlacklist(
         targetUser,
         targetIdentity,
+        await this._askNumber(
+          "Severity (0 LOW, 1 MEDIUM, 2 HIGH, 3 CRITICAL)",
+          1,
+          0,
+          3,
+        ),
         "Fraudulent activity detected",
       );
       await addBlacklistTx.wait();

@@ -23,15 +23,15 @@ contract VanguardGovernance is Ownable2Step, ReentrancyGuard {
         TokenParameters,
         SystemParameters,
         EmergencyAction,
-        AddToWhitelist,      // Add user to whitelist
-        RemoveFromWhitelist, // Remove user from whitelist
-        AddToBlacklist,      // Add user to blacklist
-        RemoveFromBlacklist, // Remove user from blacklist
-        // Appended last so existing indexes (0-9) do not shift. Governs the
-        // IdentityRegistry's onlyOwner surface (claim topics, trusted issuers,
-        // agents, compliance/investor-type wiring) once ownership is handed over.
+        // Index 6: moves a member between whitelist and blacklist. Bound to the
+        // DynamicListManager; calldata is a plain call on one of its four
+        // add/remove functions, which write the WhitelistOracle/BlacklistOracle
+        // that ComplianceRules reads (plan 2D.1, D6').
+        ListUpdate,
+        // Index 7: governs the IdentityRegistry's onlyOwner surface (claim
+        // topics, trusted issuers, agents, compliance/investor-type wiring).
         IdentityRegistryParameters,
-        // Appended last (index 11): governs the vote token's owner surface (plan 2C.2, D19).
+        // Index 8: governs the vote token's owner surface (plan 2C.2, D19).
         GovernanceTokenParameters
     }
     
@@ -115,16 +115,7 @@ contract VanguardGovernance is Ownable2Step, ReentrancyGuard {
     address public complianceRules;
     address public oracleManager;
     address public token;
-    address public dynamicListManager; // DynamicListManager contract
-
-    // List update proposal data
-    struct ListUpdateProposal {
-        address targetUser;
-        uint256 targetIdentity;
-        string reason;
-    }
-
-    mapping(uint256 => ListUpdateProposal) public listUpdateProposals;
+    address public dynamicListManager; // DynamicListManager: bound target of ListUpdate
 
     /// @notice Divisor applied to every proposal type's votingPeriod and
     ///         executionDelay at construction. 1 = the mainnet schedule.
@@ -184,8 +175,6 @@ contract VanguardGovernance is Ownable2Step, ReentrancyGuard {
     ///         type has no bound target. Thresholds are chosen by type, so an
     ///         unbound target let any action run under the weakest tier.
     error TargetNotBoundToType(ProposalType proposalType, address target);
-    /// @notice List types carry their own data; use createListUpdateProposal.
-    error UseListUpdateProposal(ProposalType proposalType);
     event VotingCostUpdated(uint256 oldCost, uint256 newCost);
     
     /**
@@ -235,7 +224,8 @@ contract VanguardGovernance is Ownable2Step, ReentrancyGuard {
     /**
      * @notice The single contract a proposal type may target. address(0) means
      *         the type cannot be used with createProposal (EmergencyAction has
-     *         no bound target yet; list types go through createListUpdateProposal).
+     *         no bound target yet). ListUpdate is bound to the DynamicListManager,
+     *         so it is unproposable until setDynamicListManager runs.
      *         IdentityRegistryParameters is bound to the IdentityRegistry;
      *         GovernanceTokenParameters is bound to the GovernanceToken (VGT).
      */
@@ -245,16 +235,10 @@ contract VanguardGovernance is Ownable2Step, ReentrancyGuard {
         if (proposalType == ProposalType.OracleParameters) return oracleManager;
         if (proposalType == ProposalType.TokenParameters) return token;
         if (proposalType == ProposalType.SystemParameters) return address(this);
+        if (proposalType == ProposalType.ListUpdate) return dynamicListManager;
         if (proposalType == ProposalType.IdentityRegistryParameters) return address(identityRegistry);
         if (proposalType == ProposalType.GovernanceTokenParameters) return address(governanceToken);
         return address(0);
-    }
-
-    function _isListType(ProposalType proposalType) internal pure returns (bool) {
-        return proposalType == ProposalType.AddToWhitelist ||
-            proposalType == ProposalType.RemoveFromWhitelist ||
-            proposalType == ProposalType.AddToBlacklist ||
-            proposalType == ProposalType.RemoveFromBlacklist;
     }
 
     /**
@@ -309,34 +293,13 @@ contract VanguardGovernance is Ownable2Step, ReentrancyGuard {
             executionDelay: 1 days / TIME_SCALE
         });
 
-        // AddToWhitelist: 15% quorum, 60% approval, 5 days voting, 1 day delay
-        proposalThresholds[ProposalType.AddToWhitelist] = ProposalThresholds({
-            quorumPercentage: 1500,
-            approvalPercentage: 6000,
-            votingPeriod: 5 days / TIME_SCALE,
-            executionDelay: 1 days / TIME_SCALE
-        });
-
-        // RemoveFromWhitelist: 15% quorum, 60% approval, 5 days voting, 1 day delay
-        proposalThresholds[ProposalType.RemoveFromWhitelist] = ProposalThresholds({
-            quorumPercentage: 1500,
-            approvalPercentage: 6000,
-            votingPeriod: 5 days / TIME_SCALE,
-            executionDelay: 1 days / TIME_SCALE
-        });
-
-        // AddToBlacklist: 20% quorum, 70% approval, 5 days voting, 1 day delay
-        proposalThresholds[ProposalType.AddToBlacklist] = ProposalThresholds({
+        // ListUpdate: 20% quorum, 70% approval, 5 days voting, 1 day delay.
+        // One type now covers both whitelisting and sanctions listing, so it
+        // takes the strictest of the four old list rows (AddToBlacklist)
+        // (plan 2D.1, D6').
+        proposalThresholds[ProposalType.ListUpdate] = ProposalThresholds({
             quorumPercentage: 2000,
             approvalPercentage: 7000,
-            votingPeriod: 5 days / TIME_SCALE,
-            executionDelay: 1 days / TIME_SCALE
-        });
-
-        // RemoveFromBlacklist: 20% quorum, 65% approval, 5 days voting, 1 day delay
-        proposalThresholds[ProposalType.RemoveFromBlacklist] = ProposalThresholds({
-            quorumPercentage: 2000,
-            approvalPercentage: 6500,
             votingPeriod: 5 days / TIME_SCALE,
             executionDelay: 1 days / TIME_SCALE
         });
@@ -378,7 +341,6 @@ contract VanguardGovernance is Ownable2Step, ReentrancyGuard {
         // by type at execution, so with target free a proposer could submit a
         // TokenParameters action (30%/70%/3d) as InvestorTypeConfig (20%/60%/2d)
         // or EmergencyAction (10% quorum) and execute it under the weaker bar.
-        if (_isListType(proposalType)) revert UseListUpdateProposal(proposalType);
         address expected = boundTarget(proposalType);
         if (expected == address(0) || target != expected) {
             revert TargetNotBoundToType(proposalType, target);
@@ -538,23 +500,12 @@ contract VanguardGovernance is Ownable2Step, ReentrancyGuard {
             // Proposal passed: Execute and BURN locked tokens
             require(block.timestamp >= proposal.executionTime, "Execution delay not met");
 
-            bool success;
-            bytes memory reason;
-            if (proposal.proposalType == ProposalType.AddToWhitelist ||
-                proposal.proposalType == ProposalType.RemoveFromWhitelist ||
-                proposal.proposalType == ProposalType.AddToBlacklist ||
-                proposal.proposalType == ProposalType.RemoveFromBlacklist) {
-                (success, reason) = _executeListUpdate(proposalId);
-            } else {
-                (success, reason) = proposal.target.call(proposal.callData);
-            }
+            (bool success, bytes memory reason) = proposal.target.call(proposal.callData);
 
             if (!success) {
                 // A PASSED VOTE WHOSE TARGET CALL REVERTS IS AN OUTCOME.
                 //
-                // Both branches used to revert here (require(success) on
-                // the regular path; the list path re-raised the manager's
-                // revert). That left the proposal Active with every deposit
+                // This used to revert (require(success)). That left the proposal Active with every deposit
                 // locked and no path out: re-executing hit the same revert,
                 // and a rescue vote calling cancelProposal() also reverted
                 // because executeProposal and cancelProposal share one
@@ -769,141 +720,4 @@ contract VanguardGovernance is Ownable2Step, ReentrancyGuard {
         require(_dynamicListManager != address(0), "Invalid address");
         dynamicListManager = _dynamicListManager;
     }
-
-    /**
-     * @dev Internal function to execute list update
-     * @param proposalId Proposal ID
-     */
-    /**
-     * @dev Call the list manager for a list-update proposal and report the
-     *      outcome. Does NOT revert on a failed call: the caller settles the
-     *      proposal and logs `reason`, exactly as for a regular target call.
-     *
-     *      An unset manager is different in kind. Nothing was voted on that
-     *      could ever succeed, and the owner can fix it with
-     *      setDynamicListManager, so that case stays a revert and the
-     *      proposal stays Active: retryable once wired.
-     */
-    function _executeListUpdate(uint256 proposalId)
-        internal
-        returns (bool success, bytes memory reason)
-    {
-        require(dynamicListManager != address(0), "DynamicListManager not set");
-
-        Proposal storage proposal = _proposals[proposalId];
-        ListUpdateProposal storage listUpdate = listUpdateProposals[proposalId];
-
-        (success, reason) = dynamicListManager.call(
-            abi.encodeWithSignature(
-                _getListUpdateFunctionSignature(proposal.proposalType),
-                listUpdate.targetUser,
-                listUpdate.targetIdentity,
-                listUpdate.reason
-            )
-        );
-    }
-
-    /**
-     * @dev Get function signature for list update
-     * @param proposalType Proposal type
-     * @return Function signature string
-     */
-    function _getListUpdateFunctionSignature(ProposalType proposalType) internal pure returns (string memory) {
-        if (proposalType == ProposalType.AddToWhitelist) {
-            return "addToWhitelist(address,uint256,string)";
-        } else if (proposalType == ProposalType.RemoveFromWhitelist) {
-            return "removeFromWhitelist(address,uint256,string)";
-        } else if (proposalType == ProposalType.AddToBlacklist) {
-            return "addToBlacklist(address,uint256,string)";
-        } else if (proposalType == ProposalType.RemoveFromBlacklist) {
-            return "removeFromBlacklist(address,uint256,string)";
-        } else {
-            revert("Invalid proposal type");
-        }
-    }
-
-    /**
-     * @dev Create a list update proposal
-     * @param proposalType Type of list update (AddToWhitelist, RemoveFromWhitelist, AddToBlacklist, RemoveFromBlacklist)
-     * @param title Proposal title
-     * @param description Proposal description
-     * @param targetUser Target user address
-     * @param targetIdentity Target user identity ID
-     * @param reason Reason for the list update
-     * @return proposalId The created proposal ID
-     */
-    function createListUpdateProposal(
-        ProposalType proposalType,
-        string calldata title,
-        string calldata description,
-        address targetUser,
-        uint256 targetIdentity,
-        string calldata reason
-    ) external nonReentrant returns (uint256) {
-        // Validate proposal type
-        require(
-            proposalType == ProposalType.AddToWhitelist ||
-            proposalType == ProposalType.RemoveFromWhitelist ||
-            proposalType == ProposalType.AddToBlacklist ||
-            proposalType == ProposalType.RemoveFromBlacklist,
-            "Invalid list update proposal type"
-        );
-
-        // Check KYC/AML verification
-        require(identityRegistry.isVerified(msg.sender), "Must be KYC/AML verified");
-
-        // Check proposer has enough tokens for creation cost
-        require(
-            governanceToken.balanceOf(msg.sender) >= proposalCreationCost,
-            "Insufficient VGT balance for proposal creation"
-        );
-
-        // Transfer and lock proposal creation cost
-        require(
-            governanceToken.transferFrom(msg.sender, address(this), proposalCreationCost),
-            "Token transfer failed"
-        );
-
-        // Get thresholds for this proposal type
-        ProposalThresholds memory thresholds = proposalThresholds[proposalType];
-
-        // Create proposal
-        uint256 proposalId = _nextProposalId++;
-        _proposals[proposalId] = Proposal({
-            id: proposalId,
-            proposalType: proposalType,
-            title: title,
-            description: description,
-            target: dynamicListManager,
-            callData: "", // Will be constructed during execution
-            proposer: msg.sender,
-            createdAt: block.timestamp,
-            votingEnds: block.timestamp + thresholds.votingPeriod,
-            // Same timelock as every other proposal type. This was 0, which made
-            // the `block.timestamp >= executionTime` guard vacuous: a blacklist
-            // proposal executed the instant voting ended and the owner's cancel
-            // window never opened.
-            executionTime: block.timestamp + thresholds.votingPeriod + thresholds.executionDelay,
-            status: ProposalStatus.Active,
-            votesFor: 0,
-            votesAgainst: 0,
-            eligibleVotersAtCreation: identityRegistry.registeredIdentityCount()
-        });
-
-        // Store list update data
-        listUpdateProposals[proposalId] = ListUpdateProposal({
-            targetUser: targetUser,
-            targetIdentity: targetIdentity,
-            reason: reason
-        });
-
-        // Track locked tokens
-        _lockedTokens[proposalId] = proposalCreationCost;
-        _voterLockedTokens[proposalId][msg.sender] = proposalCreationCost;
-
-        emit ProposalCreated(proposalId, msg.sender, proposalType, title);
-
-        return proposalId;
-    }
 }
-

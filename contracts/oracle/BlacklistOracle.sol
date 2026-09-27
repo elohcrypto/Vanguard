@@ -103,6 +103,21 @@ contract BlacklistOracle is IOracle, Ownable, ReentrancyGuard, Pausable {
         _;
     }
 
+    /// @notice DynamicListManager allowed to write single entries, so a governance
+    ///         ListUpdate vote reaches this oracle (plan 2D.1). Zero = owner only.
+    address public listManager;
+    event ListManagerUpdated(address indexed previous, address indexed current);
+    modifier onlyOwnerOrListManager() {
+        require(msg.sender == owner() || (listManager != address(0) && msg.sender == listManager),
+            "BlacklistOracle: Only owner or list manager");
+        _;
+    }
+    /// @notice Grant (or clear, with address(0)) the list-manager writer role.
+    function setListManager(address _listManager) external onlyOwner {
+        emit ListManagerUpdated(listManager, _listManager);
+        listManager = _listManager;
+    }
+
     modifier onlyWhenActive() {
         require(active, "BlacklistOracle: Oracle not active");
         _;
@@ -264,7 +279,7 @@ contract BlacklistOracle is IOracle, Ownable, ReentrancyGuard, Pausable {
         SeverityLevel _severity,
         uint256 _duration,
         string calldata _reason
-    ) external onlyOwner {
+    ) external onlyOwnerOrListManager {
         require(_subject != address(0), "BlacklistOracle: Invalid subject");
 
         uint256 expiryTime = block.timestamp + (_duration > 0 ? _duration : DEFAULT_BLACKLIST_DURATION);
@@ -315,7 +330,7 @@ contract BlacklistOracle is IOracle, Ownable, ReentrancyGuard, Pausable {
     /**
      * @dev Remove address from blacklist
      */
-    function removeFromBlacklist(address _subject, string calldata _reason) external onlyOwner {
+    function removeFromBlacklist(address _subject, string calldata _reason) external onlyOwnerOrListManager {
         require(_subject != address(0), "BlacklistOracle: Invalid subject");
         require(blacklistEntries[_subject].isBlacklisted, "BlacklistOracle: Not blacklisted");
 

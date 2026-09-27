@@ -83,12 +83,16 @@ after 83c the deployer can no longer register identities.
 After the ceremony governance owns VGT and ops (a VGT agent) distributes it;
 `distributeGovernanceTokens` sends from the caller's own balance, so option
 75 (signed by wallet 0) must fund voters before 83c, and afterwards ops mints.
+When option 84 has deployed `DynamicListManager`, the ceremony nominates it
+and governance accepts it by a ListUpdate vote like the core contracts; the
+oracles' list-manager writer role (`setListManager`) is set by the oracle
+owner, which is the deployer (option 84) before the ceremony and ops after it.
 
 Outside the demo, `HANDOVER_CONFIG=<path.json> npx hardhat run
 scripts/handover.ts --network <net>` runs the same ceremony and exits
 non-zero on any failure. The JSON holds the addresses `token`,
 `governanceToken`, `identityRegistry`, `complianceRules`, `oracleManager`, `governance`, the
-optional `investorTypeRegistry`, `oracles` and `issuers` arrays, and the
+optional `investorTypeRegistry` and `dynamicListManager`, the `oracles` and `issuers` arrays, and the
 wallet indices `ops`, `guardian`, `proposer` and `voters` (an array).
 
 ## Waiting instead of jumping

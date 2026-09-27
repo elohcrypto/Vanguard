@@ -19,9 +19,9 @@ const { ethers } = require("hardhat");
 /**
  * Proposal type names in ProposalType enum order.
  *
- * Must match contracts/governance/VanguardGovernance.sol. The demo previously
- * listed only the first six; types 6-9 (the list-update proposals created by
- * DynamicListModule, menu option 86) printed as "undefined".
+ * Must match contracts/governance/VanguardGovernance.sol. ListUpdate (6) is
+ * the single list-update type created by DynamicListModule, menu option 86
+ * (plan 2D.1).
  */
 const PROPOSAL_TYPE_NAMES = [
   "InvestorTypeConfig",
@@ -30,10 +30,7 @@ const PROPOSAL_TYPE_NAMES = [
   "TokenParameters",
   "SystemParameters",
   "EmergencyAction",
-  "AddToWhitelist",
-  "RemoveFromWhitelist",
-  "AddToBlacklist",
-  "RemoveFromBlacklist",
+  "ListUpdate",
   "IdentityRegistryParameters",
   "GovernanceTokenParameters",
 ];
@@ -924,15 +921,16 @@ class GovernanceModule {
       console.log("4. SystemParameters - Update system settings");
       console.log("5. EmergencyAction - Emergency actions");
       console.log(
-        "10. IdentityRegistryParameters - Update KYC/AML registry (topics, issuers, agents)",
+        "6. ListUpdate - Whitelist/blacklist a member via DynamicListManager",
       );
       console.log(
-        "11. GovernanceTokenParameters - Pause/unpause or manage agents of the vote token",
+        "7. IdentityRegistryParameters - Update KYC/AML registry (topics, issuers, agents)",
+      );
+      console.log(
+        "8. GovernanceTokenParameters - Pause/unpause or manage agents of the vote token",
       );
 
-      const typeChoice = await this.promptUser(
-        "Select proposal type (0-5, 10, 11): ",
-      );
+      const typeChoice = await this.promptUser("Select proposal type (0-8): ");
       const proposalType = parseInt(typeChoice);
 
       if (proposalType === 0) {

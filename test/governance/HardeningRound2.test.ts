@@ -556,8 +556,7 @@ describe("Hardening round 2 — contract changes", () => {
 
   describe("R5: a list-update proposal whose manager call reverts is settled, not stuck", () => {
     const D = 9 * 86400 + 60;
-    const REMOVE_FROM_WHITELIST = 7,
-      ADD_TO_WHITELIST = 6;
+    const LIST_UPDATE = 6;
     async function listFixture() {
       const base = await govFixture();
       const dlm = await (
@@ -565,17 +564,25 @@ describe("Hardening round 2 — contract changes", () => {
       ).deploy(base.owner.address);
       return { ...base, dlm };
     }
+    // ListUpdate is a plain call on the manager (plan 2D.1): the proposal's
+    // calldata is one of its four add/remove functions.
     async function passedListProposal(
       gov: any,
       alice: any,
       bob: any,
       carol: any,
-      type: number,
-      target: string,
+      dlm: any,
+      callData: string,
     ) {
       await gov
         .connect(alice)
-        .createListUpdateProposal(type, "list", "d", target, 1, "r");
+        .createProposal(
+          LIST_UPDATE,
+          "list",
+          "d",
+          await dlm.getAddress(),
+          callData,
+        );
       const id = await gov.proposalCount();
       await gov.connect(bob).castVote(id, true, "y");
       await gov.connect(carol).castVote(id, true, "y");
@@ -583,27 +590,28 @@ describe("Hardening round 2 — contract changes", () => {
       await ethers.provider.send("evm_mine", []);
       return id;
     }
+    const addWl = (dlm: any, user: string) =>
+      dlm.interface.encodeFunctionData("addToWhitelist", [user, 1, 1, "r"]);
 
-    it("manager precondition revert: Rejected, claimable, reason preserved", async () => {
+    it("manager call reverts (oracles unset): Rejected, claimable, reason preserved", async () => {
       const { alice, bob, carol, gov, govAddr, dlm } = await listFixture();
       await gov.setDynamicListManager(await dlm.getAddress());
       await dlm.setGovernanceContract(govAddr);
-      // Removing a user who was never whitelisted reverts in the manager.
+      // The manager fails closed with no oracle to write.
       const id = await passedListProposal(
         gov,
         alice,
         bob,
         carol,
-        REMOVE_FROM_WHITELIST,
-        bob.address,
+        dlm,
+        addWl(dlm, bob.address),
       );
-      // Before: bubbled 'User not whitelisted', proposal stayed Active, 30 VGT locked.
       await expect(gov.executeProposal(id))
         .to.emit(gov, "ProposalExecutionFailed")
         .withArgs(id, (data: string) => {
           const err = gov.interface.parseError(data);
           expect(err?.name).to.equal("Error");
-          expect(err?.args[0]).to.equal("User not whitelisted");
+          expect(err?.args[0]).to.equal("DynamicListManager: oracles not set");
           return true;
         });
       const [p] = await gov.getProposal(id);
@@ -616,7 +624,7 @@ describe("Hardening round 2 — contract changes", () => {
       );
     });
 
-    it("manager not authorised, and manager never set, settle the same way", async () => {
+    it("manager not authorised settles the same way", async () => {
       const { alice, bob, carol, gov, dlm } = await listFixture();
       // Not authorised: manager set on governance, governance not set on manager.
       await gov.setDynamicListManager(await dlm.getAddress());
@@ -625,8 +633,8 @@ describe("Hardening round 2 — contract changes", () => {
         alice,
         bob,
         carol,
-        ADD_TO_WHITELIST,
-        bob.address,
+        dlm,
+        addWl(dlm, bob.address),
       );
       await expect(gov.executeProposal(a))
         .to.emit(gov, "ProposalExecutionFailed")
@@ -641,24 +649,24 @@ describe("Hardening round 2 — contract changes", () => {
       );
     });
 
-    it("manager never set is a configuration error and still reverts", async () => {
-      // Distinct from a target-call failure: nothing was voted on that could
-      // succeed later, and the owner can fix it with setDynamicListManager.
-      // Keeping this a revert preserves retry once the manager is wired.
-      const { alice, bob, carol, gov } = await listFixture();
-      const id = await passedListProposal(
-        gov,
-        alice,
-        bob,
-        carol,
-        ADD_TO_WHITELIST,
-        bob.address,
-      );
-      await expect(gov.executeProposal(id)).to.be.revertedWith(
-        "DynamicListManager not set",
-      );
-      const [p] = await gov.getProposal(id);
-      expect(p.status).to.equal(1n); // still Active: retryable after wiring
+    it("manager never set: ListUpdate cannot be proposed at all", async () => {
+      // Fail closed at creation: boundTarget(ListUpdate) is address(0), so no
+      // vote can be opened that could never execute.
+      const { alice, gov, dlm } = await listFixture();
+      const target = await dlm.getAddress();
+      await expect(
+        gov
+          .connect(alice)
+          .createProposal(
+            LIST_UPDATE,
+            "list",
+            "d",
+            target,
+            addWl(dlm, alice.address),
+          ),
+      )
+        .to.be.revertedWithCustomError(gov, "TargetNotBoundToType")
+        .withArgs(LIST_UPDATE, target);
     });
 
     it("timeScale divides every voting period and delay; 1 is the mainnet schedule", async () => {
@@ -683,12 +691,11 @@ describe("Hardening round 2 — contract changes", () => {
         3: [7n * DAY, 3n * DAY],
         4: [7n * DAY, 2n * DAY],
         5: [3n * DAY, 1n * DAY],
-        6: [5n * DAY, 1n * DAY],
-        7: [5n * DAY, 1n * DAY],
-        8: [5n * DAY, 1n * DAY],
-        9: [5n * DAY, 1n * DAY],
+        6: [5n * DAY, 1n * DAY], // ListUpdate
+        7: [7n * DAY, 2n * DAY], // IdentityRegistryParameters
+        8: [7n * DAY, 3n * DAY], // GovernanceTokenParameters
       };
-      for (let t = 0; t <= 9; t++) {
+      for (let t = 0; t <= 8; t++) {
         const a = await g1.proposalThresholds(t),
           b = await g336.proposalThresholds(t);
         expect(
@@ -710,7 +717,7 @@ describe("Hardening round 2 — contract changes", () => {
       // must still be >= 60s. Integer division floors, and a 0s delay or a
       // 2s vote (seen at scale 100000) makes a proposal unvotable.
       const gMax = await F.deploy(...args, 1440);
-      for (let t = 0; t <= 9; t++) {
+      for (let t = 0; t <= 8; t++) {
         const m = await gMax.proposalThresholds(t);
         expect(m.votingPeriod, `type ${t} vote @1440`).to.be.at.least(60n);
         expect(m.executionDelay, `type ${t} delay @1440`).to.be.at.least(60n);
@@ -724,23 +731,41 @@ describe("Hardening round 2 — contract changes", () => {
         .withArgs(1441);
     });
 
-    it("control: a wired manager call executes, whitelists, and burns", async () => {
-      const { alice, bob, carol, gt, gov, govAddr, dlm } = await listFixture();
-      await gov.setDynamicListManager(await dlm.getAddress());
+    it("control: a wired manager call executes, writes the WhitelistOracle, and burns", async () => {
+      const { owner, alice, bob, carol, gt, gov, govAddr, dlm } =
+        await listFixture();
+      const om = await (
+        await ethers.getContractFactory("OracleManager")
+      ).deploy();
+      const omAddr = await om.getAddress();
+      const wl = await (
+        await ethers.getContractFactory("WhitelistOracle")
+      ).deploy(omAddr, "WL", "d");
+      const bl = await (
+        await ethers.getContractFactory("BlacklistOracle")
+      ).deploy(omAddr, "BL", "d");
+      const dlmAddr = await dlm.getAddress();
+      await gov.setDynamicListManager(dlmAddr);
       await dlm.setGovernanceContract(govAddr);
+      await dlm.setOracles(await wl.getAddress(), await bl.getAddress());
+      await wl.connect(owner).setListManager(dlmAddr);
+      await bl.connect(owner).setListManager(dlmAddr);
+      expect(await wl.isWhitelisted(bob.address)).to.equal(false);
       const id = await passedListProposal(
         gov,
         alice,
         bob,
         carol,
-        ADD_TO_WHITELIST,
-        bob.address,
+        dlm,
+        addWl(dlm, bob.address),
       );
       const s0 = await gt.totalSupply();
       await expect(gov.executeProposal(id))
         .to.emit(gov, "ProposalExecuted")
         .withArgs(id);
-      expect(await dlm.userStatus(bob.address)).to.equal(1n); // WHITELISTED
+      // The vote reached the oracle ComplianceRules reads: it now gates transfers.
+      expect(await wl.isWhitelisted(bob.address)).to.equal(true);
+      expect(await dlm.getUserStatus(bob.address)).to.equal(1n); // WHITELISTED
       expect(s0 - (await gt.totalSupply())).to.equal(ethers.parseEther("30"));
     });
   });

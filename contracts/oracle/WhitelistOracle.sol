@@ -80,6 +80,27 @@ contract WhitelistOracle is IOracle, Ownable, ReentrancyGuard, Pausable {
         _;
     }
 
+    /// @notice DynamicListManager allowed to write single list entries, so a
+    ///         governance ListUpdate vote reaches this oracle (plan 2D.1).
+    ///         Set by the oracle owner; zero means no writer besides the owner.
+    address public listManager;
+
+    event ListManagerUpdated(address indexed previous, address indexed current);
+
+    modifier onlyOwnerOrListManager() {
+        require(
+            msg.sender == owner() || (listManager != address(0) && msg.sender == listManager),
+            "WhitelistOracle: Only owner or list manager"
+        );
+        _;
+    }
+
+    /// @notice Grant (or clear, with address(0)) the list-manager writer role.
+    function setListManager(address _listManager) external onlyOwner {
+        emit ListManagerUpdated(listManager, _listManager);
+        listManager = _listManager;
+    }
+
     modifier onlyWhenActive() {
         require(active, "WhitelistOracle: Oracle not active");
         _;
@@ -234,7 +255,7 @@ contract WhitelistOracle is IOracle, Ownable, ReentrancyGuard, Pausable {
         uint8 _tier,
         uint256 _duration,
         string calldata _reason
-    ) external onlyOwner {
+    ) external onlyOwnerOrListManager {
         require(_subject != address(0), "WhitelistOracle: Invalid subject");
         require(_tier >= MIN_TIER && _tier <= MAX_TIER, "WhitelistOracle: Invalid tier");
 
@@ -295,7 +316,7 @@ contract WhitelistOracle is IOracle, Ownable, ReentrancyGuard, Pausable {
     /**
      * @dev Remove address from whitelist
      */
-    function removeFromWhitelist(address _subject, string calldata _reason) external onlyOwner {
+    function removeFromWhitelist(address _subject, string calldata _reason) external onlyOwnerOrListManager {
         require(whitelistEntries[_subject].isWhitelisted, "WhitelistOracle: Not whitelisted");
 
         whitelistEntries[_subject].isWhitelisted = false;

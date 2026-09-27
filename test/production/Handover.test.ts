@@ -41,6 +41,7 @@ describe("Deployer holds no power after handover (plan Task 0.3)", function () {
   let complianceRules: any;
   let oracleManager: any;
   let governance: any;
+  let dynamicListManager: any;
   let govAddr: string;
   let kycIssuer: any;
   let investor: SignerWithAddress;
@@ -57,6 +58,7 @@ describe("Deployer holds no power after handover (plan Task 0.3)", function () {
       identityRegistry,
       complianceRules,
       oracleManager,
+      dynamicListManager,
       issuers: [kycIssuer],
       log: () => {},
     });
@@ -66,6 +68,7 @@ describe("Deployer holds no power after handover (plan Task 0.3)", function () {
       identityRegistry,
       complianceRules,
       oracleManager,
+      dynamicListManager,
       governance,
     };
     for (const e of ACCEPTANCE_PLAN) {
@@ -146,6 +149,14 @@ describe("Deployer holds no power after handover (plan Task 0.3)", function () {
       1440,
     );
     govAddr = await governance.getAddress();
+    // Optional plan entry (demo option 84). Its governanceContract is left
+    // unset: the ceremony's deployer step must set it.
+    dynamicListManager = await (
+      await ethers.getContractFactory("DynamicListManager")
+    ).deploy(deployer.address);
+    await governance.setDynamicListManager(
+      await dynamicListManager.getAddress(),
+    );
     await vgt.addAgent(deployer.address);
     await vgt.addAgent(govAddr);
     await complianceRules.setTokenIdentityRegistry(vgtAddr, idRegAddr);
@@ -165,6 +176,19 @@ describe("Deployer holds no power after handover (plan Task 0.3)", function () {
       expect(await c.owner()).to.equal(govAddr);
     }
     expect(await governance.owner()).to.equal(govAddr);
+  });
+
+  it("governance owns DynamicListManager when deployed", async function () {
+    expect(await dynamicListManager.owner()).to.equal(govAddr);
+    expect(await dynamicListManager.governanceContract()).to.equal(govAddr);
+    await expect(
+      dynamicListManager
+        .connect(deployer)
+        .setGovernanceContract(deployer.address),
+    ).to.be.revertedWithCustomError(
+      dynamicListManager,
+      "OwnableUnauthorizedAccount",
+    );
   });
 
   it("the deployer is no longer an agent or rule administrator", async function () {

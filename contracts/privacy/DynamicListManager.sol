@@ -1,14 +1,35 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.20;
 
-import "@openzeppelin/contracts/access/Ownable.sol";
+import "@openzeppelin/contracts/access/Ownable2Step.sol";
+
+/// @dev The WhitelistOracle surface the manager writes and reads.
+interface IWhitelistOracleWriter {
+    function addToWhitelist(address subject, uint8 tier, uint256 duration, string calldata reason) external;
+    function removeFromWhitelist(address subject, string calldata reason) external;
+    function isWhitelisted(address subject) external view returns (bool);
+}
+
+/// @dev The BlacklistOracle surface the manager writes and reads. `severity` is
+///      BlacklistOracle.SeverityLevel, which the ABI encodes as uint8.
+interface IBlacklistOracleWriter {
+    function addToBlacklist(address subject, uint8 severity, uint256 duration, string calldata reason) external;
+    function removeFromBlacklist(address subject, string calldata reason) external;
+    function isBlacklisted(address subject) external view returns (bool);
+}
 
 /**
  * @title DynamicListManager
- * @notice Manages dynamic whitelist and blacklist with governance integration
- * @dev Tracks user status changes and invalidates old proofs when status changes
+ * @notice Single entry for moving a member between whitelist and blacklist. The
+ *         owner or governance (a ListUpdate proposal, plan 2D.1) calls one of the
+ *         four add/remove functions; each records identity status and history
+ *         here and writes the WhitelistOracle/BlacklistOracle that
+ *         ComplianceRules reads. Per-address membership lives only in the
+ *         oracles (D6'); getUserStatus derives from them. The oracle owner must
+ *         grant this contract the writer role (oracle.setListManager).
+ * @dev Identity-keyed status and proof expiry invalidate old proofs when status changes.
  */
-contract DynamicListManager is Ownable {
+contract DynamicListManager is Ownable2Step {
     // User status enum
     enum UserStatus { 
         NONE,        // Not in any list
@@ -30,8 +51,8 @@ contract DynamicListManager is Ownable {
     mapping(uint256 => uint256) public whitelistRootTimestamp;
     mapping(uint256 => uint256) public blacklistRootTimestamp;
 
-    // User status tracking
-    mapping(address => UserStatus) public userStatus;
+    // Identity-keyed status (no oracle home). Per-address status is derived
+    // from the oracles in getUserStatus.
     mapping(uint256 => UserStatus) public identityStatus; // By identity ID
 
     // Status change history
@@ -51,6 +72,13 @@ contract DynamicListManager is Ownable {
     // Governance contract address
     address public governanceContract;
 
+    /// @notice Oracles this manager writes. Unset = every list write reverts.
+    IWhitelistOracleWriter public whitelistOracle;
+    IBlacklistOracleWriter public blacklistOracle;
+
+    /// @dev Highest BlacklistOracle.SeverityLevel (CRITICAL).
+    uint8 private constant MAX_SEVERITY = 3;
+
     // Events
     event WhitelistUpdated(uint256 indexed version, bytes32 newRoot, uint256 timestamp);
     event BlacklistUpdated(uint256 indexed version, bytes32 newRoot, uint256 timestamp);
@@ -63,6 +91,7 @@ contract DynamicListManager is Ownable {
     );
     event ProofExpiryDurationUpdated(uint256 oldDuration, uint256 newDuration);
     event GovernanceContractUpdated(address indexed oldGovernance, address indexed newGovernance);
+    event OraclesUpdated(address indexed whitelistOracle, address indexed blacklistOracle);
 
     /**
      * @notice Constructor
@@ -82,6 +111,27 @@ contract DynamicListManager is Ownable {
         address oldGovernance = governanceContract;
         governanceContract = _governanceContract;
         emit GovernanceContractUpdated(oldGovernance, _governanceContract);
+    }
+
+    /**
+     * @notice Set the oracles the list functions write
+     * @param whitelist WhitelistOracle address
+     * @param blacklist BlacklistOracle address
+     */
+    function setOracles(address whitelist, address blacklist) external onlyOwner {
+        require(whitelist.code.length > 0, "DynamicListManager: whitelist oracle not a contract");
+        require(blacklist.code.length > 0, "DynamicListManager: blacklist oracle not a contract");
+        whitelistOracle = IWhitelistOracleWriter(whitelist);
+        blacklistOracle = IBlacklistOracleWriter(blacklist);
+        emit OraclesUpdated(whitelist, blacklist);
+    }
+
+    /// @dev Fail closed: a list write with no oracle to reach gates nothing.
+    function _requireOracles() internal view {
+        require(
+            address(whitelistOracle) != address(0) && address(blacklistOracle) != address(0),
+            "DynamicListManager: oracles not set"
+        );
     }
 
     /**
@@ -122,98 +172,101 @@ contract DynamicListManager is Ownable {
     }
 
     /**
-     * @notice Add user to whitelist
+     * @notice Add user to whitelist (writes WhitelistOracle)
      * @param user User address
      * @param identity User identity ID
+     * @param tier Whitelist tier 1..5, passed to the oracle
      * @param reason Reason for adding to whitelist
      */
     function addToWhitelist(
-        address user, 
+        address user,
         uint256 identity,
+        uint8 tier,
         string memory reason
     ) external onlyOwnerOrGovernance {
         require(user != address(0), "Invalid user address");
-        require(userStatus[user] != UserStatus.BLACKLISTED, "User is blacklisted");
+        _requireOracles();
+        require(!blacklistOracle.isBlacklisted(user), "User is blacklisted");
 
-        UserStatus oldStatus = userStatus[user];
-        userStatus[user] = UserStatus.WHITELISTED;
-        identityStatus[identity] = UserStatus.WHITELISTED;
-
-        // Record status change
-        _recordStatusChange(user, identity, oldStatus, UserStatus.WHITELISTED, reason);
-
-        emit UserStatusChanged(user, identity, oldStatus, UserStatus.WHITELISTED, reason);
+        _setStatus(user, identity, getUserStatus(user), UserStatus.WHITELISTED, reason);
+        whitelistOracle.addToWhitelist(user, tier, 0, reason);
     }
 
     /**
-     * @notice Add user to blacklist (removes from whitelist)
+     * @notice Add user to blacklist (writes BlacklistOracle). A whitelist entry
+     *         is left in place; the blacklist takes precedence while it lasts.
      * @param user User address
      * @param identity User identity ID
+     * @param severity BlacklistOracle.SeverityLevel (0 LOW .. 3 CRITICAL)
      * @param reason Reason for blacklisting
      */
     function addToBlacklist(
-        address user, 
+        address user,
         uint256 identity,
+        uint8 severity,
         string memory reason
     ) external onlyOwnerOrGovernance {
         require(user != address(0), "Invalid user address");
+        require(severity <= MAX_SEVERITY, "Invalid severity");
+        _requireOracles();
 
-        UserStatus oldStatus = userStatus[user];
-        userStatus[user] = UserStatus.BLACKLISTED;
-        identityStatus[identity] = UserStatus.BLACKLISTED;
-
-        // Record status change
-        _recordStatusChange(user, identity, oldStatus, UserStatus.BLACKLISTED, reason);
-
-        emit UserStatusChanged(user, identity, oldStatus, UserStatus.BLACKLISTED, reason);
+        _setStatus(user, identity, getUserStatus(user), UserStatus.BLACKLISTED, reason);
+        blacklistOracle.addToBlacklist(user, severity, 0, reason);
     }
 
     /**
-     * @notice Remove user from blacklist (back to whitelist)
+     * @notice Remove user from blacklist (writes BlacklistOracle). The user is
+     *         WHITELISTED afterwards only if the whitelist oracle still lists them.
      * @param user User address
      * @param identity User identity ID
      * @param reason Reason for removing from blacklist
      */
     function removeFromBlacklist(
-        address user, 
+        address user,
         uint256 identity,
         string memory reason
     ) external onlyOwnerOrGovernance {
         require(user != address(0), "Invalid user address");
-        require(userStatus[user] == UserStatus.BLACKLISTED, "User not blacklisted");
+        _requireOracles();
+        require(blacklistOracle.isBlacklisted(user), "User not blacklisted");
 
-        UserStatus oldStatus = userStatus[user];
-        userStatus[user] = UserStatus.WHITELISTED;
-        identityStatus[identity] = UserStatus.WHITELISTED;
-
-        // Record status change
-        _recordStatusChange(user, identity, oldStatus, UserStatus.WHITELISTED, reason);
-
-        emit UserStatusChanged(user, identity, oldStatus, UserStatus.WHITELISTED, reason);
+        UserStatus newStatus = whitelistOracle.isWhitelisted(user) ? UserStatus.WHITELISTED : UserStatus.NONE;
+        _setStatus(user, identity, UserStatus.BLACKLISTED, newStatus, reason);
+        blacklistOracle.removeFromBlacklist(user, reason);
     }
 
     /**
-     * @notice Remove user from whitelist (back to NONE)
+     * @notice Remove user from whitelist (writes WhitelistOracle)
      * @param user User address
      * @param identity User identity ID
      * @param reason Reason for removing from whitelist
      */
     function removeFromWhitelist(
-        address user, 
+        address user,
         uint256 identity,
         string memory reason
     ) external onlyOwnerOrGovernance {
         require(user != address(0), "Invalid user address");
-        require(userStatus[user] == UserStatus.WHITELISTED, "User not whitelisted");
+        _requireOracles();
+        require(whitelistOracle.isWhitelisted(user), "User not whitelisted");
 
-        UserStatus oldStatus = userStatus[user];
-        userStatus[user] = UserStatus.NONE;
-        identityStatus[identity] = UserStatus.NONE;
+        UserStatus oldStatus = getUserStatus(user);
+        UserStatus newStatus = oldStatus == UserStatus.BLACKLISTED ? UserStatus.BLACKLISTED : UserStatus.NONE;
+        _setStatus(user, identity, oldStatus, newStatus, reason);
+        whitelistOracle.removeFromWhitelist(user, reason);
+    }
 
-        // Record status change
-        _recordStatusChange(user, identity, oldStatus, UserStatus.NONE, reason);
-
-        emit UserStatusChanged(user, identity, oldStatus, UserStatus.NONE, reason);
+    /// @dev Identity status, history and event for one change.
+    function _setStatus(
+        address user,
+        uint256 identity,
+        UserStatus oldStatus,
+        UserStatus newStatus,
+        string memory reason
+    ) internal {
+        identityStatus[identity] = newStatus;
+        _recordStatusChange(user, identity, oldStatus, newStatus, reason);
+        emit UserStatusChanged(user, identity, oldStatus, newStatus, reason);
     }
 
     /**
@@ -272,12 +325,18 @@ contract DynamicListManager is Ownable {
     }
 
     /**
-     * @notice Get user status by address
+     * @notice Get user status by address, derived from the oracles (D6'):
+     *         blacklisted wins, then whitelisted, else NONE (also when unset).
      * @param user User address
      * @return UserStatus Current status
      */
-    function getUserStatus(address user) external view returns (UserStatus) {
-        return userStatus[user];
+    function getUserStatus(address user) public view returns (UserStatus) {
+        if (address(whitelistOracle) == address(0) || address(blacklistOracle) == address(0)) {
+            return UserStatus.NONE;
+        }
+        if (blacklistOracle.isBlacklisted(user)) return UserStatus.BLACKLISTED;
+        if (whitelistOracle.isWhitelisted(user)) return UserStatus.WHITELISTED;
+        return UserStatus.NONE;
     }
 
     /**
