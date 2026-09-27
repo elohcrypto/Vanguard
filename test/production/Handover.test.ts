@@ -4,44 +4,88 @@ import { SignerWithAddress } from "@nomicfoundation/hardhat-ethers/signers";
 import {
   KYC_DATA,
   KYC_TOPIC,
+  attest,
   configureKyc,
   deployIdentity,
   issueSigned,
   signClaim,
 } from "../helpers/kyc";
 
-// Guard test from .omc/plans/2026-09-23-zk-kyc-ownership-cleanup.md, Task 0.3.
-// After the handover ceremony (Phase 2, Task 2.4) the deploying key must hold
-// no power at all, governance must own the core contracts, an ops multisig
-// must hold the operational roles, and a guardian must be able to pause but
-// not unpause. Today the deployer keeps everything, so this fails.
-//
-// Phase 2 replaces the `handover` stub below with `scripts/handover.ts`.
-// PENDING until Phase 2: observed RED on 2026-09-23 (4 of 4 fail: deployer owns
-// everything, guardian cannot pause). Change `describe.skip` to `describe` in Task 2.4.
-// The two ClaimIssuer cases (deployer cannot issue, ops can) are plan v2 Task
-// 2B.4 (D8); they describe the target state and go green in Phase 2C, when
-// `handover` runs the issuer ceremony proven by the live describe below.
-describe.skip("Deployer holds no power after handover (plan Task 0.3)", function () {
+// Plain JS so the demo, the smoke and scripts/handover.ts share one ceremony.
+const {
+  ACCEPTANCE_PLAN,
+  castAcceptanceVotes,
+  handoverDeployerPowers,
+  proposeAcceptOwnership,
+  settleProposal,
+} = require("../../demo/utils/Handover");
+
+// Guard test from .omc/plans/2026-09-23-zk-kyc-ownership-cleanup.md, Task 0.3,
+// green since plan v2 Task 2C.1 (.omc/plans/2026-09-25-zk-kyc-ownership-cleanup-v2.md).
+// After the handover ceremony the deploying key holds no power at all,
+// governance owns the core contracts, an ops multisig holds the operational
+// roles, and a guardian can pause but not unpause. `handover` runs the real
+// ceremony from demo/utils/Handover.js (the code behind demo options 83c/83d,
+// scripts/handover.ts and the demo smoke): deployer powers, then one
+// acceptOwnership() vote per contract. The two ClaimIssuer cases are plan v2
+// Task 2B.4 (D8), proven step by step in the describe further down.
+describe("Deployer holds no power after handover (plan Task 0.3)", function () {
   let deployer: SignerWithAddress;
-  let governance: SignerWithAddress; // stands in for VanguardGovernance until Task 2.4
   let ops: SignerWithAddress;
   let guardian: SignerWithAddress;
+  let proposer: SignerWithAddress;
+  let voters: SignerWithAddress[];
   let token: any;
   let identityRegistry: any;
   let complianceRules: any;
   let oracleManager: any;
+  let governance: any;
+  let govAddr: string;
   let kycIssuer: any;
   let investor: SignerWithAddress;
   let identityAddr: string;
 
   async function handover(): Promise<void> {
-    // Task 2.4 wires the real ceremony here. Intentionally empty so the
-    // assertions below describe the target state, not today's state.
+    await handoverDeployerPowers({
+      deployer,
+      ops,
+      guardian,
+      governance,
+      token,
+      identityRegistry,
+      complianceRules,
+      oracleManager,
+      issuers: [kycIssuer],
+      log: () => {},
+    });
+    const contracts: Record<string, any> = {
+      token,
+      identityRegistry,
+      complianceRules,
+      oracleManager,
+      governance,
+    };
+    for (const e of ACCEPTANCE_PLAN) {
+      const id = await proposeAcceptOwnership(
+        governance,
+        proposer,
+        contracts[e.key],
+        e.proposalType,
+        e.label,
+      );
+      await castAcceptanceVotes(governance, id, voters);
+      await settleProposal(governance, id, e.label);
+    }
   }
 
   beforeEach(async function () {
-    [deployer, governance, ops, guardian, investor] = await ethers.getSigners();
+    let alice: SignerWithAddress,
+      bob: SignerWithAddress,
+      carol: SignerWithAddress;
+    [deployer, ops, guardian, investor, alice, bob, carol] =
+      await ethers.getSigners();
+    proposer = alice;
+    voters = [bob, carol];
 
     identityRegistry = await (
       await ethers.getContractFactory("IdentityRegistry")
@@ -77,13 +121,46 @@ describe.skip("Deployer holds no power after handover (plan Task 0.3)", function
       344,
     );
 
+    // Governance bound to the real core contracts (fixture shape of
+    // test/governance/IdentityRegistryProposals.test.ts) and three verified
+    // VGT holders: a proposer and two voters (2 of 4 registered = 50%).
+    const idRegAddr = await identityRegistry.getAddress();
+    const rulesAddr = await complianceRules.getAddress();
+    const vgt = await (
+      await ethers.getContractFactory("GovernanceToken")
+    ).deploy("VGT", "VGT", idRegAddr, rulesAddr);
+    const vgtAddr = await vgt.getAddress();
+    governance = await (
+      await ethers.getContractFactory("VanguardGovernance")
+    ).deploy(
+      vgtAddr,
+      idRegAddr,
+      ethers.ZeroAddress,
+      rulesAddr,
+      await oracleManager.getAddress(),
+      await token.getAddress(),
+      1440,
+    );
+    govAddr = await governance.getAddress();
+    await vgt.addAgent(deployer.address);
+    await vgt.addAgent(govAddr);
+    await complianceRules.setTokenIdentityRegistry(vgtAddr, idRegAddr);
+    await complianceRules.addTrustedContract(govAddr);
+    for (const w of [alice, bob, carol]) {
+      const id = await deployIdentity(factory, w.address);
+      await identityRegistry.registerIdentity(w.address, id, 840);
+      await attest(kycIssuer, deployer, id);
+      await vgt.mint(w.address, ethers.parseEther("1000"));
+    }
+
     await handover();
   });
 
   it("governance owns Token, IdentityRegistry, ComplianceRules and OracleManager", async function () {
     for (const c of [token, identityRegistry, complianceRules, oracleManager]) {
-      expect(await c.owner()).to.equal(governance.address);
+      expect(await c.owner()).to.equal(govAddr);
     }
+    expect(await governance.owner()).to.equal(govAddr);
   });
 
   it("the deployer is no longer an agent or rule administrator", async function () {

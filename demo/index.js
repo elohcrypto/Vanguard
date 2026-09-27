@@ -33,6 +33,7 @@ const InvestorTypeModule = require("./modules/InvestorTypeModule");
 const EscrowModule = require("./modules/EscrowModule");
 const GovernanceModule = require("./modules/GovernanceModule");
 const DynamicListModule = require("./modules/DynamicListModule");
+const HandoverModule = require("./modules/HandoverModule");
 
 // Utilities
 const SignerManager = require("./utils/SignerManager");
@@ -201,6 +202,11 @@ class InteractiveDemo {
       this.logger,
       this.promptUser.bind(this),
     );
+    const handover = new HandoverModule(
+      this.state,
+      this.logger,
+      this.promptUser.bind(this),
+    );
 
     // Store modules
     this.modules = {
@@ -213,6 +219,7 @@ class InteractiveDemo {
       investorType,
       escrow,
       governance,
+      handover,
       dynamicList,
     };
 

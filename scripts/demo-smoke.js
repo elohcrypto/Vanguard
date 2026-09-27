@@ -517,6 +517,9 @@ async function main() {
     }
   }
 
+  // 7. Plan 2C.1: the handover ceremony, last because it strips the deployer.
+  await require("./demo-smoke-handover").runHandoverSmoke(state, failures);
+
   if (failures.length) {
     console.error(`\n❌ Demo smoke test failed (${failures.length}):`);
     for (const f of failures) console.error(`   - ${f}`);

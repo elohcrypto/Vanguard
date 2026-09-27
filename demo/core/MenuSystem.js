@@ -178,6 +178,13 @@ class MenuSystem {
     console.log("83. Manage InvestorTypeRegistry via Governance");
     console.log("83a. Change Governance Costs (Proposal & Voting)");
     console.log("83b. Governance Accepts Registry Ownership (by vote) 🏛️");
+    console.log(
+      "83c. Handover step 1: deployer grants ops/guardian, nominates governance",
+    );
+    console.log(
+      "83d. Handover step 2: governance accepts ownership by vote (all nominated contracts)",
+    );
+    console.log("83e. Handover step 3: verify the deployer holds no power");
     console.log("");
     console.log("📋 === DYNAMIC LIST MANAGEMENT (Options 84-88) ===");
     console.log("84. Deploy Dynamic List Manager");
@@ -212,6 +219,7 @@ class MenuSystem {
       investorType,
       escrow,
       governance,
+      handover,
       dynamicList,
     } = this.modules;
 
@@ -538,6 +546,15 @@ class MenuSystem {
           break;
         case "83b":
           await governance.acceptRegistryOwnershipByVote();
+          break;
+        case "83c":
+          await handover.handoverStep1();
+          break;
+        case "83d":
+          await handover.acceptAllOwnershipByVote();
+          break;
+        case "83e":
+          await handover.verifyHandover();
           break;
 
         // Dynamic List (84-89)

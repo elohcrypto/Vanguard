@@ -131,6 +131,18 @@ class GovernanceModule {
       const tokenAddr = digitalToken
         ? await digitalToken.getAddress()
         : ethers.ZeroAddress;
+      const oracleManager = this.state.getContract("oracleManager");
+      const oracleManagerAddr = oracleManager
+        ? await oracleManager.getAddress()
+        : ethers.ZeroAddress;
+      if (!oracleManager) {
+        console.log(
+          "   ⚠️  No OracleManager deployed (option 31): it cannot be governed or handed",
+        );
+        console.log(
+          "      over (83c) until governance is redeployed after option 31.",
+        );
+      }
 
       const VanguardGovernance =
         await ethers.getContractFactory("VanguardGovernance");
@@ -139,7 +151,7 @@ class GovernanceModule {
         identityRegistryAddr,
         investorTypeRegistryAddr,
         complianceRulesAddr,
-        ethers.ZeroAddress, // Oracle manager
+        oracleManagerAddr,
         tokenAddr,
         // Governance time scale. 1 = mainnet schedule (7-day votes). On a
         // network without evm_increaseTime set GOV_TIME_SCALE so a vote
@@ -2069,220 +2081,39 @@ class GovernanceModule {
   }
 
   /**
-   * Option 83b: Complete the Ownable2Step handover of InvestorTypeRegistry to
-   * governance — by an actual vote.
-   *
-   * Deployment (option 74) only NOMINATES governance. Because
-   * VanguardGovernance's sole external-call path is executeProposal,
-   * acceptOwnership() can only be reached through a proposal that clears the
-   * configured quorum and approval thresholds. This walks that through and
-   * shows ownership before and after, so the vote is visibly what moves it.
+   * Option 83b: governance accepts the InvestorTypeRegistry nomination made
+   * by option 74 — by an actual vote. VanguardGovernance can only make
+   * external calls through executeProposal, so acceptOwnership() is reachable
+   * only through a proposal that clears quorum and approval. The flow is
+   * HandoverModule.acceptOwnershipByVote, shared with option 83d.
    */
   async acceptRegistryOwnershipByVote() {
     displaySection("GOVERNANCE ACCEPTS REGISTRY OWNERSHIP (BY VOTE)", "🏛️");
-
-    const vanguardGovernance = this.state.getContract("vanguardGovernance");
     const investorTypeRegistry = this.state.getContract("investorTypeRegistry");
-    const governanceToken = this.state.getContract("governanceToken");
-    const identityRegistry = this.state.getContract("identityRegistry");
-
-    if (!vanguardGovernance || !investorTypeRegistry) {
+    if (
+      !this.state.getContract("vanguardGovernance") ||
+      !investorTypeRegistry
+    ) {
       displayError(
         "Deploy the governance system (74) and InvestorTypeRegistry (51) first",
       );
       return;
     }
-
-    try {
-      const govAddr = await vanguardGovernance.getAddress();
-      const registryAddr = await investorTypeRegistry.getAddress();
-
-      const ownerNow = await investorTypeRegistry.owner();
-      const pending = await investorTypeRegistry.pendingOwner();
-
-      console.log("\n📋 CURRENT OWNERSHIP STATE:");
-      console.log(`   Registry:      ${registryAddr}`);
-      console.log(`   Owner:         ${ownerNow}`);
-      console.log(`   Pending owner: ${pending}`);
-
-      const boundRegistry = await vanguardGovernance.boundTarget(0);
-      if (boundRegistry.toLowerCase() !== registryAddr.toLowerCase()) {
-        displayError(
-          "This governance was deployed against a different InvestorTypeRegistry.",
-        );
-        console.log(`   Bound InvestorTypeConfig target: ${boundRegistry}`);
-        console.log(
-          "   💡 Deploy the registry (option 51) BEFORE governance (option 74).",
-        );
-        return;
-      }
-
-      if (ownerNow.toLowerCase() === govAddr.toLowerCase()) {
-        console.log(
-          "\n   ✅ Governance already owns the registry — nothing to do.",
-        );
-        return;
-      }
-      if (pending.toLowerCase() !== govAddr.toLowerCase()) {
-        displayError(
-          "Governance is not the pending owner. Run option 74 to nominate it first.",
-        );
-        return;
-      }
-
-      // Who can vote? Quorum is a share of registered identities.
-      const eligible = await identityRegistry.registeredIdentityCount();
-      const { quorumPct, approvalPct } = await this._thresholdsFor(
-        vanguardGovernance,
-        0, // InvestorTypeConfig
-      );
-      const needed = Math.ceil((Number(eligible) * quorumPct) / 100);
-      console.log("\n🗳️  VOTE REQUIREMENTS (InvestorTypeConfig):");
-      console.log(`   Eligible voters: ${eligible}`);
-      console.log(`   Quorum:   ${quorumPct}% → at least ${needed} vote(s)`);
-      console.log(`   Approval: ${approvalPct}% of votes cast must be FOR`);
-
-      // Find verified signers who can pay the fees. Report the two
-      // prerequisites SEPARATELY: after a bare deploy the eligible-voter set
-      // is usually just the governance contract itself, so "no VGT" is the
-      // wrong diagnosis — the missing piece is verified identities.
-      const proposalCost = await vanguardGovernance.proposalCreationCost();
-      const voteCost = await vanguardGovernance.votingCost();
-      const govAddrLower = govAddr.toLowerCase();
-      const verifiedHumans = [];
-      const usable = [];
-      for (let i = 0; i < Math.min(10, this.state.signers.length); i++) {
-        const s = this.state.signers[i];
-        if (s.address.toLowerCase() === govAddrLower) continue;
-        if (!(await identityRegistry.isVerified(s.address))) continue;
-        verifiedHumans.push(s);
-        const bal = await governanceToken.balanceOf(s.address);
-        if (bal >= proposalCost + voteCost) usable.push(s);
-      }
-
-      console.log(
-        `   Verified signers: ${verifiedHumans.length} | holding enough VGT: ${usable.length}`,
-      );
-
-      if (usable.length < 2) {
-        displayError(
-          `Need a proposer plus at least one other voter (found ${usable.length} usable).`,
-        );
-        if (verifiedHumans.length < 2) {
-          console.log(
-            `   ⚠️  Only ${verifiedHumans.length} verified signer(s). Voting requires KYC/AML identities.`,
-          );
-          console.log(
-            "   💡 Run option 23 (Investor Onboarding) or 24 (Create Normal Users) first,",
-          );
-          console.log(
-            "      then options 3 and 4 to issue KYC/AML claims to those signers.",
-          );
-        } else {
-          console.log(
-            `   ⚠️  ${verifiedHumans.length} signer(s) are verified but hold under ${ethers.formatEther(proposalCost + voteCost)} VGT.`,
-          );
-          console.log(
-            "   💡 Use option 75a to mint VGT, then 75 or 75b to distribute it to them.",
-          );
-        }
-        return;
-      }
-
-      const proposer = usable[0];
-      // The proposer may not vote on their own proposal.
-      const voters = usable.slice(1);
-      if (voters.length < needed) {
-        displayError(
-          `Only ${voters.length} eligible voter(s) besides the proposer; quorum needs ${needed}.`,
-        );
-        return;
-      }
-
-      const govContractAddr = govAddr;
-      await governanceToken
-        .connect(proposer)
-        .approve(govContractAddr, proposalCost + voteCost);
-      for (const v of voters) {
-        await governanceToken.connect(v).approve(govContractAddr, voteCost);
-      }
-
-      const callData = investorTypeRegistry.interface.encodeFunctionData(
-        "acceptOwnership",
-        [],
-      );
-
-      console.log("\n📝 Step 1: Creating the proposal...");
-      const before = await vanguardGovernance.proposalCount();
-      await vanguardGovernance
-        .connect(proposer)
-        .createProposal(
-          0,
-          "Accept ownership of InvestorTypeRegistry",
-          "Complete the Ownable2Step handover so governance controls investor type config",
-          registryAddr,
-          callData,
-        );
-      const proposalId = Number(before) + 1;
-      console.log(
-        `   ✅ Proposal #${proposalId} created by ${proposer.address}`,
-      );
-
-      console.log("\n📝 Step 2: Casting votes...");
-      for (const v of voters) {
-        await vanguardGovernance
-          .connect(v)
-          .castVote(proposalId, true, "Support handover");
-        console.log(`   ✅ ${v.address} voted FOR (1 vote)`);
-      }
-
-      const [, totalVotes, participationBps] =
-        await vanguardGovernance.getProposal(proposalId);
-      console.log(
-        `   Tally: ${totalVotes} vote(s), turnout ${Number(participationBps) / 100}%`,
-      );
-
-      console.log("\n📝 Step 3: Ownership BEFORE execution:");
-      console.log(`   Owner: ${await investorTypeRegistry.owner()}`);
-      console.log("   ⏳ The vote alone changes nothing.");
-
-      console.log(
-        "\n⏰ Step 4: Advancing past the voting period and execution delay...",
-      );
-      {
-        const [p] = await vanguardGovernance.getProposal(proposalId);
-        await advancePast(
-          p.executionTime > p.votingEnds ? p.executionTime : p.votingEnds,
-          "voting period + execution delay",
-        );
-      }
-
-      const [, , , canExecute] =
-        await vanguardGovernance.getProposal(proposalId);
-      if (!canExecute) {
-        displayError(
-          "Proposal did not clear quorum/approval — ownership will NOT move.",
-        );
-        console.log(
-          "   This is the gate working: too few voters means no handover.",
-        );
-        return;
-      }
-
-      console.log("\n📝 Step 5: Executing the proposal...");
-      await vanguardGovernance.executeProposal(proposalId);
-
-      const finalOwner = await investorTypeRegistry.owner();
-      const finalPending = await investorTypeRegistry.pendingOwner();
-
-      displaySuccess("OWNERSHIP TRANSFERRED BY GOVERNANCE VOTE!");
-      console.log(`   Owner now:     ${finalOwner}`);
-      console.log(`   Pending owner: ${finalPending} (cleared)`);
-      console.log(
-        finalOwner.toLowerCase() === govAddr.toLowerCase()
-          ? "   ✅ VanguardGovernance owns InvestorTypeRegistry"
-          : "   ❌ Unexpected owner — handover did not complete",
-      );
+    const HandoverModule = require("./HandoverModule");
+    const done = await new HandoverModule(
+      this.state,
+      this.logger,
+      this.promptUser,
+    ).acceptOwnershipByVote({
+      target: investorTypeRegistry,
+      proposalType: 0,
+      label: "InvestorTypeRegistry",
+      typeName: "InvestorTypeConfig",
+      deployHint:
+        "Deploy the registry (option 51) BEFORE governance (option 74).",
+      nominateHint: "Run option 74 to nominate it first.",
+    });
+    if (done) {
       console.log(
         "\n   ⚠️  Note: updateInvestorTypeConfig is onlyOwner and BYPASSES this",
       );
@@ -2292,8 +2123,6 @@ class GovernanceModule {
       console.log(
         "      are protected by the VanguardGovernance vote, not by those governors.",
       );
-    } catch (error) {
-      displayError(`Ownership handover failed: ${error.message}`);
     }
   }
 

@@ -15,14 +15,18 @@ modifiers are what enforce the separation.
 
 | Index | Role | Signs |
 |---|---|---|
-| 0 | Platform owner, deployer | deploys, agent grants, governance ownership |
+| 0 | Platform owner, deployer | deploys, agent grants, governance ownership (until the handover ceremony) |
 | 1 | Fee wallet, compliance officer | investor-type assignments |
 | 2 | KYC issuer | KYC claims, identity registration |
 | 3 | AML issuer | AML claims |
 | 4, 5 | Risk and fraud oracles | attestations |
 | 6, 7, 8 | Investors Alice, Bob, Carol | proposals, votes, transfers, escrow parties |
 | 9 | Deliberately unverified | rejection demonstrations |
-| 10, 11 | Spare | |
+| 10 | Ops multisig stand-in | agent roles, compliance officer, oracle + issuer ownership after handover |
+| 11 | Guardian | pause only |
+
+On Sepolia and beyond, wallets 10 and 11 must be multisig addresses, not
+single keys.
 
 ```bash
 cp .env.example .env
@@ -55,6 +59,29 @@ call `deleteIdentity` for every such identity BEFORE creating a proposal;
 deleting mid-vote does not move the bar of a proposal already open. The case
 "expired claims inflate the denominator until deleteIdentity" in
 `test/governance/QuorumIntegrity.test.ts` is the executable version of this rule.
+
+## Handover ceremony
+
+After the ceremony the deployer (wallet 0) holds no power: governance owns
+Token, IdentityRegistry, ComplianceRules, OracleManager and itself; ops
+(wallet 10) holds the agent roles, the compliance-officer role and the
+oracles and claim issuers the deployer owned; the guardian (wallet 11) can
+pause the token but not unpause it. Deploy governance (option 74) after the
+oracle system (option 31) so OracleManager is a bound target. In the demo,
+run 83c (deployer grants ops and guardian, removes itself, nominates
+governance), then 83d (one acceptOwnership vote per nominated contract) and
+83b (InvestorTypeRegistry), then 83e (prints every check as pass or fail).
+The votes need a proposer plus quorum voters that are verified VGT holders
+among wallets 0 to 9: options 23/24 and 3/4 onboard them, 75a then 75/75b
+fund them; without them 83d refuses exactly as 83b does. Onboard first:
+after 83c the deployer can no longer register identities.
+
+Outside the demo, `HANDOVER_CONFIG=<path.json> npx hardhat run
+scripts/handover.ts --network <net>` runs the same ceremony and exits
+non-zero on any failure. The JSON holds the addresses `token`,
+`identityRegistry`, `complianceRules`, `oracleManager`, `governance`, the
+optional `investorTypeRegistry`, `oracles` and `issuers` arrays, and the
+wallet indices `ops`, `guardian`, `proposer` and `voters` (an array).
 
 ## Waiting instead of jumping
 
