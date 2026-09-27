@@ -6,7 +6,8 @@
  *
  * handover.json (addresses, wallet indices from docs/TESTNET_DEMO.md):
  *   {
- *     "token": "0x..", "identityRegistry": "0x..", "complianceRules": "0x..",
+ *     "token": "0x..", "governanceToken": "0x..", "identityRegistry": "0x..",
+ *     "complianceRules": "0x..",
  *     "oracleManager": "0x..", "governance": "0x..",
  *     "investorTypeRegistry": "0x..",          // optional
  *     "oracles": ["0x..", "0x..", "0x.."],      // optional, one-step Ownable
@@ -34,6 +35,7 @@ async function main(): Promise<void> {
   const cfg = JSON.parse(fs.readFileSync(path, "utf8"));
   for (const k of [
     "token",
+    "governanceToken",
     "identityRegistry",
     "complianceRules",
     "oracleManager",
@@ -63,6 +65,7 @@ async function main(): Promise<void> {
     guardian: wallet(cfg.guardian),
     governance: await at("VanguardGovernance", cfg.governance),
     token: await at("Token", cfg.token),
+    governanceToken: await at("GovernanceToken", cfg.governanceToken),
     identityRegistry: await at("IdentityRegistry", cfg.identityRegistry),
     complianceRules: await at("ComplianceRules", cfg.complianceRules),
     oracleManager: await at("OracleManager", cfg.oracleManager),

@@ -35,6 +35,7 @@ const PROPOSAL_TYPE_NAMES = [
   "AddToBlacklist",
   "RemoveFromBlacklist",
   "IdentityRegistryParameters",
+  "GovernanceTokenParameters",
 ];
 
 /**
@@ -925,9 +926,12 @@ class GovernanceModule {
       console.log(
         "10. IdentityRegistryParameters - Update KYC/AML registry (topics, issuers, agents)",
       );
+      console.log(
+        "11. GovernanceTokenParameters - Pause/unpause or manage agents of the vote token",
+      );
 
       const typeChoice = await this.promptUser(
-        "Select proposal type (0-5, 10): ",
+        "Select proposal type (0-5, 10, 11): ",
       );
       const proposalType = parseInt(typeChoice);
 

@@ -36,6 +36,7 @@ describe("Deployer holds no power after handover (plan Task 0.3)", function () {
   let proposer: SignerWithAddress;
   let voters: SignerWithAddress[];
   let token: any;
+  let governanceToken: any;
   let identityRegistry: any;
   let complianceRules: any;
   let oracleManager: any;
@@ -52,6 +53,7 @@ describe("Deployer holds no power after handover (plan Task 0.3)", function () {
       guardian,
       governance,
       token,
+      governanceToken,
       identityRegistry,
       complianceRules,
       oracleManager,
@@ -60,6 +62,7 @@ describe("Deployer holds no power after handover (plan Task 0.3)", function () {
     });
     const contracts: Record<string, any> = {
       token,
+      governanceToken,
       identityRegistry,
       complianceRules,
       oracleManager,
@@ -129,6 +132,7 @@ describe("Deployer holds no power after handover (plan Task 0.3)", function () {
     const vgt = await (
       await ethers.getContractFactory("GovernanceToken")
     ).deploy("VGT", "VGT", idRegAddr, rulesAddr);
+    governanceToken = vgt;
     const vgtAddr = await vgt.getAddress();
     governance = await (
       await ethers.getContractFactory("VanguardGovernance")
@@ -174,6 +178,32 @@ describe("Deployer holds no power after handover (plan Task 0.3)", function () {
   it("the ops multisig holds the agent roles", async function () {
     expect(await token.isAgent(ops.address)).to.equal(true);
     expect(await identityRegistry.isAgent(ops.address)).to.equal(true);
+  });
+
+  // Plan v2 Task 2C.2 (D19): a paused VGT or a frozen voter blocks castVote,
+  // so the deployer must hold no power over the vote token either.
+  it("governance owns GovernanceToken", async function () {
+    expect(await governanceToken.owner()).to.equal(govAddr);
+    await expect(governanceToken.connect(deployer).pause()).to.be.reverted;
+    await expect(
+      governanceToken.connect(deployer).addAgent(deployer.address),
+    ).to.be.revertedWithCustomError(
+      governanceToken,
+      "OwnableUnauthorizedAccount",
+    );
+  });
+
+  it("the deployer is not a GovernanceToken agent", async function () {
+    expect(await governanceToken.isAgent(deployer.address)).to.equal(false);
+    await expect(
+      governanceToken
+        .connect(deployer)
+        .freezePartialTokens(voters[0].address, 1n),
+    ).to.be.reverted;
+  });
+
+  it("the ops multisig is a GovernanceToken agent", async function () {
+    expect(await governanceToken.isAgent(ops.address)).to.equal(true);
   });
 
   it("the guardian can pause the token but cannot unpause it", async function () {

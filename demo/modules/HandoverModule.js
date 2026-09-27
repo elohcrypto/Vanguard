@@ -25,6 +25,7 @@ const { ethers } = require("hardhat");
 /** ACCEPTANCE_PLAN key -> DemoState contract key. */
 const STATE_KEY = {
   token: "digitalToken",
+  governanceToken: "governanceToken",
   identityRegistry: "identityRegistry",
   complianceRules: "complianceRules",
   oracleManager: "oracleManager",
@@ -50,6 +51,7 @@ class HandoverModule {
     const missing = [
       ["vanguardGovernance", "74"],
       ["digitalToken", "21"],
+      ["governanceToken", "74"],
       ["identityRegistry", "1"],
       ["complianceRules", "1"],
       ["oracleManager", "31"],
@@ -76,6 +78,7 @@ class HandoverModule {
       guardian,
       governance: s.getContract("vanguardGovernance"),
       token: s.getContract("digitalToken"),
+      governanceToken: s.getContract("governanceToken"),
       identityRegistry: s.getContract("identityRegistry"),
       complianceRules: s.getContract("complianceRules"),
       oracleManager: s.getContract("oracleManager"),

@@ -30,7 +30,9 @@ contract VanguardGovernance is Ownable2Step, ReentrancyGuard {
         // Appended last so existing indexes (0-9) do not shift. Governs the
         // IdentityRegistry's onlyOwner surface (claim topics, trusted issuers,
         // agents, compliance/investor-type wiring) once ownership is handed over.
-        IdentityRegistryParameters
+        IdentityRegistryParameters,
+        // Appended last (index 11): governs the vote token's owner surface (plan 2C.2, D19).
+        GovernanceTokenParameters
     }
     
     enum ProposalStatus {
@@ -234,7 +236,8 @@ contract VanguardGovernance is Ownable2Step, ReentrancyGuard {
      * @notice The single contract a proposal type may target. address(0) means
      *         the type cannot be used with createProposal (EmergencyAction has
      *         no bound target yet; list types go through createListUpdateProposal).
-     *         IdentityRegistryParameters is bound to the IdentityRegistry.
+     *         IdentityRegistryParameters is bound to the IdentityRegistry;
+     *         GovernanceTokenParameters is bound to the GovernanceToken (VGT).
      */
     function boundTarget(ProposalType proposalType) public view returns (address) {
         if (proposalType == ProposalType.InvestorTypeConfig) return investorTypeRegistry;
@@ -243,6 +246,7 @@ contract VanguardGovernance is Ownable2Step, ReentrancyGuard {
         if (proposalType == ProposalType.TokenParameters) return token;
         if (proposalType == ProposalType.SystemParameters) return address(this);
         if (proposalType == ProposalType.IdentityRegistryParameters) return address(identityRegistry);
+        if (proposalType == ProposalType.GovernanceTokenParameters) return address(governanceToken);
         return address(0);
     }
 
@@ -344,6 +348,15 @@ contract VanguardGovernance is Ownable2Step, ReentrancyGuard {
             approvalPercentage: 6500,
             votingPeriod: 7 days / TIME_SCALE,
             executionDelay: 2 days / TIME_SCALE
+        });
+
+        // GovernanceTokenParameters: reuses the TokenParameters row (plan 2C.2, D19)
+        // 30% quorum, 70% approval, 7 days voting, 3 days delay
+        proposalThresholds[ProposalType.GovernanceTokenParameters] = ProposalThresholds({
+            quorumPercentage: 3000,
+            approvalPercentage: 7000,
+            votingPeriod: 7 days / TIME_SCALE,
+            executionDelay: 3 days / TIME_SCALE
         });
     }
     

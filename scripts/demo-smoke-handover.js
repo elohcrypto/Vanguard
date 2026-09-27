@@ -43,7 +43,7 @@ async function runHandoverSmoke(state, failures) {
     return;
   }
 
-  // Seven proposals at most (five acceptances, two registry calls): give the
+  // Eight proposals at most (six acceptances, two registry calls): give the
   // proposer and every voter enough VGT for all of them.
   const vgt = c("governanceToken");
   const perRound =
@@ -68,6 +68,7 @@ async function runHandoverSmoke(state, failures) {
     guardian: s[GUARDIAN],
     governance,
     token: c("digitalToken"),
+    governanceToken: vgt,
     identityRegistry: c("identityRegistry"),
     complianceRules: c("complianceRules"),
     oracleManager,

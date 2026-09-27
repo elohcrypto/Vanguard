@@ -4,6 +4,8 @@
  * @description Plan v2 Task 2C.1 (.omc/plans/2026-09-25-zk-kyc-ownership-cleanup-v2.md).
  * One implementation shared by demo options 83c/83d/83e, scripts/handover.ts,
  * scripts/demo-smoke-handover.js and test/production/Handover.test.ts.
+ * Task 2C.2 adds GovernanceToken (VGT); the plan and the read-only check
+ * live in HandoverChecks.js.
  *
  * Order: (1) grant ops/guardian, hand over issuers; (2) oracles to ops; (5)
  * deployer drops its roles; (3) nominate governance; (4) accept by vote.
@@ -12,6 +14,16 @@
 
 const { ethers } = require("hardhat");
 const { advancePast } = require("./ChainTime");
+const {
+  ACCEPTANCE_PLAN,
+  core,
+  addrOf,
+  same,
+  keyOf,
+  hasLiveKey,
+  issuerLabel,
+  assertHandoverComplete,
+} = require("./HandoverChecks");
 
 const MANAGEMENT_KEY = 1;
 const ECDSA_TYPE = 1;
@@ -25,40 +37,10 @@ const STATUS = [
 ];
 const EXECUTED = 4;
 
-const plan = (key, proposalType, label, typeName) => ({
-  key,
-  proposalType,
-  label,
-  typeName,
-});
-/** One acceptOwnership() vote per contract governance was nominated for. */
-const ACCEPTANCE_PLAN = [
-  plan("token", 3, "Token", "TokenParameters"),
-  plan(
-    "identityRegistry",
-    10,
-    "IdentityRegistry",
-    "IdentityRegistryParameters",
-  ),
-  plan("complianceRules", 1, "ComplianceRules", "ComplianceRules"),
-  plan("oracleManager", 2, "OracleManager", "OracleParameters"),
-  plan("governance", 4, "VanguardGovernance", "SystemParameters"),
-];
-/** [contract, label] for the five contracts governance ends up owning. */
-const core = (o) => ACCEPTANCE_PLAN.map((e) => [o[e.key], e.label]);
-
 const OWNABLE = new ethers.Interface([
   "function acceptOwnership()",
   "function setComplianceOfficer(address,bool)",
 ]);
-
-async function addrOf(x) {
-  if (typeof x === "string") return x;
-  if (x.getAddress) return x.getAddress();
-  return x.address;
-}
-const same = (a, b) => a.toLowerCase() === b.toLowerCase();
-const keyOf = (a) => ethers.keccak256(ethers.solidityPacked(["address"], [a]));
 
 function check(cond, msg) {
   if (!cond) throw new Error(`Handover: ${msg}`);
@@ -68,12 +50,6 @@ async function send(p) {
   return (await p).wait();
 }
 
-/** True when `wallet` holds a non-revoked key of any purpose on the issuer. */
-async function hasLiveKey(issuer, wallet) {
-  const k = await issuer.issuerKeys(keyOf(wallet));
-  return k.key !== ethers.ZeroHash && !k.revoked;
-}
-
 async function hasLiveManagementKey(issuer, wallet) {
   const k = await issuer.issuerKeys(keyOf(wallet));
   return (
@@ -81,11 +57,6 @@ async function hasLiveManagementKey(issuer, wallet) {
     Number(k.purpose) === MANAGEMENT_KEY &&
     !k.revoked
   );
-}
-
-async function issuerLabel(issuer) {
-  const name = await issuer.issuerName().catch(() => "");
-  return `${name || "ClaimIssuer"} (${await issuer.getAddress()})`;
 }
 
 /**
@@ -143,6 +114,12 @@ async function handoverDeployerPowers(o) {
     o.identityRegistry.connect(d).addAgent(ops),
     () => o.identityRegistry.isAgent(ops),
     `IdentityRegistry agent: ${ops}`,
+  );
+  // No guardian on VGT: halting governance is not the guardian's power (D19).
+  await apply(
+    o.governanceToken.connect(d).addAgent(ops),
+    () => o.governanceToken.isAgent(ops),
+    `GovernanceToken agent: ${ops}`,
   );
   if (o.investorTypeRegistry) {
     await registryOfficer(ctx, ops, true);
@@ -217,6 +194,11 @@ async function handoverDeployerPowers(o) {
     o.identityRegistry.connect(d).removeAgent(dAddr),
     async () => !(await o.identityRegistry.isAgent(dAddr)),
     "deployer removed as IdentityRegistry agent",
+  );
+  await apply(
+    o.governanceToken.connect(d).removeAgent(dAddr),
+    async () => !(await o.governanceToken.isAgent(dAddr)),
+    "deployer removed as GovernanceToken agent",
   );
   await apply(
     o.complianceRules.connect(d).setRuleAdministrator(dAddr, false),
@@ -425,66 +407,6 @@ async function acceptAllByVote({
     await vote(id, r.label);
     log(`   ✅ ${r.label} (proposal #${id})`);
   }
-}
-
-/** Read-only verification. Returns { ok, failures, checks }; never pauses. */
-async function assertHandoverComplete(o) {
-  const dAddr = await addrOf(o.deployer);
-  const ops = await addrOf(o.ops);
-  const guardian = await addrOf(o.guardian);
-  const govAddr = await addrOf(o.governance);
-  const checks = [];
-  const add = (label, pass) => checks.push({ label, ok: Boolean(pass) });
-
-  for (const [c, label] of core(o)) {
-    add(`${label} owned by governance`, same(await c.owner(), govAddr));
-  }
-  add("deployer is not a Token agent", !(await o.token.isAgent(dAddr)));
-  add(
-    "deployer is not an IdentityRegistry agent",
-    !(await o.identityRegistry.isAgent(dAddr)),
-  );
-  add(
-    "deployer is not a ComplianceRules rule administrator",
-    !(await o.complianceRules.ruleAdministrators(dAddr)),
-  );
-  add("ops is a Token agent", await o.token.isAgent(ops));
-  add(
-    "ops is an IdentityRegistry agent",
-    await o.identityRegistry.isAgent(ops),
-  );
-  add("guardian set on Token", same(await o.token.guardian(), guardian));
-  if (o.investorTypeRegistry) {
-    const reg = o.investorTypeRegistry;
-    add(
-      "InvestorTypeRegistry owned by governance (option 83b)",
-      same(await reg.owner(), govAddr),
-    );
-    add(
-      "ops is an InvestorTypeRegistry compliance officer",
-      await reg.isComplianceOfficer(ops),
-    );
-    add(
-      "deployer is not an InvestorTypeRegistry compliance officer",
-      !(await reg.isComplianceOfficer(dAddr)),
-    );
-  }
-  for (const oracle of o.oracles || []) {
-    add(
-      `oracle ${await oracle.getAddress()} owned by ops`,
-      same(await oracle.owner(), ops),
-    );
-  }
-  for (const issuer of o.issuers || []) {
-    const label = await issuerLabel(issuer);
-    add(`deployer does not own ${label}`, !same(await issuer.owner(), dAddr));
-    add(
-      `deployer holds no live key on ${label}`,
-      !(await hasLiveKey(issuer, dAddr)),
-    );
-  }
-  const failures = checks.filter((c) => !c.ok).map((c) => c.label);
-  return { ok: failures.length === 0, failures, checks };
 }
 
 module.exports = {

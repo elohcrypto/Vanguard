@@ -130,6 +130,7 @@ on that proposal forever.
 | AddToBlacklist | 20% | 70% |
 | RemoveFromBlacklist | 20% | 65% |
 | IdentityRegistryParameters | 25% | 65% |
+| GovernanceTokenParameters | 30% | 70% |
 
 Set once in `_initializeThresholds()`; there is no setter, so they cannot be
 changed after deployment.
