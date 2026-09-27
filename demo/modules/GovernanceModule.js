@@ -34,6 +34,7 @@ const PROPOSAL_TYPE_NAMES = [
   "RemoveFromWhitelist",
   "AddToBlacklist",
   "RemoveFromBlacklist",
+  "IdentityRegistryParameters",
 ];
 
 /**
@@ -909,8 +910,13 @@ class GovernanceModule {
       console.log("3. TokenParameters - Update token settings");
       console.log("4. SystemParameters - Update system settings");
       console.log("5. EmergencyAction - Emergency actions");
+      console.log(
+        "10. IdentityRegistryParameters - Update KYC/AML registry (topics, issuers, agents)",
+      );
 
-      const typeChoice = await this.promptUser("Select proposal type (0-5): ");
+      const typeChoice = await this.promptUser(
+        "Select proposal type (0-5, 10): ",
+      );
       const proposalType = parseInt(typeChoice);
 
       if (proposalType === 0) {

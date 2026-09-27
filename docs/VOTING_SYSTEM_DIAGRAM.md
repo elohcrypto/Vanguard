@@ -332,6 +332,7 @@ Result: PASSED (3 of 10 eligible = 30% turnout ≥ 15% quorum;
 | RemoveFromWhitelist | 15% | 60% | ≥15 voters, ≥60% of them FOR |
 | AddToBlacklist | 20% | 70% | ≥20 voters, ≥70% of them FOR |
 | RemoveFromBlacklist | 20% | 65% | ≥20 voters, ≥65% of them FOR |
+| IdentityRegistryParameters | 25% | 65% | ≥25 voters, ≥65% of them FOR |
 
 *Quorum is a share of eligible (KYC-verified) voters counted when the
 proposal was created, not of VGT supply. Votes are one per person.*

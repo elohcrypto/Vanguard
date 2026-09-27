@@ -26,7 +26,11 @@ contract VanguardGovernance is Ownable2Step, ReentrancyGuard {
         AddToWhitelist,      // Add user to whitelist
         RemoveFromWhitelist, // Remove user from whitelist
         AddToBlacklist,      // Add user to blacklist
-        RemoveFromBlacklist  // Remove user from blacklist
+        RemoveFromBlacklist, // Remove user from blacklist
+        // Appended last so existing indexes (0-9) do not shift. Governs the
+        // IdentityRegistry's onlyOwner surface (claim topics, trusted issuers,
+        // agents, compliance/investor-type wiring) once ownership is handed over.
+        IdentityRegistryParameters
     }
     
     enum ProposalStatus {
@@ -230,6 +234,7 @@ contract VanguardGovernance is Ownable2Step, ReentrancyGuard {
      * @notice The single contract a proposal type may target. address(0) means
      *         the type cannot be used with createProposal (EmergencyAction has
      *         no bound target yet; list types go through createListUpdateProposal).
+     *         IdentityRegistryParameters is bound to the IdentityRegistry.
      */
     function boundTarget(ProposalType proposalType) public view returns (address) {
         if (proposalType == ProposalType.InvestorTypeConfig) return investorTypeRegistry;
@@ -237,6 +242,7 @@ contract VanguardGovernance is Ownable2Step, ReentrancyGuard {
         if (proposalType == ProposalType.OracleParameters) return oracleManager;
         if (proposalType == ProposalType.TokenParameters) return token;
         if (proposalType == ProposalType.SystemParameters) return address(this);
+        if (proposalType == ProposalType.IdentityRegistryParameters) return address(identityRegistry);
         return address(0);
     }
 
@@ -329,6 +335,15 @@ contract VanguardGovernance is Ownable2Step, ReentrancyGuard {
             approvalPercentage: 6500,
             votingPeriod: 5 days / TIME_SCALE,
             executionDelay: 1 days / TIME_SCALE
+        });
+
+        // IdentityRegistryParameters: reuses the ComplianceRules row (plan 2B.2)
+        // 25% quorum, 65% approval, 7 days voting, 2 days delay
+        proposalThresholds[ProposalType.IdentityRegistryParameters] = ProposalThresholds({
+            quorumPercentage: 2500,
+            approvalPercentage: 6500,
+            votingPeriod: 7 days / TIME_SCALE,
+            executionDelay: 2 days / TIME_SCALE
         });
     }
     
