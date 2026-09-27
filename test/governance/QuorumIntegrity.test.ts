@@ -396,3 +396,102 @@ describe("cancelProposal under self-ownership", function () {
     ).to.equal(0n);
   });
 });
+
+/**
+ * D7 electorate rule. The quorum denominator is registeredIdentityCount, but
+ * voting needs isVerified, which turns false once a required claim expires.
+ * An expired identity stays in the denominator until an operator deletes it.
+ */
+describe("Expired claims and the electorate (D7)", function () {
+  it("expired claims inflate the denominator until deleteIdentity", async function () {
+    const all = await ethers.getSigners();
+    const owner = all[0];
+    // Three live identities: a proposer (cannot vote on its own proposal)
+    // plus two voters. Seven identities whose claim expires in a day.
+    const live = all.slice(1, 4);
+    const [proposer, v1, v2] = live;
+    const lapsed = all.slice(4, 11);
+    const REJECTED = 3n,
+      EXECUTED = 4n; // ProposalStatus
+    const F = (name: string) => ethers.getContractFactory(name);
+
+    const idReg = await (await F("IdentityRegistry")).deploy();
+    const rules = await (
+      await F("ComplianceRules")
+    ).deploy(owner.address, [840], []);
+    const regAddr = await idReg.getAddress();
+    const rulesAddr = await rules.getAddress();
+    const vgt = await (
+      await F("GovernanceToken")
+    ).deploy("VGT", "VGT", regAddr, rulesAddr);
+    const vgtAddr = await vgt.getAddress();
+    const gov = await (
+      await F("VanguardGovernance")
+    ).deploy(
+      vgtAddr,
+      regAddr,
+      owner.address,
+      rulesAddr,
+      owner.address,
+      vgtAddr,
+      1440,
+    );
+    const govAddr = await gov.getAddress();
+    await idReg.addAgent(owner.address);
+    await vgt.addAgent(owner.address);
+    await vgt.addAgent(govAddr);
+    await rules.setTokenIdentityRegistry(vgtAddr, regAddr);
+    await rules.addTrustedContract(govAddr);
+    const kycIssuer = await (
+      await F("ClaimIssuer")
+    ).deploy(owner.address, "KYC", "d");
+    await configureKyc(idReg, await kycIssuer.getAddress());
+
+    const now = (await ethers.provider.getBlock("latest"))!.timestamp;
+    for (const w of [...live, ...lapsed]) {
+      const id = await (
+        await (await F("OnchainID")).deploy(w.address)
+      ).getAddress();
+      await idReg.registerIdentity(w.address, id, 840);
+      const ok = live.includes(w);
+      await attest(kycIssuer, owner, id, undefined, ok ? 0 : now + 86400);
+      if (!ok) continue;
+      await vgt.mint(w.address, ethers.parseEther("1000"));
+      await vgt.connect(w).approve(govAddr, ethers.MaxUint256);
+    }
+    await ethers.provider.send("evm_increaseTime", [86400 + 10]);
+    await ethers.provider.send("evm_mine", []);
+
+    expect(await idReg.registeredIdentityCount()).to.equal(10n);
+    for (const w of lapsed)
+      expect(await idReg.isVerified(w.address)).to.be.false;
+
+    // SystemParameters (25% quorum, 65% approval); the call is a harmless view.
+    const run = async (id: number, electorate: bigint) => {
+      const call = gov.interface.encodeFunctionData("owner");
+      await gov.connect(proposer).createProposal(4, "p", "d", govAddr, call);
+      const [p] = await gov.getProposal(id);
+      expect(p.eligibleVotersAtCreation).to.equal(electorate);
+      await gov.connect(v1).castVote(id, true, "");
+      await gov.connect(v2).castVote(id, true, "");
+      for (const w of lapsed)
+        await expect(gov.connect(w).castVote(id, true, "")).to.be.revertedWith(
+          "Must be KYC/AML verified",
+        );
+      await ethers.provider.send("evm_increaseTime", [
+        Number(p.executionTime - p.createdAt) + 5,
+      ]);
+      await ethers.provider.send("evm_mine", []);
+      await gov.executeProposal(id);
+      return (await gov.getProposal(id))[0].status;
+    };
+
+    // 2 of 10 = 20% < 25%: the lapsed identities hold the bar out of reach.
+    expect(await run(1, 10n)).to.equal(REJECTED);
+
+    for (const w of lapsed) await idReg.deleteIdentity(w.address);
+    expect(await idReg.registeredIdentityCount()).to.equal(3n);
+    // 2 of 3 clears quorum and approval.
+    expect(await run(2, 3n)).to.equal(EXECUTED);
+  });
+});

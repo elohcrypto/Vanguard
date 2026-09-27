@@ -45,6 +45,17 @@ table (1 day) is still 60 s. The percentages are never scaled. The demo reads
 | 336 | 30 min | ~9 min | Sepolia walkthrough |
 | 1440 | 7 min | 1 min | local rehearsal (the ceiling) |
 
+## Electorate rule (D7)
+
+Quorum is a share of `registeredIdentityCount`, frozen into the proposal as
+`eligibleVotersAtCreation` when it is created. Voting needs `isVerified`, which
+turns false once a required claim expires or is revoked, yet the identity
+stays registered and keeps counting toward the denominator. Operators must
+call `deleteIdentity` for every such identity BEFORE creating a proposal;
+deleting mid-vote does not move the bar of a proposal already open. The case
+"expired claims inflate the denominator until deleteIdentity" in
+`test/governance/QuorumIntegrity.test.ts` is the executable version of this rule.
+
 ## Waiting instead of jumping
 
 The four demo paths that used to call `evm_increaseTime` (governance option
