@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.20;
 
-import "@openzeppelin/contracts/access/Ownable.sol";
+import "@openzeppelin/contracts/access/Ownable2Step.sol";
 import "@openzeppelin/contracts/utils/cryptography/ECDSA.sol";
 import "@openzeppelin/contracts/utils/cryptography/MessageHashUtils.sol";
 import "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
@@ -13,7 +13,8 @@ import "./interfaces/IERC735.sol";
  * @dev Contract for issuing and verifying claims for OnchainID contracts
  * @author CMTA UTXO Compliance Team
  */
-contract ClaimIssuer is Ownable, ReentrancyGuard {
+/// @dev Two-step ownership per plan 2C.3 / D18: transferOwnership only nominates, acceptOwnership finalizes.
+contract ClaimIssuer is Ownable2Step, ReentrancyGuard {
     using ECDSA for bytes32;
     using MessageHashUtils for bytes32;
 

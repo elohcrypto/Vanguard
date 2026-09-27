@@ -67,7 +67,11 @@ Token, GovernanceToken (VGT), IdentityRegistry, ComplianceRules,
 OracleManager and itself; ops
 (wallet 10) holds the agent roles, the compliance-officer role and the
 oracles and claim issuers the deployer owned; the guardian (wallet 11) can
-pause the token but not unpause it. Deploy governance (option 74) after the
+pause the token but not unpause it. Issuer ownership moves by nominate and
+accept: the deployer's `transferOwnership` only nominates ops, so on Sepolia
+— where ops is a multisig, not a signer the script controls — the ops
+multisig must itself execute `acceptOwnership` and the deployer-key revoke
+for each claim issuer. Deploy governance (option 74) after the
 oracle system (option 31) so OracleManager is a bound target. In the demo,
 run 83c (deployer grants ops and guardian, removes itself, nominates
 governance), then 83d (one acceptOwnership vote per nominated contract) and

@@ -224,9 +224,10 @@ describe("Deployer holds no power after handover (plan Task 0.3)", function () {
   });
 });
 
-// Plan v2 Task 2B.4 (D8): the ClaimIssuer handover works with today's contract.
-// Three transactions: deployer adds ops as MANAGEMENT_KEY, deployer transfers
-// ownership to ops (one-step Ownable), ops revokes the deployer's key. Phase 2C
+// Plan v2 Task 2B.4 (D8), updated by 2C.3 (D18): the ClaimIssuer handover
+// works with today's contract. Four transactions: deployer adds ops as
+// MANAGEMENT_KEY, deployer nominates ops via transferOwnership, ops accepts
+// via acceptOwnership (Ownable2Step), ops revokes the deployer's key. Phase 2C
 // puts these into the ceremony script; this block proves the mechanism.
 describe("ClaimIssuer key handover (plan 2B.4)", function () {
   const MANAGEMENT_KEY = 1;
@@ -264,6 +265,7 @@ describe("ClaimIssuer key handover (plan 2B.4)", function () {
       .connect(deployer)
       .addIssuerKey(keyOf(ops.address), MANAGEMENT_KEY, ECDSA_TYPE);
     await kycIssuer.connect(deployer).transferOwnership(ops.address);
+    await kycIssuer.connect(ops).acceptOwnership();
     await kycIssuer.connect(ops).revokeIssuerKey(keyOf(deployer.address));
   });
 
@@ -327,5 +329,19 @@ describe("ClaimIssuer key handover (plan 2B.4)", function () {
     )
       .to.be.revertedWithCustomError(kycIssuer, "OwnableUnauthorizedAccount")
       .withArgs(deployer.address);
+  });
+
+  it("a nominated ops that has not accepted is not yet owner", async function () {
+    const freshIssuer = await (
+      await ethers.getContractFactory("ClaimIssuer")
+    ).deploy(deployer.address, "Fresh Issuer", "Nomination-only issuer");
+    await freshIssuer.connect(deployer).transferOwnership(ops.address);
+    expect(await freshIssuer.pendingOwner()).to.equal(ops.address);
+    expect(await freshIssuer.owner()).to.equal(deployer.address);
+    await expect(
+      freshIssuer
+        .connect(deployer)
+        .addIssuerKey(keyOf(investor.address), CLAIM_SIGNER_KEY, ECDSA_TYPE),
+    ).to.not.be.reverted;
   });
 });

@@ -152,9 +152,19 @@ async function handoverDeployerPowers(o) {
         issuer.connect(d).addIssuerKey(keyOf(ops), MANAGEMENT_KEY, ECDSA_TYPE),
       );
     }
-    // Ownership moves BEFORE the deployer key is revoked: onlyManagementKey
-    // also admits the owner, so the owner is the last-resort manager.
+    // Ownership nominates then accepts, before the deployer key is revoked:
+    // onlyManagementKey also admits the owner, so the owner is the
+    // last-resort manager once ops has accepted.
     await send(issuer.connect(d).transferOwnership(ops));
+    check(
+      same(await issuer.pendingOwner(), ops),
+      `${label} pendingOwner is not ops`,
+    );
+    check(
+      typeof o.ops.signMessage === "function",
+      `ops must be a signer to accept ownership of ${label}`,
+    );
+    await send(issuer.connect(o.ops).acceptOwnership());
     check(same(await issuer.owner(), ops), `${label} owner is not ops`);
     check(
       await hasLiveManagementKey(issuer, ops),
