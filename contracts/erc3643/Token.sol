@@ -2,7 +2,7 @@
 pragma solidity ^0.8.19;
 
 import "@openzeppelin/contracts/token/ERC20/ERC20.sol";
-import "@openzeppelin/contracts/access/Ownable.sol";
+import "@openzeppelin/contracts/access/Ownable2Step.sol";
 import "@openzeppelin/contracts/utils/Pausable.sol";
 import "./interfaces/IERC3643.sol";
 import "./interfaces/IIdentityRegistry.sol";
@@ -13,7 +13,7 @@ import "./interfaces/IInvestorTypeRegistry.sol";
  * @title ERC3643 Token
  * @dev Implementation of ERC-3643 T-REX standard for compliant security tokens
  */
-contract Token is IERC3643, ERC20, Ownable, Pausable {
+contract Token is IERC3643, ERC20, Ownable2Step, Pausable {
     // State variables
     IIdentityRegistry private _identityRegistry;
     IComplianceHooks private _compliance;
@@ -27,6 +27,11 @@ contract Token is IERC3643, ERC20, Ownable, Pausable {
 
     // Agent addresses
     mapping(address => bool) private _agents;
+
+    // ponytail: single guardian address; point it at a multisig, not an EOA
+    address public guardian;
+
+    event GuardianUpdated(address indexed previous, address indexed current);
 
     modifier onlyAgent() {
         require(_agents[msg.sender] || msg.sender == owner(), "Not authorized agent");
@@ -256,7 +261,14 @@ contract Token is IERC3643, ERC20, Ownable, Pausable {
         return true;
     }
 
-    function pause() external override onlyOwner {
+    /// @notice Set the address allowed to pause (not unpause). Zero clears it.
+    function setGuardian(address _guardian) external onlyOwner {
+        emit GuardianUpdated(guardian, _guardian);
+        guardian = _guardian;
+    }
+
+    function pause() external override {
+        require(msg.sender == owner() || msg.sender == guardian, "Token: caller is not owner or guardian");
         _pause();
         emit Paused(msg.sender);
     }

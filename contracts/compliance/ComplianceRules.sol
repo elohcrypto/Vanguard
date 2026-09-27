@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.20;
 
-import "@openzeppelin/contracts/access/Ownable.sol";
+import "@openzeppelin/contracts/access/Ownable2Step.sol";
 import "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
 import "./interfaces/IComplianceRules.sol";
 import "../erc3643/interfaces/ICompliance.sol";
@@ -22,7 +22,7 @@ interface IWhitelistOracleView {
  * @title ComplianceRules
  * @dev Configurable compliance rule engine bound to Token via IComplianceHooks
  */
-contract ComplianceRules is IComplianceRules, IComplianceHooks, Ownable, ReentrancyGuard {
+contract ComplianceRules is IComplianceRules, IComplianceHooks, Ownable2Step, ReentrancyGuard {
     // Implements IComplianceHooks, the slice Token actually calls, so the
     // compiler enforces it. Not a full ICompliance: the module functions
     // that interface declares were empty stubs here and are gone.

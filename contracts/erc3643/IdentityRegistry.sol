@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.19;
 
-import "@openzeppelin/contracts/access/Ownable.sol";
+import "@openzeppelin/contracts/access/Ownable2Step.sol";
 import "./interfaces/IIdentityRegistry.sol";
 import "./interfaces/IInvestorTypeRegistry.sol";
 import "../compliance/interfaces/IComplianceRules.sol";
@@ -12,7 +12,7 @@ import "../onchain_id/interfaces/IClaimIssuer.sol";
  * @title IdentityRegistry
  * @dev Implementation of identity registry for ERC-3643 ecosystem
  */
-contract IdentityRegistry is IIdentityRegistry, Ownable {
+contract IdentityRegistry is IIdentityRegistry, Ownable2Step {
     // Mapping from wallet address to OnchainID identity
     mapping(address => address) private _identities;
 

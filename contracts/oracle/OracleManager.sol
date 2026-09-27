@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.19;
 
-import "@openzeppelin/contracts/access/Ownable.sol";
+import "@openzeppelin/contracts/access/Ownable2Step.sol";
 import "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
 import "@openzeppelin/contracts/utils/Pausable.sol";
 import "./interfaces/IOracleManager.sol";
@@ -11,7 +11,7 @@ import "./interfaces/IOracle.sol";
  * @title OracleManager
  * @dev Manages oracle registration, consensus mechanisms, and reputation system
  */
-contract OracleManager is IOracleManager, Ownable, ReentrancyGuard, Pausable {
+contract OracleManager is IOracleManager, Ownable2Step, ReentrancyGuard, Pausable {
     struct OracleInfo {
         address oracleAddress;
         string name;
