@@ -55,6 +55,13 @@ class EscrowModule {
       const owner = signers[0];
       const ownerWallet = signers[1]; // Owner's wallet for receiving fees
 
+      // The owner fee wallet is a human party: escrow wallets pay it fees,
+      // so it must be a verified identity (only contracts are trusted).
+      // Done first, so a refusal (e.g. after the handover the deployer is no
+      // longer a registry agent) leaves nothing half-deployed.
+      await this._ensureVerified(ownerWallet.address, "owner fee wallet");
+      console.log("");
+
       console.log("📋 Deploying EscrowWalletFactory...");
       console.log(`   VSC Token: ${await digitalToken.getAddress()}`);
       console.log(
@@ -91,11 +98,6 @@ class EscrowModule {
         "   ℹ️  Escrow wallet contracts are registered as trusted by the ComplianceRules owner at creation (option 63)",
       );
       console.log("   ℹ️  ComplianceRules owner: " + owner.address);
-
-      // The owner fee wallet is a human party: escrow wallets pay it fees,
-      // so it must be a verified identity (only contracts are trusted).
-      console.log("");
-      await this._ensureVerified(ownerWallet.address, "owner fee wallet");
 
       console.log("");
       displaySuccess("ENHANCED ESCROW SYSTEM DEPLOYED SUCCESSFULLY!");
@@ -168,25 +170,40 @@ class EscrowModule {
     console.log(
       `   📝 Onboarding ${label} ${address} as a verified investor...`,
     );
-    const factory = this.state.getContract("onchainIDFactory");
-    let identityAddress = await factory.getIdentityByOwner(address);
+    // The registry's identity is the one isVerified() reads, so attest that
+    // one when the wallet is already registered (e.g. claims expired). The
+    // factory record is only a fallback: it is overwritten on every deploy.
+    let identityAddress = await identityRegistry.identity(address);
     if (identityAddress === ethers.ZeroAddress) {
-      await (
-        await factory.deployOnchainID(address, ethers.randomBytes(32))
-      ).wait();
+      const factory = this.state.getContract("onchainIDFactory");
       identityAddress = await factory.getIdentityByOwner(address);
+      if (identityAddress === ethers.ZeroAddress) {
+        await (
+          await factory.deployOnchainID(address, ethers.randomBytes(32))
+        ).wait();
+        identityAddress = await factory.getIdentityByOwner(address);
+      }
     }
     await attestAll(this.state, identityAddress, `escrow:${label}`);
     if ((await identityRegistry.identity(address)) === ethers.ZeroAddress) {
-      const rule = await this.state
-        .getContract("complianceRules")
-        .getJurisdictionRule(
-          await this.state.getContract("digitalToken").getAddress(),
-        );
+      const rules = this.state.getContract("complianceRules");
+      const tokenAddr = await this.state
+        .getContract("digitalToken")
+        .getAddress();
+      const rule = await rules.getJurisdictionRule(tokenAddr);
       const country =
         rule.allowedCountries.length > 0
           ? Number(rule.allowedCountries[0])
           : 840;
+      const [countryOk, why] = await rules.validateJurisdiction(
+        tokenAddr,
+        country,
+      );
+      if (!countryOk) {
+        throw new Error(
+          `${label} ${address}: country ${country} refused by the jurisdiction rule (${why})`,
+        );
+      }
       await (
         await identityRegistry.registerIdentity(
           address,
@@ -276,6 +293,17 @@ class EscrowModule {
       }
 
       // Escrow wallets pay the investor fee wallet: it must be verified.
+      const walletHasKey = this.state.signers.some(
+        (s) => s.address.toLowerCase() === investorWallet.toLowerCase(),
+      );
+      if (
+        !walletHasKey &&
+        (await ethers.provider.getCode(investorWallet)) === "0x"
+      ) {
+        displayWarning(
+          "Fee wallet is a keyless placeholder until Task 4.3 deploys the real MultiSigWallet: fees sent to it are stranded, and its identity counts in the governance electorate.",
+        );
+      }
       await this._ensureVerified(investorWallet, "investor fee wallet");
 
       console.log(`\n📝 Registering investor...`);

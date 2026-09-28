@@ -128,8 +128,21 @@ describe("Trusted contracts must be contracts", function () {
     await expect(
       token.connect(payer).transfer(payee.address, E(10)),
     ).to.be.revertedWith("Sender not verified");
-    // Nor can the payer route through the trusted contract.
-    await expect(token.connect(payer).transfer(escrow, E(10))).to.be.reverted;
+    // Nor can the payer route through the trusted contract: the trusted
+    // path checks the human counterparty.
+    await expect(
+      token.connect(payer).transfer(escrow, E(10)),
+    ).to.be.revertedWith("Compliance check failed");
     expect(await token.balanceOf(payee.address)).to.equal(E(110));
+  });
+
+  it("a trusted contract cannot pay an unverified payee", async function () {
+    await rules.addTrustedContract(escrow);
+    await token.connect(payer).transfer(escrow, E(100));
+    expect(await idReg.identity(wallet.address)).to.equal(ethers.ZeroAddress);
+    await expect(
+      token.connect(await asContract(escrow)).transfer(wallet.address, E(10)),
+    ).to.be.revertedWith("Compliance check failed");
+    expect(await token.balanceOf(wallet.address)).to.equal(0n);
   });
 });
