@@ -46,6 +46,7 @@ contract ComplianceRules is IComplianceRules, IComplianceHooks, Ownable2Step, Re
      */
     function addTrustedContract(address contractAddress) external onlyOwner {
         require(contractAddress != address(0), "Invalid address");
+        require(contractAddress.code.length > 0, "ComplianceRules: not a contract");
         require(!trustedContracts[contractAddress], "Already trusted");
         trustedContracts[contractAddress] = true;
         emit TrustedContractAdded(contractAddress);

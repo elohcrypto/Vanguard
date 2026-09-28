@@ -495,7 +495,7 @@ A conditional VSC payment between a **payer** and a **payee**, mediated by a reg
 
 The escrow holds **amount + 3% investor fee + 2% owner fee**, all fixed at creation. A 1000 VSC payment is funded with 1050 VSC. On release the payee gets 1000, the investor fee wallet 30, the platform fee wallet 20. On refund the payer gets the full 1050 back.
 
-The escrow, the payer, and the payee are added to ComplianceRules as trusted contracts when the escrow is created (the demo does this; on your own deployment the ComplianceRules owner must). That is what lets VSC move in and out of a contract that has no identity of its own. The other party to every transfer is still checked.
+The escrow wallet is added to ComplianceRules as a trusted contract when it is created (the demo does this; on your own deployment the ComplianceRules owner must). That is what lets VSC move in and out of a contract that has no identity of its own. Only addresses with code can be trusted; the payer and payee are verified investors, and the other party to every transfer is still checked.
 
 ### Lifecycle
 
@@ -517,9 +517,9 @@ stateDiagram-v2
 
 ### Steps
 
-**1. Deploy the factory (61).** Needs the ERC-3643 token (21). The demo also adds the platform fee wallet as a trusted contract here.
+**1. Deploy the factory (61).** Needs the ERC-3643 token (21). The demo also onboards the platform fee wallet as a verified investor here.
 
-**2. Register the investor (62).** The investor's fee wallet is set at registration and never changes. In the demo, onboard the investor through option 23 (steps 1 to 6) so they hold a multi-sig wallet, which is a trusted contract and can receive the fee. A user created through option 24 has no such wallet; the demo falls back to a reserved signer that is not verified, and the release later reverts with `Compliance check failed`.
+**2. Register the investor (62).** The investor's fee wallet is set at registration and never changes. In the demo, onboard the investor through option 23 (steps 1 to 6) so they hold a multi-sig wallet to receive the fee. A user created through option 24 has no such wallet; the demo falls back to a reserved signer. Either way option 62 onboards the fee wallet as a verified investor, since only contracts can be trusted.
 
 **3. Create the escrow (63).** The investor names the payer (or "Unknown" for a marketplace escrow), the payee, and the amount. The factory checks both known parties are verified, deploys the wallet, and emits `EscrowWalletCreated` with the payment id and wallet address.
 

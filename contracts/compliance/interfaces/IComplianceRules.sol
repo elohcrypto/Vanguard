@@ -118,7 +118,8 @@ interface IComplianceRules {
     function recordTransfer(address token, address from, address to, uint256 acquisitionTime) external;
 
     /**
-     * @dev Add a trusted contract (e.g., escrow wallet) that can bypass KYC/AML
+     * @dev Add a trusted contract (e.g., escrow wallet). Must have code; its own
+     * identity check is skipped, the counterparty's is not.
      * @param contractAddress Address of the trusted contract
      */
     function addTrustedContract(address contractAddress) external;

@@ -823,21 +823,7 @@ class TokenModule {
       tokensLocked: 0,
     };
 
-    // ADD MULTI-SIG WALLET TO TRUSTED CONTRACTS
-    // This allows escrow wallets to transfer investor fees to the multi-sig wallet
-    const complianceRules = this.state.getContract("complianceRules");
-    if (complianceRules) {
-      console.log("\n🔐 Adding multi-sig wallet to trusted contracts...");
-      const owner = this.state.signers[0];
-      const addTrustedTx = await complianceRules
-        .connect(owner)
-        .addTrustedContract(walletAddress);
-      await addTrustedTx.wait();
-      console.log(`   ✅ Multi-sig wallet added to trusted contracts`);
-      console.log(
-        `   💡 This allows escrow wallets to transfer fees to this wallet`,
-      );
-    }
+    // Not trusted: only contracts may be; the real MultiSigWallet is registered in Task 4.3.
 
     console.log(`\n✅ MULTI-SIG WALLET CREATED!`);
     console.log("=".repeat(60));

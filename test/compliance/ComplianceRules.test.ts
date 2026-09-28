@@ -576,14 +576,14 @@ describe("ComplianceRules", function () {
   // check country, and a per-token rule can be cleared.
   describe("Country checks on every path", function () {
     let rules: any, idReg: any;
-    let escrow: SignerWithAddress,
+    let escrow: string, // a deployed stub: only contracts may be trusted
       usHolder: SignerWithAddress,
       usHolder2: SignerWithAddress,
       ruHolder: SignerWithAddress;
 
     beforeEach(async function () {
       const signers = await ethers.getSigners();
-      [escrow, usHolder, usHolder2, ruHolder] = signers.slice(6, 10);
+      [usHolder, usHolder2, ruHolder] = signers.slice(7, 10);
 
       rules = await (
         await ethers.getContractFactory("ComplianceRules")
@@ -618,7 +618,11 @@ describe("ComplianceRules", function () {
         tokenContract.address,
         await idReg.getAddress(),
       );
-      await rules.addTrustedContract(escrow.address);
+      const stub = await (
+        await ethers.getContractFactory("MockToken")
+      ).deploy("Escrow stub", "ESC", 0);
+      escrow = await stub.getAddress();
+      await rules.addTrustedContract(escrow);
     });
 
     // canTransfer reads msg.sender as the token.
@@ -627,9 +631,9 @@ describe("ComplianceRules", function () {
 
     it("refuses an escrow counterparty from a blocked country on the trusted path", async function () {
       expect(await idReg.isVerified(ruHolder.address)).to.equal(true);
-      expect(await can(escrow.address, ruHolder.address)).to.equal(false);
-      expect(await can(ruHolder.address, escrow.address)).to.equal(false);
-      expect(await can(escrow.address, usHolder.address)).to.equal(true);
+      expect(await can(escrow, ruHolder.address)).to.equal(false);
+      expect(await can(ruHolder.address, escrow)).to.equal(false);
+      expect(await can(escrow, usHolder.address)).to.equal(true);
     });
 
     it("refuses a mint to a holder whose country was blocked after registration", async function () {

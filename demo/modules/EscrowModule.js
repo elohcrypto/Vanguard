@@ -14,6 +14,7 @@ const {
 } = require("../utils/DisplayHelpers");
 const { advancePast, canJumpTime } = require("../utils/ChainTime");
 const { signShipmentProof } = require("../utils/ShipmentProof");
+const { attestAll } = require("../utils/Kyc");
 const { ethers } = require("hardhat");
 
 /**
@@ -93,21 +94,10 @@ class EscrowModule {
       );
       console.log("   ℹ️  Owner address: " + owner.address);
 
-      // ADD OWNER WALLET TO TRUSTED CONTRACTS
-      // This is needed because escrow wallets transfer fees to the owner wallet
+      // The owner fee wallet is a human party: escrow wallets pay it fees,
+      // so it must be a verified identity (only contracts are trusted).
       console.log("");
-      console.log("🔐 Adding owner wallet to trusted contracts...");
-      const addOwnerTx = await this.state
-        .getContract("complianceRules")
-        .connect(owner)
-        .addTrustedContract(ownerWallet.address);
-      await addOwnerTx.wait();
-      console.log(
-        `   ✅ Owner wallet (${ownerWallet.address}) added to trusted contracts`,
-      );
-      console.log(
-        "   💡 This allows escrow wallets to transfer service fees to owner",
-      );
+      await this._ensureVerified(ownerWallet.address, "owner fee wallet");
 
       console.log("");
       displaySuccess("ENHANCED ESCROW SYSTEM DEPLOYED SUCCESSFULLY!");
@@ -128,6 +118,9 @@ class EscrowModule {
       console.log("   ✅ Payee must have valid OnchainID + KYC/AML");
       console.log(
         "   ✅ Escrow wallets added to trusted contracts (owner-only)",
+      );
+      console.log(
+        "   ✅ Owner and investor fee wallets are verified investors, not trusted",
       );
       console.log("   ✅ Jurisdiction rules enforced for all parties");
       console.log("   ✅ No KYC/AML bypass - secure compliance!");
@@ -160,6 +153,56 @@ class EscrowModule {
       throw new Error(`No signer found for address ${address}`);
     }
     return signer;
+  }
+
+  /**
+   * Helper: make a human party a verified identity (OnchainID, KYC + AML
+   * claims, registry entry). Only contracts may be trusted, so every wallet
+   * that sends or receives VSC around an escrow wallet goes through the
+   * identity gate as an investor.
+   */
+  async _ensureVerified(address, label) {
+    const identityRegistry = this.state.getContract("identityRegistry");
+    if (await identityRegistry.isVerified(address)) {
+      console.log(`   ✅ ${label} ${address} is a verified investor`);
+      return;
+    }
+    console.log(
+      `   📝 Onboarding ${label} ${address} as a verified investor...`,
+    );
+    const factory = this.state.getContract("onchainIDFactory");
+    let identityAddress = await factory.getIdentityByOwner(address);
+    if (identityAddress === ethers.ZeroAddress) {
+      await (
+        await factory.deployOnchainID(address, ethers.randomBytes(32))
+      ).wait();
+      identityAddress = await factory.getIdentityByOwner(address);
+    }
+    await attestAll(this.state, identityAddress, `escrow:${label}`);
+    if ((await identityRegistry.identity(address)) === ethers.ZeroAddress) {
+      const rule = await this.state
+        .getContract("complianceRules")
+        .getJurisdictionRule(
+          await this.state.getContract("digitalToken").getAddress(),
+        );
+      const country =
+        rule.allowedCountries.length > 0
+          ? Number(rule.allowedCountries[0])
+          : 840;
+      await (
+        await identityRegistry.registerIdentity(
+          address,
+          identityAddress,
+          country,
+        )
+      ).wait();
+    }
+    if (!(await identityRegistry.isVerified(address))) {
+      throw new Error(`${label} ${address} could not be verified`);
+    }
+    console.log(
+      `   ✅ ${label} is a verified investor (not a trusted contract)`,
+    );
   }
 
   /** Option 62: Register Investor (from Option 23) */
@@ -233,6 +276,9 @@ class EscrowModule {
         investorWallet = this.state.signers[3].address;
         console.log(`\n💡 Creating new fee wallet for investor`);
       }
+
+      // Escrow wallets pay the investor fee wallet: it must be verified.
+      await this._ensureVerified(investorWallet, "investor fee wallet");
 
       console.log(`\n📝 Registering investor...`);
       console.log(`   Investor Address: ${investorAddress}`);
@@ -437,25 +483,13 @@ class EscrowModule {
         await addTrustedTx.wait();
         console.log("   ✅ Wallet added to trusted contracts");
 
-        // ✅ CRITICAL FIX: Add both payer AND payee to trusted contracts
-        // This allows refunds when payer wins disputes
+        // Payer and payee are humans, never trusted: payments and refunds
+        // pass the identity gate because both are verified investors.
+        console.log("\n🔐 Checking payer and payee identities...");
         if (payerAddress !== ethers.ZeroAddress) {
-          console.log(
-            "\n🔐 Adding payer to trusted contracts (for refunds)...",
-          );
-          const addPayerTx = await complianceRules
-            .connect(owner)
-            .addTrustedContract(payerAddress);
-          await addPayerTx.wait();
-          console.log("   ✅ Payer added to trusted contracts");
+          await this._ensureVerified(payerAddress, "payer");
         }
-
-        console.log("\n🔐 Adding payee to trusted contracts (for payments)...");
-        const addPayeeTx = await complianceRules
-          .connect(owner)
-          .addTrustedContract(payeeAddress);
-        await addPayeeTx.wait();
-        console.log("   ✅ Payee added to trusted contracts");
+        await this._ensureVerified(payeeAddress, "payee");
 
         this.state.enhancedEscrowWallets.set(paymentId.toString(), {
           paymentId: paymentId.toString(),
@@ -939,27 +973,24 @@ class EscrowModule {
 
       const isWalletTrusted =
         await complianceRules.isTrustedContract(walletAddress);
-      const isPayeeTrusted = await complianceRules.isTrustedContract(payee);
-      const isOwnerTrusted =
-        await complianceRules.isTrustedContract(ownerWalletAddr);
-      const isInvestorWalletTrusted =
-        await complianceRules.isTrustedContract(investorWallet);
+      const isPayeeVerified = await identityRegistry.isVerified(payee);
+      const isOwnerVerified =
+        await identityRegistry.isVerified(ownerWalletAddr);
+      const isInvestorWalletVerified =
+        await identityRegistry.isVerified(investorWallet);
 
       console.log(
         `   Escrow Wallet (${walletAddress.substring(0, 10)}...): ${isWalletTrusted ? "✅ TRUSTED" : "❌ NOT TRUSTED"}`,
       );
       console.log(
-        `   Payee (${payee.substring(0, 10)}...): ${isPayeeTrusted ? "✅ TRUSTED" : "❌ NOT TRUSTED"}`,
+        `   Payee (${payee.substring(0, 10)}...): ${isPayeeVerified ? "✅ VERIFIED" : "❌ NOT VERIFIED"}`,
       );
       console.log(
-        `   Investor Fee Wallet (${investorWallet.substring(0, 10)}...): ${isInvestorWalletTrusted ? "✅ TRUSTED" : "❌ NOT TRUSTED"}`,
+        `   Investor Fee Wallet (${investorWallet.substring(0, 10)}...): ${isInvestorWalletVerified ? "✅ VERIFIED" : "❌ NOT VERIFIED"}`,
       );
       console.log(
-        `   Owner Wallet (${ownerWalletAddr.substring(0, 10)}...): ${isOwnerTrusted ? "✅ TRUSTED" : "❌ NOT TRUSTED"}`,
+        `   Owner Wallet (${ownerWalletAddr.substring(0, 10)}...): ${isOwnerVerified ? "✅ VERIFIED" : "❌ NOT VERIFIED"}`,
       );
-
-      const isPayeeVerified = await identityRegistry.isVerified(payee);
-      console.log(`   Payee Verified: ${isPayeeVerified ? "✅ YES" : "❌ NO"}`);
 
       // The investor must state the direction. It used to be inferred from
       // whoever signed first, which let a payer pre-sign and divert the
@@ -1187,20 +1218,20 @@ class EscrowModule {
         selectedWallet.address || selectedWallet.walletAddress;
       const wallet = MultiSigEscrowWallet.attach(walletAddress);
 
-      // ✅ CHECK: Is wallet in trusted contracts?
-      console.log("\n🔍 TRUSTED CONTRACT CHECK:");
+      // Escrow wallet: trusted contract. Owner wallet: verified human.
+      console.log("\n🔍 COMPLIANCE STATUS CHECK:");
       const complianceRules = this.state.getContract("complianceRules");
       const isTrusted = await complianceRules.isTrustedContract(walletAddress);
       console.log(
         `   Escrow Wallet (${walletAddress}): ${isTrusted ? "✅ TRUSTED" : "❌ NOT TRUSTED"}`,
       );
 
-      // Check owner wallet too
       const ownerWalletAddress = this.state.signers[1].address;
-      const isOwnerTrusted =
-        await complianceRules.isTrustedContract(ownerWalletAddress);
+      const isOwnerVerified = await this.state
+        .getContract("identityRegistry")
+        .isVerified(ownerWalletAddress);
       console.log(
-        `   Owner Wallet (${ownerWalletAddress}): ${isOwnerTrusted ? "✅ TRUSTED" : "❌ NOT TRUSTED"}`,
+        `   Owner Wallet (${ownerWalletAddress}): ${isOwnerVerified ? "✅ VERIFIED" : "❌ NOT VERIFIED"}`,
       );
 
       // Get all wallet data
