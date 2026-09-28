@@ -225,18 +225,15 @@ async function main() {
 
   // D21: option 74 must not register governance as an identity, so the
   // quorum denominator is unchanged by deploying it.
-  const idCountBefore = await state
-    .getContract("identityRegistry")
-    .registeredIdentityCount();
+  const idRegD21 = state.getContract("identityRegistry");
+  const idCountBefore = await idRegD21.registeredIdentityCount();
   let idCountAfterDeploy;
   const captured = [];
   const realLog = console.log;
   console.log = (...args) => captured.push(args.join(" "));
   try {
     await gov.deployGovernanceSystem();
-    idCountAfterDeploy = await state
-      .getContract("identityRegistry")
-      .registeredIdentityCount();
+    idCountAfterDeploy = await idRegD21.registeredIdentityCount();
     await gov.showDashboard();
     // testComplianceEnforcement reports voting ELIGIBILITY. It must derive
     // that from isVerified() + the fee, never from a token balance. It is
@@ -267,15 +264,12 @@ async function main() {
         `registeredIdentityCount went ${idCountBefore} -> ${idCountAfterDeploy} across option 74 — governance must not be registered`,
       );
     }
-    const idRegForGov = state.getContract("identityRegistry");
-    if ((await idRegForGov.identity(govAddr)) !== ethers.ZeroAddress) {
+    if ((await idRegD21.identity(govAddr)) !== ethers.ZeroAddress) {
       failures.push(
         "governance has a registry identity — it must hold fees as a trusted contract (D21)",
       );
     }
-    if (
-      !(await state.getContract("complianceRules").isTrustedContract(govAddr))
-    ) {
+    if (!(await rulesForOracle.isTrustedContract(govAddr))) {
       failures.push(
         "governance is not a trusted contract — VGT fee pulls and refunds will revert (D21)",
       );
