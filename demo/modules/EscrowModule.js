@@ -83,16 +83,14 @@ class EscrowModule {
         `✅ EscrowWalletFactory: ${await escrowFactory.getAddress()}`,
       );
 
-      // Grant factory permission to add trusted contracts
+      // The factory cannot register trusted contracts itself: the
+      // ComplianceRules owner (signers[0] until the handover) registers each
+      // escrow wallet contract when option 63 creates it.
       console.log("");
-      console.log("🔐 Granting factory permission to add trusted contracts...");
-      const factoryAddress = await escrowFactory.getAddress();
-
-      // Note that the owner (signers[0]) will add wallets
       console.log(
-        "   ℹ️  Factory will request owner to add wallets to trusted contracts",
+        "   ℹ️  Escrow wallet contracts are registered as trusted by the ComplianceRules owner at creation (option 63)",
       );
-      console.log("   ℹ️  Owner address: " + owner.address);
+      console.log("   ℹ️  ComplianceRules owner: " + owner.address);
 
       // The owner fee wallet is a human party: escrow wallets pay it fees,
       // so it must be a verified identity (only contracts are trusted).
@@ -449,6 +447,15 @@ class EscrowModule {
       console.log(`   Payee: ${payeeName} (${payeeAddress})`);
       console.log(`   Amount: ${amountInput} VSC`);
 
+      // Payer and payee are humans, never trusted. The factory refuses to
+      // deploy a wallet unless both are verified, so onboard them first;
+      // payments and refunds then pass the identity gate as investors.
+      console.log("\n🔐 Checking payer and payee identities...");
+      if (payerAddress !== ethers.ZeroAddress) {
+        await this._ensureVerified(payerAddress, "payer");
+      }
+      await this._ensureVerified(payeeAddress, "payee");
+
       // Get investor signer
       const investorSigner = await this.getSignerForAddress(investorAddress);
 
@@ -482,14 +489,6 @@ class EscrowModule {
           .addTrustedContract(walletAddress);
         await addTrustedTx.wait();
         console.log("   ✅ Wallet added to trusted contracts");
-
-        // Payer and payee are humans, never trusted: payments and refunds
-        // pass the identity gate because both are verified investors.
-        console.log("\n🔐 Checking payer and payee identities...");
-        if (payerAddress !== ethers.ZeroAddress) {
-          await this._ensureVerified(payerAddress, "payer");
-        }
-        await this._ensureVerified(payeeAddress, "payee");
 
         this.state.enhancedEscrowWallets.set(paymentId.toString(), {
           paymentId: paymentId.toString(),
