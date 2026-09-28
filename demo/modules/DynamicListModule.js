@@ -140,6 +140,50 @@ class DynamicListModule {
     return n;
   }
 
+  /** D20: a list write names its duration: whole days, or "never". */
+  async _askDuration(label, def) {
+    const raw =
+      (
+        await this.promptUser(
+          `${label} duration: days (e.g. 365) or "never" [${def}]: `,
+        )
+      )
+        .trim()
+        .toLowerCase() || String(def);
+    if (raw === "never") return ethers.MaxUint256;
+    const days = Number(raw);
+    if (!Number.isInteger(days) || days < 1)
+      throw new Error(
+        `${label} duration: expected whole days >= 1 or "never", got "${raw}"`,
+      );
+    return BigInt(days) * 86400n;
+  }
+
+  /** Expiry of each oracle list add in a receipt, as a date or "never". */
+  static listExpiries(state, receipt) {
+    const out = [];
+    for (const name of ["whitelistOracle", "blacklistOracle"]) {
+      const oracle = state.getContract(name);
+      if (!oracle) continue;
+      for (const log of receipt.logs) {
+        if (log.address.toLowerCase() !== String(oracle.target).toLowerCase())
+          continue;
+        let p;
+        try {
+          p = oracle.interface.parseLog(log);
+        } catch {
+          continue;
+        }
+        if (!/^(White|Black)listUpdated$/.test(p?.name) || !p.args[1]) continue;
+        const t = p.args.expiryTime;
+        const when =
+          t === 0n ? "never" : new Date(Number(t) * 1000).toLocaleString();
+        out.push(`${p.name.slice(0, 9)} ${p.args.subject} expires: ${when}`);
+      }
+    }
+    return out;
+  }
+
   /** Option 85: Manage Whitelist/Blacklist Status */
   async manageWhitelistBlacklistStatus() {
     displaySection("MANAGE WHITELIST/BLACKLIST STATUS", "📋");
@@ -366,25 +410,22 @@ class DynamicListModule {
       // Get reason
       const reason = await this.promptUser("Reason for this change: ");
       let args = [targetUser, targetIdentity, reason];
-      if (fn === "addToWhitelist")
-        args = [
-          targetUser,
-          targetIdentity,
-          await this._askNumber("Whitelist tier (1-5)", 1, 1, 5),
-          reason,
-        ];
-      if (fn === "addToBlacklist")
-        args = [
-          targetUser,
-          targetIdentity,
-          await this._askNumber(
-            "Severity (0 LOW, 1 MEDIUM, 2 HIGH, 3 CRITICAL)",
-            1,
-            0,
-            3,
-          ),
-          reason,
-        ];
+      let duration = null;
+      if (fn === "addToWhitelist") {
+        const tier = await this._askNumber("Whitelist tier (1-5)", 1, 1, 5);
+        duration = await this._askDuration("Whitelist", 365);
+        args = [targetUser, targetIdentity, tier, duration, reason];
+      }
+      if (fn === "addToBlacklist") {
+        const severity = await this._askNumber(
+          "Severity (0 LOW, 1 MEDIUM, 2 HIGH, 3 CRITICAL)",
+          1,
+          0,
+          3,
+        );
+        duration = await this._askDuration("Blacklist", "never");
+        args = [targetUser, targetIdentity, severity, duration, reason];
+      }
       const callData = dynamicListManager.interface.encodeFunctionData(
         fn,
         args,
@@ -437,6 +478,12 @@ class DynamicListModule {
       console.log(`   Target User: ${targetUser}`);
       console.log(`   Target Identity: ${targetIdentity}`);
       console.log(`   Reason: ${reason}`);
+      if (duration !== null)
+        console.log(
+          duration === ethers.MaxUint256
+            ? "   Duration: never expires"
+            : `   Duration: ${duration / 86400n} days (expires ${duration / 86400n} days after execution)`,
+        );
       console.log(`   Status: Active`);
       console.log("");
       console.log("📊 Next Steps:");
@@ -556,9 +603,14 @@ class DynamicListModule {
         targetUser,
         targetIdentity,
         await this._askNumber("Whitelist tier (1-5)", 1, 1, 5),
+        await this._askDuration("Whitelist", 365),
         "Initial approval - user passed KYC/AML",
       );
-      await addWhitelistTx.wait();
+      for (const line of DynamicListModule.listExpiries(
+        this.state,
+        await addWhitelistTx.wait(),
+      ))
+        console.log(`   ${line}`);
 
       status = await dynamicListManager.getUserStatus(targetUser);
       console.log(`   ✅ Status: ${statusNames[status]}`);
@@ -586,9 +638,14 @@ class DynamicListModule {
           0,
           3,
         ),
+        await this._askDuration("Blacklist", "never"),
         "Fraudulent activity detected",
       );
-      await addBlacklistTx.wait();
+      for (const line of DynamicListModule.listExpiries(
+        this.state,
+        await addBlacklistTx.wait(),
+      ))
+        console.log(`   ${line}`);
 
       status = await dynamicListManager.getUserStatus(targetUser);
       console.log(`   ❌ Status: ${statusNames[status]}`);

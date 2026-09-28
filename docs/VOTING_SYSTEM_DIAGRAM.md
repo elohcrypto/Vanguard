@@ -52,7 +52,7 @@ ALICE (Proposer)
    │       title: "Add Bob to Whitelist",
    │       description: "Bob passed KYC/AML",
    │       target: dynamicListManager,
-   │       callData: addToWhitelist(0xBob..., 123456, tier 1, "KYC/AML verified")
+   │       callData: addToWhitelist(0xBob..., 123456, tier 1, 365 days, "KYC/AML verified")
    │   )
    │
    ├─► VGT tokens transferred & locked
@@ -163,9 +163,10 @@ ANYONE can execute (usually proposer)
    │       user: 0xBob...,
    │       identity: 123456,
    │       tier: 1,
+   │       duration: 365 days,   // or type(uint256).max = no expiry; 0 reverts
    │       reason: "KYC/AML verified"
    │   )
-   │   └─► whitelistOracle.addToWhitelist(0xBob..., 1, 0, "KYC/AML verified")
+   │   └─► whitelistOracle.addToWhitelist(0xBob..., 1, 365 days, "KYC/AML verified")
    │
    ├─► Manager call SUCCEEDS → burn locked tokens
    │   governanceToken.burn(40 VGT)

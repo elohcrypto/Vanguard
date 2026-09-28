@@ -1512,6 +1512,10 @@ class GovernanceModule {
 
       if (outcome.executed) {
         displaySuccess("PROPOSAL EXECUTED — callData ran, locked VGT burned");
+        // D20: show the expiry a ListUpdate wrote (a date or "never").
+        const DynamicListModule = require("./DynamicListModule");
+        for (const line of DynamicListModule.listExpiries(this.state, receipt))
+          console.log(`   ${line}`);
       } else if (outcome.failed !== null) {
         let why = outcome.failed;
         try {

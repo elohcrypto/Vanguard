@@ -111,6 +111,10 @@ When option 84 has deployed `DynamicListManager`, the ceremony nominates it
 and governance accepts it by a ListUpdate vote like the core contracts; the
 oracles' list-manager writer role (`setListManager`) is set by the oracle
 owner, which is the deployer (option 84) before the ceremony and ops after it.
+A ListUpdate add carries the duration voters approved in its calldata
+(seconds, or no expiry as `type(uint256).max`; the manager rejects 0), so
+no entry lapses by an unstated default; a permanent entry still ends by a
+removal vote or by the oracle owner (ops).
 
 Outside the demo, `HANDOVER_CONFIG=<path.json> npx hardhat run
 scripts/handover.ts --network <net>` runs the same ceremony and exits
