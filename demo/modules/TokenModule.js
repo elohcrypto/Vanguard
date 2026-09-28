@@ -2229,30 +2229,40 @@ class TokenModule {
   async _mintRefusal(digitalToken, to, amountWei) {
     if (await digitalToken.canTransfer(ethers.ZeroAddress, to, amountWei))
       return null;
+    if (await digitalToken.isFrozen(to)) return "recipient frozen";
+    const identityRegistry = this.state.getContract("identityRegistry");
+    if (!(await identityRegistry.isVerified(to))) return "not verified";
     const registry = this.state.getContract("investorTypeRegistry");
-    if (!registry) return "token refuses the mint (identity or compliance)";
+    const balance = await digitalToken.balanceOf(to);
+    if (!registry || (await registry.canHoldAmount(to, balance + amountWei)))
+      return "compliance refused (jurisdiction or blacklist)";
     const type = await registry.getInvestorType(to);
     const cap = (await registry.getInvestorTypeConfig(type)).maxHoldingAmount;
-    const balance = await digitalToken.balanceOf(to);
     const names = ["Normal", "Retail", "Accredited", "Institutional"];
     return (
       `holding cap: type ${names[Number(type)] ?? type}, ` +
       `cap ${ethers.formatEther(cap)} VSC, balance ${ethers.formatEther(balance)} VSC, ` +
-      `mint ${ethers.formatEther(amountWei)} VSC (or identity/compliance)`
+      `mint ${ethers.formatEther(amountWei)} VSC`
     );
   }
 
   /**
    * D22 (a): the central bank is a treasury, not an investor. Mint enforces
    * investor-type holding caps (2E.3), so mark it exempt on the registry
-   * (logged on-chain). No-op without a registry or when already exempt;
-   * the deployer is a compliance officer until the handover.
+   * (logged on-chain). No-op without a registry or when already exempt.
+   * Owner only (D22): the deployer before the handover, governance after.
    * @private
    */
   async _ensureTreasuryExempt(centralBank) {
     const registry = this.state.getContract("investorTypeRegistry");
     if (!registry || (await registry.investorLimitExempt(centralBank.address)))
       return;
+    if ((await registry.owner()) !== (await registry.runner.getAddress())) {
+      console.log(
+        "   central bank not exempt: after the handover only governance can exempt a treasury (InvestorTypeConfig vote)",
+      );
+      return;
+    }
     await (
       await registry.setInvestorLimitExempt(centralBank.address, true)
     ).wait();

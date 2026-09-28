@@ -44,11 +44,8 @@ async function runEscrowSmoke(state, failures) {
   ])
     await onboard(state, s, tag);
 
-  // 1. Mint limits (2E.3). The deployer is still a registry compliance officer.
-  if (!(await registry.investorLimitExempt(treasury.address)))
-    await (
-      await registry.setInvestorLimitExempt(treasury.address, true)
-    ).wait();
+  // 1. Mint limits (2E.3). demo-smoke.js set the exemption while the
+  //    deployer still owned the registry (owner only, D22).
   if (!(await registry.investorLimitExempt(treasury.address)))
     failures.push("treasury is not investor-limit exempt after the flag");
   try {

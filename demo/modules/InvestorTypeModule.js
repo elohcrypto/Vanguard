@@ -121,8 +121,18 @@ class InvestorTypeModule {
           const wired = await token.investorTypeRegistry();
           console.log(`   ✅ Token.investorTypeRegistry(): ${wired}`);
           // D22 (a): mint now enforces holding caps; a treasury is exempt.
+          // Owner only (D22): the deployer owns a freshly deployed registry.
+          const canExempt =
+            (await investorTypeRegistry.owner()) ===
+            (await investorTypeRegistry.runner.getAddress());
           for (const bank of this.state.bankingInstitutions?.values() || []) {
             if (bank.type !== "CENTRAL_BANK") continue;
+            if (!canExempt) {
+              console.log(
+                "   central bank not exempt: after the handover only governance can exempt a treasury (InvestorTypeConfig vote)",
+              );
+              continue;
+            }
             await (
               await investorTypeRegistry.setInvestorLimitExempt(
                 bank.address,

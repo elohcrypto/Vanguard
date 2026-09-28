@@ -214,8 +214,9 @@ contract InvestorTypeRegistry is IInvestorTypeRegistry, Ownable2Step {
         emit InvestorTypeConfigUpdated(investorType, config);
     }
 
-    /// @dev Exempt a treasury from investor-type caps (logged; D22 (a))
-    function setInvestorLimitExempt(address account, bool exempt) external onlyComplianceOfficer {
+    /// @dev Exempt a treasury from investor-type caps (logged). D22 (a): a
+    /// governance decision, so owner only (an InvestorTypeConfig vote after handover).
+    function setInvestorLimitExempt(address account, bool exempt) external onlyOwner {
         require(account != address(0), "Invalid account address");
         investorLimitExempt[account] = exempt;
         emit InvestorLimitExemptionUpdated(account, exempt);

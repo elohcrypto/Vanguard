@@ -137,7 +137,8 @@ contract Token is IERC3643, ERC20, Ownable2Step, Pausable {
         uint256 _amount
     ) internal view returns (bool ok, string memory reason) {
         if (_from == address(0)) {
-            // Minting case: identity, compliance, then recipient holding cap
+            // Minting case: freeze, identity, compliance, recipient holding cap
+            if (_frozen[_to]) return (false, "Recipient frozen");
             if (!_identityRegistry.isVerified(_to)) return (false, "Identity not verified");
             if (!_compliance.canTransfer(_from, _to, _amount)) return (false, "Compliance check failed");
             if (

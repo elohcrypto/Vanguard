@@ -216,6 +216,13 @@ async function main() {
     }
   }
 
+  // D22 (a): the treasury (deployer, the demo central bank) is exempt from
+  // investor-type caps; owner only, so set it before governance owns the
+  // registry. demo-smoke-escrow.js asserts it and mints above the cap.
+  await (
+    await registry.setInvestorLimitExempt(state.signers[0].address, true)
+  ).wait();
+
   const captured = [];
   const realLog = console.log;
   console.log = (...args) => captured.push(args.join(" "));

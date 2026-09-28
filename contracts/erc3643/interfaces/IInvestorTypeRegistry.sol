@@ -94,6 +94,8 @@ interface IInvestorTypeRegistry {
 
     function investorLimitExempt(address account) external view returns (bool);
 
+    /// @dev Owner only (governance after the handover): exempt a treasury from
+    /// both investor-type amount caps. D22 (a).
     function setInvestorLimitExempt(address account, bool exempt) external;
 
     /**
