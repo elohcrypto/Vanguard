@@ -54,6 +54,8 @@ contract WhitelistOracle is IOracle, Ownable, ReentrancyGuard, Pausable {
 
     // Whitelist configuration
     uint256 public constant DEFAULT_WHITELIST_DURATION = 365 days;
+    /// @notice Duration sentinel: store expiryTime 0, the entry never expires
+    uint256 public constant NO_EXPIRY = type(uint256).max;
     uint256 public constant MIN_TIER = 1;
     uint256 public constant MAX_TIER = 5;
     uint8 public minimumConsensusOracles = 3;
@@ -259,7 +261,7 @@ contract WhitelistOracle is IOracle, Ownable, ReentrancyGuard, Pausable {
         require(_subject != address(0), "WhitelistOracle: Invalid subject");
         require(_tier >= MIN_TIER && _tier <= MAX_TIER, "WhitelistOracle: Invalid tier");
 
-        uint256 expiryTime = block.timestamp + (_duration > 0 ? _duration : DEFAULT_WHITELIST_DURATION);
+        uint256 expiryTime = _expiry(_duration);
 
         whitelistEntries[_subject] = WhitelistEntry({
             isWhitelisted: true,
@@ -271,6 +273,14 @@ contract WhitelistOracle is IOracle, Ownable, ReentrancyGuard, Pausable {
         });
 
         emit WhitelistUpdated(_subject, true, _tier, expiryTime, _reason);
+    }
+
+    /**
+     * @dev Expiry for a write: NO_EXPIRY stores 0 (never), 0 uses the default
+     */
+    function _expiry(uint256 _duration) internal view returns (uint256) {
+        if (_duration == NO_EXPIRY) return 0;
+        return block.timestamp + (_duration > 0 ? _duration : DEFAULT_WHITELIST_DURATION);
     }
 
     /**
@@ -296,7 +306,7 @@ contract WhitelistOracle is IOracle, Ownable, ReentrancyGuard, Pausable {
     {
         WhitelistEntry storage entry = whitelistEntries[_subject];
         return (
-            entry.isWhitelisted && block.timestamp < entry.expiryTime,
+            entry.isWhitelisted && (entry.expiryTime == 0 || block.timestamp < entry.expiryTime),
             entry.timestamp,
             entry.expiryTime,
             entry.tier,
@@ -396,7 +406,7 @@ contract WhitelistOracle is IOracle, Ownable, ReentrancyGuard, Pausable {
             require(_subjects[i] != address(0), "WhitelistOracle: Invalid subject");
             require(_tiers[i] >= MIN_TIER && _tiers[i] <= MAX_TIER, "WhitelistOracle: Invalid tier");
 
-            uint256 expiryTime = block.timestamp + (_duration > 0 ? _duration : DEFAULT_WHITELIST_DURATION);
+            uint256 expiryTime = _expiry(_duration);
 
             whitelistEntries[_subjects[i]] = WhitelistEntry({
                 isWhitelisted: true,

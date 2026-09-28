@@ -64,6 +64,8 @@ contract BlacklistOracle is IOracle, Ownable, ReentrancyGuard, Pausable {
     // Blacklist configuration
     uint256 public constant DEFAULT_BLACKLIST_DURATION = 30 days;
     uint256 public constant EMERGENCY_BLACKLIST_DURATION = 7 days;
+    /// @notice Duration sentinel: store expiryTime 0, the entry never expires
+    uint256 public constant NO_EXPIRY = type(uint256).max;
     uint8 public minimumConsensusOracles = 2; // Lower threshold for blacklisting
 
     // Emergency blacklisting - allows single oracle for critical threats
@@ -282,7 +284,7 @@ contract BlacklistOracle is IOracle, Ownable, ReentrancyGuard, Pausable {
     ) external onlyOwnerOrListManager {
         require(_subject != address(0), "BlacklistOracle: Invalid subject");
 
-        uint256 expiryTime = block.timestamp + (_duration > 0 ? _duration : DEFAULT_BLACKLIST_DURATION);
+        uint256 expiryTime = _expiry(_duration, DEFAULT_BLACKLIST_DURATION);
 
         blacklistEntries[_subject] = BlacklistEntry({
             isBlacklisted: true,
@@ -345,7 +347,7 @@ contract BlacklistOracle is IOracle, Ownable, ReentrancyGuard, Pausable {
      */
     function isBlacklisted(address _subject) external view returns (bool) {
         BlacklistEntry storage entry = blacklistEntries[_subject];
-        return entry.isBlacklisted && block.timestamp < entry.expiryTime;
+        return entry.isBlacklisted && (entry.expiryTime == 0 || block.timestamp < entry.expiryTime);
     }
 
     /**
@@ -368,7 +370,7 @@ contract BlacklistOracle is IOracle, Ownable, ReentrancyGuard, Pausable {
     {
         BlacklistEntry storage entry = blacklistEntries[_subject];
         return (
-            entry.isBlacklisted && block.timestamp < entry.expiryTime,
+            entry.isBlacklisted && (entry.expiryTime == 0 || block.timestamp < entry.expiryTime),
             entry.timestamp,
             entry.expiryTime,
             entry.severity,
@@ -435,6 +437,14 @@ contract BlacklistOracle is IOracle, Ownable, ReentrancyGuard, Pausable {
     }
 
     /**
+     * @dev Expiry for a write: NO_EXPIRY stores 0 (never), 0 uses the fallback
+     */
+    function _expiry(uint256 _duration, uint256 _fallback) internal view returns (uint256) {
+        if (_duration == NO_EXPIRY) return 0;
+        return block.timestamp + (_duration > 0 ? _duration : _fallback);
+    }
+
+    /**
      * @dev Get blacklist duration based on severity
      */
     function _getDurationBySeverity(SeverityLevel _severity) internal pure returns (uint256) {
@@ -483,7 +493,7 @@ contract BlacklistOracle is IOracle, Ownable, ReentrancyGuard, Pausable {
         for (uint256 i = 0; i < _subjects.length; i++) {
             require(_subjects[i] != address(0), "BlacklistOracle: Invalid subject");
 
-            uint256 expiryTime = block.timestamp + (_duration > 0 ? _duration : _getDurationBySeverity(_severities[i]));
+            uint256 expiryTime = _expiry(_duration, _getDurationBySeverity(_severities[i]));
 
             blacklistEntries[_subjects[i]] = BlacklistEntry({
                 isBlacklisted: true,
@@ -505,7 +515,7 @@ contract BlacklistOracle is IOracle, Ownable, ReentrancyGuard, Pausable {
     function cleanupExpiredEntries(address[] calldata _subjects) external {
         for (uint256 i = 0; i < _subjects.length; i++) {
             BlacklistEntry storage entry = blacklistEntries[_subjects[i]];
-            if (entry.isBlacklisted && block.timestamp >= entry.expiryTime) {
+            if (entry.isBlacklisted && entry.expiryTime != 0 && block.timestamp >= entry.expiryTime) {
                 entry.isBlacklisted = false;
                 entry.reason = "Expired";
                 emit BlacklistUpdated(_subjects[i], false, SeverityLevel.LOW, 0, "Expired", false);

@@ -10,6 +10,9 @@ describe("DynamicListManager writes the oracles", function () {
     WHITELISTED = 1n,
     BLACKLISTED = 2n;
   const HIGH = 2; // BlacklistOracle.SeverityLevel.HIGH
+  // D20 = (b): every manager write names its duration (seconds or NO_EXPIRY).
+  const YEAR = 365n * 86400n;
+  const NO_EXPIRY = ethers.MaxUint256;
 
   async function fixture() {
     const [owner, gov, user, stranger, other] = await ethers.getSigners();
@@ -101,10 +104,10 @@ describe("DynamicListManager writes the oracles", function () {
     it("every list write reverts while the oracles are unset", async function () {
       const { dlm, user } = await fixture();
       await expect(
-        dlm.addToWhitelist(user.address, 1, 1, "r"),
+        dlm.addToWhitelist(user.address, 1, 1, YEAR, "r"),
       ).to.be.revertedWith("DynamicListManager: oracles not set");
       await expect(
-        dlm.addToBlacklist(user.address, 1, HIGH, "r"),
+        dlm.addToBlacklist(user.address, 1, HIGH, NO_EXPIRY, "r"),
       ).to.be.revertedWith("DynamicListManager: oracles not set");
       await expect(
         dlm.removeFromWhitelist(user.address, 1, "r"),
@@ -137,14 +140,14 @@ describe("DynamicListManager writes the oracles", function () {
       const { dlm, wl, bl, user } = await fixture();
       await dlm.setOracles(await wl.getAddress(), await bl.getAddress());
       await expect(
-        dlm.addToWhitelist(user.address, 1, 1, "r"),
+        dlm.addToWhitelist(user.address, 1, 1, YEAR, "r"),
       ).to.be.revertedWith("WhitelistOracle: Only owner or list manager");
     });
 
     it("rejects an out-of-range severity", async function () {
       const { dlm, user } = await wired();
       await expect(
-        dlm.addToBlacklist(user.address, 1, 4, "r"),
+        dlm.addToBlacklist(user.address, 1, 4, NO_EXPIRY, "r"),
       ).to.be.revertedWith("Invalid severity");
     });
   });
@@ -152,21 +155,25 @@ describe("DynamicListManager writes the oracles", function () {
   describe("status derived from the oracles", function () {
     it("governance whitelists, blacklists and restores through the oracles", async function () {
       const { dlm, gov, user, wl, bl } = await wired();
-      await expect(dlm.connect(gov).addToWhitelist(user.address, 7, 3, "kyc"))
+      await expect(
+        dlm.connect(gov).addToWhitelist(user.address, 7, 3, YEAR, "kyc"),
+      )
         .to.emit(dlm, "UserStatusChanged")
         .withArgs(user.address, 7, NONE, WHITELISTED, "kyc");
       expect(await wl.isWhitelisted(user.address)).to.equal(true);
       expect((await wl.getWhitelistInfo(user.address)).tier).to.equal(3n);
       expect(await dlm.getUserStatus(user.address)).to.equal(WHITELISTED);
 
-      await dlm.connect(gov).addToBlacklist(user.address, 7, HIGH, "sanctions");
+      await dlm
+        .connect(gov)
+        .addToBlacklist(user.address, 7, HIGH, NO_EXPIRY, "sanctions");
       expect(await bl.isBlacklisted(user.address)).to.equal(true);
       expect((await bl.blacklistEntries(user.address)).severity).to.equal(
         BigInt(HIGH),
       );
       expect(await dlm.getUserStatus(user.address)).to.equal(BLACKLISTED);
       await expect(
-        dlm.connect(gov).addToWhitelist(user.address, 7, 1, "again"),
+        dlm.connect(gov).addToWhitelist(user.address, 7, 1, YEAR, "again"),
       ).to.be.revertedWith("User is blacklisted");
 
       // Unblacklisting returns to WHITELISTED because the whitelist entry stayed.
@@ -195,7 +202,7 @@ describe("DynamicListManager writes the oracles", function () {
     it("strangers cannot call the manager", async function () {
       const { dlm, stranger, user } = await wired();
       await expect(
-        dlm.connect(stranger).addToWhitelist(user.address, 1, 1, "r"),
+        dlm.connect(stranger).addToWhitelist(user.address, 1, 1, YEAR, "r"),
       ).to.be.revertedWith("Only owner or governance");
     });
   });
@@ -203,8 +210,8 @@ describe("DynamicListManager writes the oracles", function () {
   describe("identity status and history", function () {
     it("records identity status and both histories", async function () {
       const { dlm, user } = await wired();
-      await dlm.addToWhitelist(user.address, 42, 1, "a");
-      await dlm.addToBlacklist(user.address, 42, HIGH, "b");
+      await dlm.addToWhitelist(user.address, 42, 1, YEAR, "a");
+      await dlm.addToBlacklist(user.address, 42, HIGH, NO_EXPIRY, "b");
       expect(await dlm.getIdentityStatus(42)).to.equal(BLACKLISTED);
       expect(await dlm.getUserStatusHistoryCount(user.address)).to.equal(2n);
       expect(await dlm.getIdentityStatusHistoryCount(42)).to.equal(2n);
@@ -219,14 +226,138 @@ describe("DynamicListManager writes the oracles", function () {
       const now = BigInt((await ethers.provider.getBlock("latest"))!.timestamp);
       expect(await dlm.isProofValid(9, now, true)).to.equal(false);
       expect(await dlm.isProofValid(9, now, false)).to.equal(true);
-      await dlm.addToWhitelist(user.address, 9, 1, "a");
+      await dlm.addToWhitelist(user.address, 9, 1, YEAR, "a");
       expect(await dlm.isProofValid(9, now, true)).to.equal(true);
-      await dlm.addToBlacklist(user.address, 9, HIGH, "b");
+      await dlm.addToBlacklist(user.address, 9, HIGH, NO_EXPIRY, "b");
       expect(await dlm.isProofValid(9, now, true)).to.equal(false);
       expect(await dlm.isProofValid(9, now, false)).to.equal(false);
       await dlm.removeFromBlacklist(user.address, 9, "c");
       const expired = now - (await dlm.proofExpiryDuration()) - 10n;
       expect(await dlm.isProofValid(9, expired, true)).to.equal(false);
+    });
+  });
+
+  describe("explicit durations (D20 = b)", function () {
+    const HOUR = 3600;
+    const TEN_YEARS = 10 * 365 * 86400;
+    const advance = async (s: number) => {
+      await ethers.provider.send("evm_increaseTime", [s]);
+      await ethers.provider.send("evm_mine", []);
+    };
+    const ts = async (tx: any) =>
+      BigInt(
+        (await ethers.provider.getBlock((await tx.wait()).blockNumber))!
+          .timestamp,
+      );
+
+    it("the manager rejects a zero duration for both writes", async function () {
+      const { dlm, user } = await wired();
+      await expect(
+        dlm.addToWhitelist(user.address, 1, 1, 0, "r"),
+      ).to.be.revertedWith("DynamicListManager: duration required");
+      await expect(
+        dlm.addToBlacklist(user.address, 1, HIGH, 0, "r"),
+      ).to.be.revertedWith("DynamicListManager: duration required");
+    });
+
+    it("honours an explicit duration; the oracle event carries now + duration", async function () {
+      const { dlm, user, other, wl, bl } = await wired();
+      const tx1 = await dlm.addToWhitelist(user.address, 1, 1, HOUR, "r");
+      await expect(tx1)
+        .to.emit(wl, "WhitelistUpdated")
+        .withArgs(user.address, true, 1, (await ts(tx1)) + BigInt(HOUR), "r");
+      const tx2 = await dlm.addToBlacklist(other.address, 2, HIGH, HOUR, "b");
+      await expect(tx2)
+        .to.emit(bl, "BlacklistUpdated")
+        .withArgs(
+          other.address,
+          true,
+          HIGH,
+          (await ts(tx2)) + BigInt(HOUR),
+          "b",
+          false,
+        );
+      expect(await wl.isWhitelisted(user.address)).to.equal(true);
+      expect(await dlm.getUserStatus(other.address)).to.equal(BLACKLISTED);
+
+      await advance(HOUR + 1);
+      expect(await wl.isWhitelisted(user.address)).to.equal(false);
+      expect(await dlm.getUserStatus(user.address)).to.equal(NONE);
+      expect(await bl.isBlacklisted(other.address)).to.equal(false);
+      expect(await dlm.getUserStatus(other.address)).to.equal(NONE);
+    });
+
+    it("NO_EXPIRY stores expiryTime 0 and survives ten years and cleanup", async function () {
+      const { dlm, user, other, wl, bl } = await wired();
+      expect(await wl.NO_EXPIRY()).to.equal(NO_EXPIRY);
+      expect(await bl.NO_EXPIRY()).to.equal(NO_EXPIRY);
+      await expect(dlm.addToWhitelist(user.address, 1, 2, NO_EXPIRY, "w"))
+        .to.emit(wl, "WhitelistUpdated")
+        .withArgs(user.address, true, 2, 0, "w");
+      await expect(dlm.addToBlacklist(other.address, 2, HIGH, NO_EXPIRY, "b"))
+        .to.emit(bl, "BlacklistUpdated")
+        .withArgs(other.address, true, HIGH, 0, "b", false);
+
+      await advance(TEN_YEARS);
+      expect(await wl.isWhitelisted(user.address)).to.equal(true);
+      const wi = await wl.getWhitelistInfo(user.address);
+      expect(wi.isWhitelistedStatus).to.equal(true);
+      expect(wi.expiryTime).to.equal(0n);
+      expect(await dlm.getUserStatus(user.address)).to.equal(WHITELISTED);
+
+      await expect(bl.cleanupExpiredEntries([other.address])).to.not.emit(
+        bl,
+        "BlacklistUpdated",
+      );
+      expect(await bl.isBlacklisted(other.address)).to.equal(true);
+      const bi = await bl.getBlacklistInfo(other.address);
+      expect(bi.isBlacklistedStatus).to.equal(true);
+      expect(bi.expiryTime).to.equal(0n);
+      expect(await dlm.getUserStatus(other.address)).to.equal(BLACKLISTED);
+
+      // A permanent entry still ends by an explicit removal.
+      await dlm.removeFromBlacklist(other.address, 2, "cleared");
+      expect(await bl.isBlacklisted(other.address)).to.equal(false);
+    });
+
+    it("oracle owner writes and batches accept NO_EXPIRY; 0 keeps the default", async function () {
+      const { user, other, stranger, wl, bl } = await fixture();
+      await wl.addToWhitelist(user.address, 1, NO_EXPIRY, "w");
+      await bl.addToBlacklist(user.address, HIGH, NO_EXPIRY, "b");
+      await expect(
+        wl.batchAddToWhitelist([other.address], [1], NO_EXPIRY, "bw"),
+      )
+        .to.emit(wl, "WhitelistUpdated")
+        .withArgs(other.address, true, 1, 0, "bw");
+      await expect(
+        bl.batchAddToBlacklist([other.address], [HIGH], NO_EXPIRY, "bb"),
+      )
+        .to.emit(bl, "BlacklistUpdated")
+        .withArgs(other.address, true, HIGH, 0, "bb", false);
+      const tx = await bl.addToBlacklist(stranger.address, HIGH, 0, "d");
+      expect((await bl.getBlacklistInfo(stranger.address)).expiryTime).to.equal(
+        (await ts(tx)) + (await bl.DEFAULT_BLACKLIST_DURATION()),
+      );
+
+      await advance(TEN_YEARS);
+      for (const a of [user.address, other.address]) {
+        expect(await wl.isWhitelisted(a)).to.equal(true);
+        expect((await wl.getWhitelistInfo(a)).isWhitelistedStatus).to.equal(
+          true,
+        );
+        expect(await bl.isBlacklisted(a)).to.equal(true);
+        expect((await bl.getBlacklistInfo(a)).isBlacklistedStatus).to.equal(
+          true,
+        );
+      }
+      // The defaulted entry expired and is still cleaned up.
+      expect(await bl.isBlacklisted(stranger.address)).to.equal(false);
+      await expect(bl.cleanupExpiredEntries([stranger.address, user.address]))
+        .to.emit(bl, "BlacklistUpdated")
+        .withArgs(stranger.address, false, 0, 0, "Expired", false);
+      expect((await bl.blacklistEntries(user.address)).isBlacklisted).to.equal(
+        true,
+      );
     });
   });
 

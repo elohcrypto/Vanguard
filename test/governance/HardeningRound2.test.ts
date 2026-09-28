@@ -591,7 +591,13 @@ describe("Hardening round 2 — contract changes", () => {
       return id;
     }
     const addWl = (dlm: any, user: string) =>
-      dlm.interface.encodeFunctionData("addToWhitelist", [user, 1, 1, "r"]);
+      dlm.interface.encodeFunctionData("addToWhitelist", [
+        user,
+        1,
+        1,
+        365 * 86400,
+        "r",
+      ]);
 
     it("manager call reverts (oracles unset): Rejected, claimable, reason preserved", async () => {
       const { alice, bob, carol, gov, govAddr, dlm } = await listFixture();

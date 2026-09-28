@@ -176,20 +176,25 @@ contract DynamicListManager is Ownable2Step {
      * @param user User address
      * @param identity User identity ID
      * @param tier Whitelist tier 1..5, passed to the oracle
+     * @param duration Seconds until expiry, or type(uint256).max for no
+     *        expiry. 0 is rejected: the oracle default is not reachable
+     *        through the manager, every write states its duration (D20).
      * @param reason Reason for adding to whitelist
      */
     function addToWhitelist(
         address user,
         uint256 identity,
         uint8 tier,
+        uint256 duration,
         string memory reason
     ) external onlyOwnerOrGovernance {
         require(user != address(0), "Invalid user address");
+        require(duration != 0, "DynamicListManager: duration required");
         _requireOracles();
         require(!blacklistOracle.isBlacklisted(user), "User is blacklisted");
 
         _setStatus(user, identity, getUserStatus(user), UserStatus.WHITELISTED, reason);
-        whitelistOracle.addToWhitelist(user, tier, 0, reason);
+        whitelistOracle.addToWhitelist(user, tier, duration, reason);
     }
 
     /**
@@ -198,20 +203,25 @@ contract DynamicListManager is Ownable2Step {
      * @param user User address
      * @param identity User identity ID
      * @param severity BlacklistOracle.SeverityLevel (0 LOW .. 3 CRITICAL)
+     * @param duration Seconds until expiry, or type(uint256).max for no
+     *        expiry. 0 is rejected: the oracle default is not reachable
+     *        through the manager, every write states its duration (D20).
      * @param reason Reason for blacklisting
      */
     function addToBlacklist(
         address user,
         uint256 identity,
         uint8 severity,
+        uint256 duration,
         string memory reason
     ) external onlyOwnerOrGovernance {
         require(user != address(0), "Invalid user address");
+        require(duration != 0, "DynamicListManager: duration required");
         require(severity <= MAX_SEVERITY, "Invalid severity");
         _requireOracles();
 
         _setStatus(user, identity, getUserStatus(user), UserStatus.BLACKLISTED, reason);
-        blacklistOracle.addToBlacklist(user, severity, 0, reason);
+        blacklistOracle.addToBlacklist(user, severity, duration, reason);
     }
 
     /**

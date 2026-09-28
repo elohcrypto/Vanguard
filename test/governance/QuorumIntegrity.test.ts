@@ -222,6 +222,7 @@ describe("List-update proposals honour the execution delay", function () {
       alice.address,
       0,
       2,
+      ethers.MaxUint256,
       "test",
     ]);
     const dlmAddr = await dlm.getAddress();
