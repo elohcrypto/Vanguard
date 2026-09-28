@@ -9,19 +9,32 @@
  *     "token": "0x..", "governanceToken": "0x..", "identityRegistry": "0x..",
  *     "complianceRules": "0x..",
  *     "oracleManager": "0x..", "governance": "0x..",
- *     "investorTypeRegistry": "0x..",          // optional
+ *     "investorTypeRegistry": "0x..",          // optional, in the plan (type 0)
  *     "dynamicListManager": "0x..",            // optional, demo option 84
  *     "oracles": ["0x..", "0x..", "0x.."],      // optional, one-step Ownable
  *     "issuers": ["0x..", "0x.."],              // optional, ClaimIssuer
  *     "ops": 10, "guardian": 11, "proposer": 1, "voters": [2, 3, 6]
  *   }
  *
- * Exits non-zero on any failure. The ceremony itself is demo/utils/Handover.js.
+ * Every contract in ACCEPTANCE_PLAN (demo/utils/HandoverChecks.js) given here
+ * is nominated and accepted by vote, InvestorTypeRegistry included; a
+ * preflight refuses to start before the first transaction if any
+ * precondition fails. Exits non-zero on any failure. The ceremony itself is
+ * demo/utils/Handover.js.
  */
 // ponytail: a JSON file via HANDOVER_CONFIG is the ceiling (hardhat run has no
 // argv passthrough); a typed CLI can replace it later.
 import { ethers } from "hardhat";
 import * as fs from "fs";
+
+// Whitelist/Blacklist oracles have listManager(); ConsensusOracle does not,
+// and the ceremony treats its revert as "no writer role".
+const ORACLE_ABI = [
+  "function owner() view returns (address)",
+  "function transferOwnership(address)",
+  "function listManager() view returns (address)",
+  "function setListManager(address)",
+];
 
 const {
   ACCEPTANCE_PLAN,
@@ -78,7 +91,7 @@ async function main(): Promise<void> {
       : undefined,
     oracles: await Promise.all(
       (cfg.oracles || []).map((a: string) =>
-        at("@openzeppelin/contracts/access/Ownable.sol:Ownable", a),
+        ethers.getContractAt(ORACLE_ABI, a),
       ),
     ),
     issuers: await Promise.all(

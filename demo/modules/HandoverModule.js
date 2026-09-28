@@ -30,6 +30,7 @@ const STATE_KEY = {
   complianceRules: "complianceRules",
   oracleManager: "oracleManager",
   dynamicListManager: "dynamicListManager",
+  investorTypeRegistry: "investorTypeRegistry",
   governance: "vanguardGovernance",
 };
 

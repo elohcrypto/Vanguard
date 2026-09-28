@@ -43,7 +43,8 @@ async function runHandoverSmoke(state, failures) {
     return;
   }
 
-  // Eight proposals at most (six acceptances, two registry calls): give the
+  // Eight proposals at most (seven acceptances, or six when 83b already gave
+  // governance the registry plus two registry calls): give the
   // proposer and every voter enough VGT for all of them.
   const vgt = c("governanceToken");
   const perRound =

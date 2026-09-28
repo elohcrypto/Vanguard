@@ -64,7 +64,7 @@ deleting mid-vote does not move the bar of a proposal already open. The case
 
 After the ceremony the deployer (wallet 0) holds no power: governance owns
 Token, GovernanceToken (VGT), IdentityRegistry, ComplianceRules,
-OracleManager and itself; ops
+OracleManager, InvestorTypeRegistry (when deployed) and itself; ops
 (wallet 10) holds the agent roles, the compliance-officer role and the
 oracles and claim issuers the deployer owned; the guardian (wallet 11) can
 pause the token but not unpause it. Issuer ownership moves by nominate and
@@ -74,8 +74,27 @@ multisig must itself execute `acceptOwnership` and the deployer-key revoke
 for each claim issuer. Deploy governance (option 74) after the
 oracle system (option 31) so OracleManager is a bound target. In the demo,
 run 83c (deployer grants ops and guardian, removes itself, nominates
-governance), then 83d (one acceptOwnership vote per nominated contract) and
-83b (InvestorTypeRegistry), then 83e (prints every check as pass or fail).
+governance), then 83d (one acceptOwnership vote per nominated contract,
+InvestorTypeRegistry included as an InvestorTypeConfig vote), then 83e
+(prints every check as pass or fail). 83b stays as the single-registry
+shortcut; if it ran first the ceremony skips the registry's nomination and
+queues its officer changes as InvestorTypeConfig proposals.
+Before its first transaction the ceremony runs a read-only preflight and
+refuses to start rather than stop halfway: governance bound to every plan
+contract; each plan contract owned by the deployer, or already by governance
+where the deployer never calls it (Token, VGT, IdentityRegistry and
+ComplianceRules must still be the deployer's); no issuer where the deployer
+holds a key but not ownership; ops a signer wherever it must accept or revoke
+on an issuer; each oracle owned by the deployer or ops.
+Two hazards are fixed rather than only reported: step 1 clears any VGT
+guardian ("VGT guardian cleared: none may pause the vote token"; a VGT pause
+blocks every vote), and step 2 moves an oracle's `listManager` off the
+deployer to the DynamicListManager, or to zero when there is none.
+83e also checks: GovernanceToken has no guardian, no oracle's `listManager`
+is the deployer, the deployer is not an InvestorTypeRegistry governor or a
+trusted contract, and every address still trusted on ComplianceRules (found
+from `TrustedContractAdded` events) has code; a wallet trusted before 2E.1
+must be removed by the owner before the handover counts as complete.
 The votes need a proposer plus quorum voters that are verified VGT holders
 among wallets 0 to 9: options 23/24 and 3/4 onboard them, 75a then 75/75b
 fund them; without them 83d refuses exactly as 83b does. Onboard first:

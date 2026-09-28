@@ -9,9 +9,10 @@
  *
  * Order: (1) grant ops/guardian, hand over issuers; (2) oracles to ops; (5)
  * deployer drops its roles; (3) nominate governance; (4) accept by vote.
- * The oracles' list-manager writer role is not touched here: option 84 sets
- * it while the deployer owns the oracles, and after the handover ops does.
- * Every transaction is followed by a state assertion; any mismatch throws.
+ * Task 2E.2: preflight (HandoverChecks.js) checks every precondition before
+ * the first transaction; step 1 clears any VGT guardian and step 2 moves an
+ * oracle list-manager role off the deployer (to the DynamicListManager, else
+ * zero). Every transaction is followed by a state assertion; any mismatch throws.
  */
 
 const { ethers } = require("hardhat");
@@ -19,12 +20,13 @@ const { advancePast } = require("./ChainTime");
 const {
   ACCEPTANCE_PLAN,
   planFor,
-  core,
   addrOf,
   same,
   keyOf,
   hasLiveKey,
   issuerLabel,
+  listManagerOf,
+  preflight,
   assertHandoverComplete,
 } = require("./HandoverChecks");
 
@@ -43,6 +45,7 @@ const EXECUTED = 4;
 const OWNABLE = new ethers.Interface([
   "function acceptOwnership()",
   "function setComplianceOfficer(address,bool)",
+  "function setGovernor(address,bool,uint256)",
 ]);
 
 function check(cond, msg) {
@@ -80,25 +83,8 @@ async function handoverDeployerPowers(o) {
     log(`   ✅ ${m}`);
   };
 
-  // Governance must be bound to every contract it is about to own, or the
-  // acceptOwnership vote in step 4 can never be proposed. Checked before any
-  // transaction so a mis-ordered deployment leaves no partial handover.
-  for (const e of planFor(o).filter((x) => x.key !== "governance")) {
-    const want = await addrOf(o[e.key]);
-    const got = await o.governance.boundTarget(e.proposalType);
-    check(
-      same(got, want),
-      `governance is not bound to ${e.label} (${want}); boundTarget(${e.proposalType}) = ${got}. ` +
-        `Governance must be deployed after ${e.label}; redeploy it.`,
-    );
-  }
-  for (const [c, label] of core(o)) {
-    const owner = await c.owner();
-    check(
-      same(owner, dAddr),
-      `deployer ${dAddr} does not own ${label} (owner ${owner}); the handover was already run or needs another key`,
-    );
-  }
+  // Read-only; throws before any transaction when a precondition fails.
+  const { governanceOwned } = await preflight(o);
   const ctx = { o, d, dAddr, govAddr, report, ok, log };
   // Send, read back, assert, print.
   const apply = async (tx, readBack, msg) => {
@@ -119,6 +105,13 @@ async function handoverDeployerPowers(o) {
     `IdentityRegistry agent: ${ops}`,
   );
   // No guardian on VGT: halting governance is not the guardian's power (D19).
+  if (!same(await o.governanceToken.guardian(), ethers.ZeroAddress)) {
+    await apply(
+      o.governanceToken.connect(d).setGuardian(ethers.ZeroAddress),
+      async () => same(await o.governanceToken.guardian(), ethers.ZeroAddress),
+      "VGT guardian cleared: none may pause the vote token",
+    );
+  }
   await apply(
     o.governanceToken.connect(d).addAgent(ops),
     () => o.governanceToken.isAgent(ops),
@@ -155,10 +148,6 @@ async function handoverDeployerPowers(o) {
       log(`   ℹ️  deployer holds no key on ${label}: nothing to hand over`);
       continue;
     }
-    check(
-      isOwner,
-      `deployer holds a key on ${label} but is not its owner (${await issuer.owner()}); its owner must run this issuer's handover`,
-    );
     if (!(await hasLiveManagementKey(issuer, ops))) {
       await send(
         issuer.connect(d).addIssuerKey(keyOf(ops), MANAGEMENT_KEY, ECDSA_TYPE),
@@ -172,10 +161,6 @@ async function handoverDeployerPowers(o) {
       same(await issuer.pendingOwner(), ops),
       `${label} pendingOwner is not ops`,
     );
-    check(
-      typeof o.ops.signMessage === "function",
-      `ops must be a signer to accept ownership of ${label}`,
-    );
     await send(issuer.connect(o.ops).acceptOwnership());
     check(same(await issuer.owner(), ops), `${label} owner is not ops`);
     check(
@@ -183,10 +168,6 @@ async function handoverDeployerPowers(o) {
       `ops holds no live MANAGEMENT_KEY on ${label}; refusing to revoke the deployer key`,
     );
     if (hasKey) {
-      check(
-        typeof o.ops.signMessage === "function",
-        `ops must be a signer to revoke the deployer key on ${label}`,
-      );
       await send(issuer.connect(o.ops).revokeIssuerKey(keyOf(dAddr)));
     }
     check(
@@ -199,6 +180,15 @@ async function handoverDeployerPowers(o) {
   log("\n📝 Step 2: oracles to ops");
   for (const oracle of o.oracles || []) {
     const a = await oracle.getAddress();
+    // The deployer must not keep the list-writer role once ops owns the oracle.
+    if (same((await listManagerOf(oracle)) || ethers.ZeroAddress, dAddr)) {
+      const to = dlm ? await dlm.getAddress() : ethers.ZeroAddress;
+      await apply(
+        oracle.connect(d).setListManager(to),
+        async () => same(await oracle.listManager(), to),
+        `oracle ${a} listManager moved off the deployer to ${to}`,
+      );
+    }
     if (!same(await oracle.owner(), ops)) {
       await send(oracle.connect(d).transferOwnership(ops));
     }
@@ -229,10 +219,25 @@ async function handoverDeployerPowers(o) {
   );
   if (o.investorTypeRegistry) {
     await registryOfficer(ctx, dAddr, false);
+    const reg = o.investorTypeRegistry;
+    if (typeof reg.isGovernor === "function") {
+      await registryCall(
+        ctx,
+        `InvestorTypeRegistry governor ${dAddr} = false`,
+        async () => !(await reg.isGovernor(dAddr)),
+        "setGovernor",
+        [dAddr, false, 0],
+      );
+    }
   }
 
   log("\n📝 Step 3: nominate governance as owner");
-  for (const [c, label] of core(o)) {
+  for (const e of planFor(o)) {
+    const [c, label] = [o[e.key], e.label];
+    if (governanceOwned.has(e.key)) {
+      ok(`${label}: already owned by governance`);
+      continue;
+    }
     await send(c.connect(d).transferOwnership(govAddr));
     check(
       same(await c.pendingOwner(), govAddr),
@@ -244,40 +249,40 @@ async function handoverDeployerPowers(o) {
 }
 
 /**
- * InvestorTypeRegistry.setComplianceOfficer(who, flag). Direct when the
- * deployer still owns the registry; queued as an InvestorTypeConfig proposal
- * (loudly) when governance already owns it (option 83b ran first).
+ * InvestorTypeRegistry.<fn>(...args) unless `done()` already holds. Direct
+ * when the deployer owns the registry; queued (loudly) as an
+ * InvestorTypeConfig proposal when governance does (preflight allows no
+ * other owner).
  */
-async function registryOfficer(ctx, who, flag) {
-  const { o, d, dAddr, govAddr, report, ok, log } = ctx;
+async function registryCall(ctx, what, done, fn, args) {
+  const { o, d, dAddr, report, ok, log } = ctx;
   const reg = o.investorTypeRegistry;
-  const owner = await reg.owner();
-  const what = `InvestorTypeRegistry compliance officer ${who} = ${flag}`;
-  if (same(owner, dAddr)) {
-    await send(reg.connect(d).setComplianceOfficer(who, flag));
-    check(
-      (await reg.isComplianceOfficer(who)) === flag,
-      `${what} did not apply`,
-    );
-    ok(what);
-  } else if (same(owner, govAddr)) {
-    if ((await reg.isComplianceOfficer(who)) === flag)
-      return ok(`${what} (already)`);
-    report.registryProposals.push({
-      label: what,
-      proposalType: 0,
-      target: await reg.getAddress(),
-      callData: OWNABLE.encodeFunctionData("setComplianceOfficer", [who, flag]),
-    });
-    log(
-      `   ⚠️  ${what}: governance owns the registry, queued as an InvestorTypeConfig proposal`,
-    );
-  } else {
-    check(
-      false,
-      `InvestorTypeRegistry is owned by ${owner}, neither deployer nor governance`,
-    );
+  if (await done()) return ok(`${what} (already)`);
+  if (same(await reg.owner(), dAddr)) {
+    await send(reg.connect(d)[fn](...args));
+    check(await done(), `${what} did not apply`);
+    return ok(what);
   }
+  report.registryProposals.push({
+    label: what,
+    proposalType: 0,
+    target: await reg.getAddress(),
+    callData: OWNABLE.encodeFunctionData(fn, args),
+  });
+  log(
+    `   ⚠️  ${what}: governance owns the registry, queued as an InvestorTypeConfig proposal`,
+  );
+}
+
+async function registryOfficer(ctx, who, flag) {
+  const reg = ctx.o.investorTypeRegistry;
+  await registryCall(
+    ctx,
+    `InvestorTypeRegistry compliance officer ${who} = ${flag}`,
+    async () => (await reg.isComplianceOfficer(who)) === flag,
+    "setComplianceOfficer",
+    [who, flag],
+  );
 }
 
 const vgtOf = async (g) =>

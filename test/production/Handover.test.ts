@@ -42,6 +42,7 @@ describe("Deployer holds no power after handover (plan Task 0.3)", function () {
   let oracleManager: any;
   let governance: any;
   let dynamicListManager: any;
+  let investorTypeRegistry: any;
   let govAddr: string;
   let kycIssuer: any;
   let investor: SignerWithAddress;
@@ -59,6 +60,7 @@ describe("Deployer holds no power after handover (plan Task 0.3)", function () {
       complianceRules,
       oracleManager,
       dynamicListManager,
+      investorTypeRegistry,
       issuers: [kycIssuer],
       log: () => {},
     });
@@ -69,6 +71,7 @@ describe("Deployer holds no power after handover (plan Task 0.3)", function () {
       complianceRules,
       oracleManager,
       dynamicListManager,
+      investorTypeRegistry,
       governance,
     };
     for (const e of ACCEPTANCE_PLAN) {
@@ -136,13 +139,16 @@ describe("Deployer holds no power after handover (plan Task 0.3)", function () {
       await ethers.getContractFactory("GovernanceToken")
     ).deploy("VGT", "VGT", idRegAddr, rulesAddr);
     governanceToken = vgt;
+    investorTypeRegistry = await (
+      await ethers.getContractFactory("InvestorTypeRegistry")
+    ).deploy();
     const vgtAddr = await vgt.getAddress();
     governance = await (
       await ethers.getContractFactory("VanguardGovernance")
     ).deploy(
       vgtAddr,
       idRegAddr,
-      ethers.ZeroAddress,
+      await investorTypeRegistry.getAddress(),
       rulesAddr,
       await oracleManager.getAddress(),
       await token.getAddress(),
@@ -189,6 +195,17 @@ describe("Deployer holds no power after handover (plan Task 0.3)", function () {
       dynamicListManager,
       "OwnableUnauthorizedAccount",
     );
+  });
+
+  // Plan v2 Task 2E.2: the registry is in the acceptance plan.
+  it("governance owns InvestorTypeRegistry; ops is its officer, the deployer is not", async function () {
+    expect(await investorTypeRegistry.owner()).to.equal(govAddr);
+    expect(
+      await investorTypeRegistry.isComplianceOfficer(ops.address),
+    ).to.equal(true);
+    expect(
+      await investorTypeRegistry.isComplianceOfficer(deployer.address),
+    ).to.equal(false);
   });
 
   it("the deployer is no longer an agent or rule administrator", async function () {

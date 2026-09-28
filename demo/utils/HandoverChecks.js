@@ -26,7 +26,24 @@ const ACCEPTANCE_PLAN = [
   plan("dynamicListManager", 6, "DynamicListManager", "ListUpdate", {
     optional: true,
   }),
+  // Optional; option 83b may already have handed it to governance (2E.2).
+  plan(
+    "investorTypeRegistry",
+    0,
+    "InvestorTypeRegistry",
+    "InvestorTypeConfig",
+    {
+      optional: true,
+    },
+  ),
   plan("governance", 4, "VanguardGovernance", "SystemParameters"),
+];
+// Steps 1 and 5 call these as their owner, so the deployer must still own them.
+const DEPLOYER_CALLED = [
+  "token",
+  "governanceToken",
+  "identityRegistry",
+  "complianceRules",
 ];
 /** The plan entries that apply to `o`: optional ones only when given. */
 const planFor = (o) =>
@@ -51,6 +68,80 @@ async function hasLiveKey(issuer, wallet) {
 async function issuerLabel(issuer) {
   const name = await issuer.issuerName().catch(() => "");
   return `${name || "ClaimIssuer"} (${await issuer.getAddress()})`;
+}
+
+function fail(msg) {
+  throw new Error(`Handover: ${msg}`);
+}
+
+/** An oracle's list-manager writer, or null when it has none (ConsensusOracle). */
+async function listManagerOf(oracle) {
+  if (typeof oracle.listManager !== "function") return null;
+  return oracle.listManager().catch(() => null);
+}
+
+/**
+ * Every precondition, read-only, before the ceremony's first transaction
+ * (plan v2 Task 2E.2): refuse to start rather than stop halfway. Returns
+ * { governanceOwned }: plan keys governance already owns (step 3 skips them).
+ */
+async function preflight(o) {
+  const dAddr = await addrOf(o.deployer);
+  const ops = await addrOf(o.ops);
+  const govAddr = await addrOf(o.governance);
+  const opsSigns = typeof o.ops.signMessage === "function";
+  // Governance must be bound to every contract it is about to own, or the
+  // acceptOwnership vote in step 4 can never be proposed.
+  for (const e of planFor(o).filter((x) => x.key !== "governance")) {
+    const want = await addrOf(o[e.key]);
+    const got = await o.governance.boundTarget(e.proposalType);
+    if (!same(got, want)) {
+      fail(
+        `governance is not bound to ${e.label} (${want}); boundTarget(${e.proposalType}) = ${got}. ` +
+          `Governance must be deployed after ${e.label}; redeploy it.`,
+      );
+    }
+  }
+  const governanceOwned = new Set();
+  for (const e of planFor(o)) {
+    const owner = await o[e.key].owner();
+    if (same(owner, dAddr)) continue;
+    const deployerNeeded =
+      DEPLOYER_CALLED.includes(e.key) ||
+      (e.key === "dynamicListManager" &&
+        !same(await o.dynamicListManager.governanceContract(), govAddr));
+    if (!same(owner, govAddr) || deployerNeeded) {
+      fail(
+        `deployer ${dAddr} does not own ${e.label} (owner ${owner}); the handover was already run or needs another key`,
+      );
+    }
+    governanceOwned.add(e.key);
+  }
+  for (const issuer of o.issuers || []) {
+    const label = await issuerLabel(issuer);
+    const owner = await issuer.owner();
+    const hasKey = await hasLiveKey(issuer, dAddr);
+    if (hasKey && !same(owner, dAddr)) {
+      fail(
+        `deployer holds a key on ${label} but is not its owner (${owner}); its owner must run this issuer's handover`,
+      );
+    }
+    if ((hasKey || same(owner, dAddr)) && !opsSigns) {
+      fail(`ops must be a signer to accept ownership of ${label}`);
+    }
+  }
+  for (const oracle of o.oracles || []) {
+    const a = await oracle.getAddress();
+    const owner = await oracle.owner();
+    if (!same(owner, dAddr) && !same(owner, ops)) {
+      fail(`oracle ${a} is owned by ${owner}, neither deployer nor ops`);
+    }
+    const lm = await listManagerOf(oracle);
+    if (lm && same(lm, dAddr) && !same(owner, dAddr)) {
+      fail(`oracle ${a} listManager is the deployer and only ops can clear it`);
+    }
+  }
+  return { governanceOwned };
 }
 
 /** Read-only verification. Returns { ok, failures, checks }; never pauses. */
@@ -91,12 +182,12 @@ async function assertHandoverComplete(o) {
       same(await o.dynamicListManager.governanceContract(), govAddr),
     );
   }
+  add(
+    "GovernanceToken has no guardian",
+    same(await o.governanceToken.guardian(), ethers.ZeroAddress),
+  );
   if (o.investorTypeRegistry) {
     const reg = o.investorTypeRegistry;
-    add(
-      "InvestorTypeRegistry owned by governance (option 83b)",
-      same(await reg.owner(), govAddr),
-    );
     add(
       "ops is an InvestorTypeRegistry compliance officer",
       await reg.isComplianceOfficer(ops),
@@ -105,13 +196,40 @@ async function assertHandoverComplete(o) {
       "deployer is not an InvestorTypeRegistry compliance officer",
       !(await reg.isComplianceOfficer(dAddr)),
     );
+    if (typeof reg.isGovernor === "function") {
+      add(
+        "deployer is not an InvestorTypeRegistry governor",
+        !(await reg.isGovernor(dAddr)),
+      );
+    }
   }
   for (const oracle of o.oracles || []) {
-    add(
-      `oracle ${await oracle.getAddress()} owned by ops`,
-      same(await oracle.owner(), ops),
-    );
+    const a = await oracle.getAddress();
+    add(`oracle ${a} owned by ops`, same(await oracle.owner(), ops));
+    const lm = await listManagerOf(oracle);
+    if (lm)
+      add(`oracle ${a} listManager is not the deployer`, !same(lm, dAddr));
   }
+  const rules = o.complianceRules;
+  add(
+    "deployer is not a trusted contract",
+    !(await rules.isTrustedContract(dAddr)),
+  );
+  // Residue from runs before 2E.1, when a wallet could be trusted.
+  const added = await rules.queryFilter(
+    rules.filters.TrustedContractAdded(),
+    0,
+    "latest",
+  );
+  const trusted = [...new Set(added.map((ev) => ev.args[0]))];
+  let clean = true;
+  for (const a of trusted) {
+    if (!(await rules.isTrustedContract(a))) continue;
+    if ((await ethers.provider.getCode(a)) !== "0x") continue;
+    clean = false;
+    add(`trusted address ${a} has code`, false);
+  }
+  if (clean) add("every trusted contract has code", true);
   for (const issuer of o.issuers || []) {
     const label = await issuerLabel(issuer);
     add(`deployer does not own ${label}`, !same(await issuer.owner(), dAddr));
@@ -133,5 +251,7 @@ module.exports = {
   keyOf,
   hasLiveKey,
   issuerLabel,
+  listManagerOf,
+  preflight,
   assertHandoverComplete,
 };
