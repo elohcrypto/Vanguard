@@ -359,6 +359,62 @@ describe("DynamicListManager writes the oracles", function () {
         true,
       );
     });
+
+    it("the manager rejects a duration that would overflow the expiry", async function () {
+      const { dlm, user } = await wired();
+      for (const call of [
+        dlm.addToWhitelist(user.address, 1, 1, NO_EXPIRY - 1n, "r"),
+        dlm.addToBlacklist(user.address, 1, HIGH, NO_EXPIRY - 1n, "r"),
+      ])
+        await expect(call).to.be.revertedWith(
+          "DynamicListManager: duration too large",
+        );
+    });
+
+    async function withEmergencyOracle() {
+      const f = await wired();
+      const om = await ethers.getContractAt(
+        "OracleManager",
+        await f.bl.oracleManager(),
+      );
+      await om["registerOracle(address,string)"](f.stranger.address, "e");
+      await f.bl.setEmergencyOracle(f.stranger.address, true);
+      return f;
+    }
+    const CRITICAL = 3;
+    const WEEK = 7 * 86400;
+
+    it("an emergency listing never shortens a permanent entry", async function () {
+      const { dlm, user, bl, stranger } = await withEmergencyOracle();
+      await dlm.addToBlacklist(user.address, 1, HIGH, NO_EXPIRY, "voted");
+      await expect(
+        bl.connect(stranger).emergencyBlacklist(user.address, CRITICAL, "e"),
+      )
+        .to.emit(bl, "BlacklistUpdated")
+        .withArgs(user.address, true, CRITICAL, 0, "e", true);
+      const e = await bl.blacklistEntries(user.address);
+      expect(e.expiryTime).to.equal(0n);
+      expect(e.emergencyListing).to.equal(true);
+      await advance(8 * 86400);
+      expect(await bl.isBlacklisted(user.address)).to.equal(true);
+      await advance(TEN_YEARS);
+      expect(await bl.isBlacklisted(user.address)).to.equal(true);
+    });
+
+    it("an emergency listing extends a shorter entry to now + 7 days", async function () {
+      const { dlm, user, bl, stranger } = await withEmergencyOracle();
+      await dlm.addToBlacklist(user.address, 1, HIGH, HOUR, "voted");
+      const tx = await bl
+        .connect(stranger)
+        .emergencyBlacklist(user.address, CRITICAL, "e");
+      const exp = (await ts(tx)) + BigInt(WEEK);
+      await expect(tx)
+        .to.emit(bl, "BlacklistUpdated")
+        .withArgs(user.address, true, CRITICAL, exp, "e", true);
+      expect((await bl.blacklistEntries(user.address)).expiryTime).to.equal(
+        exp,
+      );
+    });
   });
 
   it("ownership is two-step (Ownable2Step)", async function () {

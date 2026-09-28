@@ -675,6 +675,46 @@ describe("Hardening round 2 — contract changes", () => {
         .withArgs(LIST_UPDATE, target);
     });
 
+    it("a passed ListUpdate writes a permanent blacklist entry to the oracle", async () => {
+      const { alice, bob, carol, gov, govAddr, dlm } = await listFixture();
+      const om = await (
+        await ethers.getContractFactory("OracleManager")
+      ).deploy();
+      const omAddr = await om.getAddress();
+      const wl = await (
+        await ethers.getContractFactory("WhitelistOracle")
+      ).deploy(omAddr, "WL", "d");
+      const bl = await (
+        await ethers.getContractFactory("BlacklistOracle")
+      ).deploy(omAddr, "BL", "d");
+      const dlmAddr = await dlm.getAddress();
+      await dlm.setOracles(await wl.getAddress(), await bl.getAddress());
+      await wl.setListManager(dlmAddr);
+      await bl.setListManager(dlmAddr);
+      await gov.setDynamicListManager(dlmAddr);
+      await dlm.setGovernanceContract(govAddr);
+      const HIGH = 2;
+      const cd = dlm.interface.encodeFunctionData("addToBlacklist", [
+        carol.address,
+        5,
+        HIGH,
+        ethers.MaxUint256,
+        "r",
+      ]);
+      const id = await passedListProposal(gov, alice, bob, carol, dlm, cd);
+      await expect(gov.executeProposal(id))
+        .to.emit(bl, "BlacklistUpdated")
+        .withArgs(carol.address, true, HIGH, 0, "r", false);
+      await ethers.provider.send("evm_increaseTime", [10 * 365 * 86400]);
+      await ethers.provider.send("evm_mine", []);
+      expect(await dlm.getUserStatus(carol.address)).to.equal(2n);
+      await expect(bl.cleanupExpiredEntries([carol.address])).to.not.emit(
+        bl,
+        "BlacklistUpdated",
+      );
+      expect(await bl.isBlacklisted(carol.address)).to.equal(true);
+    });
+
     it("timeScale divides every voting period and delay; 1 is the mainnet schedule", async () => {
       const { owner, gt, ir } = await govFixture();
       const F = await ethers.getContractFactory("VanguardGovernance");

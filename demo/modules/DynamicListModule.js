@@ -152,9 +152,9 @@ class DynamicListModule {
         .toLowerCase() || String(def);
     if (raw === "never") return ethers.MaxUint256;
     const days = Number(raw);
-    if (!Number.isInteger(days) || days < 1)
+    if (!/^\d+$/.test(raw) || days < 1 || days > 36500)
       throw new Error(
-        `${label} duration: expected whole days >= 1 or "never", got "${raw}"`,
+        `${label} duration: expected whole days 1-36500 or "never", got "${raw}"`,
       );
     return BigInt(days) * 86400n;
   }

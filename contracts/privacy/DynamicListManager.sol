@@ -190,6 +190,10 @@ contract DynamicListManager is Ownable2Step {
     ) external onlyOwnerOrGovernance {
         require(user != address(0), "Invalid user address");
         require(duration != 0, "DynamicListManager: duration required");
+        require(
+            duration == type(uint256).max || duration <= type(uint256).max - block.timestamp,
+            "DynamicListManager: duration too large"
+        );
         _requireOracles();
         require(!blacklistOracle.isBlacklisted(user), "User is blacklisted");
 
@@ -217,6 +221,10 @@ contract DynamicListManager is Ownable2Step {
     ) external onlyOwnerOrGovernance {
         require(user != address(0), "Invalid user address");
         require(duration != 0, "DynamicListManager: duration required");
+        require(
+            duration == type(uint256).max || duration <= type(uint256).max - block.timestamp,
+            "DynamicListManager: duration too large"
+        );
         require(severity <= MAX_SEVERITY, "Invalid severity");
         _requireOracles();
 

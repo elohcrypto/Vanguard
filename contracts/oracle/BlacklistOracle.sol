@@ -311,6 +311,10 @@ contract BlacklistOracle is IOracle, Ownable, ReentrancyGuard, Pausable {
         require(_severity == SeverityLevel.CRITICAL, "BlacklistOracle: Only critical severity for emergency");
 
         uint256 expiryTime = block.timestamp + EMERGENCY_BLACKLIST_DURATION;
+        // Never shorten a live entry: the longer expiry (0 = never) wins.
+        BlacklistEntry storage prior = blacklistEntries[_subject];
+        if (prior.isBlacklisted && (prior.expiryTime == 0 || prior.expiryTime > expiryTime))
+            expiryTime = prior.expiryTime;
 
         blacklistEntries[_subject] = BlacklistEntry({
             isBlacklisted: true,
