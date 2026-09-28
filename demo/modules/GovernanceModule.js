@@ -933,6 +933,16 @@ class GovernanceModule {
       return;
     }
 
+    console.log("\n1. Update investor type limits");
+    console.log(
+      "2. Exempt or un-exempt a treasury wallet from investor limits (D22)",
+    );
+    const action = await this.promptUser("Select action (1-2): ");
+    if (action.trim() === "2") {
+      await this._createTreasuryExemptionProposal(investorTypeRegistry);
+      return;
+    }
+
     console.log("\n🎯 Select investor type to update:");
     console.log("0. Normal Investor");
     console.log("1. Retail Investor");
@@ -986,6 +996,53 @@ class GovernanceModule {
     console.log(`   Max Transfer: ${maxTransfer} VSC`);
     console.log(`   Max Holding: ${maxHolding} VSC`);
     console.log("\n💡 Next: Use option 77 to vote on this proposal");
+  }
+
+  /**
+   * Helper: InvestorTypeConfig proposal calling setInvestorLimitExempt.
+   * D22: after the handover governance owns the registry, so a vote is the
+   * only way to exempt (or un-exempt) a treasury wallet.
+   * @private
+   */
+  async _createTreasuryExemptionProposal(investorTypeRegistry) {
+    const bank = Array.from(
+      this.state.bankingInstitutions?.values?.() ?? [],
+    ).find((b) => b.type === "CENTRAL_BANK");
+    const fallback = bank ? bank.address : this.state.signers[0].address;
+    const input = await this.promptUser(`Treasury wallet [${fallback}]: `);
+    const wallet = input.trim() || fallback;
+    if (!ethers.isAddress(wallet)) {
+      displayError(`Not an address: ${wallet}`);
+      return;
+    }
+    const answer = await this.promptUser(
+      "Exempt from investor limits? (y/n): ",
+    );
+    const exempt = answer.trim().toLowerCase().startsWith("y");
+
+    const title = `${exempt ? "Exempt" : "Un-exempt"} treasury ${wallet} from investor limits`;
+    const callData = investorTypeRegistry.interface.encodeFunctionData(
+      "setInvestorLimitExempt",
+      [wallet, exempt],
+    );
+    const vanguardGovernance = this.state.getContract("vanguardGovernance");
+    const receipt = await (
+      await vanguardGovernance.createProposal(
+        0, // ProposalType.InvestorTypeConfig
+        title,
+        `setInvestorLimitExempt(${wallet}, ${exempt}) (D22)`,
+        await investorTypeRegistry.getAddress(),
+        callData,
+      )
+    ).wait();
+
+    displaySuccess("TREASURY EXEMPTION PROPOSAL CREATED!");
+    console.log(`   Transaction: ${receipt.hash}`);
+    console.log(`   Title: ${title}`);
+    console.log(`   Target: InvestorTypeRegistry.setInvestorLimitExempt`);
+    console.log(
+      "\n💡 Next: option 77 votes, option 78 executes after the delay",
+    );
   }
 
   /**

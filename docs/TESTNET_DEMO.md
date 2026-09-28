@@ -148,6 +148,10 @@ GOV_TIME_SCALE=1440 npm run demo:interactive:proof   # in another terminal
 Then walk: 1 (deploy), 74 (governance), 75 (distribute VGT to 6-8), 76
 (Alice proposes), 77 (Bob and Carol vote), 79 (wait ~8 min), 78 (execute),
 78a (claim on a rejected one). Every action is signed by its role's key.
+Name the treasury wallet and exempt it from investor limits (option 22 or 51,
+or `setInvestorLimitExempt` directly) BEFORE the ceremony, while the deployer
+owns the registry; afterwards only an InvestorTypeConfig vote can (option 76,
+type 0, choice 2).
 
 Rehearsed on 2026-09-11 with the poll branch forced at a since-removed
 scale of 10080: a 60-second vote plus 17-second delay waited 78 seconds of
