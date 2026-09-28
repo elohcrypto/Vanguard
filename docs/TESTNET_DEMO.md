@@ -100,9 +100,12 @@ blocks every vote), and step 2 moves an oracle's `listManager` off the
 deployer to the DynamicListManager, or to zero when there is none.
 83e also checks: GovernanceToken has no guardian, no oracle's `listManager`
 is the deployer, the deployer is not an InvestorTypeRegistry governor or a
-trusted contract, and every address still trusted on ComplianceRules (found
-from `TrustedContractAdded` events) has code; a wallet trusted before 2E.1
-must be removed by the owner before the handover counts as complete.
+trusted contract, governance is a trusted contract and has no registry
+identity (D21), and every address still trusted on ComplianceRules (found
+from `TrustedContractAdded` events) is a deployed contract, not a wallet or
+delegated wallet; a wallet trusted before 2E.1 must be removed by the owner
+before the handover counts as complete. Preflight refuses to start on a
+governance that is untrusted or still registered (a pre-D21 deployment).
 The votes need a proposer plus quorum voters that are verified VGT holders
 among wallets 0 to 9: options 23/24 and 3/4 onboard them, 75a then 75/75b
 fund them; without them 83d refuses exactly as 83b does. Onboard first:

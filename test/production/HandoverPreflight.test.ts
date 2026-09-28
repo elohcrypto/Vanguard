@@ -302,6 +302,23 @@ describe("Handover preflight and self-healing (plan 2E.2)", function () {
     );
   });
 
+  it("rejects an untrusted governance (pre-D21 or half-deployed)", async function () {
+    await c.complianceRules.removeTrustedContract(govAddr);
+    await rejectsBeforeAnyTx(/must addTrustedContract\(governance\) first/);
+  });
+
+  it("rejects a governance that still has a registry identity", async function () {
+    const id = await (
+      await ethers.getContractFactory("OnchainID")
+    ).deploy(govAddr);
+    await c.identityRegistry.registerIdentity(
+      govAddr,
+      await id.getAddress(),
+      840,
+    );
+    await rejectsBeforeAnyTx(/must deleteIdentity\(governance\) first/);
+  });
+
   it("rejects a registry owned by a third party", async function () {
     await c.investorTypeRegistry.transferOwnership(stranger.address);
     await c.investorTypeRegistry.connect(stranger).acceptOwnership();

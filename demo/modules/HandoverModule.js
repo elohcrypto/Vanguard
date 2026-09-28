@@ -349,9 +349,8 @@ class HandoverModule {
       `   Approval: ${Number(t.approvalPercentage) / 100}% of votes cast must be FOR`,
     );
 
-    // Report the two prerequisites SEPARATELY: after a bare deploy the
-    // eligible-voter set is usually just the governance contract itself,
-    // so "no VGT" is the wrong diagnosis — verified identities are missing.
+    // Report the two prerequisites SEPARATELY: missing verified voters and
+    // missing VGT are different fixes.
     const proposalCost = await vanguardGovernance.proposalCreationCost();
     const voteCost = await vanguardGovernance.votingCost();
     const verifiedHumans = [];

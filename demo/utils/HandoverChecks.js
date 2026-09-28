@@ -112,6 +112,18 @@ async function preflight(o) {
       );
     }
   }
+  // D21: the acceptance votes pull VGT fees into governance. A pre-D21 or
+  // half-deployed governance would revert them after step 1 already ran.
+  if (!(await o.complianceRules.isTrustedContract(govAddr))) {
+    fail(
+      `governance ${govAddr} is not a trusted contract: the ComplianceRules owner must addTrustedContract(governance) first`,
+    );
+  }
+  if (!same(await o.identityRegistry.identity(govAddr), ethers.ZeroAddress)) {
+    fail(
+      `governance ${govAddr} has a registry identity: a registry agent must deleteIdentity(governance) first; governance holds fees as a trusted contract, D21`,
+    );
+  }
   const governanceOwned = new Set();
   for (const e of planFor(o)) {
     const owner = await o[e.key].owner();

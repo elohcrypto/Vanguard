@@ -162,22 +162,24 @@ class GovernanceModule {
 
       // Set VanguardGovernance as agent for GovernanceToken
       console.log("\n📝 Step 3: Setting VanguardGovernance as agent...");
-      await govToken.addAgent(govAddr);
+      await (await govToken.addAgent(govAddr)).wait();
       console.log("   ✅ VanguardGovernance set as agent");
 
       // Set VanguardGovernance as rule administrator for ComplianceRules
       console.log(
         "\n📝 Step 4: Setting VanguardGovernance as rule administrator...",
       );
-      await complianceRules.setRuleAdministrator(govAddr, true);
+      await (await complianceRules.setRuleAdministrator(govAddr, true)).wait();
       console.log("   ✅ VanguardGovernance set as rule administrator");
 
       // Configure ComplianceRules with IdentityRegistry for VGT
       console.log("\n📝 Step 5: Configuring ComplianceRules for VGT...");
-      await complianceRules.setTokenIdentityRegistry(
-        govTokenAddr,
-        identityRegistryAddr,
-      );
+      await (
+        await complianceRules.setTokenIdentityRegistry(
+          govTokenAddr,
+          identityRegistryAddr,
+        )
+      ).wait();
       console.log("   ✅ ComplianceRules linked to IdentityRegistry for VGT");
       console.log(
         "   ✅ REAL KYC/AML enforcement enabled for governance tokens",
@@ -191,7 +193,7 @@ class GovernanceModule {
       console.log(
         "\n📝 Step 6: Trusting VanguardGovernance to hold VGT fees...",
       );
-      await complianceRules.addTrustedContract(govAddr);
+      await (await complianceRules.addTrustedContract(govAddr)).wait();
       console.log("   ✅ VanguardGovernance added as a trusted contract (D21)");
       console.log(
         "   ℹ️  It has no identity of its own: it never counts in the quorum",
@@ -1005,6 +1007,15 @@ class GovernanceModule {
    * @private
    */
   async _createTreasuryExemptionProposal(investorTypeRegistry) {
+    const vanguardGovernance = this.state.getContract("vanguardGovernance");
+    const owner = await investorTypeRegistry.owner();
+    if (owner !== (await vanguardGovernance.getAddress())) {
+      // The call would revert at execution and the proposal settle Rejected.
+      displayError(
+        `InvestorTypeRegistry is owned by ${owner}, not governance: run option 83b first, or exempt directly as the owner (option 22/51)`,
+      );
+      return;
+    }
     const bank = Array.from(
       this.state.bankingInstitutions?.values?.() ?? [],
     ).find((b) => b.type === "CENTRAL_BANK");
@@ -1025,7 +1036,6 @@ class GovernanceModule {
       "setInvestorLimitExempt",
       [wallet, exempt],
     );
-    const vanguardGovernance = this.state.getContract("vanguardGovernance");
     const receipt = await (
       await vanguardGovernance.createProposal(
         0, // ProposalType.InvestorTypeConfig
