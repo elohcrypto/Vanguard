@@ -114,6 +114,21 @@ describe("Trusted contracts must be contracts", function () {
     expect(await rules.isTrustedContract(escrow)).to.equal(false);
   });
 
+  it("the owner (governance after the handover) stays trusted", async function () {
+    await rules.addTrustedContract(escrow2);
+    await rules.addTrustedContract(escrow);
+    await rules.transferOwnership(escrow);
+    const asOwner = rules.connect(await asContract(escrow));
+    await asOwner.acceptOwnership();
+    expect(await rules.owner()).to.equal(escrow);
+    await expect(asOwner.removeTrustedContract(escrow)).to.be.revertedWith(
+      "ComplianceRules: owner stays trusted",
+    );
+    expect(await rules.isTrustedContract(escrow)).to.equal(true);
+    await asOwner.removeTrustedContract(escrow2);
+    expect(await rules.isTrustedContract(escrow2)).to.equal(false);
+  });
+
   it("moves tokens between two trusted contracts with no identity", async function () {
     await rules.addTrustedContract(escrow);
     await rules.addTrustedContract(escrow2);

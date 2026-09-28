@@ -67,6 +67,10 @@ contract ComplianceRules is IComplianceRules, IComplianceHooks, Ownable2Step, Re
      */
     function removeTrustedContract(address contractAddress) external onlyOwner {
         require(trustedContracts[contractAddress], "Not trusted");
+        // After the handover the owner is governance, which holds VGT fees as
+        // a trusted contract with no identity (D21). Untrusting it would make
+        // every later fee pull revert, so no proposal could ever undo it.
+        require(contractAddress != owner(), "ComplianceRules: owner stays trusted");
         trustedContracts[contractAddress] = false;
         emit TrustedContractRemoved(contractAddress);
     }

@@ -261,6 +261,27 @@ describe("Handover preflight and self-healing (plan 2E.2)", function () {
     expect(await check("every trusted contract has code")).to.equal(undefined);
   });
 
+  it("fails completion when governance is not trusted", async function () {
+    await c.complianceRules.removeTrustedContract(govAddr);
+    expect((await assertHandoverComplete(args)).failures).to.include(
+      "governance is a trusted contract",
+    );
+  });
+
+  it("fails completion when governance still has a registry identity", async function () {
+    const id = await (
+      await ethers.getContractFactory("OnchainID")
+    ).deploy(govAddr);
+    await c.identityRegistry.registerIdentity(
+      govAddr,
+      await id.getAddress(),
+      840,
+    );
+    expect((await assertHandoverComplete(args)).failures).to.include(
+      "governance has no registry identity",
+    );
+  });
+
   /** Preflight rejects with `msg` and the deployer sends no transaction. */
   async function rejectsBeforeAnyTx(msg: RegExp): Promise<void> {
     const nonce = await ethers.provider.getTransactionCount(deployer.address);

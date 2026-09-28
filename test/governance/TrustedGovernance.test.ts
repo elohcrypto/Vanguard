@@ -101,6 +101,27 @@ describe("Governance as a trusted contract (D21)", function () {
     expect(await vgt.balanceOf(govAddr)).to.equal(FEE * 3n);
   });
 
+  it("a de-verified voter's refund waits until re-verified", async function () {
+    const { proposer, v1, v2, v3, idReg, vgt, gov } = await fixture();
+    const id = await propose(gov, proposer);
+    for (const v of [v1, v2, v3]) await gov.connect(v).castVote(id, false, "n");
+    await ethers.provider.send("evm_increaseTime", [PAST_VOTE_AND_DELAY]);
+    await ethers.provider.send("evm_mine", []);
+    await gov.executeProposal(id);
+    const v1Id = await idReg.identity(v1.address);
+    await idReg.deleteIdentity(v1.address);
+    // Governance is trusted, so the token skips identities; ComplianceRules
+    // still checks the human counterparty.
+    await expect(gov.connect(v1).claimRefund(id)).to.be.revertedWith(
+      "Compliance check failed",
+    );
+    expect(await gov.getClaimableRefund(id, v1.address)).to.equal(FEE);
+    await idReg.registerIdentity(v1.address, v1Id, 840);
+    const b0 = await vgt.balanceOf(v1.address);
+    await gov.connect(v1).claimRefund(id);
+    expect(await vgt.balanceOf(v1.address)).to.equal(b0 + FEE);
+  });
+
   it("a passed proposal burns the locked fees", async function () {
     const { proposer, v1, v2, v3, vgt, gov } = await fixture();
     const govAddr = await gov.getAddress();
@@ -139,5 +160,9 @@ describe("Governance as a trusted contract (D21)", function () {
     await expect(
       gov.connect(outsider).castVote(pid, true, "y"),
     ).to.be.revertedWith("Must be KYC/AML verified");
+    // Token level: the trusted path still checks the human counterparty.
+    await expect(
+      vgt.connect(outsider).transfer(await gov.getAddress(), 1n),
+    ).to.be.revertedWith("Compliance check failed");
   });
 });

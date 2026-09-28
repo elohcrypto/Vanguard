@@ -87,8 +87,14 @@ contract ComplianceRegistry is ICompliance {
         return _modules[module];
     }
 
-    function isTrustedContract(address /* contractAddress */) external pure override returns (bool) {
-        // Mock implementation - no trusted contracts in this simple registry
-        return false;
+    /// @notice Test-only trust map (default false), e.g. governance holding VGT fees (D21).
+    mapping(address => bool) public trusted;
+
+    function setTrusted(address contractAddress, bool isTrusted) external {
+        trusted[contractAddress] = isTrusted;
+    }
+
+    function isTrustedContract(address contractAddress) external view override returns (bool) {
+        return trusted[contractAddress];
     }
 }

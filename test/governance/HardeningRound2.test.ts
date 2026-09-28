@@ -44,8 +44,9 @@ describe("Hardening round 2 — contract changes", () => {
       ["alice", alice.address],
       ["bob", bob.address],
       ["carol", carol.address],
-      ["gov", govAddr],
     ];
+    // D21: governance holds VGT fees as a trusted contract, never an identity.
+    await cr.setTrusted(govAddr, true);
     for (const [key, addr] of named) {
       const id = await (await OID.deploy(addr)).getAddress();
       await ir.registerIdentity(addr, id, 840);
@@ -400,7 +401,7 @@ describe("Hardening round 2 — contract changes", () => {
         .withArgs(1n, alice.address, 0n, "t");
       const [p] = await gov.getProposal(1);
       expect((p as any).snapshotId).to.equal(undefined);
-      expect(p.eligibleVotersAtCreation).to.equal(5n);
+      expect(p.eligibleVotersAtCreation).to.equal(4n); // voters only (D21)
     });
   });
 
@@ -454,17 +455,14 @@ describe("Hardening round 2 — contract changes", () => {
       expect(await gt.balanceOf(carol.address)).to.equal(
         c0 + ethers.parseEther("10"),
       );
-      // Bob cannot claim while de-verified; his deposit waits for him.
-      await expect(gov.connect(bob).claimRefund(id)).to.be.revertedWith(
-        "Recipient not verified",
-      );
+      // Bob's deposit waits for him. That a de-verified voter cannot pull it
+      // is ComplianceRules' counterparty check on the trusted path (D21),
+      // which this permissive mock does not run: TrustedGovernance.test.ts
+      // proves it on real ComplianceRules.
       expect(await gov.getClaimableRefund(id, bob.address)).to.equal(
         ethers.parseEther("10"),
       );
       expect(await gt.balanceOf(govAddr)).to.equal(ethers.parseEther("10"));
-      // Re-verified, he claims: re-register with his original (already
-      // attested) identity, not a bare EOA the registry would treat as
-      // unverifiable once claim topics are required.
       await ir.registerIdentity(bob.address, ids.bob, 840);
       await gov.connect(bob).claimRefund(id);
       expect(await gt.balanceOf(govAddr)).to.equal(0n);
@@ -500,7 +498,7 @@ describe("Hardening round 2 — contract changes", () => {
         );
       const e = await gov.proposalCount();
       await gov.connect(bob).castVote(e, true, "y");
-      // SystemParameters (governance targets itself) needs 25% quorum: 2 of 5.
+      // SystemParameters (governance targets itself) needs 25% quorum: 1 of 4.
       await gov.connect(carol).castVote(e, true, "y");
       await ir.deleteIdentity(bob.address);
       await ethers.provider.send("evm_increaseTime", [D]);
