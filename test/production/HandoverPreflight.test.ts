@@ -239,4 +239,56 @@ describe("Handover preflight and self-healing (plan 2E.2)", function () {
     );
     expect(await check("every trusted contract has code")).to.equal(undefined);
   });
+
+  /** Preflight rejects with `msg` and the deployer sends no transaction. */
+  async function rejectsBeforeAnyTx(msg: RegExp): Promise<void> {
+    const nonce = await ethers.provider.getTransactionCount(deployer.address);
+    await expect(handoverDeployerPowers(args)).to.be.rejectedWith(msg);
+    expect(await c.token.isAgent(ops.address)).to.equal(false);
+    expect(
+      await ethers.provider.getTransactionCount(deployer.address),
+    ).to.equal(nonce);
+  }
+
+  it("rejects an issuer where ops holds a non-management key", async function () {
+    const [issuer] = args.issuers;
+    const keyOf = (a: string) =>
+      ethers.keccak256(ethers.solidityPacked(["address"], [a]));
+    await issuer.addIssuerKey(keyOf(ops.address), 3, 1); // CLAIM_SIGNER_KEY
+    await rejectsBeforeAnyTx(
+      /already holds a purpose-3 key .* cannot be re-added/,
+    );
+  });
+
+  it("rejects a registry owned by a third party", async function () {
+    await c.investorTypeRegistry.transferOwnership(stranger.address);
+    await c.investorTypeRegistry.connect(stranger).acceptOwnership();
+    await rejectsBeforeAnyTx(/does not own InvestorTypeRegistry/);
+  });
+
+  it("rejects an ops-owned oracle whose listManager is the deployer", async function () {
+    const [oracle] = args.oracles;
+    await oracle.setListManager(deployer.address);
+    await oracle.transferOwnership(ops.address);
+    await rejectsBeforeAnyTx(
+      /listManager is the deployer and only ops can clear it/,
+    );
+  });
+
+  it("finds trusted residue across several log chunks", async function () {
+    const stub = await (
+      await ethers.getContractFactory("MockToken")
+    ).deploy("Stub", "STB", 0);
+    const stubAddr = await stub.getAddress();
+    await c.complianceRules.addTrustedContract(stubAddr);
+    await network.provider.send("hardhat_mine", ["0x10"]);
+    await network.provider.send("hardhat_setCode", [stubAddr, "0x"]);
+    args.logChunk = 3;
+    expect((await check(`trusted address ${stubAddr} has code`)).ok).to.equal(
+      false,
+    );
+    // A start block after the event finds nothing.
+    args.fromBlock = await ethers.provider.getBlockNumber();
+    expect((await check("every trusted contract has code")).ok).to.equal(true);
+  });
 });

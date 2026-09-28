@@ -57,6 +57,7 @@ async function addrOf(x) {
   return x.address;
 }
 const same = (a, b) => a.toLowerCase() === b.toLowerCase();
+const MANAGEMENT_KEY = 1;
 const keyOf = (a) => ethers.keccak256(ethers.solidityPacked(["address"], [a]));
 
 /** True when `wallet` holds a non-revoked key of any purpose on the issuer. */
@@ -74,10 +75,19 @@ function fail(msg) {
   throw new Error(`Handover: ${msg}`);
 }
 
-/** An oracle's list-manager writer, or null when it has none (ConsensusOracle). */
+/**
+ * An oracle's list-manager writer, or null when it has none: no listManager
+ * in its ABI, or the call reverts (ConsensusOracle behind an inline ABI).
+ * Anything else (an RPC failure) is rethrown, never read as "no role".
+ */
 async function listManagerOf(oracle) {
   if (typeof oracle.listManager !== "function") return null;
-  return oracle.listManager().catch(() => null);
+  return oracle.listManager().catch((e) => {
+    // ethers v6 on a public RPC reports CALL_EXCEPTION; a Hardhat node
+    // reports "Transaction reverted: function selector was not recognized".
+    if (e.code === "CALL_EXCEPTION" || /revert/i.test(e.message)) return null;
+    throw e;
+  });
 }
 
 /**
@@ -126,8 +136,19 @@ async function preflight(o) {
         `deployer holds a key on ${label} but is not its owner (${owner}); its owner must run this issuer's handover`,
       );
     }
-    if ((hasKey || same(owner, dAddr)) && !opsSigns) {
+    if (!hasKey && !same(owner, dAddr)) continue;
+    if (!opsSigns) {
       fail(`ops must be a signer to accept ownership of ${label}`);
+    }
+    // addIssuerKey reverts "Key already exists" for any ops key that is not
+    // a live MANAGEMENT_KEY, after step 1 has already sent transactions.
+    const k = await issuer.issuerKeys(keyOf(ops));
+    const liveManagement = Number(k.purpose) === MANAGEMENT_KEY && !k.revoked;
+    if (k.key !== ethers.ZeroHash && !liveManagement) {
+      fail(
+        `ops ${ops} already holds a ${k.revoked ? "revoked" : `purpose-${k.purpose}`} key on ${label}; ` +
+          `a revoked or other-purpose ops key cannot be re-added as MANAGEMENT_KEY, so use a different ops key or a new issuer`,
+      );
     }
   }
   for (const oracle of o.oracles || []) {
@@ -215,12 +236,17 @@ async function assertHandoverComplete(o) {
     "deployer is not a trusted contract",
     !(await rules.isTrustedContract(dAddr)),
   );
-  // Residue from runs before 2E.1, when a wallet could be trusted.
-  const added = await rules.queryFilter(
-    rules.filters.TrustedContractAdded(),
-    0,
-    "latest",
-  );
+  // Residue from runs before 2E.1, when a wallet could be trusted. Scanned
+  // in chunks: public RPCs cap the eth_getLogs block range.
+  const chunk = o.logChunk || 5000;
+  const latest = await ethers.provider.getBlockNumber();
+  const added = [];
+  for (let b = o.fromBlock || 0; b <= latest; b += chunk) {
+    const to = Math.min(b + chunk - 1, latest);
+    added.push(
+      ...(await rules.queryFilter(rules.filters.TrustedContractAdded(), b, to)),
+    );
+  }
   const trusted = [...new Set(added.map((ev) => ev.args[0]))];
   let clean = true;
   for (const a of trusted) {

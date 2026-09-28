@@ -78,14 +78,19 @@ governance), then 83d (one acceptOwnership vote per nominated contract,
 InvestorTypeRegistry included as an InvestorTypeConfig vote), then 83e
 (prints every check as pass or fail). 83b stays as the single-registry
 shortcut; if it ran first the ceremony skips the registry's nomination and
-queues its officer changes as InvestorTypeConfig proposals.
+queues its officer changes as InvestorTypeConfig proposals, which 83d votes
+through after the ownership votes (ops becomes officer, the deployer stops
+being one).
 Before its first transaction the ceremony runs a read-only preflight and
 refuses to start rather than stop halfway: governance bound to every plan
 contract; each plan contract owned by the deployer, or already by governance
 where the deployer never calls it (Token, VGT, IdentityRegistry and
 ComplianceRules must still be the deployer's); no issuer where the deployer
 holds a key but not ownership; ops a signer wherever it must accept or revoke
-on an issuer; each oracle owned by the deployer or ops.
+on an issuer, and no ops key on it that is revoked or of another purpose
+(it cannot be re-added as MANAGEMENT_KEY); each oracle owned by the
+deployer or ops, and an ops-owned oracle whose `listManager` is still the
+deployer fails, because only ops can clear it.
 Two hazards are fixed rather than only reported: step 1 clears any VGT
 guardian ("VGT guardian cleared: none may pause the vote token"; a VGT pause
 blocks every vote), and step 2 moves an oracle's `listManager` off the
@@ -111,7 +116,9 @@ Outside the demo, `HANDOVER_CONFIG=<path.json> npx hardhat run
 scripts/handover.ts --network <net>` runs the same ceremony and exits
 non-zero on any failure. The JSON holds the addresses `token`,
 `governanceToken`, `identityRegistry`, `complianceRules`, `oracleManager`, `governance`, the
-optional `investorTypeRegistry` and `dynamicListManager`, the `oracles` and `issuers` arrays, and the
+optional `investorTypeRegistry` and `dynamicListManager`, the `oracles` and `issuers` arrays, the
+optional `fromBlock` (the ComplianceRules deploy block, where the trusted-contract
+event scan starts; the scan reads logs in 5000-block chunks), and the
 wallet indices `ops`, `guardian`, `proposer` and `voters` (an array).
 
 ## Waiting instead of jumping

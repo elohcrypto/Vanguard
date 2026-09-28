@@ -13,6 +13,7 @@
  *     "dynamicListManager": "0x..",            // optional, demo option 84
  *     "oracles": ["0x..", "0x..", "0x.."],      // optional, one-step Ownable
  *     "issuers": ["0x..", "0x.."],              // optional, ClaimIssuer
+ *     "fromBlock": 1234567,                     // optional, ComplianceRules deploy block
  *     "ops": 10, "guardian": 11, "proposer": 1, "voters": [2, 3, 6]
  *   }
  *
@@ -61,6 +62,9 @@ async function main(): Promise<void> {
     if (!Number.isInteger(cfg[k]))
       throw new Error(`${path}: "${k}" must be a wallet index`);
   }
+  if (cfg.fromBlock !== undefined && !Number.isInteger(cfg.fromBlock)) {
+    throw new Error(`${path}: "fromBlock" must be a block number`);
+  }
   if (!Array.isArray(cfg.voters) || cfg.voters.length === 0) {
     throw new Error(`${path}: "voters" must list wallet indices`);
   }
@@ -74,6 +78,9 @@ async function main(): Promise<void> {
   const at = (name: string, a: string) => ethers.getContractAt(name, a);
 
   const args = {
+    // Start of the trusted-contract event scan (the check reads logs in
+    // chunks from here to the latest block).
+    fromBlock: cfg.fromBlock,
     deployer: wallet(0),
     ops: wallet(cfg.ops),
     guardian: wallet(cfg.guardian),
