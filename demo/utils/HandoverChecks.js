@@ -236,6 +236,16 @@ async function assertHandoverComplete(o) {
     "deployer is not a trusted contract",
     !(await rules.isTrustedContract(dAddr)),
   );
+  // D21: governance holds VGT fees as a trusted contract, never as an
+  // identity (a contract identity's claims lapse and ops could delete it).
+  add(
+    "governance is a trusted contract",
+    await rules.isTrustedContract(govAddr),
+  );
+  add(
+    "governance has no registry identity",
+    same(await o.identityRegistry.identity(govAddr), ethers.ZeroAddress),
+  );
   // Residue from runs before 2E.1, when a wallet could be trusted. Scanned
   // in chunks: public RPCs cap the eth_getLogs block range.
   const chunk = o.logChunk || 5000;

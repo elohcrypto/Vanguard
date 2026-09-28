@@ -125,44 +125,10 @@ describe("Governance → ComplianceRules Integration Test", function () {
       await identityRegistry.getAddress(),
     );
 
-    // Register VanguardGovernance contract as a verified identity
-    const govSalt = ethers.randomBytes(32);
-    await onchainIDFactory.deployOnchainID(
-      await vanguardGovernance.getAddress(),
-      govSalt,
-    );
-    const govIdentityAddress = await onchainIDFactory.getIdentityByOwner(
+    // D21: governance holds VGT fees as a trusted contract, not an identity.
+    await complianceRules.addTrustedContract(
       await vanguardGovernance.getAddress(),
     );
-
-    const kycData = ethers.hexlify(ethers.toUtf8Bytes("GOVERNANCE_CONTRACT"));
-    await issueSigned(
-      kycIssuer,
-      owner,
-      govIdentityAddress,
-      KYC_TOPIC,
-      kycData,
-      "",
-      0,
-    );
-    const amlData = ethers.hexlify(ethers.toUtf8Bytes("GOVERNANCE_CONTRACT"));
-    await issueSigned(
-      amlIssuer,
-      owner,
-      govIdentityAddress,
-      AML_TOPIC,
-      amlData,
-      "",
-      0,
-    );
-
-    await identityRegistry.registerIdentity(
-      await vanguardGovernance.getAddress(),
-      govIdentityAddress,
-      0,
-    );
-    await attest(kycIssuer, owner, govIdentityAddress, REGISTRY_KYC_TOPIC);
-    await attest(amlIssuer, owner, govIdentityAddress, REGISTRY_AML_TOPIC);
 
     // Setup identities for owner and voters
     await setupIdentity(owner);

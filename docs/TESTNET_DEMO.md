@@ -59,6 +59,9 @@ call `deleteIdentity` for every such identity BEFORE creating a proposal;
 deleting mid-vote does not move the bar of a proposal already open. The case
 "expired claims inflate the denominator until deleteIdentity" in
 `test/governance/QuorumIntegrity.test.ts` is the executable version of this rule.
+Governance holds VGT fees as a trusted contract (option 74 adds it while the
+deployer still owns ComplianceRules): it has no identity and never counts in
+`registeredIdentityCount`, so the electorate is the onboarded humans.
 
 ## Handover ceremony
 

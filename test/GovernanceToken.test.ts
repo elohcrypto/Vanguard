@@ -161,48 +161,10 @@ describe("Governance Token System", function () {
       await identityRegistry.getAddress(),
     );
 
-    // Register VanguardGovernance contract as a verified identity
-    // This allows it to receive/send tokens for governance purposes
-    // Create a dummy OnchainID for the governance contract
-    const govSalt = ethers.randomBytes(32);
-    await onchainIDFactory.deployOnchainID(
-      await vanguardGovernance.getAddress(),
-      govSalt,
-    );
-    const govIdentityAddress = await onchainIDFactory.getIdentityByOwner(
+    // D21: governance holds VGT fees as a trusted contract, not an identity.
+    await complianceRules.addTrustedContract(
       await vanguardGovernance.getAddress(),
     );
-
-    // Issue KYC and AML claims for governance contract
-    const kycData = ethers.hexlify(ethers.toUtf8Bytes("GOVERNANCE_CONTRACT"));
-    await issueSigned(
-      kycIssuer,
-      owner,
-      govIdentityAddress,
-      KYC_TOPIC,
-      kycData,
-      "",
-      0,
-    );
-    const amlData = ethers.hexlify(ethers.toUtf8Bytes("GOVERNANCE_CONTRACT"));
-    await issueSigned(
-      amlIssuer,
-      owner,
-      govIdentityAddress,
-      AML_TOPIC,
-      amlData,
-      "",
-      0,
-    );
-
-    // Register governance contract identity
-    await identityRegistry.registerIdentity(
-      await vanguardGovernance.getAddress(),
-      govIdentityAddress,
-      0,
-    );
-    await attest(kycIssuer, owner, govIdentityAddress, REGISTRY_KYC_TOPIC);
-    await attest(amlIssuer, owner, govIdentityAddress, REGISTRY_AML_TOPIC);
 
     // Setup identities for voters (owner already set up earlier)
     await setupIdentity(voter1);

@@ -223,11 +223,20 @@ async function main() {
     await registry.setInvestorLimitExempt(state.signers[0].address, true)
   ).wait();
 
+  // D21: option 74 must not register governance as an identity, so the
+  // quorum denominator is unchanged by deploying it.
+  const idCountBefore = await state
+    .getContract("identityRegistry")
+    .registeredIdentityCount();
+  let idCountAfterDeploy;
   const captured = [];
   const realLog = console.log;
   console.log = (...args) => captured.push(args.join(" "));
   try {
     await gov.deployGovernanceSystem();
+    idCountAfterDeploy = await state
+      .getContract("identityRegistry")
+      .registeredIdentityCount();
     await gov.showDashboard();
     // testComplianceEnforcement reports voting ELIGIBILITY. It must derive
     // that from isVerified() + the fee, never from a token balance. It is
@@ -251,6 +260,26 @@ async function main() {
   } else {
     const govAddr = await govContract.getAddress();
     const deployerAddr = state.signers[0].address;
+
+    // D21: governance holds VGT fees as a trusted contract with no identity.
+    if (idCountAfterDeploy !== idCountBefore) {
+      failures.push(
+        `registeredIdentityCount went ${idCountBefore} -> ${idCountAfterDeploy} across option 74 — governance must not be registered`,
+      );
+    }
+    const idRegForGov = state.getContract("identityRegistry");
+    if ((await idRegForGov.identity(govAddr)) !== ethers.ZeroAddress) {
+      failures.push(
+        "governance has a registry identity — it must hold fees as a trusted contract (D21)",
+      );
+    }
+    if (
+      !(await state.getContract("complianceRules").isTrustedContract(govAddr))
+    ) {
+      failures.push(
+        "governance is not a trusted contract — VGT fee pulls and refunds will revert (D21)",
+      );
+    }
 
     await registry.transferOwnership(govAddr);
     if ((await registry.owner()) !== deployerAddr) {
@@ -304,6 +333,19 @@ async function main() {
     if (finalOwner !== govAddr) {
       failures.push(
         `governance did not take ownership by vote (owner is ${finalOwner}); output: ${ownershipLog.join(" | ").slice(0, 300)}`,
+      );
+    }
+
+    // The quorum denominator counts voters only: every registration so far
+    // is a signer (governance is trusted, not registered).
+    let signerIds = 0n;
+    for (const s of state.signers) {
+      if ((await idReg.identity(s.address)) !== ethers.ZeroAddress) signerIds++;
+    }
+    const idCount = await idReg.registeredIdentityCount();
+    if (idCount !== signerIds) {
+      failures.push(
+        `registeredIdentityCount = ${idCount}, expected ${signerIds} (registered signers) — something other than a voter is registered`,
       );
     }
   }

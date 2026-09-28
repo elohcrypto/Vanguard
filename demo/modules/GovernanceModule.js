@@ -13,7 +13,6 @@ const {
   displayError,
 } = require("../utils/DisplayHelpers");
 const { advancePast } = require("../utils/ChainTime");
-const { attestAll } = require("../utils/Kyc");
 const { ethers } = require("hardhat");
 
 /**
@@ -184,55 +183,21 @@ class GovernanceModule {
         "   ✅ REAL KYC/AML enforcement enabled for governance tokens",
       );
 
-      // Register VanguardGovernance contract as a verified identity
+      // D21: governance holds VGT fees as a TRUSTED CONTRACT, not as an
+      // identity. Fee pulls (createProposal/castVote) and refunds
+      // (claimRefund) skip governance's own identity check; the human
+      // counterparty is still checked. A contract identity's claims lapse
+      // and a registry agent could delete it, halting every vote.
       console.log(
-        "\n📝 Step 6: Registering VanguardGovernance as verified identity...",
+        "\n📝 Step 6: Trusting VanguardGovernance to hold VGT fees...",
       );
-      const govSalt = ethers.randomBytes(32);
-      await this.state
-        .getContract("onchainIDFactory")
-        .deployOnchainID(govAddr, govSalt);
-      const govIdentityAddress = await this.state
-        .getContract("onchainIDFactory")
-        .getIdentityByOwner(govAddr);
+      await complianceRules.addTrustedContract(govAddr);
+      console.log("   ✅ VanguardGovernance added as a trusted contract (D21)");
       console.log(
-        `   ✅ OnchainID created for governance contract: ${govIdentityAddress}`,
+        "   ℹ️  It has no identity of its own: it never counts in the quorum",
       );
-
-      // Issue KYC and AML claims for the governance contract identity. Both
-      // must go through ClaimIssuer.issueClaim on the required topics
-      // (attestAll) — IdentityRegistry.isVerified() requires both.
-      await attestAll(this.state, govIdentityAddress, "governance");
-      console.log("   ✅ KYC and AML claims issued to governance contract");
-
-      // Get the first allowed country from the whitelist (or 0 if no whitelist)
-      const jurisdictionRule =
-        await complianceRules.getJurisdictionRule(govTokenAddr);
-      let govCountry = 0; // Default to 0 if no whitelist
-
-      if (
-        jurisdictionRule.allowedCountries &&
-        jurisdictionRule.allowedCountries.length > 0
-      ) {
-        govCountry = jurisdictionRule.allowedCountries[0];
-        console.log(
-          `   ℹ️  Using country ${govCountry} from whitelist for governance contract`,
-        );
-      } else {
-        console.log(
-          "   ℹ️  No whitelist configured, using country 0 for governance contract",
-        );
-      }
-
-      // Register governance contract identity with appropriate country
-      await identityRegistry.registerIdentity(
-        govAddr,
-        govIdentityAddress,
-        govCountry,
-      );
-      console.log("   ✅ VanguardGovernance registered as verified identity");
       console.log(
-        "   ℹ️  This allows the contract to receive/send tokens while maintaining KYC/AML compliance",
+        "      denominator, and its ability to move fees never lapses.",
       );
 
       // Nominate VanguardGovernance as owner of InvestorTypeRegistry.

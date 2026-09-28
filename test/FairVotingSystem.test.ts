@@ -209,26 +209,10 @@ describe("Fair Voting System (1 Person = 1 Vote)", function () {
     await setupIdentity(carol);
     await setupIdentity(dave);
 
-    // Register VanguardGovernance contract as verified identity (needed for transferFrom)
-    const govSalt = ethers.randomBytes(32);
-    const govAddress = await vanguardGovernance.getAddress();
-    await onchainIDFactory.deployOnchainID(govAddress, govSalt);
-    const govIdentityAddress =
-      await onchainIDFactory.getIdentityByOwner(govAddress);
-
-    const kycData = ethers.hexlify(ethers.toUtf8Bytes("KYC_APPROVED"));
-    await issueSigned(
-      claimIssuer,
-      owner,
-      govIdentityAddress,
-      1, // KYC topic
-      kycData,
-      "", // URI
-      0, // No expiration
+    // D21: governance holds VGT fees as a trusted contract, not an identity.
+    await complianceRules.addTrustedContract(
+      await vanguardGovernance.getAddress(),
     );
-
-    await identityRegistry.registerIdentity(govAddress, govIdentityAddress, 0);
-    await attest(claimIssuer, owner, govIdentityAddress);
 
     // Owner already has 1M tokens from constructor mint
     // Distribute VGT tokens to users (compliance-checked transfers)
