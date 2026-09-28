@@ -15,6 +15,7 @@ const {
 const {
   ACCEPTANCE_PLAN,
   handoverDeployerPowers,
+  proposeCall,
   proposeAcceptOwnership,
   castAcceptanceVotes,
   settleProposal,
@@ -109,8 +110,10 @@ class HandoverModule {
     try {
       const report = await handoverDeployerPowers(args);
       displaySuccess("DEPLOYER POWERS HANDED OVER; GOVERNANCE NOMINATED");
+      // Governance owns the registry (83b ran first): 83d votes these.
+      this.state.handoverRegistryProposals = report.registryProposals;
       for (const r of report.registryProposals) {
-        console.log(`   ⚠️  still needs a type-0 proposal: ${r.label}`);
+        console.log(`   ⚠️  queued for 83d (type-0 proposal): ${r.label}`);
       }
       console.log(
         "   💡 Next: 83d (governance accepts by vote), then 83e (verify)",
@@ -133,6 +136,7 @@ class HandoverModule {
     }
     const govAddr = await gov.getAddress();
     const summary = [];
+    let refused = false;
     for (const e of ACCEPTANCE_PLAN) {
       const c = this.state.getContract(STATE_KEY[e.key]);
       if (!c) {
@@ -154,10 +158,45 @@ class HandoverModule {
       summary.push(
         `   ${done ? "✅" : "❌"} ${e.label}: owner ${before} -> ${await c.owner()}`,
       );
-      if (!done) break; // the refusal applies to every remaining vote too
+      if (!done) {
+        refused = true;
+        break; // the refusal applies to every remaining vote too
+      }
     }
     console.log("\n📋 OWNERSHIP BEFORE -> AFTER:");
     summary.forEach((l) => console.log(l));
+    if (!refused) await this._settleRegistryProposals(gov);
+  }
+
+  /** Vote through the InvestorTypeRegistry calls 83c queued; clears the list. */
+  async _settleRegistryProposals(gov) {
+    const queued = this.state.handoverRegistryProposals || [];
+    if (queued.length === 0) return;
+    console.log(`\n📝 Settling ${queued.length} queued registry proposal(s)`);
+    try {
+      while (queued.length) {
+        const r = queued[0];
+        const pick = await this._pickVoters(
+          r.proposalType,
+          "InvestorTypeConfig",
+        );
+        if (!pick) return;
+        const id = await proposeCall(
+          gov,
+          pick.proposer,
+          r.proposalType,
+          r.target,
+          r.callData,
+          r.label,
+        );
+        await castAcceptanceVotes(gov, id, pick.voters);
+        await settleProposal(gov, id, r.label);
+        console.log(`   ✅ ${r.label} (proposal #${id})`);
+        queued.shift();
+      }
+    } catch (error) {
+      displayError(`Registry proposal failed: ${error.message}`);
+    }
   }
 
   /** Option 83e */
@@ -193,8 +232,6 @@ class HandoverModule {
     nominateHint = "Run option 83c to nominate it first.",
   }) {
     const vanguardGovernance = this.state.getContract("vanguardGovernance");
-    const governanceToken = this.state.getContract("governanceToken");
-    const identityRegistry = this.state.getContract("identityRegistry");
     try {
       const govAddr = await vanguardGovernance.getAddress();
       const targetAddr = await target.getAddress();
@@ -226,70 +263,9 @@ class HandoverModule {
         return false;
       }
 
-      // Quorum is a share of registered identities.
-      const eligible = await identityRegistry.registeredIdentityCount();
-      const t = await vanguardGovernance.proposalThresholds(proposalType);
-      const quorumPct = Number(t.quorumPercentage) / 100;
-      const needed = Math.ceil((Number(eligible) * quorumPct) / 100);
-      console.log(`\n🗳️  VOTE REQUIREMENTS (${typeName}):`);
-      console.log(`   Eligible voters: ${eligible}`);
-      console.log(`   Quorum:   ${quorumPct}% → at least ${needed} vote(s)`);
-      console.log(
-        `   Approval: ${Number(t.approvalPercentage) / 100}% of votes cast must be FOR`,
-      );
-
-      // Report the two prerequisites SEPARATELY: after a bare deploy the
-      // eligible-voter set is usually just the governance contract itself,
-      // so "no VGT" is the wrong diagnosis — verified identities are missing.
-      const proposalCost = await vanguardGovernance.proposalCreationCost();
-      const voteCost = await vanguardGovernance.votingCost();
-      const verifiedHumans = [];
-      const usable = [];
-      for (let i = 0; i < Math.min(10, this.state.signers.length); i++) {
-        const s = this.state.signers[i];
-        if (same(s.address, govAddr)) continue;
-        if (!(await identityRegistry.isVerified(s.address))) continue;
-        verifiedHumans.push(s);
-        const bal = await governanceToken.balanceOf(s.address);
-        if (bal >= proposalCost + voteCost) usable.push(s);
-      }
-      console.log(
-        `   Verified signers: ${verifiedHumans.length} | holding enough VGT: ${usable.length}`,
-      );
-
-      if (usable.length < 2) {
-        displayError(
-          `Need a proposer plus at least one other voter (found ${usable.length} usable).`,
-        );
-        if (verifiedHumans.length < 2) {
-          console.log(
-            `   ⚠️  Only ${verifiedHumans.length} verified signer(s). Voting requires KYC/AML identities.`,
-          );
-          console.log(
-            "   💡 Run option 23 (Investor Onboarding) or 24 (Create Normal Users) first,",
-          );
-          console.log(
-            "      then options 3 and 4 to issue KYC/AML claims to those signers.",
-          );
-        } else {
-          console.log(
-            `   ⚠️  ${verifiedHumans.length} signer(s) are verified but hold under ${ethers.formatEther(proposalCost + voteCost)} VGT.`,
-          );
-          console.log(
-            "   💡 Use option 75a to mint VGT, then 75 or 75b to distribute it to them.",
-          );
-        }
-        return false;
-      }
-
-      const proposer = usable[0];
-      const voters = usable.slice(1); // the proposer may not vote on its own proposal
-      if (voters.length < needed) {
-        displayError(
-          `Only ${voters.length} eligible voter(s) besides the proposer; quorum needs ${needed}.`,
-        );
-        return false;
-      }
+      const pick = await this._pickVoters(proposalType, typeName);
+      if (!pick) return false;
+      const { proposer, voters } = pick;
 
       console.log("\n📝 Step 1: Creating the proposal...");
       const proposalId = await proposeAcceptOwnership(
@@ -349,6 +325,83 @@ class HandoverModule {
       displayError(`Ownership handover failed: ${error.message}`);
       return false;
     }
+  }
+
+  /**
+   * Proposer plus voters for a `proposalType` vote: verified VGT-holding
+   * signers among wallets 0-9. Prints the requirements; returns null (after
+   * the refusal with its diagnosis) when there are too few.
+   */
+  async _pickVoters(proposalType, typeName) {
+    const vanguardGovernance = this.state.getContract("vanguardGovernance");
+    const governanceToken = this.state.getContract("governanceToken");
+    const identityRegistry = this.state.getContract("identityRegistry");
+    const govAddr = await vanguardGovernance.getAddress();
+    // Quorum is a share of registered identities.
+    const eligible = await identityRegistry.registeredIdentityCount();
+    const t = await vanguardGovernance.proposalThresholds(proposalType);
+    const quorumPct = Number(t.quorumPercentage) / 100;
+    const needed = Math.ceil((Number(eligible) * quorumPct) / 100);
+    console.log(`\n🗳️  VOTE REQUIREMENTS (${typeName}):`);
+    console.log(`   Eligible voters: ${eligible}`);
+    console.log(`   Quorum:   ${quorumPct}% → at least ${needed} vote(s)`);
+    console.log(
+      `   Approval: ${Number(t.approvalPercentage) / 100}% of votes cast must be FOR`,
+    );
+
+    // Report the two prerequisites SEPARATELY: after a bare deploy the
+    // eligible-voter set is usually just the governance contract itself,
+    // so "no VGT" is the wrong diagnosis — verified identities are missing.
+    const proposalCost = await vanguardGovernance.proposalCreationCost();
+    const voteCost = await vanguardGovernance.votingCost();
+    const verifiedHumans = [];
+    const usable = [];
+    for (let i = 0; i < Math.min(10, this.state.signers.length); i++) {
+      const s = this.state.signers[i];
+      if (same(s.address, govAddr)) continue;
+      if (!(await identityRegistry.isVerified(s.address))) continue;
+      verifiedHumans.push(s);
+      const bal = await governanceToken.balanceOf(s.address);
+      if (bal >= proposalCost + voteCost) usable.push(s);
+    }
+    console.log(
+      `   Verified signers: ${verifiedHumans.length} | holding enough VGT: ${usable.length}`,
+    );
+
+    if (usable.length < 2) {
+      displayError(
+        `Need a proposer plus at least one other voter (found ${usable.length} usable).`,
+      );
+      if (verifiedHumans.length < 2) {
+        console.log(
+          `   ⚠️  Only ${verifiedHumans.length} verified signer(s). Voting requires KYC/AML identities.`,
+        );
+        console.log(
+          "   💡 Run option 23 (Investor Onboarding) or 24 (Create Normal Users) first,",
+        );
+        console.log(
+          "      then options 3 and 4 to issue KYC/AML claims to those signers.",
+        );
+      } else {
+        console.log(
+          `   ⚠️  ${verifiedHumans.length} signer(s) are verified but hold under ${ethers.formatEther(proposalCost + voteCost)} VGT.`,
+        );
+        console.log(
+          "   💡 Use option 75a to mint VGT, then 75 or 75b to distribute it to them.",
+        );
+      }
+      return null;
+    }
+
+    const proposer = usable[0];
+    const voters = usable.slice(1); // the proposer may not vote on its own proposal
+    if (voters.length < needed) {
+      displayError(
+        `Only ${voters.length} eligible voter(s) besides the proposer; quorum needs ${needed}.`,
+      );
+      return null;
+    }
+    return { proposer, voters };
   }
 }
 
