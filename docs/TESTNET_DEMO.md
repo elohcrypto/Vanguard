@@ -163,6 +163,10 @@ key.
    faucet. `print-role-wallets.js --network sepolia` shows balances.
 3. `GOV_TIME_SCALE=336 npx hardhat run demo/index.js --network sepolia`.
 4. Same menu walk. Option 79 waits about 40 minutes of real time.
+5. The rehearsal includes one real EIP-7702 (type-4) delegation: delegate a
+   role wallet, call `addTrustedContract` on it and expect the revert
+   "ComplianceRules: delegated wallet". Sending a type-4 transaction needs an
+   ethers version with authorization-list support.
 
 ## Transfer gas by required claim topics
 

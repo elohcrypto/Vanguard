@@ -495,7 +495,7 @@ A conditional VSC payment between a **payer** and a **payee**, mediated by a reg
 
 The escrow holds **amount + 3% investor fee + 2% owner fee**, all fixed at creation. A 1000 VSC payment is funded with 1050 VSC. On release the payee gets 1000, the investor fee wallet 30, the platform fee wallet 20. On refund the payer gets the full 1050 back.
 
-The escrow wallet is added to ComplianceRules as a trusted contract when it is created (the demo does this; on your own deployment the ComplianceRules owner must). That is what lets VSC move in and out of a contract that has no identity of its own. Only addresses with code can be trusted; the payer and payee are verified investors, and the other party to every transfer is still checked.
+The escrow wallet is added to ComplianceRules as a trusted contract when it is created (the demo does this; on your own deployment the ComplianceRules owner must). That is what lets VSC move in and out of a contract that has no identity of its own. Only addresses with code can be trusted: never a wallet, and never a wallet carrying an EIP-7702 delegation (the setter rejects the `0xef0100` indicator). The payer and payee are verified investors, and the other party to every transfer is still checked.
 
 ### Lifecycle
 

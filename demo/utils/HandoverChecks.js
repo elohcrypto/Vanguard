@@ -261,9 +261,13 @@ async function assertHandoverComplete(o) {
   let clean = true;
   for (const a of trusted) {
     if (!(await rules.isTrustedContract(a))) continue;
-    if ((await ethers.provider.getCode(a)) !== "0x") continue;
+    const code = await ethers.provider.getCode(a);
+    // An EIP-7702 delegation indicator (0xef0100 || address, 23 bytes) is a
+    // wallet, not a contract: treat it the same as no code.
+    const delegated = code.length === 48 && /^0xef0100/i.test(code);
+    if (code !== "0x" && !delegated) continue;
     clean = false;
-    add(`trusted address ${a} has code`, false);
+    add(`trusted address ${a} is a wallet or delegated wallet`, false);
   }
   if (clean) add("every trusted contract has code", true);
   for (const issuer of o.issuers || []) {

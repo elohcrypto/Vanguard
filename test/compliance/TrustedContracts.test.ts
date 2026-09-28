@@ -84,6 +84,21 @@ describe("Trusted contracts must be contracts", function () {
     expect(await rules.isTrustedContract(wallet.address)).to.equal(false);
   });
 
+  it("refuses a wallet carrying an EIP-7702 delegation", async function () {
+    // Delegation indicator: 0xef0100 || 20-byte delegate address (23 bytes).
+    const indicator = "0xef0100" + escrow.slice(2).toLowerCase();
+    await network.provider.send("hardhat_setCode", [wallet.address, indicator]);
+    expect(await ethers.provider.getCode(wallet.address)).to.equal(indicator);
+    await expect(rules.addTrustedContract(wallet.address)).to.be.revertedWith(
+      "ComplianceRules: delegated wallet",
+    );
+    expect(await rules.isTrustedContract(wallet.address)).to.equal(false);
+    // A real contract still passes.
+    await rules.addTrustedContract(escrow);
+    expect(await rules.isTrustedContract(escrow)).to.equal(true);
+    await network.provider.send("hardhat_setCode", [wallet.address, "0x"]);
+  });
+
   it("accepts a deployed contract", async function () {
     await expect(rules.addTrustedContract(escrow))
       .to.emit(rules, "TrustedContractAdded")

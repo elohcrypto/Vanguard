@@ -234,9 +234,30 @@ describe("Handover preflight and self-healing (plan 2E.2)", function () {
     );
     // Residue from a pre-2E.1 chain: a trusted address that has no code.
     await network.provider.send("hardhat_setCode", [stubAddr, "0x"]);
-    expect((await check(`trusted address ${stubAddr} has code`)).ok).to.equal(
-      false,
-    );
+    expect(
+      (
+        await check(
+          `trusted address ${stubAddr} is a wallet or delegated wallet`,
+        )
+      ).ok,
+    ).to.equal(false);
+    expect(await check("every trusted contract has code")).to.equal(undefined);
+  });
+
+  it("flags a trusted address that now carries an EIP-7702 delegation", async function () {
+    const stub = await (
+      await ethers.getContractFactory("MockToken")
+    ).deploy("Stub", "STB", 0);
+    const stubAddr = await stub.getAddress();
+    await c.complianceRules.addTrustedContract(stubAddr);
+    // Code is the 23-byte delegation indicator, not a contract.
+    await network.provider.send("hardhat_setCode", [
+      stubAddr,
+      "0xef0100" + govAddr.slice(2),
+    ]);
+    const label = `trusted address ${stubAddr} is a wallet or delegated wallet`;
+    const result = await assertHandoverComplete(args);
+    expect(result.failures).to.include(label);
     expect(await check("every trusted contract has code")).to.equal(undefined);
   });
 
@@ -284,9 +305,13 @@ describe("Handover preflight and self-healing (plan 2E.2)", function () {
     await network.provider.send("hardhat_mine", ["0x10"]);
     await network.provider.send("hardhat_setCode", [stubAddr, "0x"]);
     args.logChunk = 3;
-    expect((await check(`trusted address ${stubAddr} has code`)).ok).to.equal(
-      false,
-    );
+    expect(
+      (
+        await check(
+          `trusted address ${stubAddr} is a wallet or delegated wallet`,
+        )
+      ).ok,
+    ).to.equal(false);
     // A start block after the event finds nothing.
     args.fromBlock = await ethers.provider.getBlockNumber();
     expect((await check("every trusted contract has code")).ok).to.equal(true);

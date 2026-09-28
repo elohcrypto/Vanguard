@@ -47,6 +47,15 @@ contract ComplianceRules is IComplianceRules, IComplianceHooks, Ownable2Step, Re
     function addTrustedContract(address contractAddress) external onlyOwner {
         require(contractAddress != address(0), "Invalid address");
         require(contractAddress.code.length > 0, "ComplianceRules: not a contract");
+        // EIP-7702 delegation indicator (0xef0100 || address, 23 bytes): a
+        // delegated EOA is still a wallet, so it must never be trusted.
+        if (contractAddress.code.length == 23) {
+            bytes memory code = contractAddress.code;
+            require(
+                !(code[0] == 0xef && code[1] == 0x01 && code[2] == 0x00),
+                "ComplianceRules: delegated wallet"
+            );
+        }
         require(!trustedContracts[contractAddress], "Already trusted");
         trustedContracts[contractAddress] = true;
         emit TrustedContractAdded(contractAddress);
