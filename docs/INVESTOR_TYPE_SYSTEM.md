@@ -22,6 +22,8 @@ The Investor Type System is a comprehensive framework that implements differenti
 | **Accredited** | 50,000 VSC | 500,000 VSC | Tier 3+ | 30 minutes | >10,000 VSC | Enhanced logging, Enhanced privacy |
 | **Institutional** | 500,000 VSC | 5,000,000 VSC | Tier 4+ | 15 minutes | >100,000 VSC | Enhanced logging, Premium privacy |
 
+An address with no assigned type is Normal. `Token.mint` enforces the recipient's holding cap through the same check as `canTransfer(address(0), to, amount)` and reverts with `Holding limit exceeded` (or `Identity not verified` / `Compliance check failed`). A treasury is not an investor: a compliance officer marks it with `setInvestorLimitExempt(account, true)`, which emits `InvestorLimitExemptionUpdated` and makes `canHoldAmount` and `canTransferAmount` return true for that address (decision D22 (a)). The demo marks the central bank exempt; no cap is raised to fit a fixture.
+
 ## Smart Contracts
 
 ### InvestorTypeRegistry.sol

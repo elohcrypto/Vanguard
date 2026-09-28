@@ -240,6 +240,7 @@ class TokenModule {
       };
 
       this.state.bankingInstitutions.set(centralBank.address, centralBank);
+      await this._ensureTreasuryExempt(centralBank);
 
       // Store identity
       this.state.identities.set(identityAddress, {
@@ -2220,11 +2221,51 @@ class TokenModule {
   }
 
   /**
+   * Pre-check a mint with the token's own predicate (2E.3: mint and
+   * canTransfer(0, to, amount) share one path). Returns null when the mint
+   * would succeed, else a reason built from the investor-type registry.
+   * @private
+   */
+  async _mintRefusal(digitalToken, to, amountWei) {
+    if (await digitalToken.canTransfer(ethers.ZeroAddress, to, amountWei))
+      return null;
+    const registry = this.state.getContract("investorTypeRegistry");
+    if (!registry) return "token refuses the mint (identity or compliance)";
+    const type = await registry.getInvestorType(to);
+    const cap = (await registry.getInvestorTypeConfig(type)).maxHoldingAmount;
+    const balance = await digitalToken.balanceOf(to);
+    const names = ["Normal", "Retail", "Accredited", "Institutional"];
+    return (
+      `holding cap: type ${names[Number(type)] ?? type}, ` +
+      `cap ${ethers.formatEther(cap)} VSC, balance ${ethers.formatEther(balance)} VSC, ` +
+      `mint ${ethers.formatEther(amountWei)} VSC (or identity/compliance)`
+    );
+  }
+
+  /**
+   * D22 (a): the central bank is a treasury, not an investor. Mint enforces
+   * investor-type holding caps (2E.3), so mark it exempt on the registry
+   * (logged on-chain). No-op without a registry or when already exempt;
+   * the deployer is a compliance officer until the handover.
+   * @private
+   */
+  async _ensureTreasuryExempt(centralBank) {
+    const registry = this.state.getContract("investorTypeRegistry");
+    if (!registry || (await registry.investorLimitExempt(centralBank.address)))
+      return;
+    await (
+      await registry.setInvestorLimitExempt(centralBank.address, true)
+    ).wait();
+    console.log("   central bank exempt from investor limits (treasury, D22)");
+  }
+
+  /**
    * Complete minting to Central Bank (part 2)
    * @private
    */
   async completeMintToCentralBank(centralBank, digitalToken, mintAmount) {
     try {
+      await this._ensureTreasuryExempt(centralBank);
       console.log(
         `\n🪙 Minting ${Number(mintAmount).toLocaleString()} VSC to Central Bank...`,
       );
@@ -2416,6 +2457,16 @@ class TokenModule {
           continue;
         }
 
+        const refusal = await this._mintRefusal(
+          digitalToken,
+          investor.address,
+          amountWei,
+        );
+        if (refusal) {
+          console.log(`   ⚠️  Skipping ${investor.name} - ${refusal}`);
+          continue;
+        }
+
         // Mint tokens on-chain
         const tx = await digitalToken
           .connect(centralBank.signer)
@@ -2512,6 +2563,16 @@ class TokenModule {
       console.log(
         `   💰 Current Balance: ${ethers.formatEther(balanceBefore)} VSC`,
       );
+
+      const refusal = await this._mintRefusal(
+        digitalToken,
+        selectedInvestor.address,
+        amountWei,
+      );
+      if (refusal) {
+        console.log(`❌ Mint refused: ${refusal}`);
+        return;
+      }
 
       // Step 3: Mint tokens on-chain
       console.log("\n📝 Step 3: Minting tokens on blockchain...");

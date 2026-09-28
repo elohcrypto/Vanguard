@@ -31,6 +31,8 @@ contract InvestorTypeRegistry is IInvestorTypeRegistry, Ownable2Step {
     mapping(InvestorType => InvestorTypeConfig) private _typeConfigs;
     mapping(address => bool) private _complianceOfficers;
     mapping(address => bool) private _authorizedTokens;
+    // D22 (a): a treasury is not an investor; exempt accounts skip type caps.
+    mapping(address => bool) public investorLimitExempt;
 
     // Proposal status enumeration
     enum ProposalStatus {
@@ -139,6 +141,7 @@ contract InvestorTypeRegistry is IInvestorTypeRegistry, Ownable2Step {
      * @dev Check if investor can transfer specified amount
      */
     function canTransferAmount(address investor, uint256 amount) external view returns (bool) {
+        if (investorLimitExempt[investor]) return true;
         InvestorType investorType = _investorTypes[investor]; // Defaults to Normal (0) if not set
         InvestorTypeConfig memory config = _typeConfigs[investorType];
         return amount <= config.maxTransferAmount;
@@ -148,6 +151,7 @@ contract InvestorTypeRegistry is IInvestorTypeRegistry, Ownable2Step {
      * @dev Check if investor can hold specified amount
      */
     function canHoldAmount(address investor, uint256 amount) external view returns (bool) {
+        if (investorLimitExempt[investor]) return true;
         InvestorType investorType = _investorTypes[investor];
         InvestorTypeConfig memory config = _typeConfigs[investorType];
         return amount <= config.maxHoldingAmount;
@@ -210,9 +214,14 @@ contract InvestorTypeRegistry is IInvestorTypeRegistry, Ownable2Step {
         emit InvestorTypeConfigUpdated(investorType, config);
     }
 
-    /**
-     * @dev Set compliance officer authorization
-     */
+    /// @dev Exempt a treasury from investor-type caps (logged; D22 (a))
+    function setInvestorLimitExempt(address account, bool exempt) external onlyComplianceOfficer {
+        require(account != address(0), "Invalid account address");
+        investorLimitExempt[account] = exempt;
+        emit InvestorLimitExemptionUpdated(account, exempt);
+    }
+
+    /// @dev Set compliance officer authorization
     function setComplianceOfficer(address officer, bool authorized) external onlyOwner {
         require(officer != address(0), "Invalid officer address");
         _complianceOfficers[officer] = authorized;
@@ -314,9 +323,7 @@ contract InvestorTypeRegistry is IInvestorTypeRegistry, Ownable2Step {
 
     // ===== GOVERNANCE FUNCTIONS =====
 
-    /**
-     * @dev Create a proposal to update investor type configuration
-     */
+    /// @dev Create a proposal to update investor type configuration
     function createProposal(
         InvestorType investorType,
         InvestorTypeConfig calldata config,
@@ -343,9 +350,7 @@ contract InvestorTypeRegistry is IInvestorTypeRegistry, Ownable2Step {
         return proposalId;
     }
 
-    /**
-     * @dev Approve a proposal (governors only)
-     */
+    /// @dev Approve a proposal (governors only)
     function approveProposal(uint256 proposalId) external onlyGovernor {
         Proposal storage proposal = _proposals[proposalId];
         require(proposal.id != 0, "Proposal does not exist");
@@ -363,9 +368,7 @@ contract InvestorTypeRegistry is IInvestorTypeRegistry, Ownable2Step {
         emit ProposalApproved(proposalId, msg.sender);
     }
 
-    /**
-     * @dev Execute a proposal after approval and delay
-     */
+    /// @dev Execute a proposal after approval and delay
     function executeProposal(uint256 proposalId) external {
         Proposal storage proposal = _proposals[proposalId];
         require(proposal.id != 0, "Proposal does not exist");
@@ -385,9 +388,7 @@ contract InvestorTypeRegistry is IInvestorTypeRegistry, Ownable2Step {
         emit InvestorTypeConfigUpdated(proposal.investorType, proposal.proposedConfig);
     }
 
-    /**
-     * @dev Cancel a proposal (owner only)
-     */
+    /// @dev Cancel a proposal (owner only)
     function cancelProposal(uint256 proposalId) external onlyOwner {
         Proposal storage proposal = _proposals[proposalId];
         require(proposal.id != 0, "Proposal does not exist");
@@ -400,9 +401,7 @@ contract InvestorTypeRegistry is IInvestorTypeRegistry, Ownable2Step {
         emit ProposalCancelled(proposalId);
     }
 
-    /**
-     * @dev Set governor authorization and voting weight
-     */
+    /// @dev Set governor authorization and voting weight
     function setGovernor(address governor, bool authorized, uint256 weight) external onlyOwner {
         require(governor != address(0), "Invalid governor address");
 
@@ -423,9 +422,7 @@ contract InvestorTypeRegistry is IInvestorTypeRegistry, Ownable2Step {
         emit GovernorUpdated(governor, authorized, weight);
     }
 
-    /**
-     * @dev Update governance parameters
-     */
+    /// @dev Update governance parameters
     function updateGovernanceParameters(uint256 delay, uint256 requiredApprovals_) external onlyOwner {
         require(delay >= 1 hours, "Delay too short");
         require(delay <= 30 days, "Delay too long");
@@ -437,9 +434,7 @@ contract InvestorTypeRegistry is IInvestorTypeRegistry, Ownable2Step {
         emit GovernanceParametersUpdated(delay, requiredApprovals_);
     }
 
-    /**
-     * @dev Get proposal details
-     */
+    /// @dev Get proposal details
     function getProposal(
         uint256 proposalId
     )
@@ -471,23 +466,17 @@ contract InvestorTypeRegistry is IInvestorTypeRegistry, Ownable2Step {
         );
     }
 
-    /**
-     * @dev Check if address is governor
-     */
+    /// @dev Check if address is governor
     function isGovernor(address account) external view returns (bool) {
         return _governors[account];
     }
 
-    /**
-     * @dev Get governor voting weight
-     */
+    /// @dev Get governor voting weight
     function getGovernorWeight(address governor) external view returns (uint256) {
         return _governorWeights[governor];
     }
 
-    /**
-     * @dev Check if governor has approved proposal
-     */
+    /// @dev Check if governor has approved proposal
     function hasApproved(uint256 proposalId, address governor) external view returns (bool) {
         return _proposals[proposalId].approvals[governor];
     }

@@ -17,7 +17,6 @@
 
 const { ethers } = require("hardhat");
 const DemoState = require("../demo/core/DemoState");
-const { signShipmentProof } = require("../demo/utils/ShipmentProof");
 const { attestAll } = require("../demo/utils/Kyc");
 const ContractDeployer = require("../demo/core/ContractDeployer");
 const { EnhancedLogger } = require("../demo/logging");
@@ -431,90 +430,8 @@ async function main() {
         );
     }
 
-    // Escrow: mirror test/EnhancedEscrow.test.js setup, then drive 73b.
-    const EscrowModule = require("../demo/modules/EscrowModule");
-    const [, investor, payer, payee, investorWallet, ownerWallet] = signers;
-    const vsc = await (
-      await ethers.getContractFactory("MockToken")
-    ).deploy("VSC", "VSC", ethers.parseEther("1000000"));
-    const rules = state.getContract("complianceRules");
-    for (const sgn of [payer, payee]) {
-      if (!(await idReg.isVerified(sgn.address))) {
-        const id = await OID.deploy(sgn.address);
-        await idReg.registerIdentity(sgn.address, await id.getAddress(), 840);
-        await attestAll(state, await id.getAddress(), `escrow:${sgn.address}`);
-      }
-    }
-    const factory = await (
-      await ethers.getContractFactory("EscrowWalletFactory")
-    ).deploy(
-      await vsc.getAddress(),
-      ownerWallet.address,
-      await idReg.getAddress(),
-      await rules.getAddress(),
-    );
-    await factory.registerInvestor(investor.address, investorWallet.address);
-    const total = ethers.parseEther("1050");
-    await vsc.transfer(payer.address, ethers.parseEther("10000"));
-    await factory
-      .connect(investor)
-      .createEscrowWallet(
-        payer.address,
-        payee.address,
-        ethers.parseEther("1000"),
-      );
-    const wAddr = await factory.getWalletAddress(1);
-    await vsc.connect(payer).approve(await factory.getAddress(), total);
-    await factory.connect(payer).fundEscrowWallet(1);
-    const wallet = await ethers.getContractAt("MultiSigEscrowWallet", wAddr);
-    const proofData = JSON.stringify({
-      trackingNumber: "SMOKE-1",
-      carrier: "UPS",
-    });
-    const dataHash = ethers.keccak256(ethers.toUtf8Bytes(proofData));
-    await wallet
-      .connect(payee)
-      .submitShipmentProof(
-        proofData,
-        dataHash,
-        await signShipmentProof(payee, wAddr, dataHash),
-      );
-    state.setContract("escrowFactory", factory);
-    state.enhancedEscrowWallets.set("1", {
-      paymentId: "1",
-      walletAddress: wAddr,
-      payer: payer.address,
-      payee: payee.address,
-      investor: investor.address,
-      amount: "1000",
-      createdAt: new Date().toISOString(),
-      state: "ProofSubmitted",
-    });
-    const esc = new EscrowModule(state, new EnhancedLogger(), async () => "y");
-    const l73 = [];
-    const rl73 = console.log;
-    console.log = (...a) => l73.push(a.join(" "));
-    try {
-      await esc.timeTravel14Days();
-    } finally {
-      console.log = rl73;
-    }
-    const proof = await wallet.shipmentProof();
-    const win = await wallet.DISPUTE_WINDOW();
-    const ts2 = (await ethers.provider.getBlock("latest")).timestamp;
-    if (!(ts2 > Number(proof.submittedAt + win))) {
-      failures.push(
-        `option 73b did not advance past the dispute window; output: ${l73.join(" | ").slice(0, 300)}`,
-      );
-    } else {
-      try {
-        await wallet.connect(payee).signAsPayee();
-      } catch (e) {
-        failures.push(
-          `after option 73b, payee release reverted: ${e.message.slice(0, 120)}`,
-        );
-      }
-    }
+    // Escrow (73b) and mint limits (2E.3) on the real VSC: demo-smoke-escrow.js.
+    await require("./demo-smoke-escrow").runEscrowSmoke(state, failures);
   }
 
   // 7. Plan 2C.1: the handover ceremony, last because it strips the deployer.

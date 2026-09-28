@@ -89,8 +89,9 @@ contract Token is IERC3643, ERC20, Ownable2Step, Pausable {
     }
 
     function mint(address _to, uint256 _amount) external override onlyAgent whenNotPaused {
-        require(_identityRegistry.isVerified(_to), "Identity not verified");
-        require(_compliance.canTransfer(address(0), _to, _amount), "Compliance check failed");
+        // One path with canTransfer(0, to, amount): identity, compliance, holding cap.
+        (bool ok, string memory reason) = _checkTransfer(address(0), _to, _amount);
+        require(ok, reason);
 
         _mint(_to, _amount);
         _compliance.created(_to, _amount);
@@ -136,18 +137,14 @@ contract Token is IERC3643, ERC20, Ownable2Step, Pausable {
         uint256 _amount
     ) internal view returns (bool ok, string memory reason) {
         if (_from == address(0)) {
-            // Minting case - check holding limits for recipient
-            bool identityValid = _identityRegistry.isVerified(_to);
-            bool complianceValid = _compliance.canTransfer(_from, _to, _amount);
-            bool holdingLimitValid = true;
-
-            if (address(_investorTypeRegistry) != address(0)) {
-                uint256 mintBalance = balanceOf(_to) + _amount;
-                holdingLimitValid = _investorTypeRegistry.canHoldAmount(_to, mintBalance);
-            }
-
-            if (identityValid && complianceValid && holdingLimitValid) return (true, "");
-            return (false, "Transfer not allowed");
+            // Minting case: identity, compliance, then recipient holding cap
+            if (!_identityRegistry.isVerified(_to)) return (false, "Identity not verified");
+            if (!_compliance.canTransfer(_from, _to, _amount)) return (false, "Compliance check failed");
+            if (
+                address(_investorTypeRegistry) != address(0) &&
+                !_investorTypeRegistry.canHoldAmount(_to, balanceOf(_to) + _amount)
+            ) return (false, "Holding limit exceeded");
+            return (true, "");
         }
 
         if (_to == address(0)) {

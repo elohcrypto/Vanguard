@@ -102,7 +102,8 @@ describe("Transfer Limits Verification - 8,000 Yuan Max", function () {
     // Note: ComplianceRegistry doesn't need bindToken
 
     // Mint tokens for testing
-    await token.mint(bank.address, ethers.parseEther("100000")); // Bank has 100,000 tokens
+    // Within the Normal 50,000 holding cap: mint enforces it (2E.3)
+    await token.mint(bank.address, ethers.parseEther("50000"));
     await token.mint(investor1.address, ethers.parseEther("50000")); // Investor1 has 50,000 tokens
   });
 

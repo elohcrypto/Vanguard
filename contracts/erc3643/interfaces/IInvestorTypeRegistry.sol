@@ -42,6 +42,7 @@ interface IInvestorTypeRegistry {
     event InvestorTypeConfigUpdated(InvestorType investorType, InvestorTypeConfig config);
     event ComplianceOfficerUpdated(address indexed officer, bool authorized);
     event TokenAuthorized(address indexed token, bool authorized);
+    event InvestorLimitExemptionUpdated(address indexed account, bool exempt);
 
     // Governance events
     event ProposalCreated(
@@ -90,6 +91,10 @@ interface IInvestorTypeRegistry {
      * @dev Check if investor can hold specified amount
      */
     function canHoldAmount(address investor, uint256 amount) external view returns (bool);
+
+    function investorLimitExempt(address account) external view returns (bool);
+
+    function setInvestorLimitExempt(address account, bool exempt) external;
 
     /**
      * @dev Get required whitelist tier for investor

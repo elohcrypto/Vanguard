@@ -15,7 +15,7 @@ modifiers are what enforce the separation.
 
 | Index | Role | Signs |
 |---|---|---|
-| 0 | Platform owner, deployer | deploys, agent grants, governance ownership (until the handover ceremony) |
+| 0 | Platform owner, deployer, central bank | deploys, agent grants, treasury mints (investor-limit exempt, D22), governance ownership (until the handover ceremony) |
 | 1 | Fee wallet, compliance officer | investor-type assignments |
 | 2 | KYC issuer | KYC claims, identity registration |
 | 3 | AML issuer | AML claims |

@@ -120,6 +120,19 @@ class InvestorTypeModule {
           await tx.wait();
           const wired = await token.investorTypeRegistry();
           console.log(`   ✅ Token.investorTypeRegistry(): ${wired}`);
+          // D22 (a): mint now enforces holding caps; a treasury is exempt.
+          for (const bank of this.state.bankingInstitutions?.values() || []) {
+            if (bank.type !== "CENTRAL_BANK") continue;
+            await (
+              await investorTypeRegistry.setInvestorLimitExempt(
+                bank.address,
+                true,
+              )
+            ).wait();
+            console.log(
+              "   ✅ central bank exempt from investor limits (treasury, D22)",
+            );
+          }
           if (wired.toLowerCase() !== registryAddress.toLowerCase()) {
             console.log(
               `   ⚠️  Readback (${wired}) does not match deployed registry (${registryAddress})`,
