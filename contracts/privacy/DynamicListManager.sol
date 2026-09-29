@@ -8,6 +8,12 @@ interface IWhitelistOracleWriter {
     function addToWhitelist(address subject, uint8 tier, uint256 duration, string calldata reason) external;
     function removeFromWhitelist(address subject, string calldata reason) external;
     function isWhitelisted(address subject) external view returns (bool);
+    /// @dev Public getter of WhitelistOracle.whitelistEntries (the array
+    ///      member attestingOracles is omitted by Solidity).
+    function whitelistEntries(address subject)
+        external
+        view
+        returns (bool isWhitelisted, uint256 timestamp, uint256 expiryTime, uint8 tier, string memory reason);
 }
 
 /// @dev The BlacklistOracle surface the manager writes and reads. `severity` is
@@ -16,6 +22,19 @@ interface IBlacklistOracleWriter {
     function addToBlacklist(address subject, uint8 severity, uint256 duration, string calldata reason) external;
     function removeFromBlacklist(address subject, string calldata reason) external;
     function isBlacklisted(address subject) external view returns (bool);
+    /// @dev Public getter of BlacklistOracle.blacklistEntries (the array
+    ///      member attestingOracles is omitted; emergencyListing follows it).
+    function blacklistEntries(address subject)
+        external
+        view
+        returns (
+            bool isBlacklisted,
+            uint256 timestamp,
+            uint256 expiryTime,
+            uint8 severity,
+            string memory reason,
+            bool emergencyListing
+        );
 }
 
 /**
@@ -248,16 +267,17 @@ contract DynamicListManager is Ownable2Step {
         _requireOracles();
         // A lapsed entry is no longer listed by the oracle but still marks the
         // identity BLACKLISTED here (isProofValid false): accept it and clear
-        // the status (and the oracle's stale flag, if one is stored).
+        // the status. The oracle is written whenever it still STORES a flag
+        // (live or lapsed): a stale stored flag gates the consensus add paths.
         bool listed = blacklistOracle.isBlacklisted(user);
+        (bool stored, , , , , ) = blacklistOracle.blacklistEntries(user);
         require(listed || identityStatus[identity] == UserStatus.BLACKLISTED, "User not blacklisted");
 
         UserStatus newStatus = whitelistOracle.isWhitelisted(user) ? UserStatus.WHITELISTED : UserStatus.NONE;
         _setStatus(user, identity, UserStatus.BLACKLISTED, newStatus, reason);
-        if (listed) blacklistOracle.removeFromBlacklist(user, reason);
-        // A lapsed entry keeps its stored flag in the oracle; clear it too.
-        // The oracle reverts only when no flag is stored, which is fine here.
-        else try blacklistOracle.removeFromBlacklist(user, reason) {} catch {}
+        // No try/catch: a lost writer role or out-of-gas must revert, not
+        // leave the manager cleared and the oracle flag stored.
+        if (listed || stored) blacklistOracle.removeFromBlacklist(user, reason);
     }
 
     /**
@@ -276,15 +296,13 @@ contract DynamicListManager is Ownable2Step {
         // Same shape as removeFromBlacklist: a lapsed entry still marks the
         // identity WHITELISTED here (isProofValid true) and must be clearable.
         bool listed = whitelistOracle.isWhitelisted(user);
+        (bool stored, , , , ) = whitelistOracle.whitelistEntries(user);
         require(listed || identityStatus[identity] == UserStatus.WHITELISTED, "User not whitelisted");
 
         UserStatus oldStatus = getUserStatus(user);
         UserStatus newStatus = oldStatus == UserStatus.BLACKLISTED ? UserStatus.BLACKLISTED : UserStatus.NONE;
         _setStatus(user, identity, oldStatus, newStatus, reason);
-        if (listed) whitelistOracle.removeFromWhitelist(user, reason);
-        // A lapsed entry keeps its stored flag in the oracle; clear it too.
-        // The oracle reverts only when no flag is stored, which is fine here.
-        else try whitelistOracle.removeFromWhitelist(user, reason) {} catch {}
+        if (listed || stored) whitelistOracle.removeFromWhitelist(user, reason);
     }
 
     /// @dev Identity status, history and event for one change.

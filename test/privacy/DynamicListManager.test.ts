@@ -452,6 +452,42 @@ describe("DynamicListManager writes the oracles", function () {
       ).to.be.revertedWith("User not blacklisted");
     });
 
+    it("a lapsed entry with the writer role cleared: removal reverts, nothing changes", async function () {
+      const { dlm, user, other, wl, bl } = await wired();
+      await dlm.addToBlacklist(user.address, 5, HIGH, HOUR, "b");
+      await dlm.addToWhitelist(other.address, 6, 1, HOUR, "w");
+      await advance(HOUR + 1);
+      await bl.setListManager(ethers.ZeroAddress);
+      await wl.setListManager(ethers.ZeroAddress);
+      await expect(
+        dlm.removeFromBlacklist(user.address, 5, "lapsed"),
+      ).to.be.revertedWith("BlacklistOracle: Only owner or list manager");
+      await expect(
+        dlm.removeFromWhitelist(other.address, 6, "lapsed"),
+      ).to.be.revertedWith("WhitelistOracle: Only owner or list manager");
+      expect(await dlm.getIdentityStatus(5)).to.equal(BLACKLISTED);
+      expect(await dlm.getIdentityStatus(6)).to.equal(WHITELISTED);
+      expect((await bl.blacklistEntries(user.address)).isBlacklisted).to.equal(
+        true,
+      );
+    });
+
+    it("a status with no stored oracle flag is cleared without calling the oracle", async function () {
+      const { dlm, user, bl } = await wired();
+      await dlm.addToBlacklist(user.address, 5, HIGH, NO_EXPIRY, "b");
+      // The oracle owner removes the entry directly: no flag stored, the
+      // manager's identity status is still BLACKLISTED.
+      await bl.removeFromBlacklist(user.address, "direct");
+      expect(await dlm.getIdentityStatus(5)).to.equal(BLACKLISTED);
+      // Without the writer role any oracle call would revert.
+      await bl.setListManager(ethers.ZeroAddress);
+      await expect(dlm.removeFromBlacklist(user.address, 5, "sync"))
+        .to.emit(dlm, "UserStatusChanged")
+        .withArgs(user.address, 5, BLACKLISTED, NONE, "sync")
+        .and.not.to.emit(bl, "BlacklistUpdated");
+      expect(await dlm.getIdentityStatus(5)).to.equal(NONE);
+    });
+
     it("a lapsed whitelist entry can be removed and clears the identity", async function () {
       const { dlm, user, wl } = await wired();
       await dlm.addToWhitelist(user.address, 6, 1, HOUR, "w");
