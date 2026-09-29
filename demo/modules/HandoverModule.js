@@ -76,6 +76,8 @@ class HandoverModule {
     const pick = (keys) =>
       keys.map((k) => s.getContract(k)).filter((c) => Boolean(c));
     return {
+      // Trusted-contract scan from the ComplianceRules deploy block, not 0.
+      fromBlock: s.complianceRulesDeployBlock,
       deployer: s.signers[0],
       ops,
       guardian,

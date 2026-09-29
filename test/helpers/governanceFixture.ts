@@ -1,0 +1,109 @@
+import { ethers } from "hardhat";
+import { SignerWithAddress } from "@nomicfoundation/hardhat-ethers/signers";
+import { attest, configureKyc, deployIdentity } from "./kyc";
+
+/**
+ * A full governance system as the handover ceremony finds it: the deployer
+ * owns and administers everything, governance is bound to every contract
+ * (InvestorTypeRegistry and DynamicListManager included), trusted and has no
+ * identity; three verified VGT holders (proposer + two voters).
+ *
+ * Signer order: deployer 0, ops 1, guardian 2, stranger 3, alice 4 (the
+ * proposer), bob 5 and carol 6 (the voters). Shared by the handover
+ * preflight and CLI tests.
+ */
+export async function handoverFixture() {
+  const signers = await ethers.getSigners();
+  const [deployer, ops, guardian, stranger, alice, bob, carol] = signers;
+  const deploy = async (name: string, ...a: any[]): Promise<any> =>
+    (await ethers.getContractFactory(name)).deploy(...a);
+
+  const identityRegistry = await deploy("IdentityRegistry");
+  const complianceRules = await deploy(
+    "ComplianceRules",
+    deployer.address,
+    [840, 344],
+    [],
+  );
+  const idRegAddr = await identityRegistry.getAddress();
+  const rulesAddr = await complianceRules.getAddress();
+  const token = await deploy("Token", "VSC", "VSC", idRegAddr, rulesAddr);
+  const oracleManager = await deploy("OracleManager");
+  const kycIssuer = await deploy(
+    "ClaimIssuer",
+    deployer.address,
+    "KYC Issuer",
+    "KYC",
+  );
+  await configureKyc(identityRegistry, await kycIssuer.getAddress());
+  const factory = await deploy("OnchainIDFactory", deployer.address);
+  const governanceToken = await deploy(
+    "GovernanceToken",
+    "VGT",
+    "VGT",
+    idRegAddr,
+    rulesAddr,
+  );
+  const investorTypeRegistry = await deploy("InvestorTypeRegistry");
+  const governance = await deploy(
+    "VanguardGovernance",
+    await governanceToken.getAddress(),
+    idRegAddr,
+    await investorTypeRegistry.getAddress(),
+    rulesAddr,
+    await oracleManager.getAddress(),
+    await token.getAddress(),
+    1440,
+  );
+  const govAddr: string = await governance.getAddress();
+  const dynamicListManager = await deploy(
+    "DynamicListManager",
+    deployer.address,
+  );
+  await governance.setDynamicListManager(await dynamicListManager.getAddress());
+  const whitelistOracle = await deploy(
+    "WhitelistOracle",
+    await oracleManager.getAddress(),
+    "Whitelist",
+    "KYC whitelist",
+  );
+  const vgtAddr = await governanceToken.getAddress();
+  await governanceToken.addAgent(deployer.address);
+  await governanceToken.addAgent(govAddr);
+  await complianceRules.setTokenIdentityRegistry(vgtAddr, idRegAddr);
+  await complianceRules.addTrustedContract(govAddr);
+  for (const w of [alice, bob, carol]) {
+    const id = await deployIdentity(factory, w.address);
+    await identityRegistry.registerIdentity(w.address, id, 840);
+    await attest(kycIssuer, deployer, id);
+    await governanceToken.mint(w.address, ethers.parseEther("1000"));
+  }
+
+  const c: Record<string, any> = {
+    token,
+    governanceToken,
+    identityRegistry,
+    complianceRules,
+    oracleManager,
+    dynamicListManager,
+    investorTypeRegistry,
+    governance,
+  };
+  const args: Record<string, any> = {
+    ...c,
+    deployer,
+    ops,
+    guardian,
+    oracles: [whitelistOracle],
+    issuers: [kycIssuer],
+    log: () => {},
+  };
+  const who: Record<string, SignerWithAddress> = {
+    deployer,
+    ops,
+    guardian,
+    stranger,
+    proposer: alice,
+  };
+  return { ...who, voters: [bob, carol], c, args, govAddr, factory, kycIssuer };
+}

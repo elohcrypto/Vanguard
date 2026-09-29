@@ -390,6 +390,10 @@ class ContractDeployer {
         blockedCountries,
       );
       await complianceRules.waitForDeployment();
+      // The handover's trusted-contract scan starts here (83e, review M4).
+      this.state.complianceRulesDeployBlock = (
+        await complianceRules.deploymentTransaction().wait()
+      ).blockNumber;
 
       this.state.complianceRules = complianceRules;
       this.state.setContract("complianceRules", complianceRules);

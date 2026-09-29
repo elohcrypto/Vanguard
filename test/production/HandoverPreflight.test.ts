@@ -1,7 +1,7 @@
 import { expect } from "chai";
 import { ethers, network } from "hardhat";
 import { SignerWithAddress } from "@nomicfoundation/hardhat-ethers/signers";
-import { attest, configureKyc, deployIdentity } from "../helpers/kyc";
+import { handoverFixture } from "../helpers/governanceFixture";
 
 const {
   acceptAllByVote,
@@ -30,6 +30,8 @@ describe("Handover preflight and self-healing (plan 2E.2)", function () {
   let govAddr: string;
 
   const quiet = () => {};
+  const keyOf = (a: string) =>
+    ethers.keccak256(ethers.solidityPacked(["address"], [a]));
 
   /** The whole ceremony: deployer powers, acceptance votes, registry calls. */
   async function ceremony(): Promise<void> {
@@ -50,98 +52,9 @@ describe("Handover preflight and self-healing (plan 2E.2)", function () {
     );
 
   beforeEach(async function () {
-    let alice: SignerWithAddress,
-      bob: SignerWithAddress,
-      carol: SignerWithAddress;
-    [deployer, ops, guardian, stranger, alice, bob, carol] =
-      await ethers.getSigners();
-    proposer = alice;
-    voters = [bob, carol];
-    const deploy = async (name: string, ...a: any[]) =>
-      (await ethers.getContractFactory(name)).deploy(...a);
-
-    const identityRegistry = await deploy("IdentityRegistry");
-    const complianceRules = await deploy(
-      "ComplianceRules",
-      deployer.address,
-      [840, 344],
-      [],
-    );
-    const idRegAddr = await identityRegistry.getAddress();
-    const rulesAddr = await complianceRules.getAddress();
-    const token = await deploy("Token", "VSC", "VSC", idRegAddr, rulesAddr);
-    const oracleManager = await deploy("OracleManager");
-    const kycIssuer = await deploy(
-      "ClaimIssuer",
-      deployer.address,
-      "KYC Issuer",
-      "KYC",
-    );
-    await configureKyc(identityRegistry, await kycIssuer.getAddress());
-    const factory = await deploy("OnchainIDFactory", deployer.address);
-    const governanceToken = await deploy(
-      "GovernanceToken",
-      "VGT",
-      "VGT",
-      idRegAddr,
-      rulesAddr,
-    );
-    const investorTypeRegistry = await deploy("InvestorTypeRegistry");
-    const governance = await deploy(
-      "VanguardGovernance",
-      await governanceToken.getAddress(),
-      idRegAddr,
-      await investorTypeRegistry.getAddress(),
-      rulesAddr,
-      await oracleManager.getAddress(),
-      await token.getAddress(),
-      1440,
-    );
-    govAddr = await governance.getAddress();
-    const dynamicListManager = await deploy(
-      "DynamicListManager",
-      deployer.address,
-    );
-    await governance.setDynamicListManager(
-      await dynamicListManager.getAddress(),
-    );
-    const whitelistOracle = await deploy(
-      "WhitelistOracle",
-      await oracleManager.getAddress(),
-      "Whitelist",
-      "KYC whitelist",
-    );
-    const vgtAddr = await governanceToken.getAddress();
-    await governanceToken.addAgent(deployer.address);
-    await governanceToken.addAgent(govAddr);
-    await complianceRules.setTokenIdentityRegistry(vgtAddr, idRegAddr);
-    await complianceRules.addTrustedContract(govAddr);
-    for (const w of [alice, bob, carol]) {
-      const id = await deployIdentity(factory, w.address);
-      await identityRegistry.registerIdentity(w.address, id, 840);
-      await attest(kycIssuer, deployer, id);
-      await governanceToken.mint(w.address, ethers.parseEther("1000"));
-    }
-
-    c = {
-      token,
-      governanceToken,
-      identityRegistry,
-      complianceRules,
-      oracleManager,
-      dynamicListManager,
-      investorTypeRegistry,
-      governance,
-    };
-    args = {
-      ...c,
-      deployer,
-      ops,
-      guardian,
-      oracles: [whitelistOracle],
-      issuers: [kycIssuer],
-      log: quiet,
-    };
+    const f = await handoverFixture();
+    ({ deployer, ops, guardian, stranger, proposer, voters, c, args, govAddr } =
+      f);
   });
 
   it("completes when governance already owns the registry (option 83b ran)", async function () {
@@ -294,8 +207,6 @@ describe("Handover preflight and self-healing (plan 2E.2)", function () {
 
   it("rejects an issuer where ops holds a non-management key", async function () {
     const [issuer] = args.issuers;
-    const keyOf = (a: string) =>
-      ethers.keccak256(ethers.solidityPacked(["address"], [a]));
     await issuer.addIssuerKey(keyOf(ops.address), 3, 1); // CLAIM_SIGNER_KEY
     await rejectsBeforeAnyTx(
       /already holds a purpose-3 key .* cannot be re-added/,
@@ -353,5 +264,198 @@ describe("Handover preflight and self-healing (plan 2E.2)", function () {
     // A start block after the event finds nothing.
     args.fromBlock = await ethers.provider.getBlockNumber();
     expect((await check("every trusted contract has code")).ok).to.equal(true);
+  });
+
+  it("halves the log chunk on a range error; rethrows anything else (M4)", async function () {
+    const real = c.complianceRules;
+    const spans: number[] = [];
+    let other = false;
+    const queryFilter = async (f: any, from: number, to: number) => {
+      if (other) throw new Error("connection reset");
+      spans.push(to - from + 1);
+      if (to - from + 1 > 150) throw new Error("block range is too large");
+      return real.queryFilter(f, from, to);
+    };
+    args.complianceRules = new Proxy(real, {
+      get: (t, p) => (p === "queryFilter" ? queryFilter : Reflect.get(t, p)),
+    });
+    await network.provider.send("hardhat_mine", ["0x400"]);
+    args.logChunk = 1000;
+    expect((await check("every trusted contract has code")).ok).to.equal(true);
+    expect(spans.slice(0, 4)).to.deep.equal([1000, 500, 250, 125]);
+    other = true;
+    await expect(assertHandoverComplete(args)).to.be.rejectedWith(
+      "connection reset",
+    );
+  });
+
+  // Review M6: every preflight refusal has a failing test.
+  it("rejects a governance not bound to a plan contract", async function () {
+    const other = await (
+      await ethers.getContractFactory("Token")
+    ).deploy(
+      "VSC2",
+      "VSC2",
+      await c.identityRegistry.getAddress(),
+      await c.complianceRules.getAddress(),
+    );
+    args.token = other;
+    await rejectsBeforeAnyTx(/governance is not bound to Token/);
+  });
+
+  it("rejects ops that cannot sign when the deployer owns an issuer", async function () {
+    args.ops = ops.address;
+    await rejectsBeforeAnyTx(/ops must be a signer to accept ownership of/);
+  });
+
+  it("rejects an oracle owned by a third party", async function () {
+    await args.oracles[0].transferOwnership(stranger.address);
+    await rejectsBeforeAnyTx(/is owned by .*, neither deployer nor ops/);
+  });
+
+  it("rejects a deployer-called contract governance already owns", async function () {
+    await c.identityRegistry.transferOwnership(govAddr);
+    const id = await proposeAcceptOwnership(
+      c.governance,
+      proposer,
+      c.identityRegistry,
+      7,
+      "IdentityRegistry",
+    );
+    await castAcceptanceVotes(c.governance, id, voters);
+    await settleProposal(c.governance, id, "IdentityRegistry");
+    await rejectsBeforeAnyTx(/does not own IdentityRegistry/);
+  });
+
+  it("rejects an issuer where ops holds a revoked key", async function () {
+    const [issuer] = args.issuers;
+    await issuer.addIssuerKey(keyOf(ops.address), 1, 1);
+    await issuer.revokeIssuerKey(keyOf(ops.address));
+    await rejectsBeforeAnyTx(
+      /already holds a revoked key .* cannot be re-added/,
+    );
+  });
+
+  // Review H1/H2 (R1, R2), M2 (R3), M3 (P2).
+  for (const [name, role, other, msg] of [
+    [
+      "guardian == deployer (R2)",
+      "guardian",
+      "deployer",
+      /guardian .* is the deployer/,
+    ],
+    ["ops == deployer (R1)", "ops", "deployer", /ops .* is the deployer/],
+    ["ops == governance", "ops", "governance", /ops .* is the governance/],
+    [
+      "guardian == governance",
+      "guardian",
+      "governance",
+      /guardian .* is the governance/,
+    ],
+  ] as const) {
+    it(`rejects ${name}`, async function () {
+      args[role] = other === "deployer" ? deployer : govAddr;
+      await rejectsBeforeAnyTx(msg);
+    });
+  }
+
+  it("rejects a paused VGT (R3)", async function () {
+    await c.governanceToken.pause();
+    await rejectsBeforeAnyTx(
+      /VGT is paused: every acceptance vote would revert/,
+    );
+  });
+
+  it("rejects a blacklist oracle bound to VGT (P2, D23); completion flags it", async function () {
+    const bl = await (
+      await ethers.getContractFactory("BlacklistOracle")
+    ).deploy(await c.oracleManager.getAddress(), "BL", "d");
+    const vgt = await c.governanceToken.getAddress();
+    await c.complianceRules.setBlacklistOracle(vgt, await bl.getAddress());
+    const label = "no blacklist oracle bound to GovernanceToken (D23)";
+    expect((await check(label)).ok).to.equal(false);
+    await rejectsBeforeAnyTx(/bound to GovernanceToken: D23 forbids it/);
+  });
+
+  it("leaves out a registry governance is not bound to, with a warning", async function () {
+    const reg2 = await (
+      await ethers.getContractFactory("InvestorTypeRegistry")
+    ).deploy();
+    args.investorTypeRegistry = reg2;
+    c.investorTypeRegistry = reg2;
+    const steps: string[] = [];
+    args.log = (m: string) => steps.push(m);
+    await ceremony();
+    expect(steps.join("\n")).to.match(
+      /not bound to InvestorTypeRegistry .* option 83b hands it over later/,
+    );
+    expect(await reg2.owner()).to.equal(deployer.address);
+    const result = await assertHandoverComplete(args);
+    expect(result.failures).to.deep.equal([]);
+    expect(
+      result.checks.some((x: any) => /InvestorTypeRegistry/.test(x.label)),
+    ).to.equal(false);
+  });
+
+  // Review L6: every completion line fails when its power is given back.
+  it("each completion line catches its power (table)", async function () {
+    await ceremony();
+    expect((await assertHandoverComplete(args)).failures).to.deep.equal([]);
+    await network.provider.send("hardhat_impersonateAccount", [govAddr]);
+    await network.provider.send("hardhat_setBalance", [
+      govAddr,
+      "0xDE0B6B3A7640000",
+    ]);
+    const gov = await ethers.getSigner(govAddr);
+    const d = deployer.address;
+    const [issuer] = args.issuers;
+    const issuerName = `KYC Issuer (${await issuer.getAddress()})`;
+    const breaks: [string, () => Promise<unknown>][] = [
+      ["deployer is not a Token agent", () => c.token.connect(gov).addAgent(d)],
+      [
+        "deployer is not a GovernanceToken agent",
+        () => c.governanceToken.connect(gov).addAgent(d),
+      ],
+      [
+        "deployer is not an IdentityRegistry agent",
+        () => c.identityRegistry.connect(gov).addAgent(d),
+      ],
+      [
+        "deployer is not a ComplianceRules rule administrator",
+        () => c.complianceRules.connect(gov).setRuleAdministrator(d, true),
+      ],
+      [
+        "deployer is not an InvestorTypeRegistry governor",
+        () => c.investorTypeRegistry.connect(gov).setGovernor(d, true, 1),
+      ],
+      [
+        "ops is an InvestorTypeRegistry compliance officer",
+        () =>
+          c.investorTypeRegistry
+            .connect(gov)
+            .setComplianceOfficer(ops.address, false),
+      ],
+      [
+        "Token guardian is not the deployer",
+        () => c.token.connect(gov).setGuardian(d),
+      ],
+      // A revoked key keeps its slot ("Key already exists"), so the deployer
+      // regains the issuer by ownership instead.
+      [
+        `deployer does not own ${issuerName}`,
+        async () => {
+          await issuer.connect(ops).transferOwnership(d);
+          await issuer.connect(deployer).acceptOwnership();
+        },
+      ],
+    ];
+    for (const [label, give] of breaks) {
+      const snap = await network.provider.send("evm_snapshot", []);
+      await give();
+      const { failures } = await assertHandoverComplete(args);
+      expect(failures, label).to.include(label);
+      await network.provider.send("evm_revert", [snap]);
+    }
+    await network.provider.send("hardhat_stopImpersonatingAccount", [govAddr]);
   });
 });

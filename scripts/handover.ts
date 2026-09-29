@@ -14,6 +14,7 @@
  *     "oracles": ["0x..", "0x..", "0x.."],      // optional, one-step Ownable
  *     "issuers": ["0x..", "0x.."],              // optional, ClaimIssuer
  *     "fromBlock": 1234567,                     // optional, ComplianceRules deploy block
+ *     "logChunk": 5000,                         // optional, eth_getLogs block range
  *     "ops": 10, "guardian": 11, "proposer": 1, "voters": [2, 3, 6]
  *   }
  *
@@ -22,6 +23,11 @@
  * preflight refuses to start before the first transaction if any
  * precondition fails. Exits non-zero on any failure. The ceremony itself is
  * demo/utils/Handover.js.
+ *
+ * HANDOVER_PHASE=accept resumes after a partial run: it skips the deployer
+ * steps and only votes the acceptances (and registry proposals) still
+ * pending, then verifies. Before any transaction the proposer and every
+ * voter must be verified and hold the VGT fees for every proposal.
  */
 // ponytail: a JSON file via HANDOVER_CONFIG is the ceiling (hardhat run has no
 // argv passthrough); a typed CLI can replace it later.
@@ -41,13 +47,22 @@ const {
   ACCEPTANCE_PLAN,
   handoverDeployerPowers,
   acceptAllByVote,
+  pendingRegistryProposals,
+  preflight,
+  checkVoters,
   assertHandoverComplete,
 } = require("../demo/utils/Handover");
+const { planFor, withBoundRegistry } = require("../demo/utils/HandoverChecks");
 
-async function main(): Promise<void> {
-  const path = process.env.HANDOVER_CONFIG;
-  if (!path) throw new Error("set HANDOVER_CONFIG to the handover JSON file");
-  const cfg = JSON.parse(fs.readFileSync(path, "utf8"));
+/**
+ * The whole CLI run for a parsed handover.json (`path` names it in errors).
+ * Exported so test/production/HandoverCli.test.ts drives it in-process.
+ */
+export async function runHandover(
+  cfg: any,
+  phase = "full",
+  path = "handover.json",
+): Promise<void> {
   for (const k of [
     "token",
     "governanceToken",
@@ -65,6 +80,15 @@ async function main(): Promise<void> {
   if (cfg.fromBlock !== undefined && !Number.isInteger(cfg.fromBlock)) {
     throw new Error(`${path}: "fromBlock" must be a block number`);
   }
+  if (
+    cfg.logChunk !== undefined &&
+    !(Number.isInteger(cfg.logChunk) && cfg.logChunk >= 100)
+  ) {
+    throw new Error(`${path}: "logChunk" must be a block count >= 100`);
+  }
+  if (phase !== "full" && phase !== "accept") {
+    throw new Error(`HANDOVER_PHASE must be "accept" or unset, got "${phase}"`);
+  }
   if (!Array.isArray(cfg.voters) || cfg.voters.length === 0) {
     throw new Error(`${path}: "voters" must list wallet indices`);
   }
@@ -81,6 +105,7 @@ async function main(): Promise<void> {
     // Start of the trusted-contract event scan (the check reads logs in
     // chunks from here to the latest block).
     fromBlock: cfg.fromBlock,
+    logChunk: cfg.logChunk,
     deployer: wallet(0),
     ops: wallet(cfg.ops),
     guardian: wallet(cfg.guardian),
@@ -106,8 +131,42 @@ async function main(): Promise<void> {
     ),
   };
 
-  console.log("🔑 Handover: deployer powers");
-  const report = await handoverDeployerPowers(args);
+  const proposer = wallet(cfg.proposer);
+  const voters = cfg.voters.map(wallet);
+  const govAddr = cfg.governance.toLowerCase();
+  // Acceptance votes still to run: plan contracts governance does not own.
+  const acceptances = async (o: any) => {
+    let n = 0;
+    for (const e of planFor(o)) {
+      if ((await o[e.key].owner()).toLowerCase() !== govAddr) n++;
+    }
+    return n;
+  };
+
+  let registryProposals: any[];
+  if (phase === "accept") {
+    console.log("⏭️  HANDOVER_PHASE=accept: deployer steps skipped");
+    const o = await withBoundRegistry(args, console.log);
+    await preflight(o, { acceptOnly: true });
+    registryProposals = await pendingRegistryProposals(o);
+    await checkVoters(
+      o,
+      proposer,
+      voters,
+      (await acceptances(o)) + registryProposals.length,
+    );
+  } else {
+    const o = await withBoundRegistry(args);
+    const reg = o.investorTypeRegistry;
+    // Registry calls become proposals only when governance already owns it.
+    const regVotes =
+      reg && (await reg.owner()).toLowerCase() === govAddr
+        ? (await pendingRegistryProposals(o)).length
+        : 0;
+    await checkVoters(o, proposer, voters, (await acceptances(o)) + regVotes);
+    console.log("🔑 Handover: deployer powers");
+    registryProposals = (await handoverDeployerPowers(args)).registryProposals;
+  }
 
   console.log("\n🏛️  Handover: governance accepts by vote");
   const contracts: Record<string, any> = {};
@@ -115,9 +174,9 @@ async function main(): Promise<void> {
   await acceptAllByVote({
     governance: args.governance,
     contracts,
-    proposer: wallet(cfg.proposer),
-    voters: cfg.voters.map(wallet),
-    registryProposals: report.registryProposals,
+    proposer,
+    voters,
+    registryProposals,
   });
 
   console.log("\n🔍 Handover: verify");
@@ -127,7 +186,17 @@ async function main(): Promise<void> {
   console.log("\n✅ Handover complete: the deployer holds no power.");
 }
 
-main().catch((e) => {
-  console.error(`❌ Handover failed: ${e.message}`);
-  process.exitCode = 1;
-});
+async function main(): Promise<void> {
+  const path = process.env.HANDOVER_CONFIG;
+  if (!path) throw new Error("set HANDOVER_CONFIG to the handover JSON file");
+  const cfg = JSON.parse(fs.readFileSync(path, "utf8"));
+  await runHandover(cfg, process.env.HANDOVER_PHASE || "full", path);
+}
+
+// `hardhat run` executes this file as the main module; a test imports it.
+if (require.main === module) {
+  main().catch((e) => {
+    console.error(`❌ Handover failed: ${e.message}`);
+    process.exitCode = 1;
+  });
+}

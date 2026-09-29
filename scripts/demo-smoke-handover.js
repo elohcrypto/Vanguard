@@ -85,6 +85,7 @@ async function runHandoverSmoke(state, failures) {
   }
 
   const args = {
+    fromBlock: state.complianceRulesDeployBlock,
     deployer: s[0],
     ops: s[OPS],
     guardian: s[GUARDIAN],

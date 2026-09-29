@@ -103,7 +103,12 @@ holds a key but not ownership; ops a signer wherever it must accept or revoke
 on an issuer, and no ops key on it that is revoked or of another purpose
 (it cannot be re-added as MANAGEMENT_KEY); each oracle owned by the
 deployer or ops, and an ops-owned oracle whose `listManager` is still the
-deployer fails, because only ops can clear it.
+deployer fails, because only ops can clear it. It also refuses a guardian
+or ops that is the deployer or governance, a paused VGT (every acceptance
+vote would revert), and a blacklist oracle bound to VGT. Never bind a
+blacklist oracle to VGT (D23): a listed governance halts every fee flow.
+An `investorTypeRegistry` governance is not bound to is left out of the
+ceremony with a warning (83b hands it over later).
 Two hazards are fixed rather than only reported: step 1 clears any VGT
 guardian ("VGT guardian cleared: no guardian may pause the vote token; a VGT
 pause blocks every vote until ops or a pre-voted unpause releases it"), and
@@ -140,8 +145,13 @@ non-zero on any failure. The JSON holds the addresses `token`,
 `governanceToken`, `identityRegistry`, `complianceRules`, `oracleManager`, `governance`, the
 optional `investorTypeRegistry` and `dynamicListManager`, the `oracles` and `issuers` arrays, the
 optional `fromBlock` (the ComplianceRules deploy block, where the trusted-contract
-event scan starts; the scan reads logs in 5000-block chunks), and the
-wallet indices `ops`, `guardian`, `proposer` and `voters` (an array).
+event scan starts; the demo records it at option 1) and `logChunk` (the
+scan's block range, default 5000, halved down to 100 when the RPC refuses a
+range), and the wallet indices `ops`, `guardian`, `proposer` and `voters`
+(an array). Before step 1 it checks that the proposer and every voter are
+verified and hold the VGT fees for every proposal. After a partial run,
+`HANDOVER_PHASE=accept` skips the deployer steps and votes only the
+acceptances and registry proposals still pending, then verifies.
 
 ## Waiting instead of jumping
 

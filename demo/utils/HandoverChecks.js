@@ -91,15 +91,73 @@ async function listManagerOf(oracle) {
 }
 
 /**
+ * The optional InvestorTypeRegistry takes part only when governance is bound
+ * to it (boundTarget(0)); otherwise its acceptance vote could never be
+ * proposed. Returns `o` without it (warning once via `log`) in that case;
+ * option 83b hands it over later.
+ */
+async function withBoundRegistry(o, log) {
+  const reg = o.investorTypeRegistry;
+  if (!reg) return o;
+  const a = await addrOf(reg);
+  if (same(await o.governance.boundTarget(0), a)) return o;
+  if (log) {
+    log(
+      `   ⚠️  governance is not bound to InvestorTypeRegistry (${a}): left out of this handover; option 83b hands it over later`,
+    );
+  }
+  return { ...o, investorTypeRegistry: undefined };
+}
+
+/**
  * Every precondition, read-only, before the ceremony's first transaction
  * (plan v2 Task 2E.2): refuse to start rather than stop halfway. Returns
  * { governanceOwned }: plan keys governance already owns (step 3 skips them).
+ * `acceptOnly` (HANDOVER_PHASE=accept): only what the acceptance votes need.
  */
-async function preflight(o) {
+async function preflight(o, { acceptOnly = false } = {}) {
   const dAddr = await addrOf(o.deployer);
   const ops = await addrOf(o.ops);
+  const guardian = await addrOf(o.guardian);
   const govAddr = await addrOf(o.governance);
   const opsSigns = typeof o.ops.signMessage === "function";
+  // Distinct roles (review H1/H2): the ceremony strips the deployer's roles
+  // and makes governance the owner, so a role held by either is lost or
+  // silently kept.
+  if (!acceptOnly) {
+    for (const [role, who, other, why] of [
+      [
+        "guardian",
+        guardian,
+        dAddr,
+        "the deployer would keep the power to pause VSC",
+      ],
+      ["ops", ops, dAddr, "step 5 would strip the roles it was just granted"],
+      ["ops", ops, govAddr, "governance cannot sign as ops"],
+      ["guardian", guardian, govAddr, "governance cannot sign as guardian"],
+    ]) {
+      if (same(who, other)) {
+        const name = other === dAddr ? "deployer" : "governance";
+        fail(
+          `${role} ${who} is the ${name}: ${why}; configure a separate ${role} wallet`,
+        );
+      }
+    }
+  }
+  if (await o.governanceToken.paused()) {
+    fail(
+      "VGT is paused: every acceptance vote would revert; the owner must unpause first",
+    );
+  }
+  // D23: a listed governance fails every VGT fee transfer (proposal and
+  // vote fees, refunds), so no blacklist oracle may gate VGT.
+  const vgtAddr = await addrOf(o.governanceToken);
+  const vgtBlacklist = await o.complianceRules.blacklistOracle(vgtAddr);
+  if (!same(vgtBlacklist, ethers.ZeroAddress)) {
+    fail(
+      `a blacklist oracle (${vgtBlacklist}) is bound to GovernanceToken: D23 forbids it (listing governance halts every fee flow); the ComplianceRules owner must setBlacklistOracle(VGT, 0) first`,
+    );
+  }
   // Governance must be bound to every contract it is about to own, or the
   // acceptOwnership vote in step 4 can never be proposed.
   for (const e of planFor(o).filter((x) => x.key !== "governance")) {
@@ -125,6 +183,7 @@ async function preflight(o) {
     );
   }
   const governanceOwned = new Set();
+  if (acceptOnly) return { governanceOwned };
   for (const e of planFor(o)) {
     const owner = await o[e.key].owner();
     if (same(owner, dAddr)) continue;
@@ -177,8 +236,47 @@ async function preflight(o) {
   return { governanceOwned };
 }
 
+/**
+ * The proposer and every voter must be able to pay for `count` proposals
+ * before step 1 sends anything: verified, not frozen, and enough free VGT
+ * (proposalCreationCost each for the proposer, votingCost each per voter).
+ */
+async function checkVoters(o, proposer, voters, count) {
+  if (count === 0) return;
+  const n = BigInt(count);
+  const pAddr = await addrOf(proposer);
+  const need = [
+    [pAddr, "proposer", (await o.governance.proposalCreationCost()) * n],
+  ];
+  const vote = (await o.governance.votingCost()) * n;
+  for (const v of voters) {
+    const a = await addrOf(v);
+    if (same(a, pAddr))
+      fail(
+        `voter ${a} is the proposer; a proposer cannot vote on its own proposal`,
+      );
+    need.push([a, "voter", vote]);
+  }
+  const vgt = o.governanceToken;
+  for (const [a, role, amount] of need) {
+    if (!(await o.identityRegistry.isVerified(a))) {
+      fail(
+        `${role} ${a} is not verified in the IdentityRegistry; governance refuses its ${role === "voter" ? "vote" : "proposal"}`,
+      );
+    }
+    if (await vgt.isFrozen(a)) fail(`${role} ${a} is frozen on VGT`);
+    const free = await vgt.getFreeBalance(a);
+    if (free < amount) {
+      fail(
+        `${role} ${a} holds ${ethers.formatEther(free)} free VGT; ${count} proposal(s) need ${ethers.formatEther(amount)}`,
+      );
+    }
+  }
+}
+
 /** Read-only verification. Returns { ok, failures, checks }; never pauses. */
 async function assertHandoverComplete(o) {
+  o = await withBoundRegistry(o);
   const dAddr = await addrOf(o.deployer);
   const ops = await addrOf(o.ops);
   const guardian = await addrOf(o.guardian);
@@ -209,6 +307,10 @@ async function assertHandoverComplete(o) {
     await o.identityRegistry.isAgent(ops),
   );
   add("guardian set on Token", same(await o.token.guardian(), guardian));
+  add(
+    "Token guardian is not the deployer",
+    !same(await o.token.guardian(), dAddr),
+  );
   if (o.dynamicListManager) {
     add(
       "DynamicListManager governanceContract is governance",
@@ -218,6 +320,13 @@ async function assertHandoverComplete(o) {
   add(
     "GovernanceToken has no guardian",
     same(await o.governanceToken.guardian(), ethers.ZeroAddress),
+  );
+  add(
+    "no blacklist oracle bound to GovernanceToken (D23)",
+    same(
+      await o.complianceRules.blacklistOracle(await addrOf(o.governanceToken)),
+      ethers.ZeroAddress,
+    ),
   );
   if (o.investorTypeRegistry) {
     const reg = o.investorTypeRegistry;
@@ -259,15 +368,26 @@ async function assertHandoverComplete(o) {
     same(await o.identityRegistry.identity(govAddr), ethers.ZeroAddress),
   );
   // Residue from runs before 2E.1, when a wallet could be trusted. Scanned
-  // in chunks: public RPCs cap the eth_getLogs block range.
-  const chunk = o.logChunk || 5000;
+  // in chunks: public RPCs cap the eth_getLogs block range, so a range error
+  // halves the chunk (floor 100) and retries; any other error is rethrown.
+  let chunk = o.logChunk || 5000;
   const latest = await ethers.provider.getBlockNumber();
   const added = [];
-  for (let b = o.fromBlock || 0; b <= latest; b += chunk) {
+  for (let b = o.fromBlock || 0; b <= latest;) {
     const to = Math.min(b + chunk - 1, latest);
-    added.push(
-      ...(await rules.queryFilter(rules.filters.TrustedContractAdded(), b, to)),
-    );
+    try {
+      added.push(
+        ...(await rules.queryFilter(
+          rules.filters.TrustedContractAdded(),
+          b,
+          to,
+        )),
+      );
+      b = to + 1;
+    } catch (e) {
+      if (chunk <= 100 || !/range|limit|too many/i.test(e.message)) throw e;
+      chunk = Math.max(100, Math.floor(chunk / 2));
+    }
   }
   const trusted = [...new Set(added.map((ev) => ev.args[0]))];
   let clean = true;
@@ -304,6 +424,8 @@ module.exports = {
   hasLiveKey,
   issuerLabel,
   listManagerOf,
+  withBoundRegistry,
   preflight,
+  checkVoters,
   assertHandoverComplete,
 };

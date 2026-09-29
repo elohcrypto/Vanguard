@@ -109,6 +109,8 @@ class DemoState {
      * @type {Object|null}
      */
     this.complianceRules = null;
+    /** Block ComplianceRules was deployed in: start of the handover log scan. */
+    this.complianceRulesDeployBlock = undefined;
 
     /**
      * @property {Map} complianceRulesConfig - Compliance configuration

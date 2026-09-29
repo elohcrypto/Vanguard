@@ -26,7 +26,9 @@ const {
   hasLiveKey,
   issuerLabel,
   listManagerOf,
+  withBoundRegistry,
   preflight,
+  checkVoters,
   assertHandoverComplete,
 } = require("./HandoverChecks");
 
@@ -72,6 +74,7 @@ async function hasLiveManagementKey(issuer, wallet) {
  */
 async function handoverDeployerPowers(o) {
   const log = o.log || console.log;
+  o = await withBoundRegistry(o, log);
   const d = o.deployer;
   const dAddr = await addrOf(d);
   const ops = await addrOf(o.ops);
@@ -118,9 +121,10 @@ async function handoverDeployerPowers(o) {
     () => o.governanceToken.isAgent(ops),
     `GovernanceToken agent: ${ops}`,
   );
-  if (o.investorTypeRegistry) {
-    await registryOfficer(ctx, ops, true);
-  }
+  const regSteps = o.investorTypeRegistry
+    ? registrySteps(o.investorTypeRegistry, dAddr, ops)
+    : [];
+  if (regSteps.length) await registryCall(ctx, regSteps[0]);
   await apply(
     o.token.connect(d).setGuardian(guardian),
     async () => same(await o.token.guardian(), guardian),
@@ -218,19 +222,7 @@ async function handoverDeployerPowers(o) {
     async () => !(await o.complianceRules.ruleAdministrators(dAddr)),
     "deployer removed as ComplianceRules rule administrator",
   );
-  if (o.investorTypeRegistry) {
-    await registryOfficer(ctx, dAddr, false);
-    const reg = o.investorTypeRegistry;
-    if (typeof reg.isGovernor === "function") {
-      await registryCall(
-        ctx,
-        `InvestorTypeRegistry governor ${dAddr} = false`,
-        async () => !(await reg.isGovernor(dAddr)),
-        "setGovernor",
-        [dAddr, false, 0],
-      );
-    }
-  }
+  for (const step of regSteps.slice(1)) await registryCall(ctx, step);
 
   log("\n📝 Step 3: nominate governance as owner");
   for (const e of planFor(o)) {
@@ -250,39 +242,75 @@ async function handoverDeployerPowers(o) {
 }
 
 /**
- * InvestorTypeRegistry.<fn>(...args) unless `done()` already holds. Direct
- * when the deployer owns the registry; queued (loudly) as an
- * InvestorTypeConfig proposal when governance does (preflight allows no
- * other owner).
+ * The InvestorTypeRegistry calls of the ceremony, in order: ops becomes a
+ * compliance officer (step 1), the deployer stops being one and stops being
+ * a governor (step 5). `done()` is true once the call has taken effect.
  */
-async function registryCall(ctx, what, done, fn, args) {
+function registrySteps(reg, dAddr, ops) {
+  const officer = (who, flag) => ({
+    what: `InvestorTypeRegistry compliance officer ${who} = ${flag}`,
+    done: async () => (await reg.isComplianceOfficer(who)) === flag,
+    fn: "setComplianceOfficer",
+    args: [who, flag],
+  });
+  const steps = [officer(ops, true), officer(dAddr, false)];
+  if (typeof reg.isGovernor === "function") {
+    steps.push({
+      what: `InvestorTypeRegistry governor ${dAddr} = false`,
+      done: async () => !(await reg.isGovernor(dAddr)),
+      fn: "setGovernor",
+      args: [dAddr, false, 0],
+    });
+  }
+  return steps;
+}
+
+/** A registry step as an InvestorTypeConfig (type 0) proposal. */
+const registryProposal = async (reg, step) => ({
+  label: step.what,
+  proposalType: 0,
+  target: await reg.getAddress(),
+  callData: OWNABLE.encodeFunctionData(step.fn, step.args),
+});
+
+/**
+ * The registry proposals still needed for `o` (HANDOVER_PHASE=accept, after
+ * a partial run): every registry step whose `done()` does not hold yet.
+ */
+async function pendingRegistryProposals(o) {
+  o = await withBoundRegistry(o);
+  const reg = o.investorTypeRegistry;
+  if (!reg) return [];
+  const steps = registrySteps(
+    reg,
+    await addrOf(o.deployer),
+    await addrOf(o.ops),
+  );
+  const pending = [];
+  for (const step of steps) {
+    if (!(await step.done())) pending.push(await registryProposal(reg, step));
+  }
+  return pending;
+}
+
+/**
+ * One registry step unless `done()` already holds. Direct when the deployer
+ * owns the registry; queued (loudly) as an InvestorTypeConfig proposal when
+ * governance does (preflight allows no other owner).
+ */
+async function registryCall(ctx, step) {
   const { o, d, dAddr, report, ok, log } = ctx;
   const reg = o.investorTypeRegistry;
+  const { what, done, fn, args } = step;
   if (await done()) return ok(`${what} (already)`);
   if (same(await reg.owner(), dAddr)) {
     await send(reg.connect(d)[fn](...args));
     check(await done(), `${what} did not apply`);
     return ok(what);
   }
-  report.registryProposals.push({
-    label: what,
-    proposalType: 0,
-    target: await reg.getAddress(),
-    callData: OWNABLE.encodeFunctionData(fn, args),
-  });
+  report.registryProposals.push(await registryProposal(reg, step));
   log(
     `   ⚠️  ${what}: governance owns the registry, queued as an InvestorTypeConfig proposal`,
-  );
-}
-
-async function registryOfficer(ctx, who, flag) {
-  const reg = ctx.o.investorTypeRegistry;
-  await registryCall(
-    ctx,
-    `InvestorTypeRegistry compliance officer ${who} = ${flag}`,
-    async () => (await reg.isComplianceOfficer(who)) === flag,
-    "setComplianceOfficer",
-    [who, flag],
   );
 }
 
@@ -394,6 +422,8 @@ async function acceptAllByVote({
   log = console.log,
 }) {
   const govAddr = await governance.getAddress();
+  // An unbound optional registry is left out (preflight warned about it).
+  contracts = await withBoundRegistry(contracts);
   const vote = async (id, label) => {
     await castAcceptanceVotes(governance, id, voters);
     await settleProposal(governance, id, label);
@@ -445,5 +475,8 @@ module.exports = {
   castAcceptanceVotes,
   settleProposal,
   acceptAllByVote,
+  pendingRegistryProposals,
+  preflight,
+  checkVoters,
   assertHandoverComplete,
 };
