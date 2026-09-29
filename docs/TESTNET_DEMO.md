@@ -62,8 +62,12 @@ deleting mid-vote does not move the bar of a proposal already open. The case
 Governance holds VGT fees as a trusted contract (option 74 adds it while the
 deployer still owns ComplianceRules): it has no identity and never counts in
 `registeredIdentityCount`, so the electorate is the onboarded humans.
-Ops keeps the VGT agent role but cannot freeze, partially freeze, burn or
-recover governance's VGT (D23); the only way to stop voting is a pause by vote.
+Ops keeps the VGT agent role but cannot freeze, burn, move or recover
+governance's VGT (D23). Ops can still stop voting reversibly through
+voter-side powers: freezing or burning voters' VGT, deleting voter identities,
+or revoking claims as issuer owner. A VGT pause by vote is terminal: unpause
+is owner-only (governance) and every vote needs an unpaused `transferFrom`
+(raised to the owner as D24).
 
 ## Handover ceremony
 
