@@ -205,6 +205,108 @@ describe("GovernanceToken is governable by proposal", function () {
     expect(p.votesFor).to.equal(1n);
   });
 
+  // D24: a pause by vote cannot be voted away (every vote needs an unpaused
+  // transferFrom), so a VGT agent (ops after the ceremony) may release it.
+  // Pause stays owner-or-guardian; the VSC Token keeps unpause owner-only.
+  describe("D24: an agent releases a VGT pause", function () {
+    let ops: SignerWithAddress, stranger: SignerWithAddress;
+
+    // Mirrors the ceremony: ops becomes an agent, the deployer stops being
+    // one, then governance takes ownership.
+    beforeEach(async function () {
+      [, , , , ops, stranger] = await ethers.getSigners();
+      await vgt.addAgent(ops.address);
+      await vgt.removeAgent(owner.address);
+      await handover();
+      expect(await vgt.isAgent(ops.address)).to.equal(true);
+      expect(await vgt.isAgent(owner.address)).to.equal(false);
+    });
+
+    async function pauseByVote() {
+      const id = await proposeAndVote(
+        T.GovernanceTokenParameters,
+        vgtAddr,
+        call("pause"),
+      );
+      await passDelay(id);
+      return id;
+    }
+
+    it("ops unpauses with no pre-voted unpause; voting and refunds resume", async function () {
+      const pauseId = await pauseByVote();
+      // Open for voting when the pause lands.
+      await gov
+        .connect(alice)
+        .createProposal(
+          T.GovernanceTokenParameters,
+          "t",
+          "d",
+          vgtAddr,
+          call("removeAgent", [stranger.address]),
+        );
+      const openId = Number(await gov.proposalCount());
+
+      await execute(pauseId);
+      expect(await vgt.paused()).to.equal(true);
+      await expect(
+        gov.connect(bob).castVote(openId, false, ""),
+      ).to.be.revertedWithCustomError(vgt, "EnforcedPause");
+
+      await vgt.connect(ops).unpause();
+      expect(await vgt.paused()).to.equal(false);
+
+      // A new proposal is created and voted.
+      const newId = await proposeAndVote(
+        T.GovernanceTokenParameters,
+        vgtAddr,
+        call("setGuardian", [ethers.ZeroAddress]),
+      );
+      const [np] = await gov.getProposal(newId);
+      expect(np.votesFor).to.equal(2n);
+
+      // The proposal open during the pause is voted down and settles.
+      await gov.connect(bob).castVote(openId, false, "");
+      await passDelay(openId);
+      await gov.executeProposal(openId);
+      const [op] = await gov.getProposal(openId);
+      expect(S[Number(op.status)]).to.equal("Rejected");
+
+      for (const w of [alice, bob]) {
+        const due = await gov.getClaimableRefund(openId, w.address);
+        expect(due).to.be.gt(0n);
+        const before = await vgt.balanceOf(w.address);
+        await gov.connect(w).claimRefund(openId);
+        expect(await vgt.balanceOf(w.address)).to.equal(before + due);
+      }
+    });
+
+    it("ops cannot pause; non-agents and the deployer cannot unpause", async function () {
+      await expect(vgt.connect(ops).pause()).to.be.revertedWith(
+        "Token: caller is not owner or guardian",
+      );
+
+      await execute(await pauseByVote());
+      expect(await vgt.paused()).to.equal(true);
+
+      for (const who of [stranger, owner, alice]) {
+        await expect(vgt.connect(who).unpause()).to.be.revertedWith(
+          "Token: caller cannot unpause",
+        );
+      }
+      expect(await vgt.paused()).to.equal(true);
+    });
+
+    it("a VSC Token agent cannot unpause; only its owner can", async function () {
+      await vsc.addAgent(ops.address);
+      await vsc.pause();
+      await expect(vsc.connect(ops).unpause()).to.be.revertedWith(
+        "Token: caller cannot unpause",
+      );
+      await vsc.unpause();
+      expect(await vsc.paused()).to.equal(false);
+    });
+  });
+
   it("rejects a VGT call under TokenParameters", async function () {
     await expect(
       gov

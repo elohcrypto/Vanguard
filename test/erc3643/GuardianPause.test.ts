@@ -46,9 +46,9 @@ describe("Token — guardian pause", () => {
     const { token, guardian } = await deployToken();
     await token.setGuardian(guardian.address);
     await token.connect(guardian).pause();
-    await expect(token.connect(guardian).unpause())
-      .to.be.revertedWithCustomError(token, "OwnableUnauthorizedAccount")
-      .withArgs(guardian.address);
+    await expect(token.connect(guardian).unpause()).to.be.revertedWith(
+      "Token: caller cannot unpause",
+    );
     expect(await token.paused()).to.equal(true);
   });
 

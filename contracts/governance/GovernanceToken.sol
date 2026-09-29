@@ -179,6 +179,13 @@ contract GovernanceToken is Token {
         require(!_compliance.isTrustedContract(target), "GovernanceToken: trusted contract");
     }
 
+    // D24: a pause by vote could never be voted away, because every proposal
+    // and vote needs an unpaused transferFrom. An agent (ops) can release a
+    // pause, never impose one: pause stays owner-or-guardian.
+    function _canUnpause(address account) internal view override returns (bool) {
+        return isAgent(account);
+    }
+
     /**
      * @dev Check if an address can vote (has voting power and is verified)
      * @param account Address to check

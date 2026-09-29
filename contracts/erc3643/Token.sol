@@ -289,9 +289,16 @@ contract Token is IERC3643, ERC20, Ownable2Step, Pausable {
         emit Paused(msg.sender);
     }
 
-    function unpause() external override onlyOwner {
+    function unpause() external override {
+        require(msg.sender == owner() || _canUnpause(msg.sender), "Token: caller cannot unpause");
         _unpause();
         emit Unpaused(msg.sender);
+    }
+
+    /// @notice Hook: who, besides the owner, may release a pause.
+    /// @dev The base token says nobody; a subclass may widen it.
+    function _canUnpause(address /* account */) internal view virtual returns (bool) {
+        return false;
     }
 
     function paused() public view override(IERC3643, Pausable) returns (bool) {
@@ -360,7 +367,7 @@ contract Token is IERC3643, ERC20, Ownable2Step, Pausable {
         emit AgentRemoved(_agent);
     }
 
-    function isAgent(address _agent) external view returns (bool) {
+    function isAgent(address _agent) public view returns (bool) {
         return _agents[_agent];
     }
 
