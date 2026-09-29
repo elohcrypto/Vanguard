@@ -65,9 +65,9 @@ deployer still owns ComplianceRules): it has no identity and never counts in
 Ops keeps the VGT agent role but cannot freeze, burn, move or recover
 governance's VGT (D23). Ops can still stop voting reversibly through
 voter-side powers: freezing or burning voters' VGT, deleting voter identities,
-or revoking claims as issuer owner. A VGT pause by vote is terminal: unpause
-is owner-only (governance) and every vote needs an unpaused `transferFrom`
-(raised to the owner as D24).
+or revoking claims as issuer owner. A VGT pause is released by ops (VGT
+agent) with one transaction and no vote, or by an unpause proposal passed
+before the pause; ops cannot pause (D24).
 
 ## Handover ceremony
 

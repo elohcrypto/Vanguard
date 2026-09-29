@@ -137,6 +137,37 @@ async function runHandoverSmoke(state, failures) {
     );
   }
 
+  // D24: ops may release a VGT pause but never impose one. VGT is not
+  // paused, so unpause must pass the access check and hit ExpectedPause.
+  try {
+    await opsVgt.unpause.staticCall();
+    failures.push("D24: ops unpause on an unpaused VGT succeeded");
+  } catch (e) {
+    const name =
+      e.revert?.name ??
+      (e.data ? vgt.interface.parseError(e.data)?.name : undefined);
+    if (name !== "ExpectedPause") {
+      failures.push(
+        `D24: ops cannot unpause VGT: ${e.message.split("\n")[0]}`,
+      );
+    }
+  }
+  try {
+    await opsVgt.pause.staticCall();
+    failures.push("D24: ops can pause VGT");
+  } catch (e) {
+    // Hardhat may not put the reason in e.message; decode Error(string).
+    const why = e.data?.startsWith("0x08c379a0")
+      ? ethers.AbiCoder.defaultAbiCoder().decode(
+          ["string"],
+          ethers.dataSlice(e.data, 4),
+        )[0]
+      : e.message;
+    if (!/Token: caller is not owner or guardian/.test(why)) {
+      failures.push(`D24: ops pause wrong revert: ${why.split("\n")[0]}`);
+    }
+  }
+
   if (result.ok) {
     console.log(
       `✅ Handover ceremony: ${result.checks.length} checks pass, the deployer holds no power.`,
