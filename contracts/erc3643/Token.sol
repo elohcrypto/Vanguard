@@ -16,7 +16,7 @@ import "./interfaces/IInvestorTypeRegistry.sol";
 contract Token is IERC3643, ERC20, Ownable2Step, Pausable {
     // State variables
     IIdentityRegistry private _identityRegistry;
-    IComplianceHooks private _compliance;
+    IComplianceHooks internal _compliance;
     IInvestorTypeRegistry private _investorTypeRegistry;
 
     // Frozen addresses
@@ -98,6 +98,7 @@ contract Token is IERC3643, ERC20, Ownable2Step, Pausable {
     }
 
     function burn(address _from, uint256 _amount) external override onlyAgent whenNotPaused {
+        _checkAgentTarget(_from);
         require(balanceOf(_from) >= _amount, "Insufficient balance");
         require(getFreeBalance(_from) >= _amount, "Insufficient free balance");
 
@@ -106,15 +107,24 @@ contract Token is IERC3643, ERC20, Ownable2Step, Pausable {
     }
 
     function setAddressFrozen(address _userAddress, bool _freeze) external override onlyAgent {
+        _checkAgentTarget(_userAddress);
         _frozen[_userAddress] = _freeze;
         emit AddressFrozen(_userAddress, _freeze, msg.sender);
     }
 
     function freezePartialTokens(address _userAddress, uint256 _amount) external override onlyAgent {
+        _checkAgentTarget(_userAddress);
         require(balanceOf(_userAddress) >= _frozenTokens[_userAddress] + _amount, "Insufficient balance to freeze");
         _frozenTokens[_userAddress] += _amount;
         emit TokensFrozen(_userAddress, _amount);
     }
+
+    /**
+     * @dev Hook for agent levers that act ON a holder (burn, freeze, partial
+     *      freeze, recovery), so a subclass can refuse some targets. Empty
+     *      here: on the base token an agent may act on any holder.
+     */
+    function _checkAgentTarget(address target) internal view virtual {}
 
     function unfreezePartialTokens(address _userAddress, uint256 _amount) external override onlyAgent {
         require(_frozenTokens[_userAddress] >= _amount, "Insufficient frozen tokens");
@@ -197,6 +207,7 @@ contract Token is IERC3643, ERC20, Ownable2Step, Pausable {
         address _newWallet,
         address _investorOnchainID
     ) external override onlyAgent whenNotPaused returns (bool) {
+        _checkAgentTarget(_lostWallet);
         // The registry is shared by every token, so a sibling token's recovery
         // may already have moved this person's identity to the new wallet.
         // Requiring identity(lost) == onchainID here made every token after the

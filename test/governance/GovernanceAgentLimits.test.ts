@@ -1,0 +1,147 @@
+import { expect } from "chai";
+import { ethers } from "hardhat";
+import { attest, configureKyc } from "../helpers/kyc";
+
+/**
+ * D23: after the handover ops is a GovernanceToken agent (issuance, voter
+ * compliance), but the levers that act ON a holder refuse a trusted
+ * contract. Freezing, burning or recovering governance's VGT would stop
+ * voting or drain the locked fees, and no vote could undo it. The VSC
+ * Token keeps every agent power; governance's own burn(uint256) is intact.
+ */
+describe("GovernanceToken agent limits (D23)", function () {
+  const FEE = ethers.parseEther("10");
+  const PAST_VOTE_AND_DELAY = 9 * 86400 + 60;
+  const REASON = "GovernanceToken: trusted contract";
+  const D = async (name: string, ...args: any[]): Promise<any> =>
+    (await ethers.getContractFactory(name)).deploy(...args);
+
+  async function fixture() {
+    const [owner, proposer, v1, v2, v3, ops, fresh] = await ethers.getSigners();
+    const idReg = await D("IdentityRegistry");
+    const rules = await D("ComplianceRules", owner.address, [840], []);
+    const idAddr = await idReg.getAddress();
+    const rulesAddr = await rules.getAddress();
+    const vgt = await D("GovernanceToken", "VGT", "VGT", idAddr, rulesAddr);
+    const vgtAddr = await vgt.getAddress();
+    const gov = await D(
+      "VanguardGovernance",
+      ...[vgtAddr, idAddr, owner.address, rulesAddr, owner.address, vgtAddr, 1],
+    );
+    const govAddr = await gov.getAddress();
+    await vgt.addAgent(govAddr);
+    await vgt.addAgent(ops.address);
+    await rules.setTokenIdentityRegistry(vgtAddr, idAddr);
+    await rules.addTrustedContract(govAddr);
+
+    const kycIssuer = await D("ClaimIssuer", owner.address, "KYC", "KYC");
+    await configureKyc(idReg, await kycIssuer.getAddress());
+    for (const s of [owner, proposer, v1, v2, v3]) {
+      const id = await (await D("OnchainID", s.address)).getAddress();
+      await idReg.registerIdentity(s.address, id, 840);
+      await attest(kycIssuer, owner, id);
+      if (s !== owner) await vgt.transfer(s.address, ethers.parseEther("100"));
+      await vgt.connect(s).approve(govAddr, ethers.MaxUint256);
+    }
+    await gov
+      .connect(proposer)
+      .createProposal(
+        4,
+        "t",
+        "d",
+        govAddr,
+        gov.interface.encodeFunctionData("proposalCount"),
+      );
+    const pid = await gov.proposalCount();
+    return {
+      owner,
+      v1,
+      v2,
+      v3,
+      ops,
+      fresh,
+      idReg,
+      rules,
+      vgt,
+      gov,
+      govAddr,
+      pid,
+    };
+  }
+
+  it("ops cannot freeze, partially freeze, burn or recover governance", async function () {
+    const { ops, fresh, idReg, vgt, govAddr } = await fixture();
+    expect(await idReg.identity(govAddr)).to.equal(ethers.ZeroAddress);
+    expect(await vgt.balanceOf(govAddr)).to.equal(FEE);
+    const agent = vgt.connect(ops);
+    await expect(agent.setAddressFrozen(govAddr, true)).to.be.revertedWith(
+      REASON,
+    );
+    await expect(agent.freezePartialTokens(govAddr, 1n)).to.be.revertedWith(
+      REASON,
+    );
+    await expect(
+      agent["burn(address,uint256)"](govAddr, 1n),
+    ).to.be.revertedWith(REASON);
+    // Pre-D23 this succeeded: all three identities are zero, so recovery
+    // took the "already moved" branch and sent every locked fee to fresh.
+    await expect(
+      agent.recoveryAddress(govAddr, fresh.address, ethers.ZeroAddress),
+    ).to.be.revertedWith(REASON);
+    expect(await vgt.balanceOf(govAddr)).to.equal(FEE);
+  });
+
+  it("ops keeps every lever on a voter", async function () {
+    const { v1, ops, vgt } = await fixture();
+    const agent = vgt.connect(ops);
+    await agent.setAddressFrozen(v1.address, true);
+    expect(await vgt.isFrozen(v1.address)).to.equal(true);
+    await agent.setAddressFrozen(v1.address, false);
+    expect(await vgt.isFrozen(v1.address)).to.equal(false);
+    await agent.freezePartialTokens(v1.address, 1n);
+    expect(await vgt.frozenTokens(v1.address)).to.equal(1n);
+    const b0 = await vgt.balanceOf(v1.address);
+    await agent["burn(address,uint256)"](v1.address, 1n);
+    expect(await vgt.balanceOf(v1.address)).to.equal(b0 - 1n);
+  });
+
+  it("the VSC Token keeps agent powers over a trusted contract", async function () {
+    const { owner, ops, idReg, rules } = await fixture();
+    const vsc = await D(
+      "Token",
+      ...[
+        "Vanguard",
+        "VSC",
+        await idReg.getAddress(),
+        await rules.getAddress(),
+      ],
+    );
+    await rules.setTokenIdentityRegistry(
+      await vsc.getAddress(),
+      await idReg.getAddress(),
+    );
+    await vsc.addAgent(ops.address);
+    const stub = await (await D("MockToken", "Stub", "STB", 0)).getAddress();
+    await rules.addTrustedContract(stub);
+    await vsc.mint(owner.address, 100n);
+    await vsc.transfer(stub, 100n);
+
+    await vsc.connect(ops).setAddressFrozen(stub, true);
+    expect(await vsc.isFrozen(stub)).to.equal(true);
+    await vsc.connect(ops).setAddressFrozen(stub, false);
+    await vsc.connect(ops).burn(stub, 40n);
+    expect(await vsc.balanceOf(stub)).to.equal(60n);
+  });
+
+  it("a passed proposal still burns governance's locked fees", async function () {
+    const { v1, v2, v3, vgt, gov, govAddr, pid } = await fixture();
+    for (const v of [v1, v2, v3]) await gov.connect(v).castVote(pid, true, "y");
+    expect(await vgt.balanceOf(govAddr)).to.equal(FEE * 4n);
+    const supply0 = await vgt.totalSupply();
+    await ethers.provider.send("evm_increaseTime", [PAST_VOTE_AND_DELAY]);
+    await ethers.provider.send("evm_mine", []);
+    await expect(gov.executeProposal(pid)).to.emit(gov, "ProposalExecuted");
+    expect(await vgt.balanceOf(govAddr)).to.equal(0n);
+    expect(supply0 - (await vgt.totalSupply())).to.equal(FEE * 4n);
+  });
+});
