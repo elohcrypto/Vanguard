@@ -2229,10 +2229,21 @@ class TokenModule {
   async _mintRefusal(digitalToken, to, amountWei) {
     if (await digitalToken.canTransfer(ethers.ZeroAddress, to, amountWei))
       return null;
+    // Same order as Token._checkTransfer: pause first (mint is whenNotPaused).
+    if (await digitalToken.paused()) return "token paused";
     if (await digitalToken.isFrozen(to)) return "recipient frozen";
     const identityRegistry = this.state.getContract("identityRegistry");
     if (!(await identityRegistry.isVerified(to))) return "not verified";
-    const registry = this.state.getContract("investorTypeRegistry");
+    // The registry the token enforces, not the one demo state remembers
+    // (state only when the token ABI has no getter).
+    let registry = this.state.getContract("investorTypeRegistry");
+    if (typeof digitalToken.investorTypeRegistry === "function") {
+      const a = await digitalToken.investorTypeRegistry();
+      registry =
+        a === ethers.ZeroAddress
+          ? null
+          : await ethers.getContractAt("InvestorTypeRegistry", a);
+    }
     const balance = await digitalToken.balanceOf(to);
     if (!registry || (await registry.canHoldAmount(to, balance + amountWei)))
       return "compliance refused (jurisdiction or blacklist)";

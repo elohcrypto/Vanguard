@@ -154,6 +154,43 @@ async function runHandoverSmoke(state, failures) {
       }
     }
   }
+  // No recovery out of or into governance: out of it via the VGT hook,
+  // into it via the base Token check (review M1); the hook runs first.
+  const voter = s[VOTERS[0]].address;
+  const voterId = await c("identityRegistry").identity(voter);
+  const hook = /GovernanceToken: trusted contract/;
+  const either =
+    /GovernanceToken: trusted contract|Token: recovery into trusted contract/;
+  const recoveries = [
+    [
+      "recoveryAddress(governance, fresh)",
+      hook,
+      () =>
+        opsVgt.recoveryAddress.staticCall(
+          govAddr,
+          ethers.Wallet.createRandom().address,
+          ethers.ZeroAddress,
+        ),
+    ],
+    [
+      "recoveryAddress(voter, governance)",
+      either,
+      () => opsVgt.recoveryAddress.staticCall(voter, govAddr, voterId),
+    ],
+  ];
+  for (const [name, refused, call] of recoveries) {
+    try {
+      await call();
+      failures.push(`D23: ops ${name} on VGT succeeded`);
+    } catch (e) {
+      const r = revertOf(e, iface);
+      if (!refused.test(r.reason ?? "") && !refused.test(r.message)) {
+        failures.push(
+          `D23: ops ${name} wrong revert: ${r.message.split("\n")[0]}`,
+        );
+      }
+    }
+  }
   try {
     await opsVgt.setAddressFrozen.staticCall(s[VOTERS[0]].address, true);
   } catch (e) {

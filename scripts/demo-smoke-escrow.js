@@ -64,6 +64,15 @@ async function runEscrowSmoke(state, failures) {
     );
   if (!(await token.canTransfer(ethers.ZeroAddress, payee.address, e("40000"))))
     failures.push("canTransfer(0, untyped, 40000) is false — within the cap");
+  // The mint itself, not only the predicate, refuses above the cap.
+  try {
+    await (await token.mint(payee.address, e("60000"))).wait();
+    failures.push("mint(untyped, 60000) succeeded — mint cap not enforced");
+  } catch (err) {
+    const why = `${err.reason ?? ""} ${err.message}`;
+    if (!/Holding limit exceeded/.test(why))
+      failures.push(`mint above the cap: wrong revert: ${why.slice(0, 120)}`);
+  }
 
   // 2. Escrow on the real token; mirrors /tmp proof of 2E.1.
   const factory = await (

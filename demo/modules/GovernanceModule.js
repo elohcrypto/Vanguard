@@ -939,8 +939,14 @@ class GovernanceModule {
     console.log(
       "2. Exempt or un-exempt a treasury wallet from investor limits (D22)",
     );
-    const action = await this.promptUser("Select action (1-2): ");
-    if (action.trim() === "2") {
+    // Refuse anything but 1 or 2: a fall-through to the limits flow would
+    // consume the next scripted answers as limits.
+    const action = (await this.promptUser("Select action (1-2): ")).trim();
+    if (action !== "1" && action !== "2") {
+      displayError(`Select 1 or 2, got "${action}"`);
+      return;
+    }
+    if (action === "2") {
       await this._createTreasuryExemptionProposal(investorTypeRegistry);
       return;
     }
@@ -1029,7 +1035,13 @@ class GovernanceModule {
     const answer = await this.promptUser(
       "Exempt from investor limits? (y/n): ",
     );
-    const exempt = answer.trim().toLowerCase().startsWith("y");
+    // An explicit y or n: a blank answer must not build an un-exempt vote.
+    const yn = answer.trim().toLowerCase();
+    if (!["y", "yes", "n", "no"].includes(yn)) {
+      displayError(`Answer y or n, got "${answer.trim()}"`);
+      return;
+    }
+    const exempt = yn.startsWith("y");
 
     const title = `${exempt ? "Exempt" : "Un-exempt"} treasury ${wallet} from investor limits`;
     const callData = investorTypeRegistry.interface.encodeFunctionData(

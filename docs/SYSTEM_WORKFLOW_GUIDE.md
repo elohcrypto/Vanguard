@@ -519,7 +519,7 @@ stateDiagram-v2
 
 **1. Deploy the factory (61).** Needs the ERC-3643 token (21). The demo also onboards the platform fee wallet as a verified investor here.
 
-**2. Register the investor (62).** The investor's fee wallet is set at registration and never changes. In the demo, onboard the investor through option 23 (steps 1 to 6) so they hold a multi-sig wallet to receive the fee. A user created through option 24 has no such wallet; the demo falls back to a reserved signer. Either way option 62 onboards the fee wallet as a verified investor, since only contracts can be trusted.
+**2. Register the investor (62).** The investor's fee wallet is set at registration and never changes. In the demo, option 23 (steps 1 to 6) records a placeholder fee address until Task 4.3; no key controls it, so fees sent to it are stranded. A user created through option 24 has none; the demo falls back to a reserved signer. Either way option 62 registers the fee address as a verified identity (only contracts can be trusted), and that identity counts in the governance electorate.
 
 **3. Create the escrow (63).** The investor names the payer (or "Unknown" for a marketplace escrow), the payee, and the amount. The factory checks both known parties are verified, deploys the wallet, and emits `EscrowWalletCreated` with the payment id and wallet address.
 
