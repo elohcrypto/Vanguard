@@ -105,6 +105,38 @@ async function runHandoverSmoke(state, failures) {
 
   const result = await assertHandoverComplete(args);
   for (const f of result.failures) failures.push(`handover: ${f}`);
+
+  // D23: ops is a VGT agent now, but cannot freeze or burn governance's
+  // fees (no vote could undo it). staticCall: nothing changes on chain.
+  const opsVgt = vgt.connect(s[OPS]);
+  const govAddr = await governance.getAddress();
+  const levers = [
+    [
+      "setAddressFrozen",
+      () => opsVgt.setAddressFrozen.staticCall(govAddr, true),
+    ],
+    ["burn", () => opsVgt["burn(address,uint256)"].staticCall(govAddr, 1n)],
+  ];
+  for (const [name, call] of levers) {
+    try {
+      await call();
+      failures.push(`D23: ops ${name}(governance) on VGT succeeded`);
+    } catch (e) {
+      if (!/GovernanceToken: trusted contract/.test(e.message)) {
+        failures.push(
+          `D23: ops ${name}(governance) wrong revert: ${e.message.split("\n")[0]}`,
+        );
+      }
+    }
+  }
+  try {
+    await opsVgt.setAddressFrozen.staticCall(s[VOTERS[0]].address, true);
+  } catch (e) {
+    failures.push(
+      `D23: ops can no longer freeze a voter on VGT: ${e.message.split("\n")[0]}`,
+    );
+  }
+
   if (result.ok) {
     console.log(
       `✅ Handover ceremony: ${result.checks.length} checks pass, the deployer holds no power.`,
