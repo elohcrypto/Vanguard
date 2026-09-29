@@ -139,30 +139,41 @@ async function runHandoverSmoke(state, failures) {
 
   // D24: ops may release a VGT pause but never impose one. VGT is not
   // paused, so unpause must pass the access check and hit ExpectedPause.
+  // ethers v6 error shapes differ by provider: the in-process network puts
+  // the revert hex in e.data, a JSON-RPC node wraps it as { data, message }.
+  const revertHex = (e) =>
+    typeof e.data === "string"
+      ? e.data
+      : typeof e.data?.data === "string"
+        ? e.data.data
+        : typeof e.info?.error?.data === "string"
+          ? e.info.error.data
+          : null;
   try {
     await opsVgt.unpause.staticCall();
     failures.push("D24: ops unpause on an unpaused VGT succeeded");
   } catch (e) {
+    const hex = revertHex(e);
     const name =
       e.revert?.name ??
-      (e.data ? vgt.interface.parseError(e.data)?.name : undefined);
+      (hex ? vgt.interface.parseError(hex)?.name : undefined) ??
+      (/ExpectedPause/.test(e.message) ? "ExpectedPause" : undefined);
     if (name !== "ExpectedPause") {
-      failures.push(
-        `D24: ops cannot unpause VGT: ${e.message.split("\n")[0]}`,
-      );
+      failures.push(`D24: ops cannot unpause VGT: ${e.message.split("\n")[0]}`);
     }
   }
   try {
     await opsVgt.pause.staticCall();
     failures.push("D24: ops can pause VGT");
   } catch (e) {
-    // Hardhat may not put the reason in e.message; decode Error(string).
-    const why = e.data?.startsWith("0x08c379a0")
+    // Decode Error(string) from the revert data when the message lacks it.
+    const hex = revertHex(e);
+    const why = hex?.startsWith("0x08c379a0")
       ? ethers.AbiCoder.defaultAbiCoder().decode(
           ["string"],
-          ethers.dataSlice(e.data, 4),
+          ethers.dataSlice(hex, 4),
         )[0]
-      : e.message;
+      : (e.reason ?? e.message);
     if (!/Token: caller is not owner or guardian/.test(why)) {
       failures.push(`D24: ops pause wrong revert: ${why.split("\n")[0]}`);
     }
