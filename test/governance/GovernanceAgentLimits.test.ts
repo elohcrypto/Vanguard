@@ -15,6 +15,8 @@ describe("GovernanceToken agent limits (D23)", function () {
   const REASON = "GovernanceToken: trusted contract";
   const D = async (name: string, ...args: any[]): Promise<any> =>
     (await ethers.getContractFactory(name)).deploy(...args);
+  const refused = (tx: Promise<unknown>) =>
+    expect(tx).to.be.revertedWith(REASON);
 
   async function fixture() {
     const [owner, proposer, v1, v2, v3, ops, fresh] = await ethers.getSigners();
@@ -53,20 +55,9 @@ describe("GovernanceToken agent limits (D23)", function () {
         gov.interface.encodeFunctionData("proposalCount"),
       );
     const pid = await gov.proposalCount();
-    return {
-      owner,
-      v1,
-      v2,
-      v3,
-      ops,
-      fresh,
-      idReg,
-      rules,
-      vgt,
-      gov,
-      govAddr,
-      pid,
-    };
+    const sig = { owner, v1, v2, v3, ops, fresh };
+    const addrs = { idAddr, rulesAddr, govAddr };
+    return { ...sig, ...addrs, idReg, rules, vgt, gov, pid };
   }
 
   it("ops cannot freeze, partially freeze, burn or recover governance", async function () {
@@ -74,21 +65,43 @@ describe("GovernanceToken agent limits (D23)", function () {
     expect(await idReg.identity(govAddr)).to.equal(ethers.ZeroAddress);
     expect(await vgt.balanceOf(govAddr)).to.equal(FEE);
     const agent = vgt.connect(ops);
-    await expect(agent.setAddressFrozen(govAddr, true)).to.be.revertedWith(
-      REASON,
-    );
-    await expect(agent.freezePartialTokens(govAddr, 1n)).to.be.revertedWith(
-      REASON,
-    );
-    await expect(
-      agent["burn(address,uint256)"](govAddr, 1n),
-    ).to.be.revertedWith(REASON);
+    await refused(agent.setAddressFrozen(govAddr, true));
+    await refused(agent.freezePartialTokens(govAddr, 1n));
+    expect(await vgt.frozenTokens(govAddr)).to.equal(0n);
+    await refused(agent["burn(address,uint256)"](govAddr, 1n));
     // Pre-D23 this succeeded: all three identities are zero, so recovery
     // took the "already moved" branch and sent every locked fee to fresh.
-    await expect(
+    await refused(
       agent.recoveryAddress(govAddr, fresh.address, ethers.ZeroAddress),
-    ).to.be.revertedWith(REASON);
+    );
     expect(await vgt.balanceOf(govAddr)).to.equal(FEE);
+  });
+
+  it("no recovery INTO governance: no freeze, no identity lands on it", async function () {
+    const { v1, ops, fresh, idReg, vgt, govAddr } = await fixture();
+    const agent = vgt.connect(ops);
+    // An unregistered frozen wallet (all-zero identities) and a frozen voter.
+    await agent.setAddressFrozen(fresh.address, true);
+    await agent.setAddressFrozen(v1.address, true);
+    const v1Id = await idReg.identity(v1.address);
+    for (const [from, id] of [
+      [fresh.address, ethers.ZeroAddress],
+      [v1.address, v1Id],
+    ]) {
+      await refused(agent.recoveryAddress(from, govAddr, id));
+    }
+    expect(await vgt.isFrozen(govAddr)).to.equal(false);
+    expect(await idReg.identity(govAddr)).to.equal(ethers.ZeroAddress);
+  });
+
+  it("a contract frozen before it was trusted can still be unfrozen", async function () {
+    const { ops, rules, vgt } = await fixture();
+    const stub = await (await D("MockToken", "Stub", "STB", 0)).getAddress();
+    await vgt.connect(ops).setAddressFrozen(stub, true);
+    await rules.addTrustedContract(stub);
+    await vgt.connect(ops).setAddressFrozen(stub, false);
+    expect(await vgt.isFrozen(stub)).to.equal(false);
+    await refused(vgt.connect(ops).setAddressFrozen(stub, true));
   });
 
   it("ops keeps every lever on a voter", async function () {
@@ -106,20 +119,9 @@ describe("GovernanceToken agent limits (D23)", function () {
   });
 
   it("the VSC Token keeps agent powers over a trusted contract", async function () {
-    const { owner, ops, idReg, rules } = await fixture();
-    const vsc = await D(
-      "Token",
-      ...[
-        "Vanguard",
-        "VSC",
-        await idReg.getAddress(),
-        await rules.getAddress(),
-      ],
-    );
-    await rules.setTokenIdentityRegistry(
-      await vsc.getAddress(),
-      await idReg.getAddress(),
-    );
+    const { owner, ops, idAddr, rulesAddr, rules } = await fixture();
+    const vsc = await D("Token", "Vanguard", "VSC", idAddr, rulesAddr);
+    await rules.setTokenIdentityRegistry(await vsc.getAddress(), idAddr);
     await vsc.addAgent(ops.address);
     const stub = await (await D("MockToken", "Stub", "STB", 0)).getAddress();
     await rules.addTrustedContract(stub);

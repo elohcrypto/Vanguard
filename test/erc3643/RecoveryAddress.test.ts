@@ -290,4 +290,28 @@ describe("recoveryAddress", function () {
       ).to.be.revertedWith("Invalid identity");
     });
   });
+
+  // Review of D23: with onchainID = 0 every identity check compared zeros,
+  // so any never-registered holder took the "already moved" branch and its
+  // whole balance could be sent to any unregistered wallet.
+  it("refuses a zero onchainID: trusted contract and deleted holder", async function () {
+    const stub = await (
+      await (await ethers.getContractFactory("MockToken")).deploy("S", "S", 0)
+    ).getAddress();
+    await rules.addTrustedContract(stub);
+    await token.connect(lost).transfer(stub, E("100"));
+    await token.mint(other.address, E("50"));
+    await idReg.deleteIdentity(other.address);
+
+    for (const [from, bal] of [
+      [stub, E("100")],
+      [other.address, E("50")],
+    ] as const) {
+      await expect(
+        token.recoveryAddress(from, fresh.address, ethers.ZeroAddress),
+      ).to.be.revertedWith("Invalid identity");
+      expect(await token.balanceOf(from)).to.equal(bal);
+    }
+    expect(await token.balanceOf(fresh.address)).to.equal(0n);
+  });
 });

@@ -107,7 +107,9 @@ contract Token is IERC3643, ERC20, Ownable2Step, Pausable {
     }
 
     function setAddressFrozen(address _userAddress, bool _freeze) external override onlyAgent {
-        _checkAgentTarget(_userAddress);
+        // Unfreezing is always allowed, so a target frozen by any route can
+        // be released.
+        if (_freeze) _checkAgentTarget(_userAddress);
         _frozen[_userAddress] = _freeze;
         emit AddressFrozen(_userAddress, _freeze, msg.sender);
     }
@@ -208,6 +210,11 @@ contract Token is IERC3643, ERC20, Ownable2Step, Pausable {
         address _investorOnchainID
     ) external override onlyAgent whenNotPaused returns (bool) {
         _checkAgentTarget(_lostWallet);
+        _checkAgentTarget(_newWallet);
+        // A recovery relocates an identity. A never-registered wallet has
+        // none, and the all-zero case below would take the "already moved"
+        // branch and move its whole balance to any unregistered wallet.
+        require(_investorOnchainID != address(0), "Invalid identity");
         // The registry is shared by every token, so a sibling token's recovery
         // may already have moved this person's identity to the new wallet.
         // Requiring identity(lost) == onchainID here made every token after the

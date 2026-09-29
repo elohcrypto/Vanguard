@@ -172,8 +172,8 @@ contract GovernanceToken is Token {
     }
     
     // D23: ops keeps the agent role (issuance, voter compliance) but cannot
-    // freeze, burn or recover the VGT of a trusted contract such as
-    // governance. Each would stop voting or drain locked fees, and no vote
+    // freeze, partially freeze, burn or recover the VGT of a trusted
+    // contract such as governance, nor recover a wallet into it. Each would stop voting or drain locked fees, and no vote
     // could undo it because voting itself would be blocked.
     function _checkAgentTarget(address target) internal view override {
         require(!_compliance.isTrustedContract(target), "GovernanceToken: trusted contract");
