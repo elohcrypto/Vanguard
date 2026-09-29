@@ -109,7 +109,8 @@ async function handoverDeployerPowers(o) {
     await apply(
       o.governanceToken.connect(d).setGuardian(ethers.ZeroAddress),
       async () => same(await o.governanceToken.guardian(), ethers.ZeroAddress),
-      "VGT guardian cleared: none may pause the vote token",
+      "VGT guardian cleared: no guardian may pause the vote token; " +
+        "a VGT pause blocks every vote until ops or a pre-voted unpause releases it",
     );
   }
   await apply(

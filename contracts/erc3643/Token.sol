@@ -349,9 +349,10 @@ contract Token is IERC3643, ERC20, Ownable2Step, Pausable {
         return address(_investorTypeRegistry);
     }
 
-    // Agent management. Agents mint, burn, freeze and pause, so every change
-    // is on the log; a monitor that cannot see agent changes cannot audit
-    // supply. Not part of IERC3643, so the events are declared here.
+    // Agent management. Agents mint, burn and freeze (and, on VGT, release a
+    // pause), so every change is on the log; a monitor that cannot see agent
+    // changes cannot audit supply. Not part of IERC3643, so the events are
+    // declared here.
     event AgentAdded(address indexed agent);
     event AgentRemoved(address indexed agent);
     error ZeroAgent();

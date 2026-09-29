@@ -67,7 +67,11 @@ governance's VGT (D23). Ops can still stop voting reversibly through
 voter-side powers: freezing or burning voters' VGT, deleting voter identities,
 or revoking claims as issuer owner. A VGT pause is released by ops (VGT
 agent) with one transaction and no vote, or by an unpause proposal passed
-before the pause; ops cannot pause (D24).
+before the pause; ops cannot pause (D24). A governance pause is therefore
+advisory against ops, which can release it at once; a pause meant to hold
+against ops must be preceded by `removeAgent(ops)` in the same pre-voted
+batch, and is then terminal again (governance is the only agent left and can
+act only by vote).
 
 ## Handover ceremony
 
@@ -101,8 +105,9 @@ on an issuer, and no ops key on it that is revoked or of another purpose
 deployer or ops, and an ops-owned oracle whose `listManager` is still the
 deployer fails, because only ops can clear it.
 Two hazards are fixed rather than only reported: step 1 clears any VGT
-guardian ("VGT guardian cleared: none may pause the vote token"; a VGT pause
-blocks every vote), and step 2 moves an oracle's `listManager` off the
+guardian ("VGT guardian cleared: no guardian may pause the vote token; a VGT
+pause blocks every vote until ops or a pre-voted unpause releases it"), and
+step 2 moves an oracle's `listManager` off the
 deployer to the DynamicListManager, or to zero when there is none.
 83e also checks: GovernanceToken has no guardian, no oracle's `listManager`
 is the deployer, the deployer is not an InvestorTypeRegistry governor or a

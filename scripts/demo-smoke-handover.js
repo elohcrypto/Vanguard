@@ -27,6 +27,27 @@ const PROPOSER = 1;
 // votes clear every quorum in the plan (TokenParameters is 30%).
 const VOTERS = [2, 3, 6, 7, 8];
 
+// ethers v6 error shapes differ by provider: the in-process network puts
+// the revert hex in e.data, a JSON-RPC node wraps it as { data, message }.
+// parseError decodes both custom errors and Error(string).
+function revertOf(e, iface) {
+  const data = [e.data, e.data?.data, e.error?.data, e.info?.error?.data].find(
+    (d) => typeof d === "string" && d.length >= 10,
+  );
+  let p = null;
+  try {
+    p = data ? iface.parseError(data) : null;
+  } catch {}
+  return {
+    name: e.revert?.name ?? p?.name,
+    reason:
+      e.revert?.args?.[0] ??
+      e.reason ??
+      (p?.name === "Error" ? p.args[0] : undefined),
+    message: e.message ?? "",
+  };
+}
+
 async function runHandoverSmoke(state, failures) {
   const s = state.signers;
   const c = (k) => state.getContract(k);
@@ -110,6 +131,7 @@ async function runHandoverSmoke(state, failures) {
   // fees (no vote could undo it). staticCall: nothing changes on chain.
   const opsVgt = vgt.connect(s[OPS]);
   const govAddr = await governance.getAddress();
+  const iface = vgt.interface;
   const levers = [
     [
       "setAddressFrozen",
@@ -122,9 +144,11 @@ async function runHandoverSmoke(state, failures) {
       await call();
       failures.push(`D23: ops ${name}(governance) on VGT succeeded`);
     } catch (e) {
-      if (!/GovernanceToken: trusted contract/.test(e.message)) {
+      const r = revertOf(e, iface);
+      const trusted = /GovernanceToken: trusted contract/;
+      if (!trusted.test(r.reason ?? "") && !trusted.test(r.message)) {
         failures.push(
-          `D23: ops ${name}(governance) wrong revert: ${e.message.split("\n")[0]}`,
+          `D23: ops ${name}(governance) wrong revert: ${r.message.split("\n")[0]}`,
         );
       }
     }
@@ -139,41 +163,21 @@ async function runHandoverSmoke(state, failures) {
 
   // D24: ops may release a VGT pause but never impose one. VGT is not
   // paused, so unpause must pass the access check and hit ExpectedPause.
-  // ethers v6 error shapes differ by provider: the in-process network puts
-  // the revert hex in e.data, a JSON-RPC node wraps it as { data, message }.
-  const revertHex = (e) =>
-    typeof e.data === "string"
-      ? e.data
-      : typeof e.data?.data === "string"
-        ? e.data.data
-        : typeof e.info?.error?.data === "string"
-          ? e.info.error.data
-          : null;
   try {
     await opsVgt.unpause.staticCall();
     failures.push("D24: ops unpause on an unpaused VGT succeeded");
   } catch (e) {
-    const hex = revertHex(e);
-    const name =
-      e.revert?.name ??
-      (hex ? vgt.interface.parseError(hex)?.name : undefined) ??
-      (/ExpectedPause/.test(e.message) ? "ExpectedPause" : undefined);
-    if (name !== "ExpectedPause") {
-      failures.push(`D24: ops cannot unpause VGT: ${e.message.split("\n")[0]}`);
+    const r = revertOf(e, iface);
+    if (r.name !== "ExpectedPause" && !/ExpectedPause/.test(r.message)) {
+      failures.push(`D24: ops cannot unpause VGT: ${r.message.split("\n")[0]}`);
     }
   }
   try {
     await opsVgt.pause.staticCall();
     failures.push("D24: ops can pause VGT");
   } catch (e) {
-    // Decode Error(string) from the revert data when the message lacks it.
-    const hex = revertHex(e);
-    const why = hex?.startsWith("0x08c379a0")
-      ? ethers.AbiCoder.defaultAbiCoder().decode(
-          ["string"],
-          ethers.dataSlice(hex, 4),
-        )[0]
-      : (e.reason ?? e.message);
+    const r = revertOf(e, iface);
+    const why = r.reason ?? r.message;
     if (!/Token: caller is not owner or guardian/.test(why)) {
       failures.push(`D24: ops pause wrong revert: ${why.split("\n")[0]}`);
     }

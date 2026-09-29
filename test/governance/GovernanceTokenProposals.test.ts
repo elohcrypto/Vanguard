@@ -233,23 +233,46 @@ describe("GovernanceToken is governable by proposal", function () {
     }
 
     it("ops unpauses with no pre-voted unpause; voting and refunds resume", async function () {
+      const propose = async () => {
+        await gov
+          .connect(alice)
+          .createProposal(
+            T.GovernanceTokenParameters,
+            "t",
+            "d",
+            vgtAddr,
+            call("removeAgent", [stranger.address]),
+          );
+        return Number(await gov.proposalCount());
+      };
+      // Settled (Rejected) before the pause: its refunds are due.
+      const doneId = await propose();
+      await gov.connect(bob).castVote(doneId, false, "");
+      await passDelay(doneId);
+      await gov.executeProposal(doneId);
+
       const pauseId = await pauseByVote();
-      // Open for voting when the pause lands.
-      await gov
-        .connect(alice)
-        .createProposal(
-          T.GovernanceTokenParameters,
-          "t",
-          "d",
-          vgtAddr,
-          call("removeAgent", [stranger.address]),
-        );
-      const openId = Number(await gov.proposalCount());
+      // Still open for voting when the pause lands.
+      const openId = await propose();
 
       await execute(pauseId);
       expect(await vgt.paused()).to.equal(true);
       await expect(
         gov.connect(bob).castVote(openId, false, ""),
+      ).to.be.revertedWithCustomError(vgt, "EnforcedPause");
+      await expect(
+        gov.connect(alice).claimRefund(doneId),
+      ).to.be.revertedWithCustomError(vgt, "EnforcedPause");
+
+      // The open proposal's vote ends during the pause, starved of votes;
+      // settlement makes no VGT transfer, so it still settles Rejected.
+      await passDelay(openId);
+      await gov.executeProposal(openId);
+      const [op] = await gov.getProposal(openId);
+      expect(S[Number(op.status)]).to.equal("Rejected");
+      expect(op.votesFor + op.votesAgainst).to.equal(0n);
+      await expect(
+        gov.connect(alice).claimRefund(openId),
       ).to.be.revertedWithCustomError(vgt, "EnforcedPause");
 
       await vgt.connect(ops).unpause();
@@ -264,18 +287,16 @@ describe("GovernanceToken is governable by proposal", function () {
       const [np] = await gov.getProposal(newId);
       expect(np.votesFor).to.equal(2n);
 
-      // The proposal open during the pause is voted down and settles.
-      await gov.connect(bob).castVote(openId, false, "");
-      await passDelay(openId);
-      await gov.executeProposal(openId);
-      const [op] = await gov.getProposal(openId);
-      expect(S[Number(op.status)]).to.equal("Rejected");
-
-      for (const w of [alice, bob]) {
-        const due = await gov.getClaimableRefund(openId, w.address);
+      const claims: [number, SignerWithAddress][] = [
+        [doneId, alice],
+        [doneId, bob],
+        [openId, alice],
+      ];
+      for (const [id, w] of claims) {
+        const due = await gov.getClaimableRefund(id, w.address);
         expect(due).to.be.gt(0n);
         const before = await vgt.balanceOf(w.address);
-        await gov.connect(w).claimRefund(openId);
+        await gov.connect(w).claimRefund(id);
         expect(await vgt.balanceOf(w.address)).to.equal(before + due);
       }
     });
