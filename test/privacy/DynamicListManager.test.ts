@@ -415,6 +415,59 @@ describe("DynamicListManager writes the oracles", function () {
         exp,
       );
     });
+
+    it("an emergency listing never shortens a finite longer entry (M7)", async function () {
+      const { dlm, user, bl, stranger } = await withEmergencyOracle();
+      await dlm.addToBlacklist(user.address, 1, HIGH, 30 * 86400, "voted");
+      const voted = (await bl.blacklistEntries(user.address)).expiryTime;
+      await bl
+        .connect(stranger)
+        .emergencyBlacklist(user.address, CRITICAL, "e");
+      expect((await bl.blacklistEntries(user.address)).expiryTime).to.equal(
+        voted,
+      );
+      await advance(8 * 86400);
+      expect(await bl.isBlacklisted(user.address)).to.equal(true);
+    });
+
+    it("a lapsed blacklist entry can be removed and clears the identity (A-N1)", async function () {
+      const { dlm, user, bl } = await wired();
+      await dlm.addToBlacklist(user.address, 5, HIGH, HOUR, "b");
+      await advance(HOUR + 1);
+      expect(await bl.isBlacklisted(user.address)).to.equal(false);
+      expect(await dlm.getIdentityStatus(5)).to.equal(BLACKLISTED);
+      await expect(dlm.removeFromBlacklist(user.address, 5, "lapsed"))
+        .to.emit(dlm, "UserStatusChanged")
+        .withArgs(user.address, 5, BLACKLISTED, NONE, "lapsed");
+      expect(await dlm.getIdentityStatus(5)).to.equal(NONE);
+      const now = (await ethers.provider.getBlock("latest"))!.timestamp;
+      expect(await dlm.isProofValid(5, now, false)).to.equal(true);
+      // The oracle's stale flag is cleared too.
+      expect((await bl.blacklistEntries(user.address)).isBlacklisted).to.equal(
+        false,
+      );
+      // Nothing left to remove: the second call is refused.
+      await expect(
+        dlm.removeFromBlacklist(user.address, 5, "again"),
+      ).to.be.revertedWith("User not blacklisted");
+    });
+
+    it("a lapsed whitelist entry can be removed and clears the identity", async function () {
+      const { dlm, user, wl } = await wired();
+      await dlm.addToWhitelist(user.address, 6, 1, HOUR, "w");
+      await advance(HOUR + 1);
+      expect(await dlm.getIdentityStatus(6)).to.equal(WHITELISTED);
+      await dlm.removeFromWhitelist(user.address, 6, "lapsed");
+      expect(await dlm.getIdentityStatus(6)).to.equal(NONE);
+      const now = (await ethers.provider.getBlock("latest"))!.timestamp;
+      expect(await dlm.isProofValid(6, now, true)).to.equal(false);
+      expect((await wl.whitelistEntries(user.address)).isWhitelisted).to.equal(
+        false,
+      );
+      await expect(
+        dlm.removeFromWhitelist(user.address, 6, "again"),
+      ).to.be.revertedWith("User not whitelisted");
+    });
   });
 
   it("ownership is two-step (Ownable2Step)", async function () {

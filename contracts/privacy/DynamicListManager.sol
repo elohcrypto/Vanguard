@@ -246,11 +246,18 @@ contract DynamicListManager is Ownable2Step {
     ) external onlyOwnerOrGovernance {
         require(user != address(0), "Invalid user address");
         _requireOracles();
-        require(blacklistOracle.isBlacklisted(user), "User not blacklisted");
+        // A lapsed entry is no longer listed by the oracle but still marks the
+        // identity BLACKLISTED here (isProofValid false): accept it and clear
+        // the status (and the oracle's stale flag, if one is stored).
+        bool listed = blacklistOracle.isBlacklisted(user);
+        require(listed || identityStatus[identity] == UserStatus.BLACKLISTED, "User not blacklisted");
 
         UserStatus newStatus = whitelistOracle.isWhitelisted(user) ? UserStatus.WHITELISTED : UserStatus.NONE;
         _setStatus(user, identity, UserStatus.BLACKLISTED, newStatus, reason);
-        blacklistOracle.removeFromBlacklist(user, reason);
+        if (listed) blacklistOracle.removeFromBlacklist(user, reason);
+        // A lapsed entry keeps its stored flag in the oracle; clear it too.
+        // The oracle reverts only when no flag is stored, which is fine here.
+        else try blacklistOracle.removeFromBlacklist(user, reason) {} catch {}
     }
 
     /**
@@ -266,12 +273,18 @@ contract DynamicListManager is Ownable2Step {
     ) external onlyOwnerOrGovernance {
         require(user != address(0), "Invalid user address");
         _requireOracles();
-        require(whitelistOracle.isWhitelisted(user), "User not whitelisted");
+        // Same shape as removeFromBlacklist: a lapsed entry still marks the
+        // identity WHITELISTED here (isProofValid true) and must be clearable.
+        bool listed = whitelistOracle.isWhitelisted(user);
+        require(listed || identityStatus[identity] == UserStatus.WHITELISTED, "User not whitelisted");
 
         UserStatus oldStatus = getUserStatus(user);
         UserStatus newStatus = oldStatus == UserStatus.BLACKLISTED ? UserStatus.BLACKLISTED : UserStatus.NONE;
         _setStatus(user, identity, oldStatus, newStatus, reason);
-        whitelistOracle.removeFromWhitelist(user, reason);
+        if (listed) whitelistOracle.removeFromWhitelist(user, reason);
+        // A lapsed entry keeps its stored flag in the oracle; clear it too.
+        // The oracle reverts only when no flag is stored, which is fine here.
+        else try whitelistOracle.removeFromWhitelist(user, reason) {} catch {}
     }
 
     /// @dev Identity status, history and event for one change.

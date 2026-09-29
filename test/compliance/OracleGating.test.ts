@@ -257,11 +257,8 @@ describe("Oracle gating in ComplianceRules", function () {
         await ethers.getContractFactory("MockToken")
       ).deploy("T", "T", 0);
       const tAddr = await trusted.getAddress();
+      // A trusted contract has no identity (governance, escrow wallets).
       await rules.addTrustedContract(tAddr);
-      const id = await (
-        await ethers.getContractFactory("OnchainID")
-      ).deploy(owner.address);
-      await idReg.registerIdentity(tAddr, await id.getAddress(), 840);
     });
 
     it("a blacklisted sender cannot transfer TO a trusted contract", async function () {
@@ -295,11 +292,8 @@ describe("Oracle gating in ComplianceRules", function () {
         await ethers.getContractFactory("MockToken")
       ).deploy("T", "T", 0);
       const tAddr = await trusted.getAddress();
+      // A trusted contract has no identity (governance, escrow wallets).
       await rules.addTrustedContract(tAddr);
-      const id = await (
-        await ethers.getContractFactory("OnchainID")
-      ).deploy(owner.address);
-      await idReg.registerIdentity(tAddr, await id.getAddress(), 840);
     });
 
     it("an unlisted sender cannot transfer TO a trusted contract", async function () {
@@ -313,6 +307,48 @@ describe("Oracle gating in ComplianceRules", function () {
       await expect(
         token.connect(alice).transfer(await trusted.getAddress(), E(10)),
       ).to.not.be.reverted;
+    });
+
+    // The trusted contract as SENDER: an escrow paying out must not reach an
+    // unlisted investor (M8), and contract-to-contract moves are exempt.
+    async function asTrusted(): Promise<any> {
+      const tAddr = await trusted.getAddress();
+      // Fund it through a listed alice, then take alice off the list.
+      await wl.addToWhitelist(alice.address, 1, 0, "kyc");
+      await token.connect(alice).transfer(tAddr, E(10));
+      await wl.removeFromWhitelist(alice.address, "off");
+      await ethers.provider.send("hardhat_impersonateAccount", [tAddr]);
+      await ethers.provider.send("hardhat_setBalance", [
+        tAddr,
+        "0xDE0B6B3A7640000",
+      ]);
+      return ethers.getSigner(tAddr);
+    }
+    afterEach(async function () {
+      await ethers.provider.send("hardhat_stopImpersonatingAccount", [
+        await trusted.getAddress(),
+      ]);
+    });
+
+    it("a trusted contract cannot pay an unlisted investor", async function () {
+      const t = await asTrusted();
+      await expect(
+        token.connect(t).transfer(alice.address, E(1)),
+      ).to.be.revertedWith("Compliance check failed");
+      await wl.addToWhitelist(alice.address, 1, 0, "kyc");
+      await expect(token.connect(t).transfer(alice.address, E(1))).to.not.be
+        .reverted;
+      expect(await token.balanceOf(alice.address)).to.equal(E(991));
+    });
+
+    it("trusted to trusted needs no listing (both parties exempt)", async function () {
+      const t = await asTrusted();
+      const other = await (
+        await ethers.getContractFactory("MockToken")
+      ).deploy("U", "U", 0);
+      await rules.addTrustedContract(await other.getAddress());
+      await token.connect(t).transfer(await other.getAddress(), E(4));
+      expect(await token.balanceOf(await other.getAddress())).to.equal(E(4));
     });
   });
 

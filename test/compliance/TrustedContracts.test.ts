@@ -77,6 +77,12 @@ describe("Trusted contracts must be contracts", function () {
     escrow2 = await deployStub();
   });
 
+  // The 7702 test plants code on a shared signer; clear it even when that
+  // test fails midway, or it leaks into every later suite using the signer.
+  afterEach(async function () {
+    await network.provider.send("hardhat_setCode", [wallet.address, "0x"]);
+  });
+
   it("refuses a wallet", async function () {
     await expect(rules.addTrustedContract(wallet.address)).to.be.revertedWith(
       "ComplianceRules: not a contract",
@@ -96,7 +102,6 @@ describe("Trusted contracts must be contracts", function () {
     // A real contract still passes.
     await rules.addTrustedContract(escrow);
     expect(await rules.isTrustedContract(escrow)).to.equal(true);
-    await network.provider.send("hardhat_setCode", [wallet.address, "0x"]);
   });
 
   it("accepts a deployed contract", async function () {

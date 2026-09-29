@@ -5,6 +5,10 @@ import { ComplianceRules } from "../../typechain-types";
 import { attest, configureKyc } from "../helpers/kyc";
 
 describe("ComplianceRules", function () {
+  // Chain time, not wall-clock time: the two drift apart once any earlier
+  // test advances the clock, and a holding period compared across them flakes.
+  const chainNow = async () =>
+    (await ethers.provider.getBlock("latest"))!.timestamp;
   let complianceRules: ComplianceRules;
   let owner: SignerWithAddress;
   let admin: SignerWithAddress;
@@ -319,7 +323,7 @@ describe("ComplianceRules", function () {
         .connect(admin)
         .setHoldingPeriodRule(tokenContract.address, holdingPeriod, 0);
 
-      const acquisitionTime = Math.floor(Date.now() / 1000) - holdingPeriod - 1; // Just over 24 hours ago
+      const acquisitionTime = (await chainNow()) - holdingPeriod - 1; // Just over 24 hours ago
 
       const [isValid, reason] = await complianceRules.validateHoldingPeriod(
         tokenContract.address,
@@ -356,7 +360,7 @@ describe("ComplianceRules", function () {
           tokenContract.address,
           investor1.address,
           investor2.address,
-          Math.floor(Date.now() / 1000),
+          await chainNow(),
         );
       // No revert means success
     });
@@ -368,7 +372,7 @@ describe("ComplianceRules", function () {
           user.address, // This token is not authorized
           investor1.address,
           investor2.address,
-          Math.floor(Date.now() / 1000),
+          await chainNow(),
         ),
       ).to.be.revertedWith("ComplianceRules: Token not authorized");
     });
@@ -490,7 +494,7 @@ describe("ComplianceRules", function () {
       expect(isValidInvestorType).to.be.true;
 
       // Should use default holding period rule
-      const oldAcquisitionTime = Math.floor(Date.now() / 1000) - 25 * 60 * 60; // 25 hours ago
+      const oldAcquisitionTime = (await chainNow()) - 25 * 60 * 60; // 25 hours ago
       const [isValidHolding] = await complianceRules.validateHoldingPeriod(
         unknownToken,
         investor1.address,

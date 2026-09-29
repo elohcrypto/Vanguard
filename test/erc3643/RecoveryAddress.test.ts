@@ -314,4 +314,20 @@ describe("recoveryAddress", function () {
     }
     expect(await token.balanceOf(fresh.address)).to.equal(0n);
   });
+
+  it("refuses a trusted contract as the new wallet (M1)", async function () {
+    // A trusted contract has no identity, so every identity check passes;
+    // the recovery would move the investor's identity onto the contract.
+    const stub = await (
+      await (await ethers.getContractFactory("MockToken")).deploy("S", "S", 0)
+    ).getAddress();
+    await rules.addTrustedContract(stub);
+    await expect(
+      token.recoveryAddress(lost.address, stub, lostId),
+    ).to.be.revertedWith("Token: recovery into trusted contract");
+    expect(await idReg.identity(lost.address)).to.equal(lostId);
+    expect(await idReg.identity(stub)).to.equal(ethers.ZeroAddress);
+    expect(await token.balanceOf(lost.address)).to.equal(E("1000"));
+    expect(await token.balanceOf(stub)).to.equal(0n);
+  });
 });

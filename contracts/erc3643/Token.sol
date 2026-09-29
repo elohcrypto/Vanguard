@@ -148,6 +148,8 @@ contract Token is IERC3643, ERC20, Ownable2Step, Pausable {
         address _to,
         uint256 _amount
     ) internal view returns (bool ok, string memory reason) {
+        // mint and transfer are whenNotPaused; the predicate must agree.
+        if (paused()) return (false, "Token paused");
         if (_from == address(0)) {
             // Minting case: freeze, identity, compliance, recipient holding cap
             if (_frozen[_to]) return (false, "Recipient frozen");
@@ -211,6 +213,10 @@ contract Token is IERC3643, ERC20, Ownable2Step, Pausable {
     ) external override onlyAgent whenNotPaused returns (bool) {
         _checkAgentTarget(_lostWallet);
         _checkAgentTarget(_newWallet);
+        // A trusted contract (governance, escrow) has no identity, so the
+        // checks below would accept it and move the investor's identity and
+        // balance onto it in the shared registry.
+        require(!_compliance.isTrustedContract(_newWallet), "Token: recovery into trusted contract");
         // A recovery relocates an identity. A never-registered wallet has
         // none, and the all-zero case below would take the "already moved"
         // branch and move its whole balance to any unregistered wallet.

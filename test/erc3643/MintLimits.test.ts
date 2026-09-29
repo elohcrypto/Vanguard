@@ -127,4 +127,19 @@ describe("Token.mint investor limits (2E.3)", function () {
     await token.setAddressFrozen(investor.address, true);
     await agree(investor.address, 1n, "Recipient frozen");
   });
+
+  it("a paused token: canTransfer is false and mint reverts (L3)", async function () {
+    const { investor, token } = await deploy();
+    await token.pause();
+    // whenNotPaused runs before the shared check, so mint reverts with the
+    // modifier's error; the predicate must still say no.
+    expect(await token.canTransfer(ethers.ZeroAddress, investor.address, 1n)).to
+      .be.false;
+    await expect(
+      token.mint(investor.address, 1n),
+    ).to.be.revertedWithCustomError(token, "EnforcedPause");
+    await token.unpause();
+    expect(await token.canTransfer(ethers.ZeroAddress, investor.address, 1n)).to
+      .be.true;
+  });
 });

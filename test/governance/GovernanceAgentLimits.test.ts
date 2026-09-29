@@ -146,4 +146,20 @@ describe("GovernanceToken agent limits (D23)", function () {
     expect(await vgt.balanceOf(govAddr)).to.equal(0n);
     expect(supply0 - (await vgt.totalSupply())).to.equal(FEE * 4n);
   });
+
+  it("VSC refuses recovery of a voter into governance (P1)", async function () {
+    const { v1, ops, idAddr, rulesAddr, rules, idReg, govAddr } =
+      await fixture();
+    const vsc = await D("Token", "Vanguard", "VSC", idAddr, rulesAddr);
+    await rules.setTokenIdentityRegistry(await vsc.getAddress(), idAddr);
+    await vsc.addAgent(ops.address);
+    await vsc.mint(v1.address, 100n);
+    const v1Id = await idReg.identity(v1.address);
+    await expect(
+      vsc.connect(ops).recoveryAddress(v1.address, govAddr, v1Id),
+    ).to.be.revertedWith("Token: recovery into trusted contract");
+    expect(await idReg.identity(v1.address)).to.equal(v1Id);
+    expect(await idReg.identity(govAddr)).to.equal(ethers.ZeroAddress);
+    expect(await vsc.balanceOf(v1.address)).to.equal(100n);
+  });
 });
