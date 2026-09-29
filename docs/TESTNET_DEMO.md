@@ -107,8 +107,10 @@ deployer fails, because only ops can clear it. It also refuses a guardian
 or ops that is the deployer or governance, a paused VGT (every acceptance
 vote would revert), and a blacklist oracle bound to VGT. Never bind a
 blacklist oracle to VGT (D23): a listed governance halts every fee flow.
-An `investorTypeRegistry` governance is not bound to is left out of the
-ceremony with a warning (83b hands it over later).
+An `investorTypeRegistry` governance is not bound to is left out with a
+warning only when the Token does not enforce it; if the Token does, preflight
+refuses (redeploy governance after the registry, or point the Token at the
+bound one), and 83e keeps a line for any registry left out.
 Two hazards are fixed rather than only reported: step 1 clears any VGT
 guardian ("VGT guardian cleared: no guardian may pause the vote token; a VGT
 pause blocks every vote until ops or a pre-voted unpause releases it"), and

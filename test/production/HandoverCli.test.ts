@@ -114,4 +114,50 @@ describe("Handover CLI (scripts/handover.ts)", function () {
       /voter .* holds 0\.0+1 free VGT; 8 proposal\(s\) need 80\.0/,
     );
   });
+
+  /** runHandover(cfg, phase) rejects with `msg`; the deployer sends nothing. */
+  async function refusedWithNoTx(phase: string, msg: RegExp) {
+    const nonce = await ethers.provider.getTransactionCount(f.deployer.address);
+    await expect(runHandover(cfg, phase)).to.be.rejectedWith(msg);
+    expect(
+      await ethers.provider.getTransactionCount(f.deployer.address),
+    ).to.equal(nonce);
+  }
+
+  it("refuses the accept phase when step 1 never ran (L-A)", async function () {
+    await refusedWithNoTx(
+      "accept",
+      /accept phase: governance is not nominated on Token, GovernanceToken/,
+    );
+  });
+
+  it("refuses the accept phase naming the contracts not nominated", async function () {
+    await f.c.token.transferOwnership(f.govAddr);
+    await refusedWithNoTx(
+      "accept",
+      /not nominated on GovernanceToken, IdentityRegistry, ComplianceRules, OracleManager, DynamicListManager, InvestorTypeRegistry, VanguardGovernance;/,
+    );
+  });
+
+  it("refuses a duplicate voter (L-B)", async function () {
+    cfg.voters = [5, 6, 5];
+    await refusedWithNoTx("full", /voter 0x[0-9a-fA-F]+ is listed twice/);
+  });
+
+  it("refuses too few voters for the highest quorum in the plan (L-B)", async function () {
+    // Four registered identities: one vote is 25%, under TokenParameters' 30%.
+    const id = await (
+      await ethers.getContractFactory("OnchainID")
+    ).deploy(f.stranger.address);
+    await f.c.identityRegistry.registerIdentity(
+      f.stranger.address,
+      await id.getAddress(),
+      840,
+    );
+    cfg.voters = [5];
+    await refusedWithNoTx(
+      "full",
+      /1 voter\(s\) cannot reach the TokenParameters quorum \(30% of 4 registered identities\)/,
+    );
+  });
 });

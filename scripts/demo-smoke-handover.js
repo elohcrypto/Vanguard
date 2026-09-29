@@ -154,16 +154,16 @@ async function runHandoverSmoke(state, failures) {
       }
     }
   }
-  // No recovery out of or into governance: out of it via the VGT hook,
-  // into it via the base Token check (review M1); the hook runs first.
+  // No recovery out of or into governance. On VGT the D23 hook refuses
+  // both (it checks the lost and the new wallet before anything else); on
+  // VSC, which has no hook, the base check refuses the new wallet (M1).
   const voter = s[VOTERS[0]].address;
   const voterId = await c("identityRegistry").identity(voter);
   const hook = /GovernanceToken: trusted contract/;
-  const either =
-    /GovernanceToken: trusted contract|Token: recovery into trusted contract/;
+  const opsVsc = c("digitalToken").connect(s[OPS]);
   const recoveries = [
     [
-      "recoveryAddress(governance, fresh)",
+      "VGT recoveryAddress(governance, fresh)",
       hook,
       () =>
         opsVgt.recoveryAddress.staticCall(
@@ -173,15 +173,20 @@ async function runHandoverSmoke(state, failures) {
         ),
     ],
     [
-      "recoveryAddress(voter, governance)",
-      either,
+      "VGT recoveryAddress(voter, governance)",
+      hook,
       () => opsVgt.recoveryAddress.staticCall(voter, govAddr, voterId),
+    ],
+    [
+      "VSC recoveryAddress(voter, governance)",
+      /^Token: recovery into trusted contract$/,
+      () => opsVsc.recoveryAddress.staticCall(voter, govAddr, voterId),
     ],
   ];
   for (const [name, refused, call] of recoveries) {
     try {
       await call();
-      failures.push(`D23: ops ${name} on VGT succeeded`);
+      failures.push(`D23: ops ${name} succeeded`);
     } catch (e) {
       const r = revertOf(e, iface);
       if (!refused.test(r.reason ?? "") && !refused.test(r.message)) {

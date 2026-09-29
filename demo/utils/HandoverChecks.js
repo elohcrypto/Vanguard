@@ -93,8 +93,9 @@ async function listManagerOf(oracle) {
 /**
  * The optional InvestorTypeRegistry takes part only when governance is bound
  * to it (boundTarget(0)); otherwise its acceptance vote could never be
- * proposed. Returns `o` without it (warning once via `log`) in that case;
- * option 83b hands it over later.
+ * proposed. Returns `o` without it, recorded as `skippedRegistry` (warning
+ * once via `log`). Preflight refuses the skip when the Token enforces that
+ * registry; the completion check keeps a line for it.
  */
 async function withBoundRegistry(o, log) {
   const reg = o.investorTypeRegistry;
@@ -103,11 +104,15 @@ async function withBoundRegistry(o, log) {
   if (same(await o.governance.boundTarget(0), a)) return o;
   if (log) {
     log(
-      `   ⚠️  governance is not bound to InvestorTypeRegistry (${a}): left out of this handover; option 83b hands it over later`,
+      `   ⚠️  governance is not bound to InvestorTypeRegistry (${a}): left out of this handover (no vote can target it)`,
     );
   }
-  return { ...o, investorTypeRegistry: undefined };
+  return { ...o, investorTypeRegistry: undefined, skippedRegistry: reg };
 }
+
+/** True when the Token enforces `reg` (its investorTypeRegistry()). */
+const liveOnToken = async (o, reg) =>
+  same(await o.token.investorTypeRegistry(), await addrOf(reg));
 
 /**
  * Every precondition, read-only, before the ceremony's first transaction
@@ -121,6 +126,14 @@ async function preflight(o, { acceptOnly = false } = {}) {
   const guardian = await addrOf(o.guardian);
   const govAddr = await addrOf(o.governance);
   const opsSigns = typeof o.ops.signMessage === "function";
+  // A skipped registry the Token enforces would stay the deployer's: the
+  // report would say "no power" while the deployer sets every holding cap.
+  if (o.skippedRegistry && (await liveOnToken(o, o.skippedRegistry))) {
+    fail(
+      `governance is not bound to InvestorTypeRegistry ${await addrOf(o.skippedRegistry)}, which the Token enforces: ` +
+        `redeploy governance after the registry, or point the Token at the registry governance is bound to (setInvestorTypeRegistry)`,
+    );
+  }
   // Distinct roles (review H1/H2): the ceremony strips the deployer's roles
   // and makes governance the owner, so a role held by either is lost or
   // silently kept.
@@ -183,7 +196,22 @@ async function preflight(o, { acceptOnly = false } = {}) {
     );
   }
   const governanceOwned = new Set();
-  if (acceptOnly) return { governanceOwned };
+  if (acceptOnly) {
+    // An interrupted step 3 leaves contracts un-nominated: their votes would
+    // be paid for and then fail, and a full re-run is refused.
+    const missing = [];
+    for (const e of planFor(o)) {
+      const c = o[e.key];
+      if (same(await c.owner(), govAddr)) continue;
+      if (!same(await c.pendingOwner(), govAddr)) missing.push(e.label);
+    }
+    if (missing.length) {
+      fail(
+        `accept phase: governance is not nominated on ${missing.join(", ")}; step 3 did not run for them (run the full phase, or nominate as their owner)`,
+      );
+    }
+    return { governanceOwned };
+  }
   for (const e of planFor(o)) {
     const owner = await o[e.key].owner();
     if (same(owner, dAddr)) continue;
@@ -245,12 +273,36 @@ async function checkVoters(o, proposer, voters, count) {
   if (count === 0) return;
   const n = BigInt(count);
   const pAddr = await addrOf(proposer);
+  const vAddrs = await Promise.all(voters.map(addrOf));
+  const dup = vAddrs.find((a, i) => vAddrs.findIndex((b) => same(a, b)) !== i);
+  if (dup) fail(`voter ${dup} is listed twice; each wallet votes once`);
+  // Quorum as the contract counts it: votes * 10000 >= eligible * quorum,
+  // eligible = registered identities (the proposer cannot vote).
+  const eligible = await o.identityRegistry.registeredIdentityCount();
+  for (const e of planFor(o)) {
+    const q = (await o.governance.proposalThresholds(e.proposalType))
+      .quorumPercentage;
+    if (BigInt(vAddrs.length) * 10000n < eligible * q) {
+      fail(
+        `${vAddrs.length} voter(s) cannot reach the ${e.typeName} quorum (${Number(q) / 100}% of ${eligible} registered identities); add voters`,
+      );
+    }
+  }
+  // A whitelist oracle on VGT gates the fee transfers of every party.
+  const wl = await o.complianceRules.whitelistOracle(
+    await addrOf(o.governanceToken),
+  );
+  const wlOracle = same(wl, ethers.ZeroAddress)
+    ? null
+    : await ethers.getContractAt(
+        ["function isWhitelisted(address) view returns (bool)"],
+        wl,
+      );
   const need = [
     [pAddr, "proposer", (await o.governance.proposalCreationCost()) * n],
   ];
   const vote = (await o.governance.votingCost()) * n;
-  for (const v of voters) {
-    const a = await addrOf(v);
+  for (const a of vAddrs) {
     if (same(a, pAddr))
       fail(
         `voter ${a} is the proposer; a proposer cannot vote on its own proposal`,
@@ -259,6 +311,11 @@ async function checkVoters(o, proposer, voters, count) {
   }
   const vgt = o.governanceToken;
   for (const [a, role, amount] of need) {
+    if (wlOracle && !(await wlOracle.isWhitelisted(a))) {
+      fail(
+        `${role} ${a} is not on the whitelist oracle bound to VGT (${wl}); its fee transfer would fail`,
+      );
+    }
     if (!(await o.identityRegistry.isVerified(a))) {
       fail(
         `${role} ${a} is not verified in the IdentityRegistry; governance refuses its ${role === "voter" ? "vote" : "proposal"}`,
@@ -283,6 +340,13 @@ async function assertHandoverComplete(o) {
   const govAddr = await addrOf(o.governance);
   const checks = [];
   const add = (label, pass) => checks.push({ label, ok: Boolean(pass) });
+  if (o.skippedRegistry) {
+    add(
+      "InvestorTypeRegistry is not live on Token or is owned by governance",
+      !(await liveOnToken(o, o.skippedRegistry)) ||
+        same(await o.skippedRegistry.owner(), govAddr),
+    );
+  }
 
   for (const [c, label] of core(o)) {
     add(`${label} owned by governance`, same(await c.owner(), govAddr));
@@ -385,7 +449,10 @@ async function assertHandoverComplete(o) {
       );
       b = to + 1;
     } catch (e) {
-      if (chunk <= 100 || !/range|limit|too many/i.test(e.message)) throw e;
+      // Block-range refusals only; a rate limit is rethrown, not halved.
+      const rangeError =
+        /block range|range too large|exceeds.*(range|limit)|too many (blocks|results)|query returned more than/i;
+      if (chunk <= 100 || !rangeError.test(e.message)) throw e;
       chunk = Math.max(100, Math.floor(chunk / 2));
     }
   }

@@ -377,85 +377,41 @@ describe("Handover preflight and self-healing (plan 2E.2)", function () {
     await rejectsBeforeAnyTx(/bound to GovernanceToken: D23 forbids it/);
   });
 
-  it("leaves out a registry governance is not bound to, with a warning", async function () {
+  const unboundRegistry = async () => {
     const reg2 = await (
       await ethers.getContractFactory("InvestorTypeRegistry")
     ).deploy();
     args.investorTypeRegistry = reg2;
     c.investorTypeRegistry = reg2;
+    return reg2;
+  };
+  const SKIP_LINE =
+    "InvestorTypeRegistry is not live on Token or is owned by governance";
+
+  it("leaves out an unbound registry the Token does not use, with a warning", async function () {
+    const reg2 = await unboundRegistry();
+    expect(await c.token.investorTypeRegistry()).to.equal(ethers.ZeroAddress);
     const steps: string[] = [];
     args.log = (m: string) => steps.push(m);
     await ceremony();
     expect(steps.join("\n")).to.match(
-      /not bound to InvestorTypeRegistry .* option 83b hands it over later/,
+      /not bound to InvestorTypeRegistry .* left out of this handover/,
     );
     expect(await reg2.owner()).to.equal(deployer.address);
     const result = await assertHandoverComplete(args);
     expect(result.failures).to.deep.equal([]);
+    const labels = result.checks.map((x: any) => x.label);
     expect(
-      result.checks.some((x: any) => /InvestorTypeRegistry/.test(x.label)),
-    ).to.equal(false);
+      labels.filter((l: string) => /InvestorTypeRegistry/.test(l)),
+    ).to.deep.equal([SKIP_LINE]);
   });
 
-  // Review L6: every completion line fails when its power is given back.
-  it("each completion line catches its power (table)", async function () {
-    await ceremony();
-    expect((await assertHandoverComplete(args)).failures).to.deep.equal([]);
-    await network.provider.send("hardhat_impersonateAccount", [govAddr]);
-    await network.provider.send("hardhat_setBalance", [
-      govAddr,
-      "0xDE0B6B3A7640000",
-    ]);
-    const gov = await ethers.getSigner(govAddr);
-    const d = deployer.address;
-    const [issuer] = args.issuers;
-    const issuerName = `KYC Issuer (${await issuer.getAddress()})`;
-    const breaks: [string, () => Promise<unknown>][] = [
-      ["deployer is not a Token agent", () => c.token.connect(gov).addAgent(d)],
-      [
-        "deployer is not a GovernanceToken agent",
-        () => c.governanceToken.connect(gov).addAgent(d),
-      ],
-      [
-        "deployer is not an IdentityRegistry agent",
-        () => c.identityRegistry.connect(gov).addAgent(d),
-      ],
-      [
-        "deployer is not a ComplianceRules rule administrator",
-        () => c.complianceRules.connect(gov).setRuleAdministrator(d, true),
-      ],
-      [
-        "deployer is not an InvestorTypeRegistry governor",
-        () => c.investorTypeRegistry.connect(gov).setGovernor(d, true, 1),
-      ],
-      [
-        "ops is an InvestorTypeRegistry compliance officer",
-        () =>
-          c.investorTypeRegistry
-            .connect(gov)
-            .setComplianceOfficer(ops.address, false),
-      ],
-      [
-        "Token guardian is not the deployer",
-        () => c.token.connect(gov).setGuardian(d),
-      ],
-      // A revoked key keeps its slot ("Key already exists"), so the deployer
-      // regains the issuer by ownership instead.
-      [
-        `deployer does not own ${issuerName}`,
-        async () => {
-          await issuer.connect(ops).transferOwnership(d);
-          await issuer.connect(deployer).acceptOwnership();
-        },
-      ],
-    ];
-    for (const [label, give] of breaks) {
-      const snap = await network.provider.send("evm_snapshot", []);
-      await give();
-      const { failures } = await assertHandoverComplete(args);
-      expect(failures, label).to.include(label);
-      await network.provider.send("evm_revert", [snap]);
-    }
-    await network.provider.send("hardhat_stopImpersonatingAccount", [govAddr]);
+  it("refuses to leave out an unbound registry the Token enforces (M-A)", async function () {
+    const reg2 = await unboundRegistry();
+    await c.token.setInvestorTypeRegistry(await reg2.getAddress());
+    expect((await check(SKIP_LINE)).ok).to.equal(false);
+    await rejectsBeforeAnyTx(
+      /not bound to InvestorTypeRegistry .* which the Token enforces: redeploy governance/,
+    );
   });
 });

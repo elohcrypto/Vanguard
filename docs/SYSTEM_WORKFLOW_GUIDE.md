@@ -562,7 +562,7 @@ On a local node, this order works from a fresh start:
 ```
 1 → 21 → 51 → 22 → 25/1/1          deploy, mint to the central bank
 24/1 Alice, 24/1 Bob               payer and payee
-23/1 Ivan, then 23/2 … 23/6 for Ivan   investor with a multi-sig fee wallet
+23/1 Ivan, then 23/2 … 23/6 for Ivan   investor with a placeholder fee address (Task 4.3)
 61 → 62 (Ivan) → 63 (Ivan, Alice → Bob, 1000)
 64                                  fund: escrow holds 1050
    (send another 1050 straight to the escrow address, outside the factory)
