@@ -185,4 +185,28 @@ describe("Handover CLI (scripts/handover.ts)", function () {
       /voter 0x[0-9a-fA-F]+ has an identity younger than minVoterAge .*register voters at least 7 days/,
     );
   });
+
+  it("refuses a voter whose wallet does not control its identity (review L-2)", async function () {
+    // Verified, funded and aged, but the OnchainID is the deployer's and the
+    // stranger holds no key on it: castVote would revert mid-ceremony.
+    const id = await (
+      await ethers.getContractFactory("OnchainID")
+    ).deploy(f.deployer.address);
+    await f.c.identityRegistry.registerIdentity(
+      f.stranger.address,
+      await id.getAddress(),
+      840,
+    );
+    await attest(f.kycIssuer, f.deployer, await id.getAddress());
+    await f.c.governanceToken.mint(
+      f.stranger.address,
+      ethers.parseEther("1000"),
+    );
+    await ageVoters(f.c.governance);
+    cfg.voters = [5, 6, 3];
+    await refusedWithNoTx(
+      "full",
+      /voter 0x[0-9a-fA-F]+ does not control its identity .*"Wallet does not control its identity"\): the identity's owner must addKey/,
+    );
+  });
 });

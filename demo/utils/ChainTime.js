@@ -94,10 +94,61 @@ async function voterAgeRefusal(governance, identityRegistry, wallet) {
   return `has an identity younger than minVoterAge (${age}s); governance refuses it ("Identity too new to vote"): ${VOTER_AGE_REMEDY}`;
 }
 
-/** Quorum denominator for a proposal created now: identities old enough to vote. */
+/**
+ * Quorum denominator for a proposal created now: identities old enough to
+ * vote. ADVISORY: it reads the cutoff from the latest block, while the
+ * contract uses the creation block's timestamp (later), so it can undercount
+ * identities registered in between. Use it for preflight messages only.
+ */
 async function eligibleVotersNow(governance, identityRegistry) {
   const cutoff = BigInt(await chainNow()) - (await minVoterAgeOf(governance));
   return identityRegistry.registeredIdentityCountAt(cutoff > 0n ? cutoff : 0n);
+}
+
+/**
+ * Why `wallet` may not act through its identity, or null when it may. Mirrors
+ * VanguardGovernance._controls: the wallet must be the OnchainID owner or
+ * hold a MANAGEMENT (1) or ACTION (2) key on it. An unregistered wallet
+ * returns null (the verification check reports it).
+ */
+async function walletControlRefusal(identityRegistry, wallet) {
+  const a = walletOf(wallet);
+  const id = await identityRegistry.identity(a);
+  if (id === ethers.ZeroAddress) return null;
+  const refusal = `does not control its identity ${id} (not its OnchainID owner, no MANAGEMENT or ACTION key); governance refuses it ("Wallet does not control its identity"): the identity's owner must addKey(keccak256(wallet), 2, 1), or the registry agent must bind the wallet to an identity it controls`;
+  if ((await ethers.provider.getCode(id)) === "0x") return refusal;
+  const oid = await ethers.getContractAt(
+    [
+      "function owner() view returns (address)",
+      "function keyHasPurpose(bytes32,uint256) view returns (bool)",
+    ],
+    id,
+  );
+  const owner = await oid.owner().catch(() => ethers.ZeroAddress);
+  if (owner.toLowerCase() === a.toLowerCase()) return null;
+  const key = ethers.keccak256(ethers.solidityPacked(["address"], [a]));
+  for (const purpose of [1, 2]) {
+    if (await oid.keyHasPurpose(key, purpose).catch(() => false)) return null;
+  }
+  return refusal;
+}
+
+/**
+ * Demo options that propose or vote at once: on a dev node, jump past every
+ * wallet's minVoterAge and return null; on a real network do not wait, return
+ * the first refusal (a readable line for displayError), or null when all are
+ * old enough already.
+ */
+async function ageOrVoterAgeRefusal(governance, identityRegistry, wallets) {
+  if (await canJumpTime()) {
+    await advancePastVoterAge(governance, identityRegistry, wallets);
+    return null;
+  }
+  for (const w of wallets) {
+    const why = await voterAgeRefusal(governance, identityRegistry, w);
+    if (why) return `${walletOf(w)} ${why}`;
+  }
+  return null;
 }
 
 /**
@@ -121,6 +172,8 @@ module.exports = {
   canJumpTime,
   chainNow,
   advancePastVoterAge,
+  ageOrVoterAgeRefusal,
   eligibleVotersNow,
   voterAgeRefusal,
+  walletControlRefusal,
 };

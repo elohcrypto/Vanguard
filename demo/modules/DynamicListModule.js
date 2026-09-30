@@ -13,6 +13,7 @@ const {
   displayError,
 } = require("../utils/DisplayHelpers");
 const { attestAll } = require("../utils/Kyc");
+const { ageOrVoterAgeRefusal } = require("../utils/ChainTime");
 const { ethers } = require("hardhat");
 
 /**
@@ -456,6 +457,17 @@ class DynamicListModule {
         proposalCost,
       );
       await approveTx.wait();
+
+      // D25: the proposer's identity must be minVoterAge old.
+      const tooNew = await ageOrVoterAgeRefusal(
+        vanguardGovernance,
+        this.state.getContract("identityRegistry"),
+        [this.state.signers[0]],
+      );
+      if (tooNew) {
+        displayError(tooNew);
+        return;
+      }
 
       // Create proposal
       console.log("\n📝 Creating governance proposal...");

@@ -12,7 +12,12 @@ const {
   displaySuccess,
   displayError,
 } = require("../utils/DisplayHelpers");
-const { advancePast, voterAgeRefusal } = require("../utils/ChainTime");
+const {
+  advancePast,
+  ageOrVoterAgeRefusal,
+  voterAgeRefusal,
+  walletControlRefusal,
+} = require("../utils/ChainTime");
 const { ethers } = require("hardhat");
 
 /**
@@ -850,7 +855,7 @@ class GovernanceModule {
         owner.address,
       );
       if (young) {
-        displayError(`Identity too new to vote: your identity ${young}`);
+        displayError(`Proposer ${owner.address} ${young}`);
         return;
       }
 
@@ -1315,6 +1320,9 @@ class GovernanceModule {
       // snapshot, so no VGT amount is shown as a weight.
       const idRegistryForVoters = this.state.getContract("identityRegistry");
       const voteFee = await vanguardGovernance.votingCost();
+      // D25: only identities bound at or before this proposal's cutoff vote.
+      // Jumping time cannot help: the cutoff is frozen at creation.
+      const cutoff = proposal.voterAgeCutoff;
 
       console.log("\n👥 ELIGIBLE VOTERS (1 vote each):");
       console.log(`   Voting fee: ${ethers.formatEther(voteFee)} VGT`);
@@ -1324,8 +1332,22 @@ class GovernanceModule {
         const balance = await governanceToken.balanceOf(addr);
         const verified = await idRegistryForVoters.isVerified(addr);
         const canPay = balance >= voteFee;
+        const at = verified
+          ? await idRegistryForVoters.identityRegisteredAt(
+              await idRegistryForVoters.identity(addr),
+            )
+          : 0n;
+        const noControl = verified
+          ? await walletControlRefusal(idRegistryForVoters, addr)
+          : null;
 
-        if (verified && canPay) {
+        if (verified && (at === 0n || at > cutoff)) {
+          console.log(
+            `${i}. ${addr} - ⚠️ Identity too new to vote: bound after this proposal's cutoff (created minVoterAge after the identity, a new proposal admits it)`,
+          );
+        } else if (noControl) {
+          console.log(`${i}. ${addr} - ⚠️ Wallet ${noControl}`);
+        } else if (verified && canPay) {
           console.log(`${i}. ${addr}`);
           console.log(
             `   ✅ Verified, ${ethers.formatEther(balance)} VGT — worth 1 vote`,
@@ -2031,6 +2053,17 @@ class GovernanceModule {
       console.log("\n" + "=".repeat(70));
       console.log("STEP 2: CREATE GOVERNANCE PROPOSAL");
       console.log("=".repeat(70));
+
+      // D25: identities propose and vote only once minVoterAge old.
+      const tooNew = await ageOrVoterAgeRefusal(
+        vanguardGovernance,
+        this.state.getContract("identityRegistry"),
+        [voter1, voter2, voter3],
+      );
+      if (tooNew) {
+        displayError(tooNew);
+        return;
+      }
 
       console.log("\n🗳️  Creating proposal to update jurisdiction rules...");
       const tokenAddr = await digitalToken.getAddress();

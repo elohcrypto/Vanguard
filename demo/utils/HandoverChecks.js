@@ -6,7 +6,11 @@
  */
 
 const { ethers } = require("hardhat");
-const { eligibleVotersNow, voterAgeRefusal } = require("./ChainTime");
+const {
+  eligibleVotersNow,
+  voterAgeRefusal,
+  walletControlRefusal,
+} = require("./ChainTime");
 
 const plan = (key, proposalType, label, typeName, opts = {}) => ({
   key,
@@ -321,8 +325,10 @@ async function checkVoters(o, proposer, voters, count) {
         `${role} ${a} is not verified in the IdentityRegistry; governance refuses its ${role === "voter" ? "vote" : "proposal"}`,
       );
     }
-    const young = await voterAgeRefusal(o.governance, o.identityRegistry, a);
-    if (young) fail(`${role} ${a} ${young}`);
+    const why =
+      (await voterAgeRefusal(o.governance, o.identityRegistry, a)) ||
+      (await walletControlRefusal(o.identityRegistry, a));
+    if (why) fail(`${role} ${a} ${why}`);
     if (await vgt.isFrozen(a)) fail(`${role} ${a} is frozen on VGT`);
     const free = await vgt.getFreeBalance(a);
     if (free < amount) {

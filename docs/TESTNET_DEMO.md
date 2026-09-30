@@ -78,8 +78,10 @@ act only by vote).
 One identity, one wallet, one vote (plan 2F.1, D25). The IdentityRegistry
 binds each OnchainID to at most one wallet (a second wallet on the same
 identity is refused, "Identity already bound"; `moveIdentity` re-points it
-on recovery) and records when the identity was first bound
-(`identityRegisteredAt`, kept across recovery and re-registration).
+on recovery) and records when the identity's current binding began
+(`identityRegisteredAt`, kept across recovery (moveIdentity); a
+delete-and-re-register or an updateIdentity to another OnchainID restarts
+it).
 `VanguardGovernance` counts one vote per identity, not per wallet, and
 excludes the proposer's identity from voting on its own proposal. The voting
 wallet must control its identity: be the OnchainID owner or hold a
@@ -94,12 +96,20 @@ proposal freezes its own cutoff. Quorum counts only those identities
 minVoterAge)`), so fresh identities neither vote nor raise the bar, and a
 deletion lowers the bar only for proposals created `minVoterAge` later.
 `executeProposal` needs 3,000,000 gas left before it runs a passed
-proposal's call ("Insufficient gas for execution"; an under-gassed call
-reverts and the proposal stays Active; `estimateGas` already covers it).
+proposal's call ("Insufficient gas for execution"). A target call that runs
+out of gas reverts the execution (`InsufficientExecutionGas`) and leaves the
+proposal Active, so anyone can retry with more gas; `eth_estimateGas` finds
+a working limit. A target that can never complete (it burns all the gas it
+is given) needs a rescue vote that calls `cancelProposal` on it.
 `createProposal` refuses calldata under 4 bytes and the `transfer`,
-`approve`, `transferFrom` and `renounceOwnership` selectors on every type;
-ListUpdate accepts only the four DynamicListManager list writes plus
-`transferOwnership`/`acceptOwnership` ("Selector not allowed"). The residual
+`approve`, `transferFrom`, `renounceOwnership`, `distributeGovernanceTokens`
+and `burn(uint256)` selectors on every type (governance is a VGT agent, so
+the last two would spend the deposits it holds). ListUpdate accepts only
+the DynamicListManager's four list writes, its owner setters (`setOracles`,
+`setGovernanceContract`, `setProofExpiryDuration`, `updateWhitelist`,
+`updateBlacklist`) and `transferOwnership`/`acceptOwnership` ("Selector not
+allowed"), and only while the manager's `governanceContract` is this
+governance ("List manager not bound to governance"). The residual
 risk is collusion of a registry agent with an issuer key: they can still
 mint fake identities, visibly on chain, but those cannot vote for
 `minVoterAge`, which is the honest electorate's window to vote the colluding

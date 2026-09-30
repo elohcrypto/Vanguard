@@ -13,6 +13,7 @@ const {
   displayError,
   displayProgress,
 } = require("../utils/DisplayHelpers");
+const { ageOrVoterAgeRefusal } = require("../utils/ChainTime");
 const { ethers } = require("hardhat");
 
 /**
@@ -794,6 +795,17 @@ class PrivacyModule {
       const description =
         (await this.promptUser("   Enter proposal description: ")) ||
         `Update allowed jurisdictions to [${allowedArray.join(", ")}] and blocked jurisdictions to [${blockedArray.join(", ")}]`;
+
+      // D25: the proposer's identity must be minVoterAge old.
+      const tooNew = await ageOrVoterAgeRefusal(
+        governance,
+        this.state.getContract("identityRegistry"),
+        [proposer],
+      );
+      if (tooNew) {
+        console.log(`   ❌ ${tooNew}`);
+        return;
+      }
 
       console.log("\n   📝 Creating proposal...");
       const tx = await governance.connect(proposer).createProposal(
