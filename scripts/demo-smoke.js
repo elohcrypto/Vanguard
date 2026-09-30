@@ -18,6 +18,7 @@
 const { ethers } = require("hardhat");
 const DemoState = require("../demo/core/DemoState");
 const { attestAll } = require("../demo/utils/Kyc");
+const { advancePastVoterAge } = require("../demo/utils/ChainTime");
 const ContractDeployer = require("../demo/core/ContractDeployer");
 const { EnhancedLogger } = require("../demo/logging");
 
@@ -421,6 +422,8 @@ async function main() {
         await vgt.transfer(sgn.address, ethers.parseEther("100"));
       await vgt.connect(sgn).approve(govAddr2, ethers.MaxUint256);
     }
+    // D25: identities propose and vote only once minVoterAge old.
+    await advancePastVoterAge(govC, idReg, [alice, bob, carol]);
     // Type must match the target: a proposal against governance itself is
     // SystemParameters (createProposal reverts TargetNotBoundToType otherwise).
     // Governance has no fallback, so empty calldata would fail at execution;

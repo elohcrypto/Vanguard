@@ -73,6 +73,43 @@ against ops must be preceded by `removeAgent(ops)` in the same pre-voted
 batch, and is then terminal again (governance is the only agent left and can
 act only by vote).
 
+## Vote rules (D25)
+
+One identity, one wallet, one vote (plan 2F.1, D25). The IdentityRegistry
+binds each OnchainID to at most one wallet (a second wallet on the same
+identity is refused, "Identity already bound"; `moveIdentity` re-points it
+on recovery) and records when the identity was first bound
+(`identityRegisteredAt`, kept across recovery and re-registration).
+`VanguardGovernance` counts one vote per identity, not per wallet, and
+excludes the proposer's identity from voting on its own proposal. The voting
+wallet must control its identity: be the OnchainID owner or hold a
+MANAGEMENT or ACTION key on it ("Wallet does not control its identity"), so
+a registry agent cannot vote as an investor by binding a wallet of its own
+to the investor's identity. Only identities at least `minVoterAge` old when
+the proposal is created may propose or vote ("Identity too new to vote"): 7
+days divided by `TIME_SCALE` (420 s at 1440, 30 min at 336), tunable by a
+SystemParameters vote within 1 to 30 days (scaled) and never to zero; each
+proposal freezes its own cutoff. Quorum counts only those identities
+(`eligibleVotersAtCreation = registeredIdentityCountAt(createdAt -
+minVoterAge)`), so fresh identities neither vote nor raise the bar, and a
+deletion lowers the bar only for proposals created `minVoterAge` later.
+`executeProposal` needs 3,000,000 gas left before it runs a passed
+proposal's call ("Insufficient gas for execution"; an under-gassed call
+reverts and the proposal stays Active; `estimateGas` already covers it).
+`createProposal` refuses calldata under 4 bytes and the `transfer`,
+`approve`, `transferFrom` and `renounceOwnership` selectors on every type;
+ListUpdate accepts only the four DynamicListManager list writes plus
+`transferOwnership`/`acceptOwnership` ("Selector not allowed"). The residual
+risk is collusion of a registry agent with an issuer key: they can still
+mint fake identities, visibly on chain, but those cannot vote for
+`minVoterAge`, which is the honest electorate's window to vote the colluding
+keys out.
+The handover ceremony votes, so its proposer and voters must be registered
+`minVoterAge` before step 1: `scripts/handover.ts` refuses a younger identity
+before any transaction and computes quorum over aged identities only; the
+demo (83b, 83d) and the smoke advance past it with `ChainTime.advancePastVoterAge`,
+which jumps on a dev node and waits on Sepolia.
+
 ## Handover ceremony
 
 After the ceremony the deployer (wallet 0) holds no power: governance owns

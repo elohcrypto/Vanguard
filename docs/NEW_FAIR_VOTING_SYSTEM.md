@@ -190,7 +190,9 @@ require(identityRegistry.isVerified(msg.sender), "Must be KYC/AML verified");
 ```
 
 ### **Benefits:**
-- ✅ Prevents Sybil attacks (one person creating multiple wallets)
+- ✅ One vote per identity, not per wallet: the registry binds each OnchainID to one wallet, governance keys votes on the identity, and the voting wallet must own the OnchainID or hold a MANAGEMENT/ACTION key on it (plan 2F.1, D25)
+- ✅ Only identities at least `minVoterAge` old (7 days / TIME_SCALE) at proposal creation vote or count toward quorum
+- ⚠️ Residual: a registry agent colluding with an issuer key can still create fake identities; that is visible on chain, and the fakes cannot vote for `minVoterAge`, the window in which honest voters remove those keys
 - ✅ Ensures compliance with regulations
 - ✅ Fair voting (verified identities only)
 

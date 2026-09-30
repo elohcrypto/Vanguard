@@ -18,6 +18,7 @@ const {
   acceptAllByVote,
   assertHandoverComplete,
 } = require("../demo/utils/Handover");
+const { advancePastVoterAge } = require("../demo/utils/ChainTime");
 
 /** Wallet roles from docs/TESTNET_DEMO.md. */
 const OPS = 10;
@@ -83,6 +84,13 @@ async function runHandoverSmoke(state, failures) {
       ).wait();
     }
   }
+
+  // D25: voters are registered minVoterAge before the ceremony's proposals.
+  await advancePastVoterAge(
+    governance,
+    c("identityRegistry"),
+    [PROPOSER, ...VOTERS].map((i) => s[i]),
+  );
 
   const args = {
     fromBlock: state.complianceRulesDeployBlock,

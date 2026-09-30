@@ -6,6 +6,7 @@
  */
 
 const { ethers } = require("hardhat");
+const { eligibleVotersNow, voterAgeRefusal } = require("./ChainTime");
 
 const plan = (key, proposalType, label, typeName, opts = {}) => ({
   key,
@@ -276,15 +277,14 @@ async function checkVoters(o, proposer, voters, count) {
   const vAddrs = await Promise.all(voters.map(addrOf));
   const dup = vAddrs.find((a, i) => vAddrs.findIndex((b) => same(a, b)) !== i);
   if (dup) fail(`voter ${dup} is listed twice; each wallet votes once`);
-  // Quorum as the contract counts it: votes * 10000 >= eligible * quorum,
-  // eligible = registered identities (the proposer cannot vote).
-  const eligible = await o.identityRegistry.registeredIdentityCount();
+  // Quorum as on chain: votes * 10000 >= eligible (aged identities, D25) * quorum.
+  const eligible = await eligibleVotersNow(o.governance, o.identityRegistry);
   for (const e of planFor(o)) {
     const q = (await o.governance.proposalThresholds(e.proposalType))
       .quorumPercentage;
     if (BigInt(vAddrs.length) * 10000n < eligible * q) {
       fail(
-        `${vAddrs.length} voter(s) cannot reach the ${e.typeName} quorum (${Number(q) / 100}% of ${eligible} registered identities); add voters`,
+        `${vAddrs.length} voter(s) cannot reach the ${e.typeName} quorum (${Number(q) / 100}% of ${eligible} registered identities old enough to vote); add voters`,
       );
     }
   }
@@ -321,6 +321,8 @@ async function checkVoters(o, proposer, voters, count) {
         `${role} ${a} is not verified in the IdentityRegistry; governance refuses its ${role === "voter" ? "vote" : "proposal"}`,
       );
     }
+    const young = await voterAgeRefusal(o.governance, o.identityRegistry, a);
+    if (young) fail(`${role} ${a} ${young}`);
     if (await vgt.isFrozen(a)) fail(`${role} ${a} is frozen on VGT`);
     const free = await vgt.getFreeBalance(a);
     if (free < amount) {

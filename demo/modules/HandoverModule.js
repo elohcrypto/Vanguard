@@ -22,6 +22,10 @@ const {
   assertHandoverComplete,
 } = require("../utils/Handover");
 const { ethers } = require("hardhat");
+const {
+  advancePastVoterAge,
+  eligibleVotersNow,
+} = require("../utils/ChainTime");
 
 /** ACCEPTANCE_PLAN key -> DemoState contract key. */
 const STATE_KEY = {
@@ -339,17 +343,6 @@ class HandoverModule {
     const governanceToken = this.state.getContract("governanceToken");
     const identityRegistry = this.state.getContract("identityRegistry");
     const govAddr = await vanguardGovernance.getAddress();
-    // Quorum is a share of registered identities.
-    const eligible = await identityRegistry.registeredIdentityCount();
-    const t = await vanguardGovernance.proposalThresholds(proposalType);
-    const quorumPct = Number(t.quorumPercentage) / 100;
-    const needed = Math.ceil((Number(eligible) * quorumPct) / 100);
-    console.log(`\n🗳️  VOTE REQUIREMENTS (${typeName}):`);
-    console.log(`   Eligible voters: ${eligible}`);
-    console.log(`   Quorum:   ${quorumPct}% → at least ${needed} vote(s)`);
-    console.log(
-      `   Approval: ${Number(t.approvalPercentage) / 100}% of votes cast must be FOR`,
-    );
 
     // Report the two prerequisites SEPARATELY: missing verified voters and
     // missing VGT are different fixes.
@@ -393,6 +386,23 @@ class HandoverModule {
       }
       return null;
     }
+
+    // D25: only identities minVoterAge old propose, vote and count toward
+    // quorum. Jumps on a dev node; on a real network waits it out.
+    await advancePastVoterAge(vanguardGovernance, identityRegistry, usable);
+    const eligible = await eligibleVotersNow(
+      vanguardGovernance,
+      identityRegistry,
+    );
+    const t = await vanguardGovernance.proposalThresholds(proposalType);
+    const quorumPct = Number(t.quorumPercentage) / 100;
+    const needed = Math.ceil((Number(eligible) * quorumPct) / 100);
+    console.log(`\n🗳️  VOTE REQUIREMENTS (${typeName}):`);
+    console.log(`   Eligible voters (identities old enough): ${eligible}`);
+    console.log(`   Quorum:   ${quorumPct}% → at least ${needed} vote(s)`);
+    console.log(
+      `   Approval: ${Number(t.approvalPercentage) / 100}% of votes cast must be FOR`,
+    );
 
     const proposer = usable[0];
     const voters = usable.slice(1); // the proposer may not vote on its own proposal

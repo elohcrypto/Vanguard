@@ -12,7 +12,7 @@ const {
   displaySuccess,
   displayError,
 } = require("../utils/DisplayHelpers");
-const { advancePast } = require("../utils/ChainTime");
+const { advancePast, voterAgeRefusal } = require("../utils/ChainTime");
 const { ethers } = require("hardhat");
 
 /**
@@ -843,6 +843,17 @@ class GovernanceModule {
         return;
       }
 
+      // D25: a proposer's identity must be minVoterAge old.
+      const young = await voterAgeRefusal(
+        vanguardGovernance,
+        identityRegistry,
+        owner.address,
+      );
+      if (young) {
+        displayError(`Identity too new to vote: your identity ${young}`);
+        return;
+      }
+
       const proposalCost = await vanguardGovernance.proposalCreationCost();
       const balance = await governanceToken.balanceOf(owner.address);
       const governanceAddress = await vanguardGovernance.getAddress();
@@ -917,6 +928,16 @@ class GovernanceModule {
         );
       } else if (error.message.includes("Must be KYC/AML verified")) {
         console.log("\n💡 TIP: Use Options 3 & 4 to issue KYC/AML to yourself");
+      } else if (error.message.includes("Identity too new to vote")) {
+        console.log(
+          "\n💡 TIP: identities propose and vote only once minVoterAge old (7 days / TIME_SCALE); wait, or jump time on a dev node",
+        );
+      } else if (
+        error.message.includes("Wallet does not control its identity")
+      ) {
+        console.log(
+          "\n💡 TIP: the wallet must own its OnchainID or hold a MANAGEMENT/ACTION key on it",
+        );
       }
     }
   }

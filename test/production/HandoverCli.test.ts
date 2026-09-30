@@ -1,6 +1,7 @@
 import { expect } from "chai";
 import { ethers } from "hardhat";
-import { handoverFixture } from "../helpers/governanceFixture";
+import { ageVoters, handoverFixture } from "../helpers/governanceFixture";
+import { attest } from "../helpers/kyc";
 import { runHandover } from "../../scripts/handover";
 
 const {
@@ -154,10 +155,34 @@ describe("Handover CLI (scripts/handover.ts)", function () {
       await id.getAddress(),
       840,
     );
+    // Quorum counts identities at least minVoterAge old (D25).
+    await ageVoters(f.c.governance);
     cfg.voters = [5];
     await refusedWithNoTx(
       "full",
-      /1 voter\(s\) cannot reach the TokenParameters quorum \(30% of 4 registered identities\)/,
+      /1 voter\(s\) cannot reach the TokenParameters quorum \(30% of 4 registered identities old enough to vote\)/,
+    );
+  });
+
+  it("refuses a voter whose identity is younger than minVoterAge (D25)", async function () {
+    // The stranger is verified and funded, but registered just now.
+    const id = await (
+      await ethers.getContractFactory("OnchainID")
+    ).deploy(f.stranger.address);
+    await f.c.identityRegistry.registerIdentity(
+      f.stranger.address,
+      await id.getAddress(),
+      840,
+    );
+    await attest(f.kycIssuer, f.deployer, await id.getAddress());
+    await f.c.governanceToken.mint(
+      f.stranger.address,
+      ethers.parseEther("1000"),
+    );
+    cfg.voters = [5, 6, 3];
+    await refusedWithNoTx(
+      "full",
+      /voter 0x[0-9a-fA-F]+ has an identity younger than minVoterAge .*register voters at least 7 days/,
     );
   });
 });
