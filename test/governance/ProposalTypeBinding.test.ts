@@ -3,6 +3,10 @@ import { ethers } from "hardhat";
 import { ageVoters } from "../helpers/governanceFixture";
 import { attest, configureKyc } from "../helpers/kyc";
 
+// owner(): a harmless call. createProposal refuses calldata under 4 bytes
+// (plan 2F.1 selector check), so "0x" is no longer a valid no-op.
+const NOOP = "0x8da5cb5b";
+
 // Thresholds are looked up by proposalType at execution, but nothing bound the
 // type to the target. A TokenParameters action (30% quorum, 70% approval, 3-day
 // delay) could be submitted as InvestorTypeConfig (20%/60%/2d) or EmergencyAction
@@ -109,6 +113,16 @@ describe("Proposal type is bound to its target", () => {
     const [, , , , , , manager] = await ethers.getSigners();
     await gov.setDynamicListManager(manager.address);
     expect(await gov.boundTarget(T.ListUpdate)).to.equal(manager.address);
+    // ListUpdate may only call a list write (plan 2F.1).
+    const addWl = (
+      await ethers.getContractFactory("DynamicListManager")
+    ).interface.encodeFunctionData("addToWhitelist", [
+      alice.address,
+      0,
+      1,
+      86400,
+      "r",
+    ]);
     await expect(
       gov.connect(alice).createProposal(T.ListUpdate, "t", "d", govAddr, "0x"),
     )
@@ -117,7 +131,7 @@ describe("Proposal type is bound to its target", () => {
     await expect(
       gov
         .connect(alice)
-        .createProposal(T.ListUpdate, "t", "d", manager.address, "0x"),
+        .createProposal(T.ListUpdate, "t", "d", manager.address, addWl),
     ).to.not.be.reverted;
   });
 
@@ -134,7 +148,7 @@ describe("Proposal type is bound to its target", () => {
     for (const [type, target] of pairs) {
       expect(await gov.boundTarget(type)).to.equal(target);
       await expect(
-        gov.connect(alice).createProposal(type, "t", "d", target, "0x"),
+        gov.connect(alice).createProposal(type, "t", "d", target, NOOP),
       ).to.not.be.reverted;
     }
     expect(await gov.proposalCount()).to.equal(pairs.length);

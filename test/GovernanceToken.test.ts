@@ -11,6 +11,10 @@ import {
   issueSigned,
 } from "./helpers/kyc";
 
+// owner(): a harmless call. createProposal refuses calldata under 4 bytes
+// (plan 2F.1 selector check), so "0x" is no longer a valid no-op.
+const NOOP = "0x8da5cb5b";
+
 describe("Governance Token System", function () {
   let governanceToken: any;
   let vanguardGovernance: any;
@@ -342,7 +346,7 @@ describe("Governance Token System", function () {
           "Test Proposal",
           "Test Description",
           await complianceRules.getAddress(),
-          "0x",
+          NOOP,
         ),
       ).to.emit(vanguardGovernance, "ProposalCreated");
     });
@@ -356,7 +360,7 @@ describe("Governance Token System", function () {
             "Test Proposal",
             "Test Description",
             await complianceRules.getAddress(),
-            "0x",
+            NOOP,
           ),
       ).to.be.revertedWith("Insufficient tokens for proposal creation");
     });
@@ -391,7 +395,7 @@ describe("Governance Token System", function () {
         "Test Proposal",
         "Test Description",
         await complianceRules.getAddress(),
-        "0x",
+        NOOP,
       );
       const receipt = await tx.wait();
       proposalId = 1; // First proposal
@@ -549,7 +553,7 @@ describe("Governance Token System", function () {
         "Update Jurisdiction Rules",
         "Add US and UK to allowed countries",
         await complianceRules.getAddress(),
-        "0x",
+        NOOP,
       );
       console.log("   ✅ Proposal created");
 
@@ -595,9 +599,11 @@ describe("Governance Token System", function () {
         `   Approval Met: ${Number(finalProposal.proposal.votesFor) >= Number(finalProposal.totalVotes) * 0.65}`,
       );
 
-      // Note: We don't actually execute because calldata is empty (0x)
-      // In production, this would contain actual function call data
-      console.log("\n   ℹ️  Skipping execution (empty calldata for demo)");
+      // Note: We don't actually execute because calldata is a placeholder
+      // (NOOP). In production, this would contain actual function call data
+      console.log(
+        "\n   ℹ️  Skipping execution (placeholder calldata for demo)",
+      );
       console.log(
         "   ℹ️  In production, calldata would contain actual function calls",
       );

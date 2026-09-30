@@ -3,6 +3,10 @@ import { ethers } from "hardhat";
 import { ageVoters } from "../helpers/governanceFixture";
 import { attest, configureKyc } from "../helpers/kyc";
 
+// owner(): a harmless call. createProposal refuses calldata under 4 bytes
+// (plan 2F.1 selector check), so "0x" is no longer a valid no-op.
+const NOOP = "0x8da5cb5b";
+
 /**
  * One behavioural test per contract change in hardening round 2. Each was
  * reproduced as a defect before the change; the "before" shape is noted.
@@ -80,7 +84,7 @@ describe("Hardening round 2 — contract changes", () => {
       const { owner, alice, bob, gt, gov, govAddr } = await govFixture();
       const a0 = await gt.balanceOf(alice.address),
         b0 = await gt.balanceOf(bob.address);
-      await gov.connect(alice).createProposal(0, "t", "d", owner.address, "0x");
+      await gov.connect(alice).createProposal(0, "t", "d", owner.address, NOOP);
       const id = await gov.proposalCount();
       await gov.connect(bob).castVote(id, true, "yes");
       expect(await gov.getLockedTokens(id)).to.equal(ethers.parseEther("20"));
@@ -101,7 +105,7 @@ describe("Hardening round 2 — contract changes", () => {
 
     it("cannot be refunded twice via a later execute or a second claim", async () => {
       const { owner, alice, gov } = await govFixture();
-      await gov.connect(alice).createProposal(0, "t", "d", owner.address, "0x");
+      await gov.connect(alice).createProposal(0, "t", "d", owner.address, NOOP);
       const id = await gov.proposalCount();
       await gov.connect(owner).cancelProposal(id);
       await expect(gov.executeProposal(id)).to.be.revertedWith(
@@ -398,7 +402,7 @@ describe("Hardening round 2 — contract changes", () => {
         "title",
       ]);
       await expect(
-        gov.connect(alice).createProposal(0, "t", "d", owner.address, "0x"),
+        gov.connect(alice).createProposal(0, "t", "d", owner.address, NOOP),
       )
         .to.emit(gov, "ProposalCreated")
         .withArgs(1n, alice.address, 0n, "t");
@@ -413,7 +417,7 @@ describe("Hardening round 2 — contract changes", () => {
     async function rejectedWithTwoVoters() {
       const { owner, alice, bob, carol, ir, gt, gov, govAddr, ids } =
         await govFixture();
-      await gov.connect(alice).createProposal(0, "t", "d", owner.address, "0x");
+      await gov.connect(alice).createProposal(0, "t", "d", owner.address, NOOP);
       const id = await gov.proposalCount();
       await gov.connect(bob).castVote(id, false, "n");
       await gov.connect(carol).castVote(id, false, "n");
@@ -475,7 +479,7 @@ describe("Hardening round 2 — contract changes", () => {
       const { owner, alice, bob, carol, ir, gt, gov, govAddr, ids } =
         await govFixture();
       // Cancel with a de-verified voter.
-      await gov.connect(alice).createProposal(0, "t", "d", owner.address, "0x");
+      await gov.connect(alice).createProposal(0, "t", "d", owner.address, NOOP);
       const c = await gov.proposalCount();
       await gov.connect(bob).castVote(c, true, "y");
       await ir.deleteIdentity(bob.address);
@@ -539,7 +543,7 @@ describe("Hardening round 2 — contract changes", () => {
       // A passed proposal burns; there is nothing to claim.
       await gov
         .connect(alice)
-        .createProposal(0, "ok", "d", owner.address, "0x");
+        .createProposal(0, "ok", "d", owner.address, NOOP);
       const ok = await gov.proposalCount();
       await gov.connect(bob).castVote(ok, true, "y");
       await gov.connect(carol).castVote(ok, true, "y");

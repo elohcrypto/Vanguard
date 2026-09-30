@@ -4,6 +4,10 @@ import { ageVoters } from "../helpers/governanceFixture";
 import { SignerWithAddress } from "@nomicfoundation/hardhat-ethers/signers";
 import { attest, configureKyc } from "../helpers/kyc";
 
+// owner(): a harmless call. createProposal refuses calldata under 4 bytes
+// (plan 2F.1 selector check), so "0x" is no longer a valid no-op.
+const NOOP = "0x8da5cb5b";
+
 /**
  * Quorum denominator integrity.
  *
@@ -350,7 +354,7 @@ describe("cancelProposal under self-ownership", function () {
   it("a proposal can cancel ANOTHER proposal by vote (brake reachable)", async function () {
     await gov
       .connect(alice)
-      .createProposal(0, "victim", "d", owner.address, "0x");
+      .createProposal(0, "victim", "d", owner.address, NOOP);
     await gov.connect(bob).castVote(2, true, "");
     await gov
       .connect(alice)

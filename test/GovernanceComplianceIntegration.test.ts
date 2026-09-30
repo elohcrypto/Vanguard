@@ -11,6 +11,10 @@ import {
   issueSigned,
 } from "./helpers/kyc";
 
+// owner(): a harmless call. createProposal refuses calldata under 4 bytes
+// (plan 2F.1 selector check), so "0x" is no longer a valid no-op.
+const NOOP = "0x8da5cb5b";
+
 describe("Governance → ComplianceRules Integration Test", function () {
   let governanceToken: any;
   let vanguardGovernance: any;
@@ -453,7 +457,7 @@ describe("Governance → ComplianceRules Integration Test", function () {
           ethers.parseEther("1000"),
         );
 
-      const callData = "0x";
+      const callData = NOOP;
       await vanguardGovernance.connect(voter1).createProposal(
         1, // ComplianceRules: the bound target below is complianceRules
         "Low turnout proposal",
@@ -533,7 +537,7 @@ describe("Governance → ComplianceRules Integration Test", function () {
         "Ignored proposal",
         "Nobody votes on this",
         await complianceRules.getAddress(),
-        "0x",
+        NOOP,
       );
       const proposalId = 1;
 
@@ -577,7 +581,7 @@ describe("Governance → ComplianceRules Integration Test", function () {
         "Snapshot test",
         "Quorum must use the creation-time count",
         await complianceRules.getAddress(),
-        "0x",
+        NOOP,
       );
       const proposalId = 1;
 
@@ -646,7 +650,7 @@ describe("Governance → ComplianceRules Integration Test", function () {
         "Advisory vs enforcement",
         "One voter only",
         await complianceRules.getAddress(),
-        "0x",
+        NOOP,
       );
       const proposalId = 1;
 
