@@ -110,13 +110,18 @@ describe("Proposal type is bound to its target", () => {
 
   it("a ListUpdate proposal targeting governance reverts; the manager is accepted", async () => {
     const { alice, gov, govAddr } = await fixture();
-    const [, , , , , , manager] = await ethers.getSigners();
-    await gov.setDynamicListManager(manager.address);
-    expect(await gov.boundTarget(T.ListUpdate)).to.equal(manager.address);
-    // ListUpdate may only call a list write (plan 2F.1).
-    const addWl = (
+    const [owner] = await ethers.getSigners();
+    // A real manager that reports this governance (review 2F.1 B-L4).
+    const manager = await (
       await ethers.getContractFactory("DynamicListManager")
-    ).interface.encodeFunctionData("addToWhitelist", [
+    ).deploy(owner.address);
+    await manager.setGovernanceContract(govAddr);
+    await gov.setDynamicListManager(await manager.getAddress());
+    expect(await gov.boundTarget(T.ListUpdate)).to.equal(
+      await manager.getAddress(),
+    );
+    // ListUpdate may only call a list write (plan 2F.1).
+    const addWl = manager.interface.encodeFunctionData("addToWhitelist", [
       alice.address,
       0,
       1,
@@ -131,7 +136,13 @@ describe("Proposal type is bound to its target", () => {
     await expect(
       gov
         .connect(alice)
-        .createProposal(T.ListUpdate, "t", "d", manager.address, addWl),
+        .createProposal(
+          T.ListUpdate,
+          "t",
+          "d",
+          await manager.getAddress(),
+          addWl,
+        ),
     ).to.not.be.reverted;
   });
 

@@ -77,19 +77,22 @@ describe("Vote binding: one identity, one wallet, one vote", function () {
       expect(await ir.identityRegisteredAt(other)).to.be.greaterThan(0n);
     });
 
-    it("moveIdentity re-points and deleteIdentity clears; the age survives both", async function () {
+    it("moveIdentity keeps the age; delete and re-register restarts it", async function () {
       const { ir, proposer, stranger } = await setup();
       const aliceId = await ir.identity(proposer.address);
       const born = await ir.identityRegisteredAt(aliceId);
       expect(born).to.be.greaterThan(0n);
       await ir.moveIdentity(proposer.address, stranger.address);
       expect(await ir.walletOf(aliceId)).to.equal(stranger.address);
+      expect(await ir.identityRegisteredAt(aliceId)).to.equal(born);
       await ir.deleteIdentity(stranger.address);
       expect(await ir.walletOf(aliceId)).to.equal(ethers.ZeroAddress);
       await time.increase(3600);
       await ir.registerIdentity(proposer.address, aliceId, 840);
       expect(await ir.walletOf(aliceId)).to.equal(proposer.address);
-      expect(await ir.identityRegisteredAt(aliceId)).to.equal(born);
+      expect(await ir.identityRegisteredAt(aliceId)).to.equal(
+        BigInt(await time.latest()),
+      );
     });
 
     it("keeps the identity-count history across register, delete and move", async function () {
@@ -219,6 +222,158 @@ describe("Vote binding: one identity, one wallet, one vote", function () {
       await gov.connect(actionHolder).castVote(id, true, "");
       expect(await ir.identity(actionHolder.address)).to.equal(
         await idB.getAddress(),
+      );
+    });
+  });
+
+  // Review 2F.1 M-1: an unbound, aged identity re-bound to a wallet kept its
+  // first-bind age, so one wallet voted twice by swapping identities, a
+  // proposer voted on its own proposal, and deletions before the cutoff
+  // shrank quorum. Every bind of an unbound identity now restarts the age.
+  describe("re-binding restarts the identity age (M-1)", function () {
+    const MANAGEMENT_KEY = 1;
+    /** An OnchainID owned by `owner`, KYC'd by the fixture issuer. */
+    const kycId = async (f: any, owner: string) => {
+      const oid = await (
+        await ethers.getContractFactory("OnchainID")
+      ).deploy(owner);
+      const id = await oid.getAddress();
+      await attest(f.kycIssuer, f.deployer, id);
+      return { oid, id };
+    };
+
+    it("swap-back: updateIdentity to an older identity cannot vote again", async function () {
+      const f = await setup();
+      const { gov, ir, ops, propose, voters } = f;
+      const [bob] = voters;
+      const b1 = await ir.identity(bob.address);
+      const { id: b2 } = await kycId(f, bob.address);
+      await ir.connect(ops).updateIdentity(bob.address, b2);
+      await ageVoters(gov);
+      const id = await propose();
+      await gov.connect(bob).castVote(id, true, "");
+      await ir.connect(ops).updateIdentity(bob.address, b1);
+      await expect(gov.connect(bob).castVote(id, true, "")).to.be.revertedWith(
+        "Identity too new to vote",
+      );
+      expect((await gov.getProposal(id))[0].votesFor).to.equal(1n);
+    });
+
+    it("a proposer swapped onto a spare aged identity cannot self-vote", async function () {
+      const f = await setup();
+      const { gov, ir, ops, propose, proposer } = f;
+      const { id: spare } = await kycId(f, proposer.address);
+      const parked = ethers.Wallet.createRandom().address;
+      await ir.connect(ops).registerIdentity(parked, spare, 840);
+      await ageVoters(gov);
+      await ir.connect(ops).deleteIdentity(parked);
+      const id = await propose();
+      await ir.connect(ops).updateIdentity(proposer.address, spare);
+      await expect(
+        gov.connect(proposer).castVote(id, true, "self"),
+      ).to.be.revertedWith("Identity too new to vote");
+    });
+
+    it("delete then re-register: no vote until the identity ages again", async function () {
+      const { gov, ir, ops, propose, voters } = await setup();
+      const [bob] = voters;
+      const bobId = await ir.identity(bob.address);
+      await ir.connect(ops).deleteIdentity(bob.address);
+      await ir.connect(ops).registerIdentity(bob.address, bobId, 840);
+      const id = await propose();
+      await expect(gov.connect(bob).castVote(id, true, "")).to.be.revertedWith(
+        "Identity too new to vote",
+      );
+      await ageVoters(gov);
+      await gov.connect(bob).castVote(await propose(), true, "");
+    });
+
+    it("ops deleting and re-registering aged voters cannot shrink quorum", async function () {
+      const f = await setup();
+      const { gov, ir, ops, propose, fresh, fund, factory } = f;
+      const extra = [];
+      for (let i = 0; i < 7; i++) {
+        const w = await fresh();
+        const id = await deployIdentity(factory, w.address);
+        await ir.registerIdentity(w.address, id, 840);
+        await attest(f.kycIssuer, f.deployer, id);
+        await fund(w);
+        extra.push({ w, id });
+      }
+      await ageVoters(gov);
+      expect(await ir.registeredIdentityCount()).to.equal(10n);
+      for (const e of extra) await ir.connect(ops).deleteIdentity(e.w.address);
+      await ageVoters(gov);
+      for (const e of extra)
+        await ir.connect(ops).registerIdentity(e.w.address, e.id, 840);
+      const id = await propose();
+      // 10 honest identities, 7 deregistered at the cutoff: 3 counted, and
+      // the 7 re-registered ones are not eligible either.
+      expect((await gov.getProposal(id))[0].eligibleVotersAtCreation).to.equal(
+        3n,
+      );
+      for (const e of extra)
+        await expect(
+          gov.connect(e.w).castVote(id, true, ""),
+        ).to.be.revertedWith("Identity too new to vote");
+      await ageVoters(gov);
+      const id2 = await propose();
+      expect((await gov.getProposal(id2))[0].eligibleVotersAtCreation).to.equal(
+        10n,
+      );
+      for (const e of extra) await gov.connect(e.w).castVote(id2, true, "");
+    });
+
+    it("M5b: a MANAGEMENT-key wallet that is not the owner may vote", async function () {
+      const f = await setup();
+      const { gov, ir, voters, fresh, fund } = f;
+      const w = await fresh();
+      const { oid, id } = await kycId(f, voters[1].address);
+      await oid
+        .connect(voters[1])
+        .addKey(keyOf(w.address), MANAGEMENT_KEY, ECDSA);
+      await ir.registerIdentity(w.address, id, 840);
+      await fund(w);
+      await ageVoters(gov);
+      expect(await oid.owner()).to.not.equal(w.address);
+      await gov.connect(w).castVote(await f.propose(), true, "");
+    });
+
+    it("M5c: an owner whose own key was removed may still vote", async function () {
+      const f = await setup();
+      const { gov, ir, fresh, fund } = f;
+      const w = await fresh();
+      const { oid, id } = await kycId(f, w.address);
+      await oid.connect(w).removeKey(keyOf(w.address), MANAGEMENT_KEY);
+      expect(
+        await oid.keyHasPurpose(keyOf(w.address), MANAGEMENT_KEY),
+      ).to.equal(false);
+      await ir.registerIdentity(w.address, id, 840);
+      await fund(w);
+      await ageVoters(gov);
+      await gov.connect(w).castVote(await f.propose(), true, "");
+    });
+
+    it("L-3: a wallet voting through a second identity records both deposits", async function () {
+      const f = await setup();
+      const { gov, ir, ops, propose, voters, fresh, fund } = f;
+      const [bob] = voters;
+      // Xavier: an aged, KYC'd identity that has not voted.
+      const x = await fresh();
+      const { oid: xOid, id: xId } = await kycId(f, x.address);
+      await ir.registerIdentity(x.address, xId, 840);
+      await fund(x);
+      await ageVoters(gov);
+      const id = await propose();
+      const cost = await gov.votingCost();
+      await gov.connect(bob).castVote(id, true, "");
+      // With Xavier's consent his identity moves onto Bob's wallet.
+      await ir.connect(ops).deleteIdentity(bob.address);
+      await xOid.connect(x).addKey(keyOf(bob.address), ACTION_KEY, ECDSA);
+      await ir.connect(ops).moveIdentity(x.address, bob.address);
+      await gov.connect(bob).castVote(id, false, "");
+      expect(await gov.getVoterLockedTokens(id, bob.address)).to.equal(
+        2n * cost,
       );
     });
   });

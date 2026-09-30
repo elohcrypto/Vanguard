@@ -49,12 +49,11 @@ async function setup() {
 }
 
 describe("Execution gas floor (M1)", function () {
-  async function heavyProposal() {
+  /** A passed onboarding batch: n new wallets, n distinct identities. */
+  async function heavyProposal(n = 20) {
     const s = await setup();
     const ir = s.c.identityRegistry;
     await s.handTo(IRP, ir);
-    // A normal onboarding batch: 20 new wallets, 20 distinct identities.
-    const n = 20;
     const ws = Array.from(
       { length: n },
       () => ethers.Wallet.createRandom().address,
@@ -102,6 +101,29 @@ describe("Execution gas floor (M1)", function () {
     await gov.connect(stranger).executeProposal(id, { gasLimit: est });
     expect(await status(id)).to.equal(EXECUTED);
     expect(await ir.identity(ws[19])).to.not.equal(ethers.ZeroAddress);
+  });
+
+  // Review 2F.1 L-1: about 98.5k gas per wallet, so a 40-wallet batch needs
+  // more than the floor. eth_estimateGas used to return the gasUsed of a
+  // 12M run, at which the target ran out and the proposal settled Rejected.
+  it("L-1: a 40-wallet batch executes at exactly estimateGas", async function () {
+    const { gov, stranger, ir, ws, id, status } = await heavyProposal(40);
+    const est = await gov.connect(stranger).executeProposal.estimateGas(id);
+    expect(est).to.be.greaterThan(4_000_000n);
+    await gov.connect(stranger).executeProposal(id, { gasLimit: est });
+    expect(await status(id)).to.equal(EXECUTED);
+    expect(await ir.identity(ws[39])).to.not.equal(ethers.ZeroAddress);
+  });
+
+  it("L-1: a 35-wallet batch under-gassed above the floor reverts and stays Active", async function () {
+    const { gov, stranger, ir, ws, id, status } = await heavyProposal(35);
+    await expect(
+      gov.connect(stranger).executeProposal(id, { gasLimit: 3_100_000 }),
+    ).to.be.revertedWithCustomError(gov, "InsufficientExecutionGas");
+    expect(await status(id)).to.equal(ACTIVE);
+    await gov.connect(stranger).executeProposal(id, { gasLimit: 12_000_000 });
+    expect(await status(id)).to.equal(EXECUTED);
+    expect(await ir.identity(ws[34])).to.not.equal(ethers.ZeroAddress);
   });
 
   it("a genuine target revert with ample gas still settles Rejected", async function () {
@@ -153,6 +175,24 @@ describe("Selector denylist (L5)", function () {
     expect(await gov.proposalCount()).to.equal(0n);
   });
 
+  it("M-2: VGT distributeGovernanceTokens and burn(uint256) are refused at creation", async function () {
+    const { c, gov, propose, proposer, govAddr } = await setup();
+    const vgt = c.governanceToken;
+    const bal = await vgt.balanceOf(govAddr);
+    const distribute = vgt.interface.encodeFunctionData(
+      "distributeGovernanceTokens",
+      [[proposer.address], [bal]],
+    );
+    expect(distribute.slice(0, 10)).to.equal("0x18b55856");
+    const burn = vgt.interface.encodeFunctionData("burn(uint256)", [1n]);
+    expect(burn.slice(0, 10)).to.equal("0x42966c68");
+    for (const data of [distribute, burn])
+      await expect(propose(GTP, vgt, data)).to.be.revertedWith(
+        "Selector not allowed",
+      );
+    expect(await gov.proposalCount()).to.equal(0n);
+  });
+
   it("refuses renounceOwnership on every bound type and calldata under 4 bytes", async function () {
     const { c, propose } = await setup();
     const renounce =
@@ -194,9 +234,10 @@ describe("Selector denylist (L5)", function () {
     expect(await vgt.isAgent(stranger.address)).to.equal(true);
   });
 
-  it("ListUpdate accepts the four list writes and the ownership steps only", async function () {
-    const { c, propose, stranger, ops } = await setup();
+  it("ListUpdate accepts the list writes, the manager's owner surface and the ownership steps only", async function () {
+    const { c, propose, stranger, ops, govAddr } = await setup();
     const dlm = c.dynamicListManager;
+    await dlm.setGovernanceContract(govAddr);
     const who = stranger.address;
     const DAY = 86400;
     for (const data of [
@@ -207,15 +248,75 @@ describe("Selector denylist (L5)", function () {
       // The ceremony accepts the manager's ownership under ListUpdate.
       dlm.interface.encodeFunctionData("acceptOwnership"),
       dlm.interface.encodeFunctionData("transferOwnership", [ops.address]),
+      // Follow-up (b): the manager's owner-only and list-root setters.
+      dlm.interface.encodeFunctionData("setOracles", [who, who]),
+      dlm.interface.encodeFunctionData("setGovernanceContract", [ops.address]),
+      dlm.interface.encodeFunctionData("setProofExpiryDuration", [DAY]),
+      dlm.interface.encodeFunctionData("updateWhitelist", [ethers.ZeroHash]),
+      dlm.interface.encodeFunctionData("updateBlacklist", [ethers.ZeroHash]),
     ])
       await propose(LIST, dlm, data);
+    const vgt = c.governanceToken;
     for (const data of [
-      dlm.interface.encodeFunctionData("setGovernanceContract", [ops.address]),
-      dlm.interface.encodeFunctionData("setOracles", [who, who]),
-      dlm.interface.encodeFunctionData("setProofExpiryDuration", [DAY]),
+      dlm.interface.encodeFunctionData("owner"),
+      dlm.interface.encodeFunctionData("renounceOwnership"),
+      vgt.interface.encodeFunctionData("transfer", [who, 1n]),
     ])
       await expect(propose(LIST, dlm, data)).to.be.revertedWith(
         "Selector not allowed",
       );
+  });
+
+  // B-L4: a SystemParameters vote could retarget ListUpdate (20% quorum) at
+  // any governance-owned contract. createProposal now requires the bound
+  // manager to report this governance.
+  it("refuses ListUpdate on a manager bound to another governance, or unset", async function () {
+    const { c, propose, stranger, ops } = await setup();
+    const dlm = c.dynamicListManager;
+    const data = dlm.interface.encodeFunctionData("addToWhitelist", [
+      stranger.address,
+      0,
+      1,
+      86400,
+      "r",
+    ]);
+    await expect(propose(LIST, dlm, data)).to.be.revertedWith(
+      "List manager not bound to governance",
+    );
+    await dlm.setGovernanceContract(ops.address);
+    await expect(propose(LIST, dlm, data)).to.be.revertedWith(
+      "List manager not bound to governance",
+    );
+  });
+
+  it("refuses ListUpdate retargeted at a contract with no governanceContract()", async function () {
+    const { c, gov, propose, ops } = await setup();
+    const token = c.token;
+    await gov.setDynamicListManager(await token.getAddress());
+    await expect(
+      propose(
+        LIST,
+        token,
+        token.interface.encodeFunctionData("transferOwnership", [ops.address]),
+      ),
+    ).to.be.revertedWith("List manager not bound to governance");
+  });
+
+  it("setOracles passes by ListUpdate vote on a governance-owned manager", async function () {
+    const { c, gov, passed, status, handTo, govAddr, args } = await setup();
+    const dlm = c.dynamicListManager;
+    await dlm.setGovernanceContract(govAddr);
+    await handTo(LIST, dlm);
+    const wl = await args.oracles[0].getAddress();
+    const bl = await c.oracleManager.getAddress();
+    const id = await passed(
+      LIST,
+      dlm,
+      dlm.interface.encodeFunctionData("setOracles", [wl, bl]),
+    );
+    await gov.executeProposal(id);
+    expect(await status(id)).to.equal(EXECUTED);
+    expect(await dlm.whitelistOracle()).to.equal(wl);
+    expect(await dlm.blacklistOracle()).to.equal(bl);
   });
 });

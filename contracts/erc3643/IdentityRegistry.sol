@@ -35,10 +35,13 @@ contract IdentityRegistry is IIdentityRegistry, Ownable2Step {
     // the agent key vote twice with one person's identity.
     mapping(address => address) private _walletOf;
 
-    /// @notice When an identity was first bound to a wallet. Never reset:
-    ///         moveIdentity, updateIdentity back to it, and delete followed by
-    ///         re-registration all keep the original age. Governance only
-    ///         lets identities older than its minimum voter age vote.
+    /// @notice Start of the identity's current continuous binding. Every
+    ///         bind of an unbound identity (register, batch, updateIdentity to
+    ///         a different identity) restarts it; moveIdentity (recovery, same
+    ///         person) keeps it. Governance only lets identities older than
+    ///         its minimum voter age vote, and counts identities bound at its
+    ///         cutoff, so a restart keeps "eligible" inside "counted": a
+    ///         re-bound identity can neither vote twice nor vote uncounted.
     mapping(address => uint64) public identityRegisteredAt;
 
     // registeredIdentityCount over time, keyed by block.timestamp, so a
@@ -218,13 +221,11 @@ contract IdentityRegistry is IIdentityRegistry, Ownable2Step {
         emit IdentityUnstored(_fromWallet, identityAddr);
     }
 
-    /// @dev Reverse entry plus first-bind timestamp. Callers check the
-    ///      identity is not bound elsewhere first.
+    /// @dev Reverse entry plus bind timestamp. Callers check the identity is
+    ///      not bound elsewhere first, so this always starts a new binding.
     function _bindIdentity(address _wallet, address _identity) private {
         _walletOf[_identity] = _wallet;
-        if (identityRegisteredAt[_identity] == 0) {
-            identityRegisteredAt[_identity] = uint64(block.timestamp);
-        }
+        identityRegisteredAt[_identity] = uint64(block.timestamp);
     }
 
     /// @inheritdoc IIdentityRegistry

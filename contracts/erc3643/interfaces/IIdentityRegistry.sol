@@ -43,7 +43,9 @@ interface IIdentityRegistry {
     ///         voter-age cutoff so fresh identities do not raise quorum.
     function registeredIdentityCountAt(uint48 timestamp) external view returns (uint256);
 
-    /// @notice First time `identity` was bound to a wallet, or 0. Never reset.
+    /// @notice Start of `identity`'s current binding, or 0 if never bound.
+    ///         Restarted by every bind of an unbound identity; kept by
+    ///         moveIdentity (recovery).
     function identityRegisteredAt(address identity) external view returns (uint64);
 
     /// @notice The one wallet `identity` is bound to, or address(0).

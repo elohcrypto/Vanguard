@@ -490,6 +490,8 @@ describe("Hardening round 2 — contract changes", () => {
         ethers.parseEther("10"),
       );
       await ir.registerIdentity(bob.address, ids.bob, 840);
+      // Re-registration restarts Bob's identity age (review 2F.1 M-1).
+      await ageVoters(gov);
       // Execution failure with a de-verified voter.
       const cd = gov.interface.encodeFunctionData("setVotingCost", [
         ethers.parseEther("5000"),
@@ -636,9 +638,12 @@ describe("Hardening round 2 — contract changes", () => {
     });
 
     it("manager not authorised settles the same way", async () => {
-      const { alice, bob, carol, gov, dlm } = await listFixture();
-      // Not authorised: manager set on governance, governance not set on manager.
+      const { alice, bob, carol, gov, govAddr, dlm } = await listFixture();
       await gov.setDynamicListManager(await dlm.getAddress());
+      // createProposal requires the manager to report this governance, so
+      // the unauthorised state arises only after the vote: the manager is
+      // re-pointed elsewhere before execution.
+      await dlm.setGovernanceContract(govAddr);
       const a = await passedListProposal(
         gov,
         alice,
@@ -647,6 +652,7 @@ describe("Hardening round 2 — contract changes", () => {
         dlm,
         addWl(dlm, bob.address),
       );
+      await dlm.setGovernanceContract(alice.address);
       await expect(gov.executeProposal(a))
         .to.emit(gov, "ProposalExecutionFailed")
         .withArgs(

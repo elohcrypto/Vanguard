@@ -223,6 +223,7 @@ describe("List-update proposals honour the execution delay", function () {
       await ethers.getContractFactory("DynamicListManager")
     ).deploy(owner.address);
     await gov.setDynamicListManager(await dlm.getAddress());
+    await dlm.setGovernanceContract(await gov.getAddress());
 
     // ProposalType.ListUpdate (6): a plain call on the manager.
     const cd = dlm.interface.encodeFunctionData("addToBlacklist", [

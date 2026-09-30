@@ -9,6 +9,12 @@ import "../compliance/interfaces/IComplianceRules.sol";
 import "../erc3643/interfaces/IInvestorTypeRegistry.sol";
 import "../onchain_id/interfaces/IERC734.sol";
 
+/// @dev The one DynamicListManager getter governance checks before a
+///      ListUpdate proposal: the manager must report this governance.
+interface IGovernedListManager {
+    function governanceContract() external view returns (address);
+}
+
 /**
  * @title VanguardGovernance
  * @dev Unified governance contract using GovernanceToken for voting
@@ -162,19 +168,25 @@ contract VanguardGovernance is Ownable2Step, ReentrancyGuard {
     // Selectors no proposal may call, on any bound target (L5). transfer,
     // approve and transferFrom would move VGT deposits governance holds for
     // other proposals; renounceOwnership would orphan a bound contract.
+    // distributeGovernanceTokens and burn(uint256) are VGT agent functions
+    // that spend the CALLER's balance, and governance is a VGT agent (it
+    // burns deposits on pass): a vote on either would pay out or destroy
+    // every other proposal's deposits, the same drain as transfer (M-2).
     // transferOwnership/acceptOwnership stay allowed: the handover ceremony
     // and a future governance migration need them (A-N3 is an operational rule).
     bytes4 private constant SEL_TRANSFER = 0xa9059cbb; // transfer(address,uint256)
     bytes4 private constant SEL_APPROVE = 0x095ea7b3; // approve(address,uint256)
     bytes4 private constant SEL_TRANSFER_FROM = 0x23b872dd; // transferFrom(address,address,uint256)
     bytes4 private constant SEL_RENOUNCE = 0x715018a6; // renounceOwnership()
+    bytes4 private constant SEL_DISTRIBUTE = 0x18b55856; // distributeGovernanceTokens(address[],uint256[])
+    bytes4 private constant SEL_BURN_SELF = 0x42966c68; // burn(uint256)
     // ListUpdate runs under list thresholds, so it may only call the
-    // DynamicListManager's four list writes, plus the two ownership steps:
-    // the handover ceremony accepts the manager's ownership under ListUpdate
-    // (its only bound type), and a migration must be able to hand it on.
-    // Manager admin setters (setOracles, ...) are refused here; governance
-    // reaches them by transferring the manager, reconfiguring, and taking
-    // it back.
+    // DynamicListManager: its four list writes, its owner surface (oracles,
+    // governance address, proof expiry, list roots), and the two ownership
+    // steps. ListUpdate is the manager's only bound type, so this is the
+    // only way a governance-owned manager is reconfigured; the ceremony
+    // accepts the manager's ownership under it, and a migration must be
+    // able to hand it on.
     bytes4 private constant SEL_TRANSFER_OWNERSHIP = 0xf2fde38b; // transferOwnership(address)
     bytes4 private constant SEL_ACCEPT_OWNERSHIP = 0x79ba5097; // acceptOwnership()
     bytes4 private constant SEL_ADD_WHITELIST =
@@ -185,6 +197,11 @@ contract VanguardGovernance is Ownable2Step, ReentrancyGuard {
         bytes4(keccak256("removeFromWhitelist(address,uint256,string)"));
     bytes4 private constant SEL_REMOVE_BLACKLIST =
         bytes4(keccak256("removeFromBlacklist(address,uint256,string)"));
+    bytes4 private constant SEL_SET_ORACLES = bytes4(keccak256("setOracles(address,address)"));
+    bytes4 private constant SEL_SET_GOVERNANCE = bytes4(keccak256("setGovernanceContract(address)"));
+    bytes4 private constant SEL_SET_PROOF_EXPIRY = bytes4(keccak256("setProofExpiryDuration(uint256)"));
+    bytes4 private constant SEL_UPDATE_WHITELIST = bytes4(keccak256("updateWhitelist(bytes32)"));
+    bytes4 private constant SEL_UPDATE_BLACKLIST = bytes4(keccak256("updateBlacklist(bytes32)"));
 
     // Token locking tracking.
     //
@@ -233,6 +250,9 @@ contract VanguardGovernance is Ownable2Step, ReentrancyGuard {
     event VotingCostUpdated(uint256 oldCost, uint256 newCost);
     event MinVoterAgeUpdated(uint256 oldAge, uint256 newAge);
     error VoterAgeOutOfRange(uint256 requested, uint256 min, uint256 max);
+    /// @notice executeProposal: the passed proposal's target ran out of gas.
+    ///         The proposal stays Active; retry with a higher gas limit.
+    error InsufficientExecutionGas();
     
     /**
      * @dev Constructor
@@ -405,6 +425,7 @@ contract VanguardGovernance is Ownable2Step, ReentrancyGuard {
             revert TargetNotBoundToType(proposalType, target);
         }
         _requireAllowedSelector(proposalType, callData);
+        if (proposalType == ProposalType.ListUpdate) _requireGovernedListManager(target);
 
         // Check proposer has enough tokens for creation cost
         require(
@@ -495,7 +516,10 @@ contract VanguardGovernance is Ownable2Step, ReentrancyGuard {
 
         // Track locked tokens
         _lockedTokens[proposalId] += votingCost;
-        _voterLockedTokens[proposalId][msg.sender] = votingCost;
+        // +=, not =: votes are keyed by identity, so one wallet can vote
+        // twice through two identities (a consenting holder's identity moved
+        // onto it after a deletion). Each deposit must stay claimable (L-3).
+        _voterLockedTokens[proposalId][msg.sender] += votingCost;
 
         // 1 Person = 1 Vote (equal voting power)
         if (support) {
@@ -529,7 +553,12 @@ contract VanguardGovernance is Ownable2Step, ReentrancyGuard {
         require(callData.length >= 4, "Selector not allowed");
         bytes4 sel = bytes4(callData[:4]);
         require(
-            sel != SEL_TRANSFER && sel != SEL_APPROVE && sel != SEL_TRANSFER_FROM && sel != SEL_RENOUNCE,
+            sel != SEL_TRANSFER &&
+                sel != SEL_APPROVE &&
+                sel != SEL_TRANSFER_FROM &&
+                sel != SEL_RENOUNCE &&
+                sel != SEL_DISTRIBUTE &&
+                sel != SEL_BURN_SELF,
             "Selector not allowed"
         );
         if (proposalType == ProposalType.ListUpdate) {
@@ -538,10 +567,34 @@ contract VanguardGovernance is Ownable2Step, ReentrancyGuard {
                     sel == SEL_ADD_BLACKLIST ||
                     sel == SEL_REMOVE_WHITELIST ||
                     sel == SEL_REMOVE_BLACKLIST ||
+                    sel == SEL_SET_ORACLES ||
+                    sel == SEL_SET_GOVERNANCE ||
+                    sel == SEL_SET_PROOF_EXPIRY ||
+                    sel == SEL_UPDATE_WHITELIST ||
+                    sel == SEL_UPDATE_BLACKLIST ||
                     sel == SEL_TRANSFER_OWNERSHIP ||
                     sel == SEL_ACCEPT_OWNERSHIP,
                 "Selector not allowed"
             );
+        }
+    }
+
+    /**
+     * @dev ListUpdate's target must be a list manager that reports this
+     *      governance (B-L4). Otherwise a SystemParameters vote could point
+     *      dynamicListManager at any governance-owned contract (e.g.
+     *      ComplianceRules) and run transferOwnership there at list
+     *      thresholds. Checked per proposal, not in setDynamicListManager,
+     *      so wiring order does not matter and a later change of the
+     *      manager's governanceContract is caught. Fails closed: no code, a
+     *      revert, or another address all refuse.
+     */
+    function _requireGovernedListManager(address target) private view {
+        require(target.code.length > 0, "List manager not bound to governance");
+        try IGovernedListManager(target).governanceContract() returns (address g) {
+            require(g == address(this), "List manager not bound to governance");
+        } catch {
+            revert("List manager not bound to governance");
         }
     }
 
@@ -620,22 +673,30 @@ contract VanguardGovernance is Ownable2Step, ReentrancyGuard {
             // Proposal passed: Execute and BURN locked tokens
             require(block.timestamp >= proposal.executionTime, "Execution delay not met");
             // Before any state change, so an under-gassed call reverts and
-            // the proposal stays Active and executable (M1).
-            //
-            // Deliberately a floor, not "revert if the call failed with
-            // gasleft() <= gasBefore / 63": under that rule a target that
-            // burns all gas it is given would revert at every gas limit, so
-            // the proposal could never settle and its deposits would stay
-            // locked until a second, rescue vote passed cancelProposal on it
-            // (reachable: cancelProposal is onlyOwner but not nonReentrant,
-            // see its comment). The floor keeps a failed call terminal and
-            // refundable in one step. A target needing more than ~2.9M gas
-            // can still be griefed; raise the floor before proposing one.
+            // the proposal stays Active and executable (M1). The floor lets
+            // eth_estimateGas land on a working limit for light targets.
             require(gasleft() >= MIN_EXECUTION_GAS, "Insufficient gas for execution");
 
-            (bool success, bytes memory reason) = proposal.target.call(proposal.callData);
+            bytes memory data = proposal.callData;
+            address target = proposal.target;
+            uint256 gasBefore = gasleft();
+            (bool success, bytes memory reason) = target.call(data);
 
             if (!success) {
+                // OUT OF GAS IS NOT AN OUTCOME (L-1). EIP-150 gives the
+                // target at most 63/64 of gasBefore, so a failed call that
+                // leaves at most 1/63 of it ran the target out of gas: revert,
+                // the proposal stays Active, and anyone retries with more gas.
+                // This covers targets heavier than the floor (a 35-wallet
+                // batchRegisterIdentity needs ~3.5M), both against a griefer
+                // who under-gasses and an honest executor whose
+                // eth_estimateGas used to return a limit the target ran out
+                // at. Cost: a target that burns everything it is given now
+                // reverts at every gas limit, and its deposits stay locked
+                // until a rescue vote calls cancelProposal on it (reachable:
+                // onlyOwner but not nonReentrant, see its comment).
+                if (gasleft() <= gasBefore / 63) revert InsufficientExecutionGas();
+
                 // A PASSED VOTE WHOSE TARGET CALL REVERTS IS AN OUTCOME.
                 //
                 // This used to revert (require(success)). That left the proposal Active with every deposit

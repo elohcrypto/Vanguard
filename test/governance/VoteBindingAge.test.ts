@@ -183,6 +183,57 @@ describe("Vote binding: minimum identity age", function () {
     expect(await ir.isAgent(ops.address)).to.equal(false);
   });
 
+  it("M8c: an identity registered exactly at the cutoff is eligible and counted; one second later is not", async function () {
+    const { gov, c, proposer, deployer, kycIssuer, ops } = await setup();
+    const ir = c.identityRegistry;
+    const before = await ir.registeredIdentityCount();
+    const OID = await ethers.getContractFactory("OnchainID");
+    const ws = [];
+    for (let i = 0; i < 2; i++) {
+      const w = ethers.Wallet.createRandom().connect(ethers.provider);
+      await deployer.sendTransaction({
+        to: w.address,
+        value: ethers.parseEther("1"),
+      });
+      const id = await (await OID.deploy(w.address)).getAddress();
+      await attest(kycIssuer, deployer, id);
+      ws.push({ w, id });
+    }
+    const t = (await time.latest()) + 10;
+    await time.setNextBlockTimestamp(t);
+    await ir.registerIdentity(ws[0].w.address, ws[0].id, 840);
+    await time.setNextBlockTimestamp(t + 1);
+    await ir.registerIdentity(ws[1].w.address, ws[1].id, 840);
+    for (const { w } of ws) {
+      await c.governanceToken
+        .connect(ops)
+        .mint(w.address, ethers.parseEther("100"));
+      await c.governanceToken
+        .connect(w)
+        .approve(await gov.getAddress(), ethers.MaxUint256);
+    }
+    await time.setNextBlockTimestamp(t + Number(await gov.minVoterAge()));
+    await gov
+      .connect(proposer)
+      .createProposal(
+        SYS,
+        "t",
+        "",
+        await gov.getAddress(),
+        gov.interface.encodeFunctionData("setVotingCost", [
+          ethers.parseEther("10"),
+        ]),
+      );
+    const id = await gov.proposalCount();
+    const p = (await gov.getProposal(id))[0];
+    expect(p.voterAgeCutoff).to.equal(BigInt(t));
+    expect(p.eligibleVotersAtCreation).to.equal(before + 1n);
+    await gov.connect(ws[0].w).castVote(id, true, "");
+    await expect(
+      gov.connect(ws[1].w).castVote(id, true, ""),
+    ).to.be.revertedWith("Identity too new to vote");
+  });
+
   describe("setMinVoterAge", function () {
     it("is owner-only and bounded to [1 day, 30 days] / TIME_SCALE", async function () {
       const { gov, stranger } = await setup();
