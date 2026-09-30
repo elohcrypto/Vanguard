@@ -1,5 +1,6 @@
 import { expect } from "chai";
 import { ethers } from "hardhat";
+import { ageVoters } from "../helpers/governanceFixture";
 import { SignerWithAddress } from "@nomicfoundation/hardhat-ethers/signers";
 import { attest, configureKyc } from "../helpers/kyc";
 
@@ -211,6 +212,8 @@ describe("List-update proposals honour the execution delay", function () {
     await attest(kycIssuer, owner, aliceId);
     await vgt.mint(alice.address, ethers.parseEther("1000"));
     await vgt.connect(alice).approve(await gov.getAddress(), ethers.MaxUint256);
+    // Voters must be older than minVoterAge before they propose (D25).
+    await ageVoters(gov);
 
     const dlm = await (
       await ethers.getContractFactory("DynamicListManager")
@@ -326,6 +329,8 @@ describe("cancelProposal under self-ownership", function () {
       await vgt.mint(w.address, E("1000"));
       await vgt.connect(w).approve(govAddr, ethers.MaxUint256);
     }
+    // Voters must be older than minVoterAge before they propose (D25).
+    await ageVoters(gov);
     // Governance takes ownership of itself by vote.
     await gov.transferOwnership(govAddr);
     await gov
@@ -490,6 +495,9 @@ describe("Expired claims and the electorate (D7)", function () {
     for (const w of lapsed) await idReg.deleteIdentity(w.address);
     expect(await idReg.registeredIdentityCount()).to.equal(3n);
     // 2 of 3 clears quorum and approval.
+    // The denominator is the count at the voter-age cutoff (D25), so a
+    // deletion lowers it for proposals created minVoterAge later.
+    await ageVoters(gov);
     expect(await run(2, 3n)).to.equal(EXECUTED);
   });
 });

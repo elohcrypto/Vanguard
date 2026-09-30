@@ -1,5 +1,6 @@
 import { expect } from "chai";
 import { ethers } from "hardhat";
+import { ageVoters } from "../helpers/governanceFixture";
 import { attest, configureKyc } from "../helpers/kyc";
 
 /**
@@ -57,6 +58,8 @@ describe("Governance as a trusted contract (D21)", function () {
       if (s !== owner) await vgt.transfer(s.address, ethers.parseEther("100"));
       await vgt.connect(s).approve(govAddr, ethers.MaxUint256);
     }
+    // Voters must be older than minVoterAge before they propose (D25).
+    await ageVoters(gov);
     await vgt.connect(outsider).approve(govAddr, ethers.MaxUint256);
     return { owner, proposer, v1, v2, v3, outsider, idReg, rules, vgt, gov };
   }

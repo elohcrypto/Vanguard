@@ -7,6 +7,7 @@ import "./GovernanceToken.sol";
 import "../erc3643/interfaces/IIdentityRegistry.sol";
 import "../compliance/interfaces/IComplianceRules.sol";
 import "../erc3643/interfaces/IInvestorTypeRegistry.sol";
+import "../onchain_id/interfaces/IERC734.sol";
 
 /**
  * @title VanguardGovernance
@@ -75,7 +76,16 @@ contract VanguardGovernance is Ownable2Step, ReentrancyGuard {
         // identities to push a proposal below quorum, or delete them to lift
         // it above. Freezing the count at creation makes the bar fixed for the
         // life of the proposal.
+        //
+        // Since plan 2F.1 it is the count at voterAgeCutoff, so identities too
+        // young to vote do not raise the bar either.
         uint256 eligibleVotersAtCreation;
+        // Identity of the proposer; it may not vote on its own proposal.
+        address proposerIdentity;
+        // Only identities registered at or before this time may vote:
+        // createdAt - minVoterAge, frozen so a later setMinVoterAge does not
+        // move an open proposal's electorate.
+        uint256 voterAgeCutoff;
     }
     
     // State variables
@@ -83,6 +93,7 @@ contract VanguardGovernance is Ownable2Step, ReentrancyGuard {
     IIdentityRegistry public identityRegistry;
 
     mapping(uint256 => Proposal) private _proposals;
+    // Keyed by IDENTITY (OnchainID), not wallet: one vote per person.
     mapping(uint256 => mapping(address => bool)) private _hasVoted;
     mapping(uint256 => mapping(address => bool)) private _voteChoice; // true = for, false = against
     mapping(uint256 => address[]) private _proposalVoters; // Track voters for token return
@@ -107,7 +118,8 @@ contract VanguardGovernance is Ownable2Step, ReentrancyGuard {
      * @return True if the voter has voted, false otherwise
      */
     function hasVoted(uint256 proposalId, address voter) external view returns (bool) {
-        return _hasVoted[proposalId][voter];
+        address id = identityRegistry.identity(voter);
+        return id != address(0) && _hasVoted[proposalId][id];
     }
 
     // Target contracts
@@ -130,6 +142,15 @@ contract VanguardGovernance is Ownable2Step, ReentrancyGuard {
     ///      one call. 1000 VGT is 100x the default; the exact ceiling is a
     ///      product decision and only needs to block the freeze.
     uint256 public constant MAX_COST = 1000 * 10**18;
+
+    /// @notice Minimum identity age to propose or vote (D25, plan 2F.1):
+    ///         an identity votes on a proposal only if the registry bound it
+    ///         at least this long before the proposal was created. Fresh fake
+    ///         identities (registry agent plus issuer collusion) therefore
+    ///         neither vote nor count toward quorum, and the honest electorate
+    ///         has this window to vote the colluding keys out. 7 days, divided
+    ///         by TIME_SCALE like every other duration.
+    uint256 public minVoterAge;
 
     // Token locking tracking.
     //
@@ -176,6 +197,8 @@ contract VanguardGovernance is Ownable2Step, ReentrancyGuard {
     ///         unbound target let any action run under the weakest tier.
     error TargetNotBoundToType(ProposalType proposalType, address target);
     event VotingCostUpdated(uint256 oldCost, uint256 newCost);
+    event MinVoterAgeUpdated(uint256 oldAge, uint256 newAge);
+    error VoterAgeOutOfRange(uint256 requested, uint256 min, uint256 max);
     
     /**
      * @dev Constructor
@@ -219,6 +242,7 @@ contract VanguardGovernance is Ownable2Step, ReentrancyGuard {
         token = _token;
 
         _initializeThresholds();
+        minVoterAge = 7 days / _timeScale;
     }
     
     /**
@@ -334,8 +358,9 @@ contract VanguardGovernance is Ownable2Step, ReentrancyGuard {
         address target,
         bytes calldata callData
     ) external nonReentrant returns (uint256) {
-        // Check KYC/AML verification
-        require(identityRegistry.isVerified(msg.sender), "Must be KYC/AML verified");
+        uint256 cutoff = block.timestamp > minVoterAge ? block.timestamp - minVoterAge : 0;
+        address proposerId = identityRegistry.identity(msg.sender);
+        _requireEligible(msg.sender, proposerId, cutoff);
 
         // Bind the type to the one contract it governs. Thresholds are looked up
         // by type at execution, so with target free a proposer could submit a
@@ -376,7 +401,9 @@ contract VanguardGovernance is Ownable2Step, ReentrancyGuard {
             status: ProposalStatus.Active,
             votesFor: 0,
             votesAgainst: 0,
-            eligibleVotersAtCreation: identityRegistry.registeredIdentityCount()
+            eligibleVotersAtCreation: identityRegistry.registeredIdentityCountAt(uint48(cutoff)),
+            proposerIdentity: proposerId,
+            voterAgeCutoff: cutoff
         });
 
         // Track locked tokens
@@ -402,11 +429,14 @@ contract VanguardGovernance is Ownable2Step, ReentrancyGuard {
 
         require(proposal.status == ProposalStatus.Active, "Proposal not active");
         require(block.timestamp <= proposal.votingEnds, "Voting period ended");
-        require(!_hasVoted[proposalId][msg.sender], "Already voted");
-        require(msg.sender != proposal.proposer, "Proposer cannot vote on own proposal");
-
-        // Check KYC/AML verification
-        require(identityRegistry.isVerified(msg.sender), "Must be KYC/AML verified");
+        // One vote per identity (H1): N wallets on one OnchainID, or a moved
+        // identity, still vote once, and the proposer's person cannot vote
+        // through another wallet.
+        address id = identityRegistry.identity(msg.sender);
+        require(id != address(0), "Must be KYC/AML verified");
+        require(!_hasVoted[proposalId][id], "Already voted");
+        require(id != proposal.proposerIdentity, "Proposer cannot vote on own proposal");
+        _requireEligible(msg.sender, id, proposal.voterAgeCutoff);
 
         // Check voter has enough tokens for voting cost
         require(
@@ -420,9 +450,10 @@ contract VanguardGovernance is Ownable2Step, ReentrancyGuard {
             "Token transfer failed"
         );
 
-        // Mark as voted
-        _hasVoted[proposalId][msg.sender] = true;
-        _voteChoice[proposalId][msg.sender] = support;
+        // Mark as voted (by identity; the deposit below stays per wallet,
+        // since that is where the VGT came from)
+        _hasVoted[proposalId][id] = true;
+        _voteChoice[proposalId][id] = support;
 
         // Track voter for potential token return
         _proposalVoters[proposalId].push(msg.sender);
@@ -441,6 +472,39 @@ contract VanguardGovernance is Ownable2Step, ReentrancyGuard {
         emit VoteCast(proposalId, msg.sender, support, 1, reason);
     }
     
+    /**
+     * @dev `wallet` may propose or vote through identity `id`: verified,
+     *      holding a key on the identity, and the identity old enough.
+     *
+     *      The key check stops the registry agent voting AS an investor by
+     *      binding a wallet of its own to the investor's identity: the wallet
+     *      must be the OnchainID owner or hold a MANAGEMENT (1) or ACTION (2)
+     *      key. OnchainIDFactory deploys every identity owned by the investor
+     *      wallet with that wallet as MANAGEMENT key, so investors pass as is.
+     */
+    function _requireEligible(address wallet, address id, uint256 cutoff) private view {
+        require(identityRegistry.isVerified(wallet), "Must be KYC/AML verified");
+        require(_controls(wallet, id), "Wallet does not control its identity");
+        uint64 registeredAt = identityRegistry.identityRegisteredAt(id);
+        require(registeredAt != 0 && registeredAt <= cutoff, "Identity too new to vote");
+    }
+
+    /// @dev Fails closed: no code, or a call that reverts, is "no control".
+    function _controls(address wallet, address id) private view returns (bool) {
+        if (id.code.length == 0) return false;
+        try Ownable(id).owner() returns (address o) {
+            if (o == wallet) return true;
+        } catch {}
+        bytes32 key = keccak256(abi.encodePacked(wallet));
+        try IERC734(id).keyHasPurpose(key, 1) returns (bool ok) {
+            if (ok) return true;
+        } catch {}
+        try IERC734(id).keyHasPurpose(key, 2) returns (bool ok) {
+            if (ok) return true;
+        } catch {}
+        return false;
+    }
+
     /**
      * @dev Settle a proposal after its voting period.
      * @notice Passes (quorum and approval for its type met, target call
@@ -691,6 +755,19 @@ contract VanguardGovernance is Ownable2Step, ReentrancyGuard {
         if (newCost == 0 || newCost > MAX_COST) revert CostOutOfRange(newCost, MAX_COST);
         emit VotingCostUpdated(votingCost, newCost);
         votingCost = newCost;
+    }
+
+    /**
+     * @notice Tune the minimum identity age. Bounded to [1 day, 30 days]
+     *         divided by TIME_SCALE, so a vote may adjust it but never
+     *         disable it. Open proposals keep the cutoff they were created with.
+     */
+    function setMinVoterAge(uint256 newAge) external onlyOwner {
+        uint256 lo = 1 days / TIME_SCALE;
+        uint256 hi = 30 days / TIME_SCALE;
+        if (newAge < lo || newAge > hi) revert VoterAgeOutOfRange(newAge, lo, hi);
+        emit MinVoterAgeUpdated(minVoterAge, newAge);
+        minVoterAge = newAge;
     }
 
     /**

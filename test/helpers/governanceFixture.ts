@@ -1,12 +1,24 @@
 import { ethers } from "hardhat";
+import { time } from "@nomicfoundation/hardhat-network-helpers";
 import { SignerWithAddress } from "@nomicfoundation/hardhat-ethers/signers";
 import { attest, configureKyc, deployIdentity } from "./kyc";
+
+/**
+ * Advance the chain past `governance.minVoterAge()` so every identity
+ * registered so far may propose and vote (plan 2F.1, D25: only identities
+ * at least minVoterAge old at proposal creation vote). Call after
+ * onboarding voters and before the first proposal.
+ */
+export async function ageVoters(governance: any): Promise<void> {
+  await time.increase((await governance.minVoterAge()) + 1n);
+}
 
 /**
  * A full governance system as the handover ceremony finds it: the deployer
  * owns and administers everything, governance is bound to every contract
  * (InvestorTypeRegistry and DynamicListManager included), trusted and has no
- * identity; three verified VGT holders (proposer + two voters).
+ * identity; three verified VGT holders (proposer + two voters), aged past
+ * the minimum voter age.
  *
  * Signer order: deployer 0, ops 1, guardian 2, stranger 3, alice 4 (the
  * proposer), bob 5 and carol 6 (the voters). Shared by the handover
@@ -78,6 +90,8 @@ export async function handoverFixture() {
     await attest(kycIssuer, deployer, id);
     await governanceToken.mint(w.address, ethers.parseEther("1000"));
   }
+  // Voters are registered well before the ceremony (D25).
+  await ageVoters(governance);
 
   const c: Record<string, any> = {
     token,

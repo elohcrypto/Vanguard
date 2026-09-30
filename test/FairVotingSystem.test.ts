@@ -1,5 +1,6 @@
 import { expect } from "chai";
 import { ethers } from "hardhat";
+import { ageVoters } from "./helpers/governanceFixture";
 import { SignerWithAddress } from "@nomicfoundation/hardhat-ethers/signers";
 import {
   GovernanceToken,
@@ -238,6 +239,8 @@ describe("Fair Voting System (1 Person = 1 Vote)", function () {
     await governanceToken
       .connect(dave)
       .approve(await vanguardGovernance.getAddress(), ethers.MaxUint256);
+    // Voters must be older than minVoterAge before they propose (D25).
+    await ageVoters(vanguardGovernance);
   });
 
   describe("Governance Costs", function () {

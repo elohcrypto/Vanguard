@@ -1,5 +1,6 @@
 import { expect } from "chai";
 import { ethers } from "hardhat";
+import { ageVoters } from "./helpers/governanceFixture";
 import { SignerWithAddress } from "@nomicfoundation/hardhat-ethers/signers";
 import { time } from "@nomicfoundation/hardhat-network-helpers";
 import {
@@ -170,6 +171,8 @@ describe("Governance Token System", function () {
     await setupIdentity(voter1);
     await setupIdentity(voter2);
     await setupIdentity(voter3);
+    // Voters must be older than minVoterAge before they propose (D25).
+    await ageVoters(vanguardGovernance);
   });
 
   async function setupIdentity(signer: SignerWithAddress) {

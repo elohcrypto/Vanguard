@@ -1,5 +1,6 @@
 import { expect } from "chai";
 import { ethers } from "hardhat";
+import { ageVoters } from "../helpers/governanceFixture";
 import { attest, configureKyc } from "../helpers/kyc";
 
 /**
@@ -57,6 +58,8 @@ describe("Hardening round 2 — contract changes", () => {
       await gt.transfer(s.address, ethers.parseEther("1000"));
       await gt.connect(s).approve(govAddr, ethers.MaxUint256);
     }
+    // Voters must be older than minVoterAge before they propose (D25).
+    await ageVoters(gov);
     return {
       owner,
       alice,

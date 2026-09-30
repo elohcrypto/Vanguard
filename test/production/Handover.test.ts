@@ -1,5 +1,6 @@
 import { expect } from "chai";
 import { ethers } from "hardhat";
+import { ageVoters } from "../helpers/governanceFixture";
 import { SignerWithAddress } from "@nomicfoundation/hardhat-ethers/signers";
 import {
   KYC_DATA,
@@ -173,6 +174,8 @@ describe("Deployer holds no power after handover (plan Task 0.3)", function () {
       await attest(kycIssuer, deployer, id);
       await vgt.mint(w.address, ethers.parseEther("1000"));
     }
+    // Voters are registered minVoterAge before the ceremony (D25).
+    await ageVoters(governance);
 
     await handover();
   });

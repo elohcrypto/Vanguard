@@ -2,6 +2,7 @@
 pragma solidity ^0.8.19;
 
 import "@openzeppelin/contracts/access/Ownable2Step.sol";
+import "@openzeppelin/contracts/utils/structs/Checkpoints.sol";
 import "./interfaces/IIdentityRegistry.sol";
 import "./interfaces/IInvestorTypeRegistry.sol";
 import "../compliance/interfaces/IComplianceRules.sol";
@@ -13,6 +14,8 @@ import "../onchain_id/interfaces/IClaimIssuer.sol";
  * @dev Implementation of identity registry for ERC-3643 ecosystem
  */
 contract IdentityRegistry is IIdentityRegistry, Ownable2Step {
+    using Checkpoints for Checkpoints.Trace208;
+
     // Mapping from wallet address to OnchainID identity
     mapping(address => address) private _identities;
 
@@ -26,6 +29,21 @@ contract IdentityRegistry is IIdentityRegistry, Ownable2Step {
      * deleteIdentity; never derived by iteration.
      */
     uint256 public registeredIdentityCount;
+
+    // One identity, one wallet (plan 2F.1, H1). Governance counts one vote per
+    // identity; a second wallet on the same OnchainID would let whoever holds
+    // the agent key vote twice with one person's identity.
+    mapping(address => address) private _walletOf;
+
+    /// @notice When an identity was first bound to a wallet. Never reset:
+    ///         moveIdentity, updateIdentity back to it, and delete followed by
+    ///         re-registration all keep the original age. Governance only
+    ///         lets identities older than its minimum voter age vote.
+    mapping(address => uint64) public identityRegisteredAt;
+
+    // registeredIdentityCount over time, keyed by block.timestamp, so a
+    // proposal's quorum denominator can be read at its voter-age cutoff.
+    Checkpoints.Trace208 private _countHistory;
 
     /// @dev moveIdentity: the destination wallet is the zero address.
     error InvalidNewWallet();
@@ -111,11 +129,13 @@ contract IdentityRegistry is IIdentityRegistry, Ownable2Step {
     function _storeIdentity(address _userAddress, address _identity, uint16 _country) private {
         _identities[_userAddress] = _identity;
         _countries[_userAddress] = _country;
+        _bindIdentity(_userAddress, _identity);
         // A recycled wallet must not keep a stale "formerly belonged to" claim.
         delete _formerIdentity[_userAddress];
         // New registration only. updateIdentity replaces an existing entry and
         // must not change the count.
         registeredIdentityCount += 1;
+        _countHistory.push(uint48(block.timestamp), uint208(registeredIdentityCount));
 
         emit IdentityStored(_userAddress, _identity);
         emit CountryUpdated(_identity, _country);
@@ -129,6 +149,7 @@ contract IdentityRegistry is IIdentityRegistry, Ownable2Step {
         require(_userAddress != address(0), "Invalid user address");
         require(_identity != address(0), "Invalid identity address");
         require(_identities[_userAddress] == address(0), "Identity already registered");
+        require(_walletOf[_identity] == address(0), "Identity already bound");
 
         if (address(_complianceRules) != address(0) && _tokenForJurisdiction != address(0)) {
             (bool isValid, string memory reason) = _complianceRules.validateJurisdiction(
@@ -149,11 +170,13 @@ contract IdentityRegistry is IIdentityRegistry, Ownable2Step {
         address identityAddr = _identities[_userAddress];
         delete _identities[_userAddress];
         delete _countries[_userAddress];
+        delete _walletOf[identityAddr];
         // Guarded by the "Identity not found" require above, so this cannot
         // underflow, but the check makes that independent of call ordering.
         if (registeredIdentityCount > 0) {
             registeredIdentityCount -= 1;
         }
+        _countHistory.push(uint48(block.timestamp), uint208(registeredIdentityCount));
 
         emit IdentityUnstored(_userAddress, identityAddr);
     }
@@ -183,6 +206,7 @@ contract IdentityRegistry is IIdentityRegistry, Ownable2Step {
         _countries[_toWallet] = country;
         delete _identities[_fromWallet];
         delete _countries[_fromWallet];
+        _walletOf[identityAddr] = _toWallet;
         // Remember whose wallet this was. Sibling tokens on the same registry
         // recover AFTER the identity has moved, and need to prove the lost
         // wallet really belonged to this identity rather than being any
@@ -192,6 +216,25 @@ contract IdentityRegistry is IIdentityRegistry, Ownable2Step {
         emit IdentityStored(_toWallet, identityAddr);
         emit CountryUpdated(identityAddr, country);
         emit IdentityUnstored(_fromWallet, identityAddr);
+    }
+
+    /// @dev Reverse entry plus first-bind timestamp. Callers check the
+    ///      identity is not bound elsewhere first.
+    function _bindIdentity(address _wallet, address _identity) private {
+        _walletOf[_identity] = _wallet;
+        if (identityRegisteredAt[_identity] == 0) {
+            identityRegisteredAt[_identity] = uint64(block.timestamp);
+        }
+    }
+
+    /// @inheritdoc IIdentityRegistry
+    function walletOf(address _identity) external view override returns (address) {
+        return _walletOf[_identity];
+    }
+
+    /// @inheritdoc IIdentityRegistry
+    function registeredIdentityCountAt(uint48 _timestamp) external view override returns (uint256) {
+        return _countHistory.upperLookup(_timestamp);
     }
 
     /// @inheritdoc IIdentityRegistry
@@ -205,6 +248,11 @@ contract IdentityRegistry is IIdentityRegistry, Ownable2Step {
         require(_identities[_userAddress] != address(0), "Identity not registered");
 
         address oldIdentity = _identities[_userAddress];
+        if (_identity != oldIdentity) {
+            require(_walletOf[_identity] == address(0), "Identity already bound");
+            delete _walletOf[oldIdentity];
+            _bindIdentity(_userAddress, _identity);
+        }
         _identities[_userAddress] = _identity;
 
         emit IdentityModified(oldIdentity, _identity);

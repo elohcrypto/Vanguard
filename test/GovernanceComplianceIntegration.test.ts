@@ -1,5 +1,6 @@
 import { expect } from "chai";
 import { ethers } from "hardhat";
+import { ageVoters } from "./helpers/governanceFixture";
 import { SignerWithAddress } from "@nomicfoundation/hardhat-ethers/signers";
 import { time } from "@nomicfoundation/hardhat-network-helpers";
 import {
@@ -135,6 +136,8 @@ describe("Governance → ComplianceRules Integration Test", function () {
     await setupIdentity(voter1);
     await setupIdentity(voter2);
     await setupIdentity(voter3);
+    // Voters must be older than minVoterAge before they propose (D25).
+    await ageVoters(vanguardGovernance);
   });
 
   async function setupIdentity(signer: SignerWithAddress) {
@@ -438,6 +441,8 @@ describe("Governance → ComplianceRules Integration Test", function () {
       }
       const eligible = await identityRegistry.registeredIdentityCount();
       expect(eligible).to.be.greaterThanOrEqual(6n);
+      // Only identities older than minVoterAge count toward quorum (D25).
+      await ageVoters(vanguardGovernance);
 
       await governanceToken.transfer(voter1.address, ethers.parseEther("1000"));
       // createProposal and castVote both pull their fee via transferFrom.
@@ -626,6 +631,8 @@ describe("Governance → ComplianceRules Integration Test", function () {
       }
       const eligible = await identityRegistry.registeredIdentityCount();
       expect(eligible).to.be.greaterThanOrEqual(6n);
+      // Only identities older than minVoterAge count toward quorum (D25).
+      await ageVoters(vanguardGovernance);
 
       await governanceToken.transfer(voter1.address, ethers.parseEther("1000"));
       await governanceToken

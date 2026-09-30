@@ -38,6 +38,17 @@ interface IIdentityRegistry {
     ///         for 1-person-1-vote governance quorum.
     function registeredIdentityCount() external view returns (uint256);
 
+    /// @notice registeredIdentityCount as it stood at `timestamp` (the last
+    ///         change at or before it). Governance reads it at a proposal's
+    ///         voter-age cutoff so fresh identities do not raise quorum.
+    function registeredIdentityCountAt(uint48 timestamp) external view returns (uint256);
+
+    /// @notice First time `identity` was bound to a wallet, or 0. Never reset.
+    function identityRegisteredAt(address identity) external view returns (uint64);
+
+    /// @notice The one wallet `identity` is bound to, or address(0).
+    function walletOf(address identity) external view returns (address);
+
     // Batch Functions
     function batchRegisterIdentity(
         address[] memory users,

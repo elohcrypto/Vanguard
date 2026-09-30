@@ -1,5 +1,6 @@
 import { expect } from "chai";
 import { ethers } from "hardhat";
+import { ageVoters } from "../helpers/governanceFixture";
 import { attest, configureKyc } from "../helpers/kyc";
 
 // Thresholds are looked up by proposalType at execution, but nothing bound the
@@ -58,6 +59,8 @@ describe("Proposal type is bound to its target", () => {
     }
     await gt.transfer(alice.address, ethers.parseEther("1000"));
     await gt.connect(alice).approve(govAddr, ethers.MaxUint256);
+    // Voters must be older than minVoterAge before they propose (D25).
+    await ageVoters(gov);
     return { alice, itr, rules, oracleMgr, tokenSlot, gov, govAddr };
   }
 
@@ -173,6 +176,8 @@ describe("Proposal type is bound to its target", () => {
     }
     await gt.transfer(alice.address, ethers.parseEther("100"));
     await gt.connect(alice).approve(await gov.getAddress(), ethers.MaxUint256);
+    // Voters must be older than minVoterAge before they propose (D25).
+    await ageVoters(gov);
     await expect(
       gov
         .connect(alice)

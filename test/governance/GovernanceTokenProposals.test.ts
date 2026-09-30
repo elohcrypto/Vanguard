@@ -1,5 +1,6 @@
 import { expect } from "chai";
 import { ethers } from "hardhat";
+import { ageVoters } from "../helpers/governanceFixture";
 import { SignerWithAddress } from "@nomicfoundation/hardhat-ethers/signers";
 import { attest, configureKyc } from "../helpers/kyc";
 
@@ -123,6 +124,8 @@ describe("GovernanceToken is governable by proposal", function () {
       await vgt.mint(w.address, E("1000"));
       await vgt.connect(w).approve(govAddr, ethers.MaxUint256);
     }
+    // Voters must be older than minVoterAge before they propose (D25).
+    await ageVoters(gov);
   });
 
   it("binds GovernanceTokenParameters to the GovernanceToken", async function () {
