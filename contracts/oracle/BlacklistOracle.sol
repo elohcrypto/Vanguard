@@ -152,8 +152,13 @@ contract BlacklistOracle is IOracle, Ownable, ReentrancyGuard, Pausable {
         _;
     }
 
+    /// @dev Review LOW-2: the role also needs a live OracleManager node, so
+    ///      an offboarded key loses it without a separate revoke here.
     modifier onlyEmergencyOracle() {
-        require(emergencyOracles[msg.sender], "BlacklistOracle: Not an emergency oracle");
+        require(
+            emergencyOracles[msg.sender] && oracleManager.isActiveOracle(msg.sender),
+            "BlacklistOracle: Not an emergency oracle"
+        );
         _;
     }
 
@@ -314,8 +319,10 @@ contract BlacklistOracle is IOracle, Ownable, ReentrancyGuard, Pausable {
         bytes32 messageHash = keccak256(abi.encodePacked(_subject, _queryId, _result, block.chainid));
         bytes32 ethSignedMessageHash = MessageHashUtils.toEthSignedMessageHash(messageHash);
 
+        // The attestation is the sender's (review N-7, as ConsensusOracle):
+        // the signer must be msg.sender, not any active oracle.
         address signer = ECDSA.recover(ethSignedMessageHash, _signature);
-        return oracleManager.isActiveOracle(signer);
+        return signer == msg.sender && oracleManager.isActiveOracle(signer);
     }
 
     /**

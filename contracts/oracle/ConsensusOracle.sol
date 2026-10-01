@@ -450,7 +450,9 @@ contract ConsensusOracle is IOracle, Ownable, ReentrancyGuard, Pausable {
         // must not make a verdict.
         if (query.voters.length < minimumOracles) revert InsufficientParticipation();
 
-        // Resolve based on current votes
+        // Review N-5 (recorded for D11/4.4): this resolves by a simple
+        // weighted majority, not by the consensusThreshold percentage, and
+        // createConsensusQuery is still permissionless.
         query.isResolved = true;
         query.consensusResult = query.positiveVotes > query.negativeVotes;
 

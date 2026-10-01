@@ -12,6 +12,7 @@ const WHITELIST = 1;
 const DAY = 86400;
 const LOW = 0;
 const MEDIUM = 1;
+const HIGH = 2;
 const CRITICAL = 3;
 const coder = ethers.AbiCoder.defaultAbiCoder();
 const sev = (s: number) => coder.encode(["uint8"], [s]);
@@ -69,18 +70,21 @@ describe("Oracle verdict integrity (2F.3)", function () {
       ),
     );
 
-  // Raise a query (by node n1) and, when `verdict` is given, resolve it 3-of-4.
+  // Raise a query (by node n1 unless `by`) and, when `verdict` is given,
+  // resolve it 3-of-4.
   async function query(
     subj: string,
     type: number,
     verdict: boolean | null,
     data = "0x",
+    by?: SignerWithAddress,
   ): Promise<string> {
-    const tx = await OM.connect(n1).submitQuery(subj, type, data);
+    const raiser = by ?? n1;
+    const tx = await OM.connect(raiser).submitQuery(subj, type, data);
     const blk = await ethers.provider.getBlock((await tx.wait()).blockNumber);
     const q = ethers.solidityPackedKeccak256(
       ["address", "uint8", "bytes", "uint256", "address"],
-      [subj, type, data, blk!.timestamp, n1.address],
+      [subj, type, data, blk!.timestamp, raiser.address],
     );
     if (verdict !== null) {
       for (const n of [n1, n2, n3]) {
@@ -428,8 +432,29 @@ describe("Oracle verdict integrity (2F.3)", function () {
       await expect(
         OM.connect(n1).submitQuery(victim.address, BLACKLIST, "0x01"),
       ).to.be.revertedWithCustomError(OM, "InvalidSeverity");
-      const q = await query(victim.address, BLACKLIST, null, sev(CRITICAL));
-      expect(await OM.getQueryData(q)).to.equal(sev(CRITICAL));
+      const q = await query(victim.address, BLACKLIST, null, sev(HIGH));
+      expect(await OM.getQueryData(q)).to.equal(sev(HIGH));
+    });
+
+    it("LOW-1: only the owner raises a CRITICAL blacklist query", async function () {
+      await expect(
+        OM.connect(n1).submitQuery(victim.address, BLACKLIST, sev(CRITICAL)),
+      ).to.be.revertedWithCustomError(OM, "SeverityRequiresOwner");
+      for (const s of [LOW, MEDIUM, HIGH]) {
+        await OM.connect(n1).submitQuery(victim.address, BLACKLIST, sev(s));
+      }
+      // P4: owner-raised CRITICAL plus a threshold "yes" lists for 365 days.
+      const q = await query(
+        victim.address,
+        BLACKLIST,
+        true,
+        sev(CRITICAL),
+        owner,
+      );
+      await attest(BO, n1, victim.address, q, true);
+      const e = await BO.blacklistEntries(victim.address);
+      expect(e.severity).to.equal(CRITICAL);
+      expect(e.expiryTime - e.timestamp).to.equal(BigInt(365 * DAY));
     });
 
     it("resolvedAt is set once, when the verdict first resolves", async function () {

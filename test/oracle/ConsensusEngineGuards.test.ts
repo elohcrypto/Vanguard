@@ -191,4 +191,57 @@ describe("Consensus engine guards (2F.3 B)", function () {
       expect(await OM.isEmergencyOracle(n1.address)).to.equal(false);
     });
   });
+
+  describe("Blacklist/Whitelist oracle roles (2F.3 review LOW-2, N-7)", function () {
+    let BO: any, WO: any;
+    beforeEach(async function () {
+      const om = await OM.getAddress();
+      const F = async (n: string) =>
+        (await ethers.getContractFactory(n)).deploy(om, n, "");
+      BO = await F("BlacklistOracle");
+      WO = await F("WhitelistOracle");
+    });
+
+    it("P6: a removed node loses BlacklistOracle emergency power", async function () {
+      await BO.setEmergencyOracle(n4.address, true);
+      await BO.connect(n4).emergencyBlacklist(subject.address, 3, "live");
+      await OM.removeOracle(n4.address);
+      expect(await BO.emergencyOracles(n4.address)).to.equal(true);
+      await expect(
+        BO.connect(n4).emergencyBlacklist(stranger.address, 3, "after removal"),
+      ).to.be.revertedWith("BlacklistOracle: Not an emergency oracle");
+      expect(await BO.isBlacklisted(stranger.address)).to.equal(false);
+    });
+
+    it("N-7: an attestation signed by another active node is refused", async function () {
+      const tx = await OM.connect(n1).submitQuery(
+        subject.address,
+        BLACKLIST,
+        "0x",
+      );
+      const blk = await ethers.provider.getBlock((await tx.wait()).blockNumber);
+      const q = ethers.solidityPackedKeccak256(
+        ["address", "uint8", "bytes", "uint256", "address"],
+        [subject.address, BLACKLIST, "0x", blk!.timestamp, n1.address],
+      );
+      for (const [O, name] of [
+        [BO, "BlacklistOracle"],
+        [WO, "WhitelistOracle"],
+      ] as [any, string][]) {
+        const other = await voteSig(n2, q, true); // n2 signs, n1 sends
+        await expect(
+          O.connect(n1).provideAttestation(
+            subject.address,
+            q,
+            true,
+            other,
+            "0x",
+          ),
+        ).to.be.revertedWith(`${name}: Invalid signature`);
+        expect(
+          await O.connect(n1).verifySignature(subject.address, q, true, other),
+        ).to.equal(false);
+      }
+    });
+  });
 });

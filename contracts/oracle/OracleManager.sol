@@ -20,6 +20,8 @@ contract OracleManager is IOracleManager, Ownable2Step, ReentrancyGuard, Pausabl
     error UnauthorizedQueryCreator();
     /// @notice A blacklist query's data must be empty or one ABI-encoded severity 0..3.
     error InvalidSeverity();
+    /// @notice A CRITICAL (365-day) blacklist query is raised by the owner only.
+    error SeverityRequiresOwner();
 
     struct OracleInfo {
         address oracleAddress;
@@ -59,10 +61,11 @@ contract OracleManager is IOracleManager, Ownable2Step, ReentrancyGuard, Pausabl
     /// @notice Highest BlacklistOracle.SeverityLevel (CRITICAL)
     uint256 private constant MAX_SEVERITY = 3;
 
-    /// @notice Manager-level emergency flag (IOracleManager). The role that
-    ///         gates `BlacklistOracle.emergencyBlacklist` is that oracle's own
-    ///         `emergencyOracles`, set by its owner; this flag is the registry
-    ///         view of the same decision and is cleared when an oracle leaves.
+    /// @notice Manager-level emergency flag (IOracleManager), informational
+    ///         only: it neither grants nor revokes the BlacklistOracle role.
+    ///         `BlacklistOracle.emergencyBlacklist` is gated by that oracle's
+    ///         own `emergencyOracles` (set by its owner) plus an active node
+    ///         here. This flag is cleared when an oracle leaves.
     mapping(address => bool) private _emergencyOracles;
 
     // Additional events not in interface
@@ -249,13 +252,21 @@ contract OracleManager is IOracleManager, Ownable2Step, ReentrancyGuard, Pausabl
      *      a stranger must not choose it). For QUERY_TYPE_BLACKLIST, `_data`
      *      is empty (MEDIUM) or `abi.encode(uint8 severity)` with 0..3; the
      *      blacklist oracle reads the severity from here, never from the relayer.
+     *      Responders vote a bare bool, so answering yes accepts the raiser's
+     *      severity: an active oracle may raise at most HIGH, only the owner
+     *      CRITICAL (review LOW-1). Review N-8 (recorded): an existing queryId
+     *      is not refused, but the id hashes the raiser and block time, so
+     *      only the same raiser, in the same block, with identical arguments
+     *      can reset a query: self-griefing only.
      */
     function submitQuery(address _subject, uint8 _queryType, bytes calldata _data) external returns (bytes32 queryId) {
         if (!oracles[msg.sender].active && msg.sender != owner()) revert UnauthorizedQueryCreator();
         require(_subject != address(0), "OracleManager: Invalid subject");
         require(_queryType >= 1 && _queryType <= 4, "OracleManager: Invalid query type");
         if (_queryType == QUERY_TYPE_BLACKLIST && _data.length != 0) {
-            if (_data.length != 32 || abi.decode(_data, (uint256)) > MAX_SEVERITY) revert InvalidSeverity();
+            uint256 severity = _data.length == 32 ? abi.decode(_data, (uint256)) : type(uint256).max;
+            if (severity > MAX_SEVERITY) revert InvalidSeverity();
+            if (severity == MAX_SEVERITY && msg.sender != owner()) revert SeverityRequiresOwner();
         }
 
         queryId = keccak256(abi.encodePacked(_subject, _queryType, _data, block.timestamp, msg.sender));

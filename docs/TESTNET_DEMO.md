@@ -214,7 +214,9 @@ registered oracle nodes, then applied by one node's `provideAttestation`)
 follow four rules. A query is raised only by the OracleManager owner or an
 active oracle, and a blacklist query fixes its severity (so its duration)
 when it is raised (`abi.encode(uint8)`, empty = MEDIUM); the severity a
-node passes when it attests is ignored. A resolved verdict is final (no
+node passes when it attests is ignored. Answering yes accepts the query's
+severity, and a node can raise at most HIGH: only the OracleManager owner
+raises a CRITICAL (365-day) query. A resolved verdict is final (no
 responses after it resolves), except that the OracleManager owner's
 `emergencyOverride` may flip it before it is applied; it is applied once
 per oracle contract (`VerdictAlreadyApplied`). It is usable for
