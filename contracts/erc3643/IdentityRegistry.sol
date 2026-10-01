@@ -6,7 +6,6 @@ import "@openzeppelin/contracts/utils/structs/Checkpoints.sol";
 import "./interfaces/IIdentityRegistry.sol";
 import "./interfaces/IInvestorTypeRegistry.sol";
 import "../compliance/interfaces/IComplianceRules.sol";
-import "../onchain_id/interfaces/IOnchainID.sol";
 import "../onchain_id/interfaces/IClaimIssuer.sol";
 
 /**
@@ -349,16 +348,18 @@ contract IdentityRegistry is IIdentityRegistry, Ownable2Step {
      *      may add claims naming themselves to an identity (OnchainID.addClaim),
      *      so that list cannot decide verification (2F.2, H2). A self-added
      *      claim naming a trusted issuer fails because the issuer has no
-     *      record of it.
+     *      record of it. A low-level staticcall: an issuer that reverts
+     *      or returns short data counts as "no claim", never reverts here.
      */
     function _hasValidClaim(address id, uint256 topic) private view returns (bool) {
         // Wallets registered with a non-identity address are unverified.
         if (id.code.length == 0) return false;
         address[] storage issuers = _trustedIssuersForTopic[topic];
         for (uint256 i = 0; i < issuers.length; i++) {
-            try IClaimIssuer(issuers[i]).hasValidClaim(id, topic) returns (bool ok) {
-                if (ok) return true;
-            } catch {}
+            (bool ok, bytes memory ret) = issuers[i].staticcall(
+                abi.encodeCall(IClaimIssuer.hasValidClaim, (id, topic))
+            );
+            if (ok && ret.length >= 32 && abi.decode(ret, (bool))) return true;
         }
         return false;
     }

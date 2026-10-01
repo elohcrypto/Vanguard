@@ -6,6 +6,7 @@ import "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
 import "@openzeppelin/contracts/utils/cryptography/ECDSA.sol";
 import "@openzeppelin/contracts/utils/cryptography/MessageHashUtils.sol";
 import "./interfaces/IOnchainID.sol";
+import "./interfaces/IClaimIssuer.sol";
 
 /**
  * @title OnchainID
@@ -544,19 +545,17 @@ contract OnchainID is IOnchainID, Ownable2Step, ReentrancyGuard {
     }
 
     /**
-     * @dev Check if has valid claim
+     * @notice True if `_issuer` (a ClaimIssuer) reports a live claim on
+     *         `_topic` for this identity. Asks the issuer, not this
+     *         identity's claim list, which the owner and anyone naming
+     *         themselves can write (2F.2 review, N1).
      */
-    function hasValidClaim(uint256 _topic, address _issuer) external view returns (bool exists) {
-        bytes32[] memory topicClaims = claimsByTopic[_topic];
-
-        for (uint256 i = 0; i < topicClaims.length; i++) {
-            Claim memory claim = claims[topicClaims[i]];
-            if (claim.issuer == _issuer && (claim.validTo == 0 || claim.validTo > block.timestamp)) {
-                return true;
-            }
-        }
-
-        return false;
+    function hasValidClaim(uint256 _topic, address _issuer) public view returns (bool exists) {
+        if (_issuer.code.length == 0) return false;
+        (bool ok, bytes memory ret) = _issuer.staticcall(
+            abi.encodeCall(IClaimIssuer.hasValidClaim, (address(this), _topic))
+        );
+        return ok && ret.length >= 32 && abi.decode(ret, (bool));
     }
 
     /**
@@ -689,31 +688,21 @@ contract OnchainID is IOnchainID, Ownable2Step, ReentrancyGuard {
      */
     function isCompliant() external view returns (bool valid) {
         for (uint256 i = 0; i < requiredTopicsList.length; i++) {
-            uint256 topic = requiredTopicsList[i];
-            bool hasValidClaimForTopic = false;
+            if (!_hasTrustedClaim(requiredTopicsList[i])) return false;
+        }
+        return true;
+    }
 
-            bytes32[] memory topicClaims = claimsByTopic[topic];
-            for (uint256 j = 0; j < topicClaims.length; j++) {
-                Claim memory claim = claims[topicClaims[j]];
-                if (claim.validTo == 0 || claim.validTo > block.timestamp) {
-                    // Check if issuer is trusted for this topic
-                    uint256[] memory issuerTopics = trustedIssuers[claim.issuer];
-                    for (uint256 k = 0; k < issuerTopics.length; k++) {
-                        if (issuerTopics[k] == topic) {
-                            hasValidClaimForTopic = true;
-                            break;
-                        }
-                    }
-                    if (hasValidClaimForTopic) break;
-                }
-            }
-
-            if (!hasValidClaimForTopic) {
-                return false;
+    /// @dev Some issuer this identity trusts for `_topic` attests to it.
+    function _hasTrustedClaim(uint256 _topic) private view returns (bool) {
+        for (uint256 i = 0; i < trustedIssuersList.length; i++) {
+            address issuer = trustedIssuersList[i];
+            uint256[] storage topics = trustedIssuers[issuer];
+            for (uint256 j = 0; j < topics.length; j++) {
+                if (topics[j] == _topic && hasValidClaim(_topic, issuer)) return true;
             }
         }
-
-        return true;
+        return false;
     }
 
     /**
@@ -731,21 +720,7 @@ contract OnchainID is IOnchainID, Ownable2Step, ReentrancyGuard {
 
         // Check for missing required topics
         for (uint256 i = 0; i < requiredTopicsList.length; i++) {
-            uint256 topic = requiredTopicsList[i];
-            bool hasValidClaimForTopic = false;
-
-            bytes32[] memory topicClaims = claimsByTopic[topic];
-            for (uint256 j = 0; j < topicClaims.length; j++) {
-                Claim memory claim = claims[topicClaims[j]];
-                if (claim.validTo == 0 || claim.validTo > block.timestamp) {
-                    hasValidClaimForTopic = true;
-                    break;
-                }
-            }
-
-            if (!hasValidClaimForTopic) {
-                missing[missingCount++] = topic;
-            }
+            if (!_hasTrustedClaim(requiredTopicsList[i])) missing[missingCount++] = requiredTopicsList[i];
         }
 
         // Check for expired claims
@@ -826,7 +801,11 @@ contract OnchainID is IOnchainID, Ownable2Step, ReentrancyGuard {
     ) private returns (bytes32 claimId) {
         require(_issuer != address(0), "OnchainID: Invalid issuer");
         claimId = keccak256(abi.encodePacked(_issuer, _topic, _data));
-        if (claims[claimId].issuer == address(0)) {
+        if (claims[claimId].issuer != address(0)) {
+            // The owner and management keys may remove an issuer's copy,
+            // never overwrite it (2F.2 review, N2).
+            require(msg.sender == _issuer, "OnchainID: Only the issuer updates its claim");
+        } else {
             claimsByTopic[_topic].push(claimId);
             _topicIndex[claimId] = claimsByTopic[_topic].length;
             allClaims.push(claimId);

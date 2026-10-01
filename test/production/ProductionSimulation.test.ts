@@ -347,7 +347,8 @@ describe("🏭 Production Simulation - OnchainID System", function () {
         prodEnv.config.accreditationTopic,
         claimData,
         `https://compliance-provider.com/accreditation/${institutionalAddress}`,
-        Math.floor(Date.now() / 1000) + prodEnv.config.claimValidityPeriod,
+        (await ethers.provider.getBlock("latest"))!.timestamp +
+          prodEnv.config.claimValidityPeriod,
       );
 
       console.log("✅ Advanced institutional compliance configured");

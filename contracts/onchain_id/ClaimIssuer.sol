@@ -7,6 +7,7 @@ import "@openzeppelin/contracts/utils/cryptography/MessageHashUtils.sol";
 import "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
 import "./interfaces/IOnchainID.sol";
 import "./interfaces/IERC735.sol";
+import "./interfaces/IClaimIssuer.sol";
 
 /**
  * @title ClaimIssuer
@@ -14,7 +15,7 @@ import "./interfaces/IERC735.sol";
  * @author CMTA UTXO Compliance Team
  */
 /// @dev Two-step ownership per plan 2C.3 / D18: transferOwnership only nominates, acceptOwnership finalizes.
-contract ClaimIssuer is Ownable2Step, ReentrancyGuard {
+contract ClaimIssuer is IClaimIssuer, Ownable2Step, ReentrancyGuard {
     using ECDSA for bytes32;
     using MessageHashUtils for bytes32;
 
@@ -67,6 +68,9 @@ contract ClaimIssuer is Ownable2Step, ReentrancyGuard {
     mapping(bytes32 => IssuedClaim) public issuedClaims;
     mapping(address => bytes32[]) public claimsByIdentity;
     mapping(uint256 => bytes32[]) public claimsByTopic;
+    /// @notice This issuer's latest claim per (identity, topic); it alone
+    ///         decides hasValidClaim (2F.2 review, F1).
+    mapping(address => mapping(uint256 => bytes32)) public latestClaimId;
 
     bytes32[] public allKeys;
     bytes32[] public allClaims;
@@ -186,6 +190,7 @@ contract ClaimIssuer is Ownable2Step, ReentrancyGuard {
 
         // Add claim to the OnchainID contract
         try IOnchainID(_identity).addClaim(_topic, _scheme, address(this), _signature, _data, _uri) {
+            latestClaimId[_identity][_topic] = claimId;
             emit ClaimIssued(_identity, _topic, claimId, address(this), _signature, _data);
         } catch {
             // Revert the storage changes if adding to OnchainID fails
@@ -265,6 +270,7 @@ contract ClaimIssuer is Ownable2Step, ReentrancyGuard {
             claimsByIdentity[_identities[i]].push(claimId);
             claimsByTopic[_topics[i]].push(claimId);
             allClaims.push(claimId);
+            latestClaimId[_identities[i]][_topics[i]] = claimId;
 
             emit ClaimIssued(_identities[i], _topics[i], claimId, address(this), _signatures[i], _data[i]);
         }
@@ -296,22 +302,18 @@ contract ClaimIssuer is Ownable2Step, ReentrancyGuard {
     }
 
     /**
-     * @notice True if this issuer holds a live (issued, not revoked, not
-     *         expired) claim on `_topic` for `_identity`. IdentityRegistry
-     *         asks this instead of reading the identity's claim list, which
-     *         anyone can pad (2F.2, H2).
-     * @dev Walks the identity's claims newest first, at most 8. Only this
-     *      issuer's signers append to that list, so the bound is not an
-     *      attack surface; a renewal is always the newest entry.
+     * @notice True if this issuer's latest claim on `_topic` for `_identity`
+     *         is live (not revoked, not expired). IdentityRegistry asks this
+     *         instead of reading the identity's claim list, which anyone can
+     *         pad (2F.2, H2).
+     * @dev The latest claim supersedes older ones: revoking it unverifies
+     *      the holder even if an older claim is unrevoked, and revoking a
+     *      superseded claim has no effect. To restore a holder the issuer
+     *      issues a new claim; a renewal issued before expiry moves the
+     *      pointer with no gap. Claims on other topics never interfere.
      */
     function hasValidClaim(address _identity, uint256 _topic) external view returns (bool) {
-        bytes32[] storage ids = claimsByIdentity[_identity];
-        uint256 n = ids.length;
-        uint256 stop = n > 8 ? n - 8 : 0;
-        for (uint256 i = n; i > stop; i--) {
-            if (issuedClaims[ids[i - 1]].topic == _topic && isClaimValid(ids[i - 1])) return true;
-        }
-        return false;
+        return isClaimValid(latestClaimId[_identity][_topic]);
     }
 
     /**

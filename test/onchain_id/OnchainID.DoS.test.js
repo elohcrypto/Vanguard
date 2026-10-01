@@ -55,9 +55,15 @@ describe("OnchainID - DoS Protection Tests", function () {
       const topics = new Array(maxBatchSize).fill(1);
       const schemes = new Array(maxBatchSize).fill(1);
       const issuers = new Array(maxBatchSize).fill(issuer.address);
-      const signatures = new Array(maxBatchSize).fill("0x" + "00".repeat(65));
-      const data = new Array(maxBatchSize).fill("0x1234");
-      const uris = new Array(maxBatchSize).fill("https://example.com");
+      // Distinct data: one id per entry (an owner cannot overwrite an
+      // existing claim named for another issuer, 2F.2 review N2). Empty
+      // signature and uri: 50 distinct claims carrying a 65-byte signature
+      // and a uri do not fit the 12M test block.
+      const signatures = new Array(maxBatchSize).fill("0x");
+      const data = Array.from({ length: maxBatchSize }, (_, i) =>
+        ethers.toBeHex(i + 1, 4),
+      );
+      const uris = new Array(maxBatchSize).fill("");
 
       // Should not revert
       await expect(
@@ -170,9 +176,11 @@ describe("OnchainID - DoS Protection Tests", function () {
         const topics = new Array(size).fill(1);
         const schemes = new Array(size).fill(1);
         const issuers = new Array(size).fill(issuer.address);
-        const signatures = new Array(size).fill("0x" + "00".repeat(65));
-        const data = new Array(size).fill("0x1234");
-        const uris = new Array(size).fill("https://example.com");
+        const signatures = new Array(size).fill("0x");
+        const data = Array.from({ length: size }, (_, i) =>
+          ethers.toBeHex(size * 1000 + i + 1, 4),
+        );
+        const uris = new Array(size).fill("");
 
         const tx = await onchainID.batchAddClaims(
           topics,
@@ -249,7 +257,9 @@ describe("OnchainID - DoS Protection Tests", function () {
       const signatures = new Array(legitimateBatchSize).fill(
         "0x" + "00".repeat(65),
       );
-      const data = new Array(legitimateBatchSize).fill("0x1234");
+      const data = Array.from({ length: legitimateBatchSize }, (_, i) =>
+        ethers.toBeHex(i + 1, 4),
+      );
       const uris = new Array(legitimateBatchSize).fill("https://example.com");
 
       // Should succeed

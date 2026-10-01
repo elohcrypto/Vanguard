@@ -56,9 +56,14 @@ table (1 day) is still 60 s. The percentages are never scaled. The demo reads
 identity's own claim list, which anyone can pad with claims naming
 themselves. The issuer's `issueClaim` still writes a copy onto the
 OnchainID (ERC-735 view), but nothing reads that copy to decide
-verification; correctness rests on the issuer's record. `revokeClaim` removes the claim on both sides and the holder
-is unverified at once (a `ClaimRemovalFailed` event flags a copy the holder
-had already removed). A wallet recovered with `Token.recoveryAddress` is bound
+verification; correctness rests on the issuer's record. Verification
+follows the issuer's latest claim per topic for that identity: revoking the
+latest claim unverifies the holder in the same block, even if an older claim
+is unrevoked, and revoking an older, superseded claim has no effect; the
+issuer restores a holder by issuing a new claim. Batch-issued claims verify
+and revoke the same way. `revokeClaim` also removes the identity-side copy
+(a `ClaimRemovalFailed` event flags a copy the holder had already removed,
+or a batch-issued claim that never had one). A wallet recovered with `Token.recoveryAddress` is bound
 to the old OnchainID in the registry, but the identity's owner and keys are
 unchanged, so it cannot propose or vote ("Wallet does not control its
 identity") until it holds a key on that OnchainID: the designed path is
@@ -272,7 +277,7 @@ second transfer (after a warm-up) for three deployments: the permissive
 required topic (KYC), and two (KYC+AML). Since Task 2F.2 the remaining cost
 is one `ClaimIssuer.hasValidClaim` call per party per topic
 (`IdentityRegistry -> ClaimIssuer`, no OnchainID read). The two-topic delta
-is still about 2x the 40,000 gas tolerance; the next lever is plan v2
+(+71,234) is still above the 40,000 gas tolerance; the next lever is plan v2
 decision D17 (verified-until cache).
 
 **Before Task 2A.7 (measured 2026-09-26):**
@@ -306,14 +311,17 @@ scenario A now binds `ComplianceRules` to the mock (whose `investorCountry`
 returns `uint16`), which is why the baseline rose while B and C fell.
 
 **After Task 2F.2 (measured 2026-10-01):** the registry asks the issuer
-instead of walking the identity's claims.
+instead of walking the identity's claims, and the issuer reads one
+latest-claim pointer per (identity, topic).
 
 | Scenario | transfer gasUsed | delta vs A | isVerified est. |
 |---|---|---|---|
 | A: MockIdentityRegistry (baseline) | 93,956 | 0 | 23,938 |
-| B: IdentityRegistry, 1 topic (KYC) | 143,568 | +49,612 | 53,663 |
-| C: IdentityRegistry, 2 topics (KYC+AML) | 184,068 | +90,112 | 78,163 |
+| B: IdentityRegistry, 1 topic (KYC) | 134,126 | +40,170 | 48,942 |
+| C: IdentityRegistry, 2 topics (KYC+AML) | 165,190 | +71,234 | 68,724 |
 
-Before this change, at 1d61eed: B 246,346 (+152,390), C 389,550 (+295,594).
+Before this change, at 1d61eed: B 246,346 (+152,390), C 389,550 (+295,594);
+with the first 2F.2 issuer scan (efd0313): B 143,568 (+49,612), C 184,068
+(+90,112).
 
 Deploying all eleven contracts costs under 0.01 ETH at 1.3 gwei.

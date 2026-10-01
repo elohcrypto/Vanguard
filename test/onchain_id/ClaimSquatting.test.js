@@ -222,4 +222,211 @@ describe("Claim-slot squatting (2F.2, H2)", function () {
     expect(await kyc.hasValidClaim(idAddr, KYC)).to.equal(true);
     expect(await ir.isVerified(victim.address)).to.equal(true);
   });
+
+  // Review of 2F.2, F1: the issuer used to scan only the newest 8 claims of
+  // an identity across ALL topics. It now keeps a pointer to its latest
+  // claim per (identity, topic): the latest claim decides.
+  const ACC = 9;
+  const issuerId = (data, topic = KYC) =>
+    ethers.solidityPackedKeccak256(
+      ["address", "address", "uint256", "bytes"],
+      [kycAddr, idAddr, topic, data],
+    );
+  async function issueOn(topic, data) {
+    const d = ethers.toUtf8Bytes(data);
+    const sig = await sign(issuerOwner, idAddr, topic, d);
+    return kyc.connect(issuerOwner).issueClaim(idAddr, topic, 1, d, "", 0, sig);
+  }
+
+  it("claims on other topics never push KYC out (F1-A)", async function () {
+    await ir.addTrustedIssuer(kycAddr, [ACC]);
+    await issue();
+    for (let i = 0; i < 9; i++) await issueOn(ACC, "acc-" + i);
+    expect(await kyc.isClaimValid(issuerId(DATA))).to.equal(true);
+    expect(await ir.isVerified(victim.address)).to.equal(true);
+  });
+
+  it("re-issuing the same claim keeps the holder verified (F1-B)", async function () {
+    await issue();
+    for (let i = 0; i < 9; i++) await issue();
+    for (let i = 0; i < 9; i++) await issueOn(ACC, "ACC_SAME");
+    expect(await ir.isVerified(victim.address)).to.equal(true);
+    expect(await kyc.latestClaimId(idAddr, KYC)).to.equal(issuerId(DATA));
+  });
+
+  it("revoking the latest claim unverifies even with an older live one (F1-C)", async function () {
+    const y25 = ethers.toUtf8Bytes("KYC_2025");
+    const y26 = ethers.toUtf8Bytes("KYC_2026");
+    await issue(y25);
+    await issue(y26);
+    expect(await kyc.latestClaimId(idAddr, KYC)).to.equal(issuerId(y26));
+    // Revoking a superseded claim has no effect.
+    await kyc.connect(issuerOwner).revokeClaim(issuerId(y25));
+    expect(await ir.isVerified(victim.address)).to.equal(true);
+    await kyc.connect(issuerOwner).revokeClaim(issuerId(y26));
+    expect(await kyc.isClaimValid(issuerId(y25))).to.equal(false);
+    expect(await ir.isVerified(victim.address)).to.equal(false);
+
+    const y25b = ethers.toUtf8Bytes("KYC_2025b");
+    await issue(y25b);
+    await kyc.connect(issuerOwner).revokeClaim(issuerId(y25b));
+    // An older unrevoked claim does not come back.
+    await issue(ethers.toUtf8Bytes("KYC_A"));
+    await issue(ethers.toUtf8Bytes("KYC_B"));
+    await kyc
+      .connect(issuerOwner)
+      .revokeClaim(issuerId(ethers.toUtf8Bytes("KYC_B")));
+    expect(
+      await kyc.isClaimValid(issuerId(ethers.toUtf8Bytes("KYC_A"))),
+    ).to.equal(true);
+    expect(await ir.isVerified(victim.address)).to.equal(false);
+    // The issuer restores the holder by issuing a new claim.
+    await issue(ethers.toUtf8Bytes("KYC_C"));
+    expect(await ir.isVerified(victim.address)).to.equal(true);
+  });
+
+  it("a renewal issued before expiry moves the pointer with no gap", async function () {
+    const now = (await ethers.provider.getBlock("latest")).timestamp;
+    await issue(ethers.toUtf8Bytes("y1"), now + 1000);
+    await issue(ethers.toUtf8Bytes("y2"), now + 5000);
+    await ethers.provider.send("evm_increaseTime", [2000]);
+    await ethers.provider.send("evm_mine", []);
+    expect(await ir.isVerified(victim.address)).to.equal(true);
+  });
+
+  it("batch-issued claims verify and revoke by the same rule", async function () {
+    const mk = async (s) => {
+      const d = ethers.toUtf8Bytes(s);
+      return [d, await sign(issuerOwner, idAddr, KYC, d)];
+    };
+    const [d1, s1] = await mk("B1");
+    const [d2, s2] = await mk("B2");
+    await kyc
+      .connect(issuerOwner)
+      .batchIssueClaims(
+        [idAddr, idAddr],
+        [KYC, KYC],
+        [1, 1],
+        [d1, d2],
+        ["", ""],
+        [0, 0],
+        [s1, s2],
+      );
+    expect(await kyc.latestClaimId(idAddr, KYC)).to.equal(issuerId(d2));
+    expect(await ir.isVerified(victim.address)).to.equal(true);
+    await kyc.connect(issuerOwner).revokeClaim(issuerId(d1));
+    expect(await ir.isVerified(victim.address)).to.equal(true);
+    await expect(kyc.connect(issuerOwner).revokeClaim(issuerId(d2))).to.emit(
+      kyc,
+      "ClaimRemovalFailed",
+    );
+    expect(await ir.isVerified(victim.address)).to.equal(false);
+  });
+
+  // F5: an issuer that returns empty data or reverts must not make
+  // isVerified revert; it counts as "no claim".
+  async function rawContract(runtimeInitcode) {
+    const tx = await issuerOwner.sendTransaction({ data: runtimeInitcode });
+    return (await tx.wait()).contractAddress;
+  }
+  for (const [name, code] of [
+    ["returns empty data (STOP)", "0x6001600c60003960016000f300"],
+    ["reverts", "0x6005600c60003960056000f360006000fd"],
+  ]) {
+    it(`a trusted issuer that ${name} ahead of the real one is skipped (F5)`, async function () {
+      await issue();
+      const bad = await rawContract(code);
+      const ir2 = await (
+        await ethers.getContractFactory("IdentityRegistry")
+      ).deploy();
+      await ir2.addClaimTopic(KYC);
+      await ir2.addTrustedIssuer(bad, [KYC]);
+      await ir2.addTrustedIssuer(kycAddr, [KYC]);
+      await ir2.registerIdentity(victim.address, idAddr, 840);
+      expect(await ir2.isVerified(victim.address)).to.equal(true);
+      await ir2.removeTrustedIssuer(kycAddr);
+      expect(await ir2.isVerified(victim.address)).to.equal(false);
+    });
+  }
+
+  it("an identity address with no code is unverified even with an issuer claim (M20)", async function () {
+    const eoaId = attacker.address;
+    const d = ethers.toUtf8Bytes("EOA");
+    await kyc
+      .connect(issuerOwner)
+      .batchIssueClaims(
+        [eoaId],
+        [KYC],
+        [1],
+        [d],
+        [""],
+        [0],
+        [await sign(issuerOwner, eoaId, KYC, d)],
+      );
+    expect(await kyc.hasValidClaim(eoaId, KYC)).to.equal(true);
+    await ir.registerIdentity(attacker.address, eoaId, 840);
+    expect(await ir.isVerified(attacker.address)).to.equal(false);
+  });
+
+  // N1: the identity's own views ask the issuer too.
+  it("OnchainID.hasValidClaim and isCompliant ask the issuer (N1)", async function () {
+    await id.connect(victim).addTrustedIssuer(kycAddr, [KYC]);
+    await id.connect(victim).addClaimTopic(KYC, true);
+    // Owner forges a claim naming the trusted issuer.
+    await id.connect(victim).addClaim(KYC, 1, kycAddr, "0x", DATA, "");
+    expect(await id.hasValidClaim(KYC, kycAddr)).to.equal(false);
+    expect(await id.isCompliant()).to.equal(false);
+    let st = await id.getComplianceStatus();
+    expect(st.valid).to.equal(false);
+    expect(st.missingTopics.map(Number)).to.deep.equal([KYC]);
+    // A real issuer claim verifies.
+    await issue();
+    expect(await id.hasValidClaim(KYC, kycAddr)).to.equal(true);
+    expect(await id.isCompliant()).to.equal(true);
+    st = await id.getComplianceStatus();
+    expect(st.valid).to.equal(true);
+    // No code at the issuer address: false, no revert.
+    expect(await id.hasValidClaim(KYC, attacker.address)).to.equal(false);
+  });
+
+  // N2: only the issuer may update its own identity-side copy.
+  it("the owner cannot overwrite the issuer's identity-side copy (N2)", async function () {
+    await issue();
+    const side = idSideId(kycAddr, KYC, DATA);
+    await expect(
+      id.connect(victim).addClaim(KYC, 1, kycAddr, "0xdead", DATA, "evil-uri"),
+    ).to.be.revertedWith("OnchainID: Only the issuer updates its claim");
+    const c = await id.getClaim(side);
+    expect(c.uri).to.equal("");
+    expect(c.signature).to.not.equal("0xdead");
+    // The issuer itself still re-issues in place; the owner may remove.
+    await issue();
+    await id.connect(victim).removeClaim(side);
+  });
+
+  // M22: _swapPop must re-index the element it moves.
+  it("removing a swapped-in claim keeps both lists consistent (M22)", async function () {
+    const ids = [];
+    for (let i = 0; i < 4; i++) {
+      const d = ethers.toUtf8Bytes("c" + i);
+      await id.connect(victim).addClaim(5, 1, victim.address, "0x", d, "");
+      ids.push(idSideId(victim.address, 5, d));
+    }
+    await id.connect(victim).removeClaim(ids[0]); // c3 moves to slot 0
+    await id.connect(victim).removeClaim(ids[3]); // the moved element
+    expect([...(await id.getClaimIdsByTopic(5))]).to.have.members([
+      ids[1],
+      ids[2],
+    ]);
+    expect([...(await id.getAllClaims())]).to.have.members([ids[1], ids[2]]);
+    await id.connect(victim).removeClaim(ids[2]);
+    await id.connect(victim).removeClaim(ids[1]);
+    expect((await id.getAllClaims()).length).to.equal(0);
+    await id
+      .connect(victim)
+      .addClaim(5, 1, victim.address, "0x", ethers.toUtf8Bytes("c0"), "");
+    await id.connect(victim).removeClaim(ids[0]);
+    expect((await id.getAllClaims()).length).to.equal(0);
+    expect((await id.getClaimIdsByTopic(5)).length).to.equal(0);
+  });
 });

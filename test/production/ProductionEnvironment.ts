@@ -357,7 +357,8 @@ export class ProductionEnvironment {
         this.config.ecdsaScheme,
         claimData,
         `https://kyc-provider.com/verification/${identityAddress}`,
-        Math.floor(Date.now() / 1000) + this.config.claimValidityPeriod,
+        (await ethers.provider.getBlock("latest"))!.timestamp +
+          this.config.claimValidityPeriod,
         signature,
         { gasPrice: this.networkConditions.gasPrice },
       );
@@ -400,7 +401,8 @@ export class ProductionEnvironment {
         this.config.ecdsaScheme,
         claimData,
         `https://aml-provider.com/screening/${identityAddress}`,
-        Math.floor(Date.now() / 1000) + this.config.claimValidityPeriod,
+        (await ethers.provider.getBlock("latest"))!.timestamp +
+          this.config.claimValidityPeriod,
         signature,
         { gasPrice: this.networkConditions.gasPrice },
       );
