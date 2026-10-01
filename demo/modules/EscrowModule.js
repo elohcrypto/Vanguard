@@ -684,8 +684,52 @@ class EscrowModule {
         (parseFloat(selectedWallet.amount) * 1.05).toString(),
       );
 
-      console.log(`\n💰 Approving ${ethers.formatEther(totalAmount)} VSC...`);
+      // D26: the payer's per-transfer cap applies to the funding leg.
+      // Explain a refusal BEFORE an approval is spent. This only explains:
+      // the funding call stays the source of truth (a revert is caught).
       const digitalToken = this.state.getContract("digitalToken");
+      const fundTotal =
+        (await wallet.amount()) +
+        (await wallet.investorFee()) +
+        (await wallet.ownerFee());
+      if (
+        !(await digitalToken.canTransfer(
+          payerAddress,
+          walletAddress,
+          fundTotal,
+        ))
+      ) {
+        displayError(
+          `The token refuses payer -> escrow for ${ethers.formatEther(fundTotal)} VSC`,
+        );
+        const types = this.state.getContract("investorTypeRegistry");
+        if (
+          types &&
+          !(await types.canTransferAmount(payerAddress, fundTotal))
+        ) {
+          const t = Number(await types.getInvestorType(payerAddress));
+          const cap = (await types.getInvestorTypeConfig(t)).maxTransferAmount;
+          const rate = await escrowFactory.TOTAL_FEE_RATE();
+          const den = await escrowFactory.FEE_DENOMINATOR();
+          const name = ["Normal", "Retail", "Accredited", "Institutional"][t];
+          console.log(
+            `   Reason: a ${name} payer may send at most ${ethers.formatEther(cap)} VSC per transfer`,
+          );
+          console.log(
+            `   Largest escrow a ${name} payer can fund: about ${ethers.formatEther((cap * den) / (den + rate))} VSC (+${Number(rate) / 100}% fees)`,
+          );
+          console.log(
+            "   Remedies: raise the payer's investor type (options 53/54), split the escrow into smaller ones, or exempt the payer (option 76, type 0, choice 2 after the handover)",
+          );
+        } else {
+          console.log(
+            "   Reason: not the investor-type cap; check the payer's KYC, country, freeze state and token pause",
+          );
+        }
+        return;
+      }
+
+      console.log(`\n💰 Approving ${ethers.formatEther(totalAmount)} VSC...`);
       const approveTx = await digitalToken
         .connect(payer)
         .approve(await escrowFactory.getAddress(), totalAmount);
@@ -1078,6 +1122,60 @@ class EscrowModule {
       console.log(
         `\n✍️ Investor signing to ${releaseToPayee ? "RELEASE to payee" : "REFUND to payer"}...`,
       );
+      // D26 caps every human recipient of the settlement. Check each leg
+      // before signing and say which one fails; the signing call stays the
+      // source of truth (a revert is still caught below).
+      const token = this.state.getContract("digitalToken");
+      const legs = releaseToPayee
+        ? [
+            ["payee", payee, await wallet.amount()],
+            ["investor fee wallet", investorWallet, await wallet.investorFee()],
+            [
+              "owner fee wallet",
+              await wallet.ownerWallet(),
+              await wallet.ownerFee(),
+            ],
+          ]
+        : [
+            [
+              "payer (refund)",
+              await wallet.payer(),
+              (await wallet.amount()) +
+                (await wallet.investorFee()) +
+                (await wallet.ownerFee()),
+            ],
+          ];
+      const types = this.state.getContract("investorTypeRegistry");
+      let blocked = false;
+      for (const [label, to, amt] of legs) {
+        if (await token.canTransfer(walletAddress, to, amt)) continue;
+        blocked = true;
+        displayError(
+          `Leg to ${label} ${to} (${ethers.formatEther(amt)} VSC) would be refused`,
+        );
+        const bal = await token.balanceOf(to);
+        if (types && !(await types.canHoldAmount(to, bal + amt))) {
+          const t = Number(await types.getInvestorType(to));
+          const max = (await types.getInvestorTypeConfig(t)).maxHoldingAmount;
+          console.log(
+            `   Reason: holding cap ${ethers.formatEther(max)} VSC; it holds ${ethers.formatEther(bal)} VSC`,
+          );
+        } else {
+          console.log(
+            "   Reason: not the holding cap; check its KYC, country and freeze state",
+          );
+        }
+      }
+      if (blocked) {
+        console.log(
+          "   The settlement would revert atomically; the escrow stays Active.",
+        );
+        console.log(
+          "   Exits: the over-cap party moves balance out, the registry raises its type (options 53/54), or exempt it (option 76, type 0, choice 2 after the handover)",
+        );
+        return;
+      }
+
       const tx = await wallet.connect(investor).signAsInvestor(releaseToPayee);
       const receipt = await tx.wait();
 

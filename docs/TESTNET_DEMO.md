@@ -271,9 +271,14 @@ type 0, choice 2). Do the same for the two escrow fee wallets (the owner fee
 wallet given to the factory and each investor's fee wallet; options 61 and
 62 do it while the deployer owns the registry): the human side of a trusted
 transfer is cap-checked (D26), so without the exemption every release
-eventually reverts on a fee wallet's holding cap. A release that would put
-the payee over its holding cap reverts at release with "Holding limit
-exceeded"; the refund stays open, or raise the payee's type or exempt it.
+eventually reverts on a fee wallet's holding cap. A release or refund that
+would put any recipient (payee, payer, either fee wallet) over its holding
+cap reverts atomically with "Holding limit exceeded" and the escrow stays
+Active with the funds in it. Exits: the over-cap party moves balance out,
+the registry raises its type, or it is exempted (D22). The refund stays
+open only while the payer has room under its own cap. After a wallet
+recovery, re-assign the investor type (and the exemption) to the new
+wallet: recovery moves the balance but not the type.
 
 Rehearsed on 2026-09-11 with the poll branch forced at a since-removed
 scale of 10080: a 60-second vote plus 17-second delay waited 78 seconds of

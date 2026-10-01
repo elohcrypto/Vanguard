@@ -72,7 +72,10 @@ interface IMultiSigEscrowWallet {
     function manualRefund() external;
 
     /// @notice Return tokens that arrived outside the factory funding to the
-    ///         payer. Anyone may call it once the escrow is Released or Refunded.
+    ///         payer (or the owner fee wallet if no payer was set) once the
+    ///         escrow is Released or Refunded. Escrow parties only (payer,
+    ///         payee, investor, owner); reverts NotEscrowParty otherwise.
+    ///         The recipient's holding cap applies.
     function sweepExcess() external;
 
     // ========================================

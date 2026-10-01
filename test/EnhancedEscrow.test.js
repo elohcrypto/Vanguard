@@ -404,6 +404,10 @@ describe("Enhanced Escrow System", function () {
         wallet,
         "EscrowStillActive",
       );
+      // The party check comes first: a stranger never learns the state.
+      await expect(
+        wallet.connect(signers[9]).sweepExcess(),
+      ).to.be.revertedWithCustomError(wallet, "NotEscrowParty");
     });
 
     it("sweeps to the platform fee wallet when no payer ever identified themselves", async function () {
