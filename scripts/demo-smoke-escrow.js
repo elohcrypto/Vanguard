@@ -5,6 +5,7 @@
  *    treasury (deployer, the demo central bank) is exempt by a logged flag.
  * 2. Escrow (option 73b): payer funded through the real mint, only the
  *    escrow wallet trusted, fees paid to verified (untrusted) fee wallets.
+ * 3. D26: fee wallets exempt; an over-cap release reverts, refund works.
  */
 const { ethers } = require("hardhat");
 const { signShipmentProof } = require("../demo/utils/ShipmentProof");
@@ -172,6 +173,59 @@ async function runEscrowSmoke(state, failures) {
   for (const s of [payee, investorWallet, ownerWallet])
     if (await rules.isTrustedContract(s.address))
       failures.push(`${s.address} is trusted; only the escrow wallet may be`);
+
+  // 3. D26: the human side of a trusted transfer is capped. The fee wallets
+  //    carry the D22 exemption (demo-smoke.js, before the handover); a
+  //    release that would put the payee over its holding cap reverts at
+  //    release, and the refund path stays open.
+  for (const s of [investorWallet, ownerWallet])
+    if (!(await registry.investorLimitExempt(s.address)))
+      failures.push(`fee wallet ${s.address} is not limit-exempt (D26)`);
+  await (await token.mint(payee.address, e("48500"))).wait(); // 49,500 held
+  await (
+    await factory
+      .connect(investor)
+      .createEscrowWallet(payer.address, payee.address, e("1000"))
+  ).wait();
+  const w2Addr = await factory.getWalletAddress(2);
+  await (await rules.addTrustedContract(w2Addr)).wait();
+  await (
+    await token.connect(payer).approve(await factory.getAddress(), e("1050"))
+  ).wait();
+  await (await factory.connect(payer).fundEscrowWallet(2)).wait();
+  const w2 = await ethers.getContractAt("MultiSigEscrowWallet", w2Addr);
+  await (
+    await w2
+      .connect(payee)
+      .submitShipmentProof(
+        proofData,
+        dataHash,
+        await signShipmentProof(payee, w2Addr, dataHash),
+      )
+  ).wait();
+  await ethers.provider.send("evm_increaseTime", [15 * 24 * 60 * 60]);
+  await ethers.provider.send("evm_mine", []);
+  await (await w2.connect(payee).signAsPayee()).wait();
+  try {
+    await (await w2.connect(investor).signAsInvestor(true)).wait();
+    failures.push("over-cap escrow release succeeded: payee cap skipped");
+  } catch (err) {
+    const why = `${err.reason ?? ""} ${err.message}`;
+    if (!/Holding limit exceeded/.test(why))
+      failures.push(`over-cap release: wrong revert: ${why.slice(0, 120)}`);
+  }
+  const payerBefore = await token.balanceOf(payer.address);
+  try {
+    await (await w2.connect(payer).signAsPayer()).wait();
+    await (await w2.connect(investor).signAsInvestor(false)).wait();
+  } catch (err) {
+    failures.push(
+      `refund after a refused release: ${err.message.slice(0, 120)}`,
+    );
+    return;
+  }
+  if ((await token.balanceOf(payer.address)) - payerBefore !== e("1050"))
+    failures.push("refund after a refused release did not return 1,050 VSC");
 }
 
 module.exports = { runEscrowSmoke };

@@ -60,6 +60,7 @@ class EscrowModule {
       // Done first, so a refusal (e.g. after the handover the deployer is no
       // longer a registry agent) leaves nothing half-deployed.
       await this._ensureVerified(ownerWallet.address, "owner fee wallet");
+      await this._ensureFeeExempt(ownerWallet.address, "owner fee wallet");
       console.log("");
 
       console.log("📋 Deploying EscrowWalletFactory...");
@@ -220,6 +221,27 @@ class EscrowModule {
     );
   }
 
+  /**
+   * Helper: D26 caps the human side of every escrow leg, and each release
+   * pays the fee wallets, so on a registry-bound VSC their holding cap would
+   * eventually refuse every release. Mark them exempt (D22, logged
+   * on-chain). No-op without a registry or when already exempt. Owner only:
+   * the deployer before the handover, after it an InvestorTypeConfig vote
+   * (option 76, type 0, choice 2).
+   */
+  async _ensureFeeExempt(address, label) {
+    const registry = this.state.getContract("investorTypeRegistry");
+    if (!registry || (await registry.investorLimitExempt(address))) return;
+    if ((await registry.owner()) !== (await registry.runner.getAddress())) {
+      displayWarning(
+        `${label} ${address} is not exempt from investor limits: after the handover only an InvestorTypeConfig vote can exempt it (option 76, type 0, choice 2)`,
+      );
+      return;
+    }
+    await (await registry.setInvestorLimitExempt(address, true)).wait();
+    console.log(`   ✅ ${label} exempt from investor limits (D22)`);
+  }
+
   /** Option 62: Register Investor (from Option 23) */
   async registerInvestor() {
     displaySection("REGISTER INVESTOR FOR ENHANCED ESCROW", "👤");
@@ -305,6 +327,7 @@ class EscrowModule {
         );
       }
       await this._ensureVerified(investorWallet, "investor fee wallet");
+      await this._ensureFeeExempt(investorWallet, "investor fee wallet");
 
       console.log(`\n📝 Registering investor...`);
       console.log(`   Investor Address: ${investorAddress}`);
@@ -994,6 +1017,12 @@ class EscrowModule {
       const payee = await wallet.payee();
       const ownerWalletAddr = this.state.signers[1].address;
       const investorWallet = await wallet.investorWallet();
+      // The registry may have been bound after options 61/62 ran.
+      await this._ensureFeeExempt(investorWallet, "investor fee wallet");
+      await this._ensureFeeExempt(
+        await wallet.ownerWallet(),
+        "owner fee wallet",
+      );
 
       const complianceRules = this.state.getContract("complianceRules");
       const identityRegistry = this.state.getContract("identityRegistry");

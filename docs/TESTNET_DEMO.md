@@ -267,7 +267,13 @@ Then walk: 1 (deploy), 74 (governance), 75 (distribute VGT to 6-8), 76
 Name the treasury wallet and exempt it from investor limits (option 22 or 51,
 or `setInvestorLimitExempt` directly) BEFORE the ceremony, while the deployer
 owns the registry; afterwards only an InvestorTypeConfig vote can (option 76,
-type 0, choice 2).
+type 0, choice 2). Do the same for the two escrow fee wallets (the owner fee
+wallet given to the factory and each investor's fee wallet; options 61 and
+62 do it while the deployer owns the registry): the human side of a trusted
+transfer is cap-checked (D26), so without the exemption every release
+eventually reverts on a fee wallet's holding cap. A release that would put
+the payee over its holding cap reverts at release with "Holding limit
+exceeded"; the refund stays open, or raise the payee's type or exempt it.
 
 Rehearsed on 2026-09-11 with the poll branch forced at a since-removed
 scale of 10080: a 60-second vote plus 17-second delay waited 78 seconds of

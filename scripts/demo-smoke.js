@@ -217,12 +217,11 @@ async function main() {
     }
   }
 
-  // D22 (a): the treasury (deployer, the demo central bank) is exempt from
-  // investor-type caps; owner only, so set it before governance owns the
-  // registry. demo-smoke-escrow.js asserts it and mints above the cap.
-  await (
-    await registry.setInvestorLimitExempt(state.signers[0].address, true)
-  ).wait();
+  // D22 (a): the treasury (signer 0) and, for D26, demo-smoke-escrow.js's
+  // fee wallets (4, 5) are exempt from investor caps; owner only, so set
+  // before governance owns the registry. demo-smoke-escrow.js asserts both.
+  for (const w of [0, 4, 5].map((i) => state.signers[i].address))
+    await (await registry.setInvestorLimitExempt(w, true)).wait();
 
   // D21: option 74 must not register governance as an identity, so the
   // quorum denominator is unchanged by deploying it.
