@@ -261,7 +261,7 @@ describe("OnchainID System - Coverage Tests", function () {
 
       await keyManager
         .connect(recoveryAgent)
-        .executeKeyRecovery(identityAddress);
+        .executeKeyRecovery(identityAddress, recoveryKey);
 
       // Verify recovery key was added
       expect(await identity.keyHasPurpose(recoveryKey, 1)).to.be.true;

@@ -465,7 +465,7 @@ describe("🏭 Production Simulation - OnchainID System", function () {
       // Execute recovery
       await prodEnv.keyManager
         .connect(prodEnv.recoveryAgents[0])
-        .executeKeyRecovery(compromisedAddress);
+        .executeKeyRecovery(compromisedAddress, emergencyRecoveryKey);
 
       // Verify recovery key was added
       expect(await compromisedIdentity.keyHasPurpose(emergencyRecoveryKey, 1))

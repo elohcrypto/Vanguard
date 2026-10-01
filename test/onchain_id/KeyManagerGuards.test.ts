@@ -28,29 +28,67 @@ async function setup() {
   return { holder, A, B, C, good, evil, anyone, m1, id, idA, km };
 }
 
-describe("KeyManager recovery guards (2F.2, M2)", function () {
-  it("approvals for GOOD do not carry to EVIL after a re-initiation", async function () {
+describe("KeyManager recovery guards (2F.2, M2, review F2/F3)", function () {
+  const DAY2 = 48 * 3600;
+
+  it("a rogue initiation neither erases GOOD's approvals nor executes", async function () {
     const { A, B, C, good, evil, anyone, id, idA, km } = await setup();
     await km.connect(A).initiateKeyRecovery(idA, k(good.address));
     await km.connect(A).approveKeyRecovery(idA, k(good.address));
     await km.connect(B).approveKeyRecovery(idA, k(good.address));
 
-    // C re-points: approvals reset, EVIL has none.
+    // C opens its own candidate: a separate tally, GOOD's stays at 2.
     await km.connect(C).initiateKeyRecovery(idA, k(evil.address));
-    expect((await km.getKeyRecovery(idA)).approvalCount).to.equal(0);
-    await time.increase(48 * 3600 + 1);
-    await expect(km.connect(anyone).executeKeyRecovery(idA)).to.be.revertedWith(
-      "KeyManager: Insufficient approvals",
-    );
+    expect(
+      (await km.getRecoveryCandidate(idA, k(good.address))).approvalCount,
+    ).to.equal(2);
+    expect(
+      (await km.getRecoveryCandidate(idA, k(evil.address))).approvalCount,
+    ).to.equal(0);
+    await time.increase(DAY2 + 1);
+    await expect(
+      km.connect(anyone).executeKeyRecovery(idA, k(evil.address)),
+    ).to.be.revertedWith("KeyManager: Insufficient approvals");
+    await km.connect(anyone).executeKeyRecovery(idA, k(good.address));
+    expect(await id.keyHasPurpose(k(good.address), MGMT)).to.equal(true);
     expect(await id.keyHasPurpose(k(evil.address), MGMT)).to.equal(false);
   });
 
-  it("an approval names the key it approves", async function () {
+  it("three rounds of rogue re-initiation do not delay the honest 2-of-3 (F2)", async function () {
+    const { A, B, C, good, evil, anyone, id, idA, km } = await setup();
+    await km.connect(A).initiateKeyRecovery(idA, k(good.address));
+    await km.connect(A).approveKeyRecovery(idA, k(good.address));
+    await km.connect(B).approveKeyRecovery(idA, k(good.address));
+    // C keeps trying: re-initiating its own candidate is refused, and
+    // re-initiating GOOD's is refused too, so GOOD's timelock never resets.
+    await km.connect(C).initiateKeyRecovery(idA, k(evil.address));
+    for (let r = 0; r < 3; r++) {
+      await time.increase(15 * 3600);
+      await expect(
+        km.connect(C).initiateKeyRecovery(idA, k(evil.address)),
+      ).to.be.revertedWith("KeyManager: Recovery already pending");
+      await expect(
+        km.connect(C).initiateKeyRecovery(idA, k(good.address)),
+      ).to.be.revertedWith("KeyManager: Recovery already pending");
+    }
+    await time.increase(DAY2 - 45 * 3600 + 1);
+    await km.connect(anyone).executeKeyRecovery(idA, k(good.address));
+    expect(await id.keyHasPurpose(k(good.address), MGMT)).to.equal(true);
+    // Execution bumps the epoch: EVIL's candidate is gone.
+    expect(
+      (await km.getRecoveryCandidate(idA, k(evil.address))).initiatedAt,
+    ).to.equal(0);
+    await expect(
+      km.connect(C).approveKeyRecovery(idA, k(evil.address)),
+    ).to.be.revertedWith("KeyManager: Recovery already completed");
+  });
+
+  it("an approval names an open candidate", async function () {
     const { A, B, good, evil, idA, km } = await setup();
     await km.connect(A).initiateKeyRecovery(idA, k(good.address));
     await expect(
       km.connect(B).approveKeyRecovery(idA, k(evil.address)),
-    ).to.be.revertedWith("KeyManager: Approval for a different key");
+    ).to.be.revertedWith("KeyManager: Recovery not initiated");
   });
 
   it("a legitimate 2-of-3 recovery still completes", async function () {
@@ -58,51 +96,88 @@ describe("KeyManager recovery guards (2F.2, M2)", function () {
     await km.connect(A).initiateKeyRecovery(idA, k(good.address));
     await km.connect(A).approveKeyRecovery(idA, k(good.address));
     await km.connect(B).approveKeyRecovery(idA, k(good.address));
-    await time.increase(48 * 3600 + 1);
-    await km.connect(anyone).executeKeyRecovery(idA);
+    await time.increase(DAY2 + 1);
+    await km.connect(anyone).executeKeyRecovery(idA, k(good.address));
     expect(await id.keyHasPurpose(k(good.address), MGMT)).to.equal(true);
   });
 
-  it("the holder or the initiating agent cancels; others cannot", async function () {
+  it("duplicate agents are refused; one approval never meets threshold 2 (F3)", async function () {
     const { holder, A, B, good, anyone, idA, km } = await setup();
+    await expect(
+      km
+        .connect(holder)
+        .setupKeyRecovery(idA, [A.address, A.address, B.address], 2),
+    ).to.be.revertedWith("KeyManager: Duplicate agent");
+    await km.connect(holder).setupKeyRecovery(idA, [A.address, B.address], 2);
     await km.connect(A).initiateKeyRecovery(idA, k(good.address));
-    await expect(km.connect(B).cancelKeyRecovery(idA)).to.be.revertedWith(
-      "KeyManager: Not allowed to cancel recovery",
-    );
-    await expect(km.connect(anyone).cancelKeyRecovery(idA)).to.be.revertedWith(
-      "KeyManager: Not allowed to cancel recovery",
-    );
-    await km.connect(A).cancelKeyRecovery(idA);
+    await km.connect(A).approveKeyRecovery(idA, k(good.address));
+    await expect(
+      km.connect(A).approveKeyRecovery(idA, k(good.address)),
+    ).to.be.revertedWith("KeyManager: Already approved");
+    await time.increase(DAY2 + 1);
+    await expect(
+      km.connect(anyone).executeKeyRecovery(idA, k(good.address)),
+    ).to.be.revertedWith("KeyManager: Insufficient approvals");
+  });
+
+  it("the holder or the candidate's initiator cancels; others cannot", async function () {
+    const { holder, A, B, C, good, evil, anyone, idA, km } = await setup();
+    await km.connect(A).initiateKeyRecovery(idA, k(good.address));
+    await km.connect(C).initiateKeyRecovery(idA, k(evil.address));
+    await km.connect(B).approveKeyRecovery(idA, k(good.address));
+    // C initiated EVIL, not GOOD.
+    await expect(
+      km.connect(C).cancelKeyRecovery(idA, k(good.address)),
+    ).to.be.revertedWith("KeyManager: Not allowed to cancel recovery");
+    await expect(
+      km.connect(anyone).cancelKeyRecovery(idA, k(good.address)),
+    ).to.be.revertedWith("KeyManager: Not allowed to cancel recovery");
+    await km.connect(A).cancelKeyRecovery(idA, k(good.address));
     await expect(
       km.connect(B).approveKeyRecovery(idA, k(good.address)),
     ).to.be.revertedWith("KeyManager: Recovery not initiated");
+    // Cancelling GOOD left EVIL untouched; the holder cancels it.
+    expect(
+      (await km.getRecoveryCandidate(idA, k(evil.address))).initiatedAt,
+    ).to.not.equal(0);
+    await km.connect(holder).cancelKeyRecovery(idA, k(evil.address));
 
+    // Re-opened after a cancel: B's earlier approval does not carry over.
     await km.connect(B).initiateKeyRecovery(idA, k(good.address));
-    await km.connect(holder).cancelKeyRecovery(idA);
-    await expect(km.connect(anyone).executeKeyRecovery(idA)).to.be.revertedWith(
-      "KeyManager: Recovery not initiated",
-    );
+    expect(
+      (await km.getRecoveryCandidate(idA, k(good.address))).approvalCount,
+    ).to.equal(0);
+    await km.connect(B).approveKeyRecovery(idA, k(good.address));
+    await km.connect(holder).cancelKeyRecovery(idA, k(good.address));
+    await time.increase(DAY2 + 1);
+    await expect(
+      km.connect(anyone).executeKeyRecovery(idA, k(good.address)),
+    ).to.be.revertedWith("KeyManager: Recovery not initiated");
   });
 
-  it("re-running setup clears a pending recovery and its approvals", async function () {
+  it("re-running setup clears every pending candidate and its approvals", async function () {
     const { holder, A, B, C, good, anyone, idA, km } = await setup();
     await km.connect(A).initiateKeyRecovery(idA, k(good.address));
     await km.connect(A).approveKeyRecovery(idA, k(good.address));
     await km.connect(B).approveKeyRecovery(idA, k(good.address));
     // Holder replaces the agent set: A and B are out.
     await km.connect(holder).setupKeyRecovery(idA, [C.address], 1);
-    await time.increase(48 * 3600 + 1);
-    await expect(km.connect(anyone).executeKeyRecovery(idA)).to.be.revertedWith(
-      "KeyManager: Recovery not initiated",
-    );
+    await time.increase(DAY2 + 1);
+    await expect(
+      km.connect(anyone).executeKeyRecovery(idA, k(good.address)),
+    ).to.be.revertedWith("KeyManager: Recovery not initiated");
     // Re-adding A later does not revive its stale approval.
     await km
       .connect(holder)
       .setupKeyRecovery(idA, [A.address, B.address, C.address], 2);
+    expect((await km.keyRecoveries(idA)).initiatedAt).to.equal(0);
     await km.connect(C).initiateKeyRecovery(idA, k(good.address));
     expect((await km.getKeyRecovery(idA)).approvalCount).to.equal(0);
-    await expect(km.connect(A).approveKeyRecovery(idA, k(good.address))).to.not
-      .be.reverted;
+    await km.connect(A).approveKeyRecovery(idA, k(good.address));
+    await time.increase(DAY2 + 1);
+    await expect(
+      km.connect(anyone).executeKeyRecovery(idA, k(good.address)),
+    ).to.be.revertedWith("KeyManager: Insufficient approvals");
   });
 });
 
@@ -208,7 +283,7 @@ describe("Recovered wallet votes after KeyManager recovery (2F.1 + 2F.2)", funct
     ).to.be.revertedWith("Wallet does not control its identity");
 
     // KeyManager recovery adds newBob's key as MANAGEMENT on Bob's identity.
-    await km.executeKeyRecovery(bobId);
+    await km.executeKeyRecovery(bobId, k(newBob.address));
     expect(await id.keyHasPurpose(k(newBob.address), MGMT)).to.equal(true);
 
     await expect(gov.connect(newBob).castVote(pid, true, "")).to.not.be

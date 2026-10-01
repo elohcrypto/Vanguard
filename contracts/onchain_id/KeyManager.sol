@@ -62,25 +62,35 @@ contract KeyManager is Ownable, ReentrancyGuard {
         uint256 signatureCount;
     }
 
+    /// @dev Per identity. Candidates live under (epoch, key); bumping the
+    ///      epoch (setup, execute) drops every candidate at once.
     struct KeyRecovery {
-        bytes32 recoveryKey;
         address[] recoveryAgents;
         uint256 threshold;
+        uint256 epoch;
+        bool completed;
+        bytes32 lastKey; // last candidate opened, or the key recovered
+    }
+
+    /// @dev One proposed recovery key with its own tally (2F.2 review, F2):
+    ///      a new candidate never touches another's approvals or timelock.
+    struct RecoveryCandidate {
         uint256 initiatedAt;
         uint256 executionTime;
-        bool completed;
-        mapping(address => bool) hasApproved;
         uint256 approvalCount;
         address initiator;
+        uint256 round; // bumps on each (re)open; older approvals die
+        mapping(address => uint256) approvedRound;
     }
 
     event KeyRotationCancelled(address indexed identity, bytes32 indexed rotationId, address by);
-    event KeyRecoveryCancelled(address indexed identity, address by);
+    event KeyRecoveryCancelled(address indexed identity, bytes32 indexed recoveryKey, address by);
 
     // State variables
     mapping(address => mapping(bytes32 => KeyRotation)) public keyRotations;
     mapping(address => mapping(bytes32 => MultiSigKey)) public multiSigKeys;
-    mapping(address => KeyRecovery) public keyRecoveries;
+    mapping(address => KeyRecovery) private _recoveries;
+    mapping(address => mapping(uint256 => mapping(bytes32 => RecoveryCandidate))) private _candidates;
 
     // Configuration
     uint256 public constant DEFAULT_TIMELOCK = 24 hours;
@@ -284,9 +294,10 @@ contract KeyManager is Ownable, ReentrancyGuard {
     // Key recovery functions
 
     /**
-     * @dev Set up key recovery mechanism
+     * @dev Set up key recovery. Clears every pending candidate and approval
+     *      (new epoch) and re-opens recovery after a completed one.
      * @param _identity The OnchainID contract address
-     * @param _recoveryAgents Array of recovery agent addresses
+     * @param _recoveryAgents Distinct recovery agent addresses
      * @param _threshold Number of agents required for recovery
      */
     function setupKeyRecovery(
@@ -297,97 +308,110 @@ contract KeyManager is Ownable, ReentrancyGuard {
         require(_recoveryAgents.length > 0, "KeyManager: No recovery agents");
         require(_recoveryAgents.length <= MAX_RECOVERY_AGENTS, "KeyManager: Too many recovery agents");
         require(_threshold > 0 && _threshold <= _recoveryAgents.length, "KeyManager: Invalid threshold");
+        // A duplicate would let one agent count twice (2F.2 review, F3).
+        for (uint256 i = 0; i < _recoveryAgents.length; i++) {
+            for (uint256 j = i + 1; j < _recoveryAgents.length; j++) {
+                require(_recoveryAgents[i] != _recoveryAgents[j], "KeyManager: Duplicate agent");
+            }
+        }
 
-        KeyRecovery storage recovery = keyRecoveries[_identity];
-        // Clear any pending recovery and every old agent's approval, so a
-        // re-added agent does not carry a stale vote.
-        _resetRecovery(recovery);
+        KeyRecovery storage recovery = _recoveries[_identity];
+        recovery.epoch++;
         recovery.recoveryAgents = _recoveryAgents;
         recovery.threshold = _threshold;
         recovery.completed = false;
+        recovery.lastKey = bytes32(0);
     }
 
     /**
-     * @dev Initiate key recovery process. Re-initiating (any agent) replaces
-     *      the key and resets every approval: approvals commit to one key, so
-     *      an agent below threshold cannot re-point an approved recovery to
-     *      its own key (M2). Reset, not refuse, so a malicious first
-     *      initiator cannot block a holder who has lost every key.
+     * @dev Open a recovery candidate for `_newRecoveryKey`. Each candidate
+     *      has its own approvals and timelock, so an agent proposing another
+     *      key never erases or delays an honest candidate (2F.2 review, F2).
+     *      Re-initiating a pending candidate is refused, so its timelock
+     *      cannot be restarted.
      * @param _identity The OnchainID contract address
      * @param _newRecoveryKey The new recovery key to add
      */
     function initiateKeyRecovery(address _identity, bytes32 _newRecoveryKey) external {
-        KeyRecovery storage recovery = keyRecoveries[_identity];
+        KeyRecovery storage recovery = _recoveries[_identity];
         require(recovery.recoveryAgents.length > 0, "KeyManager: Recovery not set up");
         require(!recovery.completed, "KeyManager: Recovery already completed");
         require(_isRecoveryAgent(recovery, msg.sender), "KeyManager: Not a recovery agent");
         require(_newRecoveryKey != bytes32(0), "KeyManager: Invalid recovery key");
+        RecoveryCandidate storage c = _candidates[_identity][recovery.epoch][_newRecoveryKey];
+        require(c.initiatedAt == 0, "KeyManager: Recovery already pending");
 
-        _resetRecovery(recovery);
-        recovery.recoveryKey = _newRecoveryKey;
-        recovery.initiatedAt = block.timestamp;
-        recovery.executionTime = block.timestamp + RECOVERY_TIMELOCK;
-        recovery.initiator = msg.sender;
+        c.round++;
+        c.initiatedAt = block.timestamp;
+        c.executionTime = block.timestamp + RECOVERY_TIMELOCK;
+        c.initiator = msg.sender;
+        recovery.lastKey = _newRecoveryKey;
 
         emit KeyRecoveryInitiated(_identity, _newRecoveryKey, msg.sender);
     }
 
     /**
-     * @dev Approve key recovery for `_key`, which must be the pending key.
+     * @dev Approve the pending candidate for `_key`, once per agent.
      * @param _identity The OnchainID contract address
      * @param _key The recovery key being approved
      */
     function approveKeyRecovery(address _identity, bytes32 _key) external {
-        KeyRecovery storage recovery = keyRecoveries[_identity];
-        require(recovery.initiatedAt > 0, "KeyManager: Recovery not initiated");
+        KeyRecovery storage recovery = _recoveries[_identity];
         require(!recovery.completed, "KeyManager: Recovery already completed");
-        require(_key == recovery.recoveryKey, "KeyManager: Approval for a different key");
+        RecoveryCandidate storage c = _candidates[_identity][recovery.epoch][_key];
+        require(c.initiatedAt > 0, "KeyManager: Recovery not initiated");
         require(_isRecoveryAgent(recovery, msg.sender), "KeyManager: Not a recovery agent");
-        require(!recovery.hasApproved[msg.sender], "KeyManager: Already approved");
+        require(c.approvedRound[msg.sender] != c.round, "KeyManager: Already approved");
 
-        recovery.hasApproved[msg.sender] = true;
-        recovery.approvalCount++;
+        c.approvedRound[msg.sender] = c.round;
+        c.approvalCount++;
     }
 
     /**
-     * @dev Cancel a pending recovery: the identity owner or a MANAGEMENT key,
-     *      or the agent that initiated it.
+     * @dev Cancel the pending candidate for `_key`: the identity owner, a
+     *      MANAGEMENT key, or the agent that opened that candidate. Other
+     *      candidates are untouched.
      */
-    function cancelKeyRecovery(address _identity) external {
-        KeyRecovery storage recovery = keyRecoveries[_identity];
-        require(recovery.initiatedAt > 0 && !recovery.completed, "KeyManager: Recovery not initiated");
+    function cancelKeyRecovery(address _identity, bytes32 _key) external {
+        KeyRecovery storage recovery = _recoveries[_identity];
+        RecoveryCandidate storage c = _candidates[_identity][recovery.epoch][_key];
+        require(c.initiatedAt > 0 && !recovery.completed, "KeyManager: Recovery not initiated");
         require(
-            msg.sender == recovery.initiator ||
+            msg.sender == c.initiator ||
                 IOnchainID(_identity).keyHasPurpose(keccak256(abi.encodePacked(msg.sender)), 1) ||
                 msg.sender == Ownable(_identity).owner(),
             "KeyManager: Not allowed to cancel recovery"
         );
-        _resetRecovery(recovery);
-        emit KeyRecoveryCancelled(_identity, msg.sender);
+        c.initiatedAt = 0;
+        c.executionTime = 0;
+        c.approvalCount = 0;
+        c.initiator = address(0);
+        emit KeyRecoveryCancelled(_identity, _key, msg.sender);
     }
 
     /**
-     * @dev Execute key recovery after timelock and sufficient approvals
+     * @dev Execute the candidate for `_key` after its timelock with enough
+     *      approvals: adds `_key` as MANAGEMENT and ends the epoch, so every
+     *      other candidate dies. Recovery stays closed until the next setup.
      * @param _identity The OnchainID contract address
+     * @param _key The recovery key to add
      */
-    function executeKeyRecovery(address _identity) external nonReentrant {
-        KeyRecovery storage recovery = keyRecoveries[_identity];
-        require(recovery.initiatedAt > 0, "KeyManager: Recovery not initiated");
+    function executeKeyRecovery(address _identity, bytes32 _key) external nonReentrant {
+        KeyRecovery storage recovery = _recoveries[_identity];
         require(!recovery.completed, "KeyManager: Recovery already completed");
-        require(block.timestamp >= recovery.executionTime, "KeyManager: Timelock not expired");
-        // Count approvals against the CURRENT agent set, not the counter.
-        uint256 approvals;
-        for (uint256 i = 0; i < recovery.recoveryAgents.length; i++) {
-            if (recovery.hasApproved[recovery.recoveryAgents[i]]) approvals++;
-        }
-        require(approvals >= recovery.threshold, "KeyManager: Insufficient approvals");
-
-        // Add recovery key as management key
-        require(IOnchainID(_identity).addKey(recovery.recoveryKey, 1, 1), "KeyManager: Failed to add recovery key");
+        RecoveryCandidate storage c = _candidates[_identity][recovery.epoch][_key];
+        require(c.initiatedAt > 0, "KeyManager: Recovery not initiated");
+        require(block.timestamp >= c.executionTime, "KeyManager: Timelock not expired");
+        // Exact: agents are distinct and fixed within an epoch.
+        require(c.approvalCount >= recovery.threshold, "KeyManager: Insufficient approvals");
 
         recovery.completed = true;
+        recovery.lastKey = _key;
+        recovery.epoch++;
 
-        emit KeyRecoveryCompleted(_identity, recovery.recoveryKey);
+        require(IOnchainID(_identity).addKey(_key, 1, 1), "KeyManager: Failed to add recovery key");
+
+        emit KeyRecoveryCompleted(_identity, _key);
     }
 
     function _isRecoveryAgent(KeyRecovery storage recovery, address who) private view returns (bool) {
@@ -395,18 +419,6 @@ contract KeyManager is Ownable, ReentrancyGuard {
             if (recovery.recoveryAgents[i] == who) return true;
         }
         return false;
-    }
-
-    /// @dev Clear the pending key, timelock and every agent's approval.
-    function _resetRecovery(KeyRecovery storage recovery) private {
-        for (uint256 i = 0; i < recovery.recoveryAgents.length; i++) {
-            recovery.hasApproved[recovery.recoveryAgents[i]] = false;
-        }
-        recovery.approvalCount = 0;
-        recovery.recoveryKey = bytes32(0);
-        recovery.initiatedAt = 0;
-        recovery.executionTime = 0;
-        recovery.initiator = address(0);
     }
 
     // Utility functions
@@ -523,21 +535,95 @@ contract KeyManager is Ownable, ReentrancyGuard {
     }
 
     /**
-     * @dev Get key recovery details
+     * @dev Key recovery details. approvalCount describes `lastKey`: the last
+     *      candidate opened in this epoch, or, once completed, the key
+     *      recovered. Per-candidate data: getRecoveryCandidate.
      * @param _identity The OnchainID contract address
      * @return recoveryAgents Array of recovery agent addresses
      * @return threshold Required approval threshold
-     * @return approvalCount Current approval count
-     * @return completed Whether recovery is completed
+     * @return approvalCount Approvals of the last candidate
+     * @return completed Whether a recovery executed since the last setup
+     * @return epoch Current epoch (bumped by setup and execute)
+     * @return lastKey Last candidate opened, or the key recovered
      */
     function getKeyRecovery(
         address _identity
     )
         external
         view
-        returns (address[] memory recoveryAgents, uint256 threshold, uint256 approvalCount, bool completed)
+        returns (
+            address[] memory recoveryAgents,
+            uint256 threshold,
+            uint256 approvalCount,
+            bool completed,
+            uint256 epoch,
+            bytes32 lastKey
+        )
     {
-        KeyRecovery storage recovery = keyRecoveries[_identity];
-        return (recovery.recoveryAgents, recovery.threshold, recovery.approvalCount, recovery.completed);
+        KeyRecovery storage recovery = _recoveries[_identity];
+        return (
+            recovery.recoveryAgents,
+            recovery.threshold,
+            _lastCandidate(_identity).approvalCount,
+            recovery.completed,
+            recovery.epoch,
+            recovery.lastKey
+        );
+    }
+
+    /**
+     * @dev Same outputs as the former public `keyRecoveries` getter, with
+     *      `epoch` appended. Candidate fields describe `lastKey`.
+     */
+    function keyRecoveries(
+        address _identity
+    )
+        external
+        view
+        returns (
+            bytes32 recoveryKey,
+            uint256 threshold,
+            uint256 initiatedAt,
+            uint256 executionTime,
+            bool completed,
+            uint256 approvalCount,
+            address initiator,
+            uint256 epoch
+        )
+    {
+        KeyRecovery storage recovery = _recoveries[_identity];
+        RecoveryCandidate storage c = _lastCandidate(_identity);
+        return (
+            recovery.lastKey,
+            recovery.threshold,
+            c.initiatedAt,
+            c.executionTime,
+            recovery.completed,
+            c.approvalCount,
+            c.initiator,
+            recovery.epoch
+        );
+    }
+
+    /// @dev The pending candidate for `_key` in the current epoch.
+    function getRecoveryCandidate(
+        address _identity,
+        bytes32 _key
+    ) external view returns (uint256 initiatedAt, uint256 executionTime, uint256 approvalCount, address initiator) {
+        RecoveryCandidate storage c = _candidates[_identity][_recoveries[_identity].epoch][_key];
+        return (c.initiatedAt, c.executionTime, c.approvalCount, c.initiator);
+    }
+
+    /// @dev True if `_agent` approved the pending candidate for `_key`.
+    function hasApprovedRecovery(address _identity, bytes32 _key, address _agent) external view returns (bool) {
+        RecoveryCandidate storage c = _candidates[_identity][_recoveries[_identity].epoch][_key];
+        return c.initiatedAt > 0 && c.approvedRound[_agent] == c.round;
+    }
+
+    /// @dev `lastKey`'s candidate; after execution, in the epoch it ran in.
+    function _lastCandidate(address _identity) private view returns (RecoveryCandidate storage) {
+        KeyRecovery storage recovery = _recoveries[_identity];
+        uint256 epoch = recovery.completed ? recovery.epoch - 1 : recovery.epoch;
+        return _candidates[_identity][epoch][recovery.lastKey];
     }
 }

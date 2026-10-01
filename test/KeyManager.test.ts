@@ -808,7 +808,7 @@ describe("KeyManager", function () {
         await expect(
           keyManager
             .connect(recoveryAgent1)
-            .executeKeyRecovery(await onchainID.getAddress()),
+            .executeKeyRecovery(await onchainID.getAddress(), newRecoveryKey),
         )
           .to.emit(keyManager, "KeyRecoveryCompleted")
           .withArgs(await onchainID.getAddress(), newRecoveryKey);
@@ -822,7 +822,7 @@ describe("KeyManager", function () {
         await expect(
           keyManager
             .connect(recoveryAgent1)
-            .executeKeyRecovery(await onchainID.getAddress()),
+            .executeKeyRecovery(await onchainID.getAddress(), newRecoveryKey),
         ).to.be.revertedWith("KeyManager: Timelock not expired");
       });
 
@@ -847,7 +847,7 @@ describe("KeyManager", function () {
         await expect(
           keyManager
             .connect(recoveryAgent1)
-            .executeKeyRecovery(await onchainID.getAddress()),
+            .executeKeyRecovery(await onchainID.getAddress(), newRecoveryKey),
         ).to.be.revertedWith("KeyManager: Insufficient approvals");
       });
     });
@@ -1025,7 +1025,7 @@ describe("KeyManager", function () {
       // 5. Execute recovery
       await keyManager
         .connect(recoveryAgent1)
-        .executeKeyRecovery(await onchainID.getAddress());
+        .executeKeyRecovery(await onchainID.getAddress(), recoveryKey);
 
       // 6. Verify recovery key was added
       expect(await onchainID.keyHasPurpose(recoveryKey, MANAGEMENT_KEY)).to.be
