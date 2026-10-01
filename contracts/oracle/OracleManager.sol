@@ -4,6 +4,8 @@ pragma solidity ^0.8.19;
 import "@openzeppelin/contracts/access/Ownable2Step.sol";
 import "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
 import "@openzeppelin/contracts/utils/Pausable.sol";
+import "@openzeppelin/contracts/utils/cryptography/ECDSA.sol";
+import "@openzeppelin/contracts/utils/cryptography/MessageHashUtils.sol";
 import "./interfaces/IOracleManager.sol";
 import "./interfaces/IOracle.sol";
 
@@ -130,6 +132,7 @@ contract OracleManager is IOracleManager, Ownable2Step, ReentrancyGuard, Pausabl
 
         oracles[_oracle].registered = false;
         oracles[_oracle].active = false;
+        delete _emergencyOracles[_oracle];
 
         // Remove from registered list
         for (uint256 i = 0; i < registeredOraclesList.length; i++) {
@@ -491,6 +494,7 @@ contract OracleManager is IOracleManager, Ownable2Step, ReentrancyGuard, Pausabl
         require(oracles[oracle].registered, "Oracle not registered");
         oracles[oracle].registered = false;
         oracles[oracle].active = false;
+        delete _emergencyOracles[oracle];
 
         // Remove from list
         for (uint256 i = 0; i < registeredOraclesList.length; i++) {
@@ -504,14 +508,18 @@ contract OracleManager is IOracleManager, Ownable2Step, ReentrancyGuard, Pausabl
         emit OracleDeregistered(oracle, "Removed by admin");
     }
 
-    function setEmergencyOracle(address oracle, bool /* isEmergency */) external view override onlyOwner {
+    /// @notice Record (or clear) an oracle's manager-level emergency flag.
+    ///         Gating of emergency listings stays with each BlacklistOracle's
+    ///         own `setEmergencyOracle` (its owner); this is the registry
+    ///         record, cleared when the oracle is removed.
+    function setEmergencyOracle(address oracle, bool isEmergency) external override onlyOwner {
         require(oracles[oracle].registered, "Oracle not registered");
-        // Implementation would set emergency status - simplified for demo
+        _emergencyOracles[oracle] = isEmergency;
+        emit EmergencyOracleSet(oracle, isEmergency);
     }
 
     function isEmergencyOracle(address oracle) external view override returns (bool) {
-        // Simplified implementation
-        return oracles[oracle].registered && oracles[oracle].reputation >= MAX_REPUTATION;
+        return _emergencyOracles[oracle];
     }
 
     function getOracleName(address oracle) external view override returns (string memory) {
@@ -536,12 +544,32 @@ contract OracleManager is IOracleManager, Ownable2Step, ReentrancyGuard, Pausabl
         emit ConsensusThresholdUpdated(oldThreshold, newThreshold);
     }
 
+    /// @notice True when at least `consensusThreshold` distinct, currently
+    ///         active oracles each signed `messageHash` (EIP-191 personal sign);
+    ///         `signatures[i]` must recover to `oracles[i]`. A duplicate,
+    ///         inactive, mismatched or malformed entry does not count; a length
+    ///         mismatch is false. (It always returned true before plan 2F.3.)
     function validateOracleConsensus(
-        address[] memory /* oracles */,
-        bytes[] memory /* signatures */,
-        bytes32 /* messageHash */
-    ) external pure override returns (bool) {
-        // Simplified implementation
-        return true;
+        address[] memory _oracles,
+        bytes[] memory _signatures,
+        bytes32 _messageHash
+    ) external view override returns (bool) {
+        if (_oracles.length != _signatures.length) return false;
+        bytes32 digest = MessageHashUtils.toEthSignedMessageHash(_messageHash);
+        uint256 valid = 0;
+        for (uint256 i = 0; i < _oracles.length; i++) {
+            if (!oracles[_oracles[i]].active) continue;
+            bool duplicate = false;
+            for (uint256 j = 0; j < i; j++) {
+                if (_oracles[j] == _oracles[i]) {
+                    duplicate = true;
+                    break;
+                }
+            }
+            if (duplicate) continue;
+            (address signer, ECDSA.RecoverError err, ) = ECDSA.tryRecover(digest, _signatures[i]);
+            if (err == ECDSA.RecoverError.NoError && signer == _oracles[i]) valid++;
+        }
+        return valid >= consensusThreshold;
     }
 }

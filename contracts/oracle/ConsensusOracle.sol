@@ -16,6 +16,12 @@ import "./interfaces/IOracleManager.sol";
 contract ConsensusOracle is IOracle, Ownable, ReentrancyGuard, Pausable {
     using ECDSA for bytes32;
 
+    /// @notice An expired query is force-resolved only after `minimumOracles`
+    ///         distinct oracles voted (plan 2F.3, review B-L2).
+    error InsufficientParticipation();
+    /// @notice A vote's signature must be the sender's own.
+    error SignerMismatch();
+
     struct ConsensusQuery {
         bytes32 queryId;
         address subject;
@@ -174,8 +180,12 @@ contract ConsensusOracle is IOracle, Ownable, ReentrancyGuard, Pausable {
         require(!query.isResolved, "ConsensusOracle: Query already resolved");
         require(!query.hasVoted[msg.sender], "ConsensusOracle: Oracle already voted");
 
-        // Verify signature
-        require(verifySignature(query.subject, _queryId, _vote, _signature), "ConsensusOracle: Invalid signature");
+        // The vote is the sender's: its signature must recover to msg.sender,
+        // not to any active oracle (one key must not cast another's vote).
+        bytes32 digest = MessageHashUtils.toEthSignedMessageHash(
+            keccak256(abi.encodePacked(query.subject, _queryId, _vote, block.chainid))
+        );
+        if (ECDSA.recover(digest, _signature) != msg.sender) revert SignerMismatch();
 
         // Get oracle weight
         uint256 weight = getOracleWeight(msg.sender);
@@ -435,6 +445,10 @@ contract ConsensusOracle is IOracle, Ownable, ReentrancyGuard, Pausable {
         require(query.timestamp > 0, "ConsensusOracle: Query does not exist");
         require(block.timestamp >= query.expiryTime, "ConsensusOracle: Query not expired");
         require(!query.isResolved, "ConsensusOracle: Query already resolved");
+        // Anyone may finalise an expired query, so it must have the same
+        // participation floor as a normal resolution: one "yes" plus an hour
+        // must not make a verdict.
+        if (query.voters.length < minimumOracles) revert InsufficientParticipation();
 
         // Resolve based on current votes
         query.isResolved = true;
