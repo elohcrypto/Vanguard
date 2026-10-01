@@ -448,10 +448,10 @@ describe("🏭 Production Simulation - OnchainID System", function () {
       // Multiple agents approve recovery (2-of-3 threshold)
       await prodEnv.keyManager
         .connect(prodEnv.recoveryAgents[0])
-        .approveKeyRecovery(compromisedAddress);
+        .approveKeyRecovery(compromisedAddress, emergencyRecoveryKey);
       await prodEnv.keyManager
         .connect(prodEnv.recoveryAgents[1])
-        .approveKeyRecovery(compromisedAddress);
+        .approveKeyRecovery(compromisedAddress, emergencyRecoveryKey);
 
       console.log("✅ Recovery approvals obtained (2/3 threshold met)");
 

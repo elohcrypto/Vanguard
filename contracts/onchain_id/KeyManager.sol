@@ -71,7 +71,11 @@ contract KeyManager is Ownable, ReentrancyGuard {
         bool completed;
         mapping(address => bool) hasApproved;
         uint256 approvalCount;
+        address initiator;
     }
+
+    event KeyRotationCancelled(address indexed identity, bytes32 indexed rotationId, address by);
+    event KeyRecoveryCancelled(address indexed identity, address by);
 
     // State variables
     mapping(address => mapping(bytes32 => KeyRotation)) public keyRotations;
@@ -172,6 +176,11 @@ contract KeyManager is Ownable, ReentrancyGuard {
         require(rotation.initiatedAt > 0, "KeyManager: Rotation not initiated");
         require(!rotation.completed, "KeyManager: Rotation already completed");
         require(block.timestamp >= rotation.executionTime, "KeyManager: Timelock not expired");
+        // A rotation queued by a key that was revoked since must not run (M3).
+        require(
+            IOnchainID(_identity).keyHasPurpose(keccak256(abi.encodePacked(rotation.initiator)), 1),
+            "KeyManager: Initiator no longer a manager"
+        );
 
         // Add new key first
         require(IOnchainID(_identity).addKey(_newKey, _purpose, 1), "KeyManager: Failed to add new key");
@@ -182,6 +191,22 @@ contract KeyManager is Ownable, ReentrancyGuard {
         rotation.completed = true;
 
         emit KeyRotationCompleted(_identity, _oldKey, _newKey, _purpose);
+    }
+
+    /**
+     * @dev Cancel a pending rotation. Any current MANAGEMENT key of the identity.
+     */
+    function cancelKeyRotation(
+        address _identity,
+        bytes32 _oldKey,
+        bytes32 _newKey,
+        uint256 _purpose
+    ) external onlyIdentityManager(_identity) {
+        bytes32 rotationId = keccak256(abi.encodePacked(_identity, _oldKey, _newKey, _purpose));
+        KeyRotation storage rotation = keyRotations[_identity][rotationId];
+        require(rotation.initiatedAt > 0 && !rotation.completed, "KeyManager: No pending rotation");
+        delete keyRotations[_identity][rotationId];
+        emit KeyRotationCancelled(_identity, rotationId, msg.sender);
     }
 
     // Multi-signature key management
@@ -274,19 +299,20 @@ contract KeyManager is Ownable, ReentrancyGuard {
         require(_threshold > 0 && _threshold <= _recoveryAgents.length, "KeyManager: Invalid threshold");
 
         KeyRecovery storage recovery = keyRecoveries[_identity];
+        // Clear any pending recovery and every old agent's approval, so a
+        // re-added agent does not carry a stale vote.
+        _resetRecovery(recovery);
         recovery.recoveryAgents = _recoveryAgents;
         recovery.threshold = _threshold;
         recovery.completed = false;
-        recovery.approvalCount = 0;
-
-        // Reset previous approvals
-        for (uint256 i = 0; i < _recoveryAgents.length; i++) {
-            recovery.hasApproved[_recoveryAgents[i]] = false;
-        }
     }
 
     /**
-     * @dev Initiate key recovery process
+     * @dev Initiate key recovery process. Re-initiating (any agent) replaces
+     *      the key and resets every approval: approvals commit to one key, so
+     *      an agent below threshold cannot re-point an approved recovery to
+     *      its own key (M2). Reset, not refuse, so a malicious first
+     *      initiator cannot block a holder who has lost every key.
      * @param _identity The OnchainID contract address
      * @param _newRecoveryKey The new recovery key to add
      */
@@ -294,46 +320,50 @@ contract KeyManager is Ownable, ReentrancyGuard {
         KeyRecovery storage recovery = keyRecoveries[_identity];
         require(recovery.recoveryAgents.length > 0, "KeyManager: Recovery not set up");
         require(!recovery.completed, "KeyManager: Recovery already completed");
+        require(_isRecoveryAgent(recovery, msg.sender), "KeyManager: Not a recovery agent");
+        require(_newRecoveryKey != bytes32(0), "KeyManager: Invalid recovery key");
 
-        // Check if sender is a recovery agent
-        bool isRecoveryAgent = false;
-        for (uint256 i = 0; i < recovery.recoveryAgents.length; i++) {
-            if (recovery.recoveryAgents[i] == msg.sender) {
-                isRecoveryAgent = true;
-                break;
-            }
-        }
-        require(isRecoveryAgent, "KeyManager: Not a recovery agent");
-
+        _resetRecovery(recovery);
         recovery.recoveryKey = _newRecoveryKey;
         recovery.initiatedAt = block.timestamp;
         recovery.executionTime = block.timestamp + RECOVERY_TIMELOCK;
+        recovery.initiator = msg.sender;
 
         emit KeyRecoveryInitiated(_identity, _newRecoveryKey, msg.sender);
     }
 
     /**
-     * @dev Approve key recovery
+     * @dev Approve key recovery for `_key`, which must be the pending key.
      * @param _identity The OnchainID contract address
+     * @param _key The recovery key being approved
      */
-    function approveKeyRecovery(address _identity) external {
+    function approveKeyRecovery(address _identity, bytes32 _key) external {
         KeyRecovery storage recovery = keyRecoveries[_identity];
         require(recovery.initiatedAt > 0, "KeyManager: Recovery not initiated");
         require(!recovery.completed, "KeyManager: Recovery already completed");
-
-        // Check if sender is a recovery agent
-        bool isRecoveryAgent = false;
-        for (uint256 i = 0; i < recovery.recoveryAgents.length; i++) {
-            if (recovery.recoveryAgents[i] == msg.sender) {
-                isRecoveryAgent = true;
-                break;
-            }
-        }
-        require(isRecoveryAgent, "KeyManager: Not a recovery agent");
+        require(_key == recovery.recoveryKey, "KeyManager: Approval for a different key");
+        require(_isRecoveryAgent(recovery, msg.sender), "KeyManager: Not a recovery agent");
         require(!recovery.hasApproved[msg.sender], "KeyManager: Already approved");
 
         recovery.hasApproved[msg.sender] = true;
         recovery.approvalCount++;
+    }
+
+    /**
+     * @dev Cancel a pending recovery: the identity owner or a MANAGEMENT key,
+     *      or the agent that initiated it.
+     */
+    function cancelKeyRecovery(address _identity) external {
+        KeyRecovery storage recovery = keyRecoveries[_identity];
+        require(recovery.initiatedAt > 0 && !recovery.completed, "KeyManager: Recovery not initiated");
+        require(
+            msg.sender == recovery.initiator ||
+                IOnchainID(_identity).keyHasPurpose(keccak256(abi.encodePacked(msg.sender)), 1) ||
+                msg.sender == Ownable(_identity).owner(),
+            "KeyManager: Not allowed to cancel recovery"
+        );
+        _resetRecovery(recovery);
+        emit KeyRecoveryCancelled(_identity, msg.sender);
     }
 
     /**
@@ -345,7 +375,12 @@ contract KeyManager is Ownable, ReentrancyGuard {
         require(recovery.initiatedAt > 0, "KeyManager: Recovery not initiated");
         require(!recovery.completed, "KeyManager: Recovery already completed");
         require(block.timestamp >= recovery.executionTime, "KeyManager: Timelock not expired");
-        require(recovery.approvalCount >= recovery.threshold, "KeyManager: Insufficient approvals");
+        // Count approvals against the CURRENT agent set, not the counter.
+        uint256 approvals;
+        for (uint256 i = 0; i < recovery.recoveryAgents.length; i++) {
+            if (recovery.hasApproved[recovery.recoveryAgents[i]]) approvals++;
+        }
+        require(approvals >= recovery.threshold, "KeyManager: Insufficient approvals");
 
         // Add recovery key as management key
         require(IOnchainID(_identity).addKey(recovery.recoveryKey, 1, 1), "KeyManager: Failed to add recovery key");
@@ -353,6 +388,25 @@ contract KeyManager is Ownable, ReentrancyGuard {
         recovery.completed = true;
 
         emit KeyRecoveryCompleted(_identity, recovery.recoveryKey);
+    }
+
+    function _isRecoveryAgent(KeyRecovery storage recovery, address who) private view returns (bool) {
+        for (uint256 i = 0; i < recovery.recoveryAgents.length; i++) {
+            if (recovery.recoveryAgents[i] == who) return true;
+        }
+        return false;
+    }
+
+    /// @dev Clear the pending key, timelock and every agent's approval.
+    function _resetRecovery(KeyRecovery storage recovery) private {
+        for (uint256 i = 0; i < recovery.recoveryAgents.length; i++) {
+            recovery.hasApproved[recovery.recoveryAgents[i]] = false;
+        }
+        recovery.approvalCount = 0;
+        recovery.recoveryKey = bytes32(0);
+        recovery.initiatedAt = 0;
+        recovery.executionTime = 0;
+        recovery.initiator = address(0);
     }
 
     // Utility functions

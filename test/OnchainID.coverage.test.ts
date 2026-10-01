@@ -252,7 +252,7 @@ describe("OnchainID System - Coverage Tests", function () {
         .initiateKeyRecovery(identityAddress, recoveryKey);
       await keyManager
         .connect(recoveryAgent)
-        .approveKeyRecovery(identityAddress);
+        .approveKeyRecovery(identityAddress, recoveryKey);
 
       // Fast forward time
       await TestHelpers.fastForwardTime(
