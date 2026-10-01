@@ -76,20 +76,17 @@ contract IdentityRegistry is IIdentityRegistry, Ownable2Step {
     address private _tokenForJurisdiction;
 
     // ---- Required claims (folds ClaimTopicsRegistry + TrustedIssuersRegistry) ----
-    // A wallet is verified only if its identity carries, for EVERY required
-    // topic, a claim from an issuer trusted for that topic which that issuer
-    // still reports as valid (not revoked, not expired).
+    // A wallet is verified only if, for EVERY required topic, an issuer
+    // trusted for that topic reports a live claim (issued to the identity,
+    // not revoked, not expired).
     uint256[] private _claimTopics;
     mapping(uint256 => bool) private _isRequiredTopic;
     mapping(uint256 => address[]) private _trustedIssuersForTopic;
     mapping(address => mapping(uint256 => bool)) private _issuerHasTopic;
     mapping(address => uint256[]) private _issuerTopics;
 
-    // ponytail: bounded loops in isVerified. Raise if a topic needs more
-    // issuers or an identity legitimately carries more claims per topic.
+    // ponytail: bounded loop in isVerified. Raise if a topic needs more issuers.
     uint256 public constant MAX_TRUSTED_ISSUERS_PER_TOPIC = 8;
-    // ponytail: bounded scan; an identity owner can bury their own valid claim behind 8 junk claims (self-DoS only). Upgrade path: T-REX ids keccak256(abi.encode(issuer, topic)), one claim per issuer per topic.
-    uint256 public constant MAX_CLAIMS_SCANNED_PER_TOPIC = 8;
 
     error TooManyTrustedIssuers(uint256 topic);
     error IssuerNotAContract(address issuer);
@@ -347,33 +344,19 @@ contract IdentityRegistry is IIdentityRegistry, Ownable2Step {
     }
 
     /**
-     * @dev True if `id` carries a claim on `topic` from a trusted issuer that
-     *      the issuer still reports valid. Reads the claim the identity holds,
-     *      recomputes the issuer-side id from (issuer, identity, topic, data),
-     *      and asks the issuer. A self-added claim naming a trusted issuer
-     *      fails here because the issuer has no record of it.
+     * @dev True if some issuer trusted for `topic` reports a live claim on it
+     *      for `id`. Asks the issuers, never the identity's claim list: anyone
+     *      may add claims naming themselves to an identity (OnchainID.addClaim),
+     *      so that list cannot decide verification (2F.2, H2). A self-added
+     *      claim naming a trusted issuer fails because the issuer has no
+     *      record of it.
      */
     function _hasValidClaim(address id, uint256 topic) private view returns (bool) {
-        if (_trustedIssuersForTopic[topic].length == 0) return false;
-        // A high-level call to a non-contract reverts in the caller, outside
-        // try/catch, so check first. Wallets registered with a non-identity
-        // address are simply unverified.
+        // Wallets registered with a non-identity address are unverified.
         if (id.code.length == 0) return false;
-
-        bytes32[] memory claimIds;
-        try IOnchainID(id).getClaimIdsByTopic(topic) returns (bytes32[] memory ids) {
-            claimIds = ids;
-        } catch {
-            return false;
-        }
-
-        uint256 n = claimIds.length;
-        if (n > MAX_CLAIMS_SCANNED_PER_TOPIC) n = MAX_CLAIMS_SCANNED_PER_TOPIC;
-        for (uint256 i = 0; i < n; i++) {
-            (uint256 foundTopic, , address issuer, , bytes memory data, ) = IOnchainID(id).getClaim(claimIds[i]);
-            if (foundTopic != topic || !_issuerHasTopic[issuer][topic]) continue;
-            bytes32 issuerClaimId = keccak256(abi.encodePacked(issuer, id, topic, data));
-            try IClaimIssuer(issuer).isClaimValid(issuerClaimId) returns (bool ok) {
+        address[] storage issuers = _trustedIssuersForTopic[topic];
+        for (uint256 i = 0; i < issuers.length; i++) {
+            try IClaimIssuer(issuers[i]).hasValidClaim(id, topic) returns (bool ok) {
                 if (ok) return true;
             } catch {}
         }

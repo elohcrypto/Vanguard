@@ -132,34 +132,22 @@ describe("IdentityRegistry.isVerified requires trusted-issuer claims (plan Task 
     expect(await freshRegistry.isVerified(investor.address)).to.equal(false);
   });
 
-  // Plan section 2.3, Task 1R.8 / Decision D16: the claim scan is bounded at
-  // MAX_CLAIMS_SCANNED_PER_TOPIC (8). An identity owner can bury their own
-  // valid claim behind junk self-claims naming the trusted issuer, but that
-  // issuer never recorded those junk claims so they were never going to
-  // validate anyway — the point demonstrated here is that the scan never
-  // even reaches the real, valid claim once 8 claims precede it.
-  it("an identity owner can bury their own valid claim behind the scan cap (documented self-DoS)", async function () {
+  // Plan section 2.3, Task 1R.8 / D16 bounded the registry's scan of the
+  // identity's claim list at 8, which let junk claims bury a valid one (and,
+  // per the 2026-09-30 review H2, anyone could add them). Since 2F.2 the
+  // registry asks the trusted issuer and never reads that list, so junk
+  // claims naming the trusted issuer change nothing.
+  it("junk self-claims naming the trusted issuer do not bury a valid claim (2F.2)", async function () {
     const identity = await ethers.getContractAt("OnchainID", identityAddr);
     const kycIssuerAddr = await kycIssuer.getAddress();
 
-    // OnchainID.addClaim appends to claimsByTopic[topic] in call order and
-    // getClaimIdsByTopic returns that same order, so these 8 junk claims
-    // occupy indices 0-7 and the real claim issued afterwards lands at
-    // index 8 — outside the first-8 window _hasValidClaim scans.
-    const junkClaimIds: string[] = [];
     for (let i = 0; i < 8; i++) {
       const junkData = ethers.toUtf8Bytes(`junk-claim-${i}`);
       await identity
         .connect(investor)
         .addClaim(KYC_TOPIC, 1, kycIssuerAddr, "0x", junkData, "");
-      // OnchainID.addClaim: claimId = keccak256(abi.encodePacked(issuer, topic, data))
-      junkClaimIds.push(
-        ethers.solidityPackedKeccak256(
-          ["address", "uint256", "bytes"],
-          [kycIssuerAddr, KYC_TOPIC, junkData],
-        ),
-      );
     }
+    expect(await registry.isVerified(investor.address)).to.equal(false);
 
     await issueSigned(
       kycIssuer,
@@ -170,12 +158,6 @@ describe("IdentityRegistry.isVerified requires trusted-issuer claims (plan Task 
       "",
       0,
     );
-
-    expect(await registry.isVerified(investor.address)).to.equal(false);
-
-    for (const claimId of junkClaimIds) {
-      await identity.connect(investor).removeClaim(claimId);
-    }
 
     expect(await registry.isVerified(investor.address)).to.equal(true);
   });

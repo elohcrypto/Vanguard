@@ -488,7 +488,7 @@ describe("OnchainID", function () {
       it("Should reject removal by unauthorized user", async function () {
         await expect(
           onchainID.connect(unauthorized).removeClaim(claimId),
-        ).to.be.revertedWith("OnchainID: Sender does not have management key");
+        ).to.be.revertedWith("OnchainID: Not authorized to remove claim");
       });
     });
 

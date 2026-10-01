@@ -77,6 +77,9 @@ contract OnchainID is IOnchainID, Ownable, ReentrancyGuard {
 
     bytes32[] private allKeys;
     bytes32[] private allClaims;
+    // Position + 1 of a claim id in claimsByTopic[topic] / allClaims.
+    mapping(bytes32 => uint256) private _topicIndex;
+    mapping(bytes32 => uint256) private _allIndex;
     address[] private trustedIssuersList;
     uint256[] private requiredTopicsList;
 
@@ -484,9 +487,11 @@ contract OnchainID is IOnchainID, Ownable, ReentrancyGuard {
         bytes calldata _data,
         string calldata _uri
     ) external override returns (bytes32 claimRequestId) {
-        require(_issuer != address(0), "OnchainID: Invalid issuer");
-
-        // Check if sender is authorized to add claims
+        // `msg.sender == _issuer` is how a ClaimIssuer contract writes its
+        // claim here (ClaimIssuer.issueClaim). It also lets ANY caller add a
+        // claim naming itself as issuer. That only grows this identity's
+        // lists: IdentityRegistry.isVerified asks the trusted issuers
+        // (ClaimIssuer.hasValidClaim) and never reads these lists (2F.2, H2).
         require(
             msg.sender == owner() ||
                 keyHasPurpose(keccak256(abi.encodePacked(msg.sender)), MANAGEMENT_KEY) ||
@@ -494,55 +499,28 @@ contract OnchainID is IOnchainID, Ownable, ReentrancyGuard {
                 msg.sender == _issuer,
             "OnchainID: Not authorized to add claim"
         );
-
-        bytes32 claimId = keccak256(abi.encodePacked(_issuer, _topic, _data));
-        claimRequestId = claimId;
-
-        claims[claimId] = Claim({
-            topic: _topic,
-            scheme: _scheme,
-            issuer: _issuer,
-            signature: _signature,
-            data: _data,
-            uri: _uri,
-            validTo: 0, // 0 means no expiry
-            validFrom: block.timestamp
-        });
-
-        claimsByTopic[_topic].push(claimId);
-        allClaims.push(claimId);
-
-        emit ClaimAdded(claimId, _topic, _scheme, _issuer, _signature, _data, _uri);
-
-        return claimRequestId;
+        return _storeClaim(_topic, _scheme, _issuer, _signature, _data, _uri);
     }
 
     /**
-     * @dev Remove claim
+     * @dev Remove claim. A management key removes any claim; an issuer
+     *      removes only its own (ClaimIssuer.revokeClaim).
      */
-    function removeClaim(bytes32 _claimId) external override onlyManagementKey returns (bool success) {
-        require(claims[_claimId].issuer != address(0), "OnchainID: Claim does not exist");
-
+    function removeClaim(bytes32 _claimId) external override returns (bool success) {
         Claim memory claim = claims[_claimId];
+        require(claim.issuer != address(0), "OnchainID: Claim does not exist");
+        require(
+            msg.sender == claim.issuer ||
+                keyHasPurpose(keccak256(abi.encodePacked(msg.sender)), MANAGEMENT_KEY) ||
+                msg.sender == owner() ||
+                authorizedManagers[msg.sender],
+            "OnchainID: Not authorized to remove claim"
+        );
 
-        // Remove from claimsByTopic
-        bytes32[] storage topicClaims = claimsByTopic[claim.topic];
-        for (uint256 i = 0; i < topicClaims.length; i++) {
-            if (topicClaims[i] == _claimId) {
-                topicClaims[i] = topicClaims[topicClaims.length - 1];
-                topicClaims.pop();
-                break;
-            }
-        }
-
-        // Remove from allClaims
-        for (uint256 i = 0; i < allClaims.length; i++) {
-            if (allClaims[i] == _claimId) {
-                allClaims[i] = allClaims[allClaims.length - 1];
-                allClaims.pop();
-                break;
-            }
-        }
+        // ponytail: O(1) swap-and-pop via stored indices, so an identity
+        // bloated by self-named junk claims can still remove any claim.
+        _swapPop(claimsByTopic[claim.topic], _topicIndex, _claimId);
+        _swapPop(allClaims, _allIndex, _claimId);
 
         emit ClaimRemoved(_claimId, claim.topic, claim.scheme, claim.issuer, claim.signature, claim.data, claim.uri);
 
@@ -815,26 +793,51 @@ contract OnchainID is IOnchainID, Ownable, ReentrancyGuard {
             );
 
             claimRequestIds[i] = claimRequestNonce++;
-            bytes32 claimId = keccak256(abi.encodePacked(_issuers[i], _topics[i], _data[i]));
-
-            claims[claimId] = Claim({
-                topic: _topics[i],
-                scheme: _schemes[i],
-                issuer: _issuers[i],
-                signature: _signatures[i],
-                data: _data[i],
-                uri: _uris[i],
-                validFrom: block.timestamp,
-                validTo: 0
-            });
-
-            claimsByTopic[_topics[i]].push(claimId);
-            allClaims.push(claimId);
-
-            emit ClaimAdded(claimId, _topics[i], _schemes[i], _issuers[i], _signatures[i], _data[i], _uris[i]);
+            _storeClaim(_topics[i], _schemes[i], _issuers[i], _signatures[i], _data[i], _uris[i]);
         }
 
         return claimRequestIds;
+    }
+
+    /// @dev Store or update a claim. An id already present is updated in
+    ///      place, never pushed twice, so one removeClaim always clears it.
+    function _storeClaim(
+        uint256 _topic,
+        uint256 _scheme,
+        address _issuer,
+        bytes calldata _signature,
+        bytes calldata _data,
+        string calldata _uri
+    ) private returns (bytes32 claimId) {
+        require(_issuer != address(0), "OnchainID: Invalid issuer");
+        claimId = keccak256(abi.encodePacked(_issuer, _topic, _data));
+        if (claims[claimId].issuer == address(0)) {
+            claimsByTopic[_topic].push(claimId);
+            _topicIndex[claimId] = claimsByTopic[_topic].length;
+            allClaims.push(claimId);
+            _allIndex[claimId] = allClaims.length;
+        }
+        claims[claimId] = Claim({
+            topic: _topic,
+            scheme: _scheme,
+            issuer: _issuer,
+            signature: _signature,
+            data: _data,
+            uri: _uri,
+            validTo: 0, // 0 means no expiry
+            validFrom: block.timestamp
+        });
+        emit ClaimAdded(claimId, _topic, _scheme, _issuer, _signature, _data, _uri);
+    }
+
+    /// @dev Remove `id` from `list` in O(1); `index` holds position + 1.
+    function _swapPop(bytes32[] storage list, mapping(bytes32 => uint256) storage index, bytes32 id) private {
+        uint256 i = index[id] - 1;
+        bytes32 last = list[list.length - 1];
+        list[i] = last;
+        index[last] = i + 1;
+        list.pop();
+        delete index[id];
     }
 
     /**

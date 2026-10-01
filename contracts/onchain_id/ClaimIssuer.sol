@@ -29,6 +29,10 @@ contract ClaimIssuer is Ownable2Step, ReentrancyGuard {
     );
 
     event ClaimRevoked(address indexed identity, bytes32 indexed claimId, uint256 indexed topic);
+    /// @notice revokeClaim could not remove the identity-side copy (already
+    ///         removed by the holder, or not an OnchainID). The claim is
+    ///         revoked here either way and no longer verifies.
+    event ClaimRemovalFailed(address indexed identity, bytes32 indexed identityClaimId);
 
     event IssuerKeyAdded(bytes32 indexed key, uint256 indexed purpose);
     event IssuerKeyRevoked(bytes32 indexed key, uint256 indexed purpose);
@@ -280,14 +284,34 @@ contract ClaimIssuer is Ownable2Step, ReentrancyGuard {
         claim.revoked = true;
         claim.revokedAt = block.timestamp;
 
-        // Try to remove from OnchainID (may fail if not authorized)
-        try IOnchainID(claim.identity).removeClaim(_claimId) {
-            // Claim removed successfully
-        } catch {
-            // Continue even if removal fails - claim is still marked as revoked
+        // Remove our copy from the identity: OnchainID ids are
+        // keccak256(issuer, topic, data), and an issuer may remove its own.
+        // Verification does not depend on it (it asks hasValidClaim below).
+        bytes32 sideId = keccak256(abi.encodePacked(address(this), claim.topic, claim.data));
+        try IOnchainID(claim.identity).removeClaim(sideId) {} catch {
+            emit ClaimRemovalFailed(claim.identity, sideId);
         }
 
         emit ClaimRevoked(claim.identity, _claimId, claim.topic);
+    }
+
+    /**
+     * @notice True if this issuer holds a live (issued, not revoked, not
+     *         expired) claim on `_topic` for `_identity`. IdentityRegistry
+     *         asks this instead of reading the identity's claim list, which
+     *         anyone can pad (2F.2, H2).
+     * @dev Walks the identity's claims newest first, at most 8. Only this
+     *      issuer's signers append to that list, so the bound is not an
+     *      attack surface; a renewal is always the newest entry.
+     */
+    function hasValidClaim(address _identity, uint256 _topic) external view returns (bool) {
+        bytes32[] storage ids = claimsByIdentity[_identity];
+        uint256 n = ids.length;
+        uint256 stop = n > 8 ? n - 8 : 0;
+        for (uint256 i = n; i > stop; i--) {
+            if (issuedClaims[ids[i - 1]].topic == _topic && isClaimValid(ids[i - 1])) return true;
+        }
+        return false;
     }
 
     /**
@@ -345,18 +369,12 @@ contract ClaimIssuer is Ownable2Step, ReentrancyGuard {
      * @param _claimId The claim ID
      * @return valid True if the claim is valid
      */
-    function isClaimValid(bytes32 _claimId) external view returns (bool valid) {
-        IssuedClaim memory claim = issuedClaims[_claimId];
-
-        if (claim.identity == address(0) || claim.revoked) {
-            return false;
-        }
-
-        if (claim.validTo != 0 && claim.validTo <= block.timestamp) {
-            return false;
-        }
-
-        return true;
+    function isClaimValid(bytes32 _claimId) public view returns (bool valid) {
+        IssuedClaim storage claim = issuedClaims[_claimId];
+        return
+            claim.identity != address(0) &&
+            !claim.revoked &&
+            (claim.validTo == 0 || claim.validTo > block.timestamp);
     }
 
     // Key management functions
