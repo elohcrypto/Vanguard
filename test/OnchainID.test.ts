@@ -802,8 +802,11 @@ describe("OnchainID", function () {
   });
 
   describe("Access Control", function () {
-    it("Should allow ownership transfer", async function () {
+    it("Should allow ownership transfer (two-step, plan 2F.2)", async function () {
       await expect(onchainID.connect(owner).transferOwnership(user1.address))
+        .to.emit(onchainID, "OwnershipTransferStarted")
+        .withArgs(owner.address, user1.address);
+      await expect(onchainID.connect(user1).acceptOwnership())
         .to.emit(onchainID, "OwnershipTransferred")
         .withArgs(owner.address, user1.address);
 

@@ -49,6 +49,23 @@ table (1 day) is still 60 s. The percentages are never scaled. The demo reads
 | 336 | 30 min | ~9 min | Sepolia walkthrough |
 | 1440 | 7 min | 1 min | local rehearsal (the ceiling) |
 
+## KYC claims and verification (2F.2)
+
+`IdentityRegistry.isVerified` asks each issuer trusted for a required topic
+(`ClaimIssuer.hasValidClaim(identity, topic)`); it does not read the
+identity's own claim list, which anyone can pad with claims naming
+themselves. The issuer's `issueClaim` still writes a copy onto the
+OnchainID (ERC-735 view), but nothing reads that copy to decide
+verification; correctness rests on the issuer's record. `revokeClaim` removes the claim on both sides and the holder
+is unverified at once (a `ClaimRemovalFailed` event flags a copy the holder
+had already removed). A wallet recovered with `Token.recoveryAddress` is bound
+to the old OnchainID in the registry, but the identity's owner and keys are
+unchanged, so it cannot propose or vote ("Wallet does not control its
+identity") until it holds a key on that OnchainID: the designed path is
+KeyManager recovery (the holder authorised KeyManager and named recovery
+agents beforehand; the agents initiate and approve the new wallet's key, and
+after the 48-hour timelock anyone executes it).
+
 ## Electorate rule (D7)
 
 Quorum is a share of `registeredIdentityCount`, frozen into the proposal as
@@ -252,12 +269,11 @@ sender and recipient); `ComplianceRules.canTransfer` verifies only the escrow
 counterparty on trusted transfers. `scripts/gas-analysis.ts` measures a real
 second transfer (after a warm-up) for three deployments: the permissive
 `MockIdentityRegistry` with compliance bound to it as the baseline, one
-required topic (KYC), and two (KYC+AML). The remaining cost is one cold
-`isVerified` walk per party per topic: three external calls
-(`IdentityRegistry -> OnchainID -> ClaimIssuer`) plus a claim-struct copy.
-The two-topic delta is still about 7x the 40,000 gas tolerance, so the next
-lever is plan v2 decision D17 (verified-until cache) or a leaner claim read
-on OnchainID.
+required topic (KYC), and two (KYC+AML). Since Task 2F.2 the remaining cost
+is one `ClaimIssuer.hasValidClaim` call per party per topic
+(`IdentityRegistry -> ClaimIssuer`, no OnchainID read). The two-topic delta
+is still about 2x the 40,000 gas tolerance; the next lever is plan v2
+decision D17 (verified-until cache).
 
 **Before Task 2A.7 (measured 2026-09-26):**
 
@@ -288,5 +304,16 @@ Task 2A.7 made Token the single identity gate (ERC-3643 shape), so
 the normal path (two `isVerified` calls per transfer instead of four), and
 scenario A now binds `ComplianceRules` to the mock (whose `investorCountry`
 returns `uint16`), which is why the baseline rose while B and C fell.
+
+**After Task 2F.2 (measured 2026-10-01):** the registry asks the issuer
+instead of walking the identity's claims.
+
+| Scenario | transfer gasUsed | delta vs A | isVerified est. |
+|---|---|---|---|
+| A: MockIdentityRegistry (baseline) | 93,956 | 0 | 23,938 |
+| B: IdentityRegistry, 1 topic (KYC) | 143,568 | +49,612 | 53,663 |
+| C: IdentityRegistry, 2 topics (KYC+AML) | 184,068 | +90,112 | 78,163 |
+
+Before this change, at 1d61eed: B 246,346 (+152,390), C 389,550 (+295,594).
 
 Deploying all eleven contracts costs under 0.01 ETH at 1.3 gwei.

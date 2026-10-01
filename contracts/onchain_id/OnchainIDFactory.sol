@@ -54,6 +54,7 @@ contract OnchainIDFactory is Ownable {
      */
     function deployOnchainID(address _owner, bytes32 _salt) external payable whenNotPaused returns (address identity) {
         require(_owner != address(0), "OnchainIDFactory: Invalid owner");
+        _checkReplace(_owner);
         require(msg.value >= deploymentFee, "OnchainIDFactory: Insufficient fee");
         require(saltToIdentity[_salt] == address(0), "OnchainIDFactory: Salt already used");
 
@@ -92,6 +93,7 @@ contract OnchainIDFactory is Ownable {
         bytes32 _salt
     ) external payable whenNotPaused returns (address identity) {
         require(_owner != address(0), "OnchainIDFactory: Invalid owner");
+        _checkReplace(_owner);
         require(_managementKey != bytes32(0), "OnchainIDFactory: Invalid management key");
         require(msg.value >= deploymentFee, "OnchainIDFactory: Insufficient fee");
         require(saltToIdentity[_salt] == address(0), "OnchainIDFactory: Salt already used");
@@ -154,6 +156,7 @@ contract OnchainIDFactory is Ownable {
 
         for (uint256 i = 0; i < _owners.length; i++) {
             require(_owners[i] != address(0), "OnchainIDFactory: Invalid owner");
+            _checkReplace(_owners[i]);
             require(saltToIdentity[_salts[i]] == address(0), "OnchainIDFactory: Salt already used");
 
             // Deploy OnchainID contract using CREATE2
@@ -299,6 +302,16 @@ contract OnchainIDFactory is Ownable {
         _transferOwnership(newOwner);
 
         emit FactoryOwnershipTransferred(oldOwner, newOwner);
+    }
+
+    /// @dev The first identity for a wallet may be deployed by anyone; after
+    ///      that only the wallet or the factory owner may re-point
+    ///      ownerToIdentity[wallet], which the demo reads (2F.2, L7).
+    function _checkReplace(address _wallet) private view {
+        require(
+            ownerToIdentity[_wallet] == address(0) || msg.sender == _wallet || msg.sender == owner(),
+            "OnchainIDFactory: Only the wallet or factory owner may replace"
+        );
     }
 
     /**

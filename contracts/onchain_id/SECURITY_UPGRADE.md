@@ -4,6 +4,14 @@
 
 The `OnchainID.sol` contract has been upgraded with a new secure key removal function that requires cryptographic proof of ownership.
 
+> **Plan 2F.2 (2026-10-01).** `removeKeyWithProof` now hashes the signer with
+> `abi.encodePacked`, the way address keys are stored; before, it hashed
+> `abi.encode` and could never match, so this path did not work. OnchainID
+> ownership is two-step (`transferOwnership` then `acceptOwnership`, as
+> ClaimIssuer); on acceptance the old owner's MANAGEMENT key is revoked and the
+> new owner's added. `renounceOwnership` reverts and `initialize` runs once, so
+> an identity always has a controller.
+
 ---
 
 ## ⚠️ Previous Vulnerability
@@ -92,7 +100,7 @@ address signer = ECDSA.recover(ethSignedMessageHash, _signature);
 ### **Step 4: Verify Ownership**
 
 ```solidity
-bytes32 signerKeyHash = keccak256(abi.encode(signer));
+bytes32 signerKeyHash = keccak256(abi.encodePacked(signer)); // how address keys are stored
 require(signerKeyHash == _key, "Signature does not prove ownership");
 ```
 
@@ -117,10 +125,10 @@ function getRemoveKeyMessage(
 ) external view returns (bytes32 messageHash)
 ```
 
-**Usage:**
-1. Call `getRemoveKeyMessage(keyHash, purpose)`
-2. Sign the returned hash with your wallet
-3. Call `removeKeyWithProof(keyHash, purpose, signature)`
+**Usage:** the returned hash is already EIP-191 prefixed, so it is the digest to CHECK, not the bytes to pass to `signMessage` (which would prefix twice). Sign the raw message instead:
+1. Compute `raw = keccak256(abi.encodePacked("Remove key from OnchainID", identity, keyHash, purpose, chainId))`
+2. `signature = wallet.signMessage(getBytes(raw))`; `getRemoveKeyMessage(keyHash, purpose)` equals `ethers.hashMessage(getBytes(raw))`
+3. A management key calls `removeKeyWithProof(keyHash, purpose, signature)`
 
 ---
 
@@ -129,11 +137,17 @@ function getRemoveKeyMessage(
 ### **Example: Remove Management Key**
 
 ```javascript
-// Step 1: Get the message to sign
-const keyHash = ethers.keccak256(ethers.AbiCoder.defaultAbiCoder().encode(['address'], [myAddress]));
+// Step 1: Build the raw message to sign (address keys are
+// keccak256(abi.encodePacked(address)))
+const rawRemoveKeyMessage = async (onchainID, keyHash, purpose) =>
+    ethers.solidityPackedKeccak256(
+        ['string', 'address', 'bytes32', 'uint256', 'uint256'],
+        ['Remove key from OnchainID', await onchainID.getAddress(), keyHash, purpose,
+         (await ethers.provider.getNetwork()).chainId]);
+const keyHash = ethers.solidityPackedKeccak256(['address'], [myAddress]);
 const purpose = 1; // MANAGEMENT_KEY
 
-const messageHash = await onchainID.getRemoveKeyMessage(keyHash, purpose);
+const messageHash = await rawRemoveKeyMessage(onchainID, keyHash, purpose);
 
 // Step 2: Sign the message with your wallet
 const signature = await wallet.signMessage(ethers.getBytes(messageHash));
@@ -216,13 +230,11 @@ const [owner, alice, bob] = await ethers.getSigners();
 const onchainID = await OnchainID.deploy(owner.address);
 
 // Add Alice's key
-const aliceKeyHash = ethers.keccak256(
-    ethers.AbiCoder.defaultAbiCoder().encode(['address'], [alice.address])
-);
+const aliceKeyHash = ethers.solidityPackedKeccak256(['address'], [alice.address]);
 await onchainID.addKey(aliceKeyHash, 1, 1);
 
 // Alice removes her own key (SECURE)
-const messageHash = await onchainID.getRemoveKeyMessage(aliceKeyHash, 1);
+const messageHash = await rawRemoveKeyMessage(onchainID, aliceKeyHash, 1);
 const signature = await alice.signMessage(ethers.getBytes(messageHash));
 await onchainID.connect(alice).removeKeyWithProof(aliceKeyHash, 1, signature);
 // ✅ Success - Alice proved ownership
@@ -231,8 +243,8 @@ await onchainID.connect(alice).removeKeyWithProof(aliceKeyHash, 1, signature);
 ### **Test 2: Prevent Unauthorized Removal**
 
 ```javascript
-// Bob tries to remove Alice's key (ATTACK)
-const messageHash = await onchainID.getRemoveKeyMessage(aliceKeyHash, 1);
+// Bob (also a management key) tries to remove Alice's key (ATTACK)
+const messageHash = await rawRemoveKeyMessage(onchainID, aliceKeyHash, 1);
 const bobSignature = await bob.signMessage(ethers.getBytes(messageHash));
 
 await expect(
@@ -246,7 +258,7 @@ await expect(
 ```javascript
 // String-based keys cannot use removeKeyWithProof
 const stringKeyHash = ethers.id("my-backup-key");
-await onchainID.addKey(stringKeyHash, 1, 1);
+await onchainID.addKey(stringKeyHash, 1, 2); // keyType 2 (RSA): not ECDSA
 
 await expect(
     onchainID.removeKeyWithProof(stringKeyHash, 1, signature)
@@ -270,7 +282,7 @@ await onchainID.removeKey(keyHash, purpose);
 ### **2. Verify Message Before Signing**
 ```javascript
 // Always verify what you're signing
-const message = await onchainID.getRemoveKeyMessage(keyHash, purpose);
+const message = await rawRemoveKeyMessage(onchainID, keyHash, purpose);
 console.log("Signing message:", message);
 const signature = await wallet.signMessage(ethers.getBytes(message));
 ```
@@ -298,7 +310,7 @@ const removal = {
 await onchainID.removeKey(keyHash, purpose);
 
 // New code (secure)
-const messageHash = await onchainID.getRemoveKeyMessage(keyHash, purpose);
+const messageHash = await rawRemoveKeyMessage(onchainID, keyHash, purpose);
 const signature = await wallet.signMessage(ethers.getBytes(messageHash));
 await onchainID.removeKeyWithProof(keyHash, purpose, signature);
 ```

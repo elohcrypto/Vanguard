@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.20;
 
-import "@openzeppelin/contracts/access/Ownable.sol";
+import "@openzeppelin/contracts/access/Ownable2Step.sol";
 import "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
 import "@openzeppelin/contracts/utils/cryptography/ECDSA.sol";
 import "@openzeppelin/contracts/utils/cryptography/MessageHashUtils.sol";
@@ -12,7 +12,7 @@ import "./interfaces/IOnchainID.sol";
  * @dev Implementation of OnchainID with ERC-734 and ERC-735 standards
  * @author CMTA UTXO Compliance Team
  */
-contract OnchainID is IOnchainID, Ownable, ReentrancyGuard {
+contract OnchainID is IOnchainID, Ownable2Step, ReentrancyGuard {
     using ECDSA for bytes32;
 
     // Key purposes
@@ -86,6 +86,7 @@ contract OnchainID is IOnchainID, Ownable, ReentrancyGuard {
     uint256 private executionNonce;
     uint256 private claimRequestNonce;
     uint256 private creationTime;
+    bool private initialized;
 
     // ✅ DoS Protection: Maximum array sizes to prevent gas limit attacks
     uint256 public constant MAX_BATCH_SIZE = 50;
@@ -185,6 +186,8 @@ contract OnchainID is IOnchainID, Ownable, ReentrancyGuard {
      */
     constructor(address _owner) Ownable(_owner == address(0) ? address(this) : _owner) {
         creationTime = block.timestamp;
+        // Deployed without an owner: initialize() sets one, once.
+        initialized = _owner != address(0);
 
         // Add owner's address as management key (only if not zero address)
         if (_owner != address(0)) {
@@ -201,6 +204,25 @@ contract OnchainID is IOnchainID, Ownable, ReentrancyGuard {
         return Ownable.owner();
     }
 
+    /// @dev An identity must always have a controller. Renouncing used to
+    ///      reopen initialize() to anyone (2F.2, L6).
+    function renounceOwnership() public pure override {
+        revert("OnchainID: identity needs an owner");
+    }
+
+    /// @dev Two-step, as ClaimIssuer (D18). On acceptance the old owner's
+    ///      MANAGEMENT key is retired and the new owner's added, so a
+    ///      transferred identity is no longer controllable by the old wallet
+    ///      (2F.2, L8).
+    function acceptOwnership() public override {
+        address previous = owner();
+        super.acceptOwnership();
+        bytes32 oldKey = keccak256(abi.encodePacked(previous));
+        if (keyHasPurpose(oldKey, MANAGEMENT_KEY)) _removeKey(oldKey, MANAGEMENT_KEY);
+        bytes32 newKey = keccak256(abi.encodePacked(msg.sender));
+        if (keys[newKey].key == bytes32(0)) _addKey(newKey, MANAGEMENT_KEY, ECDSA_TYPE);
+    }
+
     /**
      * @dev Allow authorized contracts to manage keys
      * @param _contract The contract address to authorize
@@ -214,7 +236,9 @@ contract OnchainID is IOnchainID, Ownable, ReentrancyGuard {
      * @dev Initialize function (for factory pattern)
      */
     function initialize(address _owner, bytes32 _managementKey) external {
-        require(owner() == address(0), "OnchainID: Already initialized");
+        require(!initialized, "OnchainID: Already initialized");
+        require(_owner != address(0), "OnchainID: Invalid owner");
+        initialized = true;
         _transferOwnership(_owner);
         creationTime = block.timestamp;
 
@@ -268,10 +292,14 @@ contract OnchainID is IOnchainID, Ownable, ReentrancyGuard {
     function removeKey(bytes32 _key, uint256 _purpose) external override onlyManagementKey returns (bool success) {
         require(keys[_key].key != bytes32(0), "OnchainID: Key does not exist");
         require(keys[_key].purpose == _purpose, "OnchainID: Purpose mismatch");
+        _removeKey(_key, _purpose);
+        return true;
+    }
 
+    /// @dev Revoke `_key` and drop it from keysByPurpose[_purpose].
+    function _removeKey(bytes32 _key, uint256 _purpose) private {
         keys[_key].revokedAt = block.timestamp;
 
-        // Remove from keysByPurpose array
         bytes32[] storage purposeKeys = keysByPurpose[_purpose];
         for (uint256 i = 0; i < purposeKeys.length; i++) {
             if (purposeKeys[i] == _key) {
@@ -282,7 +310,6 @@ contract OnchainID is IOnchainID, Ownable, ReentrancyGuard {
         }
 
         emit KeyRemoved(_key, _purpose, keys[_key].keyType);
-        return true;
     }
 
     /**
@@ -320,25 +347,13 @@ contract OnchainID is IOnchainID, Ownable, ReentrancyGuard {
         bytes32 ethSignedMessageHash = MessageHashUtils.toEthSignedMessageHash(message);
         address signer = ECDSA.recover(ethSignedMessageHash, _signature);
 
-        // Verify the signer owns the key being removed
-        // For address-based keys: keccak256(abi.encode(address))
-        bytes32 signerKeyHash = keccak256(abi.encode(signer));
+        // Verify the signer owns the key being removed. Address keys are
+        // stored as keccak256(abi.encodePacked(address)) (constructor,
+        // onlyManagementKey); abi.encode here could never match (2F.2, L8).
+        bytes32 signerKeyHash = keccak256(abi.encodePacked(signer));
         require(signerKeyHash == _key, "OnchainID: Signature does not prove ownership of key");
 
-        // Proceed with removal
-        keys[_key].revokedAt = block.timestamp;
-
-        // Remove from keysByPurpose array
-        bytes32[] storage purposeKeys = keysByPurpose[_purpose];
-        for (uint256 i = 0; i < purposeKeys.length; i++) {
-            if (purposeKeys[i] == _key) {
-                purposeKeys[i] = purposeKeys[purposeKeys.length - 1];
-                purposeKeys.pop();
-                break;
-            }
-        }
-
-        emit KeyRemoved(_key, _purpose, keys[_key].keyType);
+        _removeKey(_key, _purpose);
         return true;
     }
 
