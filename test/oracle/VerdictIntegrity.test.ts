@@ -277,6 +277,137 @@ describe("Oracle verdict integrity (2F.3)", function () {
     });
   });
 
+  describe("ordering by resolution time (2F.3 review MEDIUM-1)", function () {
+    // Two contrary verdicts: the first resolves, an hour later the second.
+    async function pair(type: number, first: boolean) {
+      const older = await query(victim.address, type, first);
+      await inc(3600);
+      const newer = await query(victim.address, type, !first);
+      return { older, newer };
+    }
+
+    it("P1: an older flag applied first is overridden by the newer clear", async function () {
+      const { older, newer } = await pair(BLACKLIST, true);
+      await inc(600);
+      // Nothing on-chain knows of the unapplied newer verdict yet.
+      await attest(BO, n1, victim.address, older, true);
+      expect(await BO.isBlacklisted(victim.address)).to.equal(true);
+      const [, , tOlder] = await OM.getQueryResolution(older);
+      expect(await BO.lastWriteAt(victim.address)).to.equal(tOlder);
+      await attest(BO, n2, victim.address, newer, false);
+      expect(await BO.isBlacklisted(victim.address)).to.equal(false);
+    });
+
+    it("P1b: a newer clear consumed as a no-op still refuses the older flag", async function () {
+      const { older, newer } = await pair(BLACKLIST, true);
+      await attest(BO, n2, victim.address, newer, false);
+      const [, , tNewer] = await OM.getQueryResolution(newer);
+      expect(await BO.lastWriteAt(victim.address)).to.equal(tNewer);
+      await expect(
+        attest(BO, n1, victim.address, older, true),
+      ).to.be.revertedWithCustomError(BO, "VerdictSuperseded");
+      expect(await BO.isBlacklisted(victim.address)).to.equal(false);
+    });
+
+    it("P1w: whitelist, a newer rejection beats an older approval either way", async function () {
+      let { older, newer } = await pair(WHITELIST, true);
+      await attest(WO, n1, victim.address, older, true);
+      await attest(WO, n2, victim.address, newer, false);
+      expect(await WO.isWhitelisted(victim.address)).to.equal(false);
+      ({ older, newer } = await pair(WHITELIST, true));
+      await attest(WO, n2, victim.address, newer, false); // no-op, consumed
+      await expect(
+        attest(WO, n1, victim.address, older, true),
+      ).to.be.revertedWithCustomError(WO, "VerdictSuperseded");
+      expect(await WO.isWhitelisted(victim.address)).to.equal(false);
+    });
+
+    it("M11: an older flag after a consensus clear is superseded", async function () {
+      await BO.addToBlacklist(victim.address, LOW, 30 * DAY, "owner");
+      await inc(60);
+      const { older, newer } = await pair(BLACKLIST, true);
+      await attest(BO, n2, victim.address, newer, false); // clears
+      expect(await BO.isBlacklisted(victim.address)).to.equal(false);
+      await expect(
+        attest(BO, n1, victim.address, older, true),
+      ).to.be.revertedWithCustomError(BO, "VerdictSuperseded");
+    });
+
+    it("M12: an older approval after a consensus rejection is superseded", async function () {
+      await WO.addToWhitelist(victim.address, 3, 30 * DAY, "owner");
+      await inc(60);
+      const { older, newer } = await pair(WHITELIST, true);
+      await attest(WO, n2, victim.address, newer, false); // rejects
+      expect(await WO.isWhitelisted(victim.address)).to.equal(false);
+      await expect(
+        attest(WO, n1, victim.address, older, true),
+      ).to.be.revertedWithCustomError(WO, "VerdictSuperseded");
+    });
+
+    it("M16: a governance whitelist removal supersedes an older approval", async function () {
+      await DLM.addToWhitelist(victim.address, 7, 3, 30 * DAY, "KYC ok");
+      await inc(60);
+      const q = await query(victim.address, WHITELIST, true); // not applied
+      await inc(60);
+      await DLM.removeFromWhitelist(victim.address, 7, "KYC withdrawn");
+      await expect(
+        attest(WO, n1, victim.address, q, true),
+      ).to.be.revertedWithCustomError(WO, "VerdictSuperseded");
+      expect(await WO.isWhitelisted(victim.address)).to.equal(false);
+    });
+
+    it("M2/M14: a verdict resolved in the same block as an owner write is refused", async function () {
+      const raw = async (from: string, to: string, data: string) =>
+        network.provider.send("eth_sendTransaction", [
+          { from, to, data, gas: "0x7a1200" },
+        ]);
+      for (const [O, type, write] of [
+        [
+          BO,
+          BLACKLIST,
+          BO.interface.encodeFunctionData("addToBlacklist", [
+            victim.address,
+            LOW,
+            DAY,
+            "owner",
+          ]),
+        ],
+        [
+          WO,
+          WHITELIST,
+          WO.interface.encodeFunctionData("addToWhitelist", [
+            victim.address,
+            3,
+            DAY,
+            "owner",
+          ]),
+        ],
+      ] as [any, number, string][]) {
+        const q = await query(victim.address, type, null);
+        await OM.connect(n1).submitResponse(q, true);
+        await OM.connect(n2).submitResponse(q, true);
+        await network.provider.send("evm_setAutomine", [false]);
+        try {
+          const resolve = OM.interface.encodeFunctionData("submitResponse", [
+            q,
+            true,
+          ]);
+          await raw(n3.address, await OM.getAddress(), resolve);
+          await raw(owner.address, await O.getAddress(), write);
+          await network.provider.send("evm_mine");
+        } finally {
+          await network.provider.send("evm_setAutomine", [true]);
+        }
+        const [has, , at] = await OM.getQueryResolution(q);
+        expect(has).to.equal(true);
+        expect(await O.lastWriteAt(victim.address)).to.equal(at);
+        await expect(
+          attest(O, n1, victim.address, q, true),
+        ).to.be.revertedWithCustomError(O, "VerdictSuperseded");
+      }
+    });
+  });
+
   describe("OracleManager: who raises queries, resolution is final", function () {
     it("only the owner or an active oracle may raise a query", async function () {
       await expect(

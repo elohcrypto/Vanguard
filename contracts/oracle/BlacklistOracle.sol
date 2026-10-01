@@ -22,7 +22,7 @@ contract BlacklistOracle is IOracle, Ownable, ReentrancyGuard, Pausable {
     error VerdictAlreadyApplied();
     /// @notice The verdict resolved more than `maxVerdictAge` ago.
     error VerdictExpired();
-    /// @notice The subject's entry was written at or after the verdict resolved.
+    /// @notice The subject was written at or after the verdict resolved.
     error VerdictSuperseded();
     /// @notice `maxVerdictAge` outside [MIN_VERDICT_AGE, MAX_VERDICT_AGE].
     error InvalidVerdictAge();
@@ -67,9 +67,15 @@ contract BlacklistOracle is IOracle, Ownable, ReentrancyGuard, Pausable {
 
     /// @notice Verdict rules (plan 2F.3, review H3): a resolved OracleManager
     ///         query is applied at most once, only within `maxVerdictAge` of
-    ///         resolving, and only if it resolved after the subject's current
-    ///         entry was written (owner, list manager, emergency or consensus).
+    ///         resolving, and only if it resolved after the subject's last
+    ///         write. Ordered by resolution time (review MEDIUM-1):
+    ///         `lastWriteAt` is block.timestamp for an owner, list-manager,
+    ///         emergency or batch write and the verdict's resolvedAt for a
+    ///         consensus application (a no-op included), so an older verdict
+    ///         applied late never beats a newer one. `entry.timestamp` is the
+    ///         readers' write time and is not the ordering clock.
     mapping(bytes32 => bool) public verdictApplied;
+    mapping(address => uint256) public lastWriteAt;
     uint256 public maxVerdictAge = 1 days;
     uint256 public constant MIN_VERDICT_AGE = 1 hours;
     uint256 public constant MAX_VERDICT_AGE = 30 days;
@@ -335,6 +341,7 @@ contract BlacklistOracle is IOracle, Ownable, ReentrancyGuard, Pausable {
             emergencyListing: false
         });
 
+        lastWriteAt[_subject] = block.timestamp;
         emit BlacklistUpdated(_subject, true, _severity, expiryTime, _reason, false);
     }
 
@@ -369,6 +376,7 @@ contract BlacklistOracle is IOracle, Ownable, ReentrancyGuard, Pausable {
         });
 
         blacklistEntries[_subject].attestingOracles[0] = msg.sender;
+        lastWriteAt[_subject] = block.timestamp;
         emergencyBlacklistCount++;
 
         emit BlacklistUpdated(_subject, true, _severity, expiryTime, _reason, true);
@@ -386,6 +394,7 @@ contract BlacklistOracle is IOracle, Ownable, ReentrancyGuard, Pausable {
         blacklistEntries[_subject].reason = _reason;
         // A removal is a write: a verdict resolved before it cannot undo it.
         blacklistEntries[_subject].timestamp = block.timestamp;
+        lastWriteAt[_subject] = block.timestamp;
 
         emit BlacklistUpdated(_subject, false, SeverityLevel.LOW, 0, _reason, false);
     }
@@ -431,18 +440,20 @@ contract BlacklistOracle is IOracle, Ownable, ReentrancyGuard, Pausable {
     /**
      * @dev Apply a resolved oracle consensus (subject and type already bound).
      *      Open query: nothing. Resolved: refused if already applied, if the
-     *      entry was written at or after the verdict resolved (a governance
-     *      NO_EXPIRY sanction, an emergency listing, an owner write or a
-     *      removal is never undone by an older verdict) or if older than
-     *      maxVerdictAge; otherwise consumed, even when it changes nothing.
+     *      subject was written at or after the verdict resolved (lastWriteAt:
+     *      a governance NO_EXPIRY sanction, an emergency listing, an owner
+     *      write, a removal, or a consensus verdict that resolved later) or
+     *      if older than maxVerdictAge; otherwise consumed, even when it
+     *      changes nothing, and lastWriteAt moves to its resolvedAt.
      */
     function _updateBlacklistConsensus(address _subject, bytes32 _queryId, SeverityLevel _severity) internal {
         (bool hasConsensus, bool consensusResult, uint256 resolvedAt) = oracleManager.getQueryResolution(_queryId);
         if (!hasConsensus) return;
         if (verdictApplied[_queryId]) revert VerdictAlreadyApplied();
-        if (resolvedAt <= blacklistEntries[_subject].timestamp) revert VerdictSuperseded();
+        if (resolvedAt <= lastWriteAt[_subject]) revert VerdictSuperseded();
         if (block.timestamp > resolvedAt + maxVerdictAge) revert VerdictExpired();
         verdictApplied[_queryId] = true;
+        lastWriteAt[_subject] = resolvedAt;
 
         // Review B N-d (recorded, plan 3.3): the add branch reads the
         // stored flag, so a lapsed entry never removed (isBlacklisted()
@@ -471,7 +482,9 @@ contract BlacklistOracle is IOracle, Ownable, ReentrancyGuard, Pausable {
             );
             correctAttestations++;
         } else if (!consensusResult && blacklistEntries[_subject].isBlacklisted) {
-            // Remove from blacklist
+            // D27 (owner decision, review N-1): a consensus that resolved
+            // after a governance NO_EXPIRY sanction may clear it; the latest
+            // write by resolution time wins. Unchanged by design.
             blacklistEntries[_subject].isBlacklisted = false;
             blacklistEntries[_subject].reason = "Oracle consensus clearing";
             blacklistEntries[_subject].timestamp = block.timestamp;
@@ -550,6 +563,7 @@ contract BlacklistOracle is IOracle, Ownable, ReentrancyGuard, Pausable {
                 emergencyListing: false
             });
 
+            lastWriteAt[_subjects[i]] = block.timestamp;
             emit BlacklistUpdated(_subjects[i], true, _severities[i], expiryTime, _reason, false);
         }
     }
@@ -561,6 +575,8 @@ contract BlacklistOracle is IOracle, Ownable, ReentrancyGuard, Pausable {
         for (uint256 i = 0; i < _subjects.length; i++) {
             BlacklistEntry storage entry = blacklistEntries[_subjects[i]];
             if (entry.isBlacklisted && entry.expiryTime != 0 && block.timestamp >= entry.expiryTime) {
+                // Not a write for lastWriteAt: the entry had already lapsed
+                // and anyone may call this, so it must not kill verdicts.
                 entry.isBlacklisted = false;
                 entry.reason = "Expired";
                 emit BlacklistUpdated(_subjects[i], false, SeverityLevel.LOW, 0, "Expired", false);

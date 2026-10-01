@@ -22,7 +22,7 @@ contract WhitelistOracle is IOracle, Ownable, ReentrancyGuard, Pausable {
     error VerdictAlreadyApplied();
     /// @notice The verdict resolved more than `maxVerdictAge` ago.
     error VerdictExpired();
-    /// @notice The subject's entry was written at or after the verdict resolved.
+    /// @notice The subject was written at or after the verdict resolved.
     error VerdictSuperseded();
     /// @notice `maxVerdictAge` outside [MIN_VERDICT_AGE, MAX_VERDICT_AGE].
     error InvalidVerdictAge();
@@ -58,9 +58,14 @@ contract WhitelistOracle is IOracle, Ownable, ReentrancyGuard, Pausable {
 
     /// @notice Verdict rules (plan 2F.3, review H3): a resolved OracleManager
     ///         query is applied at most once, only within `maxVerdictAge` of
-    ///         resolving, and only if it resolved after the subject's current
-    ///         entry was written (owner, list manager or consensus).
+    ///         resolving, and only if it resolved after the subject's last
+    ///         write. Ordered by resolution time (review MEDIUM-1):
+    ///         `lastWriteAt` is block.timestamp for an owner, list-manager or
+    ///         batch write and the verdict's resolvedAt for a consensus
+    ///         application (a no-op included). `entry.timestamp` is the
+    ///         readers' write time and is not the ordering clock.
     mapping(bytes32 => bool) public verdictApplied;
+    mapping(address => uint256) public lastWriteAt;
     uint256 public maxVerdictAge = 1 days;
     uint256 public constant MIN_VERDICT_AGE = 1 hours;
     uint256 public constant MAX_VERDICT_AGE = 30 days;
@@ -302,6 +307,7 @@ contract WhitelistOracle is IOracle, Ownable, ReentrancyGuard, Pausable {
             attestingOracles: new address[](0)
         });
 
+        lastWriteAt[_subject] = block.timestamp;
         emit WhitelistUpdated(_subject, true, _tier, expiryTime, _reason);
     }
 
@@ -362,6 +368,7 @@ contract WhitelistOracle is IOracle, Ownable, ReentrancyGuard, Pausable {
         whitelistEntries[_subject].isWhitelisted = false;
         whitelistEntries[_subject].reason = _reason;
         whitelistEntries[_subject].timestamp = block.timestamp;
+        lastWriteAt[_subject] = block.timestamp;
 
         emit WhitelistUpdated(_subject, false, 0, 0, _reason);
     }
@@ -383,14 +390,16 @@ contract WhitelistOracle is IOracle, Ownable, ReentrancyGuard, Pausable {
         if (boundSubject != _subject || boundType != QUERY_TYPE_WHITELIST) revert QuerySubjectMismatch();
 
         // Plan 2F.3: a resolved verdict applies once, only while fresh and only
-        // if it resolved after the entry's last write (a governance removal or
-        // addition, an owner write) so an older verdict never undoes it.
-        // Consumed even when it changes nothing.
+        // if it resolved after the subject's last write (lastWriteAt: a
+        // governance removal or addition, an owner write, or a verdict that
+        // resolved later), so an older verdict never undoes it. Consumed even
+        // when it changes nothing; lastWriteAt moves to its resolvedAt.
         if (hasConsensus) {
             if (verdictApplied[_queryId]) revert VerdictAlreadyApplied();
-            if (resolvedAt <= whitelistEntries[_subject].timestamp) revert VerdictSuperseded();
+            if (resolvedAt <= lastWriteAt[_subject]) revert VerdictSuperseded();
             if (block.timestamp > resolvedAt + maxVerdictAge) revert VerdictExpired();
             verdictApplied[_queryId] = true;
+            lastWriteAt[_subject] = resolvedAt;
 
             // Review B N-d (recorded, plan 3.3): the add branch reads the
             // stored flag, so a lapsed entry never removed (isWhitelisted()
@@ -460,6 +469,7 @@ contract WhitelistOracle is IOracle, Ownable, ReentrancyGuard, Pausable {
                 attestingOracles: new address[](0)
             });
 
+            lastWriteAt[_subjects[i]] = block.timestamp;
             emit WhitelistUpdated(_subjects[i], true, _tiers[i], expiryTime, _reason);
         }
     }
