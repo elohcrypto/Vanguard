@@ -92,6 +92,7 @@ contract MultiSigEscrowWallet is ReentrancyGuard {
     error EscrowStillActive();  // sweepExcess: escrow not yet Released/Refunded
     error NothingToSweep();     // sweepExcess: balance is zero
     error SweepFailed();        // sweepExcess: token transfer returned false
+    error NotEscrowParty();     // sweepExcess: caller is not an escrow party
     /// @notice Investor coincides with a counterparty (payee/payer). Blocks
     ///         self-dealing at construction as defence in depth behind the factory.
     /// @notice Investor tried to unilaterally refund after the payee shipped.
@@ -446,13 +447,20 @@ contract MultiSigEscrowWallet is ReentrancyGuard {
      * @notice Return tokens that reached this escrow outside the factory's single
      *         funding. `funded` only stops a second FACTORY funding; any verified
      *         holder can transfer here directly, and release/refund pay fixed
-     *         sums, so the rest sat here forever. Anyone may call it once settled.
-     *         Goes to the payer, the party that funds escrows. If none ever
-     *         identified themselves (marketplace escrow settled from direct
-     *         transfers) it goes to the platform fee wallet, which release
-     *         already pays, rather than to address(0) where it would strand.
+     *         sums, so the rest sat here forever. An escrow party (payer,
+     *         payee, investor, platform owner) may call it once settled; a
+     *         public sweep let any holder relay VSC through a settled escrow
+     *         (H4). Goes to the payer, the party that funds escrows. If none
+     *         ever identified themselves (marketplace escrow settled from
+     *         direct transfers) it goes to the platform fee wallet, which
+     *         release already pays, rather than to address(0) where it would
+     *         strand. The token's investor caps apply to the recipient.
      */
     function sweepExcess() external nonReentrant {
+        if (
+            msg.sender != payer && msg.sender != payee &&
+            msg.sender != investor && msg.sender != owner
+        ) revert NotEscrowParty();
         if (state != WalletState.Released && state != WalletState.Refunded) revert EscrowStillActive();
         uint256 excess = vscToken.balanceOf(address(this));
         if (excess == 0) revert NothingToSweep();

@@ -784,7 +784,9 @@ contract ComplianceRules is IComplianceRules, IComplianceHooks, Ownable2Step, Re
     }
 
     /**
-     * @dev Record transfer for holding period tracking
+     * @dev Record transfer for holding period tracking. Only the authorized
+     *      token itself may record; checking the argument alone let anyone
+     *      write holding-period state for any address (L1).
      */
     function recordTransfer(
         address token,
@@ -792,6 +794,7 @@ contract ComplianceRules is IComplianceRules, IComplianceHooks, Ownable2Step, Re
         address to,
         uint256 acquisitionTime
     ) external override onlyAuthorizedToken(token) {
+        require(msg.sender == token, "ComplianceRules: caller is not the token");
         HoldingPeriodRule storage rule = holdingPeriodRules[token];
 
         if (rule.isActive) {

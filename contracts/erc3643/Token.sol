@@ -174,11 +174,13 @@ contract Token is IERC3643, ERC20, Ownable2Step, Pausable {
         //            because they are verified through ComplianceRules instead
 
         // Check if either party is a trusted contract
-        bool isTrustedTransfer = _compliance.isTrustedContract(_from) ||
-                                 _compliance.isTrustedContract(_to);
+        bool fromTrusted = _compliance.isTrustedContract(_from);
+        bool toTrusted = _compliance.isTrustedContract(_to);
+        bool isTrustedTransfer = fromTrusted || toTrusted;
 
-        // Same checks in the same order for both branches; trusted contracts
-        // skip only the identity pair (ComplianceRules verifies them instead).
+        // Same checks in the same order for both branches; a trusted transfer
+        // skips only the identity pair (ComplianceRules verifies the
+        // counterparty instead) and the trusted side's own investor cap.
         if (_frozen[_from]) return (false, "Sender frozen");
         if (_frozen[_to]) return (false, "Recipient frozen");
         if (!isTrustedTransfer) {
@@ -188,17 +190,24 @@ contract Token is IERC3643, ERC20, Ownable2Step, Pausable {
         if (getFreeBalance(_from) < _amount) return (false, "Insufficient balance");
         if (!_compliance.canTransfer(_from, _to, _amount)) return (false, "Compliance check failed");
 
-        // Check investor type limits if registry is set
-        // ✅ SKIP for trusted contracts (escrow wallets don't have investor types)
-        if (address(_investorTypeRegistry) != address(0) && !isTrustedTransfer) {
-            // Check transfer amount limit for sender
-            if (!_investorTypeRegistry.canTransferAmount(_from, _amount)) {
+        // Investor type limits if a registry is set. Only a trusted contract
+        // (escrow, governance) has no investor type, so only its own side
+        // skips the cap; the human side of a trusted transfer is still capped
+        // (D26), or a settled escrow relays any amount past both caps.
+        if (address(_investorTypeRegistry) != address(0)) {
+            // Check transfer amount limit for a non-trusted sender
+            if (
+                !fromTrusted &&
+                !_investorTypeRegistry.canTransferAmount(_from, _amount)
+            ) {
                 return (false, "Transfer amount limit exceeded");
             }
 
-            // Check holding limit for recipient
-            uint256 newBalance = balanceOf(_to) + _amount;
-            if (!_investorTypeRegistry.canHoldAmount(_to, newBalance)) {
+            // Check holding limit for a non-trusted recipient
+            if (
+                !toTrusted &&
+                !_investorTypeRegistry.canHoldAmount(_to, balanceOf(_to) + _amount)
+            ) {
                 return (false, "Holding limit exceeded");
             }
         }

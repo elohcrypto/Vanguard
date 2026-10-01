@@ -380,8 +380,14 @@ describe("Enhanced Escrow System", function () {
         "release pays fixed sums",
       ).to.equal(TOTAL_AMOUNT);
 
+      // Escrow parties only (2F.4, H4): a public sweep let any holder relay
+      // tokens through a settled escrow.
+      await expect(
+        wallet.connect(signers[9]).sweepExcess(),
+      ).to.be.revertedWithCustomError(wallet, "NotEscrowParty");
+
       const before = await vscToken.balanceOf(payer.address);
-      await expect(wallet.connect(signers[9]).sweepExcess()) // anyone may trigger it
+      await expect(wallet.connect(payee).sweepExcess()) // any party may trigger it
         .to.emit(wallet, "ExcessSwept")
         .withArgs(payer.address, TOTAL_AMOUNT);
       expect(await vscToken.balanceOf(walletAddress)).to.equal(0n);
