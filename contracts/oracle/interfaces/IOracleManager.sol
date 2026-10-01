@@ -58,5 +58,17 @@ interface IOracleManager {
     ///         not a whitelist verdict).
     function getQueryBinding(bytes32 queryId) external view returns (address subject, uint8 queryType);
 
+    /// @notice Resolution state of a query. `resolvedAt` is the block time the
+    ///         verdict first resolved (0 while open); it never moves, so
+    ///         consumers can refuse a stale verdict or one older than their
+    ///         current entry.
+    function getQueryResolution(
+        bytes32 queryId
+    ) external view returns (bool hasResult, bool result, uint256 resolvedAt);
+
+    /// @notice The `data` the query was raised with (for a blacklist query:
+    ///         empty or abi.encode(uint8 severity)).
+    function getQueryData(bytes32 queryId) external view returns (bytes memory);
+
     function submitQuery(address subject, uint8 queryType, bytes calldata data) external returns (bytes32 queryId);
 }

@@ -18,6 +18,14 @@ contract WhitelistOracle is IOracle, Ownable, ReentrancyGuard, Pausable {
     ///         policy, the query was not raised for. Binds queryId consensus to
     ///         its subject and query type.
     error QuerySubjectMismatch();
+    /// @notice This resolved query's verdict was already applied here (plan 2F.3).
+    error VerdictAlreadyApplied();
+    /// @notice The verdict resolved more than `maxVerdictAge` ago.
+    error VerdictExpired();
+    /// @notice The subject's entry was written at or after the verdict resolved.
+    error VerdictSuperseded();
+    /// @notice `maxVerdictAge` outside [MIN_VERDICT_AGE, MAX_VERDICT_AGE].
+    error InvalidVerdictAge();
     /// @dev OracleManager.QUERY_TYPE_WHITELIST: the only query type whose verdict this oracle applies.
     uint8 private constant QUERY_TYPE_WHITELIST = 1;
     using ECDSA for bytes32;
@@ -43,7 +51,20 @@ contract WhitelistOracle is IOracle, Ownable, ReentrancyGuard, Pausable {
     // State variables
     IOracleManager public oracleManager;
     mapping(address => WhitelistEntry) public whitelistEntries;
-    mapping(bytes32 => Attestation) public attestations;
+    /// @notice One record per (queryId, oracle): a second oracle no longer
+    ///         overwrites the first. `lastAttester` serves `getAttestation`.
+    mapping(bytes32 => mapping(address => Attestation)) public attestations;
+    mapping(bytes32 => address) public lastAttester;
+
+    /// @notice Verdict rules (plan 2F.3, review H3): a resolved OracleManager
+    ///         query is applied at most once, only within `maxVerdictAge` of
+    ///         resolving, and only if it resolved after the subject's current
+    ///         entry was written (owner, list manager or consensus).
+    mapping(bytes32 => bool) public verdictApplied;
+    uint256 public maxVerdictAge = 1 days;
+    uint256 public constant MIN_VERDICT_AGE = 1 hours;
+    uint256 public constant MAX_VERDICT_AGE = 30 days;
+    event MaxVerdictAgeUpdated(uint256 previous, uint256 current);
     mapping(address => uint256) public oracleReputation;
 
     string public oracleName;
@@ -120,8 +141,15 @@ contract WhitelistOracle is IOracle, Ownable, ReentrancyGuard, Pausable {
         correctAttestations = 0;
     }
 
+    /// @notice Owner sets how long a resolved verdict stays usable.
+    function setMaxVerdictAge(uint256 _maxAge) external onlyOwner {
+        if (_maxAge < MIN_VERDICT_AGE || _maxAge > MAX_VERDICT_AGE) revert InvalidVerdictAge();
+        emit MaxVerdictAgeUpdated(maxVerdictAge, _maxAge);
+        maxVerdictAge = _maxAge;
+    }
+
     /**
-     * @dev Provide attestation for whitelist status
+     * @dev Provide attestation for whitelist status (`_data` is free metadata)
      */
     function provideAttestation(
         address _subject,
@@ -137,7 +165,8 @@ contract WhitelistOracle is IOracle, Ownable, ReentrancyGuard, Pausable {
         require(verifySignature(_subject, _queryId, _result, _signature), "WhitelistOracle: Invalid signature");
 
         // Store attestation
-        attestations[_queryId] = Attestation({
+        lastAttester[_queryId] = msg.sender;
+        attestations[_queryId][msg.sender] = Attestation({
             subject: _subject,
             result: _result,
             timestamp: block.timestamp,
@@ -167,11 +196,12 @@ contract WhitelistOracle is IOracle, Ownable, ReentrancyGuard, Pausable {
         override
         returns (bool result, uint256 timestamp, address oracle, bytes memory signature, bool isValid)
     {
-        Attestation storage attestation = attestations[_queryId];
+        address attester = lastAttester[_queryId];
+        Attestation storage attestation = attestations[_queryId][attester];
         return (
             attestation.result,
             attestation.timestamp,
-            msg.sender, // This would be the oracle that provided the attestation
+            attester,
             attestation.signature,
             attestation.isValid
         );
@@ -341,7 +371,7 @@ contract WhitelistOracle is IOracle, Ownable, ReentrancyGuard, Pausable {
      */
     function _updateWhitelistConsensus(address _subject, bytes32 _queryId, bool /* _result */) internal {
         // Get consensus from oracle manager
-        (bool hasConsensus, bool consensusResult) = oracleManager.checkConsensus(_queryId);
+        (bool hasConsensus, bool consensusResult, uint256 resolvedAt) = oracleManager.getQueryResolution(_queryId);
         // Bind the resolved consensus to the address it was raised for. Without
         // this, a single active oracle self-signs an attestation naming any
         // victim and replays a benign, already-resolved queryId to whitelist
@@ -352,7 +382,19 @@ contract WhitelistOracle is IOracle, Ownable, ReentrancyGuard, Pausable {
         (address boundSubject, uint8 boundType) = oracleManager.getQueryBinding(_queryId);
         if (boundSubject != _subject || boundType != QUERY_TYPE_WHITELIST) revert QuerySubjectMismatch();
 
+        // Plan 2F.3: a resolved verdict applies once, only while fresh and only
+        // if it resolved after the entry's last write (a governance removal or
+        // addition, an owner write) so an older verdict never undoes it.
+        // Consumed even when it changes nothing.
         if (hasConsensus) {
+            if (verdictApplied[_queryId]) revert VerdictAlreadyApplied();
+            if (resolvedAt <= whitelistEntries[_subject].timestamp) revert VerdictSuperseded();
+            if (block.timestamp > resolvedAt + maxVerdictAge) revert VerdictExpired();
+            verdictApplied[_queryId] = true;
+
+            // Review B N-d (recorded, plan 3.3): the add branch reads the
+            // stored flag, so a lapsed entry never removed (isWhitelisted()
+            // false, flag still set) blocks a consensus re-listing.
             if (consensusResult && !whitelistEntries[_subject].isWhitelisted) {
                 // Add to whitelist with default tier
                 whitelistEntries[_subject] = WhitelistEntry({
@@ -376,6 +418,7 @@ contract WhitelistOracle is IOracle, Ownable, ReentrancyGuard, Pausable {
                 // Remove from whitelist
                 whitelistEntries[_subject].isWhitelisted = false;
                 whitelistEntries[_subject].reason = "Oracle consensus rejection";
+                whitelistEntries[_subject].timestamp = block.timestamp;
 
                 emit WhitelistUpdated(_subject, false, 0, 0, "Oracle consensus rejection");
                 correctAttestations++;

@@ -209,6 +209,19 @@ A ListUpdate add carries the duration voters approved in its calldata
 no entry lapses by an unstated default; a permanent entry still ends by a
 removal vote, by the oracle owner (ops) or by an oracle consensus clearing;
 an emergency listing never shortens an entry (the longer expiry wins).
+Oracle consensus verdicts (a query in OracleManager, resolved by the
+registered oracle nodes, then applied by one node's `provideAttestation`)
+follow four rules. A query is raised only by the OracleManager owner or an
+active oracle, and a blacklist query fixes its severity (so its duration)
+when it is raised (`abi.encode(uint8)`, empty = MEDIUM); the severity a
+node passes when it attests is ignored. A resolved verdict is final (no
+responses after it resolves) and is applied once per oracle contract
+(`VerdictAlreadyApplied`). It is usable for `maxVerdictAge` after it
+resolved, 1 day by default, owner-settable between 1 hour and 30 days
+(`VerdictExpired`). It never undoes a newer write: a verdict that resolved
+before the subject's current entry (a governance vote, including a
+no-expiry sanction, an emergency listing, an owner write or a removal) is
+refused (`VerdictSuperseded`). The demo menu raises no consensus queries.
 
 Outside the demo, `HANDOVER_CONFIG=<path.json> npx hardhat run
 scripts/handover.ts --network <net>` runs the same ceremony and exits

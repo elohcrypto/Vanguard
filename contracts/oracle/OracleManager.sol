@@ -12,6 +12,13 @@ import "./interfaces/IOracle.sol";
  * @dev Manages oracle registration, consensus mechanisms, and reputation system
  */
 contract OracleManager is IOracleManager, Ownable2Step, ReentrancyGuard, Pausable {
+    /// @notice A response arrived after the query resolved: a settled verdict is final.
+    error QueryAlreadyResolved();
+    /// @notice Only the owner or an active oracle may raise a query.
+    error UnauthorizedQueryCreator();
+    /// @notice A blacklist query's data must be empty or one ABI-encoded severity 0..3.
+    error InvalidSeverity();
+
     struct OracleInfo {
         address oracleAddress;
         string name;
@@ -33,6 +40,7 @@ contract OracleManager is IOracleManager, Ownable2Step, ReentrancyGuard, Pausabl
         bool result;
         uint256 consensusCount;
         uint256 totalResponses;
+        uint256 resolvedAt; // block time hasResult first became true; never moves
         mapping(address => bool) responses;
         mapping(address => bool) hasResponded;
     }
@@ -46,6 +54,14 @@ contract OracleManager is IOracleManager, Ownable2Step, ReentrancyGuard, Pausabl
     uint256 public constant MAX_ORACLES = 100;
     uint256 public constant MIN_REPUTATION = 100;
     uint256 public constant MAX_REPUTATION = 1000;
+    /// @notice Highest BlacklistOracle.SeverityLevel (CRITICAL)
+    uint256 private constant MAX_SEVERITY = 3;
+
+    /// @notice Manager-level emergency flag (IOracleManager). The role that
+    ///         gates `BlacklistOracle.emergencyBlacklist` is that oracle's own
+    ///         `emergencyOracles`, set by its owner; this flag is the registry
+    ///         view of the same decision and is cleared when an oracle leaves.
+    mapping(address => bool) private _emergencyOracles;
 
     // Additional events not in interface
     event OracleDeregistered(address indexed oracle, string reason);
@@ -225,11 +241,19 @@ contract OracleManager is IOracleManager, Ownable2Step, ReentrancyGuard, Pausabl
     }
 
     /**
-     * @dev Submit a query for oracle consensus
+     * @dev Submit a query for oracle consensus. Raised by the owner or an
+     *      active oracle (plan 2F.3: a blacklist query fixes the severity, so
+     *      a stranger must not choose it). For QUERY_TYPE_BLACKLIST, `_data`
+     *      is empty (MEDIUM) or `abi.encode(uint8 severity)` with 0..3; the
+     *      blacklist oracle reads the severity from here, never from the relayer.
      */
     function submitQuery(address _subject, uint8 _queryType, bytes calldata _data) external returns (bytes32 queryId) {
+        if (!oracles[msg.sender].active && msg.sender != owner()) revert UnauthorizedQueryCreator();
         require(_subject != address(0), "OracleManager: Invalid subject");
         require(_queryType >= 1 && _queryType <= 4, "OracleManager: Invalid query type");
+        if (_queryType == QUERY_TYPE_BLACKLIST && _data.length != 0) {
+            if (_data.length != 32 || abi.decode(_data, (uint256)) > MAX_SEVERITY) revert InvalidSeverity();
+        }
 
         queryId = keccak256(abi.encodePacked(_subject, _queryType, _data, block.timestamp, msg.sender));
 
@@ -255,6 +279,8 @@ contract OracleManager is IOracleManager, Ownable2Step, ReentrancyGuard, Pausabl
     ) external onlyRegisteredOracle onlyActiveOracle nonReentrant {
         Query storage query = queries[_queryId];
         require(query.timestamp > 0, "OracleManager: Query does not exist");
+        // A settled verdict is final: a later threshold-size group must not flip it (review L4).
+        if (query.hasResult) revert QueryAlreadyResolved();
         require(!query.hasResponded[msg.sender], "OracleManager: Oracle already responded");
 
         query.hasResponded[msg.sender] = true;
@@ -271,9 +297,11 @@ contract OracleManager is IOracleManager, Ownable2Step, ReentrancyGuard, Pausabl
         if (query.consensusCount >= consensusThreshold) {
             query.hasResult = true;
             query.result = true;
+            query.resolvedAt = block.timestamp;
         } else if (query.totalResponses - query.consensusCount >= consensusThreshold) {
             query.hasResult = true;
             query.result = false;
+            query.resolvedAt = block.timestamp;
         }
     }
 
@@ -293,6 +321,19 @@ contract OracleManager is IOracleManager, Ownable2Step, ReentrancyGuard, Pausabl
     function getQueryBinding(bytes32 _queryId) external view returns (address subject, uint8 queryType) {
         Query storage query = queries[_queryId];
         return (query.subject, query.queryType);
+    }
+
+    /// @inheritdoc IOracleManager
+    function getQueryResolution(
+        bytes32 _queryId
+    ) external view returns (bool hasResult, bool result, uint256 resolvedAt) {
+        Query storage query = queries[_queryId];
+        return (query.hasResult, query.result, query.resolvedAt);
+    }
+
+    /// @inheritdoc IOracleManager
+    function getQueryData(bytes32 _queryId) external view returns (bytes memory) {
+        return queries[_queryId].data;
     }
 
     /**
@@ -323,6 +364,7 @@ contract OracleManager is IOracleManager, Ownable2Step, ReentrancyGuard, Pausabl
         Query storage query = queries[_queryId];
         require(query.timestamp > 0, "OracleManager: Query does not exist");
 
+        if (!query.hasResult) query.resolvedAt = block.timestamp;
         query.hasResult = true;
         query.result = _result;
 

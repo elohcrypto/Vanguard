@@ -18,6 +18,14 @@ contract BlacklistOracle is IOracle, Ownable, ReentrancyGuard, Pausable {
     ///         policy, the query was not raised for. Binds queryId consensus to
     ///         its subject and query type.
     error QuerySubjectMismatch();
+    /// @notice This resolved query's verdict was already applied here (plan 2F.3).
+    error VerdictAlreadyApplied();
+    /// @notice The verdict resolved more than `maxVerdictAge` ago.
+    error VerdictExpired();
+    /// @notice The subject's entry was written at or after the verdict resolved.
+    error VerdictSuperseded();
+    /// @notice `maxVerdictAge` outside [MIN_VERDICT_AGE, MAX_VERDICT_AGE].
+    error InvalidVerdictAge();
     /// @dev OracleManager.QUERY_TYPE_BLACKLIST: the only query type whose verdict this oracle applies.
     uint8 private constant QUERY_TYPE_BLACKLIST = 2;
     using ECDSA for bytes32;
@@ -52,7 +60,20 @@ contract BlacklistOracle is IOracle, Ownable, ReentrancyGuard, Pausable {
     // State variables
     IOracleManager public oracleManager;
     mapping(address => BlacklistEntry) public blacklistEntries;
-    mapping(bytes32 => Attestation) public attestations;
+    /// @notice One record per (queryId, oracle): a second oracle no longer
+    ///         overwrites the first. `lastAttester` serves `getAttestation`.
+    mapping(bytes32 => mapping(address => Attestation)) public attestations;
+    mapping(bytes32 => address) public lastAttester;
+
+    /// @notice Verdict rules (plan 2F.3, review H3): a resolved OracleManager
+    ///         query is applied at most once, only within `maxVerdictAge` of
+    ///         resolving, and only if it resolved after the subject's current
+    ///         entry was written (owner, list manager, emergency or consensus).
+    mapping(bytes32 => bool) public verdictApplied;
+    uint256 public maxVerdictAge = 1 days;
+    uint256 public constant MIN_VERDICT_AGE = 1 hours;
+    uint256 public constant MAX_VERDICT_AGE = 30 days;
+    event MaxVerdictAgeUpdated(uint256 previous, uint256 current);
     mapping(address => uint256) public oracleReputation;
 
     string public oracleName;
@@ -143,8 +164,17 @@ contract BlacklistOracle is IOracle, Ownable, ReentrancyGuard, Pausable {
         emergencyBlacklistCount = 0;
     }
 
+    /// @notice Owner sets how long a resolved verdict stays usable.
+    function setMaxVerdictAge(uint256 _maxAge) external onlyOwner {
+        if (_maxAge < MIN_VERDICT_AGE || _maxAge > MAX_VERDICT_AGE) revert InvalidVerdictAge();
+        emit MaxVerdictAgeUpdated(maxVerdictAge, _maxAge);
+        maxVerdictAge = _maxAge;
+    }
+
     /**
-     * @dev Provide attestation for blacklist status
+     * @dev Provide attestation for blacklist status. `_data` is free metadata:
+     *      the severity (so the duration) is the one fixed when the query was
+     *      raised in OracleManager, MEDIUM if it carries none.
      */
     function provideAttestation(
         address _subject,
@@ -156,17 +186,25 @@ contract BlacklistOracle is IOracle, Ownable, ReentrancyGuard, Pausable {
         require(_subject != address(0), "BlacklistOracle: Invalid subject");
         require(oracleManager.isActiveOracle(msg.sender), "BlacklistOracle: Not an active oracle");
 
-        // Decode severity from data
-        SeverityLevel severity = SeverityLevel.MEDIUM;
-        if (_data.length > 0) {
-            severity = abi.decode(_data, (SeverityLevel));
-        }
-
         // Verify signature
         require(verifySignature(_subject, _queryId, _result, _signature), "BlacklistOracle: Invalid signature");
 
+        // Bind the queryId to its subject AND query type before reading its data.
+        // Without this, a single active oracle self-signs an attestation naming
+        // any victim and replays a benign, already-resolved queryId (consensus
+        // keys on queryId alone), or replays a resolved query of another kind
+        // (identity, compliance, whitelist) for this subject as a blacklist verdict.
+        (address boundSubject, uint8 boundType) = oracleManager.getQueryBinding(_queryId);
+        if (boundSubject != _subject || boundType != QUERY_TYPE_BLACKLIST) revert QuerySubjectMismatch();
+
+        bytes memory queryData = oracleManager.getQueryData(_queryId);
+        SeverityLevel severity = queryData.length == 0
+            ? SeverityLevel.MEDIUM
+            : abi.decode(queryData, (SeverityLevel));
+
         // Store attestation
-        attestations[_queryId] = Attestation({
+        lastAttester[_queryId] = msg.sender;
+        attestations[_queryId][msg.sender] = Attestation({
             subject: _subject,
             result: _result,
             timestamp: block.timestamp,
@@ -179,7 +217,7 @@ contract BlacklistOracle is IOracle, Ownable, ReentrancyGuard, Pausable {
         totalAttestations++;
 
         // Update blacklist based on consensus
-        _updateBlacklistConsensus(_subject, _queryId, _result, severity);
+        _updateBlacklistConsensus(_subject, _queryId, severity);
 
         emit AttestationProvided(msg.sender, _subject, _queryId, _result, block.timestamp, _signature);
         emit AttestationSubmitted(msg.sender, _subject, _queryId, _result, severity, block.timestamp);
@@ -197,8 +235,9 @@ contract BlacklistOracle is IOracle, Ownable, ReentrancyGuard, Pausable {
         override
         returns (bool result, uint256 timestamp, address oracle, bytes memory signature, bool isValid)
     {
-        Attestation storage attestation = attestations[_queryId];
-        return (attestation.result, attestation.timestamp, msg.sender, attestation.signature, attestation.isValid);
+        address attester = lastAttester[_queryId];
+        Attestation storage attestation = attestations[_queryId][attester];
+        return (attestation.result, attestation.timestamp, attester, attestation.signature, attestation.isValid);
     }
 
     /**
@@ -311,6 +350,9 @@ contract BlacklistOracle is IOracle, Ownable, ReentrancyGuard, Pausable {
         require(_severity == SeverityLevel.CRITICAL, "BlacklistOracle: Only critical severity for emergency");
 
         uint256 expiryTime = block.timestamp + EMERGENCY_BLACKLIST_DURATION;
+        // Review B N-a (recorded, not changed): calling again before expiry
+        // renews a 7-day CRITICAL listing, so one emergency key can freeze a
+        // holder indefinitely until the owner removes the entry or the role.
         // Never shorten a live entry: the longer expiry (0 = never) wins.
         BlacklistEntry storage prior = blacklistEntries[_subject];
         if (prior.isBlacklisted && (prior.expiryTime == 0 || prior.expiryTime > expiryTime))
@@ -342,6 +384,8 @@ contract BlacklistOracle is IOracle, Ownable, ReentrancyGuard, Pausable {
 
         blacklistEntries[_subject].isBlacklisted = false;
         blacklistEntries[_subject].reason = _reason;
+        // A removal is a write: a verdict resolved before it cannot undo it.
+        blacklistEntries[_subject].timestamp = block.timestamp;
 
         emit BlacklistUpdated(_subject, false, SeverityLevel.LOW, 0, _reason, false);
     }
@@ -385,58 +429,55 @@ contract BlacklistOracle is IOracle, Ownable, ReentrancyGuard, Pausable {
     }
 
     /**
-     * @dev Update blacklist based on oracle consensus
+     * @dev Apply a resolved oracle consensus (subject and type already bound).
+     *      Open query: nothing. Resolved: refused if already applied, if the
+     *      entry was written at or after the verdict resolved (a governance
+     *      NO_EXPIRY sanction, an emergency listing, an owner write or a
+     *      removal is never undone by an older verdict) or if older than
+     *      maxVerdictAge; otherwise consumed, even when it changes nothing.
      */
-    function _updateBlacklistConsensus(
-        address _subject,
-        bytes32 _queryId,
-        bool /* _result */,
-        SeverityLevel _severity
-    ) internal {
-        // Get consensus from oracle manager
-        (bool hasConsensus, bool consensusResult) = oracleManager.checkConsensus(_queryId);
-        // Bind the resolved consensus to the address it was raised for. Without
-        // this, a single active oracle self-signs an attestation naming any
-        // victim and replays a benign, already-resolved queryId to blacklist
-        // them: checkConsensus keys on queryId alone.
-        // Bind to the subject AND the query type. Subject alone still let a
-        // resolved query of another kind (identity, compliance, whitelist)
-        // for this very subject be replayed as a blacklist verdict.
-        (address boundSubject, uint8 boundType) = oracleManager.getQueryBinding(_queryId);
-        if (boundSubject != _subject || boundType != QUERY_TYPE_BLACKLIST) revert QuerySubjectMismatch();
+    function _updateBlacklistConsensus(address _subject, bytes32 _queryId, SeverityLevel _severity) internal {
+        (bool hasConsensus, bool consensusResult, uint256 resolvedAt) = oracleManager.getQueryResolution(_queryId);
+        if (!hasConsensus) return;
+        if (verdictApplied[_queryId]) revert VerdictAlreadyApplied();
+        if (resolvedAt <= blacklistEntries[_subject].timestamp) revert VerdictSuperseded();
+        if (block.timestamp > resolvedAt + maxVerdictAge) revert VerdictExpired();
+        verdictApplied[_queryId] = true;
 
-        if (hasConsensus) {
-            if (consensusResult && !blacklistEntries[_subject].isBlacklisted) {
-                // Add to blacklist
-                uint256 duration = _getDurationBySeverity(_severity);
+        // Review B N-d (recorded, plan 3.3): the add branch reads the
+        // stored flag, so a lapsed entry never removed (isBlacklisted()
+        // false, flag still set) blocks a consensus re-listing.
+        if (consensusResult && !blacklistEntries[_subject].isBlacklisted) {
+            // Add to blacklist
+            uint256 duration = _getDurationBySeverity(_severity);
 
-                blacklistEntries[_subject] = BlacklistEntry({
-                    isBlacklisted: true,
-                    timestamp: block.timestamp,
-                    expiryTime: block.timestamp + duration,
-                    severity: _severity,
-                    reason: "Oracle consensus flagging",
-                    attestingOracles: new address[](0),
-                    emergencyListing: false
-                });
+            blacklistEntries[_subject] = BlacklistEntry({
+                isBlacklisted: true,
+                timestamp: block.timestamp,
+                expiryTime: block.timestamp + duration,
+                severity: _severity,
+                reason: "Oracle consensus flagging",
+                attestingOracles: new address[](0),
+                emergencyListing: false
+            });
 
-                emit BlacklistUpdated(
-                    _subject,
-                    true,
-                    _severity,
-                    block.timestamp + duration,
-                    "Oracle consensus flagging",
-                    false
-                );
-                correctAttestations++;
-            } else if (!consensusResult && blacklistEntries[_subject].isBlacklisted) {
-                // Remove from blacklist
-                blacklistEntries[_subject].isBlacklisted = false;
-                blacklistEntries[_subject].reason = "Oracle consensus clearing";
+            emit BlacklistUpdated(
+                _subject,
+                true,
+                _severity,
+                block.timestamp + duration,
+                "Oracle consensus flagging",
+                false
+            );
+            correctAttestations++;
+        } else if (!consensusResult && blacklistEntries[_subject].isBlacklisted) {
+            // Remove from blacklist
+            blacklistEntries[_subject].isBlacklisted = false;
+            blacklistEntries[_subject].reason = "Oracle consensus clearing";
+            blacklistEntries[_subject].timestamp = block.timestamp;
 
-                emit BlacklistUpdated(_subject, false, SeverityLevel.LOW, 0, "Oracle consensus clearing", false);
-                correctAttestations++;
-            }
+            emit BlacklistUpdated(_subject, false, SeverityLevel.LOW, 0, "Oracle consensus clearing", false);
+            correctAttestations++;
         }
     }
 
