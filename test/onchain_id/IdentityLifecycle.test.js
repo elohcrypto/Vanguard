@@ -85,6 +85,53 @@ describe("OnchainID lifecycle (2F.2, L6, L8)", function () {
       id.connect(holder).addKey(k(attacker.address), MGMT, 1),
     ).to.be.revertedWith("OnchainID: Sender does not have management key");
   });
+
+  // Review of 2F.2, F4: key swap edge cases.
+  it("a new owner holding only an ACTION key ends with MANAGEMENT (F4)", async function () {
+    await id.connect(holder).addKey(k(other.address), 2, 1);
+    await id.connect(holder).transferOwnership(other.address);
+    await id.connect(other).acceptOwnership();
+    expect(await id.keyHasPurpose(k(other.address), MGMT)).to.equal(true);
+    expect(await id.keyHasPurpose(k(holder.address), MGMT)).to.equal(false);
+    expect(await id.getKeysByPurpose(2)).to.not.include(k(other.address));
+  });
+
+  it("A -> B -> A: A regains MANAGEMENT (F4)", async function () {
+    await id.connect(holder).transferOwnership(other.address);
+    await id.connect(other).acceptOwnership();
+    await id.connect(other).transferOwnership(holder.address);
+    await id.connect(holder).acceptOwnership();
+    expect(await id.keyHasPurpose(k(holder.address), MGMT)).to.equal(true);
+    expect(await id.keyHasPurpose(k(other.address), MGMT)).to.equal(false);
+    const mg = await id.getKeysByPurpose(MGMT);
+    expect(mg.filter((x) => x === k(holder.address)).length).to.equal(1);
+  });
+
+  it("transferOwnership to self keeps the owner's key (F4)", async function () {
+    await id.connect(holder).transferOwnership(holder.address);
+    await id.connect(holder).acceptOwnership();
+    expect(await id.keyHasPurpose(k(holder.address), MGMT)).to.equal(true);
+  });
+
+  it("a revoked key can be added again; an active one cannot (F4)", async function () {
+    await id.connect(holder).addKey(k(other.address), 2, 1);
+    await expect(
+      id.connect(holder).addKey(k(other.address), MGMT, 1),
+    ).to.be.revertedWith("OnchainID: Key already exists");
+    await id.connect(holder).removeKey(k(other.address), 2);
+    await id.connect(holder).addKey(k(other.address), MGMT, 1);
+    expect(await id.keyHasPurpose(k(other.address), MGMT)).to.equal(true);
+    expect((await id.getKey(k(other.address))).revokedAt).to.equal(0);
+    expect(await id.getKeysByPurpose(MGMT)).to.include(k(other.address));
+  });
+
+  it("other MANAGEMENT keys survive a handover; the new owner audits them", async function () {
+    // Documented, not changed: only the previous owner's key is retired.
+    await id.connect(holder).addKey(k(attacker.address), MGMT, 1);
+    await id.connect(holder).transferOwnership(other.address);
+    await id.connect(other).acceptOwnership();
+    expect(await id.keyHasPurpose(k(attacker.address), MGMT)).to.equal(true);
+  });
 });
 
 describe("OnchainIDFactory identity map (2F.2, L7)", function () {

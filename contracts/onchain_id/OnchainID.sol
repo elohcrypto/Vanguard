@@ -212,16 +212,24 @@ contract OnchainID is IOnchainID, Ownable2Step, ReentrancyGuard {
     }
 
     /// @dev Two-step, as ClaimIssuer (D18). On acceptance the old owner's
-    ///      MANAGEMENT key is retired and the new owner's added, so a
-    ///      transferred identity is no longer controllable by the old wallet
-    ///      (2F.2, L8).
+    ///      MANAGEMENT key is retired (unless the owner did not change) and
+    ///      the new owner ends with a MANAGEMENT key: a revoked key is
+    ///      re-activated and a key held for another purpose is moved to
+    ///      MANAGEMENT (2F.2, L8; review F4). Other keys and
+    ///      authorizedManagers survive; the new owner audits them.
     function acceptOwnership() public override {
         address previous = owner();
         super.acceptOwnership();
-        bytes32 oldKey = keccak256(abi.encodePacked(previous));
-        if (keyHasPurpose(oldKey, MANAGEMENT_KEY)) _removeKey(oldKey, MANAGEMENT_KEY);
         bytes32 newKey = keccak256(abi.encodePacked(msg.sender));
-        if (keys[newKey].key == bytes32(0)) _addKey(newKey, MANAGEMENT_KEY, ECDSA_TYPE);
+        if (previous != msg.sender) {
+            bytes32 oldKey = keccak256(abi.encodePacked(previous));
+            if (keyHasPurpose(oldKey, MANAGEMENT_KEY)) _removeKey(oldKey, MANAGEMENT_KEY);
+        }
+        if (!keyHasPurpose(newKey, MANAGEMENT_KEY)) {
+            Key storage held = keys[newKey];
+            if (held.key != bytes32(0) && held.revokedAt == 0) _removeKey(newKey, held.purpose);
+            _addKey(newKey, MANAGEMENT_KEY, ECDSA_TYPE);
+        }
     }
 
     /**
@@ -857,14 +865,17 @@ contract OnchainID is IOnchainID, Ownable2Step, ReentrancyGuard {
     /**
      * @dev Internal add key function
      */
+    /// @dev Adds `_key`, or re-activates it if it was revoked (2F.2 review,
+    ///      F4); only an active key is refused.
     function _addKey(bytes32 _key, uint256 _purpose, uint256 _keyType) internal returns (bool) {
         require(_key != bytes32(0), "OnchainID: Invalid key");
-        require(keys[_key].key == bytes32(0), "OnchainID: Key already exists");
+        bool known = keys[_key].key != bytes32(0);
+        require(!known || keys[_key].revokedAt != 0, "OnchainID: Key already exists");
 
         keys[_key] = Key({purpose: _purpose, keyType: _keyType, key: _key, revokedAt: 0});
 
         keysByPurpose[_purpose].push(_key);
-        allKeys.push(_key);
+        if (!known) allKeys.push(_key);
 
         emit KeyAdded(_key, _purpose, _keyType);
         return true;

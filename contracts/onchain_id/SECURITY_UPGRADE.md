@@ -10,7 +10,11 @@ The `OnchainID.sol` contract has been upgraded with a new secure key removal fun
 > ownership is two-step (`transferOwnership` then `acceptOwnership`, as
 > ClaimIssuer); on acceptance the old owner's MANAGEMENT key is revoked and the
 > new owner's added. `renounceOwnership` reverts and `initialize` runs once, so
-> an identity always has a controller.
+> an identity always has a controller. Other keys and `authorizedManagers`
+> survive an ownership transfer; the new owner audits them
+> (`getKeysByPurpose`; `authorizedManagers` has no list or event, so check
+> the identity's `authorizeManager` transactions) and removes any it does
+> not want.
 
 ---
 
