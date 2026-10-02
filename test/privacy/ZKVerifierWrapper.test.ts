@@ -8,9 +8,9 @@ import {
   ZKVerifierIntegrated__factory,
 } from "../../typechain-types";
 
-// Wrapper unit tests for Task 3.2 (plan v2 §7): batch, cache, the 27-word
-// verifyCircuitProof route, testingMode, verifyBatchProofs and the typed
-// IZKVerifier ABI that PrivacyManager (3.3) consumes. Real PLONK proofs,
+// Wrapper unit tests for Task 3.2 (plan v2 §7): batch, cache, the closed
+// whitelist route of verifyCircuitProof (Task 3.3), testingMode,
+// verifyBatchProofs and the typed IZKVerifier ABI that PrivacyManager consumes. Real PLONK proofs,
 // built the way ZKSoundness.test.js test D builds them.
 /* eslint-disable @typescript-eslint/no-var-requires */
 const path = require("path");
@@ -162,29 +162,16 @@ describe("ZKVerifierIntegrated wrapper (Task 3.2)", function () {
     });
   });
 
-  describe("(c) the 27-word verifyCircuitProof route", function () {
-    it("agrees with the typed entry on a real and on a tampered proof", async function () {
-      const zk = await deploy(false);
-      for (const [p, want] of [
-        [proof, true],
-        [tampered, false],
-      ] as [Words, boolean][]) {
-        const typed = await zk.verifyWhitelistMembership.staticCall(p, signals);
-        const routed = await zk.verifyCircuitProof.staticCall(
-          WL,
-          EMPTY,
-          route(p, signals),
-        );
-        expect(typed).to.equal(want);
-        expect(routed).to.equal(typed);
+  describe("(c) verifyCircuitProof refuses the whitelist circuit", function () {
+    it("reverts in strict mode, real and testingMode alike", async function () {
+      for (const mode of [false, true]) {
+        const zk = await deploy(mode);
+        for (const inputs of [route(proof, signals), [...proof, signals[0]]]) {
+          await expect(
+            zk.verifyCircuitProof(WL, EMPTY, inputs),
+          ).to.be.revertedWith("use verifyWhitelistMembership");
+        }
       }
-    });
-
-    it("reverts on a malformed whitelist input count", async function () {
-      const zk = await deploy(false);
-      await expect(
-        zk.verifyCircuitProof(WL, EMPTY, [...proof, signals[0]]),
-      ).to.be.revertedWith("Invalid public inputs for whitelist circuit");
     });
   });
 
@@ -220,23 +207,24 @@ describe("ZKVerifierIntegrated wrapper (Task 3.2)", function () {
       expect(
         await zk.verifyWhitelistMembership.staticCall(tampered, s),
       ).to.equal(true);
-      expect(
-        await zk.verifyCircuitProof.staticCall(WL, EMPTY, route(tampered, s)),
-      ).to.equal(true);
     });
   });
 
   describe("(e) verifyBatchProofs, mixed circuits", function () {
     it("returns per-entry results with real verifiers", async function () {
       const zk = await deploy(false);
-      const ids = [WL, WL, BL, COMP, ethers.ZeroHash, WL];
+      const yes = await (
+        await ethers.getContractFactory("AlwaysTrueVerifier")
+      ).deploy();
+      await zk.updateVerifier("jurisdiction", await yes.getAddress());
+      const ids = [WL, JUR, BL, COMP, ethers.ZeroHash, JUR];
       const inputs = [
-        route(proof, signals),
-        route(tampered, signals),
+        route(proof, signals), // a real whitelist proof: refused here, false
+        [7n], // accepted by the jurisdiction slot
         [1n], // garbage Groth16 proof: the real blacklist verifier refuses it
         [1n], // compliance needs 6 inputs: false, not a revert
         [1n], // unknown circuit: false, not a revert
-        route(proof, signals), // cache hit
+        [7n], // cache hit
       ];
       const proofs = ids.map(() => EMPTY);
       const [results, successCount] = await zk.verifyBatchProofs.staticCall(
@@ -244,7 +232,7 @@ describe("ZKVerifierIntegrated wrapper (Task 3.2)", function () {
         proofs,
         inputs,
       );
-      expect(results).to.deep.equal([true, false, false, false, false, true]);
+      expect(results).to.deep.equal([false, true, false, false, false, true]);
       expect(successCount).to.equal(2n);
       await expect(zk.verifyBatchProofs(ids, proofs, inputs))
         .to.emit(zk, "BatchProofsVerified")
@@ -267,16 +255,17 @@ describe("ZKVerifierIntegrated wrapper (Task 3.2)", function () {
         ids.map(() => EMPTY),
         inputs,
       );
-      expect(results).to.deep.equal([true, true, false, true, true]);
-      expect(successCount).to.equal(4n);
+      expect(results).to.deep.equal([false, true, false, true, true]);
+      expect(successCount).to.equal(3n);
 
       await zk.verifyBatchProofs(
         ids,
         ids.map(() => EMPTY),
         inputs,
       );
-      // Internal routing: stats go to the caller, not to the wrapper itself.
-      expect(await zk.userProofCount(caller.address)).to.equal(5n);
+      // Internal routing: stats go to the caller, not to the wrapper itself;
+      // the refused whitelist entry reaches no verifier and counts nothing.
+      expect(await zk.userProofCount(caller.address)).to.equal(4n);
       expect(await zk.userProofCount(await zk.getAddress())).to.equal(0n);
     });
   });

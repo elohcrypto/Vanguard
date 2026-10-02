@@ -43,10 +43,8 @@ interface IZKVerifier {
     function getVerifyingKey(bytes32 circuitId) external view returns (VerifyingKey memory);
 
     /**
-     * @dev Verify a proof for a specific circuit. For the whitelist circuit
-     *      `proof` is ignored and publicInputs carries [24 PLONK proof words,
-     *      nullifier, merkleRoot, walletBinding]; Task 3.3 removes that route
-     *      in favour of verifyWhitelistMembership.
+     * @dev Verify a Groth16 proof for a specific circuit. The whitelist
+     *      circuit is refused (reverts "use verifyWhitelistMembership").
      * @param circuitId Identifier for the circuit
      * @param proof The proof to verify
      * @param publicInputs Public inputs for the proof

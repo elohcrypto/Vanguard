@@ -19,7 +19,8 @@ describe("ZKVerifierIntegrated - Phase 2 Features", function () {
   // [nullifier, merkleRoot, walletBinding].
   const samplePlonkProof = Array.from({ length: 24 }, (_, i) => i + 1);
   const samplePublicSignals = [12345, 777, 4242]; // testingMode: all non-zero
-  // verifyCircuitProof carries a whitelist proof in publicInputs.
+  // verifyCircuitProof/verifyBatchProofs refuse the whitelist circuit since
+  // Task 3.3 (use verifyWhitelistMembership): the batch reports false for it.
   const whitelistInputs = [...samplePlonkProof, ...samplePublicSignals];
 
   beforeEach(async function () {

@@ -13,11 +13,15 @@ import { ethers } from "hardhat";
  * succeeds, so a guard that rejects everything would also be caught.
  */
 describe("Constructor guards — runtime behaviour", () => {
-  /** A deployed contract usable wherever "some contract address" is needed. */
+  /**
+   * A deployed contract usable wherever "some contract address" is needed:
+   * a real-mode ZKVerifierIntegrated, since PrivacyManager also refuses a
+   * verifier without testingMode() == false.
+   */
   async function anyContract(): Promise<string> {
     const c = await (
-      await ethers.getContractFactory("AlwaysTrueVerifier")
-    ).deploy();
+      await ethers.getContractFactory("ZKVerifierIntegrated")
+    ).deploy(false);
     await c.waitForDeployment();
     return c.getAddress();
   }
@@ -29,9 +33,7 @@ describe("Constructor guards — runtime behaviour", () => {
     args: (ok: string, owner: string) => unknown[];
     /** indices of address args that carry a code-length guard */
     guarded: number[];
-  }> = [
-    { name: "PrivacyManager", args: (ok) => [ok, ok, ok], guarded: [0, 1, 2] },
-  ];
+  }> = [{ name: "PrivacyManager", args: (ok) => [ok], guarded: [0] }];
 
   for (const { name, args, guarded } of CASES) {
     describe(name, () => {

@@ -112,34 +112,25 @@ class PrivacyModule {
         );
       }
 
-      // Deploy mock dependencies for PrivacyManager
-      console.log("🔧 Deploying mock dependencies...");
-      const MockComplianceRulesFactory = await ethers.getContractFactory(
-        "MockComplianceRules",
-      );
-      const mockComplianceRules = await MockComplianceRulesFactory.deploy();
-      await mockComplianceRules.waitForDeployment();
-      const mockComplianceRulesAddr = await mockComplianceRules.getAddress();
-
-      const MockOracleManagerFactory =
-        await ethers.getContractFactory("MockOracleManager");
-      const mockOracleManager = await MockOracleManagerFactory.deploy();
-      await mockOracleManager.waitForDeployment();
-      const mockOracleManagerAddr = await mockOracleManager.getAddress();
-
-      // Deploy PrivacyManager with proper dependencies
-      console.log("🕵️ Deploying PrivacyManager...");
-      const PrivacyManagerFactory =
-        await ethers.getContractFactory("PrivacyManager");
-      const privacyManager = await PrivacyManagerFactory.deploy(
-        zkVerifierIntegratedAddr,
-        mockComplianceRulesAddr,
-        mockOracleManagerAddr,
-      );
-      await privacyManager.waitForDeployment();
-      const privacyManagerAddr = await privacyManager.getAddress();
-      this.state.setContract("privacyManager", privacyManager);
-      console.log(`✅ PrivacyManager deployed: ${privacyManagerAddr}`);
+      // PrivacyManager refuses a testingMode verifier (Task 3.3): mock
+      // proofs can never bind a wallet, so mock mode deploys none.
+      let privacyManagerAddr = "not deployed (MOCK mode verifier)";
+      if (zkTestingMode) {
+        console.log(
+          "⚠️  PrivacyManager not deployed: it refuses a testingMode verifier.",
+        );
+      } else {
+        console.log("🕵️ Deploying PrivacyManager...");
+        const PrivacyManagerFactory =
+          await ethers.getContractFactory("PrivacyManager");
+        const privacyManager = await PrivacyManagerFactory.deploy(
+          zkVerifierIntegratedAddr,
+        );
+        await privacyManager.waitForDeployment();
+        privacyManagerAddr = await privacyManager.getAddress();
+        this.state.setContract("privacyManager", privacyManager);
+        console.log(`✅ PrivacyManager deployed: ${privacyManagerAddr}`);
+      }
 
       displaySuccess(
         "PRODUCTION-READY PRIVACY & ZK VERIFICATION SYSTEM DEPLOYED!",

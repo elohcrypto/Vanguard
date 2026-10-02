@@ -96,8 +96,8 @@ contract ZKVerifierIntegrated is Ownable2Step, ReentrancyGuard {
      *
      * This checks the proof only. Comparing merkleRoot with the published
      * root, walletBinding with the submitting wallet and recording the
-     * nullifier (one wallet per identity per root) belong to the consumer,
-     * PrivacyManager, in Task 3.3; msg.sender here is whoever called this
+     * nullifier (one wallet per commitment per root) belong to the consumer,
+     * PrivacyManager.submitWhitelistProof; msg.sender here is whoever called this
      * contract, so the binding cannot be checked here.
      *
      * testingMode (demo only): the proof words are not checked and no
@@ -520,15 +520,12 @@ contract ZKVerifierIntegrated is Ownable2Step, ReentrancyGuard {
     /**
      * @dev Verify a proof for a specific circuit, routed by circuit id.
      * @param circuitId Identifier for the circuit
-     * @param proof Groth16 proof; ignored for the whitelist circuit
+     * @param proof Groth16 proof
      * @param publicInputs Public inputs for the proof
      * @return True if the proof is valid
      *
-     * Whitelist route (PLONK): the Groth16 `proof` struct cannot carry 24
-     * words, so the proof travels in publicInputs as [24 proof words,
-     * nullifier, merkleRoot, walletBinding]. It exists only for
-     * PrivacyManager.submitPrivateProof; Task 3.3 replaces that caller with
-     * the typed verifyWhitelistMembership and deletes this route.
+     * Groth16 circuits only. The whitelist circuit (PLONK, 24-word proof) is
+     * refused here: use verifyWhitelistMembership.
      */
     function verifyCircuitProof(
         bytes32 circuitId,
@@ -548,10 +545,7 @@ contract ZKVerifierIntegrated is Ownable2Step, ReentrancyGuard {
     ) internal returns (bool) {
         uint256 n = pi.length;
         if (circuitId == WHITELIST_ID) {
-            if (n != 27) return _malformed(strict, "Invalid public inputs for whitelist circuit");
-            uint256[24] memory plonkProof;
-            for (uint256 i = 0; i < 24; i++) plonkProof[i] = pi[i];
-            return _verifyWhitelist(plonkProof, [pi[24], pi[25], pi[26]]);
+            return _malformed(strict, "use verifyWhitelistMembership");
         } else if (circuitId == BLACKLIST_ID) {
             if (n != 1) return _malformed(strict, "Invalid public inputs for blacklist circuit");
             return _verifyBlacklist(proof.a, proof.b, proof.c, [pi[0]]);

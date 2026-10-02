@@ -25,25 +25,11 @@ async function testZKFinal() {
     await zkVerifier.waitForDeployment();
     console.log(`✅ ZKVerifier deployed: ${await zkVerifier.getAddress()}`);
 
-    // Deploy mock dependencies
-    const MockComplianceRulesFactory = await ethers.getContractFactory(
-      "MockComplianceRules",
-    );
-    const mockComplianceRules = await MockComplianceRulesFactory.deploy();
-    await mockComplianceRules.waitForDeployment();
-
-    const MockOracleManagerFactory =
-      await ethers.getContractFactory("MockOracleManager");
-    const mockOracleManager = await MockOracleManagerFactory.deploy();
-    await mockOracleManager.waitForDeployment();
-
     // Deploy Privacy Manager
     const PrivacyManagerFactory =
       await ethers.getContractFactory("PrivacyManager");
     const privacyManager = await PrivacyManagerFactory.deploy(
       await zkVerifier.getAddress(),
-      await mockComplianceRules.getAddress(),
-      await mockOracleManager.getAddress(),
     );
     await privacyManager.waitForDeployment();
     console.log(

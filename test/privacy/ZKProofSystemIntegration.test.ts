@@ -116,33 +116,15 @@ describe("🔐 Complete ZK Proof System Integration Tests", function () {
     await zkVerifier.waitForDeployment();
     console.log(`   ✅ ZKVerifier: ${await zkVerifier.getAddress()}`);
 
-    // Deploy ComplianceRules and OracleManager for PrivacyManager
-    console.log("📦 Deploying ComplianceRules...");
-    const ComplianceRulesFactory =
-      await ethers.getContractFactory("ComplianceRules");
-    const complianceRules = await ComplianceRulesFactory.deploy(
-      owner.address,
-      [], // Empty allowed list = all countries allowed
-      [], // No blocked countries
-    );
-    await complianceRules.waitForDeployment();
-    console.log(`   ✅ ComplianceRules: ${await complianceRules.getAddress()}`);
-
-    console.log("📦 Deploying OracleManager...");
-    const OracleManagerFactory =
-      await ethers.getContractFactory("OracleManager");
-    const oracleManager = await OracleManagerFactory.deploy();
-    await oracleManager.waitForDeployment();
-    console.log(`   ✅ OracleManager: ${await oracleManager.getAddress()}`);
-
-    // Deploy Privacy Manager (requires zkVerifier, complianceRules, oracleManager)
+    // PrivacyManager refuses a testingMode verifier (Task 3.3), so it gets
+    // its own real-mode wrapper.
     console.log("📦 Deploying Privacy Manager...");
+    const realVerifier = await ZKVerifierFactory.deploy(false);
+    await realVerifier.waitForDeployment();
     const PrivacyManagerFactory =
       await ethers.getContractFactory("PrivacyManager");
     privacyManager = await PrivacyManagerFactory.deploy(
-      await zkVerifier.getAddress(),
-      await complianceRules.getAddress(),
-      await oracleManager.getAddress(),
+      await realVerifier.getAddress(),
     );
     await privacyManager.waitForDeployment();
     console.log(`   ✅ PrivacyManager: ${await privacyManager.getAddress()}`);
@@ -151,10 +133,10 @@ describe("🔐 Complete ZK Proof System Integration Tests", function () {
   });
 
   describe("1️⃣ Individual Verifier Contract Tests", function () {
-    it("Should verify whitelist membership proof", async function () {
+    it("Should refuse a made-up whitelist membership proof", async function () {
       console.log("🧪 Testing whitelist membership verifier...");
 
-      // [nullifier, merkleRoot, walletBinding]
+      // [nullifier, merkleRoot, walletBinding]; the PLONK verifier is real.
       const publicSignals: [number, number, number] = [mockNullifier, 1, 1];
       const result = await whitelistVerifier.verifyProof(
         mockPlonkProof,
@@ -162,7 +144,7 @@ describe("🔐 Complete ZK Proof System Integration Tests", function () {
       );
 
       console.log(`   📋 Whitelist proof result: ${result}`);
-      expect(result).to.be.a("boolean");
+      expect(result).to.equal(false);
     });
 
     it("Should verify blacklist non-membership proof", async function () {
@@ -300,34 +282,27 @@ describe("🔐 Complete ZK Proof System Integration Tests", function () {
   });
 
   describe("5️⃣ Privacy Manager Integration Tests", function () {
-    it("Should check user privacy settings", async function () {
-      console.log("🧪 Testing privacy settings check...");
-
-      try {
-        const settings = await privacyManager.getUserPrivacySettings(
-          user1.address,
-        );
-        console.log(`   🔐 Privacy settings retrieved for: ${user1.address}`);
-        console.log(`   📊 Settings: ${JSON.stringify(settings)}`);
-      } catch (error) {
-        console.log(
-          `   ⚠️  Privacy settings not configured (expected for new user)`,
-        );
-      }
+    it("refuses the testingMode verifier the other sections use", async function () {
+      const factory = await ethers.getContractFactory("PrivacyManager");
+      await expect(
+        factory.deploy(await zkVerifier.getAddress()),
+      ).to.be.revertedWithCustomError(factory, "TestingModeVerifier");
     });
 
-    it("Should validate comprehensive privacy proofs", async function () {
-      console.log("🧪 Testing comprehensive privacy validation...");
-
-      try {
-        const validation = await privacyManager.validatePrivacyProofs(
-          user1.address,
-        );
-        console.log(`   ✅ Privacy validation completed`);
-        console.log(`   📊 Validation result: ${JSON.stringify(validation)}`);
-      } catch (error) {
-        console.log(`   ⚠️  Privacy validation requires setup (expected)`);
-      }
+    it("a fresh user has default settings and no private status", async function () {
+      const settings = await privacyManager.getUserPrivacySettings(
+        user1.address,
+      );
+      expect(settings.enablePrivateWhitelist).to.equal(true);
+      expect(settings.proofValidityPeriod).to.equal(
+        await privacyManager.DEFAULT_PROOF_VALIDITY(),
+      );
+      expect(
+        await privacyManager.hasValidWhitelistProof(user1.address),
+      ).to.equal(false);
+      expect(
+        await privacyManager.validateAllPrivateCompliance(user1.address),
+      ).to.deep.equal([false, false, false, false]);
     });
   });
 

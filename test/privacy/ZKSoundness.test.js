@@ -18,11 +18,8 @@ const { loadAliasingSnarkjs } = require("../helpers/plonkAliasProver.js");
 // amended by R-3R-2 (owner decisions §N). Each names a soundness property the
 // whitelist proof must have before the ZK layer may gate live transfers.
 // Task 3.1 made the circuit hard (PLONK, binary path indices, root ===) so C
-// and D pass; A and B need the published-root compare and the wallet binding
-// in PrivacyManager (Task 3.3).
-const WHITELIST_CIRCUIT = ethers.keccak256(
-  ethers.toUtf8Bytes("WHITELIST_MEMBERSHIP"),
-);
+// and D pass; A and B run against PrivacyManager's root registry and wallet
+// binder (Task 3.3).
 // BN254 scalar field.
 const P =
   21888242871839275222246405745257275088548364400416034343698204186575808495617n;
@@ -46,6 +43,12 @@ describe("ZK soundness guards (plan Task 0.1)", function () {
   let paths;
   let alice;
   let bob;
+  // The list the operator publishes in A and B.
+  const listed = [
+    { identity: 11111n, secret: 101n },
+    { identity: 12345n, secret: 202n },
+    { identity: 33333n, secret: 303n },
+  ];
 
   before(async function () {
     [, alice, bob] = await ethers.getSigners();
@@ -58,23 +61,18 @@ describe("ZK soundness guards (plan Task 0.1)", function () {
     verifier = await (
       await ethers.getContractFactory("ZKVerifierIntegrated")
     ).deploy(false);
-    const rules = await (
-      await ethers.getContractFactory("MockComplianceRules")
-    ).deploy();
-    const oracleManager = await (
-      await ethers.getContractFactory("MockOracleManager")
-    ).deploy();
     privacyManager = await (
       await ethers.getContractFactory("PrivacyManager")
-    ).deploy(
-      await verifier.getAddress(),
-      await rules.getAddress(),
-      await oracleManager.getAddress(),
+    ).deploy(await verifier.getAddress());
+    const tree = await MerkleTreeBuilder.createFromCommitments(
+      listed.map((m) => gen.hash([m.identity, m.secret])),
+    );
+    await privacyManager.publishWhitelistRoot(
+      ethers.toBeHex(tree.getRoot(), 32),
     );
   });
 
-  // Green in 3.3: needs PrivacyManager to compare merkleRoot with the published root.
-  it.skip("A: rejects a proof built against a Merkle root the list operator never published", async function () {
+  it("A: rejects a proof built against a Merkle root the list operator never published", async function () {
     // The attacker builds their own one-leaf tree and proves membership in it.
     const attacker = { identity: 777777n, secret: 1n };
     const r = await gen.generateWhitelistProof({
@@ -82,49 +80,61 @@ describe("ZK soundness guards (plan Task 0.1)", function () {
       members: [attacker],
       walletBinding: alice.address,
     });
-
-    const accepted = await verifier.verifyWhitelistMembership.staticCall(
-      r.proof,
-      r.publicSignals,
-    );
-
     expect(
-      accepted,
+      await verifier.verifyWhitelistMembership.staticCall(
+        r.proof,
+        r.publicSignals,
+      ),
+      "precondition: the proof itself is valid for the attacker's root",
+    ).to.equal(true);
+
+    await expect(
+      privacyManager
+        .connect(alice)
+        .submitWhitelistProof(r.proof, r.publicSignals),
       "a self-built tree must not satisfy the whitelist gate",
-    ).to.equal(false);
+    ).to.be.revertedWithCustomError(privacyManager, "RootNotCurrent");
+    expect(await privacyManager.hasValidWhitelistProof(alice.address)).to.equal(
+      false,
+    );
   });
 
-  // Green in 3.3: needs walletBinding == msg.sender in PrivacyManager (new API).
-  it.skip("B: a proof submitted by one wallet does not whitelist another wallet that replays it", async function () {
-    const members = [
-      { identity: 11111n, secret: 101n },
-      { identity: 12345n, secret: 202n },
-      { identity: 33333n, secret: 303n },
-    ];
+  it("B: a proof submitted by one wallet does not whitelist another wallet that replays it", async function () {
     const r = await gen.generateWhitelistProof({
-      ...members[1],
-      members,
+      ...listed[1],
+      members: listed,
       walletBinding: alice.address,
     });
-    const unused = { a: [0, 0], b: [[0, 0], [0, 0]], c: [0, 0] };
-    const inputs = [...r.proof, ...r.publicSignals];
 
     await privacyManager
       .connect(alice)
-      .submitPrivateProof(WHITELIST_CIRCUIT, unused, inputs);
-    // Bob copies Alice's calldata straight off the chain.
-    await privacyManager
-      .connect(bob)
-      .submitPrivateProof(WHITELIST_CIRCUIT, unused, inputs);
-
-    const [, bobValid] = await privacyManager.getUserProofInfo(
-      bob.address,
-      WHITELIST_CIRCUIT,
+      .submitWhitelistProof(r.proof, r.publicSignals);
+    expect(await privacyManager.hasValidWhitelistProof(alice.address)).to.equal(
+      true,
     );
-    expect(
-      bobValid,
+    // Bob copies Alice's calldata straight off the chain.
+    await expect(
+      privacyManager
+        .connect(bob)
+        .submitWhitelistProof(r.proof, r.publicSignals),
       "a replayed proof must not count for the replaying wallet",
-    ).to.equal(false);
+    ).to.be.revertedWithCustomError(privacyManager, "WalletBindingMismatch");
+    expect(await privacyManager.hasValidWhitelistProof(bob.address)).to.equal(
+      false,
+    );
+
+    // Alice resubmitting is idempotent: same nullifier, same wallet.
+    await expect(
+      privacyManager
+        .connect(alice)
+        .submitWhitelistProof(r.proof, r.publicSignals),
+    ).to.not.be.reverted;
+    expect(await privacyManager.nullifierWallet(r.publicSignals[0])).to.equal(
+      alice.address,
+    );
+    expect(await privacyManager.hasValidWhitelistProof(alice.address)).to.equal(
+      true,
+    );
   });
 
   describe("C: a non-member cannot produce a witness", function () {
@@ -169,9 +179,10 @@ describe("ZK soundness guards (plan Task 0.1)", function () {
       // Real children of the root: a from leaf 0's path, b its sibling.
       let a = tree.commitment(members[0].identity, members[0].secret);
       for (let i = 0; i < top; i++) {
-        a = pathIndices[i] === 0
-          ? tree.hash(a, pathElements[i])
-          : tree.hash(pathElements[i], a);
+        a =
+          pathIndices[i] === 0
+            ? tree.hash(a, pathElements[i])
+            : tree.hash(pathElements[i], a);
       }
       const b = pathElements[top];
       expect(tree.hash(a, b)).to.equal(root);
@@ -179,9 +190,10 @@ describe("ZK soundness guards (plan Task 0.1)", function () {
       // Outsider's node at the top level, using the same lower siblings.
       let L = tree.commitment(outsider.identity, outsider.secret);
       for (let i = 0; i < top; i++) {
-        L = pathIndices[i] === 0
-          ? tree.hash(L, pathElements[i])
-          : tree.hash(pathElements[i], L);
+        L =
+          pathIndices[i] === 0
+            ? tree.hash(L, pathElements[i])
+            : tree.hash(pathElements[i], L);
       }
       const R = mod(a + b - L);
       const sel = mod((a - L) * inv(R - L));
@@ -316,7 +328,9 @@ describe("ZK soundness guards (plan Task 0.1)", function () {
         r.publicSignals,
       );
       const receipt = await tx.wait();
-      console.log(`      wrapper verifyWhitelistMembership gasUsed: ${receipt.gasUsed}`);
+      console.log(
+        `      wrapper verifyWhitelistMembership gasUsed: ${receipt.gasUsed}`,
+      );
 
       const plonk = await ethers.getContractAt(
         "WhitelistMembershipVerifier",

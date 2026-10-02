@@ -101,13 +101,13 @@ jobs:
 
       # Ratchet, same shape as the audit ratchet below. tsc is not a hard gate
       # because ts-node strips types, so the suite never sees these. Fail only
-      # when the count RISES. Baseline 1 (2026-10-02, was 98): the ZK
-      # integration test calls PrivacyManager.validatePrivacyProofs, which the
-      # contract does not have; the test catches the failure. Runs after
-      # compile because tsc reads typechain-types/, which compile regenerates.
+      # when the count RISES. Baseline 0 (2026-10-02, was 98 then 1): Task 3.3
+      # replaced the ZK integration test's dead validatePrivacyProofs call;
+      # new TypeScript tests must type-check. Runs after compile because tsc
+      # reads typechain-types/, which compile regenerates.
       - name: Typecheck ratchet (no NEW tsc errors)
         run: |
-          BASELINE=1
+          BASELINE=0
           test -d typechain-types || { echo "::error::typechain-types/ missing; compile did not generate it"; exit 1; }
           npx tsc --noEmit --pretty false > tsc.log 2>&1 || true
           count=$(grep -c 'error TS' tsc.log || true)
@@ -126,9 +126,11 @@ jobs:
       # error. Its stdout is also truncated under a pipe (process.exit before
       # flush), so the report goes to a file and is counted from there. Any
       # error fails; warnings fail only when they RISE above the baseline.
+      # Baseline 944 (2026-10-02, was 976; 965 measured after 3.2, 944 after
+      # the Task 3.3 PrivacyManager rewrite).
       - name: Lint ratchet (no solhint errors, no NEW warnings)
         run: |
-          BASELINE=976
+          BASELINE=944
           npx solhint -f unix 'contracts/**/*.sol' > solhint.log 2>&1 || true
           errors=$(grep -c '\[Error/' solhint.log || true)
           warnings=$(grep -c '\[Warning/' solhint.log || true)
