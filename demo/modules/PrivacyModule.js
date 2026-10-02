@@ -1995,13 +1995,22 @@ class PrivacyModule {
         // library functions as scripts/zk/build-whitelist-root.js and
         // scripts/zk/prove-whitelist.js.
         const signers = this.state.signers;
+        // Blank input keeps the default list ([]); an empty, non-numeric or
+        // unknown entry refuses the whole list (null), never wallet 0.
         const pickWallets = async (question) => {
-          const input = await this.promptUser(question);
-          const picked = input
-            .split(",")
-            .map((x) => Number(x.trim()))
-            .filter((i) => Number.isInteger(i) && signers[i]);
-          return [...new Set(picked)].map((i) => signers[i]);
+          const input = (await this.promptUser(question)).trim();
+          if (!input) return [];
+          const parts = input.split(",").map((x) => x.trim());
+          const bad = parts.find(
+            (x) => !/^\d+$/.test(x) || !signers[Number(x)],
+          );
+          if (bad !== undefined) {
+            console.log(
+              `❌ "${bad}" is not a wallet index (0-${signers.length - 1}); proof generation cancelled.`,
+            );
+            return null;
+          }
+          return [...new Set(parts.map(Number))].map((i) => signers[i]);
         };
         let listed = signers.slice(0, 3);
 
@@ -2062,9 +2071,11 @@ class PrivacyModule {
             whitelistChoice.toLowerCase() !== "yes" &&
             whitelistChoice.trim()
           ) {
-            listed = await pickWallets(
+            const picked = await pickWallets(
               "Enter the listed wallet indices (comma-separated, e.g., 0,1,2): ",
             );
+            if (picked === null) return;
+            if (picked.length) listed = picked;
           }
           if (!listed.includes(proofUser)) {
             console.log(`   ⚠️  Adding your identity to whitelist...`);
@@ -2085,6 +2096,7 @@ class PrivacyModule {
           const custom = await pickWallets(
             "Enter the listed wallet indices (comma-separated, e.g., 0,1,2): ",
           );
+          if (custom === null) return;
           if (custom.length) listed = custom;
 
           // Verify the user is in the whitelist
@@ -2093,7 +2105,6 @@ class PrivacyModule {
             console.log(
               "\n⚠️  WARNING: Your identity is NOT in the whitelist!",
             );
-            console.log("   The proof will fail verification.");
             const continueAnyway = await this.promptUser(
               "Continue anyway? (yes/no): ",
             );
