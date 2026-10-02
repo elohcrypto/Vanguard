@@ -176,8 +176,8 @@ jobs:
       - name: Run tests
         run: npm test
 
-      # Coverage ratchet. Baseline 84: measured at 85.99% lines on CI run
-      # 36968200943 (2026-10-02; earlier baselines 63.73% -> 65 -> 84, each
+      # Coverage ratchet. Baseline 86: measured at 88.55% lines on CI at
+      # 19d75cb (2026-10-02; earlier baselines 63.73% -> 65 -> 84 -> 86, each
       # raised after the notice fired).
       # Fails only when the number DROPS below BASELINE; notices when it climbs
       # 2+ points so the baseline can be raised. The plugin compiles instrumented
@@ -187,7 +187,7 @@ jobs:
       # cap that instrumented initcode exceeds.
       - name: Coverage ratchet (no DROP in line coverage)
         run: |
-          BASELINE=84
+          BASELINE=86
           npm run test:coverage > coverage.log 2>&1 || true
           lines=$(grep -E '^All files' coverage.log | awk -F'|' '{gsub(/ /,"",$5); print $5}')
           echo "line coverage: ${lines:-<none>}% (baseline $BASELINE)"
@@ -210,6 +210,8 @@ jobs:
       # ContractDeployer directly against a local node and reads the wiring back
       # from chain. Exits non-zero on any mismatch.
       - name: Demo deployment smoke test
+        env:
+          DEMO_SMOKE_OUT: /tmp/demo-smoke-out.json
         run: |
           npx hardhat node > /tmp/hardhat-node.log 2>&1 &
           for i in $(seq 1 30); do
@@ -219,6 +221,53 @@ jobs:
             sleep 1
           done
           npx hardhat run scripts/demo-smoke.js --network localhost
+
+      # Plan v2 Task 3.5: the operator and investor CLIs (scripts/zk/) against
+      # the smoke's node, still running, after its handover. Three verified
+      # wallets onboard (identity = OnchainID address, own secret), ops
+      # (wallet 10, the listOperator) builds and publishes the root, wallet 2
+      # proves and binds. VSC is in whitelist mode Either with no oracle, so
+      # ComplianceRules.canReceive(wallet 2), called as VSC, follows the
+      # binding: false before, true after. Hardhat's default keys.
+      - name: Whitelist root + proof CLI
+        run: |
+          set -euo pipefail
+          OUT=/tmp/demo-smoke-out.json
+          RPC=http://127.0.0.1:8545
+          D=$(mktemp -d)
+          key() { node -e 'const { ethers } = require("ethers"); console.log(ethers.HDNodeWallet.fromPhrase("test test test test test test test test test test test junk", undefined, ethers.getIndexedAccountPath(+process.argv[1])).privateKey)' "$1"; }
+          user() { jq -r ".users[] | select(.index == $1) | .$2" "$OUT"; }
+          PM=$(jq -r .privacyManager "$OUT"); RULES=$(jq -r .complianceRules "$OUT"); VSC=$(jq -r .token "$OUT")
+          echo '[]' > "$D/entries.json"
+          for i in 1 2 3; do
+            (umask 077; echo "0x$(openssl rand -hex 31)" > "$D/secret-$i")
+            c=$(node scripts/zk/prove-whitelist.js --commitment --identity "$(user $i onchainID)" --secret-file "$D/secret-$i")
+            jq --arg id "$(user $i onchainID)" --arg c "$c" '. + [{identity: $id, commitment: $c}]' "$D/entries.json" > "$D/e" && mv "$D/e" "$D/entries.json"
+          done
+          WHITELIST_OPS_KEY=$(key 10) node scripts/zk/build-whitelist-root.js \
+            --in "$D/entries.json" --out "$D/root.json" --publish --rpc "$RPC" --privacy-manager "$PM"
+          USER=$(user 2 wallet)
+          gate() { node -e '
+            const { ethers } = require("ethers");
+            const [rpc, pm, rules, vsc, who] = process.argv.slice(1);
+            const p = new ethers.JsonRpcProvider(rpc);
+            const i = new ethers.Interface(["function hasValidWhitelistProof(address) view returns (bool)", "function canReceive(address) view returns (bool)"]);
+            const call = async (to, f, from) => i.decodeFunctionResult(f, await p.call({ to, from, data: i.encodeFunctionData(f, [who]) }))[0];
+            (async () => console.log(`${await call(pm, "hasValidWhitelistProof")} ${await call(rules, "canReceive", vsc)}`))()
+              .catch((e) => { console.error(e.message); process.exit(1); });' "$RPC" "$PM" "$RULES" "$VSC" "$USER"; }
+          before=$(gate); echo "before: hasValidWhitelistProof canReceive = $before"
+          WHITELIST_SECRET=$(cat "$D/secret-2") WHITELIST_WALLET_KEY=$(key 2) node scripts/zk/prove-whitelist.js \
+            --root "$D/root.json" --identity "$(user 2 onchainID)" --wallet "$USER" --out "$D/proof.json" \
+            --submit --rpc "$RPC" --privacy-manager "$PM" > "$D/stdout" 2> "$D/stderr"
+          cat "$D/stderr"
+          after=$(gate); echo "after:  hasValidWhitelistProof canReceive = $after"
+          for f in "$D/stdout" "$D/stderr"; do
+            if grep -qi "$(sed 's/^0x//' "$D/secret-2")" "$f"; then echo "::error::the prover printed the secret"; exit 1; fi
+          done
+          if [ "$before" != "false false" ] || [ "$after" != "true true" ]; then
+            echo "::error::expected 'false false' before and 'true true' after the binding"
+            exit 1
+          fi
 
       # Blocks on critical (currently 0).
       - name: Audit dependencies (critical blocks)

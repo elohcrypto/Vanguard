@@ -296,6 +296,36 @@ async function runHandoverSmoke(state, failures) {
     }
   }
 
+  // 3.5: the CI step "Whitelist root + proof CLI" runs scripts/zk/ against
+  // this node; it needs the addresses and the verified wallets' OnchainIDs.
+  if (process.env.DEMO_SMOKE_OUT) {
+    const users = [];
+    for (const i of [PROPOSER, ...VOTERS]) {
+      users.push({
+        index: i,
+        wallet: s[i].address,
+        onchainID: await c("identityRegistry").identity(s[i].address),
+      });
+    }
+    const addr = (x) => x.getAddress();
+    require("fs").writeFileSync(
+      process.env.DEMO_SMOKE_OUT,
+      JSON.stringify(
+        {
+          privacyManager: await addr(privacyManager),
+          zkVerifier: await addr(zkVerifier),
+          complianceRules: await addr(c("complianceRules")),
+          token: await addr(c("digitalToken")),
+          identityRegistry: await addr(c("identityRegistry")),
+          ops: { index: OPS, wallet: s[OPS].address },
+          users,
+        },
+        null,
+        2,
+      ),
+    );
+  }
+
   if (result.ok) {
     console.log(
       `✅ Handover ceremony: ${result.checks.length} checks pass, the deployer holds no power.`,
