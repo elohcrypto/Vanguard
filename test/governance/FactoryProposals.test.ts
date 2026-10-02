@@ -124,19 +124,19 @@ describe("Factories are governable by proposal (2F.5)", function () {
 
   it("refuses to bind a factory not being handed to governance", async function () {
     await expect(gov.setEscrowWalletFactory(escrowAddr)).to.be.revertedWith(
-      "Factory not handed to governance",
+      "Target not handed to governance",
     );
     await expect(gov.setOnchainIDFactory(idFAddr)).to.be.revertedWith(
-      "Factory not handed to governance",
+      "Target not handed to governance",
     );
     // A factory nominated to someone else is not governance's either.
     await escrowF.transferOwnership(alice.address);
     await expect(gov.setEscrowWalletFactory(escrowAddr)).to.be.revertedWith(
-      "Factory not handed to governance",
+      "Target not handed to governance",
     );
     // No code, and not the owner of governance.
     await expect(gov.setOnchainIDFactory(bob.address)).to.be.revertedWith(
-      "Factory not handed to governance",
+      "Target not handed to governance",
     );
     await idF.transferOwnership(govAddr);
     await expect(

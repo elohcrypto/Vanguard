@@ -45,7 +45,13 @@ contract VanguardGovernance is Ownable2Step, ReentrancyGuard {
         // withdraw). Bound only while the factory is handed to governance
         // (plan 2F.5, M4).
         EscrowFactoryParameters,
-        IdentityFactoryParameters
+        IdentityFactoryParameters,
+        // Index 11: the PrivacyManager's owner surface (whitelist root,
+        // listOperator, validity period, verifier); index 12: the
+        // ZKVerifierIntegrated's (updateVerifier, cache expiry). Bound only
+        // while handed to governance (plan 3.3, R-3R-3/R-3R-4).
+        PrivacyParameters,
+        VerifierParameters
     }
     
     enum ProposalStatus {
@@ -142,6 +148,8 @@ contract VanguardGovernance is Ownable2Step, ReentrancyGuard {
     address public dynamicListManager; // DynamicListManager: bound target of ListUpdate
     address public escrowWalletFactory; // bound target of EscrowFactoryParameters
     address public onchainIDFactory; // bound target of IdentityFactoryParameters
+    address public privacyManager; // bound target of PrivacyParameters
+    address public zkVerifier; // bound target of VerifierParameters
 
     /// @notice Divisor applied to every proposal type's votingPeriod and
     ///         executionDelay at construction. 1 = the mainnet schedule.
@@ -315,7 +323,9 @@ contract VanguardGovernance is Ownable2Step, ReentrancyGuard {
      *         IdentityRegistryParameters is bound to the IdentityRegistry;
      *         GovernanceTokenParameters is bound to the GovernanceToken (VGT).
      *         EscrowFactoryParameters / IdentityFactoryParameters are bound to
-     *         the factories once setEscrowWalletFactory / setOnchainIDFactory ran.
+     *         the factories once setEscrowWalletFactory / setOnchainIDFactory ran;
+     *         PrivacyParameters / VerifierParameters to the PrivacyManager and
+     *         ZKVerifierIntegrated once setPrivacyManager / setZKVerifier ran.
      */
     function boundTarget(ProposalType proposalType) public view returns (address) {
         if (proposalType == ProposalType.InvestorTypeConfig) return investorTypeRegistry;
@@ -328,6 +338,8 @@ contract VanguardGovernance is Ownable2Step, ReentrancyGuard {
         if (proposalType == ProposalType.GovernanceTokenParameters) return address(governanceToken);
         if (proposalType == ProposalType.EscrowFactoryParameters) return escrowWalletFactory;
         if (proposalType == ProposalType.IdentityFactoryParameters) return onchainIDFactory;
+        if (proposalType == ProposalType.PrivacyParameters) return privacyManager;
+        if (proposalType == ProposalType.VerifierParameters) return zkVerifier;
         return address(0);
     }
 
@@ -418,6 +430,10 @@ contract VanguardGovernance is Ownable2Step, ReentrancyGuard {
         ProposalThresholds memory tokenRow = proposalThresholds[ProposalType.TokenParameters];
         proposalThresholds[ProposalType.EscrowFactoryParameters] = tokenRow;
         proposalThresholds[ProposalType.IdentityFactoryParameters] = tokenRow;
+        // The privacy contracts too (plan 3.3): the verifier decides what a
+        // whitelist proof is worth once ZK gates transfers.
+        proposalThresholds[ProposalType.PrivacyParameters] = tokenRow;
+        proposalThresholds[ProposalType.VerifierParameters] = tokenRow;
     }
     
     /**
@@ -961,18 +977,30 @@ contract VanguardGovernance is Ownable2Step, ReentrancyGuard {
         onchainIDFactory = factory;
     }
 
+    /// @notice Bind PrivacyParameters; same rule as the factories.
+    function setPrivacyManager(address manager) external onlyOwner {
+        _requireHandedToGovernance(manager);
+        privacyManager = manager;
+    }
+
+    /// @notice Bind VerifierParameters; same rule as the factories.
+    function setZKVerifier(address verifier) external onlyOwner {
+        _requireHandedToGovernance(verifier);
+        zkVerifier = verifier;
+    }
+
     /// @dev Fails closed: no code or a reverting getter is "not handed".
-    function _requireHandedToGovernance(address factory) private view {
-        require(factory.code.length > 0, "Factory not handed to governance");
+    function _requireHandedToGovernance(address target) private view {
+        require(target.code.length > 0, "Target not handed to governance");
         bool handed;
-        try Ownable2Step(factory).pendingOwner() returns (address p) {
+        try Ownable2Step(target).pendingOwner() returns (address p) {
             handed = p == address(this);
         } catch {}
         if (!handed) {
-            try Ownable(factory).owner() returns (address o) {
+            try Ownable(target).owner() returns (address o) {
                 handed = o == address(this);
             } catch {}
         }
-        require(handed, "Factory not handed to governance");
+        require(handed, "Target not handed to governance");
     }
 }

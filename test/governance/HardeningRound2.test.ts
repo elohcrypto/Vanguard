@@ -753,8 +753,10 @@ describe("Hardening round 2 — contract changes", () => {
         8: [7n * DAY, 3n * DAY], // GovernanceTokenParameters
         9: [7n * DAY, 3n * DAY], // EscrowFactoryParameters
         10: [7n * DAY, 3n * DAY], // IdentityFactoryParameters
+        11: [7n * DAY, 3n * DAY], // PrivacyParameters
+        12: [7n * DAY, 3n * DAY], // VerifierParameters
       };
-      for (let t = 0; t <= 10; t++) {
+      for (let t = 0; t <= 12; t++) {
         const a = await g1.proposalThresholds(t),
           b = await g336.proposalThresholds(t);
         expect(
