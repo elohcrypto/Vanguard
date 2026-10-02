@@ -174,8 +174,9 @@ jobs:
       - name: Run tests
         run: npm test
 
-      # Coverage ratchet. Baseline 65: measured at 65.54% lines on CI run
-      # 34552492375 (first baseline 63.73%; raised after the notice fired).
+      # Coverage ratchet. Baseline 84: measured at 85.99% lines on CI run
+      # 36968200943 (2026-10-02; earlier baselines 63.73% -> 65 -> 84, each
+      # raised after the notice fired).
       # Fails only when the number DROPS below BASELINE; notices when it climbs
       # 2+ points so the baseline can be raised. The plugin compiles instrumented
       # bytecode into artifacts/; nothing else may compile in this tree while it
@@ -184,7 +185,7 @@ jobs:
       # cap that instrumented initcode exceeds.
       - name: Coverage ratchet (no DROP in line coverage)
         run: |
-          BASELINE=65
+          BASELINE=84
           npm run test:coverage > coverage.log 2>&1 || true
           lines=$(grep -E '^All files' coverage.log | awk -F'|' '{gsub(/ /,"",$5); print $5}')
           echo "line coverage: ${lines:-<none>}% (baseline $BASELINE)"
