@@ -35,8 +35,11 @@
  * config that does not name it is refused. The two privacy keys follow the
  * same rule (3.3): null is refused when governance is already bound to the
  * contract (types 11/12), "zkVerifier" must be the verifier PrivacyManager
- * uses (so null is refused whenever a PrivacyManager is named), and a
- * testingMode verifier is refused. A "fromBlock" after the
+ * uses (so null is refused whenever a PrivacyManager is named), a
+ * testingMode verifier is refused, and so is any PrivacyManager, wrapper or
+ * circuit verifier whose runtime code hash is not the compiled artifact's
+ * (demo/utils/HandoverCodeHash.js; the refusal names both hashes and is
+ * printed unchanged after "❌ Handover failed: "). A "fromBlock" after the
  * IdentityRegistry deploy is refused (the scans would miss earlier agents).
  *
  * Every contract in ACCEPTANCE_PLAN (demo/utils/HandoverChecks.js) given here

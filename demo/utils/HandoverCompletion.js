@@ -77,7 +77,13 @@ async function assertHandoverComplete(o) {
   for (const [label, pass] of await factoryRoleLines(o, govAddr, ops)) {
     add(label, pass);
   }
-  for (const [label, pass] of await privacyLines(o, dAddr, ops, govAddr)) {
+  for (const [label, pass] of await privacyLines(
+    o,
+    dAddr,
+    ops,
+    govAddr,
+    warnings,
+  )) {
     add(label, pass);
   }
   // Bound in governance, or the creator of a trusted escrow (review M-2),

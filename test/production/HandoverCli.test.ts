@@ -11,6 +11,10 @@ const {
   settleProposal,
 } = require("../../demo/utils/Handover");
 const { planFor } = require("../../demo/utils/HandoverChecks");
+const {
+  codeHashChecks,
+  codeHashRefusal,
+} = require("../../demo/utils/HandoverCodeHash");
 
 // Review M5: scripts/handover.ts resumes after a partial run
 // (HANDOVER_PHASE=accept) and checks the proposer and voters before step 1.
@@ -130,6 +134,26 @@ describe("Handover CLI (scripts/handover.ts)", function () {
     await refusedWithNoTx("full", /"issuerAdmin" must be a wallet index/);
     delete cfg.issuerAdmin;
     await refusedWithNoTx("full", /issuerAdmin is required: 1 trusted issuer/);
+  });
+
+  // Review 3.3 MEDIUM-1: the code-hash refusal reaches the CLI unchanged.
+  it("surfaces the code-hash refusal unchanged", async function () {
+    const at = await (
+      await ethers.getContractFactory("AlwaysTrueVerifier")
+    ).deploy();
+    await f.c.zkVerifier.updateVerifier("whitelist", await at.getAddress());
+    const bad = (await codeHashChecks(null, [f.c.zkVerifier])).filter(
+      (x: any) => !x.ok,
+    );
+    expect(bad).to.have.length(1);
+    const nonce = await ethers.provider.getTransactionCount(f.deployer.address);
+    const err = await runHandover(cfg).catch((e: Error) => e);
+    expect((err as Error).message).to.equal(
+      `Handover: ${codeHashRefusal(bad[0])}`,
+    );
+    expect(
+      await ethers.provider.getTransactionCount(f.deployer.address),
+    ).to.equal(nonce);
   });
 
   it("the accept phase finishes a partial run, registry calls included", async function () {

@@ -187,7 +187,45 @@ describe("Handover power set from chain (plan 2F.5)", function () {
         "ZKVerifierIntegrated pendingOwner is not the deployer",
         "ZKVerifierIntegrated is not in testingMode",
         `PrivacyManager's verifier ${await zk.getAddress()} owned by governance`,
+        `PrivacyManager ${await pm.getAddress()} code matches the compiled PrivacyManager`,
+        `ZKVerifierIntegrated ${await zk.getAddress()} code matches the compiled ZKVerifierIntegrated`,
+        `ZKVerifierIntegrated ${await zk.getAddress()} whitelistVerifier ${await zk.whitelistVerifier()} code matches the compiled WhitelistMembershipVerifier`,
       ]);
+    });
+
+    // Review 3.3 MEDIUM-1: a circuit verifier swapped before the ceremony.
+    it("refuses an always-true whitelist verifier by code hash", async function () {
+      const zk = c.zkVerifier;
+      const at = await (
+        await ethers.getContractFactory("AlwaysTrueVerifier")
+      ).deploy();
+      const atAddr = await at.getAddress();
+      await zk.updateVerifier("whitelist", atAddr);
+      expect(await zk.testingMode()).to.equal(false);
+      await refused(
+        new RegExp(
+          `ZKVerifierIntegrated ${await zk.getAddress()} whitelistVerifier ${atAddr} runtime code hash 0x[0-9a-f]{64} is not the compiled WhitelistMembershipVerifier \\(0x[0-9a-f]{64}\\)`,
+        ),
+      );
+    });
+
+    // Review 3.3 MEDIUM-2: a look-alike wrapper that reports governance.
+    it("refuses a look-alike wrapper by code hash", async function () {
+      const fake = await (
+        await ethers.getContractFactory("FakeZKVerifier")
+      ).deploy();
+      const fakeAddr = await fake.getAddress();
+      await fake.setGovernance(govAddr);
+      await c.privacyManager.setZKVerifier(fakeAddr);
+      args.zkVerifier = await ethers.getContractAt(
+        "ZKVerifierIntegrated",
+        fakeAddr,
+      );
+      await refused(
+        new RegExp(
+          `ZKVerifierIntegrated ${fakeAddr} runtime code hash 0x[0-9a-f]{64} is not the compiled ZKVerifierIntegrated`,
+        ),
+      );
     });
 
     it("refuses a privacy contract governance is bound to but the config omits", async function () {

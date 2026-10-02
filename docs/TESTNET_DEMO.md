@@ -202,7 +202,11 @@ refuses: an `oracles` or `issuers` list that omits a contract bound on chain
 (an extra one is handed over with a warning; leave a list out to use the
 chain's set); a config that does not name a DynamicListManager, factory or privacy
 contract governance is already bound to; a `zkVerifier` that is not the
-verifier PrivacyManager uses, and a testingMode verifier; a missing issuer admin while any issuer is
+verifier PrivacyManager uses, and a testingMode verifier; a PrivacyManager,
+ZKVerifierIntegrated or any of the wrapper's five circuit verifiers whose
+runtime code hash is not the compiled artifact's (an always-true verifier
+swapped in, or a look-alike wrapper that reports governance as owner; the
+refusal names both hashes, and 83e checks the same pins); a missing issuer admin while any issuer is
 trusted, or one that is the deployer, ops, the guardian or governance; any
 IdentityRegistry agent (ops after step 5, and any other agent found in
 `AgentAdded` events) that owns, is the pending owner of, or holds a live
@@ -237,8 +241,9 @@ issuer (D25 b)" and "InvestorTypeRegistry: no governor but governance, no
 open proposal". It prints warnings that do not fail it: the deployer's
 remaining VSC with its exemption and verification (the demo deployer keeps
 100M VSC, verified and exempt, as the treasury artifact: move it and remove
-the exemption by vote), and escrow fee wallets that are not exempt or were
-registered after the handover. The InvestorTypeRegistry's own proposals
+the exemption by vote), escrow fee wallets that are not exempt or were
+registered after the handover, and a current whitelist root the deployer
+published ("republish as ops so deployer-era bindings lapse"). The InvestorTypeRegistry's own proposals
 now belong to the governor set they were created under (every `setGovernor`
 bumps `governorEpoch`, so the ceremony's removal of the deployer kills any
 planted proposal), expire 7 days after their execution time, and pass the

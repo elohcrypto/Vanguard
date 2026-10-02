@@ -7,6 +7,7 @@ const {
   assertHandoverComplete,
   handoverDeployerPowers,
 } = require("../../demo/utils/Handover");
+const { privacySteps } = require("../../demo/utils/HandoverPrivacy");
 
 // Review L6/L-C (2E.8): after a complete ceremony, every completion line
 // fails when governance (or ops) hands its power back or away. Lines that
@@ -77,6 +78,17 @@ describe("Handover completion check (table)", function () {
       await ethers.getContractFactory("ZKVerifierIntegrated")
     ).deploy(false);
     const otherZkAddr = await otherZk.getAddress();
+    // Review 3.3 MEDIUM-1/2: what only the code-hash pins catch.
+    const zkAddr = await c.zkVerifier.getAddress();
+    const alwaysTrue = await (
+      await ethers.getContractFactory("AlwaysTrueVerifier")
+    ).deploy();
+    const atAddr = await alwaysTrue.getAddress();
+    const fake = await (
+      await ethers.getContractFactory("FakeZKVerifier")
+    ).deploy();
+    const fakeAddr = await fake.getAddress();
+    await fake.setGovernance(govAddr);
     const issuerAdmin = f.issuerAdmin;
     const kcKey = ethers.keccak256(
       ethers.solidityPacked(["address"], [ops.address]),
@@ -110,6 +122,14 @@ describe("Handover completion check (table)", function () {
       [
         `PrivacyManager's verifier ${otherZkAddr} owned by governance`,
         () => pm.connect(gov).setZKVerifier(otherZkAddr),
+      ],
+      [
+        `ZKVerifierIntegrated ${zkAddr} whitelistVerifier ${atAddr} code matches the compiled WhitelistMembershipVerifier`,
+        () => c.zkVerifier.connect(gov).updateVerifier("whitelist", atAddr),
+      ],
+      [
+        `ZKVerifierIntegrated ${fakeAddr} code matches the compiled ZKVerifierIntegrated`,
+        () => pm.connect(gov).setZKVerifier(fakeAddr),
       ],
       // D25 (b): ops (registry agent) gains a claim-signer key.
       [
@@ -247,6 +267,79 @@ describe("Handover completion check (table)", function () {
       await network.provider.send("evm_revert", [snap]);
     }
     await network.provider.send("hardhat_stopImpersonatingAccount", [govAddr]);
+  });
+
+  /** Governance as a signer (impersonated, funded). */
+  async function govSigner() {
+    await network.provider.send("hardhat_impersonateAccount", [f.govAddr]);
+    await network.provider.send("hardhat_setBalance", [
+      f.govAddr,
+      "0xDE0B6B3A7640000",
+    ]);
+    return ethers.getSigner(f.govAddr);
+  }
+
+  // Review 3.3 MEDIUM-2 (d): a testingMode wrapper fails the flag and the pin.
+  it("a testingMode wrapper fails both the flag and the code-hash line", async function () {
+    const tm = await (
+      await ethers.getContractFactory("ZKVerifierIntegrated")
+    ).deploy(true);
+    const { failures } = await assertHandoverComplete({
+      ...args,
+      zkVerifier: tm,
+    });
+    expect(failures).to.include.members([
+      "ZKVerifierIntegrated is not in testingMode",
+      `ZKVerifierIntegrated ${await tm.getAddress()} code matches the compiled ZKVerifierIntegrated`,
+    ]);
+  });
+
+  // Review 3.3 LOW-3: a deployer-published root is a warning, not a failure.
+  it("warns while the current whitelist root was published by the deployer", async function () {
+    const { deployer, ops } = f;
+    const gov = await govSigner();
+    const pm = c.privacyManager;
+    const line =
+      "was published by the deployer: republish as ops so deployer-era bindings lapse";
+    expect(
+      (await assertHandoverComplete(args)).warnings.join("\n"),
+    ).to.not.include(line);
+    await pm.connect(gov).setListOperator(deployer.address);
+    await pm.connect(deployer).publishWhitelistRoot(ethers.toBeHex(7n, 32));
+    await pm.connect(gov).setListOperator(ops.address);
+    const before = await assertHandoverComplete(args);
+    expect(before.ok).to.equal(true);
+    expect(before.warnings).to.include(
+      `PrivacyManager whitelist root ${ethers.toBeHex(7n, 32)} (version 1) ${line}`,
+    );
+    await pm.connect(ops).publishWhitelistRoot(ethers.toBeHex(8n, 32));
+    const after = await assertHandoverComplete(args);
+    expect(after.warnings.join("\n")).to.not.include(line);
+    await network.provider.send("hardhat_stopImpersonatingAccount", [
+      f.govAddr,
+    ]);
+  });
+
+  // Review 3.3 LOW-4: governance owns PrivacyManager; step 5 says so.
+  it("step 5 leaves a governance-owned listOperator to a vote, with a line", async function () {
+    const gov = await govSigner();
+    const pm = c.privacyManager;
+    await pm.connect(gov).setListOperator(f.stranger.address);
+    const lines: string[] = [];
+    await privacySteps({
+      o: args,
+      d: f.deployer,
+      dAddr: f.deployer.address,
+      ok: (m: string) => lines.push(m),
+      log: (m: string) => lines.push(m),
+    });
+    expect(lines).to.deep.equal([
+      "   ⚠️  PrivacyManager: governance must set listOperator to ops by a PrivacyParameters vote",
+    ]);
+    expect(await pm.listOperator()).to.equal(f.stranger.address);
+    await network.provider.send("hardhat_stopImpersonatingAccount", [
+      f.govAddr,
+    ]);
   });
 
   // Review L-5 (mutant M9): the fee-wallet warning, present and absent.
