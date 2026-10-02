@@ -261,8 +261,12 @@ jobs:
             --submit --rpc "$RPC" --privacy-manager "$PM" > "$D/stdout" 2> "$D/stderr"
           cat "$D/stderr"
           after=$(gate); echo "after:  hasValidWhitelistProof canReceive = $after"
-          for f in "$D/stdout" "$D/stderr"; do
-            if grep -qi "$(sed 's/^0x//' "$D/secret-2")" "$f"; then echo "::error::the prover printed the secret"; exit 1; fi
+          for i in 1 2 3; do
+            hex=$(sed 's/^0x//' "$D/secret-$i")
+            dec=$(node -e 'console.log(BigInt(process.argv[1]).toString())' "0x$hex")
+            for f in "$D/stdout" "$D/stderr"; do
+              if grep -qiF -e "$hex" -e "$dec" "$f"; then echo "::error::the prover printed secret $i"; exit 1; fi
+            done
           done
           if [ "$before" != "false false" ] || [ "$after" != "true true" ]; then
             echo "::error::expected 'false false' before and 'true true' after the binding"
