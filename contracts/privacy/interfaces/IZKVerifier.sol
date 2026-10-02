@@ -43,7 +43,10 @@ interface IZKVerifier {
     function getVerifyingKey(bytes32 circuitId) external view returns (VerifyingKey memory);
 
     /**
-     * @dev Verify a proof for a specific circuit
+     * @dev Verify a proof for a specific circuit. For the whitelist circuit
+     *      `proof` is ignored and publicInputs carries [24 PLONK proof words,
+     *      nullifier, merkleRoot, walletBinding]; Task 3.3 removes that route
+     *      in favour of verifyWhitelistMembership.
      * @param circuitId Identifier for the circuit
      * @param proof The proof to verify
      * @param publicInputs Public inputs for the proof
@@ -54,6 +57,31 @@ interface IZKVerifier {
         Proof memory proof,
         uint256[] memory publicInputs
     ) external returns (bool);
+
+    /**
+     * @dev Verify a PLONK whitelist membership proof (the typed entry for
+     *      the whitelist circuit). Returns false, never reverts, on a bad
+     *      proof or on any signal >= the BN254 scalar field order.
+     * @param proof 24-word PLONK proof (snarkjs `plonk exportSolidityCallData`)
+     * @param pubSignals [nullifier, merkleRoot, walletBinding]
+     * @return True if the proof verifies against these public signals
+     */
+    function verifyWhitelistMembership(
+        uint256[24] calldata proof,
+        uint256[3] calldata pubSignals
+    ) external returns (bool);
+
+    /**
+     * @dev Proof-cache key of a whitelist proof, bound to the current
+     *      whitelist verifier instance (for clearExpiredProofs).
+     */
+    function whitelistProofCacheKey(
+        uint256[24] calldata proof,
+        uint256[3] calldata pubSignals
+    ) external view returns (bytes32);
+
+    /// @dev True on a demo deployment whose verify functions do not check proofs.
+    function testingMode() external view returns (bool);
 
     // Circuit constants
     function WHITELIST_MEMBERSHIP_CIRCUIT() external view returns (bytes32);

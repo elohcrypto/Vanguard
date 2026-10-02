@@ -221,7 +221,7 @@ class ZKProofSystemDemo {
       console.log("1️⃣ Testing integrated whitelist verification...");
       const whitelistTx = await this.contracts.zkVerifier
         .connect(this.signers[1])
-        .verifyWhitelistMembership(mockProof.plonk, [12345, 1, 0]);
+        .verifyWhitelistMembership(mockProof.plonk, [12345, 1, 1]);
       await whitelistTx.wait();
       console.log(`   ✅ Integrated whitelist verification completed`);
 

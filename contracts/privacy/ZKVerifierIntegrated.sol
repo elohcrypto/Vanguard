@@ -12,9 +12,15 @@ import "./verifiers/compliance_aggregationVerifier.sol";
 
 /**
  * @title ZKVerifierIntegrated
- * @dev Wraps the snarkjs-generated verifiers: PLONK for the whitelist
- *      circuit, Groth16 for the other four (no phase-2 contribution, so
- *      forgeable until Task 3.7 moves them to PLONK).
+ * @dev Wraps the snarkjs-generated verifiers. Two protocols:
+ *      - whitelist: PLONK (24-word proof, signals [nullifier, merkleRoot,
+ *        walletBinding]); sound; the typed entry PrivacyManager uses is
+ *        verifyWhitelistMembership (see IZKVerifier).
+ *      - blacklist, jurisdiction, accreditation, compliance: Groth16 with no
+ *        phase-2 contribution, so forgeable until Task 3.7 moves each to PLONK
+ *        with the same signal range check the whitelist path has.
+ *      Not `is IZKVerifier`: that interface also carries the legacy
+ *      verifyProof/setVerifyingKey/getVerifyingKey ABI this contract never had.
  */
 /**
  * @dev Uses Ownable2Step so ownership can migrate as governance matures —
@@ -42,6 +48,12 @@ contract ZKVerifierIntegrated is Ownable2Step, ReentrancyGuard {
     uint256 internal constant SNARK_SCALAR_FIELD =
         21888242871839275222246405745257275088548364400416034343698204186575808495617;
 
+    bytes32 private constant WHITELIST_ID = keccak256("WHITELIST_MEMBERSHIP");
+    bytes32 private constant BLACKLIST_ID = keccak256("BLACKLIST_MEMBERSHIP");
+    bytes32 private constant JURISDICTION_ID = keccak256("JURISDICTION_PROOF");
+    bytes32 private constant ACCREDITATION_ID = keccak256("ACCREDITATION_PROOF");
+    bytes32 private constant COMPLIANCE_ID = keccak256("COMPLIANCE_AGGREGATION");
+
     // Testing mode for mock verification (IMMUTABLE - set at deployment)
     bool public immutable testingMode;
 
@@ -59,13 +71,6 @@ contract ZKVerifierIntegrated is Ownable2Step, ReentrancyGuard {
     event ProofCacheHit(bytes32 indexed proofHash, string indexed proofType);
     event VerifierUpdated(string indexed proofType, address indexed newVerifier);
     event BatchProofsVerified(uint256 count, uint256 successCount);
-    
-    // Proof structure for Groth16
-    struct Proof {
-        uint256[2] a;
-        uint256[2][2] b;
-        uint256[2] c;
-    }
     
     /**
      * @param _testingMode True for mock verification (testnet), false for real ZK verification (mainnet)
@@ -95,8 +100,9 @@ contract ZKVerifierIntegrated is Ownable2Step, ReentrancyGuard {
      * PrivacyManager, in Task 3.3; msg.sender here is whoever called this
      * contract, so the binding cannot be checked here.
      *
-     * testingMode (demo only): the proof words are not checked; a proof is
-     * accepted when its nullifier and merkleRoot signals are non-zero.
+     * testingMode (demo only): the proof words are not checked and no
+     * verifier is called; a proof is accepted when all three signals are
+     * non-zero (and below the field order).
      */
     function verifyWhitelistMembership(
         uint256[24] calldata proof,
@@ -143,7 +149,7 @@ contract ZKVerifierIntegrated is Ownable2Step, ReentrancyGuard {
 
         bool result;
         if (testingMode) {
-            result = pubSignals[0] != 0 && pubSignals[1] != 0;
+            result = pubSignals[0] != 0 && pubSignals[1] != 0 && pubSignals[2] != 0;
         } else {
             result = whitelistVerifier.verifyProof(proof, pubSignals);
         }
@@ -173,7 +179,12 @@ contract ZKVerifierIntegrated is Ownable2Step, ReentrancyGuard {
         uint256[2] memory c,
         uint256[1] memory publicSignals
     ) external nonReentrant returns (bool) {
-        // Gas Optimization: Check proof cache first
+        return _verifyBlacklist(a, b, c, publicSignals);
+    }
+
+    function _verifyBlacklist(
+        uint256[2] memory a, uint256[2][2] memory b, uint256[2] memory c, uint256[1] memory publicSignals
+    ) internal returns (bool) {
         bytes32 proofHash = _proofCacheKey("blacklist", a, b, c, abi.encodePacked(publicSignals));
         if (verifiedProofs[proofHash] && block.timestamp <= proofTimestamp[proofHash] + proofCacheExpiry) {
             emit ProofCacheHit(proofHash, "blacklist");
@@ -193,7 +204,6 @@ contract ZKVerifierIntegrated is Ownable2Step, ReentrancyGuard {
 
         if (result) {
             validProofs["blacklist"]++;
-            // Cache successful proof for gas optimization
             verifiedProofs[proofHash] = true;
             proofTimestamp[proofHash] = block.timestamp;
             emit ProofCached(proofHash, "blacklist");
@@ -217,7 +227,12 @@ contract ZKVerifierIntegrated is Ownable2Step, ReentrancyGuard {
         uint256[2] memory c,
         uint256[1] memory publicSignals
     ) external nonReentrant returns (bool) {
-        // Gas Optimization: Check proof cache first
+        return _verifyJurisdiction(a, b, c, publicSignals);
+    }
+
+    function _verifyJurisdiction(
+        uint256[2] memory a, uint256[2][2] memory b, uint256[2] memory c, uint256[1] memory publicSignals
+    ) internal returns (bool) {
         bytes32 proofHash = _proofCacheKey("jurisdiction", a, b, c, abi.encodePacked(publicSignals));
         if (verifiedProofs[proofHash] && block.timestamp <= proofTimestamp[proofHash] + proofCacheExpiry) {
             emit ProofCacheHit(proofHash, "jurisdiction");
@@ -237,7 +252,6 @@ contract ZKVerifierIntegrated is Ownable2Step, ReentrancyGuard {
 
         if (result) {
             validProofs["jurisdiction"]++;
-            // Cache successful proof for gas optimization
             verifiedProofs[proofHash] = true;
             proofTimestamp[proofHash] = block.timestamp;
             emit ProofCached(proofHash, "jurisdiction");
@@ -261,7 +275,12 @@ contract ZKVerifierIntegrated is Ownable2Step, ReentrancyGuard {
         uint256[2] memory c,
         uint256[1] memory publicSignals
     ) external nonReentrant returns (bool) {
-        // Gas Optimization: Check proof cache first
+        return _verifyAccreditation(a, b, c, publicSignals);
+    }
+
+    function _verifyAccreditation(
+        uint256[2] memory a, uint256[2][2] memory b, uint256[2] memory c, uint256[1] memory publicSignals
+    ) internal returns (bool) {
         bytes32 proofHash = _proofCacheKey("accreditation", a, b, c, abi.encodePacked(publicSignals));
         if (verifiedProofs[proofHash] && block.timestamp <= proofTimestamp[proofHash] + proofCacheExpiry) {
             emit ProofCacheHit(proofHash, "accreditation");
@@ -281,7 +300,6 @@ contract ZKVerifierIntegrated is Ownable2Step, ReentrancyGuard {
 
         if (result) {
             validProofs["accreditation"]++;
-            // Cache successful proof for gas optimization
             verifiedProofs[proofHash] = true;
             proofTimestamp[proofHash] = block.timestamp;
             emit ProofCached(proofHash, "accreditation");
@@ -305,7 +323,12 @@ contract ZKVerifierIntegrated is Ownable2Step, ReentrancyGuard {
         uint256[2] memory c,
         uint256[6] memory publicSignals
     ) external nonReentrant returns (bool) {
-        // Gas Optimization: Check proof cache first
+        return _verifyComplianceAggregation(a, b, c, publicSignals);
+    }
+
+    function _verifyComplianceAggregation(
+        uint256[2] memory a, uint256[2][2] memory b, uint256[2] memory c, uint256[6] memory publicSignals
+    ) internal returns (bool) {
         bytes32 proofHash = _proofCacheKey("compliance", a, b, c, abi.encodePacked(publicSignals));
         if (verifiedProofs[proofHash] && block.timestamp <= proofTimestamp[proofHash] + proofCacheExpiry) {
             emit ProofCacheHit(proofHash, "compliance");
@@ -327,7 +350,6 @@ contract ZKVerifierIntegrated is Ownable2Step, ReentrancyGuard {
 
         if (result) {
             validProofs["compliance"]++;
-            // Cache successful proof for gas optimization
             verifiedProofs[proofHash] = true;
             proofTimestamp[proofHash] = block.timestamp;
             emit ProofCached(proofHash, "compliance");
@@ -384,7 +406,7 @@ contract ZKVerifierIntegrated is Ownable2Step, ReentrancyGuard {
 
     /**
      * @dev Update verifier contract for a specific proof type
-     * @param proofType The type of proof ("whitelist", "jurisdiction", "accreditation", "compliance")
+     * @param proofType "whitelist", "blacklist", "jurisdiction", "accreditation" or "compliance"
      * @param newVerifier Address of the new verifier contract
      *
      * @custom:security Owner can disable ZK verification with a single transaction.
@@ -398,7 +420,8 @@ contract ZKVerifierIntegrated is Ownable2Step, ReentrancyGuard {
      * What is and is not guarded:
      *   - NO timelock or delay on the swap (documented trust assumption)
      *   - `newVerifier` must be a contract, but there is NO proof it implements
-     *     Groth16 correctly — only code presence is checked
+     *     the circuit's PLONK (whitelist) or Groth16 (others) verifier — only
+     *     code presence is checked
      *   - a `VerifierUpdated` event IS emitted, so swaps are observable on-chain
      *     and can be monitored
      *
@@ -475,72 +498,81 @@ contract ZKVerifierIntegrated is Ownable2Step, ReentrancyGuard {
 
     // Circuit constants
     function WHITELIST_MEMBERSHIP_CIRCUIT() external pure returns (bytes32) {
-        return keccak256("WHITELIST_MEMBERSHIP");
+        return WHITELIST_ID;
     }
 
     function BLACKLIST_MEMBERSHIP_CIRCUIT() external pure returns (bytes32) {
-        return keccak256("BLACKLIST_MEMBERSHIP");
+        return BLACKLIST_ID;
     }
 
     function JURISDICTION_PROOF_CIRCUIT() external pure returns (bytes32) {
-        return keccak256("JURISDICTION_PROOF");
+        return JURISDICTION_ID;
     }
 
     function ACCREDITATION_PROOF_CIRCUIT() external pure returns (bytes32) {
-        return keccak256("ACCREDITATION_PROOF");
+        return ACCREDITATION_ID;
     }
 
     function COMPLIANCE_AGGREGATION_CIRCUIT() external pure returns (bytes32) {
-        return keccak256("COMPLIANCE_AGGREGATION");
+        return COMPLIANCE_ID;
     }
 
     /**
-     * @dev Verify a proof for a specific circuit
+     * @dev Verify a proof for a specific circuit, routed by circuit id.
      * @param circuitId Identifier for the circuit
-     * @param proof The proof to verify
+     * @param proof Groth16 proof; ignored for the whitelist circuit
      * @param publicInputs Public inputs for the proof
      * @return True if the proof is valid
+     *
+     * Whitelist route (PLONK): the Groth16 `proof` struct cannot carry 24
+     * words, so the proof travels in publicInputs as [24 proof words,
+     * nullifier, merkleRoot, walletBinding]. It exists only for
+     * PrivacyManager.submitPrivateProof; Task 3.3 replaces that caller with
+     * the typed verifyWhitelistMembership and deletes this route.
      */
     function verifyCircuitProof(
         bytes32 circuitId,
         IZKVerifier.Proof memory proof,
         uint256[] memory publicInputs
-    ) external returns (bool) {
-        // Convert proof format
-        uint256[2] memory a = proof.a;
-        uint256[2][2] memory b = proof.b;
-        uint256[2] memory c = proof.c;
+    ) external nonReentrant returns (bool) {
+        return _verifyCircuit(circuitId, proof, publicInputs, true);
+    }
 
-        // Route to appropriate verifier based on circuit ID
-        if (circuitId == this.WHITELIST_MEMBERSHIP_CIRCUIT()) {
-            // PLONK: the Groth16 `proof` struct cannot carry 24 words, so the
-            // whitelist proof travels in publicInputs as [24 proof words,
-            // nullifier, merkleRoot, walletBinding]; `proof` is ignored.
-            require(publicInputs.length == 27, "Invalid public inputs for whitelist circuit");
+    /// @dev Shared router of verifyCircuitProof (strict: a malformed entry
+    ///      reverts) and verifyBatchProofs (non-strict: it returns false).
+    function _verifyCircuit(
+        bytes32 circuitId,
+        IZKVerifier.Proof memory proof,
+        uint256[] memory pi,
+        bool strict
+    ) internal returns (bool) {
+        uint256 n = pi.length;
+        if (circuitId == WHITELIST_ID) {
+            if (n != 27) return _malformed(strict, "Invalid public inputs for whitelist circuit");
             uint256[24] memory plonkProof;
-            uint256[3] memory whitelistSignals;
-            for (uint256 i = 0; i < 24; i++) plonkProof[i] = publicInputs[i];
-            for (uint256 i = 0; i < 3; i++) whitelistSignals[i] = publicInputs[24 + i];
-            return this.verifyWhitelistMembership(plonkProof, whitelistSignals);
-        } else if (circuitId == this.BLACKLIST_MEMBERSHIP_CIRCUIT()) {
-            require(publicInputs.length == 1, "Invalid public inputs for blacklist circuit");
-            uint256[1] memory blacklistInputs = [publicInputs[0]];
-            return this.verifyBlacklistNonMembership(a, b, c, blacklistInputs);
-        } else if (circuitId == this.JURISDICTION_PROOF_CIRCUIT()) {
-            require(publicInputs.length == 1, "Invalid public inputs for jurisdiction circuit");
-            uint256[1] memory jurisdictionInputs = [publicInputs[0]];
-            return this.verifyJurisdictionProof(a, b, c, jurisdictionInputs);
-        } else if (circuitId == this.ACCREDITATION_PROOF_CIRCUIT()) {
-            require(publicInputs.length == 1, "Invalid public inputs for accreditation circuit");
-            uint256[1] memory accreditationInputs = [publicInputs[0]];
-            return this.verifyAccreditationProof(a, b, c, accreditationInputs);
-        } else if (circuitId == this.COMPLIANCE_AGGREGATION_CIRCUIT()) {
-            require(publicInputs.length == 6, "Invalid public inputs for compliance circuit");
-            uint256[6] memory complianceInputs = [publicInputs[0], publicInputs[1], publicInputs[2], publicInputs[3], publicInputs[4], publicInputs[5]];
-            return this.verifyComplianceAggregation(a, b, c, complianceInputs);
-        } else {
-            revert("ZKVerifierIntegrated: Unknown circuit ID");
+            for (uint256 i = 0; i < 24; i++) plonkProof[i] = pi[i];
+            return _verifyWhitelist(plonkProof, [pi[24], pi[25], pi[26]]);
+        } else if (circuitId == BLACKLIST_ID) {
+            if (n != 1) return _malformed(strict, "Invalid public inputs for blacklist circuit");
+            return _verifyBlacklist(proof.a, proof.b, proof.c, [pi[0]]);
+        } else if (circuitId == JURISDICTION_ID) {
+            if (n != 1) return _malformed(strict, "Invalid public inputs for jurisdiction circuit");
+            return _verifyJurisdiction(proof.a, proof.b, proof.c, [pi[0]]);
+        } else if (circuitId == ACCREDITATION_ID) {
+            if (n != 1) return _malformed(strict, "Invalid public inputs for accreditation circuit");
+            return _verifyAccreditation(proof.a, proof.b, proof.c, [pi[0]]);
+        } else if (circuitId == COMPLIANCE_ID) {
+            if (n != 6) return _malformed(strict, "Invalid public inputs for compliance circuit");
+            return _verifyComplianceAggregation(
+                proof.a, proof.b, proof.c, [pi[0], pi[1], pi[2], pi[3], pi[4], pi[5]]
+            );
         }
+        return _malformed(strict, "ZKVerifierIntegrated: Unknown circuit ID");
+    }
+
+    function _malformed(bool strict, string memory reason) private pure returns (bool) {
+        require(!strict, reason);
+        return false;
     }
 
     /**
@@ -548,12 +580,9 @@ contract ZKVerifierIntegrated is Ownable2Step, ReentrancyGuard {
      * @param circuitId Circuit identifier
      * @return True if circuit is registered
      */
-    function isCircuitRegistered(bytes32 circuitId) external view returns (bool) {
-        return circuitId == this.WHITELIST_MEMBERSHIP_CIRCUIT() ||
-               circuitId == this.BLACKLIST_MEMBERSHIP_CIRCUIT() ||
-               circuitId == this.JURISDICTION_PROOF_CIRCUIT() ||
-               circuitId == this.ACCREDITATION_PROOF_CIRCUIT() ||
-               circuitId == this.COMPLIANCE_AGGREGATION_CIRCUIT();
+    function isCircuitRegistered(bytes32 circuitId) external pure returns (bool) {
+        return circuitId == WHITELIST_ID || circuitId == BLACKLIST_ID || circuitId == JURISDICTION_ID ||
+               circuitId == ACCREDITATION_ID || circuitId == COMPLIANCE_ID;
     }
 
     /**
@@ -568,10 +597,10 @@ contract ZKVerifierIntegrated is Ownable2Step, ReentrancyGuard {
     }
 
     /**
-     * @dev Batch verify multiple proofs (Gas Optimization: ~40% savings)
-     * @param circuitIds Array of circuit identifiers
-     * @param proofs Array of proofs to verify
-     * @param publicInputsArray Array of public inputs for each proof
+     * @dev Verify a batch of proofs that may mix circuits; same rules as
+     *      verifyCircuitProof per entry, except that a malformed entry
+     *      (wrong input count, unknown circuit) yields false instead of
+     *      reverting the batch.
      * @return results Array of verification results
      * @return successCount Number of successful verifications
      */
@@ -587,18 +616,11 @@ contract ZKVerifierIntegrated is Ownable2Step, ReentrancyGuard {
         require(circuitIds.length > 0 && circuitIds.length <= 50, "Invalid batch size");
 
         results = new bool[](circuitIds.length);
-        successCount = 0;
-
         for (uint256 i = 0; i < circuitIds.length; i++) {
-            // Use try-catch to prevent one failure from blocking the entire batch
-            try this.verifyCircuitProof(circuitIds[i], proofs[i], publicInputsArray[i]) returns (bool result) {
-                results[i] = result;
-                if (result) {
-                    successCount++;
-                }
-            } catch {
-                results[i] = false;
-            }
+            // Internal calls: the old `try this.verifyCircuitProof` re-entered
+            // the nonReentrant verify* externals and always returned false.
+            results[i] = _verifyCircuit(circuitIds[i], proofs[i], publicInputsArray[i], false);
+            if (results[i]) successCount++;
         }
 
         emit BatchProofsVerified(circuitIds.length, successCount);

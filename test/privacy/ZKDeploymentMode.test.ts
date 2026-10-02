@@ -18,7 +18,7 @@ describe("ZK deployment mode", function () {
     // PLONK shape since Task 3.1: 24 proof words, [nullifier, root, wallet].
     const ok = await v.verifyWhitelistMembership.staticCall(
       Array(24).fill(0),
-      [1, 1, 0],
+      [1, 1, 1],
     );
     expect(ok, "a zero proof must not verify").to.be.false;
   });
@@ -30,7 +30,7 @@ describe("ZK deployment mode", function () {
     // PLONK shape since Task 3.1: 24 proof words, [nullifier, root, wallet].
     const ok = await v.verifyWhitelistMembership.staticCall(
       Array(24).fill(0),
-      [1, 1, 0],
+      [1, 1, 1],
     );
     expect(ok, "testingMode is a mock and must never be the production default")
       .to.be.true;

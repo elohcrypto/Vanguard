@@ -18,7 +18,7 @@ describe("ZKVerifierIntegrated - Phase 2 Features", function () {
   // Whitelist is PLONK since Task 3.1: 24 proof words and
   // [nullifier, merkleRoot, walletBinding].
   const samplePlonkProof = Array.from({ length: 24 }, (_, i) => i + 1);
-  const samplePublicSignals = [12345, 777, 0];
+  const samplePublicSignals = [12345, 777, 4242]; // testingMode: all non-zero
   // verifyCircuitProof carries a whitelist proof in publicInputs.
   const whitelistInputs = [...samplePlonkProof, ...samplePublicSignals];
 

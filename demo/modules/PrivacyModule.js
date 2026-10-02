@@ -1955,7 +1955,9 @@ class PrivacyModule {
 
     try {
       const userAddress = this.state.signers[0].address;
-      const merkleRoot = ethers.randomBytes(32);
+      // 31 bytes: a 32-byte root is >= the field order ~80% of the time and the
+      // wrapper then refuses it (R-3R-7), even in testingMode.
+      const merkleRoot = ethers.randomBytes(31);
 
       console.log(
         `\n🔐 Generating ${this.state.zkMode.toUpperCase()} whitelist proof...`,

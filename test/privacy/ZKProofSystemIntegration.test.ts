@@ -155,7 +155,7 @@ describe("🔐 Complete ZK Proof System Integration Tests", function () {
       console.log("🧪 Testing whitelist membership verifier...");
 
       // [nullifier, merkleRoot, walletBinding]
-      const publicSignals: [number, number, number] = [mockNullifier, 1, 0];
+      const publicSignals: [number, number, number] = [mockNullifier, 1, 1];
       const result = await whitelistVerifier.verifyProof(
         mockPlonkProof,
         publicSignals,
@@ -241,7 +241,7 @@ describe("🔐 Complete ZK Proof System Integration Tests", function () {
     it("Should verify whitelist membership through integrated verifier", async function () {
       console.log("🧪 Testing integrated whitelist verification...");
 
-      const publicSignals: [number, number, number] = [mockNullifier, 1, 0];
+      const publicSignals: [number, number, number] = [mockNullifier, 1, 1];
       const tx = await zkVerifier
         .connect(user1)
         .verifyWhitelistMembership(mockPlonkProof, publicSignals);
