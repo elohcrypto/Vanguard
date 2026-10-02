@@ -65,10 +65,45 @@ describe("Handover completion check (table)", function () {
       ["OracleManager", handAway(c.oracleManager)],
       ["DynamicListManager", handAway(c.dynamicListManager)],
       ["InvestorTypeRegistry", handAway(c.investorTypeRegistry)],
+      ["OnchainIDFactory", handAway(c.onchainIDFactory)],
       ["VanguardGovernance", handAway(c.governance)],
     ].map(([l, f]) => [`${l} owned by governance`, f] as any);
+    const escrowF = c.escrowWalletFactory;
+    const issuerAdmin = f.issuerAdmin;
+    const kcKey = ethers.keccak256(
+      ethers.solidityPacked(["address"], [ops.address]),
+    );
     const breaks: [string, () => Promise<unknown>][] = [
       ...owned,
+      // 2F.5 (M4): the escrow factory line covers ownership and roles.
+      [
+        "EscrowWalletFactory owned by governance, deployer holds no role",
+        handAway(escrowF),
+      ],
+      [
+        "EscrowWalletFactory owned by governance, deployer holds no role",
+        async () =>
+          escrowF.connect(gov).grantRole(await escrowF.ADMIN_ROLE(), d),
+      ],
+      // D25 (b): ops (registry agent) gains a claim-signer key.
+      [
+        "no IdentityRegistry agent owns or holds a key on a trusted issuer (D25 b)",
+        () => issuer.connect(issuerAdmin).addIssuerKey(kcKey, 3, 1),
+      ],
+      // L2: a new governor, or an open proposal, in the side-governance.
+      [
+        "InvestorTypeRegistry: no governor but governance, no open proposal",
+        () => c.investorTypeRegistry.connect(gov).setGovernor(s, true, 1),
+      ],
+      [
+        "InvestorTypeRegistry: no governor but governance, no open proposal",
+        async () => {
+          const cfg = await c.investorTypeRegistry.getInvestorTypeConfig(1);
+          await c.investorTypeRegistry
+            .connect(gov)
+            .createProposal(1, [...cfg], "planted");
+        },
+      ],
       [
         "deployer is not an InvestorTypeRegistry compliance officer",
         () => c.investorTypeRegistry.connect(gov).setComplianceOfficer(d, true),
@@ -157,7 +192,7 @@ describe("Handover completion check (table)", function () {
       [
         `deployer does not own ${issuerName}`,
         async () => {
-          await issuer.connect(ops).transferOwnership(d);
+          await issuer.connect(issuerAdmin).transferOwnership(d);
           await issuer.connect(deployer).acceptOwnership();
         },
       ],

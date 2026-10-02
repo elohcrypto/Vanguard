@@ -37,6 +37,8 @@ const PROPOSAL_TYPE_NAMES = [
   "ListUpdate",
   "IdentityRegistryParameters",
   "GovernanceTokenParameters",
+  "EscrowFactoryParameters",
+  "IdentityFactoryParameters",
 ];
 
 /**
@@ -912,8 +914,14 @@ class GovernanceModule {
       console.log(
         "8. GovernanceTokenParameters - Pause/unpause or manage agents of the vote token",
       );
+      console.log(
+        "9. EscrowFactoryParameters - Escrow factory fee wallet, registry, rules (after the handover)",
+      );
+      console.log(
+        "10. IdentityFactoryParameters - OnchainID factory fees, pause, withdraw (after the handover)",
+      );
 
-      const typeChoice = await this.promptUser("Select proposal type (0-8): ");
+      const typeChoice = await this.promptUser("Select proposal type (0-10): ");
       const proposalType = parseInt(typeChoice);
 
       if (proposalType === 0) {

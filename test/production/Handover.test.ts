@@ -34,6 +34,7 @@ describe("Deployer holds no power after handover (plan Task 0.3)", function () {
   let deployer: SignerWithAddress;
   let ops: SignerWithAddress;
   let guardian: SignerWithAddress;
+  let issuerAdmin: SignerWithAddress;
   let proposer: SignerWithAddress;
   let voters: SignerWithAddress[];
   let token: any;
@@ -54,6 +55,7 @@ describe("Deployer holds no power after handover (plan Task 0.3)", function () {
       deployer,
       ops,
       guardian,
+      issuerAdmin,
       governance,
       token,
       governanceToken,
@@ -76,6 +78,7 @@ describe("Deployer holds no power after handover (plan Task 0.3)", function () {
       governance,
     };
     for (const e of ACCEPTANCE_PLAN) {
+      if (!contracts[e.key]) continue; // optional factories (2F.5) not deployed here
       const id = await proposeAcceptOwnership(
         governance,
         proposer,
@@ -92,7 +95,7 @@ describe("Deployer holds no power after handover (plan Task 0.3)", function () {
     let alice: SignerWithAddress,
       bob: SignerWithAddress,
       carol: SignerWithAddress;
-    [deployer, ops, guardian, investor, alice, bob, carol] =
+    [deployer, ops, guardian, investor, alice, bob, carol, issuerAdmin] =
       await ethers.getSigners();
     proposer = alice;
     voters = [bob, carol];
@@ -262,8 +265,20 @@ describe("Deployer holds no power after handover (plan Task 0.3)", function () {
     ).to.be.revertedWith("ClaimIssuer: Sender does not have claim signer key");
   });
 
-  it("the ops multisig can issue a claim that verifies", async function () {
-    await issueSigned(kycIssuer, ops, identityAddr, KYC_TOPIC, KYC_DATA);
+  // 2F.5 (D25 b): the issuer goes to issuerAdmin, never to ops, the
+  // registry agent: one key may not both register and attest identities.
+  it("issuerAdmin can issue a claim that verifies; ops cannot", async function () {
+    expect(await kycIssuer.owner()).to.equal(issuerAdmin.address);
+    await expect(
+      issueSigned(kycIssuer, ops, identityAddr, KYC_TOPIC, KYC_DATA),
+    ).to.be.revertedWith("ClaimIssuer: Sender does not have claim signer key");
+    await issueSigned(
+      kycIssuer,
+      issuerAdmin,
+      identityAddr,
+      KYC_TOPIC,
+      KYC_DATA,
+    );
     expect(await identityRegistry.isVerified(investor.address)).to.equal(true);
   });
 });

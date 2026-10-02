@@ -15,7 +15,9 @@
 /**
  * @class SignerManager
  * @description Manages signer allocation for the demo system.
- * Reserves signers[0-3] for system roles and allocates signers[4+] for users/investors.
+ * Reserves signers[0-3] for system roles and 9-11 for the handover roles
+ * (issuer admin, ops, guardian; plan 2F.5, L11) and allocates the rest of
+ * signers[4+] to users/investors.
  */
 class SignerManager {
   /**
@@ -32,7 +34,7 @@ class SignerManager {
 
   /**
    * Get next available signer for investor or user
-   * Skips reserved signers (0-3) and already allocated signers
+   * Skips reserved signers (0-3, 9-11) and already allocated signers
    *
    * @param {string} type - 'investor' or 'user'
    * @param {string} name - Name of the investor/user
@@ -106,6 +108,21 @@ class SignerManager {
         role: "AML Issuer",
         address: this.state.signers[3]?.address,
       },
+      {
+        index: 9,
+        role: "Issuer Admin (handover, D25 b)",
+        address: this.state.signers[9]?.address,
+      },
+      {
+        index: 10,
+        role: "Ops (handover)",
+        address: this.state.signers[10]?.address,
+      },
+      {
+        index: 11,
+        role: "Guardian (handover)",
+        address: this.state.signers[11]?.address,
+      },
     ];
   }
 
@@ -147,7 +164,9 @@ class SignerManager {
 
     const availableCount =
       this.state.signers.length -
-      this.state.reservedSigners.size -
+      [...this.state.reservedSigners].filter(
+        (i) => i < this.state.signers.length,
+      ).length -
       this.state.allocatedSigners.size;
     console.log(
       `\n✅ Available Signers: ${availableCount} (signers[${this.state.nextAvailableSignerIndex}] onwards)`,
@@ -157,7 +176,8 @@ class SignerManager {
   /**
    * Get a specific reserved signer by role
    *
-   * @param {string} role - Role name: 'owner', 'feeWallet', 'kycIssuer', or 'amlIssuer'
+   * @param {string} role - Role name: 'owner', 'feeWallet', 'kycIssuer',
+   *   'amlIssuer', 'issuerAdmin', 'ops' or 'guardian'
    * @returns {Object|null} Signer object or null if not found
    *
    * @example
@@ -170,6 +190,9 @@ class SignerManager {
       feeWallet: 1,
       kycIssuer: 2,
       amlIssuer: 3,
+      issuerAdmin: 9,
+      ops: 10,
+      guardian: 11,
     };
 
     const index = roleMap[role];
@@ -239,7 +262,9 @@ class SignerManager {
   getAvailableCount() {
     return (
       this.state.signers.length -
-      this.state.reservedSigners.size -
+      [...this.state.reservedSigners].filter(
+        (i) => i < this.state.signers.length,
+      ).length -
       this.state.allocatedSigners.size
     );
   }

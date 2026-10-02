@@ -205,11 +205,11 @@ describe("Handover preflight and self-healing (plan 2E.2)", function () {
     ).to.equal(nonce);
   }
 
-  it("rejects an issuer where ops holds a non-management key", async function () {
+  it("rejects an issuer where issuerAdmin holds a non-management key", async function () {
     const [issuer] = args.issuers;
-    await issuer.addIssuerKey(keyOf(ops.address), 3, 1); // CLAIM_SIGNER_KEY
+    await issuer.addIssuerKey(keyOf(args.issuerAdmin.address), 3, 1); // CLAIM_SIGNER_KEY
     await rejectsBeforeAnyTx(
-      /already holds a purpose-3 key .* cannot be re-added/,
+      /issuerAdmin .* already holds a purpose-3 key .* cannot be re-added/,
     );
   });
 
@@ -303,9 +303,11 @@ describe("Handover preflight and self-healing (plan 2E.2)", function () {
     await rejectsBeforeAnyTx(/governance is not bound to Token/);
   });
 
-  it("rejects ops that cannot sign when the deployer owns an issuer", async function () {
-    args.ops = ops.address;
-    await rejectsBeforeAnyTx(/ops must be a signer to accept ownership of/);
+  it("rejects an issuerAdmin that cannot sign when the deployer owns an issuer", async function () {
+    args.issuerAdmin = args.issuerAdmin.address;
+    await rejectsBeforeAnyTx(
+      /issuerAdmin must be a signer to accept ownership of/,
+    );
   });
 
   it("rejects an oracle owned by a third party", async function () {
@@ -327,10 +329,11 @@ describe("Handover preflight and self-healing (plan 2E.2)", function () {
     await rejectsBeforeAnyTx(/does not own IdentityRegistry/);
   });
 
-  it("rejects an issuer where ops holds a revoked key", async function () {
+  it("rejects an issuer where issuerAdmin holds a revoked key", async function () {
     const [issuer] = args.issuers;
-    await issuer.addIssuerKey(keyOf(ops.address), 1, 1);
-    await issuer.revokeIssuerKey(keyOf(ops.address));
+    const admin = args.issuerAdmin.address;
+    await issuer.addIssuerKey(keyOf(admin), 1, 1);
+    await issuer.revokeIssuerKey(keyOf(admin));
     await rejectsBeforeAnyTx(
       /already holds a revoked key .* cannot be re-added/,
     );
@@ -372,6 +375,8 @@ describe("Handover preflight and self-healing (plan 2E.2)", function () {
     ).deploy(await c.oracleManager.getAddress(), "BL", "d");
     const vgt = await c.governanceToken.getAddress();
     await c.complianceRules.setBlacklistOracle(vgt, await bl.getAddress());
+    // Bound on chain, so the config must list it (2F.5) to reach the D23 check.
+    args.oracles = [...args.oracles, bl];
     const label = "no blacklist oracle bound to GovernanceToken (D23)";
     expect((await check(label)).ok).to.equal(false);
     await rejectsBeforeAnyTx(/bound to GovernanceToken: D23 forbids it/);

@@ -13,6 +13,9 @@
  * the first transaction; step 1 clears any VGT guardian and step 2 moves an
  * oracle list-manager role off the deployer (to the DynamicListManager, else
  * zero). Every transaction is followed by a state assertion; any mismatch throws.
+ * Task 2F.5: the power set is read from chain (HandoverPowers.js), issuers go
+ * to issuerAdmin (never ops, D25 b), both factories are nominated, bound and
+ * accepted, and the completion check is HandoverCompletion.js.
  */
 
 const { ethers } = require("hardhat");
@@ -22,18 +25,21 @@ const {
   planFor,
   addrOf,
   same,
-  keyOf,
-  hasLiveKey,
-  issuerLabel,
   listManagerOf,
   withBoundRegistry,
   preflight,
   checkVoters,
-  assertHandoverComplete,
 } = require("./HandoverChecks");
+const {
+  withDerivedPowers,
+  checkIssuerAdmin,
+  preflightPowers,
+  handOverIssuers,
+  bindFactory,
+  factorySteps,
+} = require("./HandoverPowers");
+const { assertHandoverComplete } = require("./HandoverCompletion");
 
-const MANAGEMENT_KEY = 1;
-const ECDSA_TYPE = 1;
 const STATUS = [
   "Pending",
   "Active",
@@ -58,15 +64,6 @@ async function send(p) {
   return (await p).wait();
 }
 
-async function hasLiveManagementKey(issuer, wallet) {
-  const k = await issuer.issuerKeys(keyOf(wallet));
-  return (
-    k.key !== ethers.ZeroHash &&
-    Number(k.purpose) === MANAGEMENT_KEY &&
-    !k.revoked
-  );
-}
-
 /**
  * Plan steps 1, 2, 5, 3. Returns a report; throws on the first mismatch.
  * `registryProposals` lists InvestorTypeRegistry calls the deployer could not
@@ -75,6 +72,9 @@ async function hasLiveManagementKey(issuer, wallet) {
 async function handoverDeployerPowers(o) {
   const log = o.log || console.log;
   o = await withBoundRegistry(o, log);
+  // Oracles and issuers bound on chain; refuses a config that omits one.
+  o = await withDerivedPowers(o, log);
+  await checkIssuerAdmin(o);
   const d = o.deployer;
   const dAddr = await addrOf(d);
   const ops = await addrOf(o.ops);
@@ -88,6 +88,7 @@ async function handoverDeployerPowers(o) {
 
   // Read-only; throws before any transaction when a precondition fails.
   const { governanceOwned } = await preflight(o);
+  await preflightPowers(o, { governanceOwned });
   const ctx = { o, d, dAddr, govAddr, report, ok, log };
   // Send, read back, assert, print.
   const apply = async (tx, readBack, msg) => {
@@ -145,42 +146,7 @@ async function handoverDeployerPowers(o) {
     );
   }
 
-  for (const issuer of o.issuers || []) {
-    const label = await issuerLabel(issuer);
-    const isOwner = same(await issuer.owner(), dAddr);
-    const hasKey = await hasLiveKey(issuer, dAddr);
-    if (!isOwner && !hasKey) {
-      log(`   ℹ️  deployer holds no key on ${label}: nothing to hand over`);
-      continue;
-    }
-    if (!(await hasLiveManagementKey(issuer, ops))) {
-      await send(
-        issuer.connect(d).addIssuerKey(keyOf(ops), MANAGEMENT_KEY, ECDSA_TYPE),
-      );
-    }
-    // Ownership nominates then accepts, before the deployer key is revoked:
-    // onlyManagementKey also admits the owner, so the owner is the
-    // last-resort manager once ops has accepted.
-    await send(issuer.connect(d).transferOwnership(ops));
-    check(
-      same(await issuer.pendingOwner(), ops),
-      `${label} pendingOwner is not ops`,
-    );
-    await send(issuer.connect(o.ops).acceptOwnership());
-    check(same(await issuer.owner(), ops), `${label} owner is not ops`);
-    check(
-      await hasLiveManagementKey(issuer, ops),
-      `ops holds no live MANAGEMENT_KEY on ${label}; refusing to revoke the deployer key`,
-    );
-    if (hasKey) {
-      await send(issuer.connect(o.ops).revokeIssuerKey(keyOf(dAddr)));
-    }
-    check(
-      !(await hasLiveKey(issuer, dAddr)),
-      `deployer key still live on ${label}`,
-    );
-    ok(`${label}: owner ops, ops MANAGEMENT_KEY live, deployer key revoked`);
-  }
+  await handOverIssuers(ctx);
 
   log("\n📝 Step 2: oracles to ops");
   for (const oracle of o.oracles || []) {
@@ -222,6 +188,7 @@ async function handoverDeployerPowers(o) {
     async () => !(await o.complianceRules.ruleAdministrators(dAddr)),
     "deployer removed as ComplianceRules rule administrator",
   );
+  await factorySteps(ctx);
   for (const step of regSteps.slice(1)) await registryCall(ctx, step);
 
   log("\n📝 Step 3: nominate governance as owner");
@@ -237,6 +204,8 @@ async function handoverDeployerPowers(o) {
       `${label} pendingOwner is not governance`,
     );
     ok(`${label}: pendingOwner = governance`);
+    // Factories: bound to their type now, while the deployer owns governance.
+    if (e.bind) await bindFactory(ctx, e);
   }
   return report;
 }

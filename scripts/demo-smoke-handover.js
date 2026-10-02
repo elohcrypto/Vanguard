@@ -23,6 +23,8 @@ const { advancePastVoterAge } = require("../demo/utils/ChainTime");
 /** Wallet roles from docs/TESTNET_DEMO.md. */
 const OPS = 10;
 const GUARDIAN = 11;
+// Takes any claim issuer the deployer holds; never ops (2F.5, D25 b).
+const ISSUER_ADMIN = 9;
 const PROPOSER = 1;
 // Verified VGT holders the smoke already onboarded (0-3 and 6-8). Five
 // votes clear every quorum in the plan (TokenParameters is 30%).
@@ -65,9 +67,9 @@ async function runHandoverSmoke(state, failures) {
     return;
   }
 
-  // Eight proposals at most (seven acceptances, or six when 83b already gave
-  // governance the registry plus two registry calls): give the
-  // proposer and every voter enough VGT for all of them.
+  // Ten proposals at most (nine acceptances incl. both factories, or eight
+  // when 83b already gave governance the registry plus two registry calls):
+  // give the proposer and every voter enough VGT for all of them.
   const vgt = c("governanceToken");
   const perRound =
     (await governance.proposalCreationCost()) + (await governance.votingCost());
@@ -76,7 +78,7 @@ async function runHandoverSmoke(state, failures) {
       failures.push(`handover smoke: wallet ${i} is not a verified voter`);
       return;
     }
-    const want = perRound * 8n;
+    const want = perRound * 10n;
     const have = await vgt.balanceOf(s[i].address);
     if (have < want) {
       await (
@@ -97,6 +99,7 @@ async function runHandoverSmoke(state, failures) {
     deployer: s[0],
     ops: s[OPS],
     guardian: s[GUARDIAN],
+    issuerAdmin: s[ISSUER_ADMIN],
     governance,
     token: c("digitalToken"),
     governanceToken: vgt,
@@ -106,6 +109,9 @@ async function runHandoverSmoke(state, failures) {
     investorTypeRegistry: c("investorTypeRegistry"),
     // The smoke does not deploy DynamicListManager (option 84); optional in the plan.
     dynamicListManager: undefined,
+    // Both factories join the plan (2F.5, M4); the escrow leg deployed one.
+    escrowWalletFactory: c("escrowFactory"),
+    onchainIDFactory: c("onchainIDFactory"),
     oracles: ["whitelistOracle", "blacklistOracle", "consensusOracle"].map(c),
     issuers: [c("kycIssuer"), c("amlIssuer")],
   };
@@ -238,6 +244,7 @@ async function runHandoverSmoke(state, failures) {
     console.log(
       `✅ Handover ceremony: ${result.checks.length} checks pass, the deployer holds no power.`,
     );
+    for (const w of result.warnings) console.log(`   ⚠️  ${w}`);
   }
 }
 

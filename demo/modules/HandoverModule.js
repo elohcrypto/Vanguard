@@ -36,12 +36,16 @@ const STATE_KEY = {
   oracleManager: "oracleManager",
   dynamicListManager: "dynamicListManager",
   investorTypeRegistry: "investorTypeRegistry",
+  escrowWalletFactory: "escrowFactory",
+  onchainIDFactory: "onchainIDFactory",
   governance: "vanguardGovernance",
 };
 
 /** Wallet indices from docs/TESTNET_DEMO.md (multisigs on Sepolia). */
 const OPS_INDEX = 10;
 const GUARDIAN_INDEX = 11;
+// Owns the claim issuers the deployer holds; never ops (2F.5, D25 b).
+const ISSUER_ADMIN_INDEX = 9;
 
 const same = (a, b) => a.toLowerCase() === b.toLowerCase();
 
@@ -71,9 +75,10 @@ class HandoverModule {
     }
     const ops = s.signers[OPS_INDEX];
     const guardian = s.signers[GUARDIAN_INDEX];
-    if (!ops || !guardian) {
+    const issuerAdmin = s.signers[ISSUER_ADMIN_INDEX];
+    if (!ops || !guardian || !issuerAdmin) {
       displayError(
-        `Handover needs wallets ${OPS_INDEX} (ops) and ${GUARDIAN_INDEX} (guardian); only ${s.signers.length} loaded`,
+        `Handover needs wallets ${ISSUER_ADMIN_INDEX} (issuerAdmin), ${OPS_INDEX} (ops) and ${GUARDIAN_INDEX} (guardian); only ${s.signers.length} loaded`,
       );
       return null;
     }
@@ -85,6 +90,7 @@ class HandoverModule {
       deployer: s.signers[0],
       ops,
       guardian,
+      issuerAdmin,
       governance: s.getContract("vanguardGovernance"),
       token: s.getContract("digitalToken"),
       governanceToken: s.getContract("governanceToken"),
@@ -94,6 +100,9 @@ class HandoverModule {
       investorTypeRegistry: s.getContract("investorTypeRegistry") || undefined,
       // Optional: only when option 84 deployed it.
       dynamicListManager: s.getContract("dynamicListManager") || undefined,
+      // Optional (2F.5): option 60 / option 1 deploy them.
+      escrowWalletFactory: s.getContract("escrowFactory") || undefined,
+      onchainIDFactory: s.getContract("onchainIDFactory") || undefined,
       oracles: pick(["whitelistOracle", "blacklistOracle", "consensusOracle"]),
       issuers: pick(["kycIssuer", "amlIssuer"]),
     };
@@ -111,6 +120,9 @@ class HandoverModule {
     console.log(`   Ops:      ${args.ops.address} (wallet ${OPS_INDEX})`);
     console.log(
       `   Guardian: ${args.guardian.address} (wallet ${GUARDIAN_INDEX})`,
+    );
+    console.log(
+      `   Issuer admin: ${args.issuerAdmin.address} (wallet ${ISSUER_ADMIN_INDEX})`,
     );
     console.log(`   Governance: ${await args.governance.getAddress()}`);
     try {
@@ -211,9 +223,10 @@ class HandoverModule {
     const args = this._ceremonyArgs();
     if (!args) return;
     try {
-      const { ok, checks } = await assertHandoverComplete(args);
+      const { ok, checks, warnings } = await assertHandoverComplete(args);
       for (const c of checks)
         console.log(`   ${c.ok ? "✅" : "❌"} ${c.label}`);
+      for (const w of warnings) console.log(`   ⚠️  ${w}`);
       console.log(
         ok
           ? "\n   ✅ Handover complete: the deployer holds no power."

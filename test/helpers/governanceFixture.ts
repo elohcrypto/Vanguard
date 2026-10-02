@@ -21,12 +21,16 @@ export async function ageVoters(governance: any): Promise<void> {
  * the minimum voter age.
  *
  * Signer order: deployer 0, ops 1, guardian 2, stranger 3, alice 4 (the
- * proposer), bob 5 and carol 6 (the voters). Shared by the handover
- * preflight and CLI tests.
+ * proposer), bob 5 and carol 6 (the voters), issuerAdmin 7, the escrow
+ * factory's fee wallet 8. Both factories are in the plan (2F.5), unbound
+ * until the ceremony binds them. Shared by the handover preflight,
+ * completion and CLI tests.
  */
 export async function handoverFixture() {
   const signers = await ethers.getSigners();
-  const [deployer, ops, guardian, stranger, alice, bob, carol] = signers;
+  const [deployer, ops, guardian, stranger, alice, bob, carol, issuerAdmin] =
+    signers;
+  const feeWallet = signers[8];
   const deploy = async (name: string, ...a: any[]): Promise<any> =>
     (await ethers.getContractFactory(name)).deploy(...a);
 
@@ -68,6 +72,13 @@ export async function handoverFixture() {
     1440,
   );
   const govAddr: string = await governance.getAddress();
+  const escrowWalletFactory = await deploy(
+    "EscrowWalletFactory",
+    await token.getAddress(),
+    feeWallet.address,
+    idRegAddr,
+    rulesAddr,
+  );
   const dynamicListManager = await deploy(
     "DynamicListManager",
     deployer.address,
@@ -101,6 +112,8 @@ export async function handoverFixture() {
     oracleManager,
     dynamicListManager,
     investorTypeRegistry,
+    escrowWalletFactory,
+    onchainIDFactory: factory,
     governance,
   };
   const args: Record<string, any> = {
@@ -108,6 +121,7 @@ export async function handoverFixture() {
     deployer,
     ops,
     guardian,
+    issuerAdmin,
     oracles: [whitelistOracle],
     issuers: [kycIssuer],
     log: () => {},
@@ -118,6 +132,8 @@ export async function handoverFixture() {
     guardian,
     stranger,
     proposer: alice,
+    issuerAdmin,
+    feeWallet,
   };
   return { ...who, voters: [bob, carol], c, args, govAddr, factory, kycIssuer };
 }

@@ -1,8 +1,9 @@
 /**
  * @fileoverview Handover ceremony: acceptance plan, shared helpers and the
- * read-only completion check. Split from Handover.js (plan v2 Task 2C.2) to
- * keep both files under 500 lines; Handover.js re-exports everything callers
- * used before, so no caller changes.
+ * preflight. Split from Handover.js (plan v2 Task 2C.2) to keep both files
+ * under 500 lines; Handover.js re-exports everything callers used before.
+ * The completion check lives in HandoverCompletion.js and the chain-derived
+ * power set in HandoverPowers.js (plan v2 Task 2F.5).
  */
 
 const { ethers } = require("hardhat");
@@ -19,6 +20,8 @@ const plan = (key, proposalType, label, typeName, opts = {}) => ({
   typeName,
   // Optional entries are skipped when the caller passes no contract for them.
   optional: Boolean(opts.optional),
+  // Governance setter that binds the type at step 3 (factories, 2F.5).
+  bind: opts.bind,
 });
 /** One acceptOwnership() vote per contract governance was nominated for. */
 const ACCEPTANCE_PLAN = [
@@ -39,6 +42,27 @@ const ACCEPTANCE_PLAN = [
     "InvestorTypeConfig",
     {
       optional: true,
+    },
+  ),
+  // Optional (2F.5, M4): bound at step 3, once nominated to governance.
+  plan(
+    "escrowWalletFactory",
+    9,
+    "EscrowWalletFactory",
+    "EscrowFactoryParameters",
+    {
+      optional: true,
+      bind: "setEscrowWalletFactory",
+    },
+  ),
+  plan(
+    "onchainIDFactory",
+    10,
+    "OnchainIDFactory",
+    "IdentityFactoryParameters",
+    {
+      optional: true,
+      bind: "setOnchainIDFactory",
     },
   ),
   plan("governance", 4, "VanguardGovernance", "SystemParameters"),
@@ -130,7 +154,6 @@ async function preflight(o, { acceptOnly = false } = {}) {
   const ops = await addrOf(o.ops);
   const guardian = await addrOf(o.guardian);
   const govAddr = await addrOf(o.governance);
-  const opsSigns = typeof o.ops.signMessage === "function";
   // A skipped registry the Token enforces would stay the deployer's: the
   // report would say "no power" while the deployer sets every holding cap.
   if (o.skippedRegistry && (await liveOnToken(o, o.skippedRegistry))) {
@@ -177,8 +200,9 @@ async function preflight(o, { acceptOnly = false } = {}) {
     );
   }
   // Governance must be bound to every contract it is about to own, or the
-  // acceptOwnership vote in step 4 can never be proposed.
-  for (const e of planFor(o).filter((x) => x.key !== "governance")) {
+  // acceptOwnership vote in step 4 can never be proposed. Factories are
+  // bound at step 3 (HandoverPowers.js checks them).
+  for (const e of planFor(o).filter((x) => x.key !== "governance" && !x.bind)) {
     const want = await addrOf(o[e.key]);
     const got = await o.governance.boundTarget(e.proposalType);
     if (!same(got, want)) {
@@ -231,6 +255,7 @@ async function preflight(o, { acceptOnly = false } = {}) {
     }
     governanceOwned.add(e.key);
   }
+  // Issuers the deployer holds go to issuerAdmin, never ops (D25 b).
   for (const issuer of o.issuers || []) {
     const label = await issuerLabel(issuer);
     const owner = await issuer.owner();
@@ -241,17 +266,18 @@ async function preflight(o, { acceptOnly = false } = {}) {
       );
     }
     if (!hasKey && !same(owner, dAddr)) continue;
-    if (!opsSigns) {
-      fail(`ops must be a signer to accept ownership of ${label}`);
+    if (typeof o.issuerAdmin?.signMessage !== "function") {
+      fail(`issuerAdmin must be a signer to accept ownership of ${label}`);
     }
-    // addIssuerKey reverts "Key already exists" for any ops key that is not
-    // a live MANAGEMENT_KEY, after step 1 has already sent transactions.
-    const k = await issuer.issuerKeys(keyOf(ops));
+    // addIssuerKey reverts "Key already exists" for any issuerAdmin key that
+    // is not a live MANAGEMENT_KEY, after step 1 has already sent transactions.
+    const admin = await addrOf(o.issuerAdmin);
+    const k = await issuer.issuerKeys(keyOf(admin));
     const liveManagement = Number(k.purpose) === MANAGEMENT_KEY && !k.revoked;
     if (k.key !== ethers.ZeroHash && !liveManagement) {
       fail(
-        `ops ${ops} already holds a ${k.revoked ? "revoked" : `purpose-${k.purpose}`} key on ${label}; ` +
-          `a revoked or other-purpose ops key cannot be re-added as MANAGEMENT_KEY, so use a different ops key or a new issuer`,
+        `issuerAdmin ${admin} already holds a ${k.revoked ? "revoked" : `purpose-${k.purpose}`} key on ${label}; ` +
+          `a revoked or other-purpose key cannot be re-added as MANAGEMENT_KEY, so use a different issuerAdmin key or a new issuer`,
       );
     }
   }
@@ -339,156 +365,6 @@ async function checkVoters(o, proposer, voters, count) {
   }
 }
 
-/** Read-only verification. Returns { ok, failures, checks }; never pauses. */
-async function assertHandoverComplete(o) {
-  o = await withBoundRegistry(o);
-  const dAddr = await addrOf(o.deployer);
-  const ops = await addrOf(o.ops);
-  const guardian = await addrOf(o.guardian);
-  const govAddr = await addrOf(o.governance);
-  const checks = [];
-  const add = (label, pass) => checks.push({ label, ok: Boolean(pass) });
-  if (o.skippedRegistry) {
-    add(
-      "InvestorTypeRegistry is not live on Token or is owned by governance",
-      !(await liveOnToken(o, o.skippedRegistry)) ||
-        same(await o.skippedRegistry.owner(), govAddr),
-    );
-  }
-
-  for (const [c, label] of core(o)) {
-    add(`${label} owned by governance`, same(await c.owner(), govAddr));
-  }
-  add("deployer is not a Token agent", !(await o.token.isAgent(dAddr)));
-  add(
-    "deployer is not a GovernanceToken agent",
-    !(await o.governanceToken.isAgent(dAddr)),
-  );
-  add(
-    "deployer is not an IdentityRegistry agent",
-    !(await o.identityRegistry.isAgent(dAddr)),
-  );
-  add(
-    "deployer is not a ComplianceRules rule administrator",
-    !(await o.complianceRules.ruleAdministrators(dAddr)),
-  );
-  add("ops is a Token agent", await o.token.isAgent(ops));
-  add("ops is a GovernanceToken agent", await o.governanceToken.isAgent(ops));
-  add(
-    "ops is an IdentityRegistry agent",
-    await o.identityRegistry.isAgent(ops),
-  );
-  add("guardian set on Token", same(await o.token.guardian(), guardian));
-  add(
-    "Token guardian is not the deployer",
-    !same(await o.token.guardian(), dAddr),
-  );
-  if (o.dynamicListManager) {
-    add(
-      "DynamicListManager governanceContract is governance",
-      same(await o.dynamicListManager.governanceContract(), govAddr),
-    );
-  }
-  add(
-    "GovernanceToken has no guardian",
-    same(await o.governanceToken.guardian(), ethers.ZeroAddress),
-  );
-  add(
-    "no blacklist oracle bound to GovernanceToken (D23)",
-    same(
-      await o.complianceRules.blacklistOracle(await addrOf(o.governanceToken)),
-      ethers.ZeroAddress,
-    ),
-  );
-  if (o.investorTypeRegistry) {
-    const reg = o.investorTypeRegistry;
-    add(
-      "ops is an InvestorTypeRegistry compliance officer",
-      await reg.isComplianceOfficer(ops),
-    );
-    add(
-      "deployer is not an InvestorTypeRegistry compliance officer",
-      !(await reg.isComplianceOfficer(dAddr)),
-    );
-    if (typeof reg.isGovernor === "function") {
-      add(
-        "deployer is not an InvestorTypeRegistry governor",
-        !(await reg.isGovernor(dAddr)),
-      );
-    }
-  }
-  for (const oracle of o.oracles || []) {
-    const a = await oracle.getAddress();
-    add(`oracle ${a} owned by ops`, same(await oracle.owner(), ops));
-    const lm = await listManagerOf(oracle);
-    if (lm)
-      add(`oracle ${a} listManager is not the deployer`, !same(lm, dAddr));
-  }
-  const rules = o.complianceRules;
-  add(
-    "deployer is not a trusted contract",
-    !(await rules.isTrustedContract(dAddr)),
-  );
-  // D21: governance holds VGT fees as a trusted contract, never as an
-  // identity (a contract identity's claims lapse and ops could delete it).
-  add(
-    "governance is a trusted contract",
-    await rules.isTrustedContract(govAddr),
-  );
-  add(
-    "governance has no registry identity",
-    same(await o.identityRegistry.identity(govAddr), ethers.ZeroAddress),
-  );
-  // Residue from runs before 2E.1, when a wallet could be trusted. Scanned
-  // in chunks: public RPCs cap the eth_getLogs block range, so a range error
-  // halves the chunk (floor 100) and retries; any other error is rethrown.
-  let chunk = o.logChunk || 5000;
-  const latest = await ethers.provider.getBlockNumber();
-  const added = [];
-  for (let b = o.fromBlock || 0; b <= latest;) {
-    const to = Math.min(b + chunk - 1, latest);
-    try {
-      added.push(
-        ...(await rules.queryFilter(
-          rules.filters.TrustedContractAdded(),
-          b,
-          to,
-        )),
-      );
-      b = to + 1;
-    } catch (e) {
-      // Block-range refusals only; a rate limit is rethrown, not halved.
-      const rangeError =
-        /block range|range too large|exceeds.*(range|limit)|too many (blocks|results)|query returned more than/i;
-      if (chunk <= 100 || !rangeError.test(e.message)) throw e;
-      chunk = Math.max(100, Math.floor(chunk / 2));
-    }
-  }
-  const trusted = [...new Set(added.map((ev) => ev.args[0]))];
-  let clean = true;
-  for (const a of trusted) {
-    if (!(await rules.isTrustedContract(a))) continue;
-    const code = await ethers.provider.getCode(a);
-    // An EIP-7702 delegation indicator (0xef0100 || address, 23 bytes) is a
-    // wallet, not a contract: treat it the same as no code.
-    const delegated = code.length === 48 && /^0xef0100/i.test(code);
-    if (code !== "0x" && !delegated) continue;
-    clean = false;
-    add(`trusted address ${a} is a wallet or delegated wallet`, false);
-  }
-  if (clean) add("every trusted contract has code", true);
-  for (const issuer of o.issuers || []) {
-    const label = await issuerLabel(issuer);
-    add(`deployer does not own ${label}`, !same(await issuer.owner(), dAddr));
-    add(
-      `deployer holds no live key on ${label}`,
-      !(await hasLiveKey(issuer, dAddr)),
-    );
-  }
-  const failures = checks.filter((c) => !c.ok).map((c) => c.label);
-  return { ok: failures.length === 0, failures, checks };
-}
-
 module.exports = {
   ACCEPTANCE_PLAN,
   planFor,
@@ -502,5 +378,6 @@ module.exports = {
   withBoundRegistry,
   preflight,
   checkVoters,
-  assertHandoverComplete,
+  liveOnToken,
+  fail,
 };

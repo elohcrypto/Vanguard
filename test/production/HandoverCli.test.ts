@@ -31,12 +31,15 @@ describe("Handover CLI (scripts/handover.ts)", function () {
       governance: f.govAddr,
       investorTypeRegistry: await a("investorTypeRegistry"),
       dynamicListManager: await a("dynamicListManager"),
+      escrowWalletFactory: await a("escrowWalletFactory"),
+      onchainIDFactory: await a("onchainIDFactory"),
       oracles: [await f.args.oracles[0].getAddress()],
       issuers: [await f.args.issuers[0].getAddress()],
       logChunk: 100,
       // Signer order from handoverFixture.
       ops: 1,
       guardian: 2,
+      issuerAdmin: 7,
       proposer: 4,
       voters: [5, 6],
     };
@@ -50,6 +53,54 @@ describe("Handover CLI (scripts/handover.ts)", function () {
   it("the full phase completes", async function () {
     await runHandover(cfg);
     expect(await f.c.token.owner()).to.equal(f.govAddr);
+    // 2F.5: both factories and the issuer moved; ops never got the issuer.
+    expect(await f.c.escrowWalletFactory.owner()).to.equal(f.govAddr);
+    expect(await f.c.onchainIDFactory.owner()).to.equal(f.govAddr);
+    expect(await f.kycIssuer.owner()).to.equal(f.issuerAdmin.address);
+  });
+
+  it("the full phase completes with oracles and issuers read from chain", async function () {
+    const wl = f.args.oracles[0];
+    await f.c.complianceRules.setWhitelistOracle(
+      await f.c.token.getAddress(),
+      await wl.getAddress(),
+    );
+    delete cfg.oracles;
+    delete cfg.issuers;
+    await runHandover(cfg);
+    expect(await wl.owner()).to.equal(f.ops.address);
+    expect(await f.kycIssuer.owner()).to.equal(f.issuerAdmin.address);
+  });
+
+  // 2F.5 (M4, probe P7): a config that omits a bound oracle is refused.
+  it("refuses a config that omits an oracle bound on chain", async function () {
+    const bl = await (
+      await ethers.getContractFactory("BlacklistOracle")
+    ).deploy(await f.c.oracleManager.getAddress(), "BL", "d");
+    const blAddr = await bl.getAddress();
+    await f.c.complianceRules.setBlacklistOracle(
+      await f.c.token.getAddress(),
+      blAddr,
+    );
+    await refusedWithNoTx(
+      "full",
+      new RegExp(
+        `config "oracles" omits ${blAddr} \\(an oracle ComplianceRules binds`,
+      ),
+    );
+  });
+
+  it("refuses a config without the factory keys or with a bad issuerAdmin", async function () {
+    delete cfg.onchainIDFactory;
+    await refusedWithNoTx(
+      "full",
+      /missing "onchainIDFactory" \(an address, or null/,
+    );
+    cfg.onchainIDFactory = null;
+    cfg.issuerAdmin = "9";
+    await refusedWithNoTx("full", /"issuerAdmin" must be a wallet index/);
+    delete cfg.issuerAdmin;
+    await refusedWithNoTx("full", /issuerAdmin is required: 1 trusted issuer/);
   });
 
   it("the accept phase finishes a partial run, registry calls included", async function () {
@@ -111,8 +162,8 @@ describe("Handover CLI (scripts/handover.ts)", function () {
       .connect(bob)
       .transfer(f.proposer.address, (await vgt.balanceOf(bob.address)) - 1n);
     await expect(runHandover(cfg)).to.be.rejectedWith(
-      // Eight plan contracts, votingCost 10 VGT each.
-      /voter .* holds 0\.0+1 free VGT; 8 proposal\(s\) need 80\.0/,
+      // Ten plan contracts, votingCost 10 VGT each.
+      /voter .* holds 0\.0+1 free VGT; 10 proposal\(s\) need 100\.0/,
     );
   });
 
@@ -136,7 +187,7 @@ describe("Handover CLI (scripts/handover.ts)", function () {
     await f.c.token.transferOwnership(f.govAddr);
     await refusedWithNoTx(
       "accept",
-      /not nominated on GovernanceToken, IdentityRegistry, ComplianceRules, OracleManager, DynamicListManager, InvestorTypeRegistry, VanguardGovernance;/,
+      /not nominated on GovernanceToken, IdentityRegistry, ComplianceRules, OracleManager, DynamicListManager, InvestorTypeRegistry, EscrowWalletFactory, OnchainIDFactory, VanguardGovernance;/,
     );
   });
 

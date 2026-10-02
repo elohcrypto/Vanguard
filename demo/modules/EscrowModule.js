@@ -12,6 +12,7 @@ const {
   displayError,
   displayWarning,
 } = require("../utils/DisplayHelpers");
+const { trustContract } = require("../utils/GovernedCalls");
 const { advancePast, canJumpTime } = require("../utils/ChainTime");
 const { signShipmentProof } = require("../utils/ShipmentProof");
 const { attestAll } = require("../utils/Kyc");
@@ -531,15 +532,19 @@ class EscrowModule {
         const paymentId = parsedEvent.args.paymentId;
         const walletAddress = parsedEvent.args.walletAddress;
 
-        // ✅ Add wallet to trusted contracts (owner must do this)
+        // Trust the wallet: the deployer while it owns ComplianceRules, a
+        // ComplianceRules proposal once governance does (2F.5, L11).
         console.log("\n🔐 Adding wallet to trusted contracts...");
-        const owner = this.state.signers[0]; // Platform owner
-        const complianceRules = this.state.getContract("complianceRules");
-        const addTrustedTx = await complianceRules
-          .connect(owner)
-          .addTrustedContract(walletAddress);
-        await addTrustedTx.wait();
-        console.log("   ✅ Wallet added to trusted contracts");
+        const trust = await trustContract(this.state, walletAddress);
+        if (trust.direct) {
+          console.log("   ✅ Wallet added to trusted contracts");
+        } else if (trust.proposalId) {
+          console.log(
+            `   ⏳ Untrusted until proposal #${trust.proposalId} passes: vote with option 77, execute with option 78`,
+          );
+        } else {
+          console.log(`   ⚠️  Wallet left untrusted: ${trust.refused}`);
+        }
 
         this.state.enhancedEscrowWallets.set(paymentId.toString(), {
           paymentId: paymentId.toString(),

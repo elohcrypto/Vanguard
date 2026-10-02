@@ -11,12 +11,24 @@
  *     "oracleManager": "0x..", "governance": "0x..",
  *     "investorTypeRegistry": "0x..",          // optional, in the plan (type 0)
  *     "dynamicListManager": "0x..",            // optional, demo option 84
+ *     "escrowWalletFactory": "0x.." | null,     // required key (2F.5), null = not deployed
+ *     "onchainIDFactory": "0x.." | null,        // required key (2F.5), null = not deployed
  *     "oracles": ["0x..", "0x..", "0x.."],      // optional, one-step Ownable
  *     "issuers": ["0x..", "0x.."],              // optional, ClaimIssuer
- *     "fromBlock": 1234567,                     // optional, ComplianceRules deploy block
+ *     "feeWallets": ["0x.."],                   // optional, escrow fee wallets to check
+ *     "fromBlock": 1234567,                     // optional, first deploy block (registry)
  *     "logChunk": 5000,                         // optional, eth_getLogs block range
- *     "ops": 10, "guardian": 11, "proposer": 1, "voters": [2, 3, 6]
+ *     "ops": 10, "guardian": 11, "issuerAdmin": 9,
+ *     "proposer": 1, "voters": [2, 3, 6]
  *   }
+ *
+ * The power set is read from chain (demo/utils/HandoverPowers.js): an
+ * "oracles"/"issuers" list that omits a contract bound on chain is refused;
+ * leave a list out to use the chain's set. "issuerAdmin" (a wallet index,
+ * not ops/guardian/deployer) is required whenever the registry trusts an
+ * issuer: the ceremony hands every deployer-held issuer to it (D25 b).
+ * Both factory keys must be present: neither factory is reachable from the
+ * core contracts, so only the config can name them; null states "none".
  *
  * Every contract in ACCEPTANCE_PLAN (demo/utils/HandoverChecks.js) given here
  * is nominated and accepted by vote, InvestorTypeRegistry included; a
@@ -77,6 +89,16 @@ export async function runHandover(
     if (!Number.isInteger(cfg[k]))
       throw new Error(`${path}: "${k}" must be a wallet index`);
   }
+  if (cfg.issuerAdmin !== undefined && !Number.isInteger(cfg.issuerAdmin)) {
+    throw new Error(`${path}: "issuerAdmin" must be a wallet index`);
+  }
+  for (const k of ["escrowWalletFactory", "onchainIDFactory"]) {
+    if (!(k in cfg)) {
+      throw new Error(
+        `${path}: missing "${k}" (an address, or null when not deployed): the deployer owns it until the ceremony hands it over`,
+      );
+    }
+  }
   if (cfg.fromBlock !== undefined && !Number.isInteger(cfg.fromBlock)) {
     throw new Error(`${path}: "fromBlock" must be a block number`);
   }
@@ -109,6 +131,9 @@ export async function runHandover(
     deployer: wallet(0),
     ops: wallet(cfg.ops),
     guardian: wallet(cfg.guardian),
+    issuerAdmin:
+      cfg.issuerAdmin === undefined ? undefined : wallet(cfg.issuerAdmin),
+    feeWallets: cfg.feeWallets,
     governance: await at("VanguardGovernance", cfg.governance),
     token: await at("Token", cfg.token),
     governanceToken: await at("GovernanceToken", cfg.governanceToken),
@@ -121,14 +146,21 @@ export async function runHandover(
     dynamicListManager: cfg.dynamicListManager
       ? await at("DynamicListManager", cfg.dynamicListManager)
       : undefined,
-    oracles: await Promise.all(
-      (cfg.oracles || []).map((a: string) =>
-        ethers.getContractAt(ORACLE_ABI, a),
-      ),
-    ),
-    issuers: await Promise.all(
-      (cfg.issuers || []).map((a: string) => at("ClaimIssuer", a)),
-    ),
+    escrowWalletFactory: cfg.escrowWalletFactory
+      ? await at("EscrowWalletFactory", cfg.escrowWalletFactory)
+      : undefined,
+    onchainIDFactory: cfg.onchainIDFactory
+      ? await at("OnchainIDFactory", cfg.onchainIDFactory)
+      : undefined,
+    // Left out: the ceremony uses the set read from chain.
+    oracles: cfg.oracles
+      ? await Promise.all(
+          cfg.oracles.map((a: string) => ethers.getContractAt(ORACLE_ABI, a)),
+        )
+      : undefined,
+    issuers: cfg.issuers
+      ? await Promise.all(cfg.issuers.map((a: string) => at("ClaimIssuer", a)))
+      : undefined,
   };
 
   const proposer = wallet(cfg.proposer);
@@ -180,8 +212,9 @@ export async function runHandover(
   });
 
   console.log("\n🔍 Handover: verify");
-  const { ok, checks } = await assertHandoverComplete(args);
+  const { ok, checks, warnings } = await assertHandoverComplete(args);
   for (const c of checks) console.log(`   ${c.ok ? "✅" : "❌"} ${c.label}`);
+  for (const w of warnings) console.log(`   ⚠️  ${w}`);
   if (!ok) throw new Error("handover incomplete (see ❌ above)");
   console.log("\n✅ Handover complete: the deployer holds no power.");
 }
