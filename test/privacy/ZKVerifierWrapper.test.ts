@@ -281,6 +281,59 @@ describe("ZKVerifierIntegrated wrapper (Task 3.2)", function () {
     });
   });
 
+  // Review 3.2 L1: a mutation that routed the blacklist id to the
+  // jurisdiction internal survived every test, because the batch entries were
+  // garbage under both verifiers. Pin each Groth16 id to its own slot.
+  describe("(g) every Groth16 id reaches its own verifier", function () {
+    const ACC = ethers.keccak256(ethers.toUtf8Bytes("ACCREDITATION_PROOF"));
+
+    it("an accepting verifier in one slot answers only that circuit", async function () {
+      for (const [slot, id] of [
+        ["blacklist", BL],
+        ["jurisdiction", JUR],
+        ["accreditation", ACC],
+      ] as [string, string][]) {
+        const zk = await deploy(false);
+        const yes = await (
+          await ethers.getContractFactory("AlwaysTrueVerifier")
+        ).deploy();
+        await zk.updateVerifier(slot, await yes.getAddress());
+        for (const other of [BL, JUR, ACC]) {
+          expect(
+            await zk.verifyCircuitProof.staticCall(other, EMPTY, [1n]),
+            `${slot} slot accepting, querying ${other}`,
+          ).to.equal(other === id);
+        }
+        expect(
+          await zk.verifyCircuitProof.staticCall(COMP, EMPTY, [
+            1n,
+            1n,
+            1n,
+            1n,
+            1n,
+            1n,
+          ]),
+        ).to.equal(false);
+      }
+    });
+
+    it("strict mode keeps the original revert messages", async function () {
+      const zk = await deploy(false);
+      const cases: [string, bigint[], string][] = [
+        [BL, [1n, 2n], "Invalid public inputs for blacklist circuit"],
+        [JUR, [], "Invalid public inputs for jurisdiction circuit"],
+        [ACC, [1n, 2n], "Invalid public inputs for accreditation circuit"],
+        [COMP, [1n], "Invalid public inputs for compliance circuit"],
+        [ethers.ZeroHash, [1n], "ZKVerifierIntegrated: Unknown circuit ID"],
+      ];
+      for (const [id, inputs, message] of cases) {
+        await expect(zk.verifyCircuitProof(id, EMPTY, inputs)).to.be.revertedWith(
+          message,
+        );
+      }
+    });
+  });
+
   describe("(f) IZKVerifier is the consumer ABI", function () {
     const LEGACY = ["verifyProof", "setVerifyingKey", "getVerifyingKey"];
 

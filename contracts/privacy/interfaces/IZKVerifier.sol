@@ -60,8 +60,9 @@ interface IZKVerifier {
 
     /**
      * @dev Verify a PLONK whitelist membership proof (the typed entry for
-     *      the whitelist circuit). Returns false, never reverts, on a bad
-     *      proof or on any signal >= the BN254 scalar field order.
+     *      the whitelist circuit). Returns false on a bad proof or on any
+     *      signal >= the BN254 scalar field order; reverts only if the
+     *      configured verifier itself reverts (the shipped one does not).
      * @param proof 24-word PLONK proof (snarkjs `plonk exportSolidityCallData`)
      * @param pubSignals [nullifier, merkleRoot, walletBinding]
      * @return True if the proof verifies against these public signals
