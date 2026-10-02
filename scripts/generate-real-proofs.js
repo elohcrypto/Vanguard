@@ -73,9 +73,9 @@ class RealProofGenerator {
    * @param {Object} params - Proof parameters
    * @param {BigInt} params.identity - User's secret identity
    * @param {BigInt[]} params.whitelistIdentities - Array of whitelisted identities
-   * @param {BigInt|string} [params.walletBinding=0] - Wallet the proof is for
-   *        (an address or a field element); the consumer compares it with
-   *        msg.sender (Task 3.3)
+   * @param {BigInt|string} params.walletBinding - Wallet the proof is for
+   *        (an address or a field element); required, the consumer compares
+   *        it with msg.sender (Task 3.3)
    * @returns {Object} { proof: 24 words, publicSignals: [nullifier,
    *          merkleRoot, walletBinding], rawProof, inputs }; pass proof and
    *          publicSignals to ZKVerifierIntegrated.verifyWhitelistMembership
@@ -84,7 +84,10 @@ class RealProofGenerator {
     await this.initialize();
     console.log("\n🔐 Generating Whitelist Membership Proof (PLONK)...");
 
-    const { identity, whitelistIdentities, walletBinding = 0n } = params;
+    const { identity, whitelistIdentities, walletBinding } = params;
+    if (walletBinding === undefined || walletBinding === null) {
+      throw new Error("walletBinding is required");
+    }
 
     console.log("  📊 Building Merkle tree...");
     const tree =

@@ -51,6 +51,7 @@ describe("ZK System Integration Tests", function () {
       const result = await realProofGenerator.generateWhitelistProof({
         identity,
         whitelistIdentities,
+        walletBinding: user1.address,
       });
 
       // First verification (should NOT be cached)
@@ -116,6 +117,7 @@ describe("ZK System Integration Tests", function () {
         const result = await realProofGenerator.generateWhitelistProof({
           identity: identities[i],
           whitelistIdentities,
+          walletBinding: user1.address,
         });
         proofs.push(result);
       }
@@ -154,6 +156,7 @@ describe("ZK System Integration Tests", function () {
       const result = await realProofGenerator.generateWhitelistProof({
         identity,
         whitelistIdentities,
+        walletBinding: user1.address,
       });
 
       // PLONK proof: 24 words for verifyProof(uint256[24], uint256[3])
@@ -179,6 +182,7 @@ describe("ZK System Integration Tests", function () {
       const whitelistResult = await realProofGenerator.generateWhitelistProof({
         identity: BigInt(12345),
         whitelistIdentities: [BigInt(11111), BigInt(12345), BigInt(33333)],
+        walletBinding: user1.address,
       });
 
       const whitelistTx = await zkVerifierIntegrated.verifyWhitelistMembership(

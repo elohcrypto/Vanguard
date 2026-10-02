@@ -37,6 +37,11 @@ contract ZKVerifierIntegrated is Ownable2Step, ReentrancyGuard {
     mapping(string => uint256) public validProofs;
     mapping(address => uint256) public userProofCount;
 
+    // BN254 scalar field q. The PLONK verifier reduces signals mod q in the PI
+    // term but hashes raw calldata in the transcript: n+q verifies as a new nullifier.
+    uint256 internal constant SNARK_SCALAR_FIELD =
+        21888242871839275222246405745257275088548364400416034343698204186575808495617;
+
     // Testing mode for mock verification (IMMUTABLE - set at deployment)
     bool public immutable testingMode;
 
@@ -125,6 +130,8 @@ contract ZKVerifierIntegrated is Ownable2Step, ReentrancyGuard {
         uint256[24] memory proof,
         uint256[3] memory pubSignals
     ) internal returns (bool) {
+        if (pubSignals[0] >= SNARK_SCALAR_FIELD || pubSignals[1] >= SNARK_SCALAR_FIELD ||
+            pubSignals[2] >= SNARK_SCALAR_FIELD) return false;
         bytes32 proofHash = _plonkCacheKey("whitelist", proof, abi.encodePacked(pubSignals));
         if (verifiedProofs[proofHash] && block.timestamp <= proofTimestamp[proofHash] + proofCacheExpiry) {
             emit ProofCacheHit(proofHash, "whitelist");

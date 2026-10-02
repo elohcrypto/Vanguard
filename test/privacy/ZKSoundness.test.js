@@ -9,6 +9,10 @@ const { RealProofGenerator } = require(
 const { MerkleTreeBuilder } = require(
   path.join(__dirname, "../../utils/merkle-tree-builder.js"),
 );
+const { ProofFormatter } = require(
+  path.join(__dirname, "../../utils/proof-formatter.js"),
+);
+const { loadAliasingSnarkjs } = require("../helpers/plonkAliasProver.js");
 
 // Guard tests from .omc/plans/2026-09-23-zk-kyc-ownership-cleanup.md, Task 0.1,
 // amended by R-3R-2 (owner decisions §N). Each names a soundness property the
@@ -76,6 +80,7 @@ describe("ZK soundness guards (plan Task 0.1)", function () {
     const r = await gen.generateWhitelistProof({
       identity: attacker,
       whitelistIdentities: [attacker],
+      walletBinding: alice.address,
     });
 
     const accepted = await verifier.verifyWhitelistMembership.staticCall(
@@ -274,6 +279,57 @@ describe("ZK soundness guards (plan Task 0.1)", function () {
           otherWallet,
         ),
       ).to.equal(false);
+    });
+
+    it("rejects a non-canonical nullifier (n + q) the raw verifier accepts", async function () {
+      // A second proof for bob from the same identity, built with a prover
+      // whose transcript hashes n + q: the PLONK verifier reduces signals
+      // mod q in the PI term, so [n + q, root, bob] verifies there and would
+      // look like a fresh nullifier to a nullifier -> wallet map.
+      const aliasing = loadAliasingSnarkjs();
+      const input = {
+        identity: identity.toString(),
+        ...(await MerkleTreeBuilder.createFromIdentities(members)).getProof(
+          members.indexOf(identity),
+        ),
+        merkleRoot: root.toString(),
+        walletBinding: BigInt(bob.address).toString(),
+      };
+      input.pathElements = input.pathElements.map(String);
+      const wtns = { type: "mem" };
+      await snarkjs.wtns.calculate(input, paths.wasm, wtns);
+      aliasing.__setAliasK(1);
+      const m = await aliasing.plonk.prove(paths.zkey, wtns);
+      aliasing.__setAliasK(0);
+      const c = await ProofFormatter.formatPlonkForSolidity(
+        m.proof,
+        m.publicSignals,
+      );
+      const aliased = [
+        (BigInt(c.publicSignals[0]) + P).toString(),
+        ...c.publicSignals.slice(1),
+      ];
+      expect(c.publicSignals[0]).to.equal(r.publicSignals[0]);
+
+      const plonk = await ethers.getContractAt(
+        "WhitelistMembershipVerifier",
+        await verifier.whitelistVerifier(),
+      );
+      expect(
+        await plonk.verifyProof(c.proof, aliased),
+        "precondition: raw verifier accepts the alias",
+      ).to.equal(true);
+
+      expect(
+        await verifier.verifyWhitelistMembership.staticCall(c.proof, aliased),
+      ).to.equal(false);
+      const receipt = await (
+        await verifier.verifyWhitelistMembership(c.proof, aliased)
+      ).wait();
+      const cached = receipt.logs
+        .map((l) => verifier.interface.parseLog(l))
+        .filter((e) => e && e.name === "ProofCached");
+      expect(cached).to.have.lengthOf(0);
     });
   });
 });

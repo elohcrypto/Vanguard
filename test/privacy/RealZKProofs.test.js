@@ -53,6 +53,7 @@ describe("Real ZK Proof Verification Tests", function () {
       const result = await realProofGenerator.generateWhitelistProof({
         identity,
         whitelistIdentities,
+        walletBinding: user1.address,
       });
       const duration = Date.now() - startTime;
 
@@ -91,6 +92,7 @@ describe("Real ZK Proof Verification Tests", function () {
       const result = await realProofGenerator.generateWhitelistProof({
         identity,
         whitelistIdentities,
+        walletBinding: user1.address,
       });
       const duration = Date.now() - startTime;
 

@@ -20,6 +20,8 @@ async function main() {
     const whitelistResult = await generator.generateWhitelistProof({
       identity: BigInt(12345),
       whitelistIdentities: [BigInt(11111), BigInt(12345), BigInt(33333)],
+      // Placeholder wallet; a real caller binds the submitting address.
+      walletBinding: "0x000000000000000000000000000000000000dEaD",
     });
 
     const duration = Date.now() - startTime;

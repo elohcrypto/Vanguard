@@ -43,6 +43,7 @@ describe("RealProofGenerator - All 5 Proof Types", function () {
       const result = await generator.generateWhitelistProof({
         identity,
         whitelistIdentities,
+        walletBinding: owner.address,
       });
       const duration = Date.now() - startTime;
 
@@ -69,8 +70,21 @@ describe("RealProofGenerator - All 5 Proof Types", function () {
       const whitelistIdentities = [BigInt(11111), BigInt(22222)];
 
       await expect(
-        generator.generateWhitelistProof({ identity, whitelistIdentities }),
+        generator.generateWhitelistProof({
+          identity,
+          whitelistIdentities,
+          walletBinding: owner.address,
+        }),
       ).to.be.rejectedWith("Identity not found in whitelist");
+    });
+
+    it("should require walletBinding", async function () {
+      await expect(
+        generator.generateWhitelistProof({
+          identity: BigInt(12345),
+          whitelistIdentities: [BigInt(12345)],
+        }),
+      ).to.be.rejectedWith("walletBinding is required");
     });
   });
 
