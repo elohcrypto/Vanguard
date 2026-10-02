@@ -304,6 +304,29 @@ describe("🔐 Complete ZK Proof System Integration Tests", function () {
         await privacyManager.validateAllPrivateCompliance(user1.address),
       ).to.deep.equal([false, false, false, false]);
     });
+
+    // Folded from scripts/test-zk-final.js and test-zk-integration.js
+    // (Task 3.5), the only callers of these reads until then.
+    it("lists the default jurisdictions and finds one by code", async function () {
+      const [masks, names, codes] = await privacyManager.getAllJurisdictions();
+      expect(codes).to.deep.equal(["US", "EU", "UK", "CA"]);
+      expect(names[0]).to.equal("United States");
+      const us = await privacyManager.getJurisdictionByCode("US");
+      expect(us.name).to.equal("United States");
+      expect(us.mask).to.equal(masks[0]);
+      expect(us.isActive).to.equal(true);
+      await expect(
+        privacyManager.getJurisdictionByCode("ZZ"),
+      ).to.be.revertedWith("PrivacyManager: Jurisdiction not found");
+    });
+
+    it("the accreditation circuit id is registered under its name", async function () {
+      const id = await zkVerifier.ACCREDITATION_PROOF_CIRCUIT();
+      expect(id).to.equal(
+        ethers.keccak256(ethers.toUtf8Bytes("ACCREDITATION_PROOF")),
+      );
+      expect(await zkVerifier.isCircuitRegistered(id)).to.equal(true);
+    });
   });
 
   after(function () {
