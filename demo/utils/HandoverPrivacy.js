@@ -18,6 +18,8 @@ const {
   codeHashChecks,
   codeHashLabel,
   codeHashRefusal,
+  buildIdentity,
+  buildIdentityLabel,
 } = require("./HandoverCodeHash");
 
 const check = (cond, msg) => cond || fail(msg);
@@ -104,19 +106,25 @@ async function privacyLines(o, dAddr, ops, govAddr, warnings = []) {
       `PrivacyManager's verifier ${used} owned by governance`,
       same(await v.owner(), govAddr),
     ]);
+    // Review 3.3 follow-up LOW-B: the deployer may have published through a
+    // second key it controls, so anything but ops or governance warns.
     const roots = await scanLogs(c, c.filters.WhitelistRootPublished(), o);
     const last = roots[roots.length - 1];
-    if (last && same(last.args.publisher, dAddr)) {
+    const pub = last && last.args.publisher;
+    if (last && !same(pub, ops) && !same(pub, govAddr)) {
+      const who = same(pub, dAddr) ? "the deployer" : `${pub}, not ops or governance`;
       warnings.push(
-        `PrivacyManager whitelist root ${last.args.root} (version ${last.args.version}) was published by the deployer: republish as ops so deployer-era bindings lapse`,
+        `PrivacyManager whitelist root ${last.args.root} (version ${last.args.version}) was published by ${who}: republish as ops so deployer-era bindings lapse`,
       );
     }
   }
   const zk = o.zkVerifier;
   const zkAddr = zk ? await addrOf(zk) : o.derived?.factories?.zkVerifier;
-  for (const c of await codeHashChecks(pmAddr, [used, zkAddr])) {
+  const pins = await codeHashChecks(pmAddr, [used, zkAddr]);
+  for (const c of pins) {
     lines.push([codeHashLabel(c), c.ok]);
   }
+  if (pins.length) lines.push([buildIdentityLabel(buildIdentity()), true]);
   if (zkAddr) {
     const v = await ethers.getContractAt("ZKVerifierIntegrated", zkAddr);
     lines.push([

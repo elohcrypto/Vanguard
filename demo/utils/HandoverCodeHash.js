@@ -14,6 +14,7 @@
  * the five circuit verifiers have no immutables.
  */
 
+const { execFileSync } = require("child_process");
 const { ethers, artifacts } = require("hardhat");
 const { addrOf } = require("./HandoverChecks");
 
@@ -82,6 +83,40 @@ function codeHashRefusal(c) {
   return `${c.label} ${c.addr} runtime code hash ${c.actual} is not the compiled ${c.name} (${c.expected}): redeploy it from this build, or vote the compiled contract in, before the handover`;
 }
 
+/**
+ * Review 3.3 follow-up LOW-A: the pins prove "same code as this checkout",
+ * nothing more, so the completion report names the checkout. { commit,
+ * dirty } from git; commit "unknown" and dirty null outside a git tree.
+ */
+function buildIdentity() {
+  const git = (...args) => {
+    try {
+      return execFileSync("git", args, { stdio: ["ignore", "pipe", "ignore"] })
+        .toString()
+        .trim();
+    } catch {
+      return null;
+    }
+  };
+  const commit = git("rev-parse", "--short", "HEAD");
+  const status = git("status", "--porcelain", "--untracked-files=no");
+  return {
+    commit: commit || "unknown",
+    dirty: status === null ? null : status.length > 0,
+  };
+}
+
+/** Completion line text for the checkout the pins were compiled from. */
+function buildIdentityLabel({ commit, dirty }) {
+  const state =
+    dirty === null
+      ? "not a git checkout"
+      : dirty
+        ? "DIRTY TREE: run the ceremony from the reviewed commit"
+        : "clean tree";
+  return `code-hash pins compiled from commit ${commit} (${state})`;
+}
+
 module.exports = {
   VERIFIERS,
   codeHash,
@@ -89,4 +124,6 @@ module.exports = {
   codeHashChecks,
   codeHashLabel,
   codeHashRefusal,
+  buildIdentity,
+  buildIdentityLabel,
 };
