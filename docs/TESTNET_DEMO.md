@@ -21,12 +21,14 @@ modifiers are what enforce the separation.
 | 3 | AML issuer | AML claims |
 | 4, 5 | Risk and fraud oracles | attestations |
 | 6, 7, 8 | Investors Alice, Bob, Carol | proposals, votes, transfers, escrow parties |
-| 9 | Deliberately unverified | rejection demonstrations |
-| 10 | Ops multisig stand-in | agent roles, compliance officer, oracle + issuer ownership after handover |
+| 9 | Deliberately unverified; issuer admin | rejection demonstrations; after the handover, owner of every claim issuer the deployer held (D25 b) |
+| 10 | Ops multisig stand-in | agent roles, compliance officer, oracle ownership and the escrow factory's ADMIN_ROLE after handover |
 | 11 | Guardian | pause only |
 
-On Sepolia and beyond, wallets 10 and 11 must be multisig addresses, not
-single keys.
+On Sepolia and beyond, wallets 9, 10 and 11 must be multisig addresses, not
+single keys, held by different parties: ops is an IdentityRegistry agent and
+must never also own or sign for a claim issuer (2F.5, D25 b). The demo's
+signer allocation never hands wallets 0-3 or 9-11 to an onboarded user.
 
 ```bash
 cp .env.example .env
@@ -146,14 +148,29 @@ which jumps on a dev node and waits on Sepolia.
 
 After the ceremony the deployer (wallet 0) holds no power: governance owns
 Token, GovernanceToken (VGT), IdentityRegistry, ComplianceRules,
-OracleManager, InvestorTypeRegistry (when deployed) and itself; ops
-(wallet 10) holds the agent roles, the compliance-officer role and the
-oracles and claim issuers the deployer owned; the guardian (wallet 11) can
-pause the token but not unpause it. Issuer ownership moves by nominate and
-accept: the deployer's `transferOwnership` only nominates ops, so on Sepolia
-— where ops is a multisig, not a signer the script controls — the ops
-multisig must itself execute `acceptOwnership` and the deployer-key revoke
-for each claim issuer. Deploy governance (option 74) after the
+OracleManager, InvestorTypeRegistry (when deployed), the EscrowWalletFactory
+and OnchainIDFactory (when deployed) and itself; ops (wallet 10) holds the
+agent roles, the compliance-officer role, the escrow factory's ADMIN_ROLE
+and the oracles the deployer owned; the issuer admin (wallet 9) owns the
+claim issuers the deployer held; the guardian (wallet 11) can pause the
+token but not unpause it. Issuer ownership moves by nominate and accept:
+the deployer's `transferOwnership` only nominates the issuer admin, so on
+Sepolia, where it is a multisig the script does not control, that multisig
+must itself execute `acceptOwnership` and the deployer-key revoke for each
+claim issuer. The demo's issuers are owned by wallets 2 and 3 from deploy,
+so the ceremony leaves them there (no ops key on them; the separation check
+passes).
+The deployer's powers are read from chain, not from the config (2F.5): the
+oracles ComplianceRules binds to VSC and VGT, the registry's trusted issuers
+of each required topic, each oracle's `listManager`, the DynamicListManager
+governance is bound to, and the factories bound to types 9 and 10. Step 3
+nominates each factory and binds its type (`setEscrowWalletFactory`,
+`setOnchainIDFactory`, which accept only a factory whose pending or current
+owner is governance) while the deployer still owns governance; step 4
+accepts each by an EscrowFactoryParameters or IdentityFactoryParameters
+vote; the factory's DEFAULT_ADMIN_ROLE follows ownership, and step 5 grants
+ops ADMIN_ROLE before the deployer renounces it. A factory that is not
+deployed is skipped with a line. Deploy governance (option 74) after the
 oracle system (option 31) so OracleManager is a bound target. In the demo,
 run 83c (deployer grants ops and guardian, removes itself, nominates
 governance), then 83d (one acceptOwnership vote per nominated contract,
@@ -168,11 +185,23 @@ refuses to start rather than stop halfway: governance bound to every plan
 contract; each plan contract owned by the deployer, or already by governance
 where the deployer never calls it (Token, VGT, IdentityRegistry and
 ComplianceRules must still be the deployer's); no issuer where the deployer
-holds a key but not ownership; ops a signer wherever it must accept or revoke
-on an issuer, and no ops key on it that is revoked or of another purpose
-(it cannot be re-added as MANAGEMENT_KEY); each oracle owned by the
-deployer or ops, and an ops-owned oracle whose `listManager` is still the
-deployer fails, because only ops can clear it. It also refuses a guardian
+holds a key but not ownership; the issuer admin a signer wherever it must
+accept or revoke on an issuer, and no issuer-admin key on it that is revoked
+or of another purpose (it cannot be re-added as MANAGEMENT_KEY); each oracle
+owned by the deployer or ops, and an ops-owned oracle whose `listManager` is
+still the deployer fails, because only ops can clear it. Since 2F.5 it also
+refuses: an `oracles` or `issuers` list that omits a contract bound on chain
+(an extra one is handed over with a warning; leave a list out to use the
+chain's set); a config that does not name a DynamicListManager or factory
+governance is already bound to; a missing issuer admin while any issuer is
+trusted, or one that is the deployer, ops, the guardian or governance; any
+IdentityRegistry agent (ops after step 5, and any other agent found in
+`AgentAdded` events) that owns, is the pending owner of, or holds a live
+MANAGEMENT or CLAIM_SIGNER key on a trusted issuer, and an issuer admin
+that is a registry agent; an oracle `listManager` that is neither the
+deployer nor the governance-bound DynamicListManager; an open
+InvestorTypeRegistry proposal (cancel it first) and any registry governor
+besides the deployer (`GovernorUpdated` events). It also refuses a guardian
 or ops that is the deployer or governance, a paused VGT (every acceptance
 vote would revert), and a blacklist oracle bound to VGT. Never bind a
 blacklist oracle to VGT (D23): a listed governance halts every fee flow.
@@ -191,7 +220,20 @@ trusted contract, governance is a trusted contract and has no registry
 identity (D21), and every address still trusted on ComplianceRules (found
 from `TrustedContractAdded` events) is a deployed contract, not a wallet or
 delegated wallet; a wallet trusted before 2E.1 must be removed by the owner
-before the handover counts as complete. Preflight refuses to start on a
+before the handover counts as complete. It checks every contract read from
+chain as well as those the config names, "EscrowWalletFactory owned by
+governance, deployer holds no role", "OnchainIDFactory owned by
+governance", "no IdentityRegistry agent owns or holds a key on a trusted
+issuer (D25 b)" and "InvestorTypeRegistry: no governor but governance, no
+open proposal". It prints warnings that do not fail it: the deployer's
+remaining VSC with its exemption and verification (the demo deployer keeps
+100M VSC, verified and exempt, as the treasury artifact: move it and remove
+the exemption by vote), and escrow fee wallets that are not exempt or were
+registered after the handover. The InvestorTypeRegistry's own proposals
+now belong to the governor set they were created under (every `setGovernor`
+bumps `governorEpoch`, so the ceremony's removal of the deployer kills any
+planted proposal), expire 7 days after their execution time, and pass the
+same whitelist-tier check as `updateInvestorTypeConfig`. Preflight refuses to start on a
 governance that is untrusted or still registered (a pre-D21 deployment).
 The votes need a proposer plus quorum voters that are verified VGT holders
 among wallets 0 to 9: options 23/24 and 3/4 onboard them, 75a then 75/75b
@@ -235,15 +277,54 @@ Outside the demo, `HANDOVER_CONFIG=<path.json> npx hardhat run
 scripts/handover.ts --network <net>` runs the same ceremony and exits
 non-zero on any failure. The JSON holds the addresses `token`,
 `governanceToken`, `identityRegistry`, `complianceRules`, `oracleManager`, `governance`, the
-optional `investorTypeRegistry` and `dynamicListManager`, the `oracles` and `issuers` arrays, the
-optional `fromBlock` (the ComplianceRules deploy block, where the trusted-contract
-event scan starts; the demo records it at option 1) and `logChunk` (the
+optional `investorTypeRegistry` and `dynamicListManager`, the required keys
+`escrowWalletFactory` and `onchainIDFactory` (an address, or `null` when not
+deployed: neither is reachable from the core contracts, so only the config
+can name them), the optional `oracles` and `issuers` arrays (omitted: the
+set read from chain), the optional `feeWallets` array (escrow fee wallets
+to check for the exemption), the
+optional `fromBlock` (where the event scans start: trusted contracts,
+registry agents, registry governors, escrow investors; use a block before
+the IdentityRegistry was deployed; the demo records the ComplianceRules
+deploy block at option 1) and `logChunk` (the
 scan's block range, default 5000, halved down to 100 when the RPC refuses a
-range), and the wallet indices `ops`, `guardian`, `proposer` and `voters`
+range), and the wallet indices `ops`, `guardian`, `issuerAdmin` (required
+whenever the registry trusts an issuer), `proposer` and `voters`
 (an array). Before step 1 it checks that the proposer and every voter are
 verified and hold the VGT fees for every proposal. After a partial run,
 `HANDOVER_PHASE=accept` skips the deployer steps and votes only the
 acceptances and registry proposals still pending, then verifies.
+
+### Runbook rules for the ceremony and after (plan 2F)
+
+- Register every voter at least 7 days (`minVoterAge`) before the
+  ceremony's first proposal (D25); a dev node jumps, Sepolia waits.
+- Exempt the escrow fee wallets and the treasury before the ceremony, while
+  the deployer owns the InvestorTypeRegistry; after it only an
+  InvestorTypeConfig vote can (R-2F4-2). The completion check warns about a
+  fee wallet that is not exempt.
+- Settle every open proposal (vote it through or let it settle and refund)
+  before any vote that moves a bound contract's ownership, and trust the
+  new owner first (A-N3, R-2F1-1): a ComplianceRules owner that does not
+  trust governance makes `createProposal` revert and strands open deposits.
+- A wallet recovered with `recoveryAddress` votes only after KeyManager
+  recovery gives it a key on its OnchainID (R-2F2-3).
+- Oracle consensus may clear a permanent (governance, no-expiry) blacklist
+  entry when its verdict resolved after the governance write (D27 = a):
+  watch `BlacklistUpdated` events whose reason is "Oracle consensus
+  clearing" on permanent entries. The emergency-oracle key and the
+  oracle-owner key (ops) must be held by parties able to re-list within
+  hours. Node operators' runbook: clearing a governance sanction is visible
+  on chain and accountable, and governance can deregister a node by an
+  OracleParameters vote.
+- Before step 1, cancel every open InvestorTypeRegistry proposal and remove
+  every registry governor but the deployer; the ceremony refuses otherwise.
+- Never give one key both an IdentityRegistry agent role and an issuer
+  owner or signer role (D25 b), and never vote away the last trusted issuer
+  of a required topic or the last topic (the registry refuses both).
+- Option 63 after the handover creates a ComplianceRules proposal to trust
+  the new escrow wallet (vote with 77, execute with 78); the wallet cannot
+  be funded until it passes.
 
 ## Waiting instead of jumping
 

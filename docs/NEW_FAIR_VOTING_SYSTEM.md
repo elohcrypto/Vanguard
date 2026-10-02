@@ -128,6 +128,8 @@ on that proposal forever.
 | ListUpdate | 20% | 70% |
 | IdentityRegistryParameters | 25% | 65% |
 | GovernanceTokenParameters | 30% | 70% |
+| EscrowFactoryParameters | 30% | 70% |
+| IdentityFactoryParameters | 30% | 70% |
 
 Set once in `_initializeThresholds()`; there is no setter, so they cannot be
 changed after deployment.
