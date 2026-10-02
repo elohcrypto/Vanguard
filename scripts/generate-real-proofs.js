@@ -97,8 +97,13 @@ class RealProofGenerator {
         "secret is required: the whitelist leaf is Poseidon(identity, secret)",
       );
     }
-    if (walletBinding === undefined || walletBinding === null) {
-      throw new Error("walletBinding is required");
+    if (
+      walletBinding === undefined ||
+      walletBinding === null ||
+      BigInt(walletBinding) === 0n
+    ) {
+      // 0 is never a wallet; the consumer (3.3) requires binding == msg.sender.
+      throw new Error("walletBinding is required and must be non-zero");
     }
     if (!commitments === !members) {
       throw new Error("pass exactly one of commitments or members");

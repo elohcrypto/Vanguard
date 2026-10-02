@@ -65,6 +65,23 @@ describe("Proof cache is bound to the circuit that verified it", () => {
     );
   });
 
+  // Same verifier INSTANCE in two slots (testingMode uses address(0) for all
+  // of them): now only the circuit tag separates the keys. A cached blacklist
+  // entry must not answer jurisdiction from the cache.
+  it("the circuit tag alone keeps two slots apart when they share a verifier", async () => {
+    const zk = await deployReal(["blacklist", "jurisdiction"]);
+    expect(await zk.proofCacheKey("blacklist", a, b, c, [1])).to.not.equal(
+      await zk.proofCacheKey("jurisdiction", a, b, c, [1]),
+    );
+    await expect(zk.verifyBlacklistNonMembership(a, b, c, [1])).to.emit(
+      zk,
+      "ProofCached",
+    );
+    await expect(zk.verifyJurisdictionProof(a, b, c, [1]))
+      .to.emit(zk, "ProofCached")
+      .and.not.to.emit(zk, "ProofCacheHit");
+  });
+
   it("the batch path shares the whitelist cache, not the others", async () => {
     const zk = await deployReal();
     await zk.verifyWhitelistMembership(P, S);
