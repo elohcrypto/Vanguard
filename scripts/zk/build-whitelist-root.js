@@ -226,10 +226,27 @@ function privacyManagerAt(address, runner) {
   return new ethers.Contract(address, PM_ABI, runner);
 }
 
-/** A revert as `Name(args)` when it is a PrivacyManager error. */
+/**
+ * A revert as `Name(args)` when it is a PrivacyManager error. A JSON-RPC
+ * node fails the gas estimate before the Contract can decode the data, so
+ * the raw revert data is decoded against PM_ABI here.
+ */
 function revertReason(e) {
   if (e && e.revert && e.revert.name) {
     return `${e.revert.name}(${e.revert.args.map(String).join(", ")})`;
+  }
+  const data = [
+    e?.data,
+    e?.data?.data,
+    e?.error?.data,
+    e?.info?.error?.data,
+  ].find((d) => typeof d === "string" && d.startsWith("0x") && d.length >= 10);
+  if (data) {
+    try {
+      const { ethers } = require("ethers");
+      const p = new ethers.Interface(PM_ABI).parseError(data);
+      if (p) return `${p.name}(${p.args.map(String).join(", ")})`;
+    } catch {}
   }
   return String((e && (e.shortMessage || e.message)) || e);
 }
