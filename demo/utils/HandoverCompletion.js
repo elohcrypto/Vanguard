@@ -27,6 +27,7 @@ const {
   openRegistryProposals,
 } = require("./HandoverPowers");
 const { factoryRoleLines, deployerEscrows } = require("./HandoverScans");
+const { privacyLines } = require("./HandoverPrivacy");
 
 const ZERO = ethers.ZeroAddress;
 const EXEMPT_ABI = [
@@ -74,6 +75,9 @@ async function assertHandoverComplete(o) {
   }
   // Review M-1: no role holder besides governance and ops survives.
   for (const [label, pass] of await factoryRoleLines(o, govAddr, ops)) {
+    add(label, pass);
+  }
+  for (const [label, pass] of await privacyLines(o, dAddr, ops, govAddr)) {
     add(label, pass);
   }
   // Bound in governance, or the creator of a trusted escrow (review M-2),

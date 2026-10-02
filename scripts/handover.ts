@@ -13,6 +13,8 @@
  *     "dynamicListManager": "0x..",            // optional, demo option 84
  *     "escrowWalletFactory": "0x.." | null,     // required key (2F.5), null = not deployed
  *     "onchainIDFactory": "0x.." | null,        // required key (2F.5), null = not deployed
+ *     "privacyManager": "0x.." | null,          // required key (3.3), null = not deployed
+ *     "zkVerifier": "0x.." | null,              // required key (3.3), ZKVerifierIntegrated
  *     "oracles": ["0x..", "0x..", "0x.."],      // optional, one-step Ownable
  *     "issuers": ["0x..", "0x.."],              // optional, ClaimIssuer
  *     "feeWallets": ["0x.."],                   // optional, escrow fee wallets to check
@@ -30,7 +32,11 @@
  * Both factory keys must be present; null states "none". The OnchainIDFactory
  * is unreachable from the core contracts, so only the config names it; the
  * escrow factory is also read from every trusted escrow's factory(), and a
- * config that does not name it is refused. A "fromBlock" after the
+ * config that does not name it is refused. The two privacy keys follow the
+ * same rule (3.3): null is refused when governance is already bound to the
+ * contract (types 11/12), "zkVerifier" must be the verifier PrivacyManager
+ * uses (so null is refused whenever a PrivacyManager is named), and a
+ * testingMode verifier is refused. A "fromBlock" after the
  * IdentityRegistry deploy is refused (the scans would miss earlier agents).
  *
  * Every contract in ACCEPTANCE_PLAN (demo/utils/HandoverChecks.js) given here
@@ -95,7 +101,12 @@ export async function runHandover(
   if (cfg.issuerAdmin !== undefined && !Number.isInteger(cfg.issuerAdmin)) {
     throw new Error(`${path}: "issuerAdmin" must be a wallet index`);
   }
-  for (const k of ["escrowWalletFactory", "onchainIDFactory"]) {
+  for (const k of [
+    "escrowWalletFactory",
+    "onchainIDFactory",
+    "privacyManager",
+    "zkVerifier",
+  ]) {
     if (!(k in cfg)) {
       throw new Error(
         `${path}: missing "${k}" (an address, or null when not deployed): the deployer owns it until the ceremony hands it over`,
@@ -154,6 +165,12 @@ export async function runHandover(
       : undefined,
     onchainIDFactory: cfg.onchainIDFactory
       ? await at("OnchainIDFactory", cfg.onchainIDFactory)
+      : undefined,
+    privacyManager: cfg.privacyManager
+      ? await at("PrivacyManager", cfg.privacyManager)
+      : undefined,
+    zkVerifier: cfg.zkVerifier
+      ? await at("ZKVerifierIntegrated", cfg.zkVerifier)
       : undefined,
     // Left out: the ceremony uses the set read from chain.
     oracles: cfg.oracles

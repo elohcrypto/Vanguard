@@ -39,6 +39,8 @@ const PROPOSAL_TYPE_NAMES = [
   "GovernanceTokenParameters",
   "EscrowFactoryParameters",
   "IdentityFactoryParameters",
+  "PrivacyParameters",
+  "VerifierParameters",
 ];
 
 /**
@@ -920,8 +922,14 @@ class GovernanceModule {
       console.log(
         "10. IdentityFactoryParameters - OnchainID factory fees, pause, withdraw (after the handover)",
       );
+      console.log(
+        "11. PrivacyParameters - PrivacyManager whitelist root, list operator, validity, verifier (after the handover)",
+      );
+      console.log(
+        "12. VerifierParameters - ZKVerifierIntegrated verifier contracts, cache expiry (after the handover)",
+      );
 
-      const typeChoice = await this.promptUser("Select proposal type (0-10): ");
+      const typeChoice = await this.promptUser("Select proposal type (0-12): ");
       const proposalType = parseInt(typeChoice);
 
       if (proposalType === 0) {

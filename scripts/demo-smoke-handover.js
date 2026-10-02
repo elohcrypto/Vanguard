@@ -67,9 +67,10 @@ async function runHandoverSmoke(state, failures) {
     return;
   }
 
-  // Ten proposals at most (nine acceptances incl. both factories, or eight
-  // when 83b already gave governance the registry plus two registry calls):
-  // give the proposer and every voter enough VGT for all of them.
+  // Twelve proposals at most (eleven acceptances incl. both factories and
+  // both privacy contracts, or ten when 83b already gave governance the
+  // registry plus two registry calls): give the proposer and every voter
+  // enough VGT for all of them.
   const vgt = c("governanceToken");
   const perRound =
     (await governance.proposalCreationCost()) + (await governance.votingCost());
@@ -78,7 +79,7 @@ async function runHandoverSmoke(state, failures) {
       failures.push(`handover smoke: wallet ${i} is not a verified voter`);
       return;
     }
-    const want = perRound * 10n;
+    const want = perRound * 12n;
     const have = await vgt.balanceOf(s[i].address);
     if (have < want) {
       await (
@@ -93,6 +94,24 @@ async function runHandoverSmoke(state, failures) {
     c("identityRegistry"),
     [PROPOSER, ...VOTERS].map((i) => s[i]),
   );
+
+  // 3.3 (R-3R-4): the privacy contracts join the ceremony. Option 41 in
+  // real mode deploys them; otherwise the smoke deploys the same pair.
+  let privacyManager = c("privacyManager");
+  let zkVerifier = c("zkVerifierIntegrated");
+  if (!privacyManager) {
+    zkVerifier = await (
+      await ethers.getContractFactory("ZKVerifierIntegrated")
+    ).deploy(false);
+    privacyManager = await (
+      await ethers.getContractFactory("PrivacyManager")
+    ).deploy(await zkVerifier.getAddress());
+    state.setContract("zkVerifierIntegrated", zkVerifier);
+    state.setContract("privacyManager", privacyManager);
+  }
+  // Before the ceremony the deployer (owner) publishes the root.
+  const root = ethers.toBeHex(ethers.toBigInt(ethers.randomBytes(31)), 32);
+  await (await privacyManager.publishWhitelistRoot(root)).wait();
 
   // Log scans start at the IdentityRegistry deploy (review M-3).
   let fromBlock = state.identityRegistryDeployBlock;
@@ -120,6 +139,8 @@ async function runHandoverSmoke(state, failures) {
     // Both factories join the plan (2F.5, M4); the escrow leg deployed one.
     escrowWalletFactory: c("escrowFactory"),
     onchainIDFactory: c("onchainIDFactory"),
+    privacyManager,
+    zkVerifier,
     oracles: ["whitelistOracle", "blacklistOracle", "consensusOracle"].map(c),
     issuers: [c("kycIssuer"), c("amlIssuer")],
   };
@@ -149,6 +170,26 @@ async function runHandoverSmoke(state, failures) {
 
   const result = await assertHandoverComplete(args);
   for (const f of result.failures) failures.push(`handover: ${f}`);
+
+  // 3.3: after the ceremony the deployer can no longer publish a root; ops can.
+  try {
+    await privacyManager.publishWhitelistRoot.staticCall(root);
+    failures.push("3.3: the deployer still publishes whitelist roots");
+  } catch (e) {
+    const r = revertOf(e, privacyManager.interface);
+    if (r.name !== "NotListOperator" && !/NotListOperator/.test(r.message)) {
+      failures.push(
+        `3.3: deployer root publish wrong revert: ${r.message.split("\n")[0]}`,
+      );
+    }
+  }
+  try {
+    await privacyManager.connect(s[OPS]).publishWhitelistRoot.staticCall(root);
+  } catch (e) {
+    failures.push(
+      `3.3: ops cannot publish a whitelist root: ${e.message.split("\n")[0]}`,
+    );
+  }
 
   // D23: ops is a VGT agent now, but cannot freeze or burn governance's
   // fees (no vote could undo it). staticCall: nothing changes on chain.

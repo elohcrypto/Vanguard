@@ -20,7 +20,8 @@ const plan = (key, proposalType, label, typeName, opts = {}) => ({
   typeName,
   // Optional entries are skipped when the caller passes no contract for them.
   optional: Boolean(opts.optional),
-  // Governance setter that binds the type at step 3 (factories, 2F.5).
+  // Governance setter that binds the type at step 3 (factories 2F.5,
+  // privacy contracts 3.3).
   bind: opts.bind,
 });
 /** One acceptOwnership() vote per contract governance was nominated for. */
@@ -65,6 +66,16 @@ const ACCEPTANCE_PLAN = [
       bind: "setOnchainIDFactory",
     },
   ),
+  // Optional (3.3, R-3R-4): the privacy contracts, bound at step 3 like
+  // the factories; HandoverPrivacy.js adds their own checks.
+  plan("privacyManager", 11, "PrivacyManager", "PrivacyParameters", {
+    optional: true,
+    bind: "setPrivacyManager",
+  }),
+  plan("zkVerifier", 12, "ZKVerifierIntegrated", "VerifierParameters", {
+    optional: true,
+    bind: "setZKVerifier",
+  }),
   plan("governance", 4, "VanguardGovernance", "SystemParameters"),
 ];
 // Steps 1 and 5 call these as their owner, so the deployer must still own them.

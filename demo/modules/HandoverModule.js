@@ -39,6 +39,8 @@ const STATE_KEY = {
   investorTypeRegistry: "investorTypeRegistry",
   escrowWalletFactory: "escrowFactory",
   onchainIDFactory: "onchainIDFactory",
+  privacyManager: "privacyManager",
+  zkVerifier: "zkVerifierIntegrated",
   governance: "vanguardGovernance",
 };
 
@@ -111,6 +113,10 @@ class HandoverModule {
       // Optional (2F.5): option 60 / option 1 deploy them.
       escrowWalletFactory: s.getContract("escrowFactory") || undefined,
       onchainIDFactory: s.getContract("onchainIDFactory") || undefined,
+      // Optional (3.3): option 41 deploys them; a testingMode verifier
+      // (ZK_TESTING_MODE=1) is refused by the preflight.
+      privacyManager: s.getContract("privacyManager") || undefined,
+      zkVerifier: s.getContract("zkVerifierIntegrated") || undefined,
       oracles: pick(["whitelistOracle", "blacklistOracle", "consensusOracle"]),
       issuers: pick(["kycIssuer", "amlIssuer"]),
     };

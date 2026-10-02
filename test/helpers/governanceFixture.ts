@@ -21,8 +21,9 @@ export async function ageVoters(governance: any): Promise<void> {
  *
  * Signer order: deployer 0, ops 1, guardian 2, stranger 3, alice 4 (the
  * proposer), bob 5 and carol 6 (the voters), issuerAdmin 7, the escrow
- * factory's fee wallet 8. Both factories are in the plan (2F.5), unbound
- * until the ceremony binds them. Shared by the handover preflight,
+ * factory's fee wallet 8. Both factories (2F.5) and both privacy
+ * contracts (3.3: a real-mode ZKVerifierIntegrated and the PrivacyManager
+ * using it) are in the plan, unbound until the ceremony binds them. Shared by the handover preflight,
  * completion and CLI tests.
  */
 export async function handoverFixture() {
@@ -78,6 +79,11 @@ export async function handoverFixture() {
     idRegAddr,
     rulesAddr,
   );
+  const zkVerifier = await deploy("ZKVerifierIntegrated", false);
+  const privacyManager = await deploy(
+    "PrivacyManager",
+    await zkVerifier.getAddress(),
+  );
   const dynamicListManager = await deploy(
     "DynamicListManager",
     deployer.address,
@@ -113,6 +119,8 @@ export async function handoverFixture() {
     investorTypeRegistry,
     escrowWalletFactory,
     onchainIDFactory: factory,
+    privacyManager,
+    zkVerifier,
     governance,
   };
   const args: Record<string, any> = {

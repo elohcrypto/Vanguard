@@ -16,6 +16,9 @@
  * Task 2F.5: the power set is read from chain (HandoverPowers.js), issuers go
  * to issuerAdmin (never ops, D25 b), both factories are nominated, bound and
  * accepted, and the completion check is HandoverCompletion.js.
+ * Task 3.3: PrivacyManager and ZKVerifierIntegrated join the same way
+ * (types 11, 12; HandoverPrivacy.js), ops becomes PrivacyManager's
+ * listOperator.
  */
 
 const { ethers } = require("hardhat");
@@ -39,6 +42,7 @@ const {
   factorySteps,
 } = require("./HandoverPowers");
 const { assertHandoverComplete } = require("./HandoverCompletion");
+const { preflightPrivacy, privacySteps } = require("./HandoverPrivacy");
 
 const STATUS = [
   "Pending",
@@ -89,6 +93,7 @@ async function handoverDeployerPowers(o) {
   // Read-only; throws before any transaction when a precondition fails.
   const { governanceOwned } = await preflight(o);
   await preflightPowers(o, { governanceOwned });
+  await preflightPrivacy(o);
   const ctx = { o, d, dAddr, govAddr, report, ok, log };
   // Send, read back, assert, print.
   const apply = async (tx, readBack, msg) => {
@@ -189,6 +194,7 @@ async function handoverDeployerPowers(o) {
     "deployer removed as ComplianceRules rule administrator",
   );
   await factorySteps(ctx);
+  await privacySteps(ctx);
   for (const step of regSteps.slice(1)) await registryCall(ctx, step);
 
   log("\n📝 Step 3: nominate governance as owner");

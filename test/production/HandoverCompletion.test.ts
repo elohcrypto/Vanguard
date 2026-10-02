@@ -66,9 +66,17 @@ describe("Handover completion check (table)", function () {
       ["DynamicListManager", handAway(c.dynamicListManager)],
       ["InvestorTypeRegistry", handAway(c.investorTypeRegistry)],
       ["OnchainIDFactory", handAway(c.onchainIDFactory)],
+      ["PrivacyManager", handAway(c.privacyManager)],
+      ["ZKVerifierIntegrated", handAway(c.zkVerifier)],
       ["VanguardGovernance", handAway(c.governance)],
     ].map(([l, f]) => [`${l} owned by governance`, f] as any);
     const escrowF = c.escrowWalletFactory;
+    const pm = c.privacyManager;
+    // A verifier the deployer owns, for the "PrivacyManager's verifier" line.
+    const otherZk = await (
+      await ethers.getContractFactory("ZKVerifierIntegrated")
+    ).deploy(false);
+    const otherZkAddr = await otherZk.getAddress();
     const issuerAdmin = f.issuerAdmin;
     const kcKey = ethers.keccak256(
       ethers.solidityPacked(["address"], [ops.address]),
@@ -84,6 +92,24 @@ describe("Handover completion check (table)", function () {
         "EscrowWalletFactory owned by governance, deployer holds no role",
         async () =>
           escrowF.connect(gov).grantRole(await escrowF.ADMIN_ROLE(), d),
+      ],
+      // 3.3 (R-3R-4): the privacy lines. "ZKVerifierIntegrated is not in
+      // testingMode" cannot be re-broken (testingMode is immutable).
+      [
+        "PrivacyManager listOperator is ops",
+        () => pm.connect(gov).setListOperator(s),
+      ],
+      [
+        "PrivacyManager pendingOwner is not the deployer",
+        () => pm.connect(gov).transferOwnership(d),
+      ],
+      [
+        "ZKVerifierIntegrated pendingOwner is not the deployer",
+        () => c.zkVerifier.connect(gov).transferOwnership(d),
+      ],
+      [
+        `PrivacyManager's verifier ${otherZkAddr} owned by governance`,
+        () => pm.connect(gov).setZKVerifier(otherZkAddr),
       ],
       // D25 (b): ops (registry agent) gains a claim-signer key.
       [

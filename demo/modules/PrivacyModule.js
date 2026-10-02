@@ -14,6 +14,7 @@ const {
   displayProgress,
 } = require("../utils/DisplayHelpers");
 const { ageOrVoterAgeRefusal } = require("../utils/ChainTime");
+const { publishAndBind } = require("../utils/WhitelistBinderFlow");
 const { ethers } = require("hardhat");
 
 /**
@@ -130,6 +131,9 @@ class PrivacyModule {
         privacyManagerAddr = await privacyManager.getAddress();
         this.state.setContract("privacyManager", privacyManager);
         console.log(`✅ PrivacyManager deployed: ${privacyManagerAddr}`);
+        console.log(
+          "   📜 Whitelist root registry: the owner publishes now, ops (listOperator) after the handover; option 42 -> 1 publishes the root and binds the wallet",
+        );
       }
 
       displaySuccess(
@@ -2186,6 +2190,24 @@ class PrivacyModule {
         `   ${this.state.zkMode === "real" ? "🔐" : "🔧"} Mode: ${this.state.zkMode.toUpperCase()}`,
       );
 
+      // Real mode (Task 3.3): the root is published on PrivacyManager and the
+      // wallet binds itself; only that binding counts as whitelist status.
+      const privacyManager = this.state.getContract("privacyManager");
+      if (privacyManager) {
+        const receipt = await publishAndBind({
+          state: this.state,
+          privacyManager,
+          user: this.state.signers[0],
+          proof,
+          signals: publicSignals,
+        });
+        this.state.gasTracker.set("Whitelist Proof", receipt.gasUsed);
+        displaySuccess("WHITELIST MEMBERSHIP PROOF BOUND TO THE WALLET!");
+        return;
+      }
+      console.log(
+        "   ℹ️  No PrivacyManager (MOCK mode verifier): checking the proof through the wrapper only; nothing is bound",
+      );
       const verified =
         await zkVerifierIntegrated.verifyWhitelistMembership.staticCall(
           proof,

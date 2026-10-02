@@ -130,9 +130,10 @@ is given) needs a rescue vote that calls `cancelProposal` on it.
 and `burn(uint256)` selectors on every type (governance is a VGT agent, so
 the last two would spend the deposits it holds). ListUpdate accepts only
 the DynamicListManager's four list writes, its owner setters (`setOracles`,
-`setGovernanceContract`, `setProofExpiryDuration`, `updateWhitelist`,
-`updateBlacklist`) and `transferOwnership`/`acceptOwnership` ("Selector not
-allowed"), and only while the manager's `governanceContract` is this
+`setGovernanceContract`, `setProofExpiryDuration`) and
+`transferOwnership`/`acceptOwnership` ("Selector not allowed"; the
+whitelist root moved to PrivacyManager in 3.3, published by ops or a
+PrivacyParameters vote), and only while the manager's `governanceContract` is this
 governance ("List manager not bound to governance"). The residual
 risk is collusion of a registry agent with an issuer key: they can still
 mint fake identities, visibly on chain, but those cannot vote for
@@ -149,9 +150,11 @@ which jumps on a dev node and waits on Sepolia.
 After the ceremony the deployer (wallet 0) holds no power: governance owns
 Token, GovernanceToken (VGT), IdentityRegistry, ComplianceRules,
 OracleManager, InvestorTypeRegistry (when deployed), the EscrowWalletFactory
-and OnchainIDFactory (when deployed) and itself; ops (wallet 10) holds the
-agent roles, the compliance-officer role, the escrow factory's ADMIN_ROLE
-and the oracles the deployer owned; the issuer admin (wallet 9) owns the
+and OnchainIDFactory (when deployed), PrivacyManager and ZKVerifierIntegrated
+(when deployed, option 41) and itself; ops (wallet 10) holds the
+agent roles, the compliance-officer role, the escrow factory's ADMIN_ROLE,
+PrivacyManager's `listOperator` (it publishes the whitelist root) and the
+oracles the deployer owned; the issuer admin (wallet 9) owns the
 claim issuers the deployer held; the guardian (wallet 11) can pause the
 token but not unpause it. Issuer ownership moves by nominate and accept:
 the deployer's `transferOwnership` only nominates the issuer admin, so on
@@ -163,14 +166,19 @@ passes).
 The deployer's powers are read from chain, not from the config (2F.5): the
 oracles ComplianceRules binds to VSC and VGT, the registry's trusted issuers
 of each required topic, each oracle's `listManager`, the DynamicListManager
-governance is bound to, and the factories bound to types 9 and 10. Step 3
-nominates each factory and binds its type (`setEscrowWalletFactory`,
-`setOnchainIDFactory`, which accept only a factory whose pending or current
-owner is governance) while the deployer still owns governance; step 4
-accepts each by an EscrowFactoryParameters or IdentityFactoryParameters
-vote; the factory's DEFAULT_ADMIN_ROLE follows ownership, and step 5 grants
-ops ADMIN_ROLE before the deployer renounces it. A factory that is not
-deployed is skipped with a line. Deploy governance (option 74) after the
+governance is bound to, and the contracts bound to types 9 to 12 (the two
+factories, PrivacyManager, ZKVerifierIntegrated). Step 3 nominates each
+and binds its type (`setEscrowWalletFactory`, `setOnchainIDFactory`,
+`setPrivacyManager`, `setZKVerifier`, which accept only a contract whose
+pending or current owner is governance) while the deployer still owns
+governance; step 4 accepts each by an EscrowFactoryParameters,
+IdentityFactoryParameters, PrivacyParameters or VerifierParameters vote;
+the factory's DEFAULT_ADMIN_ROLE follows ownership, and step 5 grants ops
+the escrow factory's ADMIN_ROLE before the deployer renounces it and makes
+ops PrivacyManager's `listOperator`. After the ceremony a whitelist root
+is published by ops or by a PrivacyParameters vote, never by the deployer,
+and `updateVerifier` needs a VerifierParameters vote. A contract that is
+not deployed is skipped with a line. Deploy governance (option 74) after the
 oracle system (option 31) so OracleManager is a bound target. In the demo,
 run 83c (deployer grants ops and guardian, removes itself, nominates
 governance), then 83d (one acceptOwnership vote per nominated contract,
@@ -192,8 +200,9 @@ owned by the deployer or ops, and an ops-owned oracle whose `listManager` is
 still the deployer fails, because only ops can clear it. Since 2F.5 it also
 refuses: an `oracles` or `issuers` list that omits a contract bound on chain
 (an extra one is handed over with a warning; leave a list out to use the
-chain's set); a config that does not name a DynamicListManager or factory
-governance is already bound to; a missing issuer admin while any issuer is
+chain's set); a config that does not name a DynamicListManager, factory or privacy
+contract governance is already bound to; a `zkVerifier` that is not the
+verifier PrivacyManager uses, and a testingMode verifier; a missing issuer admin while any issuer is
 trusted, or one that is the deployer, ops, the guardian or governance; any
 IdentityRegistry agent (ops after step 5, and any other agent found in
 `AgentAdded` events) that owns, is the pending owner of, or holds a live
@@ -281,7 +290,12 @@ optional `investorTypeRegistry` and `dynamicListManager`, the required keys
 `escrowWalletFactory` and `onchainIDFactory` (an address, or `null` when not
 deployed: only the OnchainIDFactory is unreachable from the core
 contracts; the escrow factory is also read from every trusted escrow's
-`factory()`, and a config that does not name it is refused), the optional `oracles` and `issuers` arrays (omitted: the
+`factory()`, and a config that does not name it is refused), the required
+keys `privacyManager` and `zkVerifier` (an address, or `null` when not
+deployed; `null` is refused when governance is already bound to the
+contract, `zkVerifier` must be the verifier PrivacyManager uses, so it
+cannot be `null` while a PrivacyManager is named, and a testingMode
+verifier is refused), the optional `oracles` and `issuers` arrays (omitted: the
 set read from chain), the optional `feeWallets` array (escrow fee wallets
 to check for the exemption), the
 optional `fromBlock` (where the event scans start: trusted contracts,

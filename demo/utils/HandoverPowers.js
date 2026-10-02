@@ -41,7 +41,7 @@ const ORACLE_ABI = [
   "function listManager() view returns (address)",
   "function setListManager(address)",
 ];
-/** The plan entries governance binds at step 3 (the two factories). */
+/** The plan entries governance binds at step 3 (factories, privacy contracts). */
 const FACTORY_PLAN = ACCEPTANCE_PLAN.filter((e) => e.bind);
 
 const check = (cond, msg) => cond || fail(msg);
@@ -51,8 +51,9 @@ const send = async (p) => (await p).wait();
  * The contracts that hold power over holders, read from chain: oracles
  * bound in ComplianceRules for VSC and VGT, the registry's trusted issuers
  * per required topic, each oracle's listManager, the DynamicListManager
- * governance is bound to, the factories bound to types 9 and 10, and the
- * escrow factories that created trusted escrows (review M-2).
+ * governance is bound to, the contracts bound to types 9-12 (factories,
+ * PrivacyManager, ZKVerifierIntegrated), and the escrow factories that
+ * created trusted escrows (review M-2).
  */
 async function derivePowers(o) {
   const rules = o.complianceRules;

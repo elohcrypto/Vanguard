@@ -151,6 +151,89 @@ describe("Handover power set from chain (plan 2F.5)", function () {
     });
   });
 
+  describe("privacy contracts (3.3, R-3R-4)", function () {
+    it("nominates, binds and accepts both; ops is the list operator", async function () {
+      const pm = c.privacyManager;
+      const zk = c.zkVerifier;
+      const root = ethers.toBeHex(7n, 32);
+      // Before the ceremony the deployer (owner) publishes roots.
+      await pm.publishWhitelistRoot(root);
+      await ceremony();
+      expect(await pm.owner()).to.equal(govAddr);
+      expect(await zk.owner()).to.equal(govAddr);
+      expect(await c.governance.boundTarget(11)).to.equal(
+        await pm.getAddress(),
+      );
+      expect(await c.governance.boundTarget(12)).to.equal(
+        await zk.getAddress(),
+      );
+      expect(await pm.listOperator()).to.equal(ops.address);
+      // After it, the deployer cannot publish a root or swap a verifier.
+      await expect(pm.publishWhitelistRoot(root)).to.be.revertedWithCustomError(
+        pm,
+        "NotListOperator",
+      );
+      await expect(
+        zk.updateVerifier("whitelist", await zk.getAddress()),
+      ).to.be.revertedWithCustomError(zk, "OwnableUnauthorizedAccount");
+      await pm.connect(ops).publishWhitelistRoot(root);
+      const { checks, failures } = await assertHandoverComplete(args);
+      expect(failures).to.deep.equal([]);
+      expect(checks.map((x: any) => x.label)).to.include.members([
+        "PrivacyManager owned by governance",
+        "ZKVerifierIntegrated owned by governance",
+        "PrivacyManager listOperator is ops",
+        "PrivacyManager pendingOwner is not the deployer",
+        "ZKVerifierIntegrated pendingOwner is not the deployer",
+        "ZKVerifierIntegrated is not in testingMode",
+        `PrivacyManager's verifier ${await zk.getAddress()} owned by governance`,
+      ]);
+    });
+
+    it("refuses a privacy contract governance is bound to but the config omits", async function () {
+      const pm = c.privacyManager;
+      await pm.transferOwnership(govAddr);
+      await c.governance.setPrivacyManager(await pm.getAddress());
+      delete args.privacyManager;
+      await refused(
+        /bound to PrivacyManager 0x[0-9a-fA-F]+, which the config does not name: add "privacyManager"/,
+      );
+      args.privacyManager = pm;
+      const zk = c.zkVerifier;
+      await zk.transferOwnership(govAddr);
+      await c.governance.setZKVerifier(await zk.getAddress());
+      args.zkVerifier = null;
+      await refused(
+        /bound to ZKVerifierIntegrated 0x[0-9a-fA-F]+, which the config does not name: add "zkVerifier"/,
+      );
+    });
+
+    it("refuses a PrivacyManager whose verifier the config does not name", async function () {
+      const pm = c.privacyManager;
+      args.zkVerifier = null;
+      await refused(
+        new RegExp(
+          `uses ZKVerifierIntegrated ${await c.zkVerifier.getAddress()}, which the config does not name: set "zkVerifier"`,
+        ),
+      );
+      const other = await (
+        await ethers.getContractFactory("ZKVerifierIntegrated")
+      ).deploy(false);
+      args.zkVerifier = other;
+      await refused(/which the config does not name: set "zkVerifier"/);
+      expect(await pm.owner()).to.equal(deployer.address);
+    });
+
+    it("refuses a testingMode verifier", async function () {
+      const mock = await (
+        await ethers.getContractFactory("ZKVerifierIntegrated")
+      ).deploy(true);
+      args.privacyManager = null;
+      args.zkVerifier = mock;
+      await refused(/is in testingMode .*redeploy it with testingMode=false/);
+    });
+  });
+
   describe("review M-1 to M-3, L-2 (2F.5 fixes)", function () {
     /** carol registers, creates an escrow (alice pays bob), rules trust it. */
     async function trustedEscrow() {

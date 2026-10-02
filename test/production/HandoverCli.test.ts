@@ -33,6 +33,8 @@ describe("Handover CLI (scripts/handover.ts)", function () {
       dynamicListManager: await a("dynamicListManager"),
       escrowWalletFactory: await a("escrowWalletFactory"),
       onchainIDFactory: await a("onchainIDFactory"),
+      privacyManager: await a("privacyManager"),
+      zkVerifier: await a("zkVerifier"),
       oracles: [await f.args.oracles[0].getAddress()],
       issuers: [await f.args.issuers[0].getAddress()],
       logChunk: 100,
@@ -61,6 +63,10 @@ describe("Handover CLI (scripts/handover.ts)", function () {
     expect(await f.c.escrowWalletFactory.owner()).to.equal(f.govAddr);
     expect(await f.c.onchainIDFactory.owner()).to.equal(f.govAddr);
     expect(await f.kycIssuer.owner()).to.equal(f.issuerAdmin.address);
+    // 3.3: both privacy contracts are governance's, ops publishes roots.
+    expect(await f.c.privacyManager.owner()).to.equal(f.govAddr);
+    expect(await f.c.zkVerifier.owner()).to.equal(f.govAddr);
+    expect(await f.c.privacyManager.listOperator()).to.equal(f.ops.address);
   });
 
   it("the full phase completes with oracles and issuers read from chain", async function () {
@@ -111,6 +117,15 @@ describe("Handover CLI (scripts/handover.ts)", function () {
       /missing "onchainIDFactory" \(an address, or null/,
     );
     cfg.onchainIDFactory = null;
+    for (const k of ["privacyManager", "zkVerifier"]) {
+      const keep = cfg[k];
+      delete cfg[k];
+      await refusedWithNoTx(
+        "full",
+        new RegExp(`missing "${k}" \\(an address, or null`),
+      );
+      cfg[k] = keep;
+    }
     cfg.issuerAdmin = "9";
     await refusedWithNoTx("full", /"issuerAdmin" must be a wallet index/);
     delete cfg.issuerAdmin;
@@ -176,8 +191,8 @@ describe("Handover CLI (scripts/handover.ts)", function () {
       .connect(bob)
       .transfer(f.proposer.address, (await vgt.balanceOf(bob.address)) - 1n);
     await expect(runHandover(cfg)).to.be.rejectedWith(
-      // Ten plan contracts, votingCost 10 VGT each.
-      /voter .* holds 0\.0+1 free VGT; 10 proposal\(s\) need 100\.0/,
+      // Twelve plan contracts, votingCost 10 VGT each.
+      /voter .* holds 0\.0+1 free VGT; 12 proposal\(s\) need 120\.0/,
     );
   });
 
@@ -201,7 +216,7 @@ describe("Handover CLI (scripts/handover.ts)", function () {
     await f.c.token.transferOwnership(f.govAddr);
     await refusedWithNoTx(
       "accept",
-      /not nominated on GovernanceToken, IdentityRegistry, ComplianceRules, OracleManager, DynamicListManager, InvestorTypeRegistry, EscrowWalletFactory, OnchainIDFactory, VanguardGovernance;/,
+      /not nominated on GovernanceToken, IdentityRegistry, ComplianceRules, OracleManager, DynamicListManager, InvestorTypeRegistry, EscrowWalletFactory, OnchainIDFactory, PrivacyManager, ZKVerifierIntegrated, VanguardGovernance;/,
     );
   });
 
