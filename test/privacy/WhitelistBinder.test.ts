@@ -1,6 +1,7 @@
 import { expect } from "chai";
 import { ethers } from "hardhat";
 import { time } from "@nomicfoundation/hardhat-network-helpers";
+import { anyValue } from "@nomicfoundation/hardhat-chai-matchers/withArgs";
 import type { HardhatEthersSigner } from "@nomicfoundation/hardhat-ethers/signers";
 import {
   PrivacyManager,
@@ -183,7 +184,7 @@ describe("PrivacyManager whitelist binder (Task 3.3)", function () {
       const b = await pm.whitelistBindings(alice.address);
       expect(b.version).to.equal(1n);
       expect(b.nullifier).to.equal(aliceR1.signals[0]);
-      expect(await pm.nullifierWallet(aliceR1.signals[0])).to.equal(
+      expect(await pm.nullifierWallet(1n, aliceR1.signals[0])).to.equal(
         alice.address,
       );
       expect(await pm.hasValidWhitelistProof(alice.address)).to.equal(true);
@@ -195,7 +196,7 @@ describe("PrivacyManager whitelist binder (Task 3.3)", function () {
       expect(bobR1.signals[0]).to.equal(aliceR1.signals[0]);
       await expect(submit(pm, bob, bobR1))
         .to.be.revertedWithCustomError(pm, "NullifierBoundToOtherWallet")
-        .withArgs(alice.address);
+        .withArgs(alice.address, 1n);
       expect(await pm.hasValidWhitelistProof(bob.address)).to.equal(false);
     });
 
@@ -211,7 +212,7 @@ describe("PrivacyManager whitelist binder (Task 3.3)", function () {
         "InvalidWhitelistProof",
       );
       expect((await pm.whitelistBindings(alice.address)).version).to.equal(0n);
-      expect(await pm.nullifierWallet(aliceR1.signals[0])).to.equal(
+      expect(await pm.nullifierWallet(1n, aliceR1.signals[0])).to.equal(
         ethers.ZeroAddress,
       );
     });
@@ -263,6 +264,44 @@ describe("PrivacyManager whitelist binder (Task 3.3)", function () {
       expect(await pm.hasValidWhitelistProof(alice.address)).to.equal(false);
       await submit(pm, alice, aliceR1);
       expect(await pm.hasValidWhitelistProof(alice.address)).to.equal(true);
+    });
+
+    // Review LOW-2: the reservation is per root version, so a holder who
+    // lost alice's key binds bob after A -> B -> A; never two per version.
+    it("A -> B -> A frees the nullifier for a new wallet, one per version", async function () {
+      const pm = await deploy();
+      await submit(pm, alice, aliceR1);
+      await pm.publishWhitelistRoot(hex32(root2));
+      await pm.publishWhitelistRoot(hex32(root1));
+      expect(await pm.whitelistVersion()).to.equal(3n);
+      await expect(submit(pm, bob, bobR1))
+        .to.emit(pm, "WhitelistProofBound")
+        .withArgs(bob.address, bobR1.signals[0], 3n, anyValue);
+      expect(await pm.nullifierWallet(3n, bobR1.signals[0])).to.equal(
+        bob.address,
+      );
+      expect(await pm.nullifierWallet(1n, aliceR1.signals[0])).to.equal(
+        alice.address,
+      );
+      expect(await pm.hasValidWhitelistProof(bob.address)).to.equal(true);
+      expect(await pm.hasValidWhitelistProof(alice.address)).to.equal(false);
+      // Same version: alice cannot take the commitment back.
+      await expect(submit(pm, alice, aliceR1))
+        .to.be.revertedWithCustomError(pm, "NullifierBoundToOtherWallet")
+        .withArgs(bob.address, 3n);
+      expect(await pm.hasValidWhitelistProof(alice.address)).to.equal(false);
+    });
+
+    it("a same-root republish lets a new wallet bind, not a second one", async function () {
+      const pm = await deploy();
+      await submit(pm, alice, aliceR1);
+      await pm.publishWhitelistRoot(hex32(root1));
+      await submit(pm, bob, bobR1);
+      expect(await pm.hasValidWhitelistProof(bob.address)).to.equal(true);
+      expect(await pm.hasValidWhitelistProof(alice.address)).to.equal(false);
+      await expect(submit(pm, alice, aliceR1))
+        .to.be.revertedWithCustomError(pm, "NullifierBoundToOtherWallet")
+        .withArgs(bob.address, 2n);
     });
   });
 

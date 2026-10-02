@@ -76,7 +76,10 @@ contract PrivacyManager is Ownable2Step, ReentrancyGuard {
     /// @notice Validity granted to a binding at submission (frozen per binding).
     uint256 public proofValidityPeriod = 30 days;
     mapping(address => WhitelistBinding) public whitelistBindings;
-    mapping(uint256 => address) public nullifierWallet;
+    /// @notice Wallet holding each nullifier, per root version: one commitment
+    ///         holds at most one live wallet per version, and a new version
+    ///         (rotation or a republish of the same root) frees it.
+    mapping(uint256 version => mapping(uint256 nullifier => address)) public nullifierWallet;
 
     // Jurisdiction management
     mapping(uint256 => JurisdictionInfo) public jurisdictions;
@@ -89,7 +92,7 @@ contract PrivacyManager is Ownable2Step, ReentrancyGuard {
     error InvalidWhitelistRoot();
     error RootNotCurrent();
     error WalletBindingMismatch();
-    error NullifierBoundToOtherWallet(address wallet);
+    error NullifierBoundToOtherWallet(address wallet, uint256 version);
     error InvalidWhitelistProof();
     error InvalidValidityPeriod();
     error TestingModeVerifier();
@@ -233,11 +236,15 @@ contract PrivacyManager is Ownable2Step, ReentrancyGuard {
      * @param signals [nullifier, merkleRoot, walletBinding]
      * @dev Reverts unless: merkleRoot is the current published root;
      *      walletBinding == uint160(msg.sender) (rejects 0 and any alias);
-     *      the nullifier is unbound or bound to the caller; the proof
-     *      verifies through the wrapper, which refuses non-canonical signals
-     *      (so the nullifier map is keyed on the canonical value). A failing
-     *      proof records nothing. Resubmitting under the same root refreshes
-     *      the caller's own binding.
+     *      the nullifier is unbound under the current root version or
+     *      bound to the caller; the proof verifies through the wrapper, which
+     *      refuses non-canonical signals (so the nullifier map is keyed on
+     *      the canonical value). A failing proof records nothing.
+     *      Resubmitting under the same version refreshes the caller's own
+     *      binding and its expiry: expiry alone does not revoke, rotating
+     *      the root does. The reservation is per version, so after any new
+     *      version (A -> B -> A, or the same root republished) a holder who
+     *      lost a wallet can bind another one.
      */
     function submitWhitelistProof(
         uint256[24] calldata proof,
@@ -247,12 +254,12 @@ contract PrivacyManager is Ownable2Step, ReentrancyGuard {
         if (root == bytes32(0) || bytes32(signals[1]) != root) revert RootNotCurrent();
         if (signals[2] != uint256(uint160(msg.sender))) revert WalletBindingMismatch();
         uint256 nullifier = signals[0];
-        address bound = nullifierWallet[nullifier];
-        if (bound != address(0) && bound != msg.sender) revert NullifierBoundToOtherWallet(bound);
+        uint256 version = whitelistVersion;
+        address bound = nullifierWallet[version][nullifier];
+        if (bound != address(0) && bound != msg.sender) revert NullifierBoundToOtherWallet(bound, version);
         if (!zkVerifier.verifyWhitelistMembership(proof, signals)) revert InvalidWhitelistProof();
 
-        if (bound == address(0)) nullifierWallet[nullifier] = msg.sender;
-        uint256 version = whitelistVersion;
+        if (bound == address(0)) nullifierWallet[version][nullifier] = msg.sender;
         uint256 expiresAt = block.timestamp + proofValidityPeriod;
         whitelistBindings[msg.sender] = WhitelistBinding({
             version: version,

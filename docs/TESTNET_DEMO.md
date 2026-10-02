@@ -341,6 +341,10 @@ acceptances and registry proposals still pending, then verifies.
 - Option 63 after the handover creates a ComplianceRules proposal to trust
   the new escrow wallet (vote with 77, execute with 78); the wallet cannot
   be funded until it passes.
+- Revoking a whitelist binding is root rotation: publish a root without
+  the commitment (ops, or a PrivacyParameters vote). Expiry alone does not
+  revoke, since a holder may resubmit the same proof under the same root
+  to refresh it.
 
 ## Waiting instead of jumping
 

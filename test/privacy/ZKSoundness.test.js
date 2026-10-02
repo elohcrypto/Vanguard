@@ -129,9 +129,10 @@ describe("ZK soundness guards (plan Task 0.1)", function () {
         .connect(alice)
         .submitWhitelistProof(r.proof, r.publicSignals),
     ).to.not.be.reverted;
-    expect(await privacyManager.nullifierWallet(r.publicSignals[0])).to.equal(
-      alice.address,
-    );
+    const version = await privacyManager.whitelistVersion();
+    expect(
+      await privacyManager.nullifierWallet(version, r.publicSignals[0]),
+    ).to.equal(alice.address);
     expect(await privacyManager.hasValidWhitelistProof(alice.address)).to.equal(
       true,
     );

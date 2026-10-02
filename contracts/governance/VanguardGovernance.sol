@@ -198,7 +198,7 @@ contract VanguardGovernance is Ownable2Step, ReentrancyGuard {
     bytes4 private constant SEL_BURN_SELF = 0x42966c68; // burn(uint256)
     // ListUpdate runs under list thresholds, so it may only call the
     // DynamicListManager: its four list writes, its owner surface (oracles,
-    // governance address, proof expiry, list roots), and the two ownership
+    // governance address, proof expiry), and the two ownership
     // steps. ListUpdate is the manager's only bound type, so this is the
     // only way a governance-owned manager is reconfigured; the ceremony
     // accepts the manager's ownership under it, and a migration must be
