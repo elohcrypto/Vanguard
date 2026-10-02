@@ -3,9 +3,13 @@
 /**
  * ZK Circuits Readiness Verification Script
  *
- * This script verifies that all ZK circuits are ready for both:
- * 1. Mock mode (testing) - Fast verification without real proofs
- * 2. REAL mode (production) - Actual cryptographic proof verification
+ * Checks the artifacts of every circuit and whether its setup is sound:
+ * protocol and nPublic per circuit, PLONK required for the whitelist, and
+ * any Groth16 key or verifier with gamma == delta (no phase-2 contribution,
+ * so forgeable) reported as UNSOUND.
+ *
+ * Exit 0: all present and sound. Exit 2: present, at least one circuit
+ * unsound (never "ready for production"). Exit 1: artifacts missing/invalid.
  *
  * Usage: node scripts/verify-zk-readiness.js
  */
@@ -16,14 +20,14 @@ const path = require("path");
 console.log("\n🔍 ZK Circuits Readiness Verification\n");
 console.log("=".repeat(60));
 
-// Circuit names
-const circuits = [
-  "whitelist_membership",
-  "blacklist_membership",
-  "jurisdiction_proof",
-  "accreditation_proof",
-  "compliance_aggregation",
-];
+// Circuit names and the protocol each must use come from the setup script,
+// so the two cannot drift. PLONK runs on the universal ptau (hash-checked by
+// setup:zk); a Groth16 key needs a per-circuit phase-2 contribution, and
+// without one gamma == delta and anyone can forge a proof.
+const { CIRCUITS: circuits, protocolOf } = require("./setup-zk-circuits");
+
+// Circuits whose setup does not make proofs sound, with the reason.
+const unsound = [];
 
 let allPassed = true;
 
@@ -74,38 +78,78 @@ circuits.forEach((circuit) => {
     allPassed = false;
   }
 
-  // Check verification key
+  // Check verification key: protocol, nPublic, setup soundness
+  const expected = protocolOf(circuit);
+  let nPublic = null;
   if (fs.existsSync(vkeyPath)) {
     const vkey = JSON.parse(fs.readFileSync(vkeyPath, "utf8"));
-    if (vkey.protocol === "groth16" && vkey.vk_alpha_1 && vkey.IC) {
-      console.log(
-        `     ✅ vkey: Valid Groth16 (${vkey.IC.length - 1} public inputs)`,
-      );
-    } else {
+    nPublic = vkey.nPublic;
+    const shapeOk =
+      vkey.protocol === "groth16"
+        ? Boolean(vkey.vk_alpha_1 && vkey.IC)
+        : vkey.protocol === "plonk"
+          ? Boolean(vkey.Qm && vkey.S1 && vkey.X_2)
+          : false;
+    console.log(`     protocol: ${vkey.protocol}, nPublic: ${vkey.nPublic}`);
+    if (!shapeOk) {
       console.log(`     ❌ vkey: Invalid format`);
       allPassed = false;
+    } else if (vkey.protocol !== expected) {
+      console.log(`     ❌ vkey: protocol ${vkey.protocol}, expected ${expected}`);
+      allPassed = false;
+    } else if (circuit === "whitelist_membership" && vkey.protocol !== "plonk") {
+      console.log(`     ❌ vkey: the whitelist circuit must be PLONK`);
+      allPassed = false;
+    } else if (
+      vkey.protocol === "groth16" &&
+      JSON.stringify(vkey.vk_gamma_2) === JSON.stringify(vkey.vk_delta_2)
+    ) {
+      console.log(
+        `     ⛔ vkey: UNSOUND: no phase-2 contribution (gamma == delta), proofs are forgeable (3.7)`,
+      );
+      unsound.push(`${circuit} (groth16, gamma == delta)`);
+    } else if (vkey.protocol === "plonk") {
+      console.log(`     ✅ vkey: PLONK, universal setup (no per-circuit secret)`);
+    } else {
+      console.log(`     ✅ vkey: Groth16 with a phase-2 contribution`);
     }
   } else {
     console.log(`     ❌ vkey: Missing`);
     allPassed = false;
   }
 
-  // Check Solidity verifier
+  // Check the committed Solidity verifier: name, ABI shape, and for Groth16
+  // the same gamma == delta test on the constants that actually deploy.
   if (fs.existsSync(verifierPath)) {
-    const verifierContent = fs.readFileSync(verifierPath, "utf8");
+    const src = fs.readFileSync(verifierPath, "utf8");
     const contractName =
       circuit
         .split("_")
         .map((w) => w.charAt(0).toUpperCase() + w.slice(1))
         .join("") + "Verifier";
-    if (
-      verifierContent.includes(`contract ${contractName}`) &&
-      verifierContent.includes("verifyProof")
-    ) {
-      console.log(`     ✅ Verifier: ${contractName}.sol`);
-    } else {
-      console.log(`     ❌ Verifier: Invalid contract`);
+    const abiShape =
+      expected === "plonk"
+        ? `verifyProof(uint256[24] calldata _proof, uint256[${nPublic}] calldata _pubSignals)`
+        : `uint[${nPublic}] calldata _pubSignals)`;
+    const constant = (n) =>
+      (src.match(new RegExp(`uint256 constant ${n}\\s*=\\s*(\\d+)`)) || [])[1];
+    const g2 = (p) => ["x1", "x2", "y1", "y2"].map((k) => constant(p + k));
+    if (!src.includes(`contract ${contractName}`) || !src.includes(abiShape)) {
+      console.log(`     ❌ Verifier: ${contractName}.sol does not match ${abiShape}`);
       allPassed = false;
+    } else if (expected === "groth16" && g2("gamma").includes(undefined)) {
+      console.log(`     ❌ Verifier: ${contractName}.sol has no gamma/delta constants`);
+      allPassed = false;
+    } else if (
+      expected === "groth16" &&
+      g2("gamma").join() === g2("delta").join()
+    ) {
+      console.log(`     ⛔ Verifier: ${contractName}.sol UNSOUND (gamma == delta)`);
+      if (!unsound.some((u) => u.startsWith(circuit))) {
+        unsound.push(`${circuit} (groth16 verifier, gamma == delta)`);
+      }
+    } else {
+      console.log(`     ✅ Verifier: ${contractName}.sol (${expected})`);
     }
   } else {
     console.log(`     ❌ Verifier: Missing`);
@@ -196,17 +240,29 @@ if (fs.existsSync(generatorPath)) {
 console.log("\n" + "=".repeat(60));
 console.log("\n📊 Verification Summary:\n");
 
-if (allPassed) {
+if (allPassed && unsound.length === 0) {
   console.log("  🎉 ALL CHECKS PASSED!\n");
-  console.log("  ✅ All 5 circuits have REAL cryptographic artifacts");
-  console.log("  ✅ ZKVerifierIntegrated supports both mock and REAL modes");
-  console.log("  ✅ RealProofGenerator can generate all proof types");
-  console.log("  ✅ Solidity verifier contracts are properly named\n");
-  console.log("  🚀 System is READY for both testing and production!\n");
-  console.log("  📖 See docs/ZK_CIRCUITS_READINESS.md for usage guide\n");
+  console.log("  ✅ All circuits have real artifacts and a sound setup");
+  console.log("  ✅ ZKVerifierIntegrated supports both mock and real modes");
+  console.log("  ✅ RealProofGenerator can generate all proof types\n");
+  console.log("  🚀 System is READY for testing and production\n");
   process.exit(0);
+} else if (allPassed) {
+  console.log("  ⛔ NOT READY for production: unsound setup\n");
+  unsound.forEach((u) => console.log(`     • ${u}`));
+  console.log(
+    "\n  Artifacts are present, so the demo and tests run, but a forged proof",
+  );
+  console.log(
+    "  verifies for every circuit above. Task 3.7 moves them to PLONK.\n",
+  );
+  process.exit(2);
 } else {
   console.log("  ❌ SOME CHECKS FAILED!\n");
+  if (unsound.length) {
+    console.log("  Also unsound:");
+    unsound.forEach((u) => console.log(`     • ${u}`));
+  }
   console.log("  Please review the errors above and run:");
   console.log("    npm run setup:zk\n");
   process.exit(1);
