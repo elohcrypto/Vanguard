@@ -306,12 +306,28 @@ describe("ComplianceRules whitelist modes (Task 3.4)", function () {
     });
 
     it("expiry blocks once the validity period passes", async function () {
-      const period = Number(await s.pm.proofValidityPeriod());
-      expect(period).to.equal(30 * DAY);
-      await time.increase(period - 10);
+      expect(await s.pm.proofValidityPeriod()).to.equal(BigInt(30 * DAY));
+      // From chain, so fixture block timing cannot shift it (review LOW-4b).
+      const { expiresAt } = await s.pm.whitelistBindings(alice.address);
+      await time.increaseTo(expiresAt - 2n);
       expect(await receives(alice.address)).to.equal(true);
-      await time.increase(10);
+      await time.increaseTo(expiresAt);
       expect(await receives(alice.address)).to.equal(false);
+    });
+
+    it("re-pointing to a new PrivacyManager drops holders until they re-bind", async function () {
+      const pm2 = await new PrivacyManager__factory(owner).deploy(
+        await s.pm.zkVerifier(),
+      );
+      await pm2.publishWhitelistRoot(hex32(root1));
+      expect(await receives(alice.address)).to.equal(true);
+      // Allowed while ZkOnly uses it: the new one has no bindings yet.
+      await rules.setPrivacyManager(s.tAddr, await pm2.getAddress());
+      expect(await receives(alice.address)).to.equal(false);
+      expect(await receives(bob.address)).to.equal(false);
+      await submit(pm2, alice, aliceA1);
+      expect(await receives(alice.address)).to.equal(true);
+      expect(await receives(bob.address)).to.equal(false);
     });
 
     it("replay: alice's nullifier cannot bind carol, carol stays blocked", async function () {
@@ -337,6 +353,26 @@ describe("ComplianceRules whitelist modes (Task 3.4)", function () {
       await submit(s.pm, carol, carolC2);
       expect(await receives(carol.address)).to.equal(true);
     });
+  });
+
+  // Review LOW-4a: the mode and the PrivacyManager are per token.
+  it("another token on the same rules keeps OracleOnly behaviour", async function () {
+    const t2 = await (
+      await ethers.getContractFactory("Token")
+    ).deploy("V2", "V2", await s.idReg.getAddress(), await rules.getAddress());
+    const t2Addr = await t2.getAddress();
+    await rules.setTokenIdentityRegistry(t2Addr, await s.idReg.getAddress());
+    await mode(M.ZkOnly);
+    expect(await can(carol.address, dave.address)).to.equal(false);
+    expect(await rules.whitelistMode(t2Addr)).to.equal(BigInt(M.OracleOnly));
+    expect(await rules.privacyManager(t2Addr)).to.equal(ethers.ZeroAddress);
+    // No oracle, no binding, no mode on t2: the gate is off there.
+    const on2 = (from: string, to: string) =>
+      asToken.canTransfer.staticCall(from, to, 1n, { from: t2Addr });
+    expect(await on2(carol.address, dave.address)).to.equal(true);
+    expect(
+      await asToken.canReceive.staticCall(dave.address, { from: t2Addr }),
+    ).to.equal(true);
   });
 
   describe("setter guards", function () {

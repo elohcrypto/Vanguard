@@ -194,6 +194,8 @@ contract ComplianceRules is IComplianceRules, IComplianceHooks, Ownable2Step, Re
     /**
      * @dev Point a token at the PrivacyManager whose whitelist bindings
      *      ZkOnly/Either read, or pass address(0) to clear it (OracleOnly only).
+     *      Re-pointing an in-use mode to another PrivacyManager drops every
+     *      holder's binding until they re-bind on the new one.
      * @param token The token whose whitelist this PrivacyManager may decide.
      * @param pm PrivacyManager address, or address(0).
      */
@@ -325,8 +327,9 @@ contract ComplianceRules is IComplianceRules, IComplianceHooks, Ownable2Step, Re
         // jurisdiction, and the non-escrow counterparty on the trusted path.
         // Token verifies both parties itself, so they are not re-verified here.
         //
-        // Minting (from == address(0)): the recipient still faces the oracle
-        // gates, so tokens cannot be issued to a blacklisted address. When a
+        // Minting (from == address(0)): the recipient still faces the list
+        // gates (the blacklist, and the whitelist by mode), so tokens cannot
+        // be issued to a blacklisted or unlisted address. When a
         // registry is bound, the recipient must also pass the country rule.
         // Identity is Token's gate (mint() verifies the recipient).
         if (from == address(0)) {

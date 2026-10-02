@@ -352,7 +352,10 @@ acceptances and registry proposals still pending, then verifies.
 - Revoking a whitelist binding is root rotation: publish a root without
   the commitment (ops, or a PrivacyParameters vote). Expiry alone does not
   revoke, since a holder may resubmit the same proof under the same root
-  to refresh it.
+  to refresh it. Under ComplianceRules whitelist mode ZkOnly (and Either
+  without a whitelist oracle) a root rotation, or an expired binding,
+  pauses every affected holder, escrow releases to them included, until
+  they re-prove; burns stay open.
 
 ## Waiting instead of jumping
 
