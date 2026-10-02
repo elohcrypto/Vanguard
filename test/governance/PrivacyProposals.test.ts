@@ -17,7 +17,7 @@ describe("Privacy contracts are governable by proposal (3.3)", function () {
     bob: SignerWithAddress,
     carol: SignerWithAddress,
     ops: SignerWithAddress;
-  let gov: any, pm: any, zk: any;
+  let gov: any, pm: any, zk: any, rules: any, vsc: any;
   let govAddr: string, pmAddr: string, zkAddr: string;
 
   async function passByVote(type: number, target: any, data: string) {
@@ -48,7 +48,7 @@ describe("Privacy contracts are governable by proposal (3.3)", function () {
       await ethers.getContractFactory("IdentityRegistry")
     ).deploy();
     const idRegAddr = await idReg.getAddress();
-    const rules = await (
+    rules = await (
       await ethers.getContractFactory("ComplianceRules")
     ).deploy(owner.address, [840], []);
     const rulesAddr = await rules.getAddress();
@@ -56,7 +56,7 @@ describe("Privacy contracts are governable by proposal (3.3)", function () {
       await ethers.getContractFactory("GovernanceToken")
     ).deploy("VGT", "VGT", idRegAddr, rulesAddr);
     const vgtAddr = await vgt.getAddress();
-    const vsc = await (
+    vsc = await (
       await ethers.getContractFactory("Token")
     ).deploy("Vanguard StableCoin", "VSC", idRegAddr, rulesAddr);
     gov = await (
@@ -230,5 +230,28 @@ describe("Privacy contracts are governable by proposal (3.3)", function () {
       ]),
     );
     expect((await zk.getVerifierAddresses()).jurisdiction).to.equal(yesAddr);
+  });
+
+  // Task 3.4: the whitelist-mode setters are plain onlyOwner calls on the
+  // ComplianceRules bound target, so a ComplianceRules vote reaches them.
+  it("ComplianceRules: privacyManager and whitelistMode set by vote", async function () {
+    const T_RULES = 1;
+    const vscAddr = await vsc.getAddress();
+    await rules.transferOwnership(govAddr);
+    await passByVote(T_RULES, rules, accept(rules));
+    expect(await rules.owner()).to.equal(govAddr);
+    await expect(
+      rules.setPrivacyManager(vscAddr, pmAddr),
+    ).to.be.revertedWithCustomError(rules, "OwnableUnauthorizedAccount");
+    const call = (fn: string, a: unknown[]) =>
+      rules.interface.encodeFunctionData(fn, a);
+    await passByVote(
+      T_RULES,
+      rules,
+      call("setPrivacyManager", [vscAddr, pmAddr]),
+    );
+    await passByVote(T_RULES, rules, call("setWhitelistMode", [vscAddr, 2]));
+    expect(await rules.privacyManager(vscAddr)).to.equal(pmAddr);
+    expect(await rules.whitelistMode(vscAddr)).to.equal(2n);
   });
 });
