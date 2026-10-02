@@ -17,6 +17,11 @@ const {
 } = require("../../scripts/zk/build-whitelist-root");
 const { proveWhitelist } = require("../../scripts/zk/prove-whitelist");
 const { MerkleTreeBuilder } = require("../../utils/merkle-tree-builder");
+const {
+  demoIdentity,
+  demoWhitelist,
+  proveForDemoUser,
+} = require("../../demo/utils/WhitelistBinderFlow");
 
 const ROOT = path.join(__dirname, "../..");
 const BUILDER = path.join(ROOT, "scripts/zk/build-whitelist-root.js");
@@ -390,6 +395,67 @@ describe("Whitelist root builder and prover CLI (Task 3.5)", function () {
       expect(r.code).to.equal(1);
       expect(r.stderr).to.match(/one commitment per identity per root/);
       expect(r.stdout).to.equal("");
+    });
+  });
+
+  describe("demo flow (option 42 -> 1)", function () {
+    it("identity is the user's OnchainID address; secret and wallet are the user's own", async function () {
+      const registry = await (
+        await ethers.getContractFactory("IdentityRegistry")
+      ).deploy();
+      const OnchainID = await ethers.getContractFactory("OnchainID");
+      const ids = {};
+      for (const w of [alice, bob]) {
+        const id = await OnchainID.deploy(w.address);
+        ids[w.address] = await id.getAddress();
+        await registry.registerIdentity(w.address, ids[w.address], 840);
+      }
+      const {
+        RealProofGenerator,
+      } = require("../../scripts/generate-real-proofs");
+      const state = {
+        zkSecrets: new Map(),
+        realProofGenerator: new RealProofGenerator(),
+        getContract: (k) => (k === "identityRegistry" ? registry : null),
+      };
+
+      const a = await demoIdentity(state, alice.address);
+      expect(a.identity).to.equal(BigInt(ids[alice.address]));
+      expect(a.onchainID).to.equal(ids[alice.address]);
+      // Carol has no OnchainID: her own address stands in.
+      const c = await demoIdentity(state, carol.address);
+      expect(c).to.deep.equal({
+        identity: BigInt(carol.address),
+        onchainID: null,
+      });
+
+      const { users, rootFile: demoRoot } = await demoWhitelist(state, [
+        alice,
+        bob,
+        carol,
+      ]);
+      for (const u of users) {
+        const expected = await computeCommitment(
+          u.identity,
+          state.zkSecrets.get(u.wallet),
+        );
+        expect(u.commitment).to.equal(expected);
+      }
+      expect(users.map((u) => u.identity)).to.deep.equal([
+        BigInt(ids[alice.address]),
+        BigInt(ids[bob.address]),
+        BigInt(carol.address),
+      ]);
+      expect(new Set(state.zkSecrets.values()).size).to.equal(3);
+
+      const calldata = await proveForDemoUser(state, bob, demoRoot);
+      expect(BigInt(calldata.signals[2])).to.equal(BigInt(bob.address));
+      const { pm } = await deployPair();
+      await pm.publishWhitelistRoot(demoRoot.root);
+      await pm
+        .connect(bob)
+        .submitWhitelistProof(calldata.proof, calldata.signals);
+      expect(await pm.hasValidWhitelistProof(bob.address)).to.be.true;
     });
   });
 });

@@ -1,15 +1,98 @@
 /**
- * @fileoverview Demo whitelist flow on PrivacyManager (plan v2 Task 3.3):
- * the list operator publishes the root, the user binds its wallet with
+ * @fileoverview Demo whitelist flow on PrivacyManager (plan v2 Tasks 3.3,
+ * 3.5): each user commits Poseidon(identity, secret), the root and the proof
+ * come from the same library functions as the scripts/zk CLIs, the list
+ * operator publishes the root, the user binds its wallet with
  * submitWhitelistProof, and hasValidWhitelistProof is the status a
  * compliance gate reads. Kept out of PrivacyModule.js, which is far over
  * the 500-line rule already.
  */
 
 const { ethers } = require("hardhat");
+const {
+  buildWhitelistRoot,
+  computeCommitment,
+} = require("../../scripts/zk/build-whitelist-root");
+const { proveWhitelist } = require("../../scripts/zk/prove-whitelist");
 
 const OPS_INDEX = 10; // docs/TESTNET_DEMO.md wallet roles
 const same = (a, b) => a.toLowerCase() === b.toLowerCase();
+
+/**
+ * A demo user's whitelist identity: its OnchainID address as a field
+ * element (D30, no modulo). A wallet with no OnchainID registered stands in
+ * with its own address (simulated onboarding).
+ * @returns {Promise<{identity: bigint, onchainID: string|null}>}
+ */
+async function demoIdentity(state, address) {
+  const registry = state.getContract("identityRegistry");
+  const onchainID = registry
+    ? await registry.identity(address)
+    : ethers.ZeroAddress;
+  if (same(onchainID, ethers.ZeroAddress)) {
+    return { identity: BigInt(address), onchainID: null };
+  }
+  return { identity: BigInt(onchainID), onchainID };
+}
+
+/** The user's own whitelist secret, created once (DemoState.zkSecrets). */
+function demoSecret(state, address) {
+  if (!state.zkSecrets.has(address)) {
+    // 31 random bytes: always below the field order.
+    state.zkSecrets.set(
+      address,
+      BigInt(ethers.hexlify(ethers.randomBytes(31))),
+    );
+  }
+  return state.zkSecrets.get(address);
+}
+
+/**
+ * Onboard the listed wallets the way an operator would: each user hands in
+ * Poseidon(its identity, its own secret); the root is built over those
+ * commitments by scripts/zk/build-whitelist-root.js. A second wallet of an
+ * identity already listed is skipped (one commitment per identity, D29).
+ * @returns {Promise<{users: Object[], rootFile: Object}>}
+ */
+async function demoWhitelist(state, signers) {
+  const users = [];
+  for (const s of signers) {
+    const { identity, onchainID } = await demoIdentity(state, s.address);
+    const twin = users.find((u) => u.identity === identity);
+    if (twin) {
+      console.log(
+        `   ⚠️  ${s.address} shares identity with ${twin.wallet}: one commitment per identity (D29), skipped`,
+      );
+      continue;
+    }
+    const secret = demoSecret(state, s.address);
+    users.push({
+      wallet: s.address,
+      identity,
+      onchainID,
+      commitment: await computeCommitment(identity, secret),
+    });
+  }
+  const rootFile = await buildWhitelistRoot(
+    users.map((u) => ({ identity: u.identity, commitment: u.commitment })),
+  );
+  return { users, rootFile };
+}
+
+/**
+ * Prove for `user` under `rootFile` with that user's own identity and
+ * secret, bound to that user's wallet (scripts/zk/prove-whitelist.js).
+ */
+async function proveForDemoUser(state, user, rootFile) {
+  const { identity } = await demoIdentity(state, user.address);
+  return proveWhitelist({
+    rootFile,
+    identity,
+    secret: demoSecret(state, user.address),
+    wallet: user.address,
+    generator: state.realProofGenerator,
+  });
+}
 
 /** The signer allowed to publish: listOperator if loaded, else the owner. */
 function publisherFor(state, owner, operator) {
@@ -85,4 +168,10 @@ async function publishAndBind({ state, privacyManager, user, proof, signals }) {
   return receipt;
 }
 
-module.exports = { publishAndBind };
+module.exports = {
+  demoIdentity,
+  demoSecret,
+  demoWhitelist,
+  proveForDemoUser,
+  publishAndBind,
+};

@@ -14,7 +14,12 @@ const {
   displayProgress,
 } = require("../utils/DisplayHelpers");
 const { ageOrVoterAgeRefusal } = require("../utils/ChainTime");
-const { publishAndBind } = require("../utils/WhitelistBinderFlow");
+const {
+  demoIdentity,
+  demoWhitelist,
+  proveForDemoUser,
+  publishAndBind,
+} = require("../utils/WhitelistBinderFlow");
 const { ethers } = require("hardhat");
 
 /**
@@ -1966,6 +1971,9 @@ class PrivacyModule {
       let finalNullifierHash;
       let generationTime = 0;
 
+      // The wallet that proves and submits; the binding names it.
+      let proofUser = this.state.signers[0];
+
       if (this.state.zkMode === "real") {
         // REAL MODE: Generate actual ZK proof with security options
         console.log("\n🔐 REAL MODE: Generating production ZK proof...");
@@ -1973,15 +1981,29 @@ class PrivacyModule {
 
         // Ask user for security mode
         console.log("\n🛡️  SECURITY MODE OPTIONS:");
-        console.log("1. Demo mode (simplified - uses hardcoded values)");
-        console.log("2. Custom input mode (manual identity entry)");
+        console.log("1. Demo mode (simplified - lists demo wallets 0-2)");
+        console.log("2. Custom input mode (choose the listed wallets)");
         console.log(
           "3. Secure mode (4-layer security: Registry + Signature + KYC + Nullifier) ⭐ RECOMMENDED",
         );
         const securityChoice = await this.promptUser("Select option (1-3): ");
 
-        let identity;
-        let whitelistIdentities;
+        // D30 onboarding: every listed user hands the operator the commitment
+        // Poseidon(identity, secret) of its own identity (its OnchainID
+        // address) and its own secret (DemoState.zkSecrets); nobody else
+        // learns the secret. The root and the proof come from the same
+        // library functions as scripts/zk/build-whitelist-root.js and
+        // scripts/zk/prove-whitelist.js.
+        const signers = this.state.signers;
+        const pickWallets = async (question) => {
+          const input = await this.promptUser(question);
+          const picked = input
+            .split(",")
+            .map((x) => Number(x.trim()))
+            .filter((i) => Number.isInteger(i) && signers[i]);
+          return [...new Set(picked)].map((i) => signers[i]);
+        };
+        let listed = signers.slice(0, 3);
 
         if (securityChoice === "3") {
           // 🛡️ SECURE MODE: 4-Layer Security
@@ -1997,29 +2019,20 @@ class PrivacyModule {
 
           // LAYER 1: Check On-Chain Identity Registry
           console.log("🔍 LAYER 1: Checking On-Chain Identity Registry...");
-          const userSigner = this.state.signers[1] || this.state.signers[0];
-          const userAddress = userSigner.address;
-          console.log(`   📍 User Address: ${userAddress}`);
-
-          const identityRegistry = this.state.getContract("identityRegistry");
-          if (!identityRegistry) {
-            console.log("   ⚠️  Identity Registry not deployed (demo mode)");
-            console.log("   ℹ️  Using simulated registry check...");
-            identity = BigInt(userAddress) % BigInt(1000000000);
-            console.log(`   🔢 Derived Identity: ${identity}`);
+          proofUser = signers[1] || signers[0];
+          console.log(`   📍 User Address: ${proofUser.address}`);
+          const { identity, onchainID } = await demoIdentity(
+            this.state,
+            proofUser.address,
+          );
+          if (onchainID) {
+            console.log(`   ✅ OnchainID Found: ${onchainID}`);
           } else {
-            const onchainID = await identityRegistry.identity(userAddress);
-            if (onchainID === ethers.ZeroAddress) {
-              console.log(
-                "   ⚠️  No identity registered. Using simulated identity...",
-              );
-              identity = BigInt(userAddress) % BigInt(1000000000);
-            } else {
-              console.log(`   ✅ OnchainID Found: ${onchainID}`);
-              identity = BigInt(onchainID) % BigInt(1000000000);
-            }
-            console.log(`   🔢 Derived Identity: ${identity}`);
+            console.log(
+              "   ⚠️  No identity registered. Using the wallet address as a simulated identity...",
+            );
           }
+          console.log(`   🔢 Identity (field element): ${identity}`);
 
           // LAYER 2: Platform Owner Signature
           console.log("\n🔏 LAYER 2: Platform Owner Signature Verification...");
@@ -2045,25 +2058,17 @@ class PrivacyModule {
           const whitelistChoice = await this.promptUser(
             "Use default whitelist? (yes/no): ",
           );
-
           if (
-            whitelistChoice.toLowerCase() === "yes" ||
-            !whitelistChoice.trim()
+            whitelistChoice.toLowerCase() !== "yes" &&
+            whitelistChoice.trim()
           ) {
-            whitelistIdentities = [BigInt(11111), identity, BigInt(33333)];
-            console.log(`   ✅ Whitelist: [11111, ${identity}, 33333]`);
-          } else {
-            const whitelistInput = await this.promptUser(
-              "Enter whitelist (comma-separated): ",
+            listed = await pickWallets(
+              "Enter the listed wallet indices (comma-separated, e.g., 0,1,2): ",
             );
-            whitelistIdentities = whitelistInput
-              .split(",")
-              .map((id) => BigInt(id.trim()));
-            if (!whitelistIdentities.some((id) => id === identity)) {
-              console.log(`   ⚠️  Adding your identity to whitelist...`);
-              whitelistIdentities.push(identity);
-            }
-            console.log(`   ✅ Whitelist: [${whitelistIdentities.join(", ")}]`);
+          }
+          if (!listed.includes(proofUser)) {
+            console.log(`   ⚠️  Adding your identity to whitelist...`);
+            listed.push(proofUser);
           }
 
           console.log("\n✅ ALL 4 SECURITY LAYERS PASSED!");
@@ -2072,32 +2077,18 @@ class PrivacyModule {
           // Custom input mode
           console.log("\n📋 CUSTOM INPUT MODE");
           console.log(
-            "Enter your identity and whitelist identities as numbers.",
+            "Choose which demo wallets the operator lists; each one is onboarded with its own identity and secret.",
           );
           console.log(
-            "Note: Your identity MUST be in the whitelist to generate a valid proof!\n",
+            "Note: Your wallet (0) MUST be in the whitelist to generate a valid proof!\n",
           );
+          const custom = await pickWallets(
+            "Enter the listed wallet indices (comma-separated, e.g., 0,1,2): ",
+          );
+          if (custom.length) listed = custom;
 
-          const identityInput = await this.promptUser(
-            "Enter your identity (e.g., 12345): ",
-          );
-          identity = BigInt(identityInput.trim() || "12345");
-
-          const whitelistInput = await this.promptUser(
-            "Enter whitelist identities (comma-separated, e.g., 11111,12345,33333): ",
-          );
-          if (whitelistInput.trim()) {
-            whitelistIdentities = whitelistInput
-              .split(",")
-              .map((id) => BigInt(id.trim()));
-          } else {
-            whitelistIdentities = [BigInt(11111), BigInt(12345), BigInt(33333)];
-          }
-
-          // Verify identity is in whitelist
-          const isInWhitelist = whitelistIdentities.some(
-            (id) => id === identity,
-          );
+          // Verify the user is in the whitelist
+          const isInWhitelist = listed.includes(proofUser);
           if (!isInWhitelist) {
             console.log(
               "\n⚠️  WARNING: Your identity is NOT in the whitelist!",
@@ -2111,54 +2102,36 @@ class PrivacyModule {
               return;
             }
           }
-
-          console.log("\n📊 PROOF PARAMETERS:");
-          console.log(`   🆔 Your Identity: ${identity}`);
-          console.log(`   📋 Whitelist: [${whitelistIdentities.join(", ")}]`);
           console.log(
             `   ✅ Identity in whitelist: ${isInWhitelist ? "YES" : "NO"}`,
           );
-          console.log("");
         } else {
-          // Demo mode - use sample identities
-          identity = BigInt(12345);
-          whitelistIdentities = [BigInt(11111), BigInt(12345), BigInt(33333)];
-          console.log("\n📊 Using demo values:");
-          console.log(`   🆔 Identity: ${identity}`);
-          console.log(`   📋 Whitelist: [${whitelistIdentities.join(", ")}]`);
-          console.log("");
+          console.log("\n📊 Using demo values: wallets 0-2 are listed");
         }
 
-        // D30: the operator publishes commitments Poseidon(identity, secret),
-        // not identities. The user's secret is created once and kept in
-        // DemoState; the other listed identities stand for other investors,
-        // whose secrets this demo makes up and nobody else would know.
-        const randomSecret = () =>
-          BigInt(ethers.hexlify(ethers.randomBytes(31)));
-        if (!this.state.zkSecrets.has(userAddress)) {
-          this.state.zkSecrets.set(userAddress, randomSecret());
+        const { users, rootFile } = await demoWhitelist(this.state, listed);
+        console.log("\n📊 PROOF PARAMETERS:");
+        console.log(`   👤 Prover wallet: ${proofUser.address}`);
+        for (const u of users) {
+          console.log(
+            `   📋 ${u.wallet}: identity ${u.onchainID || `${u.wallet} (simulated)`}`,
+          );
         }
-        const secret = this.state.zkSecrets.get(userAddress);
-        const members = whitelistIdentities.map((id) => ({
-          identity: id,
-          secret: id === identity ? secret : randomSecret(),
-        }));
         console.log(
-          `   🔏 Whitelist tree: ${members.length} commitments Poseidon(identity, secret)`,
+          `   🔏 Whitelist tree: ${rootFile.count} commitments Poseidon(identity, secret), root ${rootFile.root.slice(0, 18)}…`,
         );
 
         const startTime = Date.now();
-        const realProofResult =
-          await this.state.realProofGenerator.generateWhitelistProof({
-            identity,
-            secret,
-            members,
-            walletBinding: userAddress,
-          });
+        // Refuses before proving when the user's commitment is not listed.
+        const calldata = await proveForDemoUser(
+          this.state,
+          proofUser,
+          rootFile,
+        );
         generationTime = Date.now() - startTime;
 
-        proof = realProofResult.proof;
-        publicSignals = realProofResult.publicSignals;
+        proof = calldata.proof;
+        publicSignals = calldata.signals;
         finalNullifierHash = publicSignals[0];
         console.log(
           `✅ Real proof generated in ${generationTime}ms (${(generationTime / 1000).toFixed(2)}s)`,
@@ -2197,7 +2170,7 @@ class PrivacyModule {
         const receipt = await publishAndBind({
           state: this.state,
           privacyManager,
-          user: this.state.signers[0],
+          user: proofUser,
           proof,
           signals: publicSignals,
         });
