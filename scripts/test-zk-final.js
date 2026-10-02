@@ -71,10 +71,8 @@ async function testZKFinal() {
       const whitelistTx = await zkVerifier
         .connect(user1)
         .verifyWhitelistMembership(
-          mockProof.a,
-          mockProof.b,
-          mockProof.c,
-          [12345], // nullifierHash
+          Array.from({ length: 24 }, (_, i) => i + 1), // PLONK proof words
+          [12345, 1, 0], // nullifier, merkleRoot, walletBinding
         );
       await whitelistTx.wait();
       console.log(`   ✅ Whitelist verification: SUCCESS`);

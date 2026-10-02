@@ -44,10 +44,8 @@ async function testZKProofSystem() {
       await whitelistVerifier.waitForDeployment();
 
       const whitelistResult = await whitelistVerifier.verifyProof(
-        mockProof.a,
-        mockProof.b,
-        mockProof.c,
-        [12345],
+        Array.from({ length: 24 }, (_, i) => i + 1), // PLONK proof words
+        [12345, 1, 0], // nullifier, merkleRoot, walletBinding
       );
       console.log(
         `   📋 Whitelist verifier: ${whitelistResult ? "✅ WORKING" : "❌ FAILED"}`,

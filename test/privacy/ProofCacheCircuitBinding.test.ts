@@ -13,6 +13,9 @@ describe("Proof cache is bound to the circuit that verified it", () => {
     [5, 6],
   ];
   const c: [number, number] = [7, 8];
+  // Whitelist is PLONK since Task 3.1: 24 proof words, 3 public signals.
+  const P = Array.from({ length: 24 }, (_, i) => i + 1);
+  const S: [number, number, number] = [1, 2, 3];
 
   async function deployReal() {
     // testingMode=false: only a real verifier accepts. AlwaysTrueVerifier on
@@ -29,11 +32,11 @@ describe("Proof cache is bound to the circuit that verified it", () => {
 
   it("a whitelist-verified proof does NOT satisfy blacklist non-membership", async () => {
     const zk = await deployReal();
-    await expect(zk.verifyWhitelistMembership(a, b, c, [1])).to.emit(
+    await expect(zk.verifyWhitelistMembership(P, S)).to.emit(
       zk,
       "ProofCached",
     );
-    // Same tuple, same [1] signal, different circuit: must reach the real
+    // Same [1] signal, different circuit: must reach the real
     // blacklist verifier, which rejects. Before the fix: cache hit, true.
     expect(
       await zk.verifyBlacklistNonMembership.staticCall(a, b, c, [1]),
@@ -42,7 +45,7 @@ describe("Proof cache is bound to the circuit that verified it", () => {
 
   it("nor jurisdiction, nor accreditation", async () => {
     const zk = await deployReal();
-    await zk.verifyWhitelistMembership(a, b, c, [1]);
+    await zk.verifyWhitelistMembership(P, S);
     expect(await zk.verifyJurisdictionProof.staticCall(a, b, c, [1])).to.equal(
       false,
     );
@@ -53,12 +56,10 @@ describe("Proof cache is bound to the circuit that verified it", () => {
 
   it("the batch path shares the whitelist cache, not the others", async () => {
     const zk = await deployReal();
-    await zk.verifyWhitelistMembership(a, b, c, [1]);
+    await zk.verifyWhitelistMembership(P, S);
     const [results] = await zk.verifyBatchWhitelistMembership.staticCall(
-      [a],
-      [b],
-      [c],
-      [[1]],
+      [P],
+      [S],
     );
     expect(results[0]).to.equal(true); // same circuit: cache hit is correct
     expect(
@@ -68,8 +69,8 @@ describe("Proof cache is bound to the circuit that verified it", () => {
 
   it("still caches within a circuit: second whitelist call is a cache hit", async () => {
     const zk = await deployReal();
-    await zk.verifyWhitelistMembership(a, b, c, [1]);
-    await expect(zk.verifyWhitelistMembership(a, b, c, [1])).to.emit(
+    await zk.verifyWhitelistMembership(P, S);
+    await expect(zk.verifyWhitelistMembership(P, S)).to.emit(
       zk,
       "ProofCacheHit",
     );
@@ -79,18 +80,18 @@ describe("Proof cache is bound to the circuit that verified it", () => {
   // cached proof kept answering true after updateVerifier until expiry.
   it("rotating a verifier invalidates proofs cached under the old one", async () => {
     const zk = await deployReal();
-    await zk.verifyWhitelistMembership(a, b, c, [1]);
-    const keyBefore = await zk.proofCacheKey("whitelist", a, b, c, [1]);
-    // Swap to the default (rejecting) Groth16 verifier: the old acceptance must not survive.
+    await zk.verifyWhitelistMembership(P, S);
+    const keyBefore = await zk.whitelistProofCacheKey(P, S);
+    // Swap to the default (rejecting) PLONK verifier: the old acceptance must not survive.
     const strict = await (
       await ethers.getContractFactory("WhitelistMembershipVerifier")
     ).deploy();
     await zk.updateVerifier("whitelist", await strict.getAddress());
-    expect(await zk.proofCacheKey("whitelist", a, b, c, [1])).to.not.equal(
+    expect(await zk.whitelistProofCacheKey(P, S)).to.not.equal(
       keyBefore,
     );
     expect(
-      await zk.verifyWhitelistMembership.staticCall(a, b, c, [1]),
+      await zk.verifyWhitelistMembership.staticCall(P, S),
     ).to.equal(false);
   });
 
@@ -103,13 +104,13 @@ describe("Proof cache is bound to the circuit that verified it", () => {
 
   it("proofCacheKey exposes the bound key so clearExpiredProofs still works", async () => {
     const zk = await deployReal();
-    await zk.verifyWhitelistMembership(a, b, c, [1]);
-    const key = await zk.proofCacheKey("whitelist", a, b, c, [1]);
+    await zk.verifyWhitelistMembership(P, S);
+    const key = await zk.whitelistProofCacheKey(P, S);
     await zk.setProofCacheExpiry(3600);
     await ethers.provider.send("evm_increaseTime", [3601]);
     await ethers.provider.send("evm_mine", []);
     await zk.clearExpiredProofs([key]);
-    await expect(zk.verifyWhitelistMembership(a, b, c, [1])).to.emit(
+    await expect(zk.verifyWhitelistMembership(P, S)).to.emit(
       zk,
       "ProofCached",
     );

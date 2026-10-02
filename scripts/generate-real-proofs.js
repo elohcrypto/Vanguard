@@ -69,20 +69,23 @@ class RealProofGenerator {
   }
 
   /**
-   * Generate whitelist membership proof
+   * Generate a PLONK whitelist membership proof.
    * @param {Object} params - Proof parameters
    * @param {BigInt} params.identity - User's secret identity
    * @param {BigInt[]} params.whitelistIdentities - Array of whitelisted identities
-   * @param {BigInt} params.merkleRoot - Merkle root (optional, will be calculated)
-   * @returns {Object} Generated proof
+   * @param {BigInt|string} [params.walletBinding=0] - Wallet the proof is for
+   *        (an address or a field element); the consumer compares it with
+   *        msg.sender (Task 3.3)
+   * @returns {Object} { proof: 24 words, publicSignals: [nullifier,
+   *          merkleRoot, walletBinding], rawProof, inputs }; pass proof and
+   *          publicSignals to ZKVerifierIntegrated.verifyWhitelistMembership
    */
   async generateWhitelistProof(params) {
     await this.initialize();
-    console.log("\n🔐 Generating Whitelist Membership Proof...");
+    console.log("\n🔐 Generating Whitelist Membership Proof (PLONK)...");
 
-    const { identity, whitelistIdentities } = params;
+    const { identity, whitelistIdentities, walletBinding = 0n } = params;
 
-    // Build merkle tree
     console.log("  📊 Building Merkle tree...");
     const tree =
       await MerkleTreeBuilder.createFromIdentities(whitelistIdentities);
@@ -96,37 +99,36 @@ class RealProofGenerator {
     const merkleRoot = tree.getRoot();
     const { pathElements, pathIndices } = tree.getProof(leafIndex);
 
-    // Generate nullifier
-    const nullifierHash = this.hash([identity, merkleRoot]);
-
-    // Prepare circuit inputs
     const input = {
       identity: identity.toString(),
       pathElements: pathElements.map((x) => x.toString()),
       pathIndices: pathIndices,
       merkleRoot: merkleRoot.toString(),
-      nullifierHash: nullifierHash.toString(),
+      walletBinding: BigInt(walletBinding).toString(),
     };
 
-    console.log("  🧮 Generating witness...");
     const paths = this.getCircuitPaths("whitelist_membership");
-
-    console.log("  🔐 Generating proof...");
-    const { proof, publicSignals } = await snarkjs.groth16.fullProve(
+    console.log("  🔐 Generating witness and proof...");
+    const { proof, publicSignals } = await snarkjs.plonk.fullProve(
       input,
       paths.wasm,
       paths.zkey,
     );
-
     console.log("  ✅ Proof generated successfully");
 
-    return {
-      proof: ProofFormatter.formatForSolidity(proof, publicSignals),
+    const calldata = await ProofFormatter.formatPlonkForSolidity(
+      proof,
       publicSignals,
+    );
+    return {
+      proof: calldata.proof,
+      publicSignals: calldata.publicSignals,
+      rawProof: proof,
       inputs: {
         identity: identity.toString(),
         merkleRoot: merkleRoot.toString(),
-        nullifierHash: nullifierHash.toString(),
+        walletBinding: input.walletBinding,
+        nullifier: this.hash([identity, merkleRoot]).toString(),
       },
     };
   }

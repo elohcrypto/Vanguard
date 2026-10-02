@@ -2,60 +2,58 @@ pragma circom 2.0.0;
 
 include "circomlib/circuits/poseidon.circom";
 include "./merkletree.circom";
-include "circomlib/circuits/comparators.circom";
-include "circomlib/circuits/gates.circom";
 
 /**
  * @title WhitelistMembership
- * @dev Zero-knowledge proof circuit for whitelist membership verification
- * @notice Proves that a user is in a whitelist without revealing their identity
+ * @dev Proves that Poseidon(identity) is a leaf of the whitelist tree under
+ *      the public `merkleRoot`, without revealing the identity.
+ *
+ * Public signals, in snarkjs order (outputs first, then public inputs in
+ * declaration order): [nullifier, merkleRoot, walletBinding].
+ *
+ *  - nullifier = Poseidon(identity, merkleRoot): the same for every wallet of
+ *    one identity under one root, so the consumer (PrivacyManager, Task 3.3)
+ *    can allow one wallet per identity per root (D29 a).
+ *  - walletBinding: the wallet the proof is for; the consumer requires it to
+ *    equal msg.sender, which stops a copied proof being replayed by another
+ *    wallet.
+ *
+ * There is no validity output: a non-member cannot produce a witness.
  */
 template WhitelistMembership(levels) {
-    // Private inputs (secret)
-    signal input identity;           // User's secret identity
-    signal input pathElements[levels]; // Merkle path elements
-    signal input pathIndices[levels];  // Merkle path indices
+    // Private inputs
+    signal input identity;
+    signal input pathElements[levels];
+    signal input pathIndices[levels];
 
     // Public inputs
-    signal input merkleRoot;                 // Public merkle root of whitelist
-    signal input nullifierHash;             // Prevents double-spending/reuse
+    signal input merkleRoot;
+    signal input walletBinding;
 
-    // Outputs
-    signal output isValid;                   // 1 if proof is valid, 0 otherwise
+    // Public output
+    signal output nullifier;
 
-    // Components
-    component hasher = Poseidon(1);
-    component merkleProof = MerkleTreeChecker(levels);
+    component leafHasher = Poseidon(1);
+    leafHasher.inputs[0] <== identity;
 
-    // Hash the identity to create leaf
-    hasher.inputs[0] <== identity;
-
-    // Verify merkle proof
-    merkleProof.leaf <== hasher.out;
-    merkleProof.root <== merkleRoot;
-
+    component inclusion = MerkleInclusion(levels);
+    inclusion.leaf <== leafHasher.out;
+    inclusion.root <== merkleRoot;
     for (var i = 0; i < levels; i++) {
-        merkleProof.pathElements[i] <== pathElements[i];
-        merkleProof.pathIndices[i] <== pathIndices[i];
+        inclusion.pathElements[i] <== pathElements[i];
+        inclusion.pathIndices[i] <== pathIndices[i];
     }
 
-    // Generate nullifier to prevent reuse
     component nullifierHasher = Poseidon(2);
     nullifierHasher.inputs[0] <== identity;
     nullifierHasher.inputs[1] <== merkleRoot;
+    nullifier <== nullifierHasher.out;
 
-    // Verify nullifier matches
-    component nullifierCheck = IsEqual();
-    nullifierCheck.in[0] <== nullifierHasher.out;
-    nullifierCheck.in[1] <== nullifierHash;
-
-    // Output is valid if merkle proof is valid and nullifier matches
-    component and = AND();
-    and.a <== merkleProof.out;
-    and.b <== nullifierCheck.out;
-
-    isValid <== and.out;
+    // walletBinding enters no other constraint; this quadratic one keeps it in
+    // the constraint system so the proof is bound to its value.
+    signal walletBindingSq;
+    walletBindingSq <== walletBinding * walletBinding;
 }
 
-// Instantiate with 20 levels (supports up to 2^20 = ~1M users)
-component main = WhitelistMembership(20);
+// 20 levels: up to 2^20 identities.
+component main {public [merkleRoot, walletBinding]} = WhitelistMembership(20);

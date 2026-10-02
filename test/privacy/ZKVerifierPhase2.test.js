@@ -15,7 +15,12 @@ describe("ZKVerifierIntegrated - Phase 2 Features", function () {
     c: [7, 8],
   };
 
-  const samplePublicSignals = [12345];
+  // Whitelist is PLONK since Task 3.1: 24 proof words and
+  // [nullifier, merkleRoot, walletBinding].
+  const samplePlonkProof = Array.from({ length: 24 }, (_, i) => i + 1);
+  const samplePublicSignals = [12345, 777, 0];
+  // verifyCircuitProof carries a whitelist proof in publicInputs.
+  const whitelistInputs = [...samplePlonkProof, ...samplePublicSignals];
 
   beforeEach(async function () {
     [owner, user1, user2] = await ethers.getSigners();
@@ -66,9 +71,7 @@ describe("ZKVerifierIntegrated - Phase 2 Features", function () {
     it("should cache successful whitelist proof", async function () {
       // First verification
       const tx1 = await zkVerifier.verifyWhitelistMembership(
-        sampleProof.a,
-        sampleProof.b,
-        sampleProof.c,
+        samplePlonkProof,
         samplePublicSignals,
       );
       const receipt1 = await tx1.wait();
@@ -81,9 +84,7 @@ describe("ZKVerifierIntegrated - Phase 2 Features", function () {
 
       // Second verification (should hit cache)
       const tx2 = await zkVerifier.verifyWhitelistMembership(
-        sampleProof.a,
-        sampleProof.b,
-        sampleProof.c,
+        samplePlonkProof,
         samplePublicSignals,
       );
       const receipt2 = await tx2.wait();
@@ -158,18 +159,13 @@ describe("ZKVerifierIntegrated - Phase 2 Features", function () {
     it("should clear expired proofs", async function () {
       // Verify a proof
       await zkVerifier.verifyWhitelistMembership(
-        sampleProof.a,
-        sampleProof.b,
-        sampleProof.c,
+        samplePlonkProof,
         samplePublicSignals,
       );
 
       // Cache key is bound to the circuit; ask the contract for it.
-      const proofHash = await zkVerifier.proofCacheKey(
-        "whitelist",
-        sampleProof.a,
-        sampleProof.b,
-        sampleProof.c,
+      const proofHash = await zkVerifier.whitelistProofCacheKey(
+        samplePlonkProof,
         samplePublicSignals,
       );
 
@@ -185,9 +181,7 @@ describe("ZKVerifierIntegrated - Phase 2 Features", function () {
 
       // Next verification should not hit cache
       const tx = await zkVerifier.verifyWhitelistMembership(
-        sampleProof.a,
-        sampleProof.b,
-        sampleProof.c,
+        samplePlonkProof,
         samplePublicSignals,
       );
       const receipt = await tx.wait();
@@ -219,7 +213,7 @@ describe("ZKVerifierIntegrated - Phase 2 Features", function () {
       const proofs = [sampleProof, sampleProof, sampleProof];
 
       const publicInputsArray = [
-        [12345],
+        whitelistInputs,
         [1], // isNotBlacklisted
         [67890],
       ];
@@ -248,7 +242,7 @@ describe("ZKVerifierIntegrated - Phase 2 Features", function () {
     it("should reject batch with mismatched array lengths", async function () {
       const circuitIds = [await zkVerifier.WHITELIST_MEMBERSHIP_CIRCUIT()];
       const proofs = [sampleProof, sampleProof]; // Mismatch
-      const publicInputsArray = [[12345]];
+      const publicInputsArray = [whitelistInputs];
 
       await expect(
         zkVerifier.verifyBatchProofs(circuitIds, proofs, publicInputsArray),
@@ -274,7 +268,7 @@ describe("ZKVerifierIntegrated - Phase 2 Features", function () {
       const proofs = [sampleProof, sampleProof];
 
       const publicInputsArray = [
-        [12345],
+        whitelistInputs,
         [1], // Wrong number of inputs for compliance (needs 6)
       ];
 
@@ -306,9 +300,7 @@ describe("ZKVerifierIntegrated - Phase 2 Features", function () {
 
       for (let i = 0; i < iterations; i++) {
         const tx = await zkVerifier.verifyWhitelistMembership(
-          sampleProof.a,
-          sampleProof.b,
-          sampleProof.c,
+          samplePlonkProof,
           samplePublicSignals,
         );
         const receipt = await tx.wait();

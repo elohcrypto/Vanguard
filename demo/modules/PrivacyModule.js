@@ -1964,7 +1964,8 @@ class PrivacyModule {
         console.log("⏳ This may take ~50 seconds for real ZK proof...");
       }
 
-      let proof;
+      let proof; // PLONK: 24 words
+      let publicSignals; // [nullifier, merkleRoot, walletBinding]
       let finalNullifierHash;
       let generationTime = 0;
 
@@ -2136,19 +2137,28 @@ class PrivacyModule {
           await this.state.realProofGenerator.generateWhitelistProof({
             identity,
             whitelistIdentities,
+            walletBinding: userAddress,
           });
         generationTime = Date.now() - startTime;
 
         proof = realProofResult.proof;
-        finalNullifierHash = realProofResult.publicSignals[0];
+        publicSignals = realProofResult.publicSignals;
+        finalNullifierHash = publicSignals[0];
         console.log(
           `✅ Real proof generated in ${generationTime}ms (${(generationTime / 1000).toFixed(2)}s)`,
         );
       } else {
         // MOCK MODE: Use mock proof
         console.log("\n🔧 MOCK MODE: Using fast mock proof...");
-        proof = this.createMockGroth16Proof();
+        proof = Array.from({ length: 24 }, () =>
+          ethers.toBigInt(ethers.randomBytes(32)),
+        );
         finalNullifierHash = Math.floor(Math.random() * 1000000);
+        publicSignals = [
+          finalNullifierHash,
+          ethers.toBigInt(merkleRoot),
+          BigInt(userAddress),
+        ];
         generationTime = 1;
       }
 
@@ -2165,10 +2175,8 @@ class PrivacyModule {
       );
 
       const tx = await zkVerifierIntegrated.verifyWhitelistMembership(
-        proof.a,
-        proof.b,
-        proof.c,
-        [finalNullifierHash],
+        proof,
+        publicSignals,
       );
       const receipt = await tx.wait();
 

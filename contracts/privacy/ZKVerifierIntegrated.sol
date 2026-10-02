@@ -12,8 +12,9 @@ import "./verifiers/compliance_aggregationVerifier.sol";
 
 /**
  * @title ZKVerifierIntegrated
- * @dev Real ZK proof verifier using actual Groth16 verifier contracts
- * @notice This integrates with the real snarkjs-generated verifiers
+ * @dev Wraps the snarkjs-generated verifiers: PLONK for the whitelist
+ *      circuit, Groth16 for the other four (no phase-2 contribution, so
+ *      forgeable until Task 3.7 moves them to PLONK).
  */
 /**
  * @dev Uses Ownable2Step so ownership can migrate as governance matures —
@@ -78,24 +79,56 @@ contract ZKVerifierIntegrated is Ownable2Step, ReentrancyGuard {
     }
     
     /**
-     * @dev Verify whitelist membership proof
-     * @param a Proof point A
-     * @param b Proof point B
-     * @param c Proof point C
-     * @param publicSignals Public inputs for the proof (1 element)
-     * @return True if the proof is valid
+     * @dev Verify a PLONK whitelist membership proof.
+     * @param proof 24-word PLONK proof (snarkjs `plonk exportSolidityCallData`)
+     * @param pubSignals [nullifier, merkleRoot, walletBinding]
+     * @return True if the proof verifies against these public signals
+     *
+     * This checks the proof only. Comparing merkleRoot with the published
+     * root, walletBinding with the submitting wallet and recording the
+     * nullifier (one wallet per identity per root) belong to the consumer,
+     * PrivacyManager, in Task 3.3; msg.sender here is whoever called this
+     * contract, so the binding cannot be checked here.
+     *
+     * testingMode (demo only): the proof words are not checked; a proof is
+     * accepted when its nullifier and merkleRoot signals are non-zero.
      */
     function verifyWhitelistMembership(
-        uint256[2] memory a,
-        uint256[2][2] memory b,
-        uint256[2] memory c,
-        uint256[1] memory publicSignals
+        uint256[24] calldata proof,
+        uint256[3] calldata pubSignals
     ) external nonReentrant returns (bool) {
-        // Gas Optimization: Check proof cache first
-        bytes32 proofHash = _proofCacheKey("whitelist", a, b, c, abi.encodePacked(publicSignals));
+        return _verifyWhitelist(proof, pubSignals);
+    }
+
+    /**
+     * @dev Verify multiple PLONK whitelist proofs; same rules as
+     *      verifyWhitelistMembership for each entry.
+     * @return results Array of verification results
+     * @return successCount Number of successful verifications
+     */
+    function verifyBatchWhitelistMembership(
+        uint256[24][] calldata proofs,
+        uint256[3][] calldata pubSignalsArray
+    ) external nonReentrant returns (bool[] memory results, uint256 successCount) {
+        require(proofs.length == pubSignalsArray.length, "Array length mismatch");
+        require(proofs.length > 0 && proofs.length <= 50, "Invalid batch size");
+
+        results = new bool[](proofs.length);
+        for (uint256 i = 0; i < proofs.length; i++) {
+            results[i] = _verifyWhitelist(proofs[i], pubSignalsArray[i]);
+            if (results[i]) successCount++;
+        }
+        return (results, successCount);
+    }
+
+    function _verifyWhitelist(
+        uint256[24] memory proof,
+        uint256[3] memory pubSignals
+    ) internal returns (bool) {
+        bytes32 proofHash = _plonkCacheKey("whitelist", proof, abi.encodePacked(pubSignals));
         if (verifiedProofs[proofHash] && block.timestamp <= proofTimestamp[proofHash] + proofCacheExpiry) {
             emit ProofCacheHit(proofHash, "whitelist");
-            return true; // Cached proof, ~5k gas instead of ~300k
+            return true;
         }
 
         totalProofs["whitelist"]++;
@@ -103,15 +136,13 @@ contract ZKVerifierIntegrated is Ownable2Step, ReentrancyGuard {
 
         bool result;
         if (testingMode) {
-            // Mock verification for testing - always return true for valid inputs
-            result = (publicSignals.length == 1 && publicSignals[0] > 0);
+            result = pubSignals[0] != 0 && pubSignals[1] != 0;
         } else {
-            result = whitelistVerifier.verifyProof(a, b, c, publicSignals);
+            result = whitelistVerifier.verifyProof(proof, pubSignals);
         }
 
         if (result) {
             validProofs["whitelist"]++;
-            // Cache successful proof for gas optimization
             verifiedProofs[proofHash] = true;
             proofTimestamp[proofHash] = block.timestamp;
             emit ProofCached(proofHash, "whitelist");
@@ -119,69 +150,6 @@ contract ZKVerifierIntegrated is Ownable2Step, ReentrancyGuard {
 
         emit ProofVerified("whitelist", msg.sender, result);
         return result;
-    }
-
-    /**
-     * @dev Verify multiple whitelist membership proofs in batch
-     * @param proofsA Array of proof point A
-     * @param proofsB Array of proof point B
-     * @param proofsC Array of proof point C
-     * @param publicSignalsArray Array of public signals
-     * @return results Array of verification results
-     * @return successCount Number of successful verifications
-     */
-    function verifyBatchWhitelistMembership(
-        uint256[2][] memory proofsA,
-        uint256[2][2][] memory proofsB,
-        uint256[2][] memory proofsC,
-        uint256[1][] memory publicSignalsArray
-    ) external nonReentrant returns (bool[] memory results, uint256 successCount) {
-        require(
-            proofsA.length == proofsB.length &&
-            proofsB.length == proofsC.length &&
-            proofsC.length == publicSignalsArray.length,
-            "Array length mismatch"
-        );
-        require(proofsA.length > 0 && proofsA.length <= 50, "Invalid batch size");
-
-        results = new bool[](proofsA.length);
-        successCount = 0;
-
-        for (uint256 i = 0; i < proofsA.length; i++) {
-            // Check cache first
-            bytes32 proofHash = _proofCacheKey("whitelist", proofsA[i], proofsB[i], proofsC[i], abi.encodePacked(publicSignalsArray[i]));
-
-            if (verifiedProofs[proofHash] && block.timestamp <= proofTimestamp[proofHash] + proofCacheExpiry) {
-                results[i] = true;
-                successCount++;
-                emit ProofCacheHit(proofHash, "whitelist");
-                continue;
-            }
-
-            totalProofs["whitelist"]++;
-            userProofCount[msg.sender]++;
-
-            bool result;
-            if (testingMode) {
-                result = (publicSignalsArray[i].length == 1 && publicSignalsArray[i][0] > 0);
-            } else {
-                result = whitelistVerifier.verifyProof(proofsA[i], proofsB[i], proofsC[i], publicSignalsArray[i]);
-            }
-
-            results[i] = result;
-            if (result) {
-                validProofs["whitelist"]++;
-                successCount++;
-                // Cache successful proof
-                verifiedProofs[proofHash] = true;
-                proofTimestamp[proofHash] = block.timestamp;
-                emit ProofCached(proofHash, "whitelist");
-            }
-
-            emit ProofVerified("whitelist", msg.sender, result);
-        }
-
-        return (results, successCount);
     }
 
     /**
@@ -538,9 +506,15 @@ contract ZKVerifierIntegrated is Ownable2Step, ReentrancyGuard {
 
         // Route to appropriate verifier based on circuit ID
         if (circuitId == this.WHITELIST_MEMBERSHIP_CIRCUIT()) {
-            require(publicInputs.length == 1, "Invalid public inputs for whitelist circuit");
-            uint256[1] memory whitelistInputs = [publicInputs[0]];
-            return this.verifyWhitelistMembership(a, b, c, whitelistInputs);
+            // PLONK: the Groth16 `proof` struct cannot carry 24 words, so the
+            // whitelist proof travels in publicInputs as [24 proof words,
+            // nullifier, merkleRoot, walletBinding]; `proof` is ignored.
+            require(publicInputs.length == 27, "Invalid public inputs for whitelist circuit");
+            uint256[24] memory plonkProof;
+            uint256[3] memory whitelistSignals;
+            for (uint256 i = 0; i < 24; i++) plonkProof[i] = publicInputs[i];
+            for (uint256 i = 0; i < 3; i++) whitelistSignals[i] = publicInputs[24 + i];
+            return this.verifyWhitelistMembership(plonkProof, whitelistSignals);
         } else if (circuitId == this.BLACKLIST_MEMBERSHIP_CIRCUIT()) {
             require(publicInputs.length == 1, "Invalid public inputs for blacklist circuit");
             uint256[1] memory blacklistInputs = [publicInputs[0]];
@@ -646,6 +620,16 @@ contract ZKVerifierIntegrated is Ownable2Step, ReentrancyGuard {
         return keccak256(abi.encodePacked(circuit, _verifierFor(circuit), a, b, c, packedSignals));
     }
 
+    /// @dev Cache key for a PLONK proof (24 words); same binding to circuit
+    ///      tag and verifier instance as _proofCacheKey.
+    function _plonkCacheKey(
+        string memory circuit,
+        uint256[24] memory proof,
+        bytes memory packedSignals
+    ) internal view returns (bytes32) {
+        return keccak256(abi.encodePacked(circuit, _verifierFor(circuit), proof, packedSignals));
+    }
+
     /// @dev Verifier contract currently bound to a circuit tag. testingMode has
     ///      no verifier instance, so it keys on address(0).
     function _verifierFor(string memory circuit) internal view returns (address) {
@@ -660,8 +644,19 @@ contract ZKVerifierIntegrated is Ownable2Step, ReentrancyGuard {
     }
 
     /**
-     * @notice Cache key for a proof under a given circuit tag: "whitelist"
-     *         (single and batch), "blacklist", "jurisdiction", "accreditation",
+     * @notice Cache key of a PLONK whitelist proof (single and batch); see
+     *         proofCacheKey for the Groth16 circuits.
+     */
+    function whitelistProofCacheKey(
+        uint256[24] calldata proof,
+        uint256[3] calldata pubSignals
+    ) external view returns (bytes32) {
+        return _plonkCacheKey("whitelist", proof, abi.encodePacked(pubSignals));
+    }
+
+    /**
+     * @notice Cache key for a Groth16 proof under a given circuit tag:
+     *         "blacklist", "jurisdiction", "accreditation",
      *         "compliance" (6-signal aggregation) or "compliance-proof"
      *         (2-signal verifyComplianceProof). The key also folds in the
      *         verifier instance bound to that tag, so it changes after

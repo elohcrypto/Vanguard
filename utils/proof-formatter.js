@@ -22,6 +22,28 @@ class ProofFormatter {
     }
 
     /**
+     * Format a snarkjs PLONK proof for a snarkjs PlonkVerifier
+     * (`verifyProof(uint256[24], uint256[N])`).
+     * @param {Object} proof - snarkjs plonk proof object
+     * @param {Array} publicSignals - Public signals array
+     * @returns {Promise<{proof: string[], publicSignals: string[]}>}
+     *          24 proof words and the signals, as decimal strings
+     */
+    static async formatPlonkForSolidity(proof, publicSignals) {
+        const snarkjs = require('snarkjs');
+        const calldata = await snarkjs.plonk.exportSolidityCallData(proof, publicSignals);
+        // snarkjs 0.7.x emits "[24 words][signals]" with no separator.
+        const [words, signals] = JSON.parse(`[${calldata.replace(/\]\s*,?\s*\[/, '],[')}]`);
+        if (words.length !== 24) {
+            throw new Error(`PLONK calldata has ${words.length} proof words, expected 24`);
+        }
+        return {
+            proof: words.map(w => BigInt(w).toString()),
+            publicSignals: signals.map(s => BigInt(s).toString())
+        };
+    }
+
+    /**
      * Format proof for contract call
      * @param {Object} proof - snarkjs proof object
      * @param {Array} publicSignals - Public signals array
@@ -44,6 +66,7 @@ class ProofFormatter {
      */
     static validateProof(proof) {
         if (!proof) return false;
+        if (proof.protocol === 'plonk') return Boolean(proof.A && proof.B && proof.C && proof.Z);
         if (!proof.pi_a || proof.pi_a.length !== 3) return false;
         if (!proof.pi_b || proof.pi_b.length !== 3) return false;
         if (!proof.pi_c || proof.pi_c.length !== 3) return false;
@@ -151,13 +174,13 @@ class ProofFormatter {
     }
 
     /**
-     * Format whitelist proof
-     * @param {Object} proof - snarkjs proof
-     * @param {string} merkleRoot - Merkle root
-     * @returns {Object} Formatted proof
+     * Format whitelist proof (PLONK since Task 3.1)
+     * @param {Object} proof - snarkjs plonk proof
+     * @param {Array} publicSignals - [nullifier, merkleRoot, walletBinding]
+     * @returns {Promise<Object>} { proof: 24 words, publicSignals }
      */
-    static formatWhitelistProof(proof, merkleRoot) {
-        return this.formatForSolidity(proof, [merkleRoot]);
+    static formatWhitelistProof(proof, publicSignals) {
+        return this.formatPlonkForSolidity(proof, publicSignals);
     }
 
     /**
@@ -273,7 +296,7 @@ class ProofFormatter {
      */
     static validateForCircuit(proof, publicSignals, circuitType) {
         const expectedSignalCounts = {
-            'whitelist': 1,
+            'whitelist': 3, // [nullifier, merkleRoot, walletBinding]
             'blacklist': 1,
             'jurisdiction': 1,
             'accreditation': 1,

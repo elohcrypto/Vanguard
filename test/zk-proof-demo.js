@@ -104,6 +104,7 @@ class ZKProofSystemDemo {
         [5, 6],
       ],
       c: [7, 8],
+      plonk: Array.from({ length: 24 }, (_, i) => i + 1), // whitelist
     };
   }
 
@@ -119,10 +120,8 @@ class ZKProofSystemDemo {
       console.log("1️⃣ Testing Whitelist Membership Verifier...");
       const whitelistResult =
         await this.contracts.whitelistVerifier.verifyProof(
-          mockProof.a,
-          mockProof.b,
-          mockProof.c,
-          [12345],
+          mockProof.plonk,
+          [12345, 1, 0],
         );
       console.log(
         `   📋 Whitelist verification: ${whitelistResult ? "✅ PASS" : "❌ FAIL"}`,
@@ -222,12 +221,7 @@ class ZKProofSystemDemo {
       console.log("1️⃣ Testing integrated whitelist verification...");
       const whitelistTx = await this.contracts.zkVerifier
         .connect(this.signers[1])
-        .verifyWhitelistMembership(
-          mockProof.a,
-          mockProof.b,
-          mockProof.c,
-          [12345],
-        );
+        .verifyWhitelistMembership(mockProof.plonk, [12345, 1, 0]);
       await whitelistTx.wait();
       console.log(`   ✅ Integrated whitelist verification completed`);
 

@@ -49,17 +49,13 @@ describe("RealProofGenerator - All 5 Proof Types", function () {
       console.log(`  ⏱️  Generation time: ${duration}ms`);
       console.log(`  📊 Public signals: ${result.publicSignals.length}`);
 
-      // Validate proof structure
-      expect(result.proof).to.have.property("a");
-      expect(result.proof).to.have.property("b");
-      expect(result.proof).to.have.property("c");
-      expect(result.publicSignals).to.have.lengthOf(1);
+      // PLONK: 24 proof words, [nullifier, merkleRoot, walletBinding]
+      expect(result.proof).to.have.lengthOf(24);
+      expect(result.publicSignals).to.have.lengthOf(3);
 
       // Verify on-chain
       const tx = await zkVerifier.verifyWhitelistMembership(
-        result.proof.a,
-        result.proof.b,
-        result.proof.c,
+        result.proof,
         result.publicSignals,
       );
       const receipt = await tx.wait();

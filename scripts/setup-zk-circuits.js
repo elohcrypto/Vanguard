@@ -34,13 +34,28 @@ function blake2b512(file) {
   return h.digest("hex");
 }
 
-const CIRCUITS = [
-  "whitelist_membership",
-  "blacklist_membership",
-  "jurisdiction_proof",
-  "accreditation_proof",
-  "compliance_aggregation",
+// protocol per circuit. PLONK uses the universal ptau directly: no
+// per-circuit phase 2, no toxic waste, and `plonk setup` is deterministic,
+// so the committed verifier is reproducible (CI asserts it). The groth16
+// entries have no phase-2 contribution (gamma == delta) and are forgeable;
+// Task 3.7 moves them to PLONK.
+const CIRCUIT_SPECS = [
+  { name: "whitelist_membership", protocol: "plonk" },
+  { name: "blacklist_membership", protocol: "groth16" },
+  { name: "jurisdiction_proof", protocol: "groth16" },
+  { name: "accreditation_proof", protocol: "groth16" },
+  { name: "compliance_aggregation", protocol: "groth16" },
 ];
+const CIRCUITS = CIRCUIT_SPECS.map((c) => c.name);
+const PROTOCOLS = ["plonk", "groth16"];
+
+function protocolOf(circuitName) {
+  const spec = CIRCUIT_SPECS.find((c) => c.name === circuitName);
+  if (!spec || !PROTOCOLS.includes(spec.protocol)) {
+    throw new Error(`No known protocol for circuit ${circuitName}`);
+  }
+  return spec.protocol;
+}
 
 async function ensureDirectories() {
   console.log("📁 Creating build directories...");
@@ -201,19 +216,28 @@ async function generateKeys(circuitName) {
   const r1csPath = path.join(buildPath, `${circuitName}.r1cs`);
   const zkeyPath = path.join(buildPath, `${circuitName}.zkey`);
   const vkeyPath = path.join(buildPath, `${circuitName}_vkey.json`);
+  const protocol = protocolOf(circuitName);
 
   try {
     // Generate proving key
     await execAsync(
-      `npx snarkjs groth16 setup ${r1csPath} ${PTAU_FILE} ${zkeyPath}`,
+      `npx snarkjs ${protocol} setup ${r1csPath} ${PTAU_FILE} ${zkeyPath}`,
     );
-    console.log(`✅ ${circuitName} proving key generated`);
+    console.log(`✅ ${circuitName} ${protocol} proving key generated`);
 
     // Export verifying key
     await execAsync(
       `npx snarkjs zkey export verificationkey ${zkeyPath} ${vkeyPath}`,
     );
-    console.log(`✅ ${circuitName} verifying key exported`);
+    const vkey = JSON.parse(fs.readFileSync(vkeyPath, "utf8"));
+    if (vkey.protocol !== protocol) {
+      throw new Error(
+        `verifying key protocol is ${vkey.protocol}, expected ${protocol}`,
+      );
+    }
+    console.log(
+      `✅ ${circuitName} verifying key exported (nPublic ${vkey.nPublic})`,
+    );
 
     return true;
   } catch (error) {
@@ -248,8 +272,8 @@ async function generateSolidityVerifier(circuitName) {
       `npx snarkjs zkey export solidityverifier ${zkeyPath} ${verifierPath}`,
     );
 
-    // Rename the contract to avoid naming conflicts
-    // snarkjs generates all verifiers with the same name "Groth16Verifier"
+    // Rename the contract to avoid naming conflicts: snarkjs names every
+    // verifier "Groth16Verifier" or "PlonkVerifier" by protocol.
     let verifierContent = fs.readFileSync(verifierPath, "utf8");
     const contractName =
       circuitName
@@ -258,7 +282,7 @@ async function generateSolidityVerifier(circuitName) {
         .join("") + "Verifier";
 
     verifierContent = verifierContent.replace(
-      /contract Groth16Verifier/g,
+      /contract (Groth16|Plonk)Verifier/g,
       `contract ${contractName}`,
     );
 
@@ -302,6 +326,8 @@ async function generateCircuitInfo() {
     }
 
     circuitInfo.circuits[circuitName] = {
+      protocol: protocolOf(circuitName),
+      nPublic: vkey ? vkey.nPublic : null,
       id: `keccak256("${circuitName.toUpperCase().replace("_", "_")}")`,
       name: circuitName,
       description: getCircuitDescription(circuitName),
@@ -383,6 +409,8 @@ if (require.main === module) {
 
 module.exports = {
   CIRCUITS,
+  CIRCUIT_SPECS,
+  protocolOf,
   BUILD_DIR,
   compileCircuit,
   generateKeys,

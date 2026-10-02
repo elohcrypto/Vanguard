@@ -86,10 +86,8 @@ async function testZKIntegration() {
       const whitelistVerifyTx = await zkVerifier
         .connect(user3)
         .verifyWhitelistMembership(
-          mockProof.a,
-          mockProof.b,
-          mockProof.c,
-          [45678],
+          Array.from({ length: 24 }, (_, i) => i + 1), // PLONK proof words
+          [45678, 1, 0], // nullifier, merkleRoot, walletBinding
         );
       await whitelistVerifyTx.wait();
       console.log(`   ✅ Integrated whitelist verification completed`);

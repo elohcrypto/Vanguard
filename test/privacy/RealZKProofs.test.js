@@ -61,18 +61,15 @@ describe("Real ZK Proof Verification Tests", function () {
       );
 
       // Verify proof structure
-      expect(result.proof).to.have.property("a");
-      expect(result.proof).to.have.property("b");
-      expect(result.proof).to.have.property("c");
+      // PLONK: 24 proof words, [nullifier, merkleRoot, walletBinding]
+      expect(result.proof).to.have.lengthOf(24);
       expect(result.publicSignals).to.be.an("array");
-      expect(result.publicSignals.length).to.equal(1);
+      expect(result.publicSignals.length).to.equal(3);
 
       // Verify on-chain
       console.log("  🔍 Verifying proof on-chain...");
       const tx = await zkVerifierIntegrated.verifyWhitelistMembership(
-        result.proof.a,
-        result.proof.b,
-        result.proof.c,
+        result.proof,
         result.publicSignals,
       );
       const receipt = await tx.wait();
@@ -104,9 +101,7 @@ describe("Real ZK Proof Verification Tests", function () {
       // Verify on-chain
       console.log("  🔍 Verifying second proof on-chain...");
       const tx = await zkVerifierIntegrated.verifyWhitelistMembership(
-        result.proof.a,
-        result.proof.b,
-        result.proof.c,
+        result.proof,
         result.publicSignals,
       );
       const receipt = await tx.wait();

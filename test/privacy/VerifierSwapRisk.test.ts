@@ -22,23 +22,18 @@ describe("ZKVerifierIntegrated — updateVerifier trust assumption", () => {
   it("owner can swap in a verifier that accepts any proof, even with testingMode=false", async () => {
     const [owner] = await ethers.getSigners();
 
-    // Production mode: no mock shortcut, real Groth16 verification.
+    // Production mode: no mock shortcut, real PLONK verification.
     const Integrated = await ethers.getContractFactory("ZKVerifierIntegrated");
     const zk = await Integrated.deploy(false);
     await zk.waitForDeployment();
     expect(await zk.testingMode()).to.equal(false);
 
     // A garbage proof must be rejected by the genuine verifier.
-    const a: [bigint, bigint] = [1n, 2n];
-    const b: [[bigint, bigint], [bigint, bigint]] = [
-      [3n, 4n],
-      [5n, 6n],
-    ];
-    const c: [bigint, bigint] = [7n, 8n];
-    const signals: [bigint] = [9n];
+    const proof = Array.from({ length: 24 }, (_, i) => BigInt(i + 1));
+    const signals: [bigint, bigint, bigint] = [9n, 10n, 11n];
 
     expect(
-      await zk.verifyWhitelistMembership.staticCall(a, b, c, signals),
+      await zk.verifyWhitelistMembership.staticCall(proof, signals),
     ).to.equal(false);
 
     // Owner installs a verifier that returns true unconditionally.
@@ -52,7 +47,7 @@ describe("ZKVerifierIntegrated — updateVerifier trust assumption", () => {
 
     // The same garbage proof is now accepted. Compliance is bypassed with one tx.
     expect(
-      await zk.verifyWhitelistMembership.staticCall(a, b, c, signals),
+      await zk.verifyWhitelistMembership.staticCall(proof, signals),
     ).to.equal(true);
   });
 
@@ -114,13 +109,8 @@ describe("ZKVerifierIntegrated — updateVerifier trust assumption", () => {
       BigInt("0x" + ethers.hexlify(ethers.randomBytes(31)).slice(2));
     for (let i = 0; i < 5; i++) {
       const accepted = await zk.verifyWhitelistMembership.staticCall(
-        [rand(), rand()],
-        [
-          [rand(), rand()],
-          [rand(), rand()],
-        ],
-        [rand(), rand()],
-        [rand()],
+        Array.from({ length: 24 }, rand),
+        [rand(), rand(), rand()],
       );
       expect(accepted, `random proof #${i} should have been accepted`).to.equal(
         true,

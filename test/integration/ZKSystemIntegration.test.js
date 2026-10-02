@@ -56,9 +56,7 @@ describe("ZK System Integration Tests", function () {
       // First verification (should NOT be cached)
       console.log("  �� First verification (uncached)...");
       const tx1 = await zkVerifierIntegrated.verifyWhitelistMembership(
-        result.proof.a,
-        result.proof.b,
-        result.proof.c,
+        result.proof,
         result.publicSignals,
       );
       const receipt1 = await tx1.wait();
@@ -68,9 +66,7 @@ describe("ZK System Integration Tests", function () {
       // Second verification (should be cached)
       console.log("  🔍 Second verification (cached)...");
       const tx2 = await zkVerifierIntegrated.verifyWhitelistMembership(
-        result.proof.a,
-        result.proof.b,
-        result.proof.c,
+        result.proof,
         result.publicSignals,
       );
       const receipt2 = await tx2.wait();
@@ -127,17 +123,13 @@ describe("ZK System Integration Tests", function () {
       console.log("  ✅ All 3 proofs generated");
 
       // Prepare batch verification data
-      const proofsA = proofs.map((p) => p.proof.a);
-      const proofsB = proofs.map((p) => p.proof.b);
-      const proofsC = proofs.map((p) => p.proof.c);
+      const plonkProofs = proofs.map((p) => p.proof);
       const publicSignals = proofs.map((p) => p.publicSignals);
 
       // Batch verification
       console.log("  🔍 Batch verifying 3 proofs...");
       const tx = await zkVerifierIntegrated.verifyBatchWhitelistMembership(
-        proofsA,
-        proofsB,
-        proofsC,
+        plonkProofs,
         publicSignals,
       );
       const receipt = await tx.wait();
@@ -164,28 +156,13 @@ describe("ZK System Integration Tests", function () {
         whitelistIdentities,
       });
 
-      // Verify proof structure
-      expect(result.proof).to.have.property("a");
-      expect(result.proof).to.have.property("b");
-      expect(result.proof).to.have.property("c");
+      // PLONK proof: 24 words for verifyProof(uint256[24], uint256[3])
+      expect(result.proof).to.be.an("array");
+      expect(result.proof.length).to.equal(24);
 
-      // Verify proof.a is array of 2 elements
-      expect(result.proof.a).to.be.an("array");
-      expect(result.proof.a.length).to.equal(2);
-
-      // Verify proof.b is array of 2 arrays, each with 2 elements
-      expect(result.proof.b).to.be.an("array");
-      expect(result.proof.b.length).to.equal(2);
-      expect(result.proof.b[0]).to.be.an("array");
-      expect(result.proof.b[0].length).to.equal(2);
-
-      // Verify proof.c is array of 2 elements
-      expect(result.proof.c).to.be.an("array");
-      expect(result.proof.c.length).to.equal(2);
-
-      // Verify public signals
+      // Public signals: [nullifier, merkleRoot, walletBinding]
       expect(result.publicSignals).to.be.an("array");
-      expect(result.publicSignals.length).to.equal(1);
+      expect(result.publicSignals.length).to.equal(3);
 
       console.log("  ✅ Proof format is valid");
     });
@@ -205,9 +182,7 @@ describe("ZK System Integration Tests", function () {
       });
 
       const whitelistTx = await zkVerifierIntegrated.verifyWhitelistMembership(
-        whitelistResult.proof.a,
-        whitelistResult.proof.b,
-        whitelistResult.proof.c,
+        whitelistResult.proof,
         whitelistResult.publicSignals,
       );
       const whitelistReceipt = await whitelistTx.wait();

@@ -42,6 +42,9 @@ describe("🔐 Complete ZK Proof System Integration Tests", function () {
     c: [7, 8],
   };
 
+  // Whitelist is PLONK since Task 3.1: 24 proof words.
+  const mockPlonkProof = Array.from({ length: 24 }, (_, i) => i + 1);
+
   const mockWhitelistRoot = ethers.keccak256(
     ethers.toUtf8Bytes("test_whitelist_root"),
   );
@@ -151,11 +154,10 @@ describe("🔐 Complete ZK Proof System Integration Tests", function () {
     it("Should verify whitelist membership proof", async function () {
       console.log("🧪 Testing whitelist membership verifier...");
 
-      const publicSignals: [number] = [mockNullifier];
+      // [nullifier, merkleRoot, walletBinding]
+      const publicSignals: [number, number, number] = [mockNullifier, 1, 0];
       const result = await whitelistVerifier.verifyProof(
-        mockProof.a,
-        mockProof.b,
-        mockProof.c,
+        mockPlonkProof,
         publicSignals,
       );
 
@@ -239,15 +241,10 @@ describe("🔐 Complete ZK Proof System Integration Tests", function () {
     it("Should verify whitelist membership through integrated verifier", async function () {
       console.log("🧪 Testing integrated whitelist verification...");
 
-      const publicSignals: [number] = [mockNullifier];
+      const publicSignals: [number, number, number] = [mockNullifier, 1, 0];
       const tx = await zkVerifier
         .connect(user1)
-        .verifyWhitelistMembership(
-          mockProof.a,
-          mockProof.b,
-          mockProof.c,
-          publicSignals,
-        );
+        .verifyWhitelistMembership(mockPlonkProof, publicSignals);
 
       const receipt = await tx.wait();
       console.log(`   ✅ Transaction hash: ${receipt?.hash}`);
