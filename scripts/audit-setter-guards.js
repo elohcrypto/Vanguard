@@ -71,9 +71,11 @@ function findUnguardedSetters() {
       const body = lines.slice(i, Math.min(i + 30, lines.length)).join("\n");
 
       for (const param of addressParams) {
-        // Is the parameter cast to a contract/interface type and stored?
+        // Is the parameter cast to a contract/interface type and stored? Only
+        // an assignment counts: `x == Ownable(p).owner()` is a comparison, so
+        // the `=` must not be the tail of `==`, `!=`, `<=` or `>=`.
         const cast = new RegExp(
-          `=\\s*(I[A-Z]\\w+|[A-Z]\\w+)\\(\\s*${param}\\s*\\)`,
+          `(?<![=!<>])=\\s*(I[A-Z]\\w+|[A-Z]\\w+)\\(\\s*${param}\\s*\\)`,
         ).exec(body);
         if (!cast) continue;
 
