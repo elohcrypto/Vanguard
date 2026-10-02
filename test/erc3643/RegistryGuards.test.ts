@@ -123,10 +123,20 @@ describe("Registry guards (2F.5)", function () {
       const mk = async (n: string) =>
         (await CI.deploy(owner.address, n, n)).getAddress();
       [kyc, kyc2, aml] = [await mk("KYC"), await mk("KYC2"), await mk("AML")];
-      await reg.addClaimTopic(KYC_TOPIC);
-      await reg.addClaimTopic(AML_TOPIC);
+      // An issuer first, then its topic (2F.5 review L-1).
       await reg.addTrustedIssuer(kyc, [KYC_TOPIC]);
       await reg.addTrustedIssuer(aml, [AML_TOPIC]);
+      await reg.addClaimTopic(KYC_TOPIC);
+      await reg.addClaimTopic(AML_TOPIC);
+    });
+
+    it("refuses requiring a topic no trusted issuer covers (review L-1)", async function () {
+      await expect(reg.addClaimTopic(99)).to.be.revertedWith(
+        "No trusted issuer for topic",
+      );
+      await reg.addTrustedIssuer(kyc2, [99]);
+      await reg.addClaimTopic(99);
+      expect(await reg.getClaimTopics()).to.deep.include(99n);
     });
 
     it("refuses removing the last issuer of a required topic", async function () {

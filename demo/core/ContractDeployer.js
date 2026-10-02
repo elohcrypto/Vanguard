@@ -357,19 +357,20 @@ class ContractDeployer {
     // verifies. Without this, isVerified() would pass on registration alone.
     const kycIssuer = this.state.getContract("kycIssuer");
     const kycIssuerAddr = await kycIssuer.getAddress();
-    await identityRegistry.addClaimTopic(KYC_TOPIC);
-    console.log(`   ✅ Required claim topic: KYC (${KYC_TOPIC})`);
+    // Issuer first: a required topic needs a trusted issuer (2F.5 L-1).
     await identityRegistry.addTrustedIssuer(kycIssuerAddr, [KYC_TOPIC]);
     console.log(`   ✅ Trusted issuer for KYC: ${kycIssuerAddr}`);
+    await identityRegistry.addClaimTopic(KYC_TOPIC);
+    console.log(`   ✅ Required claim topic: KYC (${KYC_TOPIC})`);
 
     // Require an AML claim from the trusted AML issuer as well (plan Task
     // 1R.3): both deployed issuers gate transfers, not just KYC.
     const amlIssuer = this.state.getContract("amlIssuer");
     const amlIssuerAddr = await amlIssuer.getAddress();
-    await identityRegistry.addClaimTopic(AML_TOPIC);
-    console.log(`   ✅ Required claim topic: AML (${AML_TOPIC})`);
     await identityRegistry.addTrustedIssuer(amlIssuerAddr, [AML_TOPIC]);
     console.log(`   ✅ Trusted issuer for AML: ${amlIssuerAddr}`);
+    await identityRegistry.addClaimTopic(AML_TOPIC);
+    console.log(`   ✅ Required claim topic: AML (${AML_TOPIC})`);
   }
 
   /**

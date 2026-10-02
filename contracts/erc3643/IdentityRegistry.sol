@@ -289,8 +289,12 @@ contract IdentityRegistry is IIdentityRegistry, Ownable2Step {
 
     // ---- Required-claim configuration (owner = governance after handover) ----
 
+    /// @dev Never a topic no trusted issuer covers (2F.5 review L-1): it
+    ///      would verify nobody, so no vote could ever pass again. Trust the
+    ///      issuer first (addTrustedIssuer accepts a non-required topic).
     function addClaimTopic(uint256 _topic) external onlyOwner {
         require(!_isRequiredTopic[_topic], "Topic already required");
+        require(_trustedIssuersForTopic[_topic].length > 0, "No trusted issuer for topic");
         _isRequiredTopic[_topic] = true;
         _claimTopics.push(_topic);
         emit ClaimTopicAdded(_topic);

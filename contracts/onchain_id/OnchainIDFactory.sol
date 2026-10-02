@@ -292,6 +292,20 @@ contract OnchainIDFactory is Ownable2Step {
     }
 
     /**
+     * @dev Emergency withdraw to `_recipient` (2F.5 review L-3): governance
+     *      owns the factory after the handover and cannot receive ETH, so a
+     *      vote names where the balance goes.
+     * @param _recipient Address that receives the whole balance
+     */
+    function emergencyWithdrawTo(address payable _recipient) external onlyOwner {
+        require(_recipient != address(0), "OnchainIDFactory: Invalid recipient");
+        uint256 balance = address(this).balance;
+        require(balance > 0, "OnchainIDFactory: No balance to withdraw");
+        (bool ok, ) = _recipient.call{value: balance}("");
+        require(ok, "OnchainIDFactory: Withdraw failed");
+    }
+
+    /**
      * @dev Nominate a new owner; it takes over with acceptOwnership()
      *      (Ownable2Step, plan 2F.5: the factory moves to governance by vote).
      * @param newOwner New owner address

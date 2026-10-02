@@ -34,8 +34,8 @@ describe("Claim-slot squatting (2F.2, H2)", function () {
       await ethers.getContractFactory("ClaimIssuer")
     ).deploy(issuerOwner.address, "KYC", "kyc");
     kycAddr = await kyc.getAddress();
-    await ir.addClaimTopic(KYC);
     await ir.addTrustedIssuer(kycAddr, [KYC]);
+    await ir.addClaimTopic(KYC);
     OID = await ethers.getContractFactory("OnchainID");
     id = await OID.deploy(victim.address);
     idAddr = await id.getAddress();
@@ -339,9 +339,9 @@ describe("Claim-slot squatting (2F.2, H2)", function () {
       const ir2 = await (
         await ethers.getContractFactory("IdentityRegistry")
       ).deploy();
-      await ir2.addClaimTopic(KYC);
       await ir2.addTrustedIssuer(bad, [KYC]);
       await ir2.addTrustedIssuer(kycAddr, [KYC]);
+      await ir2.addClaimTopic(KYC);
       await ir2.registerIdentity(victim.address, idAddr, 840);
       expect(await ir2.isVerified(victim.address)).to.equal(true);
       await ir2.removeTrustedIssuer(kycAddr);

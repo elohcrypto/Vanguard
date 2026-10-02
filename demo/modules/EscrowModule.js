@@ -243,6 +243,25 @@ class EscrowModule {
     console.log(`   ✅ ${label} exempt from investor limits (D22)`);
   }
 
+  /**
+   * Helper: who signs registerInvestor (ADMIN_ROLE). The deployer before the
+   * handover; step 5 renounces it and ops (wallet 10) holds it after (2F.5
+   * review L-4). Null, with the remedy printed, when neither does.
+   */
+  async _investorAdmin(escrowFactory) {
+    const ADMIN = await escrowFactory.ADMIN_ROLE();
+    const [deployer, ops] = [this.state.signers[0], this.state.signers[10]];
+    if (await escrowFactory.hasRole(ADMIN, deployer.address)) return deployer;
+    if (ops && (await escrowFactory.hasRole(ADMIN, ops.address))) {
+      console.log("   ℹ️  Signing as ops (wallet 10): it holds ADMIN_ROLE");
+      return ops;
+    }
+    displayError(
+      "Investor registration is ops' (wallet 10) after the handover, and neither the deployer nor ops holds the factory's ADMIN_ROLE: governance grants it to ops by an EscrowFactoryParameters vote",
+    );
+    return null;
+  }
+
   /** Option 62: Register Investor (from Option 23) */
   async registerInvestor() {
     displaySection("REGISTER INVESTOR FOR ENHANCED ESCROW", "👤");
@@ -315,6 +334,9 @@ class EscrowModule {
         console.log(`\n💡 Creating new fee wallet for investor`);
       }
 
+      const admin = await this._investorAdmin(escrowFactory);
+      if (!admin) return;
+
       // Escrow wallets pay the investor fee wallet: it must be verified.
       const walletHasKey = this.state.signers.some(
         (s) => s.address.toLowerCase() === investorWallet.toLowerCase(),
@@ -334,10 +356,9 @@ class EscrowModule {
       console.log(`   Investor Address: ${investorAddress}`);
       console.log(`   Fee Wallet: ${investorWallet}`);
 
-      const tx = await escrowFactory.registerInvestor(
-        investorAddress,
-        investorWallet,
-      );
+      const tx = await escrowFactory
+        .connect(admin)
+        .registerInvestor(investorAddress, investorWallet);
       await tx.wait();
 
       this.state.registeredInvestors.set(investorAddress, {

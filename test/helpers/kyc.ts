@@ -27,12 +27,13 @@ export async function configureKyc(
   kycIssuerAddr: string,
   amlIssuerAddr?: string,
 ): Promise<void> {
-  await registry.addClaimTopic(KYC_TOPIC);
+  // Issuer first: a required topic needs a trusted issuer (2F.5 L-1).
   await registry.addTrustedIssuer(kycIssuerAddr, [KYC_TOPIC]);
+  await registry.addClaimTopic(KYC_TOPIC);
 
   if (amlIssuerAddr) {
-    await registry.addClaimTopic(AML_TOPIC);
     await registry.addTrustedIssuer(amlIssuerAddr, [AML_TOPIC]);
+    await registry.addClaimTopic(AML_TOPIC);
   }
 }
 

@@ -54,8 +54,8 @@ describe("IdentityRegistry.isVerified requires trusted-issuer claims (plan Task 
     await registry.registerIdentity(investor.address, identityAddr, 344);
 
     // The registry owner names the required topic and who may attest to it.
-    await registry.addClaimTopic(KYC_TOPIC);
     await registry.addTrustedIssuer(await kycIssuer.getAddress(), [KYC_TOPIC]);
+    await registry.addClaimTopic(KYC_TOPIC);
   });
 
   it("is NOT verified when the wallet is registered but holds no claim", async function () {

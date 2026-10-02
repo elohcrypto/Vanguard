@@ -199,7 +199,7 @@ export class DeploymentHelper {
           `Refusing to bind compliance: IdentityRegistry at ` +
             `${identityRegistryAddress} has no required claim topics ` +
             `(getClaimTopics() is empty). Registration alone would verify ` +
-            `every wallet. Call addClaimTopic(...) and addTrustedIssuer(...) ` +
+            `every wallet. Call addTrustedIssuer(...), then addClaimTopic(...), ` +
             `before binding a Token in production.`,
         );
       }

@@ -312,18 +312,6 @@ async function main(): Promise<DeploymentResult> {
   // KeyManager configuration below since the two are independent and the
   // registry must never be left unconfigured if a later step fails.
   console.log("\n🪪 Configuring IdentityRegistry...");
-  const addKycTopicTx = await identityRegistry
-    .connect(deployer)
-    .addClaimTopic(config.kycTopic, deploymentOptions);
-  await addKycTopicTx.wait(config.confirmations);
-  console.log(`   Required claim topic added: KYC (${config.kycTopic})`);
-
-  const addAmlTopicTx = await identityRegistry
-    .connect(deployer)
-    .addClaimTopic(config.amlTopic, deploymentOptions);
-  await addAmlTopicTx.wait(config.confirmations);
-  console.log(`   Required claim topic added: AML (${config.amlTopic})`);
-
   const addKycIssuerTx = await identityRegistry
     .connect(deployer)
     .addTrustedIssuer(kycIssuerAddress, [config.kycTopic], deploymentOptions);
@@ -335,6 +323,18 @@ async function main(): Promise<DeploymentResult> {
     .addTrustedIssuer(amlIssuerAddress, [config.amlTopic], deploymentOptions);
   await addAmlIssuerTx.wait(config.confirmations);
   console.log(`   Trusted issuer added for AML topic: ${amlIssuerAddress}`);
+
+  const addKycTopicTx = await identityRegistry
+    .connect(deployer)
+    .addClaimTopic(config.kycTopic, deploymentOptions);
+  await addKycTopicTx.wait(config.confirmations);
+  console.log(`   Required claim topic added: KYC (${config.kycTopic})`);
+
+  const addAmlTopicTx = await identityRegistry
+    .connect(deployer)
+    .addClaimTopic(config.amlTopic, deploymentOptions);
+  await addAmlTopicTx.wait(config.confirmations);
+  console.log(`   Required claim topic added: AML (${config.amlTopic})`);
 
   // Refuse to proceed if the registry or compliance ended up permissive.
   await DeploymentHelper.assertProductionCompliance(

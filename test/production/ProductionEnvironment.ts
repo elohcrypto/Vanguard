@@ -203,12 +203,6 @@ export class ProductionEnvironment {
     // required topics would verify anyone who registers.
     await this.identityRegistry
       .connect(this.admin)
-      .addClaimTopic(this.config.kycTopic);
-    await this.identityRegistry
-      .connect(this.admin)
-      .addClaimTopic(this.config.amlTopic);
-    await this.identityRegistry
-      .connect(this.admin)
       .addTrustedIssuer(await this.kycIssuer.getAddress(), [
         this.config.kycTopic,
       ]);
@@ -217,6 +211,12 @@ export class ProductionEnvironment {
       .addTrustedIssuer(await this.amlIssuer.getAddress(), [
         this.config.amlTopic,
       ]);
+    await this.identityRegistry
+      .connect(this.admin)
+      .addClaimTopic(this.config.kycTopic);
+    await this.identityRegistry
+      .connect(this.admin)
+      .addClaimTopic(this.config.amlTopic);
     console.log(
       "   IdentityRegistry requires KYC and AML claims from trusted issuers",
     );

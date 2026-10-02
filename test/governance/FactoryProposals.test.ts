@@ -276,5 +276,22 @@ describe("Factories are governable by proposal (2F.5)", function () {
       idF.interface.encodeFunctionData("setFeeRecipient", [bob.address]),
     );
     expect(await idF.feeRecipient()).to.equal(bob.address);
+
+    // Review L-3: governance has no receive(), so fees leave by
+    // emergencyWithdrawTo(recipient) under type 10.
+    await owner.sendTransaction({ to: idFAddr, value: E("1") });
+    await expect(
+      idF.emergencyWithdrawTo(owner.address),
+    ).to.be.revertedWithCustomError(idF, "OwnableUnauthorizedAccount");
+    const before = await ethers.provider.getBalance(fees.address);
+    await passByVote(
+      T.IdentityFactory,
+      idF,
+      idF.interface.encodeFunctionData("emergencyWithdrawTo", [fees.address]),
+    );
+    expect(await ethers.provider.getBalance(fees.address)).to.equal(
+      before + E("1"),
+    );
+    expect(await ethers.provider.getBalance(idFAddr)).to.equal(0n);
   });
 });
