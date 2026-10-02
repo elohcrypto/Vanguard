@@ -18,8 +18,14 @@ async function main() {
     const startTime = Date.now();
 
     const whitelistResult = await generator.generateWhitelistProof({
-      identity: BigInt(12345),
-      whitelistIdentities: [BigInt(11111), BigInt(12345), BigInt(33333)],
+      identity: 12345n,
+      // Demo secret; a real investor keeps a random one off-chain.
+      secret: 202n,
+      members: [
+        { identity: 11111n, secret: 101n },
+        { identity: 12345n, secret: 202n },
+        { identity: 33333n, secret: 303n },
+      ],
       // Placeholder wallet; a real caller binds the submitting address.
       walletBinding: "0x000000000000000000000000000000000000dEaD",
     });

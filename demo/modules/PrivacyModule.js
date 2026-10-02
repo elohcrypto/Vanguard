@@ -2132,11 +2132,30 @@ class PrivacyModule {
           console.log("");
         }
 
+        // D30: the operator publishes commitments Poseidon(identity, secret),
+        // not identities. The user's secret is created once and kept in
+        // DemoState; the other listed identities stand for other investors,
+        // whose secrets this demo makes up and nobody else would know.
+        const randomSecret = () =>
+          BigInt(ethers.hexlify(ethers.randomBytes(31)));
+        if (!this.state.zkSecrets.has(userAddress)) {
+          this.state.zkSecrets.set(userAddress, randomSecret());
+        }
+        const secret = this.state.zkSecrets.get(userAddress);
+        const members = whitelistIdentities.map((id) => ({
+          identity: id,
+          secret: id === identity ? secret : randomSecret(),
+        }));
+        console.log(
+          `   🔏 Whitelist tree: ${members.length} commitments Poseidon(identity, secret)`,
+        );
+
         const startTime = Date.now();
         const realProofResult =
           await this.state.realProofGenerator.generateWhitelistProof({
             identity,
-            whitelistIdentities,
+            secret,
+            members,
             walletBinding: userAddress,
           });
         generationTime = Date.now() - startTime;

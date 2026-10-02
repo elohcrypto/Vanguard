@@ -46,13 +46,16 @@ describe("Real ZK Proof Verification Tests", function () {
         "  🔐 Generating whitelist proof (this may take ~50 seconds)...",
       );
 
-      const identity = BigInt(12345);
-      const whitelistIdentities = [BigInt(11111), BigInt(12345), BigInt(33333)];
+      const members = [
+        { identity: 11111n, secret: 101n },
+        { identity: 12345n, secret: 202n },
+        { identity: 33333n, secret: 303n },
+      ];
 
       const startTime = Date.now();
       const result = await realProofGenerator.generateWhitelistProof({
-        identity,
-        whitelistIdentities,
+        ...members[1],
+        members,
         walletBinding: user1.address,
       });
       const duration = Date.now() - startTime;
@@ -85,13 +88,16 @@ describe("Real ZK Proof Verification Tests", function () {
       console.log("  🔐 Generating second whitelist proof...");
 
       // Generate proof for different identity in same whitelist
-      const identity = BigInt(33333);
-      const whitelistIdentities = [BigInt(11111), BigInt(22222), BigInt(33333)];
+      const members = [
+        { identity: 11111n, secret: 101n },
+        { identity: 22222n, secret: 202n },
+        { identity: 33333n, secret: 303n },
+      ];
 
       const startTime = Date.now();
       const result = await realProofGenerator.generateWhitelistProof({
-        identity,
-        whitelistIdentities,
+        ...members[2],
+        members,
         walletBinding: user1.address,
       });
       const duration = Date.now() - startTime;

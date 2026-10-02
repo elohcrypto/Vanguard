@@ -76,10 +76,10 @@ describe("ZK soundness guards (plan Task 0.1)", function () {
   // Green in 3.3: needs PrivacyManager to compare merkleRoot with the published root.
   it.skip("A: rejects a proof built against a Merkle root the list operator never published", async function () {
     // The attacker builds their own one-leaf tree and proves membership in it.
-    const attacker = 777777n;
+    const attacker = { identity: 777777n, secret: 1n };
     const r = await gen.generateWhitelistProof({
-      identity: attacker,
-      whitelistIdentities: [attacker],
+      ...attacker,
+      members: [attacker],
       walletBinding: alice.address,
     });
 
@@ -96,9 +96,14 @@ describe("ZK soundness guards (plan Task 0.1)", function () {
 
   // Green in 3.3: needs walletBinding == msg.sender in PrivacyManager (new API).
   it.skip("B: a proof submitted by one wallet does not whitelist another wallet that replays it", async function () {
+    const members = [
+      { identity: 11111n, secret: 101n },
+      { identity: 12345n, secret: 202n },
+      { identity: 33333n, secret: 303n },
+    ];
     const r = await gen.generateWhitelistProof({
-      identity: 12345n,
-      whitelistIdentities: [11111n, 12345n, 33333n],
+      ...members[1],
+      members,
       walletBinding: alice.address,
     });
     const unused = { a: [0, 0], b: [[0, 0], [0, 0]], c: [0, 0] };
@@ -123,20 +128,27 @@ describe("ZK soundness guards (plan Task 0.1)", function () {
   });
 
   describe("C: a non-member cannot produce a witness", function () {
-    const members = [11111n, 22222n, 33333n];
-    const outsider = 99999n;
+    const members = [
+      { identity: 11111n, secret: 101n },
+      { identity: 22222n, secret: 202n },
+      { identity: 33333n, secret: 303n },
+    ];
+    const outsider = { identity: 99999n, secret: 909n };
     let tree;
     let root;
 
     before(async function () {
-      tree = await MerkleTreeBuilder.createFromIdentities(members);
+      tree = await MerkleTreeBuilder.createFromCommitments(
+        members.map((m) => gen.hash([m.identity, m.secret])),
+      );
       root = tree.getRoot();
     });
 
     it("an outsider with a member's Merkle path is rejected by fullProve", async function () {
       const { pathElements, pathIndices } = tree.getProof(0);
       const input = {
-        identity: outsider.toString(),
+        identity: outsider.identity.toString(),
+        secret: outsider.secret.toString(),
         pathElements: pathElements.map(String),
         pathIndices,
         merkleRoot: root.toString(),
@@ -155,7 +167,7 @@ describe("ZK soundness guards (plan Task 0.1)", function () {
       const top = levels - 1;
       const { pathElements, pathIndices } = tree.getProof(0);
       // Real children of the root: a from leaf 0's path, b its sibling.
-      let a = tree.hashSingle(members[0]);
+      let a = tree.commitment(members[0].identity, members[0].secret);
       for (let i = 0; i < top; i++) {
         a = pathIndices[i] === 0
           ? tree.hash(a, pathElements[i])
@@ -165,7 +177,7 @@ describe("ZK soundness guards (plan Task 0.1)", function () {
       expect(tree.hash(a, b)).to.equal(root);
 
       // Outsider's node at the top level, using the same lower siblings.
-      let L = tree.hashSingle(outsider);
+      let L = tree.commitment(outsider.identity, outsider.secret);
       for (let i = 0; i < top; i++) {
         L = pathIndices[i] === 0
           ? tree.hash(L, pathElements[i])
@@ -178,7 +190,8 @@ describe("ZK soundness guards (plan Task 0.1)", function () {
       expect(mod(R - sel * (R - L))).to.equal(b);
 
       const input = {
-        identity: outsider.toString(),
+        identity: outsider.identity.toString(),
+        secret: outsider.secret.toString(),
         pathElements: [...pathElements.slice(0, top), R].map(String),
         pathIndices: [...pathIndices.slice(0, top), sel.toString()],
         merkleRoot: root.toString(),
@@ -192,17 +205,27 @@ describe("ZK soundness guards (plan Task 0.1)", function () {
 
   describe("D: the PLONK setup property", function () {
     const identity = 12345n;
-    const members = [11111n, 12345n, 33333n];
+    const secret = 0xabcdef0123456789n;
+    const members = [
+      { identity: 11111n, secret: 101n },
+      { identity, secret },
+      { identity: 33333n, secret: 303n },
+    ];
+    let tree;
     let r;
     let root;
 
     before(async function () {
       r = await gen.generateWhitelistProof({
         identity,
-        whitelistIdentities: members,
+        secret,
+        members,
         walletBinding: alice.address,
       });
-      root = (await MerkleTreeBuilder.createFromIdentities(members)).getRoot();
+      tree = await MerkleTreeBuilder.createFromCommitments(
+        members.map((m) => gen.hash([m.identity, m.secret])),
+      );
+      root = tree.getRoot();
     });
 
     it("the committed whitelist verifier is a PLONK verifier with nPublic 3", async function () {
@@ -222,10 +245,63 @@ describe("ZK soundness guards (plan Task 0.1)", function () {
     it("public signals are [nullifier, merkleRoot, walletBinding]", async function () {
       expect(r.proof).to.have.lengthOf(24);
       expect(r.publicSignals).to.deep.equal([
-        gen.hash([identity, root]).toString(),
+        gen.hash([secret, root]).toString(),
         root.toString(),
         BigInt(alice.address).toString(),
       ]);
+    });
+
+    it("the right identity with the wrong secret cannot produce a witness", async function () {
+      const input = {
+        identity: identity.toString(),
+        secret: (secret + 1n).toString(),
+        ...tree.getProof(1),
+        merkleRoot: root.toString(),
+        walletBinding: BigInt(alice.address).toString(),
+      };
+      input.pathElements = input.pathElements.map(String);
+      await expect(
+        snarkjs.plonk.fullProve(input, paths.wasm, paths.zkey),
+      ).to.be.rejectedWith(/Assert Failed/);
+    });
+
+    it("one identity under two secrets gives two leaves and two nullifiers", async function () {
+      // Nothing in the circuit ties a nullifier to an identity: an identity
+      // holding two commitments under one root gets two nullifiers, i.e. two
+      // wallets past D29's one-wallet rule. The operator's
+      // one-commitment-per-identity rule at onboarding (Task 3.5) is what
+      // closes this; this test pins the property that rule relies on.
+      const secret2 = 0x1234n;
+      const twice = [...members, { identity, secret: secret2 }];
+      const t2 = await MerkleTreeBuilder.createFromCommitments(
+        twice.map((m) => gen.hash([m.identity, m.secret])),
+      );
+      expect(t2.commitment(identity, secret)).to.not.equal(
+        t2.commitment(identity, secret2),
+      );
+      const p1 = await gen.generateWhitelistProof({
+        identity,
+        secret,
+        members: twice,
+        walletBinding: alice.address,
+      });
+      const p2 = await gen.generateWhitelistProof({
+        identity,
+        secret: secret2,
+        members: twice,
+        walletBinding: bob.address,
+      });
+      expect(p1.publicSignals[1]).to.equal(p2.publicSignals[1]);
+      expect(p1.publicSignals[0]).to.not.equal(p2.publicSignals[0]);
+    });
+
+    it("the nullifier cannot be recomputed from the identity alone", async function () {
+      // The pre-D30 formula Poseidon(identity, root) needed no secret, so
+      // anyone could link a public nullifier to an enumerated identity.
+      expect(gen.hash([identity, root]).toString()).to.not.equal(
+        r.publicSignals[0],
+      );
+      expect(gen.hash([secret, root]).toString()).to.equal(r.publicSignals[0]);
     });
 
     it("a real member proof verifies on-chain through the wrapper", async function () {
@@ -289,9 +365,8 @@ describe("ZK soundness guards (plan Task 0.1)", function () {
       const aliasing = loadAliasingSnarkjs();
       const input = {
         identity: identity.toString(),
-        ...(await MerkleTreeBuilder.createFromIdentities(members)).getProof(
-          members.indexOf(identity),
-        ),
+        secret: secret.toString(),
+        ...tree.getProof(1),
         merkleRoot: root.toString(),
         walletBinding: BigInt(bob.address).toString(),
       };

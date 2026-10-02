@@ -190,6 +190,13 @@ class DemoState {
      */
     this.userPrivacyProofs = new Map();
 
+    /**
+     * @property {Map} zkSecrets - Whitelist secret per user address (D30):
+     *   leaf = Poseidon(identity, secret); never leaves the user's side
+     * @type {Map<string, bigint>}
+     */
+    this.zkSecrets = new Map();
+
     // ========== ZK MODE CONFIGURATION ==========
 
     /**

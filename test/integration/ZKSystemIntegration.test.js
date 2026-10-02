@@ -44,13 +44,16 @@ describe("ZK System Integration Tests", function () {
       console.log("  🔐 Testing proof caching...");
 
       // Generate a whitelist proof
-      const identity = BigInt(12345);
-      const whitelistIdentities = [BigInt(11111), BigInt(12345), BigInt(33333)];
+      const members = [
+        { identity: 11111n, secret: 101n },
+        { identity: 12345n, secret: 202n },
+        { identity: 33333n, secret: 303n },
+      ];
 
       console.log("  📊 Generating whitelist proof...");
       const result = await realProofGenerator.generateWhitelistProof({
-        identity,
-        whitelistIdentities,
+        ...members[1],
+        members,
         walletBinding: user1.address,
       });
 
@@ -103,20 +106,17 @@ describe("ZK System Integration Tests", function () {
 
       // Generate 3 whitelist proofs
       console.log("  📊 Generating 3 whitelist proofs...");
-      const identities = [BigInt(11111), BigInt(22222), BigInt(33333)];
-      const whitelistIdentities = [
-        BigInt(11111),
-        BigInt(22222),
-        BigInt(33333),
-        BigInt(44444),
-      ];
+      const members = [11111n, 22222n, 33333n, 44444n].map((identity, i) => ({
+        identity,
+        secret: BigInt(i + 1) * 1000n,
+      }));
 
       const proofs = [];
       for (let i = 0; i < 3; i++) {
         console.log(`  🔐 Generating proof ${i + 1}/3...`);
         const result = await realProofGenerator.generateWhitelistProof({
-          identity: identities[i],
-          whitelistIdentities,
+          ...members[i],
+          members,
           walletBinding: user1.address,
         });
         proofs.push(result);
@@ -150,12 +150,15 @@ describe("ZK System Integration Tests", function () {
       console.log("  �� Testing proof format validation...");
 
       // Generate a proof
-      const identity = BigInt(12345);
-      const whitelistIdentities = [BigInt(11111), BigInt(12345), BigInt(33333)];
+      const members = [
+        { identity: 11111n, secret: 101n },
+        { identity: 12345n, secret: 202n },
+        { identity: 33333n, secret: 303n },
+      ];
 
       const result = await realProofGenerator.generateWhitelistProof({
-        identity,
-        whitelistIdentities,
+        ...members[1],
+        members,
         walletBinding: user1.address,
       });
 
@@ -180,8 +183,12 @@ describe("ZK System Integration Tests", function () {
       // Whitelist proof
       console.log("  📊 Testing whitelist proof gas cost...");
       const whitelistResult = await realProofGenerator.generateWhitelistProof({
-        identity: BigInt(12345),
-        whitelistIdentities: [BigInt(11111), BigInt(12345), BigInt(33333)],
+        identity: 12345n,
+        secret: 202n,
+        members: [
+          { identity: 11111n, secret: 101n },
+          { identity: 12345n, secret: 202n },
+        ],
         walletBinding: user1.address,
       });
 

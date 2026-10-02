@@ -31,18 +31,15 @@ describe("RealProofGenerator - All 5 Proof Types", function () {
     it("should generate valid whitelist proof", async function () {
       console.log("\n  🧪 Testing Whitelist Proof Generation");
 
-      const identity = BigInt(12345);
-      const whitelistIdentities = [
-        BigInt(11111),
-        BigInt(12345), // Our identity
-        BigInt(33333),
-        BigInt(44444),
-      ];
+      const members = [11111n, 12345n, 33333n, 44444n].map((identity, i) => ({
+        identity,
+        secret: BigInt(i + 1) * 1000n,
+      }));
 
       const startTime = Date.now();
       const result = await generator.generateWhitelistProof({
-        identity,
-        whitelistIdentities,
+        ...members[1],
+        members,
         walletBinding: owner.address,
       });
       const duration = Date.now() - startTime;
@@ -65,24 +62,65 @@ describe("RealProofGenerator - All 5 Proof Types", function () {
       expect(tx).to.not.be.reverted;
     });
 
-    it("should reject identity not in whitelist", async function () {
-      const identity = BigInt(99999); // Not in whitelist
-      const whitelistIdentities = [BigInt(11111), BigInt(22222)];
+    it("should reject a commitment not in the whitelist", async function () {
+      const members = [
+        { identity: 11111n, secret: 101n },
+        { identity: 22222n, secret: 202n },
+      ];
 
       await expect(
         generator.generateWhitelistProof({
-          identity,
-          whitelistIdentities,
+          identity: 99999n,
+          secret: 909n,
+          members,
           walletBinding: owner.address,
         }),
-      ).to.be.rejectedWith("Identity not found in whitelist");
-    });
-
-    it("should require walletBinding", async function () {
+      ).to.be.rejectedWith("Commitment not found in whitelist");
+      // A listed identity with the wrong secret is not a member either.
       await expect(
         generator.generateWhitelistProof({
-          identity: BigInt(12345),
-          whitelistIdentities: [BigInt(12345)],
+          identity: 11111n,
+          secret: 102n,
+          members,
+          walletBinding: owner.address,
+        }),
+      ).to.be.rejectedWith("Commitment not found in whitelist");
+    });
+
+    it("should accept published commitments as the tree leaves", async function () {
+      const members = [
+        { identity: 11111n, secret: 101n },
+        { identity: 12345n, secret: 202n },
+      ];
+      const commitments = members.map((m) =>
+        generator.hash([m.identity, m.secret]),
+      );
+      const a = await generator.generateWhitelistProof({
+        ...members[1],
+        commitments,
+        walletBinding: owner.address,
+      });
+      const b = await generator.generateWhitelistProof({
+        ...members[1],
+        members,
+        walletBinding: owner.address,
+      });
+      expect(a.publicSignals).to.deep.equal(b.publicSignals);
+    });
+
+    it("should require secret and walletBinding", async function () {
+      await expect(
+        generator.generateWhitelistProof({
+          identity: 12345n,
+          members: [{ identity: 12345n, secret: 1n }],
+          walletBinding: owner.address,
+        }),
+      ).to.be.rejectedWith("secret is required");
+      await expect(
+        generator.generateWhitelistProof({
+          identity: 12345n,
+          secret: 1n,
+          members: [{ identity: 12345n, secret: 1n }],
         }),
       ).to.be.rejectedWith("walletBinding is required");
     });

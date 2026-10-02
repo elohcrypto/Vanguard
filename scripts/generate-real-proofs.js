@@ -69,13 +69,17 @@ class RealProofGenerator {
   }
 
   /**
-   * Generate a PLONK whitelist membership proof.
+   * Generate a PLONK whitelist membership proof (D30 a: commitment leaves).
    * @param {Object} params - Proof parameters
-   * @param {BigInt} params.identity - User's secret identity
-   * @param {BigInt[]} params.whitelistIdentities - Array of whitelisted identities
+   * @param {BigInt} params.identity - The prover's identity value
+   * @param {BigInt} params.secret - The prover's private secret; leaf =
+   *        Poseidon(identity, secret), nullifier = Poseidon(secret, root)
    * @param {BigInt|string} params.walletBinding - Wallet the proof is for
-   *        (an address or a field element); required, the consumer compares
-   *        it with msg.sender (Task 3.3)
+   *        (an address or a field element); the consumer compares it with
+   *        msg.sender (Task 3.3)
+   * @param {BigInt[]} [params.commitments] - Published tree leaves, as given
+   * @param {{identity: BigInt, secret: BigInt}[]} [params.members] - Or the
+   *        members, committed here (tests and the demo)
    * @returns {Object} { proof: 24 words, publicSignals: [nullifier,
    *          merkleRoot, walletBinding], rawProof, inputs }; pass proof and
    *          publicSignals to ZKVerifierIntegrated.verifyWhitelistMembership
@@ -84,26 +88,39 @@ class RealProofGenerator {
     await this.initialize();
     console.log("\n🔐 Generating Whitelist Membership Proof (PLONK)...");
 
-    const { identity, whitelistIdentities, walletBinding } = params;
+    const { identity, secret, walletBinding, commitments, members } = params;
+    if (identity === undefined || identity === null) {
+      throw new Error("identity is required");
+    }
+    if (secret === undefined || secret === null) {
+      throw new Error(
+        "secret is required: the whitelist leaf is Poseidon(identity, secret)",
+      );
+    }
     if (walletBinding === undefined || walletBinding === null) {
       throw new Error("walletBinding is required");
     }
+    if (!commitments === !members) {
+      throw new Error("pass exactly one of commitments or members");
+    }
 
     console.log("  📊 Building Merkle tree...");
-    const tree =
-      await MerkleTreeBuilder.createFromIdentities(whitelistIdentities);
-    const identityHash = tree.hashSingle(identity);
-    const leafIndex = tree.findLeafIndex(identityHash);
+    const leaves =
+      commitments ||
+      members.map((m) => this.hash([BigInt(m.identity), BigInt(m.secret)]));
+    const tree = await MerkleTreeBuilder.createFromCommitments(leaves);
+    const leafIndex = tree.findLeafIndex(tree.commitment(identity, secret));
 
     if (leafIndex === -1) {
-      throw new Error("Identity not found in whitelist");
+      throw new Error("Commitment not found in whitelist");
     }
 
     const merkleRoot = tree.getRoot();
     const { pathElements, pathIndices } = tree.getProof(leafIndex);
 
     const input = {
-      identity: identity.toString(),
+      identity: BigInt(identity).toString(),
+      secret: BigInt(secret).toString(),
       pathElements: pathElements.map((x) => x.toString()),
       pathIndices: pathIndices,
       merkleRoot: merkleRoot.toString(),
@@ -128,10 +145,9 @@ class RealProofGenerator {
       publicSignals: calldata.publicSignals,
       rawProof: proof,
       inputs: {
-        identity: identity.toString(),
         merkleRoot: merkleRoot.toString(),
         walletBinding: input.walletBinding,
-        nullifier: this.hash([identity, merkleRoot]).toString(),
+        nullifier: this.hash([BigInt(secret), merkleRoot]).toString(),
       },
     };
   }

@@ -258,7 +258,33 @@ class MerkleTreeBuilder {
     }
 
     /**
-     * Create tree from identity hashes
+     * Whitelist leaf (D30 a): the commitment Poseidon(identity, secret) the
+     * investor hands the operator at onboarding.
+     * @param {BigInt} identity - Identity value
+     * @param {BigInt} secret - The investor's private secret
+     * @returns {BigInt} Commitment
+     */
+    commitment(identity, secret) {
+        return this.hash(BigInt(identity), BigInt(secret));
+    }
+
+    /**
+     * Create tree from commitments; leaves are used as given.
+     * @param {BigInt[]} commitments - Array of Poseidon(identity, secret)
+     * @param {number} levels - Tree levels
+     * @returns {MerkleTreeBuilder} Tree instance
+     */
+    static async createFromCommitments(commitments, levels = 20) {
+        const builder = new MerkleTreeBuilder(levels);
+        await builder.initialize();
+        builder.buildTree(commitments.map((c) => BigInt(c)));
+        return builder;
+    }
+
+    /**
+     * Create tree with Poseidon(identity) leaves.
+     * Kept only for the blacklist circuit path (Task 3.7); the whitelist
+     * uses createFromCommitments.
      * @param {BigInt[]} identities - Array of identity values
      * @param {number} levels - Tree levels
      * @returns {MerkleTreeBuilder} Tree instance
@@ -266,11 +292,7 @@ class MerkleTreeBuilder {
     static async createFromIdentities(identities, levels = 20) {
         const builder = new MerkleTreeBuilder(levels);
         await builder.initialize();
-
-        // Hash each identity to create leaves
-        const leaves = identities.map(id => builder.hashSingle(id));
-        builder.buildTree(leaves);
-
+        builder.buildTree(identities.map((id) => builder.hashSingle(id)));
         return builder;
     }
 
