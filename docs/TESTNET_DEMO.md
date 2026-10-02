@@ -362,9 +362,15 @@ acceptances and registry proposals still pending, then verifies.
 The investor keeps a secret and hands the operator only the commitment
 `Poseidon(identity, secret)`, where the identity is the investor's
 OnchainID address. The secret is read from a file or `WHITELIST_SECRET`,
-never from the command line, and is never printed.
+never from the command line, and is never printed. Generate it with
+`--new-secret`: a secret below 2^128 is refused, because the leaves and the
+OnchainID addresses are public, so a small secret can be recovered by
+trying values, and whoever recovers it binds their own wallet first.
 
 ```bash
+# Investor, once: a fresh secret (31 random bytes); keep the file offline
+node scripts/zk/prove-whitelist.js --new-secret > secret.txt
+
 # Investor, at onboarding: the commitment to hand the operator
 node scripts/zk/prove-whitelist.js --commitment --identity <onchainID> --secret-file secret.txt
 
@@ -381,10 +387,13 @@ WHITELIST_WALLET_KEY=<wallet key> node scripts/zk/prove-whitelist.js \
 
 Leaf order is the order of `entries.json`, so the same file always gives
 the same root. Without `--submit` the prover prints the calldata
-`{ proof, signals }` for `submitWhitelistProof`; it refuses a commitment
-that is not in `root.json` and a root that is not the current published
-one (it prints the publish command for ops instead). Demo option 42 -> 1
-uses the same functions.
+`{ proof, signals }` for `submitWhitelistProof` and refuses a commitment
+that is not in `root.json`. With `--submit` it also refuses a root that is
+not the current published one: when nothing is published yet it prints the
+publish command for ops; when ops has published a newer root it asks for
+the current `root.json` and a new proof (an old root is never
+republished, which would lapse every binding under the current one).
+Demo option 42 -> 1 uses the same functions.
 
 ## Waiting instead of jumping
 

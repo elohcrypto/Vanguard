@@ -60,6 +60,27 @@ function toField(value, label) {
   return v;
 }
 
+/** Smallest accepted secret: 128 bits of entropy at least. */
+const MIN_SECRET = 2n ** 128n;
+
+/**
+ * Parse the investor's secret (never named in an error). Below 2^128 it is
+ * refused: the leaves are public (every investor gets root.json) and the
+ * identities are OnchainID addresses, public in the IdentityRegistry, so a
+ * small secret is found by trying values against the leaf, and whoever
+ * finds it proves for their own wallet first and takes the per-root
+ * nullifier (D29). Make one with prove-whitelist.js --new-secret.
+ */
+function toSecret(value) {
+  const s = toField(value, "secret");
+  if (s < MIN_SECRET) {
+    throw new Error(
+      "secret: below 2^128, so it can be brute-forced from the public leaf and identity, and whoever recovers it binds their own wallet first; generate one with `node scripts/zk/prove-whitelist.js --new-secret`",
+    );
+  }
+  return s;
+}
+
 let builderPromise;
 /** One initialised Poseidon instance, shared by every call. */
 function poseidonBuilder() {
@@ -77,7 +98,7 @@ function poseidonBuilder() {
  */
 async function computeCommitment(identity, secret) {
   const id = toField(identity, "identity");
-  const s = toField(secret, "secret");
+  const s = toSecret(secret);
   return (await poseidonBuilder()).commitment(id, s);
 }
 
@@ -102,6 +123,9 @@ function parseEntries(entries) {
     }
     const identity = toField(e.identity, `entry ${i} identity`);
     const commitment = toField(e.commitment, `entry ${i} commitment`);
+    if (identity === 0n) {
+      throw new Error(`entry ${i}: identity 0 is not an OnchainID`);
+    }
     if (commitment === 0n) {
       throw new Error(`entry ${i}: commitment 0 is the empty-leaf value`);
     }
@@ -152,7 +176,7 @@ async function loadRootFile(file) {
     throw new Error("root file: not an object");
   if (file.depth !== DEPTH) {
     throw new Error(
-      `root file: depth ${file.depth}, the circuit's is ${DEPTH}`,
+      `root file: depth ${JSON.stringify(file.depth)}, expected the number ${DEPTH}`,
     );
   }
   if (!Array.isArray(file.leaves) || file.leaves.length === 0) {
@@ -165,6 +189,9 @@ async function loadRootFile(file) {
   }
   const root = toField(file.root, "root file root");
   const leaves = file.leaves.map((l, i) => toField(l, `root file leaf ${i}`));
+  if (leaves.includes(0n) || new Set(leaves).size !== leaves.length) {
+    throw new Error("root file: a zero or repeated leaf");
+  }
   const tree = await MerkleTreeBuilder.createFromCommitments(leaves, DEPTH);
   if (tree.getRoot() !== root) {
     throw new Error("root file: the root is not the root of its leaves");
@@ -172,25 +199,71 @@ async function loadRootFile(file) {
   return { root, leaves };
 }
 
+/**
+ * The PrivacyManager surface the two CLIs use, custom errors included so a
+ * revert reads as its name (NotListOperator, RootNotCurrent, ...).
+ */
 const PM_ABI = [
   "function publishWhitelistRoot(bytes32 root)",
   "function whitelistRoot() view returns (bytes32)",
   "function whitelistVersion() view returns (uint256)",
   "function listOperator() view returns (address)",
+  "function owner() view returns (address)",
+  "function submitWhitelistProof(uint256[24] proof, uint256[3] signals)",
+  "function whitelistBindings(address) view returns (uint256 version, uint256 nullifier, uint256 expiresAt)",
+  "function hasValidWhitelistProof(address) view returns (bool)",
+  "error NotListOperator()",
+  "error InvalidWhitelistRoot()",
+  "error RootNotCurrent()",
+  "error WalletBindingMismatch()",
+  "error NullifierBoundToOtherWallet(address wallet, uint256 version)",
+  "error InvalidWhitelistProof()",
 ];
+
+/** PrivacyManager at `address` for `runner` (a signer or a provider). */
+function privacyManagerAt(address, runner) {
+  const { ethers } = require("ethers");
+  return new ethers.Contract(address, PM_ABI, runner);
+}
+
+/** A revert as `Name(args)` when it is a PrivacyManager error. */
+function revertReason(e) {
+  if (e && e.revert && e.revert.name) {
+    return `${e.revert.name}(${e.revert.args.map(String).join(", ")})`;
+  }
+  return String((e && (e.shortMessage || e.message)) || e);
+}
+
+/** Who may publish: the list operator, or the owner while none is set. */
+async function publisherOf(pm) {
+  const { ethers } = require("ethers");
+  const op = await pm.listOperator();
+  return op === ethers.ZeroAddress
+    ? `the owner ${await pm.owner()} (no list operator set)`
+    : `the list operator ${op} (or the owner)`;
+}
 
 /**
  * Publish the root on PrivacyManager as the list operator (or owner).
+ * @param {Object} p
+ * @param {string} p.root - 0x 32-byte root
+ * @param {string} p.privacyManager - address
+ * @param {Object} p.signer - ethers signer of ops (the CLI builds it)
  * @returns {Promise<{version: string, txHash: string|null}>}
  */
-async function publishRoot({ root, rpc, privacyManager, opsKey }) {
-  const { ethers } = require("ethers");
-  const signer = new ethers.Wallet(opsKey, new ethers.JsonRpcProvider(rpc));
-  const pm = new ethers.Contract(privacyManager, PM_ABI, signer);
+async function publishRoot({ root, privacyManager, signer }) {
+  const pm = privacyManagerAt(privacyManager, signer);
   if ((await pm.whitelistRoot()) === root) {
     return { version: (await pm.whitelistVersion()).toString(), txHash: null };
   }
-  const rx = await (await pm.publishWhitelistRoot(root)).wait();
+  let rx;
+  try {
+    rx = await (await pm.publishWhitelistRoot(root)).wait();
+  } catch (e) {
+    throw new Error(
+      `publishWhitelistRoot reverted: ${revertReason(e)}; ${await publisherOf(pm)} publishes`,
+    );
+  }
   return { version: (await pm.whitelistVersion()).toString(), txHash: rx.hash };
 }
 
@@ -198,7 +271,7 @@ function parseArgs(argv) {
   const args = {};
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
-    if (!a.startsWith("--")) throw new Error(`unexpected argument ${a}`);
+    if (!a.startsWith("--")) throw new Error("unexpected positional argument");
     const key = a.slice(2);
     if (["publish", "help"].includes(key)) args[key] = true;
     else if (["in", "out", "rpc", "privacy-manager"].includes(key)) {
@@ -237,11 +310,14 @@ async function main() {
         "--publish needs --rpc, --privacy-manager and env WHITELIST_OPS_KEY",
       );
     }
+    const { ethers } = require("ethers");
     const p = await publishRoot({
       root: file.root,
-      rpc: args.rpc,
       privacyManager: args["privacy-manager"],
-      opsKey: process.env.WHITELIST_OPS_KEY,
+      signer: new ethers.Wallet(
+        process.env.WHITELIST_OPS_KEY,
+        new ethers.JsonRpcProvider(args.rpc),
+      ),
     });
     console.error(
       p.txHash
@@ -267,8 +343,14 @@ module.exports = {
   SNARK_SCALAR_FIELD,
   hex32,
   toField,
+  toSecret,
+  MIN_SECRET,
   computeCommitment,
   buildWhitelistRoot,
   loadRootFile,
   publishRoot,
+  PM_ABI,
+  privacyManagerAt,
+  revertReason,
+  publisherOf,
 };

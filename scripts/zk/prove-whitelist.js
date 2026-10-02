@@ -4,8 +4,10 @@
  * scripts/zk/build-whitelist-root.js: library for the demo and the tests,
  * and a CLI.
  *
+ *   # once: a fresh secret (31 random bytes); keep it offline
+ *   node scripts/zk/prove-whitelist.js --new-secret > secret.txt
  *   # onboarding: the commitment to hand the operator
- *   WHITELIST_SECRET=... node scripts/zk/prove-whitelist.js --commitment --identity <id>
+ *   node scripts/zk/prove-whitelist.js --commitment --identity <id> --secret-file secret.txt
  *   # proving: calldata for PrivacyManager.submitWhitelistProof
  *   node scripts/zk/prove-whitelist.js --root root.json --identity <id> \
  *        --wallet <0x..> --secret-file <path> [--out proof.json]
@@ -13,24 +15,31 @@
  *        ... --submit --rpc <url> --privacy-manager <addr>
  *
  * The secret comes from --secret-file or env WHITELIST_SECRET, never from
- * argv (other processes can read argv), and is never printed. The identity
- * of an onboarded investor is its OnchainID address as a field element.
- * Output: { proof: string[24], signals: [nullifier, root, wallet] } on stdout
- * (and --out); progress goes to stderr. The proof is verified locally with
- * the circuit's verification key before it is printed, and a commitment that
- * is not in the root file is refused before proving. Submitting needs the
- * root already published (ops; the publish command is printed otherwise).
+ * argv (other processes can read argv), and is never printed; one below
+ * 2^128 is refused. The identity of an onboarded investor is its OnchainID
+ * address as a field element. Output: { proof: string[24], signals:
+ * [nullifier, root, wallet] } on stdout (and --out); progress goes to
+ * stderr. The proof is verified locally with the circuit's verification key
+ * before it is printed, and a commitment that is not in the root file is
+ * refused before proving. --submit checks its arguments and that the key is
+ * the --wallet's before proving, needs the proof's root to be the current
+ * published one, and exits non-zero unless the binding reads valid.
  * Plain node + ethers; no hardhat runtime.
  */
 
+const crypto = require("crypto");
 const fs = require("fs");
 const path = require("path");
 const { ethers } = require("ethers");
 const {
   hex32,
   toField,
+  toSecret,
   computeCommitment,
   loadRootFile,
+  privacyManagerAt,
+  revertReason,
+  publisherOf,
 } = require("./build-whitelist-root");
 
 const VKEY = path.join(
@@ -50,12 +59,17 @@ function walletOf(wallet) {
   return w;
 }
 
+/** A fresh secret: 31 random bytes (below the field order), 0x hex. */
+function newSecret() {
+  return "0x" + crypto.randomBytes(31).toString("hex");
+}
+
 /**
  * Prove whitelist membership for `wallet` under the root file.
  * @param {Object} p
  * @param {Object} p.rootFile - output of buildWhitelistRoot (re-checked here)
  * @param {*} p.identity - field element (OnchainID address for investors)
- * @param {*} p.secret - the investor's secret; never logged
+ * @param {*} p.secret - the investor's secret, >= 2^128; never logged
  * @param {string} p.wallet - the wallet that will submit (walletBinding)
  * @param {Object} [p.generator] - a RealProofGenerator (the demo shares one)
  * @returns {Promise<{proof: string[], signals: string[]}>} calldata for
@@ -70,8 +84,7 @@ async function proveWhitelist({
 }) {
   const { root, leaves } = await loadRootFile(rootFile);
   const id = toField(identity, "identity");
-  const s = toField(secret, "secret");
-  if (s === 0n) throw new Error("secret: 0 is not a secret");
+  const s = toSecret(secret);
   const w = walletOf(wallet);
   const c = await computeCommitment(id, s);
   if (!leaves.includes(c)) {
@@ -111,55 +124,62 @@ async function proveWhitelist({
   return { proof, signals };
 }
 
-const PM_ABI = [
-  "function whitelistRoot() view returns (bytes32)",
-  "function whitelistVersion() view returns (uint256)",
-  "function listOperator() view returns (address)",
-  "function submitWhitelistProof(uint256[24] proof, uint256[3] signals)",
-  "function whitelistBindings(address) view returns (uint256 version, uint256 nullifier, uint256 expiresAt)",
-  "function hasValidWhitelistProof(address) view returns (bool)",
-];
-
 /**
- * Submit calldata from proveWhitelist with the bound wallet's key. Refuses
- * (and returns the publish command for ops) when the proof's root is not
- * the current published root.
- * @returns {Promise<{txHash, nullifier, version, expiresAt, hasValidWhitelistProof}>}
+ * Submit calldata from proveWhitelist as `signer`, which must be the bound
+ * wallet. A proof whose root is not the current published one is refused:
+ * nothing published yet -> the publish command for ops; another root
+ * current -> re-prove on the current root file. It never advises
+ * republishing a replaced root (that would lapse every binding under the
+ * current one and let investors removed since bind again).
+ * @param {Object} p
+ * @param {{proof: string[], signals: string[]}} p.calldata
+ * @param {string} p.privacyManager - address
+ * @param {Object} p.signer - ethers signer of the wallet (the CLI builds it)
+ * @param {string} [p.rpc] - for the printed publish command only
+ * @returns {Promise<{txHash, nullifier, version, expiresAt}>}; throws
+ *          unless hasValidWhitelistProof reads true afterwards
  */
-async function submitWhitelistProof({
-  calldata,
-  rpc,
-  privacyManager,
-  walletKey,
-}) {
-  const signer = new ethers.Wallet(walletKey, new ethers.JsonRpcProvider(rpc));
-  if (BigInt(signer.address) !== BigInt(calldata.signals[2])) {
-    throw new Error(
-      `WHITELIST_WALLET_KEY is for ${signer.address}, the proof binds ${ethers.getAddress(ethers.toBeHex(BigInt(calldata.signals[2]), 20))}`,
-    );
+async function submitWhitelistProof({ calldata, privacyManager, signer, rpc }) {
+  const who = await signer.getAddress();
+  const bound = ethers.getAddress(
+    ethers.toBeHex(BigInt(calldata.signals[2]), 20),
+  );
+  if (who !== bound) {
+    throw new Error(`the key is for ${who}, the proof binds ${bound}`);
   }
-  const pm = new ethers.Contract(privacyManager, PM_ABI, signer);
+  const pm = privacyManagerAt(privacyManager, signer);
   const root = hex32(BigInt(calldata.signals[1]));
-  if ((await pm.whitelistRoot()) !== root) {
-    const data = new ethers.Interface([
-      "function publishWhitelistRoot(bytes32)",
-    ]).encodeFunctionData("publishWhitelistRoot", [root]);
+  const current = await pm.whitelistRoot();
+  if (current === ethers.ZeroHash) {
     throw new Error(
-      `root ${root} is not the current published root; ops (listOperator ${await pm.listOperator()}) publishes it first:\n` +
-        `  WHITELIST_OPS_KEY=... node scripts/zk/build-whitelist-root.js --in <entries.json> --publish --rpc ${rpc} --privacy-manager ${privacyManager}\n` +
-        `  or send to ${privacyManager} the calldata ${data}`,
+      `no whitelist root is published yet; ${await publisherOf(pm)} publishes ${root}:\n` +
+        `  WHITELIST_OPS_KEY=... node scripts/zk/build-whitelist-root.js --in <entries.json> --publish --rpc ${rpc || "<url>"} --privacy-manager ${privacyManager}`,
     );
   }
-  const rx = await (
-    await pm.submitWhitelistProof(calldata.proof, calldata.signals)
-  ).wait();
-  const b = await pm.whitelistBindings(signer.address);
+  if (current !== root) {
+    throw new Error(
+      `your root file is not the current one: the published root is ${current} (version ${await pm.whitelistVersion()}); get the current root.json from ops and prove again (an old root is never republished)`,
+    );
+  }
+  let rx;
+  try {
+    rx = await (
+      await pm.submitWhitelistProof(calldata.proof, calldata.signals)
+    ).wait();
+  } catch (e) {
+    throw new Error(`submitWhitelistProof reverted: ${revertReason(e)}`);
+  }
+  const b = await pm.whitelistBindings(who);
+  if (!(await pm.hasValidWhitelistProof(who))) {
+    throw new Error(
+      `submitted (tx ${rx.hash}) but hasValidWhitelistProof(${who}) reads false`,
+    );
+  }
   return {
     txHash: rx.hash,
     nullifier: b.nullifier.toString(),
     version: b.version.toString(),
     expiresAt: new Date(Number(b.expiresAt) * 1000).toISOString(),
-    hasValidWhitelistProof: await pm.hasValidWhitelistProof(signer.address),
   };
 }
 
@@ -183,9 +203,11 @@ function parseArgs(argv) {
         "never pass the secret on the command line (argv is visible to other processes): use --secret-file or env WHITELIST_SECRET",
       );
     }
-    if (!a.startsWith("--")) throw new Error(`unexpected argument ${a}`);
+    // Not echoed: a mistyped secret would land in the logs.
+    if (!a.startsWith("--")) throw new Error("unexpected positional argument");
     const key = a.slice(2);
-    if (["submit", "commitment", "help"].includes(key)) args[key] = true;
+    if (["submit", "commitment", "new-secret", "help"].includes(key))
+      args[key] = true;
     else if (
       [
         "root",
@@ -204,7 +226,8 @@ function parseArgs(argv) {
   return args;
 }
 
-const USAGE = `Usage: node scripts/zk/prove-whitelist.js --commitment --identity <id>
+const USAGE = `Usage: node scripts/zk/prove-whitelist.js --new-secret
+       node scripts/zk/prove-whitelist.js --commitment --identity <id>
        node scripts/zk/prove-whitelist.js --root <root.json> --identity <id> --wallet <addr>
             [--out <proof.json>] [--submit --rpc <url> --privacy-manager <addr>]
 Secret: --secret-file <path> or env WHITELIST_SECRET. Submit key: env WHITELIST_WALLET_KEY.`;
@@ -216,6 +239,7 @@ async function main(secretBox) {
   const out = (s) => process.stdout.write(s + "\n");
   const args = parseArgs(process.argv.slice(2));
   if (args.help) return out(USAGE);
+  if (args["new-secret"]) return out(newSecret());
   if (args.identity === undefined)
     throw new Error(`--identity is required\n${USAGE}`);
   secretBox.value = readSecret(args, process.env);
@@ -225,6 +249,22 @@ async function main(secretBox) {
   }
   if (!args.root || !args.wallet)
     throw new Error(`--root and --wallet are required\n${USAGE}`);
+  // Everything --submit needs is checked before the proof is generated.
+  let signer;
+  if (args.submit) {
+    const key = process.env.WHITELIST_WALLET_KEY;
+    if (!args.rpc || !args["privacy-manager"] || !key) {
+      throw new Error(
+        "--submit needs --rpc, --privacy-manager and env WHITELIST_WALLET_KEY",
+      );
+    }
+    signer = new ethers.Wallet(key, new ethers.JsonRpcProvider(args.rpc));
+    if (signer.address !== walletOf(args.wallet)) {
+      throw new Error(
+        `WHITELIST_WALLET_KEY is for ${signer.address}, --wallet is ${walletOf(args.wallet)}`,
+      );
+    }
+  }
   const calldata = await proveWhitelist({
     rootFile: JSON.parse(fs.readFileSync(args.root, "utf8")),
     identity: args.identity,
@@ -233,27 +273,18 @@ async function main(secretBox) {
   });
   const json = JSON.stringify(calldata, null, 2);
   if (args.out) fs.writeFileSync(args.out, json + "\n");
-  if (args.submit) {
-    if (
-      !args.rpc ||
-      !args["privacy-manager"] ||
-      !process.env.WHITELIST_WALLET_KEY
-    ) {
-      throw new Error(
-        "--submit needs --rpc, --privacy-manager and env WHITELIST_WALLET_KEY",
-      );
-    }
+  if (signer) {
     const b = await submitWhitelistProof({
       calldata,
-      rpc: args.rpc,
       privacyManager: args["privacy-manager"],
-      walletKey: process.env.WHITELIST_WALLET_KEY,
+      signer,
+      rpc: args.rpc,
     });
     console.error(`submitted (tx ${b.txHash})`);
     console.error(
       `  nullifier ${b.nullifier}, root version ${b.version}, expires ${b.expiresAt}`,
     );
-    console.error(`  hasValidWhitelistProof: ${b.hasValidWhitelistProof}`);
+    console.error("  hasValidWhitelistProof: true");
   }
   out(json);
 }
@@ -282,4 +313,9 @@ if (require.main === module) {
   );
 }
 
-module.exports = { proveWhitelist, submitWhitelistProof, readSecret };
+module.exports = {
+  proveWhitelist,
+  submitWhitelistProof,
+  readSecret,
+  newSecret,
+};

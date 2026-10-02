@@ -200,7 +200,7 @@ describe("Whitelist root builder and prover CLI (Task 3.5)", function () {
       const cases = [
         { identity: investors[0].identity, secret: randomSecret() },
         { identity: 999n, secret: investors[0].secret },
-        { identity: 7n, secret: 8n },
+        { identity: 7n, secret: randomSecret() },
       ];
       for (const c of cases) {
         await expect(
@@ -215,7 +215,7 @@ describe("Whitelist root builder and prover CLI (Task 3.5)", function () {
       expect(called, "the prover ran on a non-member").to.be.false;
     });
 
-    it("refuses a zero wallet, a zero secret and a tampered root file", async function () {
+    it("refuses a zero wallet, a weak secret and a tampered root file", async function () {
       const base = {
         rootFile,
         identity: investors[0].identity,
@@ -228,9 +228,15 @@ describe("Whitelist root builder and prover CLI (Task 3.5)", function () {
       await expect(
         proveWhitelist({ ...base, wallet: "0x1234" }),
       ).to.be.rejectedWith(/not an address/);
-      await expect(proveWhitelist({ ...base, secret: 0n })).to.be.rejectedWith(
-        /0 is not a secret/,
-      );
+      // M2: below 2^128 a secret is brute-forced from the public leaf.
+      for (const secret of [0n, 4321n, 2n ** 128n - 1n]) {
+        await expect(proveWhitelist({ ...base, secret })).to.be.rejectedWith(
+          /below 2\^128, so it can be brute-forced/,
+        );
+        await expect(computeCommitment(1n, secret)).to.be.rejectedWith(
+          /below 2\^128/,
+        );
+      }
       await expect(
         proveWhitelist({
           ...base,
