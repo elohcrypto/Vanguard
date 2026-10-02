@@ -151,6 +151,94 @@ describe("Handover power set from chain (plan 2F.5)", function () {
     });
   });
 
+  describe("review M-1 to M-3, L-2 (2F.5 fixes)", function () {
+    /** carol registers, creates an escrow (alice pays bob), rules trust it. */
+    async function trustedEscrow() {
+      const e = c.escrowWalletFactory;
+      const [, , , , alice, bob, carol] = await ethers.getSigners();
+      await e.registerInvestor(carol.address, carol.address);
+      await e
+        .connect(carol)
+        .createEscrowWallet(alice.address, bob.address, ethers.parseEther("1"));
+      const w = await e.getWalletAddress(1);
+      await c.complianceRules.addTrustedContract(w);
+      return w;
+    }
+
+    it("M-1: refuses a second escrow-factory role admin before any transaction", async function () {
+      const e = c.escrowWalletFactory;
+      await e.grantRole(await e.DEFAULT_ADMIN_ROLE(), stranger.address);
+      await refused(
+        new RegExp(
+          `EscrowWalletFactory DEFAULT_ADMIN_ROLE held by ${stranger.address} besides the deployer`,
+        ),
+      );
+      await e.revokeRole(await e.DEFAULT_ADMIN_ROLE(), stranger.address);
+      await e.grantRole(await e.ADMIN_ROLE(), stranger.address);
+      await refused(
+        new RegExp(
+          `EscrowWalletFactory ADMIN_ROLE held by ${stranger.address} besides the deployer and ops`,
+        ),
+      );
+    });
+
+    it("M-1: a role granted mid-ceremony fails completion; a planted admin is cleared", async function () {
+      const e = c.escrowWalletFactory;
+      const [DA, AD] = [await e.DEFAULT_ADMIN_ROLE(), await e.ADMIN_ROLE()];
+      const report = await handoverDeployerPowers(args);
+      // The deployer still owns the factory until the vote.
+      await e.grantRole(DA, stranger.address);
+      await e.grantRole(AD, stranger.address);
+      await acceptAllByVote({
+        governance: c.governance,
+        contracts: c,
+        proposer: f.proposer,
+        voters: f.voters,
+        registryProposals: report.registryProposals,
+        log: () => {},
+      });
+      // Contract side: accepting ownership revoked every other admin.
+      expect(await e.hasRole(DA, stranger.address)).to.equal(false);
+      const { failures, checks } = await assertHandoverComplete(args);
+      expect(failures).to.deep.equal([
+        "EscrowWalletFactory ADMIN_ROLE held only by ops",
+      ]);
+      expect(checks.map((x: any) => x.label)).to.include(
+        "EscrowWalletFactory DEFAULT_ADMIN_ROLE held only by governance",
+      );
+    });
+
+    it("M-2: refuses a null escrow factory key while a trusted escrow names one", async function () {
+      const w = await trustedEscrow();
+      const fAddr = await c.escrowWalletFactory.getAddress();
+      args.escrowWalletFactory = null;
+      await refused(
+        new RegExp(
+          `trusted escrow ${w} was created by EscrowWalletFactory ${fAddr}, which the config does not name: add "escrowWalletFactory"`,
+        ),
+      );
+    });
+
+    it("M-3: refuses a fromBlock after the IdentityRegistry deploy", async function () {
+      args.fromBlock = await ethers.provider.getBlockNumber();
+      await refused(
+        new RegExp(
+          `fromBlock ${args.fromBlock} is after the IdentityRegistry deploy`,
+        ),
+      );
+    });
+
+    it("L-2: warns about escrows that keep the deployer as owner", async function () {
+      const w = await trustedEscrow();
+      await ceremony();
+      const { ok, warnings } = await assertHandoverComplete(args);
+      expect(ok).to.equal(true);
+      expect(warnings.join("\n")).to.include(
+        `escrow(s) ${w} were created before the handover and keep the deployer as owner (immutable)`,
+      );
+    });
+  });
+
   describe("separation of duties (D25 b)", function () {
     for (const [who, pick] of [
       ["deployer", () => deployer],

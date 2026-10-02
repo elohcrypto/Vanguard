@@ -26,6 +26,7 @@ const {
   registryGovernors,
   openRegistryProposals,
 } = require("./HandoverPowers");
+const { factoryRoleLines, deployerEscrows } = require("./HandoverScans");
 
 const ZERO = ethers.ZeroAddress;
 const EXEMPT_ABI = [
@@ -71,22 +72,31 @@ async function assertHandoverComplete(o) {
       owned && noRole,
     );
   }
-  // Bound in governance but not named by the config: still checked.
+  // Review M-1: no role holder besides governance and ops survives.
+  for (const [label, pass] of await factoryRoleLines(o, govAddr, ops)) {
+    add(label, pass);
+  }
+  // Bound in governance, or the creator of a trusted escrow (review M-2),
+  // but not named by the config: still checked.
   const d = o.derived;
   const unnamed = [
     ["dynamicListManager", "DynamicListManager", d.dynamicListManager],
     ...FACTORY_PLAN.map((e) => [e.key, e.label, d.factories[e.key]]),
-  ];
-  for (const [key, label, bound] of unnamed) {
+  ].map(([k, l, a]) => [k, a, `${l} ${a} (bound in governance)`]);
+  for (const { factory, escrow } of d.escrowFactories) {
+    unnamed.push([
+      "escrowWalletFactory",
+      factory,
+      `EscrowWalletFactory ${factory} (creator of trusted escrow ${escrow})`,
+    ]);
+  }
+  for (const [key, bound, label] of unnamed) {
     if (!bound || (o[key] && same(await addrOf(o[key]), bound))) continue;
     const c = await ethers.getContractAt(
       ["function owner() view returns (address)"],
       bound,
     );
-    add(
-      `${label} ${bound} (bound in governance) owned by governance`,
-      same(await c.owner(), govAddr),
-    );
+    add(`${label} owned by governance`, same(await c.owner(), govAddr));
   }
   add("deployer is not a Token agent", !(await o.token.isAgent(dAddr)));
   add(
@@ -195,7 +205,12 @@ async function assertHandoverComplete(o) {
   if (clean) add("every trusted contract has code", true);
   for (const issuer of o.issuers || []) {
     const label = await issuerLabel(issuer);
-    add(`deployer does not own ${label}`, !same(await issuer.owner(), dAddr));
+    // Review N-5: nor is it the pending owner (a planted nomination).
+    add(
+      `deployer does not own ${label}`,
+      !same(await issuer.owner(), dAddr) &&
+        !same(await issuer.pendingOwner(), dAddr),
+    );
     add(
       `deployer holds no live key on ${label}`,
       !(await hasLiveKey(issuer, dAddr)),
@@ -219,7 +234,8 @@ async function assertHandoverComplete(o) {
 
 /**
  * Warnings, not failures: the deployer's leftover VSC and exemption (a
- * treasury artifact), and escrow fee wallets that are not exempt on the
+ * treasury artifact), escrows that keep the deployer as owner, and escrow
+ * fee wallets that are not exempt on the
  * registry the Token enforces or were registered after the handover
  * (R-2F4-2: after it only an InvestorTypeConfig vote can exempt them).
  */
@@ -236,13 +252,21 @@ async function residueWarnings(o, dAddr, govAddr, warnings) {
       `deployer still holds ${ethers.formatEther(bal)} VSC (investorLimitExempt: ${dExempt}, verified: ${await o.identityRegistry.isVerified(dAddr)}): move it to the treasury; only a vote can remove the exemption now`,
     );
   }
-  if (!reg) return;
-  const fee = [];
   const fAddr =
     (o.escrowWalletFactory && (await addrOf(o.escrowWalletFactory))) ||
-    o.derived.factories.escrowWalletFactory;
-  if (fAddr) {
-    const f = await ethers.getContractAt("EscrowWalletFactory", fAddr);
+    o.derived.factories.escrowWalletFactory ||
+    o.derived.escrowFactories[0]?.factory;
+  const f = fAddr && (await ethers.getContractAt("EscrowWalletFactory", fAddr));
+  // Review L-2: an escrow's owner is immutable.
+  const mine = f ? await deployerEscrows(f, dAddr, o) : [];
+  if (mine.length) {
+    warnings.push(
+      `escrow(s) ${mine.join(", ")} were created before the handover and keep the deployer as owner (immutable): it can still setPayer on an unfunded one and sweepExcess; settle or sweep them`,
+    );
+  }
+  if (!reg) return;
+  const fee = [];
+  if (f) {
     fee.push([await f.ownerWallet(), "factory ownerWallet"]);
     const handed = await scanLogs(
       f,

@@ -187,6 +187,22 @@ describe("Handover completion check (table)", function () {
         "Token guardian is not the deployer",
         () => c.token.connect(gov).setGuardian(d),
       ],
+      // Review M-1: no role holder besides governance and ops.
+      [
+        "EscrowWalletFactory DEFAULT_ADMIN_ROLE held only by governance",
+        async () =>
+          escrowF.connect(gov).grantRole(await escrowF.DEFAULT_ADMIN_ROLE(), s),
+      ],
+      [
+        "EscrowWalletFactory ADMIN_ROLE held only by ops",
+        async () =>
+          escrowF.connect(gov).grantRole(await escrowF.ADMIN_ROLE(), s),
+      ],
+      // Review N-5: a planted nomination to the deployer.
+      [
+        `deployer does not own ${issuerName}`,
+        () => issuer.connect(issuerAdmin).transferOwnership(d),
+      ],
       // A revoked key keeps its slot ("Key already exists"), so the deployer
       // regains the issuer by ownership instead.
       [
@@ -204,6 +220,27 @@ describe("Handover completion check (table)", function () {
       expect(failures, label).to.include(label);
       await network.provider.send("evm_revert", [snap]);
     }
+    await network.provider.send("hardhat_stopImpersonatingAccount", [govAddr]);
+  });
+
+  // Review L-5 (mutant M9): the fee-wallet warning, present and absent.
+  it("warns on a non-exempt escrow fee wallet, not on an exempt one", async function () {
+    const { govAddr, feeWallet } = f;
+    await network.provider.send("hardhat_impersonateAccount", [govAddr]);
+    await network.provider.send("hardhat_setBalance", [
+      govAddr,
+      "0xDE0B6B3A7640000",
+    ]);
+    const gov = await ethers.getSigner(govAddr);
+    const reg = c.investorTypeRegistry;
+    await c.token.connect(gov).setInvestorTypeRegistry(await reg.getAddress());
+    const line = `escrow fee wallet ${feeWallet.address} (factory ownerWallet) is not investorLimitExempt`;
+    const before = await assertHandoverComplete(args);
+    expect(before.ok).to.equal(true);
+    expect(before.warnings.join("\n")).to.include(line);
+    await reg.connect(gov).setInvestorLimitExempt(feeWallet.address, true);
+    const after = await assertHandoverComplete(args);
+    expect(after.warnings.join("\n")).to.not.include(line);
     await network.provider.send("hardhat_stopImpersonatingAccount", [govAddr]);
   });
 });

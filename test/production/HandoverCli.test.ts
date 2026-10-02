@@ -51,6 +51,10 @@ describe("Handover CLI (scripts/handover.ts)", function () {
   });
 
   it("the full phase completes", async function () {
+    // Review M-3: the scans start at the IdentityRegistry deploy block.
+    cfg.fromBlock = (
+      await f.c.identityRegistry.deploymentTransaction().wait()
+    ).blockNumber;
     await runHandover(cfg);
     expect(await f.c.token.owner()).to.equal(f.govAddr);
     // 2F.5: both factories and the issuer moved; ops never got the issuer.
@@ -86,6 +90,16 @@ describe("Handover CLI (scripts/handover.ts)", function () {
       "full",
       new RegExp(
         `config "oracles" omits ${blAddr} \\(an oracle ComplianceRules binds`,
+      ),
+    );
+  });
+
+  it("refuses a fromBlock after the IdentityRegistry deploy (review M-3)", async function () {
+    cfg.fromBlock = await ethers.provider.getBlockNumber();
+    await refusedWithNoTx(
+      "full",
+      new RegExp(
+        `fromBlock ${cfg.fromBlock} is after the IdentityRegistry deploy`,
       ),
     );
   });

@@ -279,14 +279,16 @@ non-zero on any failure. The JSON holds the addresses `token`,
 `governanceToken`, `identityRegistry`, `complianceRules`, `oracleManager`, `governance`, the
 optional `investorTypeRegistry` and `dynamicListManager`, the required keys
 `escrowWalletFactory` and `onchainIDFactory` (an address, or `null` when not
-deployed: neither is reachable from the core contracts, so only the config
-can name them), the optional `oracles` and `issuers` arrays (omitted: the
+deployed: only the OnchainIDFactory is unreachable from the core
+contracts; the escrow factory is also read from every trusted escrow's
+`factory()`, and a config that does not name it is refused), the optional `oracles` and `issuers` arrays (omitted: the
 set read from chain), the optional `feeWallets` array (escrow fee wallets
 to check for the exemption), the
 optional `fromBlock` (where the event scans start: trusted contracts,
-registry agents, registry governors, escrow investors; use a block before
-the IdentityRegistry was deployed; the demo records the ComplianceRules
-deploy block at option 1) and `logChunk` (the
+registry agents, registry governors, escrow investors and roles; a block
+no later than the IdentityRegistry deploy, refused when the registry
+already has code before it; the demo records the IdentityRegistry deploy
+block at option 1) and `logChunk` (the
 scan's block range, default 5000, halved down to 100 when the RPC refuses a
 range), and the wallet indices `ops`, `guardian`, `issuerAdmin` (required
 whenever the registry trusts an issuer), `proposer` and `voters`

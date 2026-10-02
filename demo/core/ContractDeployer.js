@@ -341,6 +341,10 @@ class ContractDeployer {
       await ethers.getContractFactory("IdentityRegistry");
     const identityRegistry = await IdentityRegistry.deploy();
     await identityRegistry.waitForDeployment();
+    // The handover's log scans start here (fromBlock, 2F.5 review M-3).
+    this.state.identityRegistryDeployBlock = (
+      await identityRegistry.deploymentTransaction().wait()
+    ).blockNumber;
     this.state.setContract("identityRegistry", identityRegistry);
 
     await this.logger.logContractDeployment(

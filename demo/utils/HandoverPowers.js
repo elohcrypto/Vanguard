@@ -3,7 +3,8 @@
  * deployer's power set derived from chain state rather than from the config,
  * the preflight checks built on it (the config covers it, separation of
  * duties, InvestorTypeRegistry side-governance), the factory and issuer
- * steps, and the chunked log scan shared with the completion check.
+ * steps. The chunked log scan and the facts read from it are in
+ * HandoverScans.js.
  */
 
 const { ethers } = require("hardhat");
@@ -17,6 +18,13 @@ const {
   listManagerOf,
   fail,
 } = require("./HandoverChecks");
+const {
+  uniq,
+  scanLogs,
+  checkFromBlock,
+  preflightFactoryRoles,
+  escrowFactoriesFromChain,
+} = require("./HandoverScans");
 
 const ZERO = ethers.ZeroAddress;
 const MANAGEMENT_KEY = 1;
@@ -39,46 +47,12 @@ const FACTORY_PLAN = ACCEPTANCE_PLAN.filter((e) => e.bind);
 const check = (cond, msg) => cond || fail(msg);
 const send = async (p) => (await p).wait();
 
-/** Checksummed, de-duplicated, zero dropped. */
-function uniq(list) {
-  const out = [];
-  for (const a of list) {
-    if (!a || same(a, ZERO) || out.some((b) => same(a, b))) continue;
-    out.push(ethers.getAddress(a));
-  }
-  return out;
-}
-
-/**
- * Every `filter` event of `contract` from o.fromBlock to the latest block.
- * Public RPCs cap the eth_getLogs block range, so a range error halves the
- * chunk (floor 100) and retries; any other error is rethrown.
- */
-async function scanLogs(contract, filter, o) {
-  let chunk = o.logChunk || 5000;
-  const latest = await ethers.provider.getBlockNumber();
-  const found = [];
-  for (let b = o.fromBlock || 0; b <= latest;) {
-    const to = Math.min(b + chunk - 1, latest);
-    try {
-      found.push(...(await contract.queryFilter(filter, b, to)));
-      b = to + 1;
-    } catch (e) {
-      // Block-range refusals only; a rate limit is rethrown, not halved.
-      const rangeError =
-        /block range|range too large|exceeds.*(range|limit)|too many (blocks|results)|query returned more than/i;
-      if (chunk <= 100 || !rangeError.test(e.message)) throw e;
-      chunk = Math.max(100, Math.floor(chunk / 2));
-    }
-  }
-  return found;
-}
-
 /**
  * The contracts that hold power over holders, read from chain: oracles
  * bound in ComplianceRules for VSC and VGT, the registry's trusted issuers
  * per required topic, each oracle's listManager, the DynamicListManager
- * governance is bound to, and the factories bound to types 9 and 10.
+ * governance is bound to, the factories bound to types 9 and 10, and the
+ * escrow factories that created trusted escrows (review M-2).
  */
 async function derivePowers(o) {
   const rules = o.complianceRules;
@@ -112,6 +86,7 @@ async function derivePowers(o) {
     listManagers,
     dynamicListManager: same(dlm, ZERO) ? null : dlm,
     factories,
+    escrowFactories: await escrowFactoriesFromChain(o),
   };
 }
 
@@ -163,6 +138,16 @@ async function withDerivedPowers(o, log = () => {}, { strict = true } = {}) {
       );
     }
   }
+  // Review M-2: a null key cannot hide a factory a trusted escrow names.
+  const escrowNamed =
+    o.escrowWalletFactory && (await addrOf(o.escrowWalletFactory));
+  for (const { factory, escrow } of d.escrowFactories) {
+    if (escrowNamed && same(escrowNamed, factory)) continue;
+    fail(
+      `trusted escrow ${escrow} was created by EscrowWalletFactory ${factory}, which the config does not name: add "escrowWalletFactory"`,
+    );
+  }
+  await checkFromBlock(o, log);
   return out;
 }
 
@@ -271,6 +256,7 @@ async function preflightPowers(o, { governanceOwned }) {
       );
     }
   }
+  await preflightFactoryRoles(o, dAddr, ops, govAddr);
   // D25 (b): no key both registers identities and attests them.
   const agents = await registryAgentsAfter(o, dAddr, ops);
   for (const issuer of issuers) {

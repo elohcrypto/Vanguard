@@ -11,6 +11,7 @@ const {
   displaySection,
   displaySuccess,
   displayError,
+  displayWarning,
 } = require("../utils/DisplayHelpers");
 const {
   ACCEPTANCE_PLAN,
@@ -84,9 +85,16 @@ class HandoverModule {
     }
     const pick = (keys) =>
       keys.map((k) => s.getContract(k)).filter((c) => Boolean(c));
+    // Log scans start at the IdentityRegistry deploy (review M-3).
+    let fromBlock = s.identityRegistryDeployBlock;
+    if (fromBlock === undefined && s.complianceRulesDeployBlock !== undefined) {
+      fromBlock = s.complianceRulesDeployBlock;
+      displayWarning(
+        `IdentityRegistry deploy block not recorded: scanning from the ComplianceRules deploy (block ${fromBlock}); a registry agent added before it would be missed`,
+      );
+    }
     return {
-      // Trusted-contract scan from the ComplianceRules deploy block, not 0.
-      fromBlock: s.complianceRulesDeployBlock,
+      fromBlock,
       deployer: s.signers[0],
       ops,
       guardian,
@@ -364,6 +372,8 @@ class HandoverModule {
     const verifiedHumans = [];
     const usable = [];
     for (let i = 0; i < Math.min(10, this.state.signers.length); i++) {
+      // Review N-3: the role wallets (issuerAdmin, ops, guardian) never vote.
+      if ([ISSUER_ADMIN_INDEX, OPS_INDEX, GUARDIAN_INDEX].includes(i)) continue;
       const s = this.state.signers[i];
       if (same(s.address, govAddr)) continue;
       if (!(await identityRegistry.isVerified(s.address))) continue;

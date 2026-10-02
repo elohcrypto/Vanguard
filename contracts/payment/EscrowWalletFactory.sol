@@ -3,7 +3,7 @@ pragma solidity ^0.8.19;
 
 import "./MultiSigEscrowWallet.sol";
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
-import "@openzeppelin/contracts/access/AccessControl.sol";
+import "@openzeppelin/contracts/access/extensions/AccessControlEnumerable.sol";
 import "@openzeppelin/contracts/access/Ownable2Step.sol";
 import "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
 import "../erc3643/interfaces/IIdentityRegistry.sol";
@@ -18,8 +18,10 @@ import "../compliance/interfaces/IComplianceRules.sol";
  *      registry and the rules and is written into every escrow (sweep rights);
  *      it moves to governance at the handover ceremony. DEFAULT_ADMIN_ROLE
  *      follows ownership. ADMIN_ROLE (investor management) is operational.
+ *      Enumerable (2F.5 review M-1) so a change of owner can clear every
+ *      other DEFAULT_ADMIN_ROLE holder.
  */
-contract EscrowWalletFactory is AccessControl, Ownable2Step, ReentrancyGuard {
+contract EscrowWalletFactory is AccessControlEnumerable, Ownable2Step, ReentrancyGuard {
     /// @notice The creating investor named itself as payee or payer. An
     ///         investor who is also a counterparty holds two of the three
     ///         signatures plus dispute resolution and can take the funds.
@@ -128,12 +130,15 @@ contract EscrowWalletFactory is AccessControl, Ownable2Step, ReentrancyGuard {
         _grantRole(ADMIN_ROLE, msg.sender);
     }
 
-    /// @dev DEFAULT_ADMIN_ROLE (admin of ADMIN_ROLE) follows ownership, so a
-    ///      handed-over factory leaves no role admin behind with the deployer.
+    /// @dev DEFAULT_ADMIN_ROLE (admin of ADMIN_ROLE) follows ownership: the
+    ///      new owner is its only holder, so a handed-over factory leaves no
+    ///      role admin behind, not even one the deployer granted (review M-1).
     function _transferOwnership(address newOwner) internal override {
-        address previous = owner();
         super._transferOwnership(newOwner);
-        if (previous != address(0)) _revokeRole(DEFAULT_ADMIN_ROLE, previous);
+        for (uint256 i = getRoleMemberCount(DEFAULT_ADMIN_ROLE); i > 0; i--) {
+            address member = getRoleMember(DEFAULT_ADMIN_ROLE, i - 1);
+            if (member != newOwner) _revokeRole(DEFAULT_ADMIN_ROLE, member);
+        }
         if (newOwner != address(0)) _grantRole(DEFAULT_ADMIN_ROLE, newOwner);
     }
 

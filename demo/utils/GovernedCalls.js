@@ -11,9 +11,11 @@ const { voterAgeRefusal, walletControlRefusal } = require("./ChainTime");
 
 const same = (a, b) => a.toLowerCase() === b.toLowerCase();
 const COMPLIANCE_RULES_TYPE = 1; // ProposalType.ComplianceRules
+/** issuerAdmin 9, ops 10, guardian 11: role wallets never propose (N-3). */
+const ROLE_WALLETS = new Set([9, 10, 11]);
 
 /**
- * First wallet among 0-9 that may propose: verified, old enough, controls
+ * First wallet among 0-8 that may propose: verified, old enough, controls
  * its identity and holds the creation fee. Null when none can.
  */
 async function pickProposer(state) {
@@ -22,6 +24,7 @@ async function pickProposer(state) {
   const vgt = state.getContract("governanceToken");
   const cost = await gov.proposalCreationCost();
   for (let i = 0; i < Math.min(10, state.signers.length); i++) {
+    if (ROLE_WALLETS.has(i)) continue;
     const s = state.signers[i];
     if (!(await idReg.isVerified(s.address))) continue;
     if ((await vgt.balanceOf(s.address)) < cost) continue;
@@ -54,7 +57,7 @@ async function trustContract(state, wallet, log = console.log) {
   const proposer = await pickProposer(state);
   if (!proposer) {
     return {
-      refused: `governance owns ComplianceRules; no wallet among 0-9 can propose (verified, ${ethers.formatEther(await gov.proposalCreationCost())} VGT, identity old enough)`,
+      refused: `governance owns ComplianceRules; no wallet among 0-8 can propose (verified, ${ethers.formatEther(await gov.proposalCreationCost())} VGT, identity old enough)`,
     };
   }
   const proposalId = await proposeCall(

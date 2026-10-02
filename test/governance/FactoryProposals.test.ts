@@ -232,6 +232,27 @@ describe("Factories are governable by proposal (2F.5)", function () {
     expect(await w.ownerWallet()).to.equal(bob.address);
   });
 
+  it("EscrowWalletFactory: accepting ownership revokes every other DEFAULT_ADMIN (review M-1)", async function () {
+    const DA = await escrowF.DEFAULT_ADMIN_ROLE();
+    // Planted before the ceremony: a second role admin.
+    await escrowF.grantRole(DA, alice.address);
+    expect(await escrowF.getRoleMemberCount(DA)).to.equal(2n);
+    await escrowF.transferOwnership(govAddr);
+    await gov.setEscrowWalletFactory(escrowAddr);
+    await passByVote(T.EscrowFactory, escrowF, accept(escrowF));
+    expect(await escrowF.hasRole(DA, alice.address)).to.equal(false);
+    expect(await escrowF.getRoleMemberCount(DA)).to.equal(1n);
+    expect(await escrowF.getRoleMember(DA, 0)).to.equal(govAddr);
+    await expect(
+      escrowF
+        .connect(alice)
+        .grantRole(await escrowF.ADMIN_ROLE(), owner.address),
+    ).to.be.revertedWithCustomError(
+      escrowF,
+      "AccessControlUnauthorizedAccount",
+    );
+  });
+
   it("OnchainIDFactory: two-step ownership, accepted by vote, fee recipient by vote", async function () {
     await idF.transferOwnership(govAddr);
     expect(await idF.owner()).to.equal(owner.address);

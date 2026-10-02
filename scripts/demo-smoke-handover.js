@@ -94,8 +94,16 @@ async function runHandoverSmoke(state, failures) {
     [PROPOSER, ...VOTERS].map((i) => s[i]),
   );
 
+  // Log scans start at the IdentityRegistry deploy (review M-3).
+  let fromBlock = state.identityRegistryDeployBlock;
+  if (fromBlock === undefined) {
+    fromBlock = state.complianceRulesDeployBlock;
+    console.log(
+      `   ⚠️  IdentityRegistry deploy block not recorded: scanning from the ComplianceRules deploy (block ${fromBlock})`,
+    );
+  }
   const args = {
-    fromBlock: state.complianceRulesDeployBlock,
+    fromBlock,
     deployer: s[0],
     ops: s[OPS],
     guardian: s[GUARDIAN],

@@ -16,7 +16,7 @@
  *     "oracles": ["0x..", "0x..", "0x.."],      // optional, one-step Ownable
  *     "issuers": ["0x..", "0x.."],              // optional, ClaimIssuer
  *     "feeWallets": ["0x.."],                   // optional, escrow fee wallets to check
- *     "fromBlock": 1234567,                     // optional, first deploy block (registry)
+ *     "fromBlock": 1234567,                     // optional, <= the IdentityRegistry deploy block
  *     "logChunk": 5000,                         // optional, eth_getLogs block range
  *     "ops": 10, "guardian": 11, "issuerAdmin": 9,
  *     "proposer": 1, "voters": [2, 3, 6]
@@ -27,8 +27,11 @@
  * leave a list out to use the chain's set. "issuerAdmin" (a wallet index,
  * not ops/guardian/deployer) is required whenever the registry trusts an
  * issuer: the ceremony hands every deployer-held issuer to it (D25 b).
- * Both factory keys must be present: neither factory is reachable from the
- * core contracts, so only the config can name them; null states "none".
+ * Both factory keys must be present; null states "none". The OnchainIDFactory
+ * is unreachable from the core contracts, so only the config names it; the
+ * escrow factory is also read from every trusted escrow's factory(), and a
+ * config that does not name it is refused. A "fromBlock" after the
+ * IdentityRegistry deploy is refused (the scans would miss earlier agents).
  *
  * Every contract in ACCEPTANCE_PLAN (demo/utils/HandoverChecks.js) given here
  * is nominated and accepted by vote, InvestorTypeRegistry included; a
