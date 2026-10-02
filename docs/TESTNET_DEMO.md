@@ -357,6 +357,35 @@ acceptances and registry proposals still pending, then verifies.
   pauses every affected holder, escrow releases to them included, until
   they re-prove; burns stay open.
 
+### Whitelist roots and proofs from the command line (Task 3.5)
+
+The investor keeps a secret and hands the operator only the commitment
+`Poseidon(identity, secret)`, where the identity is the investor's
+OnchainID address. The secret is read from a file or `WHITELIST_SECRET`,
+never from the command line, and is never printed.
+
+```bash
+# Investor, at onboarding: the commitment to hand the operator
+node scripts/zk/prove-whitelist.js --commitment --identity <onchainID> --secret-file secret.txt
+
+# Operator (ops, the listOperator): entries.json is
+# [{ "identity": "<onchainID>", "commitment": "<0x..>" }, ...], one per identity
+WHITELIST_OPS_KEY=<ops key> node scripts/zk/build-whitelist-root.js \
+  --in entries.json --out root.json --publish --rpc <url> --privacy-manager <addr>
+
+# Investor, with the published root.json: prove, bind the wallet, show the status
+WHITELIST_WALLET_KEY=<wallet key> node scripts/zk/prove-whitelist.js \
+  --root root.json --identity <onchainID> --wallet <wallet> --secret-file secret.txt \
+  --out proof.json --submit --rpc <url> --privacy-manager <addr>
+```
+
+Leaf order is the order of `entries.json`, so the same file always gives
+the same root. Without `--submit` the prover prints the calldata
+`{ proof, signals }` for `submitWhitelistProof`; it refuses a commitment
+that is not in `root.json` and a root that is not the current published
+one (it prints the publish command for ops instead). Demo option 42 -> 1
+uses the same functions.
+
 ## Waiting instead of jumping
 
 The four demo paths that used to call `evm_increaseTime` (governance option
