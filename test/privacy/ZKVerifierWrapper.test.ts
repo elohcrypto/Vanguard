@@ -327,9 +327,9 @@ describe("ZKVerifierIntegrated wrapper (Task 3.2)", function () {
         [ethers.ZeroHash, [1n], "ZKVerifierIntegrated: Unknown circuit ID"],
       ];
       for (const [id, inputs, message] of cases) {
-        await expect(zk.verifyCircuitProof(id, EMPTY, inputs)).to.be.revertedWith(
-          message,
-        );
+        await expect(
+          zk.verifyCircuitProof(id, EMPTY, inputs),
+        ).to.be.revertedWith(message);
       }
     });
   });
