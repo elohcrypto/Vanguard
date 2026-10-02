@@ -54,6 +54,8 @@ contract InvestorTypeRegistry is IInvestorTypeRegistry, Ownable2Step {
         string description;
         uint256 approvalsCount;
         mapping(address => bool) approvals;
+        // The governor set it was created under (plan 2F.5, L2).
+        uint256 governorEpoch;
     }
 
     mapping(uint256 => Proposal) private _proposals;
@@ -64,6 +66,16 @@ contract InvestorTypeRegistry is IInvestorTypeRegistry, Ownable2Step {
     uint256 public governanceDelay = 2 days;
     uint256 public requiredApprovals = 2;
     uint256 public totalGovernorWeight = 0;
+    /// @notice Bumped by every setGovernor: a proposal created under an older
+    ///         governor set can no longer be approved or executed, so
+    ///         approvals from removed governors do not survive (2F.5, L2).
+    uint256 public governorEpoch;
+    /// @notice A proposal not executed within this window after its
+    ///         executionTime is dead.
+    uint256 public constant PROPOSAL_LIFETIME = 7 days;
+
+    error GovernorSetChanged(uint256 proposalId);
+    error ProposalExpired(uint256 proposalId);
 
     modifier onlyComplianceOfficer() {
         require(_complianceOfficers[msg.sender] || msg.sender == owner(), "Not authorized compliance officer");
@@ -333,6 +345,7 @@ contract InvestorTypeRegistry is IInvestorTypeRegistry, Ownable2Step {
         require(uint8(investorType) <= uint8(InvestorType.Institutional), "Invalid investor type");
         require(config.maxTransferAmount > 0, "Invalid max transfer amount");
         require(config.maxHoldingAmount > 0, "Invalid max holding amount");
+        require(config.requiredWhitelistTier >= 1 && config.requiredWhitelistTier <= 5, "Invalid whitelist tier");
 
         uint256 proposalId = _nextProposalId++;
         Proposal storage proposal = _proposals[proposalId];
@@ -346,6 +359,7 @@ contract InvestorTypeRegistry is IInvestorTypeRegistry, Ownable2Step {
         proposal.status = ProposalStatus.Pending;
         proposal.description = description;
         proposal.approvalsCount = 0;
+        proposal.governorEpoch = governorEpoch;
 
         emit ProposalCreated(proposalId, msg.sender, investorType, description);
         return proposalId;
@@ -356,6 +370,7 @@ contract InvestorTypeRegistry is IInvestorTypeRegistry, Ownable2Step {
         Proposal storage proposal = _proposals[proposalId];
         require(proposal.id != 0, "Proposal does not exist");
         require(proposal.status == ProposalStatus.Pending, "Proposal not active");
+        if (proposal.governorEpoch != governorEpoch) revert GovernorSetChanged(proposalId);
         require(!proposal.approvals[msg.sender], "Already approved");
 
         proposal.approvals[msg.sender] = true;
@@ -377,7 +392,9 @@ contract InvestorTypeRegistry is IInvestorTypeRegistry, Ownable2Step {
             proposal.status == ProposalStatus.Approved || proposal.status == ProposalStatus.Pending,
             "Proposal not executable"
         );
+        if (proposal.governorEpoch != governorEpoch) revert GovernorSetChanged(proposalId);
         require(block.timestamp >= proposal.executionTime, "Execution delay not met");
+        if (block.timestamp > proposal.executionTime + PROPOSAL_LIFETIME) revert ProposalExpired(proposalId);
         require(proposal.approvalsCount >= requiredApprovals, "Insufficient approvals");
 
         proposal.status = ProposalStatus.Executed;
@@ -419,6 +436,7 @@ contract InvestorTypeRegistry is IInvestorTypeRegistry, Ownable2Step {
 
         _governors[governor] = authorized;
         _governorWeights[governor] = authorized ? weight : 0;
+        governorEpoch++;
 
         emit GovernorUpdated(governor, authorized, weight);
     }
@@ -465,6 +483,22 @@ contract InvestorTypeRegistry is IInvestorTypeRegistry, Ownable2Step {
             proposal.description,
             proposal.approvalsCount
         );
+    }
+
+    /// @notice True while a proposal could still execute: Pending or
+    ///         Approved, created under the current governor set, not expired.
+    function isProposalOpen(uint256 proposalId) external view returns (bool) {
+        Proposal storage p = _proposals[proposalId];
+        return
+            p.id != 0 &&
+            (p.status == ProposalStatus.Pending || p.status == ProposalStatus.Approved) &&
+            p.governorEpoch == governorEpoch &&
+            block.timestamp <= p.executionTime + PROPOSAL_LIFETIME;
+    }
+
+    /// @notice Number of proposals ever created (ids 1..proposalCount).
+    function proposalCount() external view returns (uint256) {
+        return _nextProposalId - 1;
     }
 
     /// @dev Check if address is governor

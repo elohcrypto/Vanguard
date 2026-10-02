@@ -39,7 +39,13 @@ contract VanguardGovernance is Ownable2Step, ReentrancyGuard {
         // topics, trusted issuers, agents, compliance/investor-type wiring).
         IdentityRegistryParameters,
         // Index 8: governs the vote token's owner surface (plan 2C.2, D19).
-        GovernanceTokenParameters
+        GovernanceTokenParameters,
+        // Index 9: the EscrowWalletFactory's owner surface (fee wallet,
+        // registry, rules); index 10: the OnchainIDFactory's (fees, pause,
+        // withdraw). Bound only while the factory is handed to governance
+        // (plan 2F.5, M4).
+        EscrowFactoryParameters,
+        IdentityFactoryParameters
     }
     
     enum ProposalStatus {
@@ -134,6 +140,8 @@ contract VanguardGovernance is Ownable2Step, ReentrancyGuard {
     address public oracleManager;
     address public token;
     address public dynamicListManager; // DynamicListManager: bound target of ListUpdate
+    address public escrowWalletFactory; // bound target of EscrowFactoryParameters
+    address public onchainIDFactory; // bound target of IdentityFactoryParameters
 
     /// @notice Divisor applied to every proposal type's votingPeriod and
     ///         executionDelay at construction. 1 = the mainnet schedule.
@@ -306,6 +314,8 @@ contract VanguardGovernance is Ownable2Step, ReentrancyGuard {
      *         so it is unproposable until setDynamicListManager runs.
      *         IdentityRegistryParameters is bound to the IdentityRegistry;
      *         GovernanceTokenParameters is bound to the GovernanceToken (VGT).
+     *         EscrowFactoryParameters / IdentityFactoryParameters are bound to
+     *         the factories once setEscrowWalletFactory / setOnchainIDFactory ran.
      */
     function boundTarget(ProposalType proposalType) public view returns (address) {
         if (proposalType == ProposalType.InvestorTypeConfig) return investorTypeRegistry;
@@ -316,6 +326,8 @@ contract VanguardGovernance is Ownable2Step, ReentrancyGuard {
         if (proposalType == ProposalType.ListUpdate) return dynamicListManager;
         if (proposalType == ProposalType.IdentityRegistryParameters) return address(identityRegistry);
         if (proposalType == ProposalType.GovernanceTokenParameters) return address(governanceToken);
+        if (proposalType == ProposalType.EscrowFactoryParameters) return escrowWalletFactory;
+        if (proposalType == ProposalType.IdentityFactoryParameters) return onchainIDFactory;
         return address(0);
     }
 
@@ -399,6 +411,13 @@ contract VanguardGovernance is Ownable2Step, ReentrancyGuard {
             votingPeriod: 7 days / TIME_SCALE,
             executionDelay: 3 days / TIME_SCALE
         });
+
+        // Both factory types reuse the TokenParameters row (plan 2F.5): the
+        // escrow factory's owner is written into every escrow and receives
+        // platform fees. 30% quorum, 70% approval, 7 days voting, 3 days delay
+        ProposalThresholds memory tokenRow = proposalThresholds[ProposalType.TokenParameters];
+        proposalThresholds[ProposalType.EscrowFactoryParameters] = tokenRow;
+        proposalThresholds[ProposalType.IdentityFactoryParameters] = tokenRow;
     }
     
     /**
@@ -926,5 +945,34 @@ contract VanguardGovernance is Ownable2Step, ReentrancyGuard {
     function setDynamicListManager(address _dynamicListManager) external onlyOwner {
         require(_dynamicListManager != address(0), "Invalid address");
         dynamicListManager = _dynamicListManager;
+    }
+
+    /// @notice Bind EscrowFactoryParameters. Only a factory being handed to
+    ///         governance (pendingOwner or owner is this contract) can be
+    ///         bound, as a ListUpdate needs a manager that reports governance.
+    function setEscrowWalletFactory(address factory) external onlyOwner {
+        _requireHandedToGovernance(factory);
+        escrowWalletFactory = factory;
+    }
+
+    /// @notice Bind IdentityFactoryParameters; same rule as the escrow factory.
+    function setOnchainIDFactory(address factory) external onlyOwner {
+        _requireHandedToGovernance(factory);
+        onchainIDFactory = factory;
+    }
+
+    /// @dev Fails closed: no code or a reverting getter is "not handed".
+    function _requireHandedToGovernance(address factory) private view {
+        require(factory.code.length > 0, "Factory not handed to governance");
+        bool handed;
+        try Ownable2Step(factory).pendingOwner() returns (address p) {
+            handed = p == address(this);
+        } catch {}
+        if (!handed) {
+            try Ownable(factory).owner() returns (address o) {
+                handed = o == address(this);
+            } catch {}
+        }
+        require(handed, "Factory not handed to governance");
     }
 }

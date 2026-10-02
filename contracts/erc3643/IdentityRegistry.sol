@@ -296,8 +296,11 @@ contract IdentityRegistry is IIdentityRegistry, Ownable2Step {
         emit ClaimTopicAdded(_topic);
     }
 
+    /// @dev Never the last topic (2F.5, L3): zero topics verifies nobody, so
+    ///      no vote could ever pass again. Zero is only a fail-closed initial state.
     function removeClaimTopic(uint256 _topic) external onlyOwner {
         require(_isRequiredTopic[_topic], "Topic not required");
+        require(_claimTopics.length > 1, "Last claim topic");
         _isRequiredTopic[_topic] = false;
         _removeFromList(_claimTopics, _topic);
         emit ClaimTopicRemoved(_topic);
@@ -323,6 +326,11 @@ contract IdentityRegistry is IIdentityRegistry, Ownable2Step {
         uint256[] storage topics = _issuerTopics[_issuer];
         require(topics.length > 0, "Issuer not trusted");
         for (uint256 i = 0; i < topics.length; i++) {
+            // A required topic with no trusted issuer verifies nobody (2F.5, L3).
+            require(
+                !_isRequiredTopic[topics[i]] || _trustedIssuersForTopic[topics[i]].length > 1,
+                "Last issuer for required topic"
+            );
             _issuerHasTopic[_issuer][topics[i]] = false;
             _removeAddressFromList(_trustedIssuersForTopic[topics[i]], _issuer);
         }

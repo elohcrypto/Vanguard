@@ -4,6 +4,7 @@ pragma solidity ^0.8.19;
 import "./MultiSigEscrowWallet.sol";
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import "@openzeppelin/contracts/access/AccessControl.sol";
+import "@openzeppelin/contracts/access/Ownable2Step.sol";
 import "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
 import "../erc3643/interfaces/IIdentityRegistry.sol";
 import "../compliance/interfaces/IComplianceRules.sol";
@@ -13,8 +14,12 @@ import "../compliance/interfaces/IComplianceRules.sol";
  * @notice Factory for creating one-time-use multi-signature escrow wallets
  * @dev Only registered investors can create escrow wallets
  * @dev Payer and Payee must have valid KYC/AML (OnchainID with verified identity)
+ * @dev Ownable2Step (plan 2F.5, M4): the owner sets the fee wallet, the
+ *      registry and the rules and is written into every escrow (sweep rights);
+ *      it moves to governance at the handover ceremony. DEFAULT_ADMIN_ROLE
+ *      follows ownership. ADMIN_ROLE (investor management) is operational.
  */
-contract EscrowWalletFactory is AccessControl, ReentrancyGuard {
+contract EscrowWalletFactory is AccessControl, Ownable2Step, ReentrancyGuard {
     /// @notice The creating investor named itself as payee or payer. An
     ///         investor who is also a counterparty holds two of the three
     ///         signatures plus dispute resolution and can take the funds.
@@ -37,7 +42,6 @@ contract EscrowWalletFactory is AccessControl, ReentrancyGuard {
     IERC20 public immutable vscToken;
     IIdentityRegistry public identityRegistry;  // KYC/AML verification
     IComplianceRules public complianceRules;    // Compliance rules (for trusted contracts)
-    address public owner;
     address public ownerWallet;  // Where owner fees are sent
 
     // Fee rates (basis points: 10000 = 100%)
@@ -106,7 +110,7 @@ contract EscrowWalletFactory is AccessControl, ReentrancyGuard {
         address _ownerWallet,
         address _identityRegistry,
         address _complianceRules
-    ) {
+    ) Ownable(msg.sender) {
         require(_vscToken != address(0), "Invalid token");
         require(_vscToken.code.length > 0, "EscrowWalletFactory: VSC token is not a contract");
         require(_ownerWallet != address(0), "Invalid owner wallet");
@@ -116,20 +120,28 @@ contract EscrowWalletFactory is AccessControl, ReentrancyGuard {
         require(_complianceRules.code.length > 0, "EscrowWalletFactory: Compliance rules is not a contract");
 
         vscToken = IERC20(_vscToken);
-        owner = msg.sender;
         ownerWallet = _ownerWallet;
         identityRegistry = IIdentityRegistry(_identityRegistry);
         complianceRules = IComplianceRules(_complianceRules);
 
-        _grantRole(DEFAULT_ADMIN_ROLE, msg.sender);
+        // DEFAULT_ADMIN_ROLE was granted with ownership (_transferOwnership).
         _grantRole(ADMIN_ROLE, msg.sender);
     }
 
+    /// @dev DEFAULT_ADMIN_ROLE (admin of ADMIN_ROLE) follows ownership, so a
+    ///      handed-over factory leaves no role admin behind with the deployer.
+    function _transferOwnership(address newOwner) internal override {
+        address previous = owner();
+        super._transferOwnership(newOwner);
+        if (previous != address(0)) _revokeRole(DEFAULT_ADMIN_ROLE, previous);
+        if (newOwner != address(0)) _grantRole(DEFAULT_ADMIN_ROLE, newOwner);
+    }
+
     /**
-     * @notice Set ComplianceRules contract (admin only)
+     * @notice Set ComplianceRules contract (owner only)
      * @param _complianceRules Address of ComplianceRules contract
      */
-    function setComplianceRules(address _complianceRules) external onlyRole(ADMIN_ROLE) {
+    function setComplianceRules(address _complianceRules) external onlyOwner {
         require(_complianceRules != address(0), "Invalid compliance rules");
         require(_complianceRules.code.length > 0, "EscrowWalletFactory: Compliance rules is not a contract");
         complianceRules = IComplianceRules(_complianceRules);
@@ -250,7 +262,7 @@ contract EscrowWalletFactory is AccessControl, ReentrancyGuard {
             amount,
             investorFee,
             ownerFee,
-            owner,
+            owner(),
             investorWallet,  // investor's wallet for fees
             ownerWallet      // owner's wallet for fees
         );
@@ -362,10 +374,10 @@ contract EscrowWalletFactory is AccessControl, ReentrancyGuard {
 
     /**
      * @notice Update identity registry address
-     * @dev Only admin can update
+     * @dev Only the owner (governance after the handover) can update
      * @param _identityRegistry New identity registry address
      */
-    function setIdentityRegistry(address _identityRegistry) external onlyRole(ADMIN_ROLE) {
+    function setIdentityRegistry(address _identityRegistry) external onlyOwner {
         require(_identityRegistry != address(0), "Invalid identity registry");
         require(_identityRegistry.code.length > 0, "EscrowWalletFactory: Identity registry is not a contract");
         identityRegistry = IIdentityRegistry(_identityRegistry);
@@ -450,9 +462,9 @@ contract EscrowWalletFactory is AccessControl, ReentrancyGuard {
     }
     
     /**
-     * @notice Update owner wallet address
+     * @notice Update owner wallet address (owner only)
      */
-    function setOwnerWallet(address _ownerWallet) external onlyRole(ADMIN_ROLE) {
+    function setOwnerWallet(address _ownerWallet) external onlyOwner {
         require(_ownerWallet != address(0), "Invalid wallet");
         ownerWallet = _ownerWallet;
     }

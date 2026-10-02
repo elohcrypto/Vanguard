@@ -445,12 +445,26 @@ describe("OnchainIDFactory", function () {
     });
 
     describe("transferOwnership", function () {
-      it("Should transfer ownership with custom event", async function () {
-        await expect(factory.connect(owner).transferOwnership(user1.address))
+      // Ownable2Step (plan 2F.5): nominate, then the new owner accepts; the
+      // custom event marks the moment ownership actually moves.
+      it("Should transfer ownership in two steps with custom event", async function () {
+        await expect(
+          factory.connect(owner).transferOwnership(user1.address),
+        ).not.to.emit(factory, "FactoryOwnershipTransferred");
+        expect(await factory.owner()).to.equal(owner.address);
+        expect(await factory.pendingOwner()).to.equal(user1.address);
+
+        await expect(factory.connect(user1).acceptOwnership())
           .to.emit(factory, "FactoryOwnershipTransferred")
           .withArgs(owner.address, user1.address);
-
         expect(await factory.owner()).to.equal(user1.address);
+      });
+
+      it("Only the nominee can accept", async function () {
+        await factory.connect(owner).transferOwnership(user1.address);
+        await expect(
+          factory.connect(owner).acceptOwnership(),
+        ).to.be.revertedWithCustomError(factory, "OwnableUnauthorizedAccount");
       });
 
       it("Should reject transfer to zero address", async function () {

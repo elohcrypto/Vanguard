@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.20;
 
-import "@openzeppelin/contracts/access/Ownable.sol";
+import "@openzeppelin/contracts/access/Ownable2Step.sol";
 import "@openzeppelin/contracts/utils/Create2.sol";
 import "./OnchainID.sol";
 import "./interfaces/IOnchainID.sol";
@@ -11,7 +11,7 @@ import "./interfaces/IOnchainID.sol";
  * @dev Factory contract for deploying OnchainID contracts with deterministic addresses
  * @author CMTA UTXO Compliance Team
  */
-contract OnchainIDFactory is Ownable {
+contract OnchainIDFactory is Ownable2Step {
     // Events
     event OnchainIDDeployed(address indexed identity, address indexed owner, bytes32 indexed salt, address deployer);
 
@@ -292,16 +292,21 @@ contract OnchainIDFactory is Ownable {
     }
 
     /**
-     * @dev Transfer factory ownership with event
+     * @dev Nominate a new owner; it takes over with acceptOwnership()
+     *      (Ownable2Step, plan 2F.5: the factory moves to governance by vote).
      * @param newOwner New owner address
      */
     function transferOwnership(address newOwner) public override onlyOwner {
         require(newOwner != address(0), "OnchainIDFactory: New owner is the zero address");
+        super.transferOwnership(newOwner);
+    }
 
+    /// @dev Emits FactoryOwnershipTransferred when ownership actually moves
+    ///      (on accept), not at construction.
+    function _transferOwnership(address newOwner) internal override {
         address oldOwner = owner();
-        _transferOwnership(newOwner);
-
-        emit FactoryOwnershipTransferred(oldOwner, newOwner);
+        super._transferOwnership(newOwner);
+        if (oldOwner != address(0)) emit FactoryOwnershipTransferred(oldOwner, newOwner);
     }
 
     /// @dev The first identity for a wallet may be deployed by anyone; after

@@ -118,6 +118,32 @@ describe("Enhanced Escrow System", function () {
       expect(await factory.ownerWallet()).to.equal(ownerWallet.address);
     });
 
+    // Plan 2F.5 (M4): the factory is Ownable2Step; the owner surface (fee
+    // wallet, registry, rules) and DEFAULT_ADMIN_ROLE move only on accept.
+    it("Should move ownership and the role admin in two steps", async function () {
+      const DEFAULT_ADMIN = await factory.DEFAULT_ADMIN_ROLE();
+      const next = signers[7];
+      await factory.transferOwnership(next.address);
+      expect(await factory.owner()).to.equal(owner.address);
+      expect(await factory.pendingOwner()).to.equal(next.address);
+      await expect(
+        factory.connect(investor).acceptOwnership(),
+      ).to.be.revertedWithCustomError(factory, "OwnableUnauthorizedAccount");
+
+      await factory.connect(next).acceptOwnership();
+      expect(await factory.owner()).to.equal(next.address);
+      expect(await factory.hasRole(DEFAULT_ADMIN, next.address)).to.be.true;
+      expect(await factory.hasRole(DEFAULT_ADMIN, owner.address)).to.be.false;
+      await expect(
+        factory.setOwnerWallet(payer.address),
+      ).to.be.revertedWithCustomError(factory, "OwnableUnauthorizedAccount");
+      await factory.connect(next).setOwnerWallet(payer.address);
+      expect(await factory.ownerWallet()).to.equal(payer.address);
+      // ADMIN_ROLE is operational and stays where it was granted.
+      await factory.registerInvestor(investor.address, investorWallet.address);
+      expect(await factory.isInvestor(investor.address)).to.be.true;
+    });
+
     it("Should have correct fee rates", async function () {
       expect(await factory.INVESTOR_FEE_RATE()).to.equal(300); // 3%
       expect(await factory.OWNER_FEE_RATE()).to.equal(200); // 2%
