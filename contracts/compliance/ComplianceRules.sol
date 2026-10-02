@@ -18,10 +18,17 @@ interface IWhitelistOracleView {
     function isWhitelisted(address subject) external view returns (bool);
 }
 
+/// @dev Read-only slice of PrivacyManager (the ZK whitelist binder). Same rationale.
+interface IPrivacyManagerView {
+    function hasValidWhitelistProof(address user) external view returns (bool);
+}
+
 /**
  * @title ComplianceRules
  * @dev Configurable compliance rule engine bound to Token via IComplianceHooks
  */
+// 16 state variables since Task 3.4; the split (Task 4.1) brings it back under 15.
+// solhint-disable-next-line max-states-count
 contract ComplianceRules is IComplianceRules, IComplianceHooks, Ownable2Step, ReentrancyGuard {
     // Implements IComplianceHooks, the slice Token actually calls, so the
     // compiler enforces it. Not a full ICompliance: the module functions
@@ -105,9 +112,22 @@ contract ComplianceRules is IComplianceRules, IComplianceHooks, Ownable2Step, Re
     // an operator must populate the oracle BEFORE pointing a live token at it.
     // Blacklist wins over whitelist: a listed address is blocked even if it is
     // also whitelisted.
+    //
+    // The whitelist source is chosen per token by whitelistMode (plan v2 Task
+    // 3.4): OracleOnly (the default, the behaviour above), ZkOnly (a live
+    // PrivacyManager binding, hasValidWhitelistProof) or Either. The
+    // blacklist never depends on the mode.
+
+    enum WhitelistMode {
+        OracleOnly,
+        ZkOnly,
+        Either
+    }
 
     mapping(address => address) public blacklistOracle;
     mapping(address => address) public whitelistOracle;
+    mapping(address => WhitelistMode) public whitelistMode;
+    mapping(address => address) public privacyManager;
 
     /// @dev Oracle gates are per token; the zero address is not a token.
     error InvalidTokenAddress();
@@ -115,9 +135,19 @@ contract ComplianceRules is IComplianceRules, IComplianceHooks, Ownable2Step, Re
     error OracleNotAContract(address oracle);
     /// @dev The oracle does not answer the selector this gate calls.
     error OracleIncompatible(address oracle);
+    /// @dev A PrivacyManager must be a contract; address(0) clears it.
+    error PrivacyManagerNotAContract(address pm);
+    /// @dev The PrivacyManager does not answer hasValidWhitelistProof.
+    error PrivacyManagerIncompatible(address pm);
+    /// @dev ZkOnly and Either need a PrivacyManager for the token.
+    error PrivacyManagerNotSet(address token);
+    /// @dev The token's mode reads the PrivacyManager: set OracleOnly first.
+    error PrivacyManagerInUse(address token);
 
     event BlacklistOracleSet(address indexed token, address indexed oracle);
     event WhitelistOracleSet(address indexed token, address indexed oracle);
+    event PrivacyManagerSet(address indexed token, address indexed privacyManager);
+    event WhitelistModeSet(address indexed token, WhitelistMode mode);
 
     /**
      * @dev Point a token at a blacklist oracle, or pass address(0) to disable.
@@ -162,6 +192,43 @@ contract ComplianceRules is IComplianceRules, IComplianceHooks, Ownable2Step, Re
     }
 
     /**
+     * @dev Point a token at the PrivacyManager whose whitelist bindings
+     *      ZkOnly/Either read, or pass address(0) to clear it (OracleOnly only).
+     * @param token The token whose whitelist this PrivacyManager may decide.
+     * @param pm PrivacyManager address, or address(0).
+     */
+    function setPrivacyManager(address token, address pm) external onlyOwner {
+        if (token == address(0)) revert InvalidTokenAddress();
+        if (pm == address(0)) {
+            // Clearing it under ZkOnly/Either would make every check call 0.
+            if (whitelistMode[token] != WhitelistMode.OracleOnly) revert PrivacyManagerInUse(token);
+        } else {
+            if (pm.code.length == 0) revert PrivacyManagerNotAContract(pm);
+            // Same rationale as setBlacklistOracle: fail here, not on every transfer.
+            (bool ok, bytes memory ret) = pm.staticcall(
+                abi.encodeWithSelector(IPrivacyManagerView.hasValidWhitelistProof.selector, address(this))
+            );
+            if (!ok || ret.length != 32) revert PrivacyManagerIncompatible(pm);
+        }
+        privacyManager[token] = pm;
+        emit PrivacyManagerSet(token, pm);
+    }
+
+    /**
+     * @dev Choose the whitelist source for a token. ZkOnly and Either need a
+     *      PrivacyManager; switching to them is default-deny for every holder
+     *      without a live binding (and, for Either, not on the oracle).
+     */
+    function setWhitelistMode(address token, WhitelistMode mode) external onlyOwner {
+        if (token == address(0)) revert InvalidTokenAddress();
+        if (mode != WhitelistMode.OracleOnly && privacyManager[token] == address(0)) {
+            revert PrivacyManagerNotSet(token);
+        }
+        whitelistMode[token] = mode;
+        emit WhitelistModeSet(token, mode);
+    }
+
+    /**
      * @dev Apply whichever oracle gates are configured for `token` to one pair.
      *      Returns false to block. A gate with no oracle set is skipped.
      */
@@ -173,10 +240,10 @@ contract ComplianceRules is IComplianceRules, IComplianceHooks, Ownable2Step, Re
     }
 
     /**
-     * @dev Blacklist (deny list) only. Split out because it is enforced on BOTH
-     *      the trusted-contract path and the normal path, while the whitelist
-     *      applies to the normal path alone. Keeping it separate means the
-     *      oracle is queried exactly once per transfer rather than twice.
+     * @dev Blacklist (deny list) only. Split out because it is enforced on
+     *      every party of every path, while the whitelist exempts the escrow
+     *      wallet on the trusted path. Keeping it separate means the oracle
+     *      is queried exactly once per transfer rather than twice.
      */
     function _blacklistAllows(address token, address from, address to) internal view returns (bool) {
         // address(0) is the mint/burn counterparty, not a real party. Asking an
@@ -196,23 +263,38 @@ contract ComplianceRules is IComplianceRules, IComplianceHooks, Ownable2Step, Re
     }
 
     /**
-     * @dev Whitelist (allow list) only. Not applied to trusted-contract
-     *      transfers: an escrow wallet is a contract and will never appear on a
-     *      whitelist of investors, so enforcing it there blocks all escrow.
+     * @dev Whitelist (allow list) only, per non-zero party, by whitelistMode:
+     *      OracleOnly: no oracle set, or the oracle lists the party.
+     *      ZkOnly: the PrivacyManager holds a live binding for the party (the
+     *        whitelist oracle is not consulted).
+     *      Either: the oracle is set and lists the party, or a live binding;
+     *        with no oracle set this is ZkOnly (no oracle vouches for nobody).
+     *      Every caller obeys the mode (R-3R-5): mint checks the recipient (in
+     *      ZkOnly a mint recipient needs a live binding), the trusted path
+     *      checks the non-escrow counterparty (the escrow wallet itself is
+     *      exempt: a contract will never be on an investor allow list),
+     *      canReceive (wallet recovery) checks the new wallet. Burn is never
+     *      gated.
      */
     function _whitelistAllows(address token, address from, address to) internal view returns (bool) {
-        address wlOracle = whitelistOracle[token];
-        if (wlOracle != address(0)) {
-            IWhitelistOracleView wl = IWhitelistOracleView(wlOracle);
-            if (from != address(0) && !wl.isWhitelisted(from)) {
-                return false;
-            }
-            if (to != address(0) && !wl.isWhitelisted(to)) {
-                return false;
+        return _whitelisted(token, from) && _whitelisted(token, to);
+    }
+
+    /// @dev One party of _whitelistAllows; address(0) (mint/burn side) passes.
+    ///      Each source is called at most once.
+    function _whitelisted(address token, address party) private view returns (bool) {
+        if (party == address(0)) return true;
+        WhitelistMode mode = whitelistMode[token];
+        if (mode != WhitelistMode.ZkOnly) {
+            address wlOracle = whitelistOracle[token];
+            if (wlOracle != address(0)) {
+                if (IWhitelistOracleView(wlOracle).isWhitelisted(party)) return true;
+                if (mode == WhitelistMode.OracleOnly) return false;
+            } else if (mode == WhitelistMode.OracleOnly) {
+                return true;
             }
         }
-
-        return true;
+        return IPrivacyManagerView(privacyManager[token]).hasValidWhitelistProof(party);
     }
 
     /**
@@ -318,7 +400,7 @@ contract ComplianceRules is IComplianceRules, IComplianceHooks, Ownable2Step, Re
 
         // ✅ ENFORCE: whitelist (allow list). The blacklist was already
         // applied above, on every path including trusted contracts, so only
-        // the whitelist remains here. Off unless an oracle is set.
+        // the whitelist remains here. Off in OracleOnly with no oracle set.
         if (!_whitelistAllows(token, from, to)) {
             return false; // ❌ BLOCK: whitelist gate
         }
@@ -332,7 +414,7 @@ contract ComplianceRules is IComplianceRules, IComplianceHooks, Ownable2Step, Re
     }
 
     /**
-     * @notice Oracle gate only (blacklist, then whitelist) for the calling
+     * @notice List gate only (blacklist, then whitelist by mode) for the calling
      *         token on `to`. No identity or jurisdiction: wallet recovery moves
      *         the same holder's balance, so it re-checks the lists alone.
      */
