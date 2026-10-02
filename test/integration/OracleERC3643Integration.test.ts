@@ -136,19 +136,19 @@ describe("Oracle-ERC3643 Integration Tests", function () {
 
   async function setupInitialConfiguration() {
     // Register oracles
-    await oracleManager.registerOracle(
+    await oracleManager["registerOracle(address,string,string,uint256)"](
       oracle1.address,
       "KYC Oracle 1",
       "Primary KYC verification oracle",
       800,
     );
-    await oracleManager.registerOracle(
+    await oracleManager["registerOracle(address,string,string,uint256)"](
       oracle2.address,
       "AML Oracle 2",
       "AML compliance oracle",
       750,
     );
-    await oracleManager.registerOracle(
+    await oracleManager["registerOracle(address,string,string,uint256)"](
       oracle3.address,
       "Compliance Oracle 3",
       "General compliance oracle",

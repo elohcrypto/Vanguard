@@ -31,7 +31,7 @@ describe("Production compliance guard", () => {
     const rules = await factory.deploy(owner.address, [840n], [408n]);
     await rules.waitForDeployment();
 
-    expect(await rules.isProductionCompliance()).to.equal(true);
+    expect(await rules["isProductionCompliance()"]()).to.equal(true);
     await expect(
       DeploymentHelper.assertProductionCompliance(await rules.getAddress()),
     ).to.not.be.rejected;

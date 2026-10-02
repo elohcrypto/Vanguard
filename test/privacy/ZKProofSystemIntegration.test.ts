@@ -29,7 +29,11 @@ describe("🔐 Complete ZK Proof System Integration Tests", function () {
   let complianceVerifier: ComplianceAggregationVerifier;
 
   // Test Data
-  const mockProof = {
+  const mockProof: {
+    a: [number, number];
+    b: [[number, number], [number, number]];
+    c: [number, number];
+  } = {
     a: [1, 2],
     b: [
       [3, 4],
@@ -147,7 +151,7 @@ describe("🔐 Complete ZK Proof System Integration Tests", function () {
     it("Should verify whitelist membership proof", async function () {
       console.log("🧪 Testing whitelist membership verifier...");
 
-      const publicSignals = [mockNullifier];
+      const publicSignals: [number] = [mockNullifier];
       const result = await whitelistVerifier.verifyProof(
         mockProof.a,
         mockProof.b,
@@ -163,7 +167,7 @@ describe("🔐 Complete ZK Proof System Integration Tests", function () {
       console.log("🧪 Testing blacklist non-membership verifier...");
 
       // Blacklist verifier expects uint[1] - just the isNotBlacklisted flag (1 = not blacklisted)
-      const publicSignals = [1]; // User is NOT in blacklist
+      const publicSignals: [number] = [1]; // User is NOT in blacklist
       const result = await blacklistVerifier.verifyProof(
         mockProof.a,
         mockProof.b,
@@ -180,7 +184,7 @@ describe("🔐 Complete ZK Proof System Integration Tests", function () {
     it("Should verify jurisdiction eligibility proof", async function () {
       console.log("🧪 Testing jurisdiction eligibility verifier...");
 
-      const publicSignals = [840]; // US jurisdiction code
+      const publicSignals: [number] = [840]; // US jurisdiction code
       const result = await jurisdictionVerifier.verifyProof(
         mockProof.a,
         mockProof.b,
@@ -195,7 +199,7 @@ describe("🔐 Complete ZK Proof System Integration Tests", function () {
     it("Should verify accreditation status proof", async function () {
       console.log("🧪 Testing accreditation status verifier...");
 
-      const publicSignals = [5]; // Tier 5 accreditation
+      const publicSignals: [number] = [5]; // Tier 5 accreditation
       const result = await accreditationVerifier.verifyProof(
         mockProof.a,
         mockProof.b,
@@ -213,7 +217,7 @@ describe("🔐 Complete ZK Proof System Integration Tests", function () {
       // Compliance verifier expects uint[2]:
       // [0] = meetsCompliance (1 = meets compliance, 0 = does not)
       // [1] = complianceLevel (the actual compliance score)
-      const publicSignals = [
+      const publicSignals: [number, number] = [
         1, // meetsCompliance (1 = meets compliance)
         85, // complianceLevel (85%)
       ];
@@ -235,7 +239,7 @@ describe("🔐 Complete ZK Proof System Integration Tests", function () {
     it("Should verify whitelist membership through integrated verifier", async function () {
       console.log("🧪 Testing integrated whitelist verification...");
 
-      const publicSignals = [mockNullifier];
+      const publicSignals: [number] = [mockNullifier];
       const tx = await zkVerifier
         .connect(user1)
         .verifyWhitelistMembership(
@@ -260,7 +264,7 @@ describe("🔐 Complete ZK Proof System Integration Tests", function () {
 
       // ZKVerifierIntegrated.verifyBlacklistNonMembership expects uint256[1]
       // publicSignals[0] = isNotBlacklisted (1 = user is NOT in blacklist)
-      const publicSignals = [1]; // User is NOT blacklisted
+      const publicSignals: [number] = [1]; // User is NOT blacklisted
       const tx = await zkVerifier
         .connect(user2)
         .verifyBlacklistNonMembership(

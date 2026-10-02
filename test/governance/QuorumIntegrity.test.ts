@@ -421,20 +421,21 @@ describe("Expired claims and the electorate (D7)", function () {
     const lapsed = all.slice(4, 11);
     const REJECTED = 3n,
       EXECUTED = 4n; // ProposalStatus
-    const F = (name: string) => ethers.getContractFactory(name);
 
-    const idReg = await (await F("IdentityRegistry")).deploy();
+    const idReg = await (
+      await ethers.getContractFactory("IdentityRegistry")
+    ).deploy();
     const rules = await (
-      await F("ComplianceRules")
+      await ethers.getContractFactory("ComplianceRules")
     ).deploy(owner.address, [840], []);
     const regAddr = await idReg.getAddress();
     const rulesAddr = await rules.getAddress();
     const vgt = await (
-      await F("GovernanceToken")
+      await ethers.getContractFactory("GovernanceToken")
     ).deploy("VGT", "VGT", regAddr, rulesAddr);
     const vgtAddr = await vgt.getAddress();
     const gov = await (
-      await F("VanguardGovernance")
+      await ethers.getContractFactory("VanguardGovernance")
     ).deploy(
       vgtAddr,
       regAddr,
@@ -451,14 +452,14 @@ describe("Expired claims and the electorate (D7)", function () {
     await rules.setTokenIdentityRegistry(vgtAddr, regAddr);
     await rules.addTrustedContract(govAddr);
     const kycIssuer = await (
-      await F("ClaimIssuer")
+      await ethers.getContractFactory("ClaimIssuer")
     ).deploy(owner.address, "KYC", "d");
     await configureKyc(idReg, await kycIssuer.getAddress());
 
     const now = (await ethers.provider.getBlock("latest"))!.timestamp;
     for (const w of [...live, ...lapsed]) {
       const id = await (
-        await (await F("OnchainID")).deploy(w.address)
+        await (await ethers.getContractFactory("OnchainID")).deploy(w.address)
       ).getAddress();
       await idReg.registerIdentity(w.address, id, 840);
       const ok = live.includes(w);

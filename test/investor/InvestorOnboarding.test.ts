@@ -418,7 +418,9 @@ describe("Investor Onboarding System", function () {
       await token.connect(user).approve(walletAddress, RETAIL_LOCK);
       const MultiSigWalletFactory =
         await ethers.getContractFactory("MultiSigWallet");
-      const wallet = MultiSigWalletFactory.attach(walletAddress);
+      const wallet = MultiSigWalletFactory.attach(
+        walletAddress,
+      ) as unknown as MultiSigWallet;
       await wallet.connect(user).lockTokens(RETAIL_LOCK);
 
       // Confirm locked
@@ -446,7 +448,9 @@ describe("Investor Onboarding System", function () {
       await token.connect(user).approve(walletAddress, ACCREDITED_LOCK);
       const MultiSigWalletFactory =
         await ethers.getContractFactory("MultiSigWallet");
-      const wallet = MultiSigWalletFactory.attach(walletAddress);
+      const wallet = MultiSigWalletFactory.attach(
+        walletAddress,
+      ) as unknown as MultiSigWallet;
       await wallet.connect(user).lockTokens(ACCREDITED_LOCK);
 
       await investorRequestManager.connect(user).confirmTokensLocked();
@@ -491,7 +495,9 @@ describe("Investor Onboarding System", function () {
 
       const MultiSigWalletFactory =
         await ethers.getContractFactory("MultiSigWallet");
-      const wallet = MultiSigWalletFactory.attach(walletAddress);
+      const wallet = MultiSigWalletFactory.attach(
+        walletAddress,
+      ) as unknown as MultiSigWallet;
       await wallet.connect(user).lockTokens(RETAIL_LOCK);
 
       // Step 4: User confirms tokens locked
@@ -532,7 +538,9 @@ describe("Investor Onboarding System", function () {
       await token.connect(user).approve(walletAddress, RETAIL_LOCK);
       const MultiSigWalletFactory =
         await ethers.getContractFactory("MultiSigWallet");
-      const wallet = MultiSigWalletFactory.attach(walletAddress);
+      const wallet = MultiSigWalletFactory.attach(
+        walletAddress,
+      ) as unknown as MultiSigWallet;
       await wallet.connect(user).lockTokens(RETAIL_LOCK);
 
       await investorRequestManager.connect(user).confirmTokensLocked();

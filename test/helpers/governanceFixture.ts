@@ -1,6 +1,5 @@
 import { ethers } from "hardhat";
 import { time } from "@nomicfoundation/hardhat-network-helpers";
-import { SignerWithAddress } from "@nomicfoundation/hardhat-ethers/signers";
 import { attest, configureKyc, deployIdentity } from "./kyc";
 
 /**
@@ -126,7 +125,7 @@ export async function handoverFixture() {
     issuers: [kycIssuer],
     log: () => {},
   };
-  const who: Record<string, SignerWithAddress> = {
+  const who = {
     deployer,
     ops,
     guardian,

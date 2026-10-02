@@ -59,19 +59,19 @@ describe("Oracle Basic Functionality Tests", function () {
     await consensusOracle.waitForDeployment();
 
     // Register oracles
-    await oracleManager.registerOracle(
+    await oracleManager["registerOracle(address,string,string,uint256)"](
       oracle1.address,
       "Oracle 1",
       "Test oracle 1",
       500,
     );
-    await oracleManager.registerOracle(
+    await oracleManager["registerOracle(address,string,string,uint256)"](
       oracle2.address,
       "Oracle 2",
       "Test oracle 2",
       500,
     );
-    await oracleManager.registerOracle(
+    await oracleManager["registerOracle(address,string,string,uint256)"](
       oracle3.address,
       "Oracle 3",
       "Test oracle 3",

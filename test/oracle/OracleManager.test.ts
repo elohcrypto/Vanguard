@@ -65,7 +65,7 @@ describe("Oracle Management System", function () {
   describe("OracleManager", function () {
     it("Should register oracles correctly", async function () {
       await expect(
-        oracleManager.registerOracle(
+        oracleManager["registerOracle(address,string,string,uint256)"](
           oracle1.address,
           "Oracle 1",
           "First test oracle",
@@ -81,7 +81,7 @@ describe("Oracle Management System", function () {
     });
 
     it("Should not allow duplicate oracle registration", async function () {
-      await oracleManager.registerOracle(
+      await oracleManager["registerOracle(address,string,string,uint256)"](
         oracle1.address,
         "Oracle 1",
         "First test oracle",
@@ -89,7 +89,7 @@ describe("Oracle Management System", function () {
       );
 
       await expect(
-        oracleManager.registerOracle(
+        oracleManager["registerOracle(address,string,string,uint256)"](
           oracle1.address,
           "Oracle 1 Duplicate",
           "Duplicate oracle",
@@ -99,7 +99,7 @@ describe("Oracle Management System", function () {
     });
 
     it("Should deregister oracles correctly", async function () {
-      await oracleManager.registerOracle(
+      await oracleManager["registerOracle(address,string,string,uint256)"](
         oracle1.address,
         "Oracle 1",
         "First test oracle",
@@ -118,7 +118,7 @@ describe("Oracle Management System", function () {
     });
 
     it("Should manage oracle activation/deactivation", async function () {
-      await oracleManager.registerOracle(
+      await oracleManager["registerOracle(address,string,string,uint256)"](
         oracle1.address,
         "Oracle 1",
         "First test oracle",
@@ -140,31 +140,31 @@ describe("Oracle Management System", function () {
 
     it("Should set consensus threshold correctly", async function () {
       // Register enough oracles to support the threshold
-      await oracleManager.registerOracle(
+      await oracleManager["registerOracle(address,string,string,uint256)"](
         oracle1.address,
         "Oracle 1",
         "First test oracle",
         500,
       );
-      await oracleManager.registerOracle(
+      await oracleManager["registerOracle(address,string,string,uint256)"](
         oracle2.address,
         "Oracle 2",
         "Second test oracle",
         500,
       );
-      await oracleManager.registerOracle(
+      await oracleManager["registerOracle(address,string,string,uint256)"](
         oracle3.address,
         "Oracle 3",
         "Third test oracle",
         500,
       );
-      await oracleManager.registerOracle(
+      await oracleManager["registerOracle(address,string,string,uint256)"](
         user.address,
         "Oracle 4",
         "Fourth test oracle",
         500,
       );
-      await oracleManager.registerOracle(
+      await oracleManager["registerOracle(address,string,string,uint256)"](
         subject.address,
         "Oracle 5",
         "Fifth test oracle",
@@ -192,7 +192,7 @@ describe("Oracle Management System", function () {
     });
 
     it("Should handle emergency override", async function () {
-      await oracleManager.registerOracle(
+      await oracleManager["registerOracle(address,string,string,uint256)"](
         oracle1.address,
         "Oracle 1",
         "First test oracle",
@@ -218,7 +218,7 @@ describe("Oracle Management System", function () {
     });
 
     it("Should update oracle reputation", async function () {
-      await oracleManager.registerOracle(
+      await oracleManager["registerOracle(address,string,string,uint256)"](
         oracle1.address,
         "Oracle 1",
         "First test oracle",
@@ -232,7 +232,7 @@ describe("Oracle Management System", function () {
     });
 
     it("Should penalize and reward oracles", async function () {
-      await oracleManager.registerOracle(
+      await oracleManager["registerOracle(address,string,string,uint256)"](
         oracle1.address,
         "Oracle 1",
         "First test oracle",
@@ -252,19 +252,19 @@ describe("Oracle Management System", function () {
   describe("WhitelistOracle", function () {
     beforeEach(async function () {
       // Register oracles in the manager
-      await oracleManager.registerOracle(
+      await oracleManager["registerOracle(address,string,string,uint256)"](
         oracle1.address,
         "Oracle 1",
         "First test oracle",
         500,
       );
-      await oracleManager.registerOracle(
+      await oracleManager["registerOracle(address,string,string,uint256)"](
         oracle2.address,
         "Oracle 2",
         "Second test oracle",
         500,
       );
-      await oracleManager.registerOracle(
+      await oracleManager["registerOracle(address,string,string,uint256)"](
         oracle3.address,
         "Oracle 3",
         "Third test oracle",
@@ -355,19 +355,19 @@ describe("Oracle Management System", function () {
 
   describe("BlacklistOracle", function () {
     beforeEach(async function () {
-      await oracleManager.registerOracle(
+      await oracleManager["registerOracle(address,string,string,uint256)"](
         oracle1.address,
         "Oracle 1",
         "First test oracle",
         500,
       );
-      await oracleManager.registerOracle(
+      await oracleManager["registerOracle(address,string,string,uint256)"](
         oracle2.address,
         "Oracle 2",
         "Second test oracle",
         500,
       );
-      await oracleManager.registerOracle(
+      await oracleManager["registerOracle(address,string,string,uint256)"](
         oracle3.address,
         "Oracle 3",
         "Third test oracle",
@@ -462,19 +462,19 @@ describe("Oracle Management System", function () {
 
   describe("ConsensusOracle", function () {
     beforeEach(async function () {
-      await oracleManager.registerOracle(
+      await oracleManager["registerOracle(address,string,string,uint256)"](
         oracle1.address,
         "Oracle 1",
         "First test oracle",
         500,
       );
-      await oracleManager.registerOracle(
+      await oracleManager["registerOracle(address,string,string,uint256)"](
         oracle2.address,
         "Oracle 2",
         "Second test oracle",
         500,
       );
-      await oracleManager.registerOracle(
+      await oracleManager["registerOracle(address,string,string,uint256)"](
         oracle3.address,
         "Oracle 3",
         "Third test oracle",
@@ -558,19 +558,19 @@ describe("Oracle Management System", function () {
   describe("Integration Tests", function () {
     beforeEach(async function () {
       // Register oracles
-      await oracleManager.registerOracle(
+      await oracleManager["registerOracle(address,string,string,uint256)"](
         oracle1.address,
         "Oracle 1",
         "First test oracle",
         500,
       );
-      await oracleManager.registerOracle(
+      await oracleManager["registerOracle(address,string,string,uint256)"](
         oracle2.address,
         "Oracle 2",
         "Second test oracle",
         500,
       );
-      await oracleManager.registerOracle(
+      await oracleManager["registerOracle(address,string,string,uint256)"](
         oracle3.address,
         "Oracle 3",
         "Third test oracle",
@@ -602,7 +602,7 @@ describe("Oracle Management System", function () {
 
     it("Should handle oracle reputation updates across contracts", async function () {
       // Register oracle first (use subject to avoid conflicts with other tests)
-      await oracleManager.registerOracle(
+      await oracleManager["registerOracle(address,string,string,uint256)"](
         subject.address,
         "Oracle Subject",
         "Subject test oracle",

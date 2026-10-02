@@ -23,10 +23,10 @@ export class DeploymentHelper {
     if (options.gasLimit) deploymentOptions.gasLimit = options.gasLimit;
     if (options.gasPrice) deploymentOptions.gasPrice = options.gasPrice;
 
-    const contract = await ContractFactory.deploy(
+    const contract = (await ContractFactory.deploy(
       ...constructorArgs,
       deploymentOptions,
-    );
+    )) as Contract;
     const deploymentTx = contract.deploymentTransaction();
 
     if (!deploymentTx) {

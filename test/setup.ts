@@ -9,7 +9,7 @@ export async function getSigners() {
 }
 
 export function expectRevert(promise: Promise<any>, expectedError?: string) {
-  return expect(promise).to.be.revertedWith(expectedError);
+  return expect(promise).to.be.revertedWith(expectedError as string);
 }
 
 export async function increaseTime(seconds: number) {

@@ -23,7 +23,7 @@ describe("Token.mint investor limits (2E.3)", function () {
     for (const w of [treasury, investor]) {
       const id = await OnchainID.deploy(w.address);
       await registry.registerIdentity(w.address, id.target, 840);
-      await attest(issuer, owner, id.target);
+      await attest(issuer, owner, id.target as string);
     }
     const rules = await (
       await ethers.getContractFactory("ComplianceRules")

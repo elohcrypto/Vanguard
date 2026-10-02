@@ -1,5 +1,6 @@
 import { expect } from "chai";
 import { ethers } from "hardhat";
+import type { Signer } from "ethers";
 import { time } from "@nomicfoundation/hardhat-network-helpers";
 import { handoverFixture } from "../helpers/governanceFixture";
 import { attest } from "../helpers/kyc";
@@ -26,7 +27,7 @@ describe("Vote binding: minimum identity age", function () {
     const noop = gov.interface.encodeFunctionData("setVotingCost", [
       ethers.parseEther("10"),
     ]);
-    const propose = async (from = proposer) => {
+    const propose = async (from: Signer = proposer) => {
       await gov.connect(from).createProposal(SYS, "t", "", f.govAddr, noop);
       return gov.proposalCount();
     };

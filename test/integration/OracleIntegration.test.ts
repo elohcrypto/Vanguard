@@ -139,19 +139,19 @@ describe("Oracle Integration with OnchainID and ERC-3643", function () {
     await token.waitForDeployment();
 
     // Setup Oracle Network
-    await oracleManager.registerOracle(
+    await oracleManager["registerOracle(address,string,string,uint256)"](
       oracle1.address,
       "Oracle 1",
       "KYC/AML Oracle 1",
       500,
     );
-    await oracleManager.registerOracle(
+    await oracleManager["registerOracle(address,string,string,uint256)"](
       oracle2.address,
       "Oracle 2",
       "KYC/AML Oracle 2",
       500,
     );
-    await oracleManager.registerOracle(
+    await oracleManager["registerOracle(address,string,string,uint256)"](
       oracle3.address,
       "Oracle 3",
       "KYC/AML Oracle 3",
@@ -189,7 +189,7 @@ describe("Oracle Integration with OnchainID and ERC-3643", function () {
       });
 
       expect(event).to.not.be.undefined;
-      const onchainIDAddress = onchainIDFactory.interface.parseLog(event!).args
+      const onchainIDAddress = onchainIDFactory.interface.parseLog(event!)!.args
         .identity;
 
       // Step 2: Issue KYC claim
@@ -331,7 +331,7 @@ describe("Oracle Integration with OnchainID and ERC-3643", function () {
         }
       });
 
-      const onchainIDAddress = onchainIDFactory.interface.parseLog(event!).args
+      const onchainIDAddress = onchainIDFactory.interface.parseLog(event!)!.args
         .identity;
 
       // Add to whitelist first (KYC approved)
@@ -461,7 +461,7 @@ describe("Oracle Integration with OnchainID and ERC-3643", function () {
         }
       });
 
-      const onchainIDAddress = onchainIDFactory.interface.parseLog(event!).args
+      const onchainIDAddress = onchainIDFactory.interface.parseLog(event!)!.args
         .identity;
 
       // Step 2: Attempt KYC but fail verification
@@ -579,7 +579,7 @@ describe("Oracle Integration with OnchainID and ERC-3643", function () {
         }
       });
 
-      const onchainIDAddress = onchainIDFactory.interface.parseLog(event!).args
+      const onchainIDAddress = onchainIDFactory.interface.parseLog(event!)!.args
         .identity;
 
       // Initially whitelisted due to KYC
@@ -669,7 +669,7 @@ describe("Oracle Integration with OnchainID and ERC-3643", function () {
           return false;
         }
       });
-      investor1OnchainID = onchainIDFactory.interface.parseLog(event1!).args
+      investor1OnchainID = onchainIDFactory.interface.parseLog(event1!)!.args
         .identity;
 
       const salt2 = ethers.randomBytes(32);
@@ -687,7 +687,7 @@ describe("Oracle Integration with OnchainID and ERC-3643", function () {
           return false;
         }
       });
-      investor2OnchainID = onchainIDFactory.interface.parseLog(event2!).args
+      investor2OnchainID = onchainIDFactory.interface.parseLog(event2!)!.args
         .identity;
 
       // Register identities
@@ -974,7 +974,7 @@ describe("Oracle Integration with OnchainID and ERC-3643", function () {
           return false;
         }
       });
-      const onchainIDAddress = onchainIDFactory.interface.parseLog(event!).args
+      const onchainIDAddress = onchainIDFactory.interface.parseLog(event!)!.args
         .identity;
       console.log("✅ OnchainID created:", onchainIDAddress);
 

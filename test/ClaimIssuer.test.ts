@@ -335,7 +335,7 @@ describe("ClaimIssuer", function () {
         const receipt = await tx.wait();
 
         // Check that claims were issued by checking events
-        expect(receipt.logs.length).to.be.gt(0);
+        expect(receipt!.logs.length).to.be.gt(0);
 
         const kycClaims = await claimIssuer.getClaimsByTopic(KYC_TOPIC);
         const amlClaims = await claimIssuer.getClaimsByTopic(AML_TOPIC);

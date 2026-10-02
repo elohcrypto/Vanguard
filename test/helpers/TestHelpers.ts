@@ -1,7 +1,6 @@
 import { ethers } from "hardhat";
 import { SignerWithAddress } from "@nomicfoundation/hardhat-ethers/signers";
 import { expect } from "chai";
-import { expect } from "chai";
 
 export class TestHelpers {
   /**
@@ -114,7 +113,7 @@ export class TestHelpers {
    * Calculate gas cost for a transaction
    */
   static async calculateGasCost(tx: any): Promise<bigint> {
-    const receipt = await tx.wait();
+    const receipt: { gasUsed: bigint; gasPrice: bigint } = await tx.wait();
     return receipt.gasUsed * receipt.gasPrice;
   }
 
