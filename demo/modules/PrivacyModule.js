@@ -65,7 +65,7 @@ class PrivacyModule {
       console.log(
         zkTestingMode
           ? "⚠️  Deploying ZKVerifierIntegrated in MOCK mode (ZK_TESTING_MODE=1) - proofs are NOT verified"
-          : "🌍 Deploying ZKVerifierIntegrated (real Groth16 verification)...",
+          : "🌍 Deploying ZKVerifierIntegrated (real verification: PLONK whitelist, Groth16 others)...",
       );
       const ZKVerifierIntegratedFactory = await ethers.getContractFactory(
         "ZKVerifierIntegrated",
@@ -2153,7 +2153,7 @@ class PrivacyModule {
         proof = Array.from({ length: 24 }, () =>
           ethers.toBigInt(ethers.randomBytes(32)),
         );
-        finalNullifierHash = Math.floor(Math.random() * 1000000);
+        finalNullifierHash = Math.floor(Math.random() * 1000000) + 1;
         publicSignals = [
           finalNullifierHash,
           ethers.toBigInt(merkleRoot),
@@ -2174,6 +2174,16 @@ class PrivacyModule {
         `   ${this.state.zkMode === "real" ? "🔐" : "🔧"} Mode: ${this.state.zkMode.toUpperCase()}`,
       );
 
+      const verified =
+        await zkVerifierIntegrated.verifyWhitelistMembership.staticCall(
+          proof,
+          publicSignals,
+        );
+      if (!verified) {
+        displayError("WHITELIST MEMBERSHIP PROOF REJECTED");
+        console.log(`   📋 Public signals: [${publicSignals.join(", ")}]`);
+        return;
+      }
       const tx = await zkVerifierIntegrated.verifyWhitelistMembership(
         proof,
         publicSignals,

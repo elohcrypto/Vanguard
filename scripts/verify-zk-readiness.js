@@ -245,7 +245,9 @@ if (allPassed && unsound.length === 0) {
   console.log("  ✅ All circuits have real artifacts and a sound setup");
   console.log("  ✅ ZKVerifierIntegrated supports both mock and real modes");
   console.log("  ✅ RealProofGenerator can generate all proof types\n");
-  console.log("  🚀 System is READY for testing and production\n");
+  console.log("  🚀 System is READY for testing; production readiness also");
+  console.log("     needs the 3.3 consumer (root compare, wallet binding,");
+  console.log("     nullifier map) and 3.7\n");
   process.exit(0);
 } else if (allPassed) {
   console.log("  ⛔ NOT READY for production: unsound setup\n");

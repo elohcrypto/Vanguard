@@ -17,16 +17,19 @@ describe("Proof cache is bound to the circuit that verified it", () => {
   const P = Array.from({ length: 24 }, (_, i) => i + 1);
   const S: [number, number, number] = [1, 2, 3];
 
-  async function deployReal() {
+  async function deployReal(accepting: string[] = ["whitelist"]) {
     // testingMode=false: only a real verifier accepts. AlwaysTrueVerifier on
-    // whitelist ONLY; every other slot keeps the default (rejecting) verifier.
+    // the listed slots ONLY; every other slot keeps the default (rejecting)
+    // verifier.
     const zk = await (
       await ethers.getContractFactory("ZKVerifierIntegrated")
     ).deploy(false);
     const yes = await (
       await ethers.getContractFactory("AlwaysTrueVerifier")
     ).deploy();
-    await zk.updateVerifier("whitelist", await yes.getAddress());
+    for (const slot of accepting) {
+      await zk.updateVerifier(slot, await yes.getAddress());
+    }
     return zk;
   }
 
@@ -43,9 +46,17 @@ describe("Proof cache is bound to the circuit that verified it", () => {
     ).to.equal(false);
   });
 
-  it("nor jurisdiction, nor accreditation", async () => {
-    const zk = await deployReal();
-    await zk.verifyWhitelistMembership(P, S);
+  // Groth16 vs Groth16: the same (a, b, c, [1]) tuple and preimage length,
+  // so only the circuit tag in the key keeps these entries apart.
+  it("a blacklist-verified Groth16 proof satisfies neither jurisdiction nor accreditation", async () => {
+    const zk = await deployReal(["blacklist"]);
+    await expect(zk.verifyBlacklistNonMembership(a, b, c, [1])).to.emit(
+      zk,
+      "ProofCached",
+    );
+    expect(
+      await zk.verifyBlacklistNonMembership.staticCall(a, b, c, [1]),
+    ).to.equal(true); // same circuit: cache hit is correct
     expect(await zk.verifyJurisdictionProof.staticCall(a, b, c, [1])).to.equal(
       false,
     );
