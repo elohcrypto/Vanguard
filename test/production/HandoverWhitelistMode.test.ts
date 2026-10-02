@@ -108,6 +108,27 @@ describe("Handover: PrivacyManager wired in ComplianceRules (3.4)", function () 
     );
   });
 
+  // Review 3.4 LOW-3: a ComplianceRules from before 3.4 has every getter
+  // the ceremony reads except privacyManager(token). Stand-in: the real
+  // rules, with that one call sent to a contract that lacks it on chain.
+  it("names a ComplianceRules that predates 3.4 instead of crashing", async function () {
+    const rules = c.complianceRules;
+    const rulesAddr = await rules.getAddress();
+    const lacking = await ethers.getContractAt(
+      "ComplianceRules",
+      await c.identityRegistry.getAddress(),
+    );
+    args.complianceRules = new Proxy(rules, {
+      get: (t, k) =>
+        k === "privacyManager" ? lacking.privacyManager : Reflect.get(t, k),
+    });
+    await refused(
+      new RegExp(
+        `ComplianceRules ${rulesAddr} has no privacyManager\\(token\\) \\(predates Task 3.4\\): redeploy it before the ceremony`,
+      ),
+    );
+  });
+
   it("refuses a wired PrivacyManager that is not the bound one", async function () {
     await c.privacyManager.transferOwnership(govAddr);
     await c.governance.setPrivacyManager(pmAddr);

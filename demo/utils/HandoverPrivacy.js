@@ -45,7 +45,14 @@ async function wiredPrivacy(o, bound) {
     ["VGT", o.governanceToken],
   ]) {
     const t = await addrOf(c);
-    const pm = await rules.privacyManager(t);
+    // Review 3.4 LOW-3: a ComplianceRules from before 3.4 has no getter;
+    // only that revert is named, anything else (RPC) is rethrown.
+    const pm = await rules.privacyManager(t).catch(async (e) => {
+      if (e.code !== "CALL_EXCEPTION" && !/revert/i.test(e.message)) throw e;
+      fail(
+        `ComplianceRules ${await addrOf(rules)} has no privacyManager(token) (predates Task 3.4): redeploy it before the ceremony`,
+      );
+    });
     wired.push({ label, pm, mode: MODE[Number(await rules.whitelistMode(t))] });
     if (!same(pm, ZERO))
       seen.push([
