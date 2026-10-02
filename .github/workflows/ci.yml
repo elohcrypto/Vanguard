@@ -28,10 +28,11 @@ jobs:
     # not start a run. pull_request events have no `deleted`, so they run.
     if: ${{ !github.event.deleted }}
     runs-on: ubuntu-latest
-    # Local baseline: install ~20s, compile ~35s, setup:zk ~27s, tests ~70s;
-    # the coverage run and the demo smoke test follow. Runner is roughly
-    # 1.6x slower than the local baseline.
-    timeout-minutes: 30
+    # Measured: 16 min end to end at 19d75cb on a normal runner; a 1.7x
+    # slower runner at 93f6fff needed ~28 min for tests + coverage alone;
+    # the real-proof CLI tests (3.5) add ~3 min on 2 vCPU. This limit is a
+    # hang guard, not a pace target.
+    timeout-minutes: 60
 
     steps:
       # Actions are pinned by commit SHA and updated by hand (no Dependabot
