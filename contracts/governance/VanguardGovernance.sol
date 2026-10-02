@@ -216,8 +216,6 @@ contract VanguardGovernance is Ownable2Step, ReentrancyGuard {
     bytes4 private constant SEL_SET_ORACLES = bytes4(keccak256("setOracles(address,address)"));
     bytes4 private constant SEL_SET_GOVERNANCE = bytes4(keccak256("setGovernanceContract(address)"));
     bytes4 private constant SEL_SET_PROOF_EXPIRY = bytes4(keccak256("setProofExpiryDuration(uint256)"));
-    bytes4 private constant SEL_UPDATE_WHITELIST = bytes4(keccak256("updateWhitelist(bytes32)"));
-    bytes4 private constant SEL_UPDATE_BLACKLIST = bytes4(keccak256("updateBlacklist(bytes32)"));
 
     // Token locking tracking.
     //
@@ -605,8 +603,6 @@ contract VanguardGovernance is Ownable2Step, ReentrancyGuard {
                     sel == SEL_SET_ORACLES ||
                     sel == SEL_SET_GOVERNANCE ||
                     sel == SEL_SET_PROOF_EXPIRY ||
-                    sel == SEL_UPDATE_WHITELIST ||
-                    sel == SEL_UPDATE_BLACKLIST ||
                     sel == SEL_TRANSFER_OWNERSHIP ||
                     sel == SEL_ACCEPT_OWNERSHIP,
                 "Selector not allowed"

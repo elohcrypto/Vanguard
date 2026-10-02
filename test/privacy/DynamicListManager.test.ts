@@ -207,12 +207,12 @@ describe("DynamicListManager writes the oracles", function () {
     });
   });
 
-  describe("identity status and history", function () {
-    it("records identity status and both histories", async function () {
+  describe("status history; status and proof validity from the oracles", function () {
+    it("records both histories; status is the oracles'", async function () {
       const { dlm, user } = await wired();
       await dlm.addToWhitelist(user.address, 42, 1, YEAR, "a");
       await dlm.addToBlacklist(user.address, 42, HIGH, NO_EXPIRY, "b");
-      expect(await dlm.getIdentityStatus(42)).to.equal(BLACKLISTED);
+      expect(await dlm.getUserStatus(user.address)).to.equal(BLACKLISTED);
       expect(await dlm.getUserStatusHistoryCount(user.address)).to.equal(2n);
       expect(await dlm.getIdentityStatusHistoryCount(42)).to.equal(2n);
       const h = await dlm.userStatusHistory(user.address, 1);
@@ -221,19 +221,49 @@ describe("DynamicListManager writes the oracles", function () {
       expect(h.reason).to.equal("b");
     });
 
-    it("isProofValid follows identity status and expiry as before", async function () {
-      const { dlm, user } = await wired();
+    it("isProofValid reads the oracles (whitelisted and not blacklisted) and expiry", async function () {
+      const { dlm, user, other, bl, wl } = await wired();
       const now = BigInt((await ethers.provider.getBlock("latest"))!.timestamp);
-      expect(await dlm.isProofValid(9, now, true)).to.equal(false);
-      expect(await dlm.isProofValid(9, now, false)).to.equal(true);
+      expect(await dlm.isProofValid(user.address, now, true)).to.equal(false);
+      expect(await dlm.isProofValid(user.address, now, false)).to.equal(true);
       await dlm.addToWhitelist(user.address, 9, 1, YEAR, "a");
-      expect(await dlm.isProofValid(9, now, true)).to.equal(true);
+      expect(await dlm.isProofValid(user.address, now, true)).to.equal(true);
       await dlm.addToBlacklist(user.address, 9, HIGH, NO_EXPIRY, "b");
-      expect(await dlm.isProofValid(9, now, true)).to.equal(false);
-      expect(await dlm.isProofValid(9, now, false)).to.equal(false);
+      expect(await dlm.isProofValid(user.address, now, true)).to.equal(false);
+      expect(await dlm.isProofValid(user.address, now, false)).to.equal(false);
       await dlm.removeFromBlacklist(user.address, 9, "c");
+      expect(await dlm.isProofValid(user.address, now, true)).to.equal(true);
       const expired = now - (await dlm.proofExpiryDuration()) - 10n;
-      expect(await dlm.isProofValid(9, expired, true)).to.equal(false);
+      expect(await dlm.isProofValid(user.address, expired, true)).to.equal(
+        false,
+      );
+      // Written straight to the oracles, never through the manager (N-2).
+      await wl.addToWhitelist(other.address, 1, 0, "direct");
+      expect(await dlm.isProofValid(other.address, now, true)).to.equal(true);
+      await bl.addToBlacklist(other.address, HIGH, 0, "direct");
+      expect(await dlm.isProofValid(other.address, now, true)).to.equal(false);
+      expect(await dlm.isProofValid(other.address, now, false)).to.equal(false);
+    });
+
+    it("the root slot and the identity status store are gone (plan 3.3)", async function () {
+      const { dlm } = await fixture();
+      const iface = new ethers.Interface(dlm.interface.fragments);
+      for (const name of [
+        "updateWhitelist",
+        "updateBlacklist",
+        "whitelistVersion",
+        "blacklistVersion",
+        "currentWhitelistRoot",
+        "currentBlacklistRoot",
+        "whitelistRootHistory",
+        "blacklistRootHistory",
+        "whitelistRootTimestamp",
+        "blacklistRootTimestamp",
+        "identityStatus",
+        "getIdentityStatus",
+      ]) {
+        expect(iface.getFunction(name), name).to.equal(null);
+      }
     });
   });
 

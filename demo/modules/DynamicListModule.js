@@ -74,11 +74,12 @@ class DynamicListModule {
       console.log(`   Address: ${address}`);
       console.log(`   Owner: ${this.state.signers[0].address}`);
       console.log(`   Governance: ${await vanguardGovernance.getAddress()}`);
+      // The whitelist Merkle root lives in PrivacyManager (plan 3.3).
+      const privacyManager = this.state.getContract("privacyManager");
       console.log(
-        `   Whitelist Version: ${await dynamicListManager.whitelistVersion()}`,
-      );
-      console.log(
-        `   Blacklist Version: ${await dynamicListManager.blacklistVersion()}`,
+        privacyManager
+          ? `   Whitelist root (PrivacyManager): ${await privacyManager.whitelistRoot()} (version ${await privacyManager.whitelistVersion()})`
+          : "   Whitelist root: kept by PrivacyManager (option 41), not here",
       );
       console.log(
         `   Proof Expiry: ${await dynamicListManager.proofExpiryDuration()} seconds (30 days)`,
@@ -249,9 +250,8 @@ class DynamicListModule {
       const identity = BigInt(userAddress) % BigInt(1000000000);
 
       // Get status
+      // Status is the oracles' (the manager keeps no copy, plan 3.3).
       const status = await dynamicListManager.getUserStatus(userAddress);
-      const identityStatus =
-        await dynamicListManager.getIdentityStatus(identity);
 
       const statusNames = ["NONE", "WHITELISTED", "BLACKLISTED"];
 
@@ -259,8 +259,7 @@ class DynamicListModule {
       console.log("=".repeat(70));
       console.log(`   Address: ${userAddress}`);
       console.log(`   Identity: ${identity}`);
-      console.log(`   Status (by address): ${statusNames[status]}`);
-      console.log(`   Status (by identity): ${statusNames[identityStatus]}`);
+      console.log(`   Status (from the oracles): ${statusNames[status]}`);
       console.log("");
 
       // Get status history count
@@ -319,9 +318,14 @@ class DynamicListModule {
     const dynamicListManager = this.state.getContract("dynamicListManager");
 
     try {
-      console.log("\n📋 Enter proof details:");
-      const identityInput = await this.promptUser("Identity ID: ");
-      const identity = BigInt(identityInput);
+      console.log("\n📋 Whose proof (status is read from the oracles):");
+      for (let i = 0; i < 3; i++) {
+        console.log(`${i}. ${this.state.signers[i].address}`);
+      }
+      const userIndex = parseInt(await this.promptUser("Select user (0-2): "));
+      const userAddress = (
+        this.state.signers[userIndex] || this.state.signers[0]
+      ).address;
 
       const proofTimestamp = Math.floor(Date.now() / 1000);
 
@@ -333,14 +337,14 @@ class DynamicListModule {
 
       // Check validity
       const isValid = await dynamicListManager.isProofValid(
-        identity,
+        userAddress,
         proofTimestamp,
         isWhitelistProof,
       );
 
       console.log("\n📊 PROOF VALIDITY CHECK:");
       console.log("=".repeat(70));
-      console.log(`   Identity: ${identity}`);
+      console.log(`   Wallet: ${userAddress}`);
       console.log(
         `   Proof Type: ${isWhitelistProof ? "Whitelist" : "Blacklist Non-Membership"}`,
       );
@@ -350,7 +354,7 @@ class DynamicListModule {
       console.log(`   Valid: ${isValid ? "✅ YES" : "❌ NO"}`);
 
       if (!isValid) {
-        const status = await dynamicListManager.getIdentityStatus(identity);
+        const status = await dynamicListManager.getUserStatus(userAddress);
         const statusNames = ["NONE", "WHITELISTED", "BLACKLISTED"];
         console.log(`\n   ℹ️  Current Status: ${statusNames[status]}`);
         console.log(`   ℹ️  Proof invalidated due to status change or expiry`);
@@ -667,7 +671,7 @@ class DynamicListModule {
       console.log("📊 STEP 5: Check Old Whitelist Proof Validity");
       const proofTimestamp = Math.floor(Date.now() / 1000);
       const isValid = await dynamicListManager.isProofValid(
-        targetIdentity,
+        targetUser,
         proofTimestamp,
         true, // whitelist proof
       );

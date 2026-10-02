@@ -248,12 +248,10 @@ describe("Selector denylist (L5)", function () {
       // The ceremony accepts the manager's ownership under ListUpdate.
       dlm.interface.encodeFunctionData("acceptOwnership"),
       dlm.interface.encodeFunctionData("transferOwnership", [ops.address]),
-      // Follow-up (b): the manager's owner-only and list-root setters.
+      // Follow-up (b): the manager's owner-only setters.
       dlm.interface.encodeFunctionData("setOracles", [who, who]),
       dlm.interface.encodeFunctionData("setGovernanceContract", [ops.address]),
       dlm.interface.encodeFunctionData("setProofExpiryDuration", [DAY]),
-      dlm.interface.encodeFunctionData("updateWhitelist", [ethers.ZeroHash]),
-      dlm.interface.encodeFunctionData("updateBlacklist", [ethers.ZeroHash]),
     ])
       await propose(LIST, dlm, data);
     const vgt = c.governanceToken;
@@ -261,6 +259,14 @@ describe("Selector denylist (L5)", function () {
       dlm.interface.encodeFunctionData("owner"),
       dlm.interface.encodeFunctionData("renounceOwnership"),
       vgt.interface.encodeFunctionData("transfer", [who, 1n]),
+      // The manager's root slot is gone (plan 3.3): the root lives in
+      // PrivacyManager and is published by a PrivacyParameters vote.
+      new ethers.Interface([
+        "function updateWhitelist(bytes32)",
+      ]).encodeFunctionData("updateWhitelist", [ethers.ZeroHash]),
+      new ethers.Interface([
+        "function updateBlacklist(bytes32)",
+      ]).encodeFunctionData("updateBlacklist", [ethers.ZeroHash]),
     ])
       await expect(propose(LIST, dlm, data)).to.be.revertedWith(
         "Selector not allowed",

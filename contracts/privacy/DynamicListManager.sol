@@ -41,12 +41,12 @@ interface IBlacklistOracleWriter {
  * @title DynamicListManager
  * @notice Single entry for moving a member between whitelist and blacklist. The
  *         owner or governance (a ListUpdate proposal, plan 2D.1) calls one of the
- *         four add/remove functions; each records identity status and history
- *         here and writes the WhitelistOracle/BlacklistOracle that
- *         ComplianceRules reads. Per-address membership lives only in the
- *         oracles (D6'); getUserStatus derives from them. The oracle owner must
+ *         four add/remove functions; each records status history here and
+ *         writes the WhitelistOracle/BlacklistOracle that ComplianceRules
+ *         reads. Membership lives only in the oracles (D6'); getUserStatus
+ *         and isProofValid derive from them. The whitelist Merkle root lives
+ *         in PrivacyManager (D14, plan 3.3), not here. The oracle owner must
  *         grant this contract the writer role (oracle.setListManager).
- * @dev Identity-keyed status and proof expiry invalidate old proofs when status changes.
  */
 contract DynamicListManager is Ownable2Step {
     // User status enum
@@ -55,24 +55,6 @@ contract DynamicListManager is Ownable2Step {
         WHITELISTED, // Approved user
         BLACKLISTED  // Banned user
     }
-
-    // List version tracking (increments on each update)
-    uint256 public whitelistVersion;
-    uint256 public blacklistVersion;
-
-    // Current Merkle roots
-    bytes32 public currentWhitelistRoot;
-    bytes32 public currentBlacklistRoot;
-
-    // Historical roots (for audit trail)
-    mapping(uint256 => bytes32) public whitelistRootHistory;
-    mapping(uint256 => bytes32) public blacklistRootHistory;
-    mapping(uint256 => uint256) public whitelistRootTimestamp;
-    mapping(uint256 => uint256) public blacklistRootTimestamp;
-
-    // Identity-keyed status (no oracle home). Per-address status is derived
-    // from the oracles in getUserStatus.
-    mapping(uint256 => UserStatus) public identityStatus; // By identity ID
 
     // Status change history
     struct StatusChange {
@@ -99,8 +81,6 @@ contract DynamicListManager is Ownable2Step {
     uint8 private constant MAX_SEVERITY = 3;
 
     // Events
-    event WhitelistUpdated(uint256 indexed version, bytes32 newRoot, uint256 timestamp);
-    event BlacklistUpdated(uint256 indexed version, bytes32 newRoot, uint256 timestamp);
     event UserStatusChanged(
         address indexed user, 
         uint256 indexed identity, 
@@ -116,10 +96,7 @@ contract DynamicListManager is Ownable2Step {
      * @notice Constructor
      * @param initialOwner Initial owner address
      */
-    constructor(address initialOwner) Ownable(initialOwner) {
-        whitelistVersion = 1;
-        blacklistVersion = 1;
-    }
+    constructor(address initialOwner) Ownable(initialOwner) {}
 
     /**
      * @notice Set governance contract address
@@ -162,32 +139,6 @@ contract DynamicListManager is Ownable2Step {
             "Only owner or governance"
         );
         _;
-    }
-
-    /**
-     * @notice Update whitelist Merkle root
-     * @param newRoot New Merkle root
-     */
-    function updateWhitelist(bytes32 newRoot) external onlyOwnerOrGovernance {
-        whitelistVersion++;
-        currentWhitelistRoot = newRoot;
-        whitelistRootHistory[whitelistVersion] = newRoot;
-        whitelistRootTimestamp[whitelistVersion] = block.timestamp;
-
-        emit WhitelistUpdated(whitelistVersion, newRoot, block.timestamp);
-    }
-
-    /**
-     * @notice Update blacklist Merkle root
-     * @param newRoot New Merkle root
-     */
-    function updateBlacklist(bytes32 newRoot) external onlyOwnerOrGovernance {
-        blacklistVersion++;
-        currentBlacklistRoot = newRoot;
-        blacklistRootHistory[blacklistVersion] = newRoot;
-        blacklistRootTimestamp[blacklistVersion] = block.timestamp;
-
-        emit BlacklistUpdated(blacklistVersion, newRoot, block.timestamp);
     }
 
     /**
@@ -265,19 +216,17 @@ contract DynamicListManager is Ownable2Step {
     ) external onlyOwnerOrGovernance {
         require(user != address(0), "Invalid user address");
         _requireOracles();
-        // A lapsed entry is no longer listed by the oracle but still marks the
-        // identity BLACKLISTED here (isProofValid false): accept it and clear
-        // the status. The oracle is written whenever it still STORES a flag
-        // (live or lapsed): a stale stored flag gates the consensus add paths.
+        // A lapsed entry is no longer listed by the oracle but still STORES
+        // its flag, which gates the consensus add paths: accept it and clear
+        // the flag. Nothing listed and nothing stored: nothing to remove.
         bool listed = blacklistOracle.isBlacklisted(user);
         (bool stored, , , , , ) = blacklistOracle.blacklistEntries(user);
-        require(listed || identityStatus[identity] == UserStatus.BLACKLISTED, "User not blacklisted");
+        require(listed || stored, "User not blacklisted");
 
         UserStatus newStatus = whitelistOracle.isWhitelisted(user) ? UserStatus.WHITELISTED : UserStatus.NONE;
         _setStatus(user, identity, UserStatus.BLACKLISTED, newStatus, reason);
-        // No try/catch: a lost writer role or out-of-gas must revert, not
-        // leave the manager cleared and the oracle flag stored.
-        if (listed || stored) blacklistOracle.removeFromBlacklist(user, reason);
+        // No try/catch: a lost writer role or out-of-gas must revert.
+        blacklistOracle.removeFromBlacklist(user, reason);
     }
 
     /**
@@ -293,19 +242,18 @@ contract DynamicListManager is Ownable2Step {
     ) external onlyOwnerOrGovernance {
         require(user != address(0), "Invalid user address");
         _requireOracles();
-        // Same shape as removeFromBlacklist: a lapsed entry still marks the
-        // identity WHITELISTED here (isProofValid true) and must be clearable.
+        // Same shape as removeFromBlacklist: a lapsed stored entry is clearable.
         bool listed = whitelistOracle.isWhitelisted(user);
         (bool stored, , , , ) = whitelistOracle.whitelistEntries(user);
-        require(listed || identityStatus[identity] == UserStatus.WHITELISTED, "User not whitelisted");
+        require(listed || stored, "User not whitelisted");
 
         UserStatus oldStatus = getUserStatus(user);
         UserStatus newStatus = oldStatus == UserStatus.BLACKLISTED ? UserStatus.BLACKLISTED : UserStatus.NONE;
         _setStatus(user, identity, oldStatus, newStatus, reason);
-        if (listed || stored) whitelistOracle.removeFromWhitelist(user, reason);
+        whitelistOracle.removeFromWhitelist(user, reason);
     }
 
-    /// @dev Identity status, history and event for one change.
+    /// @dev History and event for one change (status itself is the oracles').
     function _setStatus(
         address user,
         uint256 identity,
@@ -313,7 +261,6 @@ contract DynamicListManager is Ownable2Step {
         UserStatus newStatus,
         string memory reason
     ) internal {
-        identityStatus[identity] = newStatus;
         _recordStatusChange(user, identity, oldStatus, newStatus, reason);
         emit UserStatusChanged(user, identity, oldStatus, newStatus, reason);
     }
@@ -345,14 +292,16 @@ contract DynamicListManager is Ownable2Step {
     }
 
     /**
-     * @notice Check if proof is still valid
-     * @param identity User identity ID
+     * @notice Check if a proof is still valid against the current oracle status
+     * @param user Wallet the proof is about
      * @param proofTimestamp Timestamp when proof was generated
      * @param isWhitelistProof True if whitelist proof, false if blacklist proof
-     * @return bool True if proof is still valid
+     * @return bool True if proof is still valid: not expired, and for a
+     *         whitelist proof the wallet is whitelisted and not blacklisted;
+     *         for a blacklist non-membership proof it is not blacklisted
      */
     function isProofValid(
-        uint256 identity,
+        address user,
         uint256 proofTimestamp,
         bool isWhitelistProof
     ) external view returns (bool) {
@@ -361,8 +310,8 @@ contract DynamicListManager is Ownable2Step {
             return false; // Proof expired
         }
 
-        // Check current status
-        UserStatus currentStatus = identityStatus[identity];
+        // Check current status (blacklist wins, see getUserStatus)
+        UserStatus currentStatus = getUserStatus(user);
 
         if (isWhitelistProof) {
             // Whitelist proof only valid if user still whitelisted
@@ -386,15 +335,6 @@ contract DynamicListManager is Ownable2Step {
         if (blacklistOracle.isBlacklisted(user)) return UserStatus.BLACKLISTED;
         if (whitelistOracle.isWhitelisted(user)) return UserStatus.WHITELISTED;
         return UserStatus.NONE;
-    }
-
-    /**
-     * @notice Get user status by identity ID
-     * @param identity User identity ID
-     * @return UserStatus Current status
-     */
-    function getIdentityStatus(uint256 identity) external view returns (UserStatus) {
-        return identityStatus[identity];
     }
 
     /**
