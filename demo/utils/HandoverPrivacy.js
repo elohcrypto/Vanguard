@@ -112,7 +112,9 @@ async function privacyLines(o, dAddr, ops, govAddr, warnings = []) {
     const last = roots[roots.length - 1];
     const pub = last && last.args.publisher;
     if (last && !same(pub, ops) && !same(pub, govAddr)) {
-      const who = same(pub, dAddr) ? "the deployer" : `${pub}, not ops or governance`;
+      const who = same(pub, dAddr)
+        ? "the deployer"
+        : `${pub}, not ops or governance`;
       warnings.push(
         `PrivacyManager whitelist root ${last.args.root} (version ${last.args.version}) was published by ${who}: republish as ops so deployer-era bindings lapse`,
       );
