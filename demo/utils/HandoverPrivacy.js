@@ -8,7 +8,8 @@
  * be the one the config names, a testingMode verifier is refused, both
  * contracts and the wrapper's five verifiers must carry the compiled code
  * (HandoverCodeHash.js), ops becomes the list operator, and the completion
- * lines.
+ * lines. Task 3.4 adds the PrivacyManager ComplianceRules wires: it joins
+ * the ceremony even before governance is bound to it.
  */
 
 const { ethers } = require("hardhat");
@@ -23,6 +24,46 @@ const {
 } = require("./HandoverCodeHash");
 
 const check = (cond, msg) => cond || fail(msg);
+const ZERO = ethers.ZeroAddress;
+const MODE = ["OracleOnly", "ZkOnly", "Either"];
+
+/**
+ * Task 3.4 (R-3R-15): the PrivacyManager ComplianceRules wires for VSC and
+ * VGT, read from chain. With the one governance is bound to (type 11,
+ * `bound`), every non-zero one must be the same address: that one is the
+ * ceremony's PrivacyManager, so a wired but unbound one is nominated,
+ * bound and accepted like a bound one. `conflict` names two that differ.
+ */
+async function wiredPrivacy(o, bound) {
+  const rules = o.complianceRules;
+  const seen = bound
+    ? [[`governance is bound to PrivacyManager ${bound}`, bound]]
+    : [];
+  const wired = [];
+  for (const [label, c] of [
+    ["VSC", o.token],
+    ["VGT", o.governanceToken],
+  ]) {
+    const t = await addrOf(c);
+    const pm = await rules.privacyManager(t);
+    wired.push({ label, pm, mode: MODE[Number(await rules.whitelistMode(t))] });
+    if (!same(pm, ZERO))
+      seen.push([
+        `ComplianceRules wires PrivacyManager ${pm} for ${label}`,
+        pm,
+      ]);
+  }
+  const [first] = seen;
+  const other = first && seen.find(([, a]) => !same(a, first[1]));
+  return {
+    wired,
+    privacyManager: first ? first[1] : null,
+    wiredBy: first && !bound ? first[0] : null,
+    conflict: other
+      ? `${first[0]}, but ${other[0]}: one PrivacyManager per deployment; rewire ComplianceRules (setPrivacyManager) before the ceremony`
+      : null,
+  };
+}
 
 /**
  * Read-only, before the first transaction. PrivacyManager's zkVerifier() is
@@ -120,6 +161,15 @@ async function privacyLines(o, dAddr, ops, govAddr, warnings = []) {
       );
     }
   }
+  // Task 3.4: what ComplianceRules wires agrees with the ceremony's one.
+  const derivedPm = o.derived?.factories?.privacyManager;
+  for (const w of o.derived?.privacy?.wired || []) {
+    const none = same(w.pm, ZERO);
+    lines.push([
+      `ComplianceRules privacyManager for ${w.label}: ${none ? "none" : w.pm} (mode ${w.mode})`,
+      none || Boolean(derivedPm && same(w.pm, derivedPm)),
+    ]);
+  }
   const zk = o.zkVerifier;
   const zkAddr = zk ? await addrOf(zk) : o.derived?.factories?.zkVerifier;
   const pins = await codeHashChecks(pmAddr, [used, zkAddr]);
@@ -141,4 +191,4 @@ async function privacyLines(o, dAddr, ops, govAddr, warnings = []) {
   return lines;
 }
 
-module.exports = { preflightPrivacy, privacySteps, privacyLines };
+module.exports = { wiredPrivacy, preflightPrivacy, privacySteps, privacyLines };

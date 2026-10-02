@@ -36,6 +36,8 @@
  * same rule (3.3): null is refused when governance is already bound to the
  * contract (types 11/12), "zkVerifier" must be the verifier PrivacyManager
  * uses (so null is refused whenever a PrivacyManager is named), a
+ * PrivacyManager ComplianceRules wires for VSC or VGT (3.4) counts as bound
+ * (it must be named, and two different ones wired or bound are refused), a
  * testingMode verifier is refused, and so is any PrivacyManager, wrapper or
  * circuit verifier whose runtime code hash is not the compiled artifact's
  * (demo/utils/HandoverCodeHash.js; the refusal names both hashes and is

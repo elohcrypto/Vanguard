@@ -300,7 +300,10 @@ keys `privacyManager` and `zkVerifier` (an address, or `null` when not
 deployed; `null` is refused when governance is already bound to the
 contract, `zkVerifier` must be the verifier PrivacyManager uses, so it
 cannot be `null` while a PrivacyManager is named, and a testingMode
-verifier is refused), the optional `oracles` and `issuers` arrays (omitted: the
+verifier is refused; a PrivacyManager that ComplianceRules wires for VSC
+or VGT, `privacyManager(token)` for the ZkOnly/Either whitelist modes, is
+in the ceremony even before governance is bound to it, so `privacyManager`
+must name it, and two different ones wired or bound are refused), the optional `oracles` and `issuers` arrays (omitted: the
 set read from chain), the optional `feeWallets` array (escrow fee wallets
 to check for the exemption), the
 optional `fromBlock` (where the event scans start: trusted contracts,

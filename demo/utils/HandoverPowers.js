@@ -25,6 +25,7 @@ const {
   preflightFactoryRoles,
   escrowFactoriesFromChain,
 } = require("./HandoverScans");
+const { wiredPrivacy } = require("./HandoverPrivacy");
 
 const ZERO = ethers.ZeroAddress;
 const MANAGEMENT_KEY = 1;
@@ -52,8 +53,9 @@ const send = async (p) => (await p).wait();
  * bound in ComplianceRules for VSC and VGT, the registry's trusted issuers
  * per required topic, each oracle's listManager, the DynamicListManager
  * governance is bound to, the contracts bound to types 9-12 (factories,
- * PrivacyManager, ZKVerifierIntegrated), and the escrow factories that
- * created trusted escrows (review M-2).
+ * PrivacyManager, ZKVerifierIntegrated; `bound`), the PrivacyManager
+ * ComplianceRules wires (`privacy`, which `factories` takes when type 11 is
+ * unbound), and the escrow factories that created trusted escrows (M-2).
  */
 async function derivePowers(o) {
   const rules = o.complianceRules;
@@ -76,17 +78,22 @@ async function derivePowers(o) {
       listManagers.push({ oracle: a, listManager: lm });
   }
   const dlm = await o.governance.dynamicListManager();
-  const factories = {};
+  const bound = {};
   for (const e of FACTORY_PLAN) {
-    const bound = await o.governance.boundTarget(e.proposalType);
-    factories[e.key] = same(bound, ZERO) ? null : bound;
+    const a = await o.governance.boundTarget(e.proposalType);
+    bound[e.key] = same(a, ZERO) ? null : a;
   }
+  // Task 3.4 (R-3R-15): or the one ComplianceRules wires, not yet bound.
+  const privacy = await wiredPrivacy(o, bound.privacyManager);
+  const factories = { ...bound, privacyManager: privacy.privacyManager };
   return {
     oracles: uniq(oracles),
     issuers: uniq(issuers),
     listManagers,
     dynamicListManager: same(dlm, ZERO) ? null : dlm,
     factories,
+    bound,
+    privacy,
     escrowFactories: await escrowFactoriesFromChain(o),
   };
 }
@@ -128,15 +135,19 @@ async function withDerivedPowers(o, log = () => {}, { strict = true } = {}) {
     out[key] = [...given, ...extra];
   }
   if (!strict) return out;
+  if (d.privacy.conflict) fail(d.privacy.conflict);
   const named = [
     ["dynamicListManager", "DynamicListManager", d.dynamicListManager],
     ...FACTORY_PLAN.map((e) => [e.key, e.label, d.factories[e.key]]),
   ];
   for (const [key, label, bound] of named) {
-    if (bound && !(o[key] && same(await addrOf(o[key]), bound))) {
-      fail(
-        `governance is bound to ${label} ${bound}, which the config does not name: add "${key}"`,
-      );
+    const given = o[key] && (await addrOf(o[key]));
+    if (bound && !(given && same(given, bound))) {
+      const why =
+        (key === "privacyManager" && d.privacy.wiredBy) ||
+        `governance is bound to ${label} ${bound}`;
+      const names = given ? ` (it names ${given})` : "";
+      fail(`${why}, which the config does not name${names}: add "${key}"`);
     }
   }
   // Review M-2: a null key cannot hide a factory a trusted escrow names.
@@ -250,7 +261,7 @@ async function preflightPowers(o, { governanceOwned }) {
   for (const e of FACTORY_PLAN) {
     if (!o[e.key]) continue;
     const a = await addrOf(o[e.key]);
-    if (same(d.factories[e.key] || ZERO, a)) continue;
+    if (same(d.bound[e.key] || ZERO, a)) continue;
     if (governanceOwned.has("governance")) {
       fail(
         `governance owns itself but is not bound to ${e.label} ${a}: nominate it, then bind it by a SystemParameters vote (${e.bind})`,

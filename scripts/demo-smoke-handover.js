@@ -108,6 +108,13 @@ async function runHandoverSmoke(state, failures) {
     ).deploy(await zkVerifier.getAddress());
     state.setContract("zkVerifierIntegrated", zkVerifier);
     state.setContract("privacyManager", privacyManager);
+    // 3.4 (R-3R-15): wired as VSC's whitelist source (Either), so the
+    // ceremony derives it from ComplianceRules (the deployer owns it now).
+    const rules = c("complianceRules");
+    const vsc = await c("digitalToken").getAddress();
+    const pmAddr = await privacyManager.getAddress();
+    await (await rules.setPrivacyManager(vsc, pmAddr)).wait();
+    await (await rules.setWhitelistMode(vsc, 2)).wait();
   }
   // Before the ceremony the deployer (owner) publishes the root.
   const root = ethers.toBeHex(ethers.toBigInt(ethers.randomBytes(31)), 32);

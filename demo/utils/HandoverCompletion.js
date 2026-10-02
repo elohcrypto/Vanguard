@@ -92,7 +92,11 @@ async function assertHandoverComplete(o) {
   const unnamed = [
     ["dynamicListManager", "DynamicListManager", d.dynamicListManager],
     ...FACTORY_PLAN.map((e) => [e.key, e.label, d.factories[e.key]]),
-  ].map(([k, l, a]) => [k, a, `${l} ${a} (bound in governance)`]);
+  ].map(([k, l, a]) => [
+    k,
+    a,
+    `${l} ${a} (${k === "privacyManager" && d.privacy.wiredBy ? "wired in ComplianceRules" : "bound in governance"})`,
+  ]);
   for (const { factory, escrow } of d.escrowFactories) {
     unnamed.push([
       "escrowWalletFactory",
