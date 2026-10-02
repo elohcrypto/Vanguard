@@ -1,10 +1,15 @@
 name: CI
 
+# Every branch and every PR. A PR from a branch of this repo is already
+# covered by its push run, so build-and-test skips that pull_request event;
+# fork PRs still run.
 on:
   push:
-    branches: [main]
   pull_request:
-    branches: [main]
+
+# The job only reads the repo and the actions cache.
+permissions:
+  contents: read
 
 # A newer push to the same branch cancels the older run.
 concurrency:
@@ -16,6 +21,7 @@ env:
 
 jobs:
   build-and-test:
+    if: github.event_name == 'push' || github.event.pull_request.head.repo.full_name != github.repository
     runs-on: ubuntu-latest
     # Local baseline: install ~20s, compile ~35s, setup:zk ~27s, tests ~5min
     # (was ~9min before the Merkle builder went sparse; the first CI run
@@ -24,9 +30,12 @@ jobs:
     timeout-minutes: 30
 
     steps:
-      - uses: actions/checkout@v4
+      # Actions are pinned by commit SHA and updated by hand (no Dependabot
+      # here). Re-resolve a pin with
+      # `gh api repos/<owner>/<repo>/git/ref/tags/<tag>`.
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: '22'
           cache: npm
@@ -41,7 +50,7 @@ jobs:
       # build them. The `circom` npm package is the deprecated 0.5.x JS build.
       - name: Cache circom binary
         id: circom-cache
-        uses: actions/cache@v4
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
         with:
           path: ~/.cargo/bin/circom
           key: circom-${{ runner.os }}-${{ env.CIRCOM_VERSION }}
@@ -66,7 +75,7 @@ jobs:
       # or fresh, so a bad cache entry is replaced rather than trusted. The
       # key carries the hash prefix: a different file is a different key.
       - name: Cache Powers of Tau
-        uses: actions/cache@v4
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
         with:
           path: build/circuits/powersOfTau28_hez_final_15.ptau
           key: ptau-hez-final-15-982372c8
@@ -82,15 +91,15 @@ jobs:
       - name: Compile contracts
         run: npx hardhat compile
 
-      # Ratchet, same shape as the audit ratchet below. tsc is not a hard gate:
-      # 98 pre-existing errors, mostly typechain drift in oracle/ZK tests that
-      # the suite never sees because ts-node strips types. Fail only when the
-      # count RISES. Runs after compile because tsc reads typechain-types/,
-      # which compile regenerates; the count is 96 without it and 98 with it,
-      # so measuring at any other point compares against the wrong baseline.
+      # Ratchet, same shape as the audit ratchet below. tsc is not a hard gate
+      # because ts-node strips types, so the suite never sees these. Fail only
+      # when the count RISES. Baseline 1 (2026-10-02, was 98): the ZK
+      # integration test calls PrivacyManager.validatePrivacyProofs, which the
+      # contract does not have; the test catches the failure. Runs after
+      # compile because tsc reads typechain-types/, which compile regenerates.
       - name: Typecheck ratchet (no NEW tsc errors)
         run: |
-          BASELINE=98
+          BASELINE=1
           test -d typechain-types || { echo "::error::typechain-types/ missing; compile did not generate it"; exit 1; }
           npx tsc --noEmit --pretty false > tsc.log 2>&1 || true
           count=$(grep -c 'error TS' tsc.log || true)
@@ -111,7 +120,7 @@ jobs:
       # error fails; warnings fail only when they RISE above the baseline.
       - name: Lint ratchet (no solhint errors, no NEW warnings)
         run: |
-          BASELINE=1351
+          BASELINE=976
           npx solhint -f unix 'contracts/**/*.sol' > solhint.log 2>&1 || true
           errors=$(grep -c '\[Error/' solhint.log || true)
           warnings=$(grep -c '\[Warning/' solhint.log || true)
@@ -204,9 +213,21 @@ jobs:
       - name: Audit dependencies (critical blocks)
         run: npm audit --audit-level=critical
 
-      # Ratchet: the 22 known highs are ReDoS/DoS in build tooling, pinned behind
-      # a hardhat-toolbox 4 -> 7 major bump (i.e. a Hardhat 2 -> 3 migration), so
-      # `npm audit fix` cannot clear them — verified: it changes nothing.
+      # Ratchet. `npm audit fix` (non-breaking) was applied on 2026-10-02 and
+      # moved highs 24 -> 22. The 22 left, all in dev/build tooling:
+      # - Hardhat 2 (11): hardhat, @nomicfoundation/hardhat-toolbox, -ethers,
+      #   -chai-matchers, -network-helpers, -verify, @typechain/hardhat,
+      #   hardhat-contract-sizer, hardhat-gas-reporter; adm-zip and undici
+      #   under hardhat. npm's fix is hardhat-toolbox 7 (Hardhat 3), a major
+      #   migration; typechain, sizer and gas-reporter list no fix.
+      # - solidity-coverage 0.8 (5): solidity-coverage, mocha 10, minimatch,
+      #   nanoid, serialize-javascript. npm's fix is a downgrade to
+      #   solidity-coverage 0.7.22 (major).
+      # - Exact pins in ZK tooling (6): js-yaml 4.0.0 (circom 0.5 ->
+      #   circom_runtime -> mocha 8), tmp (solc 0.0.33, tmp-promise 0.1.0),
+      #   ws 8.18.0 (circomlibjs -> @ethersproject/providers), underscore
+      #   1.13.6 with jsonpath and bfj (snarkjs). Listed as fixable, but the
+      #   parents pin exact versions; clearing them needs npm overrides.
       # Gating on `high` would be permanently red and quickly ignored. Instead
       # fail only when the count RISES above the recorded baseline, so a newly
       # introduced high is caught while the known backlog stays visible.
