@@ -35,10 +35,7 @@ describe("Proof cache is bound to the circuit that verified it", () => {
 
   it("a whitelist-verified proof does NOT satisfy blacklist non-membership", async () => {
     const zk = await deployReal();
-    await expect(zk.verifyWhitelistMembership(P, S)).to.emit(
-      zk,
-      "ProofCached",
-    );
+    await expect(zk.verifyWhitelistMembership(P, S)).to.emit(zk, "ProofCached");
     // Same [1] signal, different circuit: must reach the real
     // blacklist verifier, which rejects. Before the fix: cache hit, true.
     expect(
@@ -115,12 +112,8 @@ describe("Proof cache is bound to the circuit that verified it", () => {
       await ethers.getContractFactory("WhitelistMembershipVerifier")
     ).deploy();
     await zk.updateVerifier("whitelist", await strict.getAddress());
-    expect(await zk.whitelistProofCacheKey(P, S)).to.not.equal(
-      keyBefore,
-    );
-    expect(
-      await zk.verifyWhitelistMembership.staticCall(P, S),
-    ).to.equal(false);
+    expect(await zk.whitelistProofCacheKey(P, S)).to.not.equal(keyBefore);
+    expect(await zk.verifyWhitelistMembership.staticCall(P, S)).to.equal(false);
   });
 
   it("the compliance-proof tag keys the 2-signal path, separate from compliance", async () => {
@@ -138,9 +131,6 @@ describe("Proof cache is bound to the circuit that verified it", () => {
     await ethers.provider.send("evm_increaseTime", [3601]);
     await ethers.provider.send("evm_mine", []);
     await zk.clearExpiredProofs([key]);
-    await expect(zk.verifyWhitelistMembership(P, S)).to.emit(
-      zk,
-      "ProofCached",
-    );
+    await expect(zk.verifyWhitelistMembership(P, S)).to.emit(zk, "ProofCached");
   });
 });
