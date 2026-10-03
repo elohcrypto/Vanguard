@@ -166,6 +166,27 @@ async function privacyLines(o, dAddr, ops, govAddr, warnings = []) {
         );
       }
     }
+    // Review 3.7b L2, like the deployer-root warning: a key the deployer
+    // trusted lets it keep vouching for attestations after the handover.
+    const trustLogs = await scanLogs(c, c.filters.TrustedAttestorSet(), o);
+    const lastTrust = new Map();
+    for (const e of trustLogs) {
+      lastTrust.set(`${e.args.circuitId}:${e.args.attestor}`, e);
+    }
+    for (const e of lastTrust.values()) {
+      const name = ATTESTATION_CIRCUITS.find(
+        ([, id]) => id === e.args.circuitId,
+      );
+      if (
+        e.args.trusted &&
+        same(e.args.by, dAddr) &&
+        (await c.trustedAttestor(e.args.circuitId, e.args.attestor))
+      ) {
+        warnings.push(
+          `PrivacyManager issuer key (Ax ${e.args.ax}) for ${name ? name[0] : e.args.circuitId} was trusted by the deployer: re-approve it by a PrivacyParameters vote or untrust it`,
+        );
+      }
+    }
     used = await c.zkVerifier();
     const v = await ethers.getContractAt("ZKVerifierIntegrated", used);
     lines.push([
