@@ -77,6 +77,7 @@ The system supports the following core workflows, each with comprehensive compli
 | **User Onboarding** | KYC/AML verification and OnchainID creation | OnchainID Factory, Claims Issuer, Identity Registry |
 | **Token Minting** | Authorized token creation with compliance validation | ERC-3643 Token, Compliance Validator, Oracle Network |
 | **Token Transfer** | Peer-to-peer transfers with UTXO compliance | UTXO Compliance, Transfer Restrictions, Oracle Consensus |
+| **Privacy & ZK Verification** | A ZK allow list on VSC: a wallet binds itself with a whitelist proof, ComplianceRules reads the binding | ZKVerifierIntegrated, PrivacyManager, ComplianceRules (whitelist mode) |
 | **Token Payment** | Payment processing with atomic transfers | Payment Processor, Compliance Validator, Event Reporter |
 | **Escrow Payment** | Conditional payment held in a one-time escrow, settled 2-of-3 with an explicit direction | EscrowWalletFactory, MultiSigEscrowWallet, ComplianceRules (trusted contracts) |
 | **Token Burning** | Authorized token destruction and compliance tracking | Token Contract, UTXO Store, Regulatory Reporter |
@@ -86,11 +87,12 @@ The system supports the following core workflows, each with comprehensive compli
 1. [User Onboarding Process](#user-onboarding-process)
 2. [Token Minting Workflow](#token-minting-workflow)
 3. [Token Transfer Workflow](#token-transfer-workflow)
-4. [Token Payment Workflow](#token-payment-workflow)
-5. [Escrow Payment Workflow](#escrow-payment-workflow)
-6. [Token Burning Workflow](#token-burning-workflow)
-7. [Compliance Monitoring](#compliance-monitoring)
-8. [Error Handling](#error-handling)
+4. [Privacy & ZK Verification Workflow](#privacy--zk-verification-workflow)
+5. [Token Payment Workflow](#token-payment-workflow)
+6. [Escrow Payment Workflow](#escrow-payment-workflow)
+7. [Token Burning Workflow](#token-burning-workflow)
+8. [Compliance Monitoring](#compliance-monitoring)
+9. [Error Handling](#error-handling)
 
 ---
 
@@ -408,6 +410,32 @@ sequenceDiagram
    - Create new UTXOs for recipient
    - Update compliance metadata
    - Record transaction in audit trail
+
+---
+
+## Privacy & ZK Verification Workflow
+
+Demo option 1 deploys `ZKVerifierIntegrated` (real verification,
+`testingMode` false) and `PrivacyManager`; option 21 points ComplianceRules
+at the PrivacyManager for VSC with the whitelist mode left at OracleOnly
+(off). Option 41 attaches the pair and initialises the proof generator;
+there is no mock mode in the demo, mocks live only in the tests.
+
+Each investor keeps a secret and hands the operator the commitment
+`Poseidon(identity, secret)` (identity = its OnchainID address). The
+operator (the owner before the handover, ops after it) publishes the root
+of the commitments on PrivacyManager; the investor proves membership with
+a PLONK proof bound to its own wallet and submits it, and
+`hasValidWhitelistProof(wallet)` is what ComplianceRules reads.
+
+Option 42 -> 1 runs this on the live token: (a) VSC switches to whitelist
+mode Either, which with no whitelist oracle bound is an allow list of
+bindings; (b) the bound wallet transfers VSC to another bound, verified
+wallet; (c) a verified wallet without a binding is refused; (d) the
+operator rotates the root without the sender's commitment and the
+sender's transfer is refused; (e) the sender re-onboards with a new
+secret, re-proves and re-binds, and the transfer succeeds again. See
+`docs/TESTNET_DEMO.md` for the command-line tools and the runbook rules.
 
 ---
 

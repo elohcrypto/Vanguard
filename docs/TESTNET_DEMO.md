@@ -151,7 +151,7 @@ After the ceremony the deployer (wallet 0) holds no power: governance owns
 Token, GovernanceToken (VGT), IdentityRegistry, ComplianceRules,
 OracleManager, InvestorTypeRegistry (when deployed), the EscrowWalletFactory
 and OnchainIDFactory (when deployed), PrivacyManager and ZKVerifierIntegrated
-(when deployed, option 41) and itself; ops (wallet 10) holds the
+(option 1 deploys them) and itself; ops (wallet 10) holds the
 agent roles, the compliance-officer role, the escrow factory's ADMIN_ROLE,
 PrivacyManager's `listOperator` (it publishes the whitelist root) and the
 oracles the deployer owned; the issuer admin (wallet 9) owns the
@@ -395,6 +395,34 @@ the current `root.json` and a new proof (an old root is never
 republished, which would lapse every binding under the current one).
 Demo option 42 -> 1 uses the same functions.
 
+### The ZK allow list on the live token (Task 3.6)
+
+Option 1 deploys the privacy pair, `ZKVerifierIntegrated` with
+`testingMode` false and `PrivacyManager` on it; option 21 points
+ComplianceRules at it for VSC (`privacyManager(VSC)`) and leaves the
+whitelist mode at OracleOnly, so nothing changes for transfers yet. The
+handover ceremony reads the PrivacyManager from that wiring. Option 41
+attaches the pair (it deploys the same real pair only when option 1 has
+not run), initialises the proof generator and prints the wiring; option
+41b shows the verifier, the circuits and the generator. The demo has no
+mock mode: every proof is real, and mocks exist only in `test/`.
+
+Option 42 -> 1 publishes a root, binds the chosen wallet, then runs five
+steps on VSC: (a) it switches VSC to whitelist mode Either (the deployer
+owns ComplianceRules until the handover; afterwards it prints the
+ComplianceRules vote needed); no whitelist oracle is bound, so Either is
+an allow list of PrivacyManager bindings and every holder without a live
+binding is refused (mint recipient and transfers, not burns); (b) the
+bound wallet sends VSC to another listed, verified wallet, which proves
+and binds first; (c) a verified wallet without a binding is refused
+(shown with `canTransfer` and a static call); (d) ops or the owner
+publishes a root without the sender's commitment: the version bump lapses
+the binding, the transfer is refused and the sender cannot re-prove; (e)
+the sender re-onboards with a new secret, both wallets re-prove and
+re-bind under the new root, and the transfer goes through again. The
+smoke (`scripts/demo-smoke-privacy.js`) runs the same steps on wallets 6
+to 8 before the handover and leaves VSC in Either.
+
 ## Waiting instead of jumping
 
 The four demo paths that used to call `evm_increaseTime` (governance option
@@ -411,7 +439,7 @@ MNEMONIC="<your phrase>" npx hardhat node          # funds the 12 role wallets
 GOV_TIME_SCALE=1440 npm run demo:interactive:proof   # in another terminal
 ```
 
-Then walk: 1 (deploy), 74 (governance), 75 (distribute VGT to 6-8), 76
+Then walk: 1 (deploy, privacy pair included), 74 (governance), 75 (distribute VGT to 6-8), 76
 (Alice proposes), 77 (Bob and Carol vote), 79 (wait ~8 min), 78 (execute),
 78a (claim on a rejected one). Every action is signed by its role's key.
 Name the treasury wallet and exempt it from investor limits (option 22 or 51,
