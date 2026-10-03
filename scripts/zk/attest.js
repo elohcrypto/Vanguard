@@ -25,7 +25,9 @@
  * random bytes. Output, the attestation handed to the investor (it carries
  * the salt and the signature: treat it as the investor's secret):
  * { circuit, identity, attributes, salt, R8x, R8y, S, Ax, Ay }, decimal
- * strings; --out writes it with mode 0600. Plain node; no hardhat runtime.
+ * strings, on stdout; with --out it goes only to that file (created with
+ * mode 0600, an existing file is refused) and stdout carries the path and
+ * the public (Ax, Ay). Plain node; no hardhat runtime.
  */
 
 const crypto = require("crypto");
@@ -315,8 +317,18 @@ async function main(keyBox) {
     scores: args.scores,
   });
   const json = JSON.stringify(att, null, 2);
-  if (args.out) fs.writeFileSync(args.out, json + "\n", { mode: 0o600 });
-  out(json);
+  if (!args.out) return out(json);
+  // The attestation is a bearer credential: with --out it goes to the file
+  // only (created 0600, never overwriting one), and stdout carries nothing
+  // secret.
+  fs.writeFileSync(args.out, json + "\n", { mode: 0o600, flag: "wx" });
+  out(
+    JSON.stringify(
+      { out: args.out, circuit: att.circuit, Ax: att.Ax, Ay: att.Ay },
+      null,
+      2,
+    ),
+  );
 }
 
 if (require.main === module) {

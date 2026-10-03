@@ -86,8 +86,7 @@ describe("Attestation CLIs (Task 3.7b)", function () {
       expect(JSON.parse(b.stdout).privateKey).to.not.equal(k.privateKey);
     });
 
-    it("--sign prints a verifying attestation, writes it 0600, never the key", async function () {
-      const out = path.join(tmp, "j.json");
+    it("--sign prints a verifying attestation; never the key", async function () {
       const s = await run(
         "attest.js",
         [
@@ -98,8 +97,6 @@ describe("Attestation CLIs (Task 3.7b)", function () {
           identity,
           "--mask",
           "4",
-          "--out",
-          out,
         ],
         { ATTESTOR_KEY: key },
       );
@@ -120,9 +117,40 @@ describe("Attestation CLIs (Task 3.7b)", function () {
       expect(att.identity).to.equal(BigInt(identity).toString());
       expect(att.attributes).to.deep.equal(["4"]);
       expect(BigInt(att.salt) < 2n ** 248n).to.equal(true);
-      expect(JSON.parse(fs.readFileSync(out, "utf8"))).to.deep.equal(att);
-      expect(fs.statSync(out).mode & 0o777).to.equal(0o600);
       await loadAttestation(att); // the signature verifies
+    });
+
+    // Review 3.7b M1: the attestation is a bearer credential.
+    it("--sign --out writes the attestation 0600 only, never overwrites, prints nothing secret", async function () {
+      const out = path.join(tmp, "j.json");
+      const args = [
+        "--sign",
+        "--circuit",
+        "jurisdiction",
+        "--identity",
+        identity,
+        "--mask",
+        "4",
+        "--out",
+        out,
+      ];
+      const s = await run("attest.js", args, { ATTESTOR_KEY: key });
+      expect(s.code, s.stderr).to.equal(0);
+      const att = JSON.parse(fs.readFileSync(out, "utf8"));
+      expect(fs.statSync(out).mode & 0o777).to.equal(0o600);
+      await loadAttestation(att);
+      expectNoSecrets(s, att, key);
+      expect(JSON.parse(s.stdout)).to.deep.equal({
+        out,
+        circuit: "jurisdiction",
+        Ax: att.Ax,
+        Ay: att.Ay,
+      });
+      const again = await run("attest.js", args, { ATTESTOR_KEY: key });
+      expect(again.code).to.equal(1);
+      expect(again.stderr).to.match(/EEXIST/);
+      expect(again.stdout).to.equal("");
+      expect(JSON.parse(fs.readFileSync(out, "utf8"))).to.deep.equal(att);
     });
 
     it("decimal, lowercase hex and checksum identities sign the same identity", async function () {
