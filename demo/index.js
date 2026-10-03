@@ -267,7 +267,7 @@ class InteractiveDemo {
   displayMenu() {
     console.log("\n🎮 INTERACTIVE MENU");
     console.log("=".repeat(50));
-    console.log("1. 🏗️  Deploy All Contracts");
+    console.log("1. 🏗️  Deploy All Contracts (+ privacy pair)");
     console.log("2. 🔑 Create Management Keys");
     console.log("3. 🆔 Create OnchainID for User");
     console.log("4. 🔍 Review Identity Keys");
@@ -306,7 +306,7 @@ class InteractiveDemo {
     console.log("31-40. Oracle Operations");
     console.log("");
     console.log("🔐 === PRIVACY & ZK VERIFICATION ===");
-    console.log("41-50. Privacy & ZK Operations");
+    console.log("41-50. Privacy & ZK Operations (real proofs, live on VSC)");
     console.log("");
     console.log("👥 === INVESTOR TYPE SYSTEM ===");
     console.log("51-60. Investor Type Operations");

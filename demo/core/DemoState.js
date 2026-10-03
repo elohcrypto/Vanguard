@@ -197,13 +197,7 @@ class DemoState {
      */
     this.zkSecrets = new Map();
 
-    // ========== ZK MODE CONFIGURATION ==========
-
-    /**
-     * @property {string} zkMode - ZK proof mode ('mock' or 'real')
-     * @type {string}
-     */
-    this.zkMode = "mock";
+    // ========== ZK PROOFS (real only; mocks live in test/) ==========
 
     /**
      * @property {Object|null} realProofGenerator - Real proof generator instance

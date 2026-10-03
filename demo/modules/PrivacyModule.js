@@ -20,6 +20,7 @@ const {
   proveForDemoUser,
   publishAndBind,
 } = require("../utils/WhitelistBinderFlow");
+const ContractDeployer = require("../core/ContractDeployer");
 const { ethers } = require("hardhat");
 
 /**
@@ -34,234 +35,127 @@ class PrivacyModule {
     this.proofGenerator = proofGenerator;
   }
 
-  /** Option 41: Deploy Privacy & ZK Verification System */
+  /**
+   * Initialise the real proof generator (idempotent) and return it. Every
+   * proof action calls this: since Task 3.6 option 1 deploys the verifier,
+   * so a proof action can run before option 41 ever did.
+   */
+  async realGenerator() {
+    await this.proofGenerator.initializeRealProofGenerator();
+    return this.state.realProofGenerator;
+  }
+
+  /**
+   * Option 41: attach the privacy system. Option 1 deploys the pair
+   * (ZKVerifierIntegrated with testingMode off, PrivacyManager on it) and
+   * option 21 wires it into ComplianceRules for VSC; this uses that pair,
+   * deploys the same real pair only when option 1 has not, wires it if VSC
+   * exists, initialises the real proof generator and prints the wiring.
+   * There is no mock mode: mocks live in test/ only (plan v2 Task 3.6).
+   */
   async deployPrivacySystem() {
-    displaySection("DEPLOY PRIVACY & ZK VERIFICATION SYSTEM", "🏗️");
-
-    if (!this.state.getContract("onchainIDFactory")) {
-      displayError("Please deploy basic contracts first (option 1)");
-      return;
-    }
-
-    if (!this.state.getContract("complianceRules")) {
-      displayError("Please deploy ComplianceRules first (option 13)");
-      console.log("   Run option 13 to deploy ComplianceRules contract");
-      return;
-    }
-
-    if (!this.state.getContract("oracleManager")) {
-      displayError("Please deploy Oracle Management System first (option 31)");
-      console.log("   Run option 31 to deploy Oracle Management System");
-      return;
-    }
+    displaySection("ATTACH PRIVACY & ZK VERIFICATION SYSTEM", "🏗️");
 
     try {
-      console.log("📦 Deploying Privacy & ZK Verification System...");
-      console.log("🎯 Production-Ready ZK Proof System with Full Integration");
-
-      // Deploy ZKVerifierIntegrated.
-      //
-      // testingMode is IMMUTABLE and defaults OFF. In testing mode every
-      // verify* call skips Groth16 and returns true for any non-zero
-      // public signal, so an all-zero proof verifies. This used to be
-      // hardcoded on while the log claimed "Real ZK Verifiers".
-      // Opt in deliberately with ZK_TESTING_MODE=1 when you want to drive
-      // the flow without generating real proofs.
-      const zkTestingMode = process.env.ZK_TESTING_MODE === "1";
+      const had = !!this.state.getContract("privacyManager");
+      const deployer = new ContractDeployer(this.state, this.logger);
+      const { zkVerifier, privacyManager } = await deployer.deployPrivacyPair();
       console.log(
-        zkTestingMode
-          ? "⚠️  Deploying ZKVerifierIntegrated in MOCK mode (ZK_TESTING_MODE=1) - proofs are NOT verified"
-          : "🌍 Deploying ZKVerifierIntegrated (real verification: PLONK whitelist, Groth16 others)...",
+        had
+          ? "✅ Using the privacy pair option 1 deployed"
+          : "✅ Option 1 had not deployed the privacy pair: deployed it now",
       );
-      const ZKVerifierIntegratedFactory = await ethers.getContractFactory(
-        "ZKVerifierIntegrated",
-      );
-      const zkVerifierIntegrated =
-        await ZKVerifierIntegratedFactory.deploy(zkTestingMode);
-      await zkVerifierIntegrated.waitForDeployment();
-      const zkVerifierIntegratedAddr = await zkVerifierIntegrated.getAddress();
-      this.state.setContract("zkVerifierIntegrated", zkVerifierIntegrated);
-      this.state.zkVerifier = zkVerifierIntegrated;
-      this.state.setContract("zkVerifier", zkVerifierIntegrated);
+      const zkAddr = await zkVerifier.getAddress();
+      const pmAddr = await privacyManager.getAddress();
+      console.log(`   🌍 ZKVerifierIntegrated: ${zkAddr}`);
+      console.log(`      testingMode: ${await zkVerifier.testingMode()}`);
+      console.log(`   🕵️ PrivacyManager:       ${pmAddr}`);
       console.log(
-        `✅ ZKVerifierIntegrated deployed: ${zkVerifierIntegratedAddr}`,
+        `      verifier: ${await privacyManager.zkVerifier()}, root version ${await privacyManager.whitelistVersion()}`,
       );
 
-      // Keep the APPLICATION's proof mode in step with the verifier's.
-      // testingMode is immutable, so a real-mode verifier paired with
-      // state.zkMode = 'mock' means every demo action generates a
-      // placeholder proof that Groth16 verification then rejects.
-      this.state.zkMode = zkTestingMode ? "mock" : "real";
-      console.log(
-        `   ZK proof mode: ${this.state.zkMode.toUpperCase()} (matches the deployed verifier)`,
-      );
-      if (!zkTestingMode) {
-        // The proof actions read state.realProofGenerator directly, and
-        // only the mode toggle ever populated it. Deploying straight into
-        // real mode therefore crashed every proof action on a null
-        // generator. Initialise it here, where the mode is decided.
-        try {
-          await this.proofGenerator.initializeRealProofGenerator();
-        } catch (error) {
-          console.log(
-            `   ⚠️  Real proof generator failed to initialise: ${error.message}`,
-          );
-          console.log(
-            "      Proof actions will fail until this is fixed, or redeploy with ZK_TESTING_MODE=1.",
-          );
-        }
+      console.log("\n🔗 ComplianceRules wiring for VSC:");
+      await deployer.wirePrivacyManager();
+
+      try {
+        await this.realGenerator();
         console.log(
-          "   ℹ️  Real mode needs compiled circuits - run `npm run setup:zk` first,",
+          "✅ Real proof generator ready (PLONK whitelist, Groth16 others)",
         );
+      } catch (error) {
         console.log(
-          "      or set ZK_TESTING_MODE=1 to drive the flow with mock proofs.",
+          `   ⚠️  Real proof generator failed to initialise: ${error.message}`,
         );
       }
-
-      // PrivacyManager refuses a testingMode verifier (Task 3.3): mock
-      // proofs can never bind a wallet, so mock mode deploys none.
-      let privacyManagerAddr = "not deployed (MOCK mode verifier)";
-      if (zkTestingMode) {
-        console.log(
-          "⚠️  PrivacyManager not deployed: it refuses a testingMode verifier.",
-        );
-      } else {
-        console.log("🕵️ Deploying PrivacyManager...");
-        const PrivacyManagerFactory =
-          await ethers.getContractFactory("PrivacyManager");
-        const privacyManager = await PrivacyManagerFactory.deploy(
-          zkVerifierIntegratedAddr,
-        );
-        await privacyManager.waitForDeployment();
-        privacyManagerAddr = await privacyManager.getAddress();
-        this.state.setContract("privacyManager", privacyManager);
-        console.log(`✅ PrivacyManager deployed: ${privacyManagerAddr}`);
-        console.log(
-          "   📜 Whitelist root registry: the owner publishes now, ops (listOperator) after the handover; option 42 -> 1 publishes the root and binds the wallet",
-        );
-      }
-
-      displaySuccess(
-        "PRODUCTION-READY PRIVACY & ZK VERIFICATION SYSTEM DEPLOYED!",
-      );
-      console.log("📋 Complete ZK Proof System:");
       console.log(
-        `   🌍 ZKVerifierIntegrated (Primary): ${zkVerifierIntegratedAddr}`,
+        "   ℹ️  Proofs need compiled circuits: run `npm run setup:zk` once (option 41b checks them)",
       );
-      console.log(`   🕵️ PrivacyManager: ${privacyManagerAddr}`);
+
+      displaySuccess("PRIVACY & ZK VERIFICATION SYSTEM ATTACHED");
       console.log("\n🔐 ZK Proof Capabilities:");
-      console.log("   ✅ Whitelist Membership Proofs (Anonymous compliance)");
+      console.log(
+        "   ✅ Whitelist Membership Proofs (bind a wallet on VSC, option 42 -> 1)",
+      );
       console.log("   ✅ Blacklist Non-Membership Proofs (Privacy-preserving)");
       console.log("   ✅ Jurisdiction Eligibility Proofs (Location privacy)");
       console.log("   ✅ Accreditation Status Proofs (Credential privacy)");
       console.log(
         "   ✅ Compliance Aggregation Proofs (Comprehensive privacy)",
       );
-      console.log("\n🚀 System Status: READY FOR PRODUCTION USE!");
-      console.log(
-        "💡 Ready for privacy-preserving compliance validation with REAL ZK proofs!",
-      );
     } catch (error) {
-      displayError(`Privacy system deployment failed: ${error.message}`);
+      displayError(`Privacy system attach failed: ${error.message}`);
     }
   }
 
-  /** Option 41a: Toggle ZK Mode */
-  async toggleZKMode() {
-    displaySection("TOGGLE ZK MODE", "🔄");
-
-    const currentMode = this.state.zkMode;
-    const newMode = currentMode === "mock" ? "real" : "mock";
-
-    console.log(`\n📊 Current Mode: ${currentMode.toUpperCase()}`);
-    console.log(`🎯 Switching to: ${newMode.toUpperCase()}`);
-
-    if (newMode === "real") {
-      console.log("\n⚠️  SWITCHING TO REAL MODE");
-      console.log("   🔐 Will use production-grade Groth16 ZK proofs");
-      console.log("   ⏱️  Proof generation time: 60ms - 50 seconds per proof");
-      console.log("   💰 Gas cost: ~140k-145k per verification");
-      console.log("   ✅ Real cryptographic security");
-      console.log("");
-
-      const confirm = await this.promptUser(
-        "Confirm switch to REAL mode? (yes/no): ",
-      );
-      if (confirm.toLowerCase() !== "yes") {
-        console.log("❌ Mode switch cancelled");
-        return;
-      }
-
-      try {
-        await this.proofGenerator.initializeRealProofGenerator();
-        this.state.zkMode = "real";
-        displaySuccess("Successfully switched to REAL mode");
-        console.log("🔐 RealProofGenerator is ready");
-        console.log(
-          "💡 All proof submissions will now use real ZK cryptography",
-        );
-      } catch (error) {
-        console.error(
-          "❌ Failed to initialize RealProofGenerator:",
-          error.message,
-        );
-        console.log("💡 Staying in MOCK mode");
-        return;
-      }
-    } else {
-      console.log("\n🔧 SWITCHING TO MOCK MODE");
-      console.log("   ⚡ Fast proof generation (instant)");
-      console.log("   🧪 For demonstration and testing");
-      console.log("   ⚠️  Not cryptographically secure");
-      console.log("");
-
-      this.state.zkMode = "mock";
-      displaySuccess("Successfully switched to MOCK mode");
-      console.log("💡 All proof submissions will now use mock proofs");
-    }
-  }
-
-  /** Option 41b: View ZK Mode Status */
+  /** Option 41b: ZK status (real proofs only; folds the old 41c notes). */
   async viewZKModeStatus() {
-    displaySection("ZK MODE STATUS & PERFORMANCE", "📊");
+    displaySection("ZK STATUS", "📊");
 
-    const modeIcon = this.state.zkMode === "real" ? "🔐" : "🔧";
-    const modeName = this.state.zkMode.toUpperCase();
-
-    console.log(`\n${modeIcon} Current Mode: ${modeName}`);
-    console.log("");
-
-    if (this.state.zkMode === "real") {
-      console.log("🔐 REAL MODE - Production ZK Proofs");
-      console.log("   ✅ Cryptographically secure Groth16 proofs");
-      console.log("   ✅ Real circom 2.2.2 circuit compilation");
-      console.log("   ✅ Production-ready verification");
-      console.log("");
-      console.log("⏱️  Performance Characteristics:");
-      console.log("   • Whitelist proof: ~50 seconds");
-      console.log("   • Blacklist proof: ~50 seconds");
-      console.log("   • Jurisdiction proof: ~60ms");
-      console.log("   • Accreditation proof: ~70ms");
-      console.log("   • Compliance proof: ~233ms");
-      console.log("");
-      console.log("💰 Gas Costs (estimated):");
-      console.log("   • First verification: ~143k-145k gas");
-      console.log("   • Cached verification: ~37k gas (74% savings)");
-      console.log("   • Batch verification: ~21k gas per proof (85% savings)");
-    } else {
-      console.log("🔧 MOCK MODE - Fast Demonstration");
-      console.log("   ⚡ Instant proof generation");
-      console.log("   🧪 For testing and demonstration");
-      console.log("   ⚠️  NOT cryptographically secure");
-      console.log("   ⚠️  Proofs are randomly generated");
-      console.log("");
-      console.log("💡 Switch to REAL mode (option 41a) for:");
-      console.log("   • Production deployment");
-      console.log("   • Security audits");
-      console.log("   • Real cryptographic verification");
+    const zkVerifier = this.state.getContract("zkVerifierIntegrated");
+    const pm = this.state.getContract("privacyManager");
+    if (!zkVerifier) {
+      displayError("No ZK verifier: run option 1 (or 41)");
+      return;
+    }
+    console.log(`\n🌍 ZKVerifierIntegrated: ${await zkVerifier.getAddress()}`);
+    console.log(
+      `   testingMode: ${await zkVerifier.testingMode()} (immutable; the demo never deploys true)`,
+    );
+    console.log(
+      `   proof cache expiry: ${await zkVerifier.proofCacheExpiry()} s (a repeated proof is served from the cache)`,
+    );
+    if (pm) {
+      console.log(`🕵️ PrivacyManager: ${await pm.getAddress()}`);
+      console.log(
+        `   whitelist root version ${await pm.whitelistVersion()}, list operator ${await pm.listOperator()}`,
+      );
     }
 
-    // Display proof generation statistics if available
+    // Circuits built by `npm run setup:zk`: wasm, zkey and vkey each.
+    const {
+      RealProofGenerator,
+    } = require("../../scripts/generate-real-proofs");
+    const files = new RealProofGenerator();
+    console.log("\n🔐 Circuits (build/circuits):");
+    for (const [name, system] of [
+      ["whitelist_membership", "PLONK"],
+      ["blacklist_membership", "Groth16"],
+      ["jurisdiction_proof", "Groth16"],
+      ["accreditation_proof", "Groth16"],
+      ["compliance_aggregation", "Groth16"],
+    ]) {
+      const ok = files.verifyCircuitFiles(name);
+      console.log(
+        `   ${ok ? "✅" : "❌"} ${name} (${system})${ok ? "" : ": run npm run setup:zk"}`,
+      );
+    }
+    console.log(
+      `\n⚙️  Proof generator: ${this.state.realProofGenerator ? "ready" : "not initialised (option 41, or the first proof action, does it)"}`,
+    );
+    console.log(
+      "   Batch verification: verifyBatchWhitelistMembership / verifyBatchProofs on the verifier",
+    );
+
     if (this.state.proofGenerationTimes.size > 0) {
       console.log("\n📈 Proof Generation Statistics:");
       for (const [
@@ -272,7 +166,6 @@ class PrivacyModule {
       }
     }
 
-    // Display gas cost statistics if available
     if (this.state.gasTracker.size > 0) {
       console.log("\n💰 Gas Cost Statistics:");
       let totalGas = 0n;
@@ -282,150 +175,6 @@ class PrivacyModule {
       }
       console.log(`   • Total: ${totalGas.toLocaleString()} gas`);
     }
-
-    console.log("");
-    console.log("💡 Tip: Use option 41a to toggle between MOCK and REAL modes");
-  }
-
-  /** Option 41c: Demo Phase 5: Batch Verification */
-  async demoBatchVerification() {
-    displaySection("PHASE 5: BATCH VERIFICATION & GAS SAVINGS DEMO", "🎉");
-    console.log("🚀 Demonstrating Production-Ready ZK Circuit Improvements");
-    console.log("");
-
-    const zkVerifierIntegrated = this.state.getContract("zkVerifierIntegrated");
-    if (!zkVerifierIntegrated) {
-      displayError(
-        "Please deploy Privacy & ZK Verification System first (option 41)",
-      );
-      return;
-    }
-
-    try {
-      console.log("📋 PHASE 5 ACHIEVEMENTS:");
-      console.log("   ✅ All 5 ZK circuits working with real proofs");
-      console.log("   ✅ Batch verification implemented (24% gas savings)");
-      console.log("   ✅ Proof caching optimized (72%+ gas savings)");
-      console.log("   ✅ 13/13 tests passing (100% success rate)");
-      console.log("");
-
-      // Demo 1: Show all 5 circuits working
-      console.log("🔐 DEMO 1: ALL 5 CIRCUITS WORKING");
-      console.log("-".repeat(70));
-      console.log("Generating real ZK proofs for all 5 circuit types...");
-      console.log("");
-
-      if (this.state.zkMode === "mock") {
-        console.log(
-          "⚠️  Currently in MOCK mode. Switch to REAL mode (option 41a) to see actual proof generation.",
-        );
-        console.log("   For now, showing what REAL mode would demonstrate:");
-        console.log("");
-      }
-
-      const circuitInfo = [
-        {
-          name: "Whitelist Membership",
-          time: "~50 seconds",
-          gas: "~147k",
-          status: "✅ WORKING",
-        },
-        {
-          name: "Blacklist Non-Membership",
-          time: "~50 seconds",
-          gas: "~63k",
-          status: "✅ WORKING",
-        },
-        {
-          name: "Jurisdiction Eligibility",
-          time: "~76ms",
-          gas: "~130k",
-          status: "✅ WORKING",
-        },
-        {
-          name: "Accreditation Status",
-          time: "~92ms",
-          gas: "~64k",
-          status: "✅ WORKING",
-        },
-        {
-          name: "Compliance Aggregation",
-          time: "~82ms",
-          gas: "~130k",
-          status: "✅ WORKING",
-        },
-      ];
-
-      console.log("📊 CIRCUIT PERFORMANCE:");
-      console.log("");
-      circuitInfo.forEach((circuit, index) => {
-        console.log(`   ${index + 1}. ${circuit.name}`);
-        console.log(`      ⏱️  Generation Time: ${circuit.time}`);
-        console.log(`      ⛽ Gas Cost: ${circuit.gas}`);
-        console.log(`      ${circuit.status}`);
-        console.log("");
-      });
-
-      // Demo 2: Batch Verification
-      console.log("🚀 DEMO 2: BATCH VERIFICATION");
-      console.log("-".repeat(70));
-      console.log("Testing new batch verification function...");
-      console.log("");
-
-      console.log("📊 BATCH VERIFICATION BENEFITS:");
-      console.log("   • Individual verification: ~96k gas per proof");
-      console.log("   • Batch verification (3 proofs): ~72k gas per proof");
-      console.log("   • Gas savings: 24% reduction");
-      console.log("   • Automatic proof caching for each proof");
-      console.log("");
-      console.log(
-        "💡 Switch to REAL mode (option 41a) to see live batch verification!",
-      );
-      console.log("");
-
-      // Demo 3: Gas Savings from Caching
-      console.log("💰 DEMO 3: PROOF CACHING GAS SAVINGS");
-      console.log("-".repeat(70));
-      console.log("Testing proof caching optimization...");
-      console.log("");
-
-      console.log("📊 CACHING PERFORMANCE:");
-      console.log("   • First verification: ~147k gas");
-      console.log("   • Cached verification: ~40k gas");
-      console.log("   • Gas savings: 72.61%");
-      console.log("   • Cache duration: 24 hours");
-      console.log("");
-      console.log(
-        "💡 Switch to REAL mode (option 41a) to see live caching demo!",
-      );
-      console.log("");
-
-      // Summary
-      console.log("📈 PHASE 5 SUMMARY");
-      console.log("=".repeat(70));
-      console.log("✅ Production-Ready Status:");
-      console.log("   • All 5 circuits: WORKING (100%)");
-      console.log("   • Test pass rate: 13/13 (100%)");
-      console.log("   • Gas optimization: 72%+ savings (caching)");
-      console.log("   • Batch verification: 24% additional savings");
-      console.log("   • Zero regressions detected");
-      console.log("");
-      console.log("🎯 Key Improvements:");
-      console.log(
-        "   1. Fixed jurisdiction circuit (16-bit support for ISO codes)",
-      );
-      console.log(
-        "   2. Fixed accreditation circuit (32-bit support for dollar amounts)",
-      );
-      console.log("   3. Implemented batch verification function");
-      console.log("   4. Optimized proof caching (24-hour expiry)");
-      console.log("   5. Comprehensive integration testing");
-      console.log("");
-      console.log("🚀 Ready for mainnet deployment!");
-      console.log("");
-    } catch (error) {
-      displayError(`Demo error: ${error.message}`);
-    }
   }
 
   /** Option 42: Submit Private Compliance Proofs */
@@ -434,9 +183,7 @@ class PrivacyModule {
 
     const zkVerifier = this.state.getContract("zkVerifier");
     if (!zkVerifier) {
-      displayError(
-        "Please deploy Privacy & ZK Verification System first (option 41)",
-      );
+      displayError("No ZK verifier: run option 1 (or 41)");
       return;
     }
 
@@ -1366,9 +1113,7 @@ class PrivacyModule {
 
     const zkVerifierIntegrated = this.state.getContract("zkVerifierIntegrated");
     if (!zkVerifierIntegrated) {
-      displayError(
-        "Please deploy Privacy & ZK Verification System first (option 41)",
-      );
+      displayError("No ZK verifier: run option 1 (or 41)");
       return;
     }
 
@@ -1440,47 +1185,56 @@ class PrivacyModule {
     }
   }
 
+  /**
+   * The latest ProofVerified(proofType, user) event the verifier emitted with
+   * result true, or null. Options 44 and 45 read the proofs option 42
+   * submitted (3 and 4) the way option 43 does for the whitelist.
+   */
+  async latestVerifiedProof(zkVerifierIntegrated, proofType, user) {
+    const events = await zkVerifierIntegrated.queryFilter(
+      zkVerifierIntegrated.filters.ProofVerified(proofType, user),
+    );
+    const ok = events.filter((e) => e.args.result);
+    console.log(
+      `   📊 ${events.length} ${proofType} proof event(s) for ${user}, ${ok.length} verified`,
+    );
+    return ok.length ? ok[ok.length - 1] : null;
+  }
+
   /** Option 44: Verify Private Jurisdiction Eligibility */
   async verifyJurisdiction() {
     displaySection("VERIFY PRIVATE JURISDICTION ELIGIBILITY", "🌍");
 
     const zkVerifierIntegrated = this.state.getContract("zkVerifierIntegrated");
     if (!zkVerifierIntegrated) {
-      displayError(
-        "Please deploy Privacy & ZK Verification System first (option 41)",
-      );
+      displayError("No ZK verifier: run option 1 (or 41)");
       return;
     }
 
     try {
       console.log("🔍 Checking private jurisdiction eligibility...");
-
-      const allowedJurisdictionsMask = 0b11110000; // US, EU, UK, Canada allowed
-      const mockProof = this.createMockGroth16Proof();
-
-      const isValid = await zkVerifierIntegrated.verifyJurisdictionProof(
-        mockProof.a,
-        mockProof.b,
-        mockProof.c,
-        [allowedJurisdictionsMask],
+      const user = this.state.signers[0].address;
+      const event = await this.latestVerifiedProof(
+        zkVerifierIntegrated,
+        "jurisdiction",
+        user,
       );
 
-      if (isValid) {
+      if (event) {
         displaySuccess("PRIVATE JURISDICTION ELIGIBILITY VERIFIED!");
         console.log(
           "   🌍 User is eligible to participate from their jurisdiction",
         );
         console.log("   🕵️ Actual location remains private");
         console.log("   ⚖️ Complies with regulatory requirements");
-        console.log(
-          `   📋 Allowed jurisdictions mask: ${allowedJurisdictionsMask.toString(2)}`,
-        );
+        console.log(`   🔗 Transaction: ${event.transactionHash}`);
+        console.log(`   🧱 Block: ${event.blockNumber}`);
       } else {
         displayError("JURISDICTION ELIGIBILITY NOT VERIFIED");
         console.log("   Possible reasons:");
+        console.log("   • No jurisdiction proof submitted (option 42 -> 3)");
         console.log("   • User not in allowed jurisdiction");
         console.log("   • Invalid jurisdiction proof");
-        console.log("   • Regulatory restrictions apply");
       }
     } catch (error) {
       displayError(
@@ -1495,57 +1249,32 @@ class PrivacyModule {
 
     const zkVerifierIntegrated = this.state.getContract("zkVerifierIntegrated");
     if (!zkVerifierIntegrated) {
-      displayError(
-        "Please deploy Privacy & ZK Verification System first (option 41)",
-      );
+      displayError("No ZK verifier: run option 1 (or 41)");
       return;
     }
 
     try {
       console.log("🔍 Checking private accreditation status...");
-
-      const accreditationLevels = [
-        { level: 100000, name: "Retail Investor ($100K+)" },
-        { level: 1000000, name: "Accredited Investor ($1M+)" },
-        { level: 5000000, name: "Qualified Purchaser ($5M+)" },
-        { level: 25000000, name: "Institutional Investor ($25M+)" },
-      ];
-
-      console.log("\n📊 Available Accreditation Levels:");
-      accreditationLevels.forEach((level, index) => {
-        console.log(`   ${index + 1}. ${level.name}`);
-      });
-
-      const choice = await this.promptUser(
-        "\nSelect minimum accreditation level to verify (1-4): ",
-      );
-      const selectedLevel =
-        accreditationLevels[parseInt(choice) - 1] || accreditationLevels[0];
-      const mockProof = this.createMockGroth16Proof();
-
-      const isValid = await zkVerifierIntegrated.verifyAccreditationProof(
-        mockProof.a,
-        mockProof.b,
-        mockProof.c,
-        [selectedLevel.level],
+      const user = this.state.signers[0].address;
+      const event = await this.latestVerifiedProof(
+        zkVerifierIntegrated,
+        "accreditation",
+        user,
       );
 
-      if (isValid) {
+      if (event) {
         displaySuccess("PRIVATE ACCREDITATION STATUS VERIFIED!");
-        console.log(
-          `   💰 User meets minimum requirement: ${selectedLevel.name}`,
-        );
+        console.log("   💰 User meets the minimum the proof was made for");
         console.log("   🕵️ Actual net worth remains private");
         console.log("   📊 Eligible for corresponding investment products");
-        console.log(
-          `   🔢 Minimum threshold: $${selectedLevel.level.toLocaleString()}`,
-        );
+        console.log(`   🔗 Transaction: ${event.transactionHash}`);
+        console.log(`   🧱 Block: ${event.blockNumber}`);
       } else {
         displayError("ACCREDITATION STATUS NOT VERIFIED");
         console.log("   Possible reasons:");
-        console.log(`   • User does not meet ${selectedLevel.name} threshold`);
+        console.log("   • No accreditation proof submitted (option 42 -> 4)");
+        console.log("   • User does not meet the threshold");
         console.log("   • Invalid accreditation proof");
-        console.log("   • Documentation insufficient");
       }
     } catch (error) {
       displayError(
@@ -1561,9 +1290,7 @@ class PrivacyModule {
     const zkVerifierIntegrated = this.state.getContract("zkVerifierIntegrated");
 
     if (!zkVerifierIntegrated) {
-      displayError(
-        "Please deploy Privacy & ZK Verification System first (option 41)",
-      );
+      displayError("No ZK verifier: run option 1 (or 41)");
       return;
     }
 
@@ -1741,9 +1468,7 @@ class PrivacyModule {
 
     const zkVerifier = this.state.getContract("zkVerifier");
     if (!zkVerifier) {
-      displayError(
-        "Please deploy Privacy & ZK Verification System first (option 41)",
-      );
+      displayError("No ZK verifier: run option 1 (or 41)");
       return;
     }
 
@@ -1752,10 +1477,7 @@ class PrivacyModule {
       console.log("=".repeat(60));
 
       // Mode information
-      console.log(`\n🔐 Current Mode: ${this.state.zkMode.toUpperCase()}`);
-      console.log(
-        `   ${this.state.zkMode === "real" ? "✅ Production cryptography" : "🧪 Mock proofs for testing"}`,
-      );
+      console.log("\n🔐 Proofs: REAL (PLONK whitelist, Groth16 others)");
 
       // Proof generation statistics
       if (this.state.proofGenerationTimes.size > 0) {
@@ -1801,9 +1523,7 @@ class PrivacyModule {
 
     const zkVerifier = this.state.getContract("zkVerifier");
     if (!zkVerifier) {
-      displayError(
-        "Please deploy Privacy & ZK Verification System first (option 41)",
-      );
+      displayError("No ZK verifier: run option 1 (or 41)");
       return;
     }
 
@@ -1867,9 +1587,7 @@ class PrivacyModule {
     }
 
     if (!zkVerifier) {
-      displayError(
-        "Please deploy Privacy & ZK Verification System first (option 41)",
-      );
+      displayError("No ZK verifier: run option 1 (or 41)");
       return;
     }
 
@@ -1917,54 +1635,22 @@ class PrivacyModule {
 
   // ==================== HELPER METHODS ====================
 
-  createMockGroth16Proof() {
-    // Create a mock Groth16 proof for testing
-    // Generate random uint256 values (not bytes)
-    const { ethers } = require("hardhat");
-
-    // Helper to generate a random uint256
-    const randomUint256 = () => {
-      const bytes = ethers.randomBytes(32);
-      return ethers.toBigInt(bytes);
-    };
-
-    return {
-      a: [randomUint256(), randomUint256()],
-      b: [
-        [randomUint256(), randomUint256()],
-        [randomUint256(), randomUint256()],
-      ],
-      c: [randomUint256(), randomUint256()],
-    };
-  }
-
   async submitWhitelistMembershipProof() {
     console.log("\n📋 SUBMIT WHITELIST MEMBERSHIP PROOF");
     console.log("-".repeat(40));
     console.log(
-      `🎯 Anonymous compliance verification using ${this.state.zkMode.toUpperCase()} ZK proofs`,
+      "🎯 Anonymous compliance verification with a real PLONK proof, bound to the wallet on VSC",
     );
 
-    const zkVerifierIntegrated = this.state.getContract("zkVerifierIntegrated");
-    if (!zkVerifierIntegrated) {
-      displayError(
-        "Please deploy Privacy & ZK Verification System first (option 41)",
-      );
+    const privacyManager = this.state.getContract("privacyManager");
+    if (!privacyManager) {
+      displayError("No PrivacyManager: run option 1 (or 41) first");
       return;
     }
 
     try {
-      const userAddress = this.state.signers[0].address;
-      // 31 bytes: a 32-byte root is >= the field order ~80% of the time and the
-      // wrapper then refuses it (R-3R-7), even in testingMode.
-      const merkleRoot = ethers.randomBytes(31);
-
-      console.log(
-        `\n🔐 Generating ${this.state.zkMode.toUpperCase()} whitelist proof...`,
-      );
-      if (this.state.zkMode === "real") {
-        console.log("⏳ This may take ~50 seconds for real ZK proof...");
-      }
+      await this.realGenerator();
+      console.log("\n🔐 Generating a real whitelist proof (PLONK)...");
 
       let proof; // PLONK: 24 words
       let publicSignals; // [nullifier, merkleRoot, walletBinding]
@@ -1974,253 +1660,180 @@ class PrivacyModule {
       // The wallet that proves and submits; the binding names it.
       let proofUser = this.state.signers[0];
 
-      if (this.state.zkMode === "real") {
-        // REAL MODE: Generate actual ZK proof with security options
-        console.log("\n🔐 REAL MODE: Generating production ZK proof...");
-        console.log("⏳ This may take ~50 seconds for whitelist proof...");
+      // Ask user for security mode
+      console.log("\n🛡️  SECURITY MODE OPTIONS:");
+      console.log("1. Demo mode (simplified - lists demo wallets 0-2)");
+      console.log("2. Custom input mode (choose the listed wallets)");
+      console.log(
+        "3. Secure mode (4-layer security: Registry + Signature + KYC + Nullifier) ⭐ RECOMMENDED",
+      );
+      const securityChoice = await this.promptUser("Select option (1-3): ");
 
-        // Ask user for security mode
-        console.log("\n🛡️  SECURITY MODE OPTIONS:");
-        console.log("1. Demo mode (simplified - lists demo wallets 0-2)");
-        console.log("2. Custom input mode (choose the listed wallets)");
-        console.log(
-          "3. Secure mode (4-layer security: Registry + Signature + KYC + Nullifier) ⭐ RECOMMENDED",
+      // D30 onboarding: every listed user hands the operator the commitment
+      // Poseidon(identity, secret) of its own identity (its OnchainID
+      // address) and its own secret (DemoState.zkSecrets); nobody else
+      // learns the secret. The root and the proof come from the same
+      // library functions as scripts/zk/build-whitelist-root.js and
+      // scripts/zk/prove-whitelist.js.
+      const signers = this.state.signers;
+      // Blank input keeps the default list ([]); an empty, non-numeric or
+      // unknown entry refuses the whole list (null), never wallet 0.
+      const pickWallets = async (question) => {
+        const input = (await this.promptUser(question)).trim();
+        if (!input) return [];
+        const parts = input.split(",").map((x) => x.trim());
+        const bad = parts.find((x) => !/^\d+$/.test(x) || !signers[Number(x)]);
+        if (bad !== undefined) {
+          console.log(
+            `❌ "${bad}" is not a wallet index (0-${signers.length - 1}); proof generation cancelled.`,
+          );
+          return null;
+        }
+        return [...new Set(parts.map(Number))].map((i) => signers[i]);
+      };
+      let listed = signers.slice(0, 3);
+
+      if (securityChoice === "3") {
+        // 🛡️ SECURE MODE: 4-Layer Security
+        console.log("\n🛡️  SECURE MODE ACTIVATED");
+        console.log("=".repeat(60));
+        console.log("Implementing 4-Layer Security:");
+        console.log("  1️⃣  On-Chain Identity Registry Check");
+        console.log("  2️⃣  Cryptographic Signature Verification");
+        console.log("  3️⃣  KYC/AML Status Verification");
+        console.log("  4️⃣  Nullifier Tracking (automatic)");
+        console.log("=".repeat(60));
+        console.log("");
+
+        // LAYER 1: Check On-Chain Identity Registry
+        console.log("🔍 LAYER 1: Checking On-Chain Identity Registry...");
+        proofUser = signers[1] || signers[0];
+        console.log(`   📍 User Address: ${proofUser.address}`);
+        const { identity, onchainID } = await demoIdentity(
+          this.state,
+          proofUser.address,
         );
-        const securityChoice = await this.promptUser("Select option (1-3): ");
-
-        // D30 onboarding: every listed user hands the operator the commitment
-        // Poseidon(identity, secret) of its own identity (its OnchainID
-        // address) and its own secret (DemoState.zkSecrets); nobody else
-        // learns the secret. The root and the proof come from the same
-        // library functions as scripts/zk/build-whitelist-root.js and
-        // scripts/zk/prove-whitelist.js.
-        const signers = this.state.signers;
-        // Blank input keeps the default list ([]); an empty, non-numeric or
-        // unknown entry refuses the whole list (null), never wallet 0.
-        const pickWallets = async (question) => {
-          const input = (await this.promptUser(question)).trim();
-          if (!input) return [];
-          const parts = input.split(",").map((x) => x.trim());
-          const bad = parts.find(
-            (x) => !/^\d+$/.test(x) || !signers[Number(x)],
-          );
-          if (bad !== undefined) {
-            console.log(
-              `❌ "${bad}" is not a wallet index (0-${signers.length - 1}); proof generation cancelled.`,
-            );
-            return null;
-          }
-          return [...new Set(parts.map(Number))].map((i) => signers[i]);
-        };
-        let listed = signers.slice(0, 3);
-
-        if (securityChoice === "3") {
-          // 🛡️ SECURE MODE: 4-Layer Security
-          console.log("\n🛡️  SECURE MODE ACTIVATED");
-          console.log("=".repeat(60));
-          console.log("Implementing 4-Layer Security:");
-          console.log("  1️⃣  On-Chain Identity Registry Check");
-          console.log("  2️⃣  Cryptographic Signature Verification");
-          console.log("  3️⃣  KYC/AML Status Verification");
-          console.log("  4️⃣  Nullifier Tracking (automatic)");
-          console.log("=".repeat(60));
-          console.log("");
-
-          // LAYER 1: Check On-Chain Identity Registry
-          console.log("🔍 LAYER 1: Checking On-Chain Identity Registry...");
-          proofUser = signers[1] || signers[0];
-          console.log(`   📍 User Address: ${proofUser.address}`);
-          const { identity, onchainID } = await demoIdentity(
-            this.state,
-            proofUser.address,
-          );
-          if (onchainID) {
-            console.log(`   ✅ OnchainID Found: ${onchainID}`);
-          } else {
-            console.log(
-              "   ⚠️  No identity registered. Using the wallet address as a simulated identity...",
-            );
-          }
-          console.log(`   🔢 Identity (field element): ${identity}`);
-
-          // LAYER 2: Platform Owner Signature
-          console.log("\n🔏 LAYER 2: Platform Owner Signature Verification...");
+        if (onchainID) {
+          console.log(`   ✅ OnchainID Found: ${onchainID}`);
+        } else {
           console.log(
-            "   🔒 SECURITY: Whitelist proofs REQUIRE platform owner authorization",
+            "   ⚠️  No identity registered. Using the wallet address as a simulated identity...",
           );
-          console.log("   ✅ Layer 2 ready (signature verification)");
+        }
+        console.log(`   🔢 Identity (field element): ${identity}`);
 
-          // LAYER 3: KYC/AML Verification
-          console.log("\n🎫 LAYER 3: KYC/AML Status Verification...");
-          console.log("   ℹ️  Checking KYC/AML claims...");
-          console.log("   ✅ Layer 3 ready");
+        // LAYER 2: Platform Owner Signature
+        console.log("\n🔏 LAYER 2: Platform Owner Signature Verification...");
+        console.log(
+          "   🔒 SECURITY: Whitelist proofs REQUIRE platform owner authorization",
+        );
+        console.log("   ✅ Layer 2 ready (signature verification)");
 
-          // LAYER 4: Nullifier Tracking
-          console.log("\n🔐 LAYER 4: Nullifier Tracking...");
-          console.log(
-            "   ℹ️  Nullifier will be automatically tracked on-chain",
-          );
-          console.log("   ✅ Layer 4 ready (handled by smart contract)");
+        // LAYER 3: KYC/AML Verification
+        console.log("\n🎫 LAYER 3: KYC/AML Status Verification...");
+        console.log("   ℹ️  Checking KYC/AML claims...");
+        console.log("   ✅ Layer 3 ready");
 
-          // Setup whitelist
-          console.log("\n📋 Setting up whitelist...");
-          const whitelistChoice = await this.promptUser(
-            "Use default whitelist? (yes/no): ",
-          );
-          if (
-            whitelistChoice.toLowerCase() !== "yes" &&
-            whitelistChoice.trim()
-          ) {
-            const picked = await pickWallets(
-              "Enter the listed wallet indices (comma-separated, e.g., 0,1,2): ",
-            );
-            if (picked === null) return;
-            if (picked.length) listed = picked;
-          }
-          if (!listed.includes(proofUser)) {
-            console.log(`   ⚠️  Adding your identity to whitelist...`);
-            listed.push(proofUser);
-          }
+        // LAYER 4: Nullifier Tracking
+        console.log("\n🔐 LAYER 4: Nullifier Tracking...");
+        console.log("   ℹ️  Nullifier will be automatically tracked on-chain");
+        console.log("   ✅ Layer 4 ready (handled by smart contract)");
 
-          console.log("\n✅ ALL 4 SECURITY LAYERS PASSED!");
-          console.log("   Proceeding to ZK proof generation...\n");
-        } else if (securityChoice === "2") {
-          // Custom input mode
-          console.log("\n📋 CUSTOM INPUT MODE");
-          console.log(
-            "Choose which demo wallets the operator lists; each one is onboarded with its own identity and secret.",
-          );
-          console.log(
-            "Note: Your wallet (0) MUST be in the whitelist to generate a valid proof!\n",
-          );
-          const custom = await pickWallets(
+        // Setup whitelist
+        console.log("\n📋 Setting up whitelist...");
+        const whitelistChoice = await this.promptUser(
+          "Use default whitelist? (yes/no): ",
+        );
+        if (whitelistChoice.toLowerCase() !== "yes" && whitelistChoice.trim()) {
+          const picked = await pickWallets(
             "Enter the listed wallet indices (comma-separated, e.g., 0,1,2): ",
           );
-          if (custom === null) return;
-          if (custom.length) listed = custom;
+          if (picked === null) return;
+          if (picked.length) listed = picked;
+        }
+        if (!listed.includes(proofUser)) {
+          console.log(`   ⚠️  Adding your identity to whitelist...`);
+          listed.push(proofUser);
+        }
 
-          // Verify the user is in the whitelist
-          const isInWhitelist = listed.includes(proofUser);
-          if (!isInWhitelist) {
-            console.log(
-              "\n⚠️  WARNING: Your identity is NOT in the whitelist!",
-            );
-            const continueAnyway = await this.promptUser(
-              "Continue anyway? (yes/no): ",
-            );
-            if (continueAnyway.toLowerCase() !== "yes") {
-              console.log("❌ Proof generation cancelled.");
-              return;
-            }
+        console.log("\n✅ ALL 4 SECURITY LAYERS PASSED!");
+        console.log("   Proceeding to ZK proof generation...\n");
+      } else if (securityChoice === "2") {
+        // Custom input mode
+        console.log("\n📋 CUSTOM INPUT MODE");
+        console.log(
+          "Choose which demo wallets the operator lists; each one is onboarded with its own identity and secret.",
+        );
+        console.log(
+          "Note: Your wallet (0) MUST be in the whitelist to generate a valid proof!\n",
+        );
+        const custom = await pickWallets(
+          "Enter the listed wallet indices (comma-separated, e.g., 0,1,2): ",
+        );
+        if (custom === null) return;
+        if (custom.length) listed = custom;
+
+        // Verify the user is in the whitelist
+        const isInWhitelist = listed.includes(proofUser);
+        if (!isInWhitelist) {
+          console.log("\n⚠️  WARNING: Your identity is NOT in the whitelist!");
+          const continueAnyway = await this.promptUser(
+            "Continue anyway? (yes/no): ",
+          );
+          if (continueAnyway.toLowerCase() !== "yes") {
+            console.log("❌ Proof generation cancelled.");
+            return;
           }
-          console.log(
-            `   ✅ Identity in whitelist: ${isInWhitelist ? "YES" : "NO"}`,
-          );
-        } else {
-          console.log("\n📊 Using demo values: wallets 0-2 are listed");
-        }
-
-        const { users, rootFile } = await demoWhitelist(this.state, listed);
-        console.log("\n📊 PROOF PARAMETERS:");
-        console.log(`   👤 Prover wallet: ${proofUser.address}`);
-        for (const u of users) {
-          console.log(
-            `   📋 ${u.wallet}: identity ${u.onchainID || `${u.wallet} (simulated)`}`,
-          );
         }
         console.log(
-          `   🔏 Whitelist tree: ${rootFile.count} commitments Poseidon(identity, secret), root ${rootFile.root.slice(0, 18)}…`,
-        );
-
-        const startTime = Date.now();
-        // Refuses before proving when the user's commitment is not listed.
-        const calldata = await proveForDemoUser(
-          this.state,
-          proofUser,
-          rootFile,
-        );
-        generationTime = Date.now() - startTime;
-
-        proof = calldata.proof;
-        publicSignals = calldata.signals;
-        finalNullifierHash = publicSignals[0];
-        console.log(
-          `✅ Real proof generated in ${generationTime}ms (${(generationTime / 1000).toFixed(2)}s)`,
+          `   ✅ Identity in whitelist: ${isInWhitelist ? "YES" : "NO"}`,
         );
       } else {
-        // MOCK MODE: Use mock proof
-        console.log("\n🔧 MOCK MODE: Using fast mock proof...");
-        proof = Array.from({ length: 24 }, () =>
-          ethers.toBigInt(ethers.randomBytes(32)),
-        );
-        finalNullifierHash = Math.floor(Math.random() * 1000000) + 1;
-        publicSignals = [
-          finalNullifierHash,
-          ethers.toBigInt(merkleRoot),
-          BigInt(userAddress),
-        ];
-        generationTime = 1;
+        console.log("\n📊 Using demo values: wallets 0-2 are listed");
       }
+
+      const { users, rootFile } = await demoWhitelist(this.state, listed);
+      console.log("\n📊 PROOF PARAMETERS:");
+      console.log(`   👤 Prover wallet: ${proofUser.address}`);
+      for (const u of users) {
+        console.log(
+          `   📋 ${u.wallet}: identity ${u.onchainID || `${u.wallet} (simulated)`}`,
+        );
+      }
+      console.log(
+        `   🔏 Whitelist tree: ${rootFile.count} commitments Poseidon(identity, secret), root ${rootFile.root.slice(0, 18)}…`,
+      );
+
+      const startTime = Date.now();
+      // Refuses before proving when the user's commitment is not listed.
+      const calldata = await proveForDemoUser(this.state, proofUser, rootFile);
+      generationTime = Date.now() - startTime;
+
+      proof = calldata.proof;
+      publicSignals = calldata.signals;
+      finalNullifierHash = publicSignals[0];
+      console.log(
+        `✅ Real proof generated in ${generationTime}ms (${(generationTime / 1000).toFixed(2)}s)`,
+      );
 
       this.state.proofGenerationTimes.set(
         "Whitelist Membership",
         generationTime,
       );
 
-      // Submit proof to ZKVerifierIntegrated
+      // Submit: the root is published on PrivacyManager and the wallet binds
+      // itself (Task 3.3); only that binding counts as whitelist status.
       console.log("\n🔍 Submitting whitelist membership proof...");
       console.log(`   🔢 Nullifier Hash: ${finalNullifierHash}`);
-      console.log(
-        `   ${this.state.zkMode === "real" ? "🔐" : "🔧"} Mode: ${this.state.zkMode.toUpperCase()}`,
-      );
-
-      // Real mode (Task 3.3): the root is published on PrivacyManager and the
-      // wallet binds itself; only that binding counts as whitelist status.
-      const privacyManager = this.state.getContract("privacyManager");
-      if (privacyManager) {
-        const receipt = await publishAndBind({
-          state: this.state,
-          privacyManager,
-          user: proofUser,
-          proof,
-          signals: publicSignals,
-        });
-        this.state.gasTracker.set("Whitelist Proof", receipt.gasUsed);
-        displaySuccess("WHITELIST MEMBERSHIP PROOF BOUND TO THE WALLET!");
-        return;
-      }
-      console.log(
-        "   ℹ️  No PrivacyManager (MOCK mode verifier): checking the proof through the wrapper only; nothing is bound",
-      );
-      const verified =
-        await zkVerifierIntegrated.verifyWhitelistMembership.staticCall(
-          proof,
-          publicSignals,
-        );
-      if (!verified) {
-        displayError("WHITELIST MEMBERSHIP PROOF REJECTED");
-        console.log(`   📋 Public signals: [${publicSignals.join(", ")}]`);
-        return;
-      }
-      const tx = await zkVerifierIntegrated.verifyWhitelistMembership(
+      const receipt = await publishAndBind({
+        state: this.state,
+        privacyManager,
+        user: proofUser,
         proof,
-        publicSignals,
-      );
-      const receipt = await tx.wait();
-
+        signals: publicSignals,
+      });
       this.state.gasTracker.set("Whitelist Proof", receipt.gasUsed);
-
-      displaySuccess("WHITELIST MEMBERSHIP PROOF VERIFIED!");
-      console.log(`   🔢 Nullifier Hash: ${finalNullifierHash}`);
-      console.log(`   🔗 Transaction: ${receipt.hash}`);
-      console.log(`   🧱 Block: ${receipt.blockNumber}`);
-      console.log(`   💰 Gas Used: ${receipt.gasUsed.toLocaleString()}`);
-      if (this.state.zkMode === "real" && generationTime > 0) {
-        console.log(
-          `   ⏱️  Proof Generation: ${generationTime}ms (${(generationTime / 1000).toFixed(2)}s)`,
-        );
-      }
-      console.log(`   🎯 Anonymous compliance verification successful!`);
+      displaySuccess("WHITELIST MEMBERSHIP PROOF BOUND TO THE WALLET!");
     } catch (error) {
       displayError(`Whitelist proof submission failed: ${error.message}`);
     }
@@ -2229,15 +1842,11 @@ class PrivacyModule {
   async submitBlacklistNonMembershipProof() {
     console.log("\n🚫 SUBMIT BLACKLIST NON-MEMBERSHIP PROOF");
     console.log("-".repeat(40));
-    console.log(
-      `🎯 Privacy-preserving blacklist check using ${this.state.zkMode.toUpperCase()} ZK proofs`,
-    );
+    console.log(`🎯 Privacy-preserving blacklist check using real ZK proofs`);
 
     const zkVerifierIntegrated = this.state.getContract("zkVerifierIntegrated");
     if (!zkVerifierIntegrated) {
-      displayError(
-        "Please deploy Privacy & ZK Verification System first (option 41)",
-      );
+      displayError("No ZK verifier: run option 1 (or 41)");
       return;
     }
 
@@ -2248,217 +1857,195 @@ class PrivacyModule {
       let finalChallengeHash;
       let generationTime = 0;
 
-      if (this.state.zkMode === "real") {
-        // REAL MODE: Generate actual ZK proof with security options
-        console.log("\n🔐 REAL MODE: Generating production ZK proof...");
-        console.log("⏳ This may take ~50 seconds for blacklist proof...");
+      // Generate a real ZK proof with security options
+      console.log("\n🔐 Generating a real ZK proof...");
+      console.log("⏳ This may take ~50 seconds for blacklist proof...");
 
-        // Ask user for security mode (same as whitelist)
-        console.log("\n🛡️  SECURITY MODE OPTIONS:");
-        console.log("1. Demo mode (simplified - uses hardcoded values)");
-        console.log("2. Custom input mode (manual identity entry)");
-        console.log(
-          "3. Secure mode (4-layer security: Registry + Signature + KYC + Nullifier) ⭐ RECOMMENDED",
-        );
-        const securityChoice = await this.promptUser("Select option (1-3): ");
+      // Ask user for security mode (same as whitelist)
+      console.log("\n🛡️  SECURITY MODE OPTIONS:");
+      console.log("1. Demo mode (simplified - uses hardcoded values)");
+      console.log("2. Custom input mode (manual identity entry)");
+      console.log(
+        "3. Secure mode (4-layer security: Registry + Signature + KYC + Nullifier) ⭐ RECOMMENDED",
+      );
+      const securityChoice = await this.promptUser("Select option (1-3): ");
 
-        let identity;
-        let blacklistIdentities;
+      let identity;
+      let blacklistIdentities;
 
-        if (securityChoice === "3") {
-          // 🛡️ SECURE MODE: 4-Layer Security
-          console.log("\n🛡️  SECURE MODE ACTIVATED");
-          console.log("=".repeat(60));
-          console.log("Implementing 4-Layer Security:");
-          console.log("  1️⃣  On-Chain Identity Registry Check");
-          console.log("  2️⃣  Cryptographic Signature Verification");
-          console.log("  3️⃣  KYC/AML Status Verification");
-          console.log("  4️⃣  Nullifier Tracking (automatic)");
-          console.log("=".repeat(60));
-          console.log("");
+      if (securityChoice === "3") {
+        // 🛡️ SECURE MODE: 4-Layer Security
+        console.log("\n🛡️  SECURE MODE ACTIVATED");
+        console.log("=".repeat(60));
+        console.log("Implementing 4-Layer Security:");
+        console.log("  1️⃣  On-Chain Identity Registry Check");
+        console.log("  2️⃣  Cryptographic Signature Verification");
+        console.log("  3️⃣  KYC/AML Status Verification");
+        console.log("  4️⃣  Nullifier Tracking (automatic)");
+        console.log("=".repeat(60));
+        console.log("");
 
-          // LAYER 1: Check On-Chain Identity Registry
-          console.log("🔍 LAYER 1: Checking On-Chain Identity Registry...");
-          const userSigner = this.state.signers[1] || this.state.signers[0];
-          const userAddress = userSigner.address;
-          console.log(`   📍 User Address: ${userAddress}`);
+        // LAYER 1: Check On-Chain Identity Registry
+        console.log("🔍 LAYER 1: Checking On-Chain Identity Registry...");
+        const userSigner = this.state.signers[1] || this.state.signers[0];
+        const userAddress = userSigner.address;
+        console.log(`   📍 User Address: ${userAddress}`);
 
-          const identityRegistry = this.state.getContract("identityRegistry");
-          if (!identityRegistry) {
-            console.log("   ⚠️  Identity Registry not deployed (demo mode)");
-            console.log("   ℹ️  Using simulated registry check...");
-            identity = BigInt(userAddress) % BigInt(1000000000);
-            console.log(`   🔢 Derived Identity: ${identity}`);
-          } else {
-            const onchainID = await identityRegistry.identity(userAddress);
-            if (onchainID === ethers.ZeroAddress) {
-              console.log(
-                "   ⚠️  No identity registered. Using simulated identity...",
-              );
-              identity = BigInt(userAddress) % BigInt(1000000000);
-            } else {
-              console.log(`   ✅ OnchainID Found: ${onchainID}`);
-              identity = BigInt(onchainID) % BigInt(1000000000);
-            }
-            console.log(`   🔢 Derived Identity: ${identity}`);
-          }
-
-          // LAYER 2: Platform Owner Signature
-          console.log("\n🔏 LAYER 2: Platform Owner Signature Verification...");
-          console.log(
-            "   🔒 SECURITY: Blacklist proofs verified by platform owner",
-          );
-          console.log("   ✅ Layer 2 ready (signature verification)");
-
-          // LAYER 3: KYC/AML Verification
-          console.log("\n🎫 LAYER 3: KYC/AML Status Verification...");
-          console.log("   ℹ️  Checking KYC/AML claims...");
-          console.log("   ✅ Layer 3 ready");
-
-          // LAYER 4: Nullifier Tracking
-          console.log("\n🔐 LAYER 4: Nullifier Tracking...");
-          console.log(
-            "   ℹ️  Nullifier will be automatically tracked on-chain",
-          );
-          console.log("   ✅ Layer 4 ready (handled by smart contract)");
-
-          // Setup blacklist
-          console.log("\n📋 Setting up blacklist...");
-          const blacklistChoice = await this.promptUser(
-            "Use default blacklist? (yes/no): ",
-          );
-
-          if (
-            blacklistChoice.toLowerCase() === "yes" ||
-            !blacklistChoice.trim()
-          ) {
-            blacklistIdentities = [BigInt(99999), BigInt(88888)]; // User NOT in blacklist
-            console.log(`   ✅ Blacklist: [99999, 88888]`);
+        const identityRegistry = this.state.getContract("identityRegistry");
+        if (!identityRegistry) {
+          console.log("   ⚠️  Identity Registry not deployed (demo mode)");
+          console.log("   ℹ️  Using simulated registry check...");
+          identity = BigInt(userAddress) % BigInt(1000000000);
+          console.log(`   🔢 Derived Identity: ${identity}`);
+        } else {
+          const onchainID = await identityRegistry.identity(userAddress);
+          if (onchainID === ethers.ZeroAddress) {
             console.log(
-              `   ✅ Your identity (${identity}) is NOT in blacklist`,
+              "   ⚠️  No identity registered. Using simulated identity...",
             );
+            identity = BigInt(userAddress) % BigInt(1000000000);
           } else {
-            const blacklistInput = await this.promptUser(
-              "Enter blacklist (comma-separated): ",
-            );
-            blacklistIdentities = blacklistInput
-              .split(",")
-              .map((id) => BigInt(id.trim()));
-
-            // Check if identity is in blacklist
-            const isInBlacklist = blacklistIdentities.some(
-              (id) => id === identity,
-            );
-            if (isInBlacklist) {
-              console.log(`   ⚠️  WARNING: Your identity IS in the blacklist!`);
-              console.log(
-                `   ⚠️  Removing your identity from blacklist for valid proof...`,
-              );
-              blacklistIdentities = blacklistIdentities.filter(
-                (id) => id !== identity,
-              );
-            }
-            console.log(`   ✅ Blacklist: [${blacklistIdentities.join(", ")}]`);
+            console.log(`   ✅ OnchainID Found: ${onchainID}`);
+            identity = BigInt(onchainID) % BigInt(1000000000);
           }
+          console.log(`   🔢 Derived Identity: ${identity}`);
+        }
 
-          console.log("\n✅ ALL 4 SECURITY LAYERS PASSED!");
-          console.log("   Proceeding to ZK proof generation...\n");
-        } else if (securityChoice === "2") {
-          // Custom input mode
-          console.log("\n📋 CUSTOM INPUT MODE");
-          console.log(
-            "Enter your identity and blacklist identities as numbers.",
-          );
-          console.log(
-            "Note: Your identity should NOT be in the blacklist for a valid proof!\n",
-          );
+        // LAYER 2: Platform Owner Signature
+        console.log("\n🔏 LAYER 2: Platform Owner Signature Verification...");
+        console.log(
+          "   🔒 SECURITY: Blacklist proofs verified by platform owner",
+        );
+        console.log("   ✅ Layer 2 ready (signature verification)");
 
-          const identityInput = await this.promptUser(
-            "Enter your identity (e.g., 12345): ",
-          );
-          identity = BigInt(identityInput.trim() || "12345");
+        // LAYER 3: KYC/AML Verification
+        console.log("\n🎫 LAYER 3: KYC/AML Status Verification...");
+        console.log("   ℹ️  Checking KYC/AML claims...");
+        console.log("   ✅ Layer 3 ready");
 
+        // LAYER 4: Nullifier Tracking
+        console.log("\n🔐 LAYER 4: Nullifier Tracking...");
+        console.log("   ℹ️  Nullifier will be automatically tracked on-chain");
+        console.log("   ✅ Layer 4 ready (handled by smart contract)");
+
+        // Setup blacklist
+        console.log("\n📋 Setting up blacklist...");
+        const blacklistChoice = await this.promptUser(
+          "Use default blacklist? (yes/no): ",
+        );
+
+        if (
+          blacklistChoice.toLowerCase() === "yes" ||
+          !blacklistChoice.trim()
+        ) {
+          blacklistIdentities = [BigInt(99999), BigInt(88888)]; // User NOT in blacklist
+          console.log(`   ✅ Blacklist: [99999, 88888]`);
+          console.log(`   ✅ Your identity (${identity}) is NOT in blacklist`);
+        } else {
           const blacklistInput = await this.promptUser(
-            "Enter blacklist identities (comma-separated, e.g., 99999,88888): ",
+            "Enter blacklist (comma-separated): ",
           );
-          if (blacklistInput.trim()) {
-            blacklistIdentities = blacklistInput
-              .split(",")
-              .map((id) => BigInt(id.trim()));
-          } else {
-            blacklistIdentities = [BigInt(99999), BigInt(88888)];
-          }
+          blacklistIdentities = blacklistInput
+            .split(",")
+            .map((id) => BigInt(id.trim()));
 
           // Check if identity is in blacklist
           const isInBlacklist = blacklistIdentities.some(
             (id) => id === identity,
           );
           if (isInBlacklist) {
-            console.log("\n⚠️  WARNING: Your identity IS in the blacklist!");
-            console.log("   The proof will fail verification.");
-            const continueAnyway = await this.promptUser(
-              "Continue anyway? (yes/no): ",
+            console.log(`   ⚠️  WARNING: Your identity IS in the blacklist!`);
+            console.log(
+              `   ⚠️  Removing your identity from blacklist for valid proof...`,
             );
-            if (continueAnyway.toLowerCase() !== "yes") {
-              console.log("❌ Proof generation cancelled.");
-              return;
-            }
+            blacklistIdentities = blacklistIdentities.filter(
+              (id) => id !== identity,
+            );
           }
-
-          console.log("\n📊 PROOF PARAMETERS:");
-          console.log(`   🆔 Your Identity: ${identity}`);
-          console.log(`   🚫 Blacklist: [${blacklistIdentities.join(", ")}]`);
-          console.log(
-            `   ✅ Identity in blacklist: ${isInBlacklist ? "YES (will fail!)" : "NO (valid)"}`,
-          );
-          console.log("");
-        } else {
-          // Demo mode - use sample identities
-          identity = BigInt(12345);
-          blacklistIdentities = [BigInt(99999), BigInt(88888)]; // User NOT in blacklist
-          console.log("\n📊 Using demo values:");
-          console.log(`   🆔 Identity: ${identity}`);
-          console.log(`   🚫 Blacklist: [${blacklistIdentities.join(", ")}]`);
-          console.log(`   ✅ Identity NOT in blacklist`);
-          console.log("");
+          console.log(`   ✅ Blacklist: [${blacklistIdentities.join(", ")}]`);
         }
 
-        const startTime = Date.now();
-        const realProofResult =
-          await this.state.realProofGenerator.generateBlacklistProof({
-            identity,
-            blacklistIdentities,
-          });
-        generationTime = Date.now() - startTime;
-
-        proof = realProofResult.proof;
-
-        // For blacklist proof, the circuit only outputs isNotBlacklisted (0 or 1)
-        // The blacklistRoot, nullifierHash, challengeHash are private inputs (not public signals)
-        // We store them for display purposes only
-        finalBlacklistRoot = BigInt(realProofResult.inputs.blacklistRoot);
-        finalNullifierHash = BigInt(realProofResult.inputs.nullifierHash);
-        finalChallengeHash = BigInt(realProofResult.inputs.challengeHash);
-
+        console.log("\n✅ ALL 4 SECURITY LAYERS PASSED!");
+        console.log("   Proceeding to ZK proof generation...\n");
+      } else if (securityChoice === "2") {
+        // Custom input mode
+        console.log("\n📋 CUSTOM INPUT MODE");
+        console.log("Enter your identity and blacklist identities as numbers.");
         console.log(
-          `✅ Real proof generated in ${generationTime}ms (${(generationTime / 1000).toFixed(2)}s)`,
+          "Note: Your identity should NOT be in the blacklist for a valid proof!\n",
         );
+
+        const identityInput = await this.promptUser(
+          "Enter your identity (e.g., 12345): ",
+        );
+        identity = BigInt(identityInput.trim() || "12345");
+
+        const blacklistInput = await this.promptUser(
+          "Enter blacklist identities (comma-separated, e.g., 99999,88888): ",
+        );
+        if (blacklistInput.trim()) {
+          blacklistIdentities = blacklistInput
+            .split(",")
+            .map((id) => BigInt(id.trim()));
+        } else {
+          blacklistIdentities = [BigInt(99999), BigInt(88888)];
+        }
+
+        // Check if identity is in blacklist
+        const isInBlacklist = blacklistIdentities.some((id) => id === identity);
+        if (isInBlacklist) {
+          console.log("\n⚠️  WARNING: Your identity IS in the blacklist!");
+          console.log("   The proof will fail verification.");
+          const continueAnyway = await this.promptUser(
+            "Continue anyway? (yes/no): ",
+          );
+          if (continueAnyway.toLowerCase() !== "yes") {
+            console.log("❌ Proof generation cancelled.");
+            return;
+          }
+        }
+
+        console.log("\n📊 PROOF PARAMETERS:");
+        console.log(`   🆔 Your Identity: ${identity}`);
+        console.log(`   🚫 Blacklist: [${blacklistIdentities.join(", ")}]`);
         console.log(
-          `   ℹ️  Public Signal (isNotBlacklisted): ${realProofResult.publicSignals[0]}`,
+          `   ✅ Identity in blacklist: ${isInBlacklist ? "YES (will fail!)" : "NO (valid)"}`,
         );
+        console.log("");
       } else {
-        // MOCK MODE: Use mock proof
-        console.log("\n🔧 MOCK MODE: Using fast mock proof...");
-        proof = this.createMockGroth16Proof();
-
-        const hash = ethers.keccak256(
-          ethers.toUtf8Bytes("demo_empty_blacklist_root"),
-        );
-        finalBlacklistRoot = BigInt(hash) % 2n ** 254n;
-        finalNullifierHash = Math.floor(Math.random() * 1000000);
-        finalChallengeHash = Math.floor(Math.random() * 1000000);
-        generationTime = 1;
+        // Demo mode - use sample identities
+        identity = BigInt(12345);
+        blacklistIdentities = [BigInt(99999), BigInt(88888)]; // User NOT in blacklist
+        console.log("\n📊 Using demo values:");
+        console.log(`   🆔 Identity: ${identity}`);
+        console.log(`   🚫 Blacklist: [${blacklistIdentities.join(", ")}]`);
+        console.log(`   ✅ Identity NOT in blacklist`);
+        console.log("");
       }
+
+      const generator = await this.realGenerator();
+      const startTime = Date.now();
+      const realProofResult = await generator.generateBlacklistProof({
+        identity,
+        blacklistIdentities,
+      });
+      generationTime = Date.now() - startTime;
+
+      proof = realProofResult.proof;
+
+      // For blacklist proof, the circuit only outputs isNotBlacklisted (0 or 1)
+      // The blacklistRoot, nullifierHash, challengeHash are private inputs (not public signals)
+      // We store them for display purposes only
+      finalBlacklistRoot = BigInt(realProofResult.inputs.blacklistRoot);
+      finalNullifierHash = BigInt(realProofResult.inputs.nullifierHash);
+      finalChallengeHash = BigInt(realProofResult.inputs.challengeHash);
+
+      console.log(
+        `✅ Real proof generated in ${generationTime}ms (${(generationTime / 1000).toFixed(2)}s)`,
+      );
+      console.log(
+        `   ℹ️  Public Signal (isNotBlacklisted): ${realProofResult.publicSignals[0]}`,
+      );
 
       this.state.proofGenerationTimes.set(
         "Blacklist Non-Membership",
@@ -2470,9 +2057,7 @@ class PrivacyModule {
       console.log(`   🚫 Blacklist Root (private): ${finalBlacklistRoot}`);
       console.log(`   🔢 Nullifier Hash (private): ${finalNullifierHash}`);
       console.log(`   🎯 Challenge Hash (private): ${finalChallengeHash}`);
-      console.log(
-        `   ${this.state.zkMode === "real" ? "🔐" : "🔧"} Mode: ${this.state.zkMode.toUpperCase()}`,
-      );
+      console.log(`   🔐 Mode: REAL`);
       console.log(
         `   ℹ️  Note: Only public signal (isNotBlacklisted=1) is sent to contract`,
       );
@@ -2502,7 +2087,7 @@ class PrivacyModule {
       console.log(`   🔗 Transaction: ${receipt.hash}`);
       console.log(`   🧱 Block: ${receipt.blockNumber}`);
       console.log(`   💰 Gas Used: ${receipt.gasUsed.toLocaleString()}`);
-      if (this.state.zkMode === "real" && generationTime > 0) {
+      if (generationTime > 0) {
         console.log(
           `   ⏱️  Proof Generation: ${generationTime}ms (${(generationTime / 1000).toFixed(2)}s)`,
         );
@@ -2519,15 +2104,11 @@ class PrivacyModule {
   async submitJurisdictionEligibilityProof() {
     console.log("\n🌍 SUBMIT JURISDICTION ELIGIBILITY PROOF");
     console.log("-".repeat(40));
-    console.log(
-      `🎯 Location privacy using ${this.state.zkMode.toUpperCase()} ZK proofs`,
-    );
+    console.log(`🎯 Location privacy using real ZK proofs`);
 
     const zkVerifierIntegrated = this.state.getContract("zkVerifierIntegrated");
     if (!zkVerifierIntegrated) {
-      displayError(
-        "Please deploy Privacy & ZK Verification System first (option 41)",
-      );
+      displayError("No ZK verifier: run option 1 (or 41)");
       return;
     }
 
@@ -2644,33 +2225,27 @@ class PrivacyModule {
         this.state.allowedJurisdictions.add(userJurisdiction);
       }
 
-      if (this.state.zkMode === "real") {
-        console.log("\n📊 Jurisdiction Parameters:");
-        console.log(`   🌍 User Jurisdiction: ${userJurisdiction} (US)`);
-        console.log(
-          `   ✅ Allowed Jurisdictions: [${allowedJurisdictions.map((j) => j.toString()).join(", ")}]`,
-        );
-        console.log(`      840 = United States`);
-        console.log(`      826 = United Kingdom`);
-        console.log(`      276 = Germany (EU)`);
-        console.log(`      124 = Canada`);
-        console.log("");
+      console.log("\n📊 Jurisdiction Parameters:");
+      console.log(`   🌍 User Jurisdiction: ${userJurisdiction} (US)`);
+      console.log(
+        `   ✅ Allowed Jurisdictions: [${allowedJurisdictions.map((j) => j.toString()).join(", ")}]`,
+      );
+      console.log(`      840 = United States`);
+      console.log(`      826 = United Kingdom`);
+      console.log(`      276 = Germany (EU)`);
+      console.log(`      124 = Canada`);
+      console.log("");
 
-        const startTime = Date.now();
-        realProofResult =
-          await this.state.realProofGenerator.generateJurisdictionProof({
-            userJurisdiction,
-            allowedJurisdictions,
-          });
-        generationTime = Date.now() - startTime;
+      const generator = await this.realGenerator();
+      const startTime = Date.now();
+      realProofResult = await generator.generateJurisdictionProof({
+        userJurisdiction,
+        allowedJurisdictions,
+      });
+      generationTime = Date.now() - startTime;
 
-        proof = realProofResult.proof;
-        console.log(`✅ Real proof generated in ${generationTime}ms`);
-      } else {
-        console.log("\n🔧 MOCK MODE: Using fast mock proof...");
-        proof = this.createMockGroth16Proof();
-        generationTime = 1;
-      }
+      proof = realProofResult.proof;
+      console.log(`✅ Real proof generated in ${generationTime}ms`);
 
       this.state.proofGenerationTimes.set(
         "Jurisdiction Eligibility",
@@ -2682,10 +2257,7 @@ class PrivacyModule {
 
       // The contract expects uint256[1] containing the public signal
       // For jurisdiction proof, this is typically the allowedJurisdictionsMask or commitment
-      const publicSignal =
-        this.state.zkMode === "real"
-          ? realProofResult.publicSignals[0] // Use actual public signal from proof
-          : allowedJurisdictions[0]; // Mock mode: use first allowed jurisdiction
+      const publicSignal = realProofResult.publicSignals[0];
 
       const tx = await zkVerifierIntegrated.verifyJurisdictionProof(
         proof.a,
@@ -2703,7 +2275,7 @@ class PrivacyModule {
       console.log(`   🧱 Block: ${receipt.blockNumber}`);
       console.log(`   💰 Gas Used: ${receipt.gasUsed.toLocaleString()}`);
       console.log(`   ⏱️  Generation time: ${generationTime}ms`);
-      console.log(`   🔒 Proof type: ${this.state.zkMode.toUpperCase()}`);
+      console.log(`   🔒 Proof type: REAL`);
       console.log(`   🌍 User jurisdiction: PRIVATE (hidden from contract)`);
       console.log(`   ✅ Eligible for participation`);
     } catch (error) {
@@ -2714,15 +2286,11 @@ class PrivacyModule {
   async submitAccreditationStatusProof() {
     console.log("\n💰 SUBMIT ACCREDITATION STATUS PROOF");
     console.log("-".repeat(40));
-    console.log(
-      `🎯 Wealth privacy using ${this.state.zkMode.toUpperCase()} ZK proofs`,
-    );
+    console.log(`🎯 Wealth privacy using real ZK proofs`);
 
     const zkVerifierIntegrated = this.state.getContract("zkVerifierIntegrated");
     if (!zkVerifierIntegrated) {
-      displayError(
-        "Please deploy Privacy & ZK Verification System first (option 41)",
-      );
+      displayError("No ZK verifier: run option 1 (or 41)");
       return;
     }
 
@@ -2760,44 +2328,38 @@ class PrivacyModule {
       let proof;
       let generationTime = 0;
 
-      if (this.state.zkMode === "real") {
-        console.log("\n📊 Accreditation Parameters:");
-        console.log(
-          `   💰 Your Wealth: ${userLevel.name} ($${userLevel.level.toLocaleString()})`,
-        );
-        console.log(
-          `   ✅ Minimum Required: ${minLevel.name} ($${minimumAccreditation.toLocaleString()})`,
-        );
+      console.log("\n📊 Accreditation Parameters:");
+      console.log(
+        `   💰 Your Wealth: ${userLevel.name} ($${userLevel.level.toLocaleString()})`,
+      );
+      console.log(
+        `   ✅ Minimum Required: ${minLevel.name} ($${minimumAccreditation.toLocaleString()})`,
+      );
 
-        // Check if user meets minimum
-        if (userLevel.level < minimumAccreditation) {
-          console.log(
-            `   ❌ Your wealth ($${userLevel.level.toLocaleString()}) is below minimum ($${minimumAccreditation.toLocaleString()})`,
-          );
-          console.log(`   💡 You cannot prove you meet this requirement!`);
-          console.log("");
-          displayError("Accreditation level below minimum requirement");
-          return;
-        }
-
-        console.log(`   ✅ You meet the requirement! Generating proof...`);
+      // Check if user meets minimum
+      if (userLevel.level < minimumAccreditation) {
+        console.log(
+          `   ❌ Your wealth ($${userLevel.level.toLocaleString()}) is below minimum ($${minimumAccreditation.toLocaleString()})`,
+        );
+        console.log(`   💡 You cannot prove you meet this requirement!`);
         console.log("");
-
-        const startTime = Date.now();
-        const realProofResult =
-          await this.state.realProofGenerator.generateAccreditationProof({
-            userAccreditation: userLevel.level,
-            minimumAccreditation,
-          });
-        generationTime = Date.now() - startTime;
-
-        proof = realProofResult.proof;
-        console.log(`✅ Real proof generated in ${generationTime}ms`);
-      } else {
-        console.log("\n🔧 MOCK MODE: Using fast mock proof...");
-        proof = this.createMockGroth16Proof();
-        generationTime = 1;
+        displayError("Accreditation level below minimum requirement");
+        return;
       }
+
+      console.log(`   ✅ You meet the requirement! Generating proof...`);
+      console.log("");
+
+      const generator = await this.realGenerator();
+      const startTime = Date.now();
+      const realProofResult = await generator.generateAccreditationProof({
+        userAccreditation: userLevel.level,
+        minimumAccreditation,
+      });
+      generationTime = Date.now() - startTime;
+
+      proof = realProofResult.proof;
+      console.log(`✅ Real proof generated in ${generationTime}ms`);
 
       this.state.proofGenerationTimes.set(
         "Accreditation Status",
@@ -2816,7 +2378,7 @@ class PrivacyModule {
       if (isValid) {
         displaySuccess("ACCREDITATION STATUS PROOF VERIFIED!");
         console.log(`   ⏱️  Generation time: ${generationTime}ms`);
-        console.log(`   🔒 Proof type: ${this.state.zkMode.toUpperCase()}`);
+        console.log(`   🔒 Proof type: REAL`);
         console.log(`   💰 User net worth: PRIVATE`);
         console.log(
           `   ✅ Meets minimum requirement: $${minimumAccreditation.toLocaleString()}`,
@@ -2832,15 +2394,11 @@ class PrivacyModule {
   async submitComplianceAggregationProof() {
     console.log("\n📊 SUBMIT COMPLIANCE AGGREGATION PROOF");
     console.log("-".repeat(40));
-    console.log(
-      `🎯 Comprehensive compliance using ${this.state.zkMode.toUpperCase()} ZK proofs`,
-    );
+    console.log(`🎯 Comprehensive compliance using real ZK proofs`);
 
     const zkVerifierIntegrated = this.state.getContract("zkVerifierIntegrated");
     if (!zkVerifierIntegrated) {
-      displayError(
-        "Please deploy Privacy & ZK Verification System first (option 41)",
-      );
+      displayError("No ZK verifier: run option 1 (or 41)");
       return;
     }
 
@@ -2863,32 +2421,26 @@ class PrivacyModule {
       let proof;
       let generationTime = 0;
 
-      if (this.state.zkMode === "real") {
-        console.log(`\n🔐 Generating REAL compliance aggregation proof...`);
-        console.log("⏳ This may take ~233ms for real ZK proof...");
+      console.log(`\n🔐 Generating REAL compliance aggregation proof...`);
+      console.log("⏳ This may take ~233ms for real ZK proof...");
 
-        const startTime = Date.now();
-        const realProofResult =
-          await this.state.realProofGenerator.generateComplianceProof({
-            kycScore: BigInt(scores.kyc),
-            amlScore: BigInt(scores.aml),
-            jurisdictionScore: BigInt(scores.jurisdiction),
-            accreditationScore: BigInt(scores.accreditation),
-            weightKyc: BigInt(25), // 25% weight for KYC
-            weightAml: BigInt(25), // 25% weight for AML
-            weightJurisdiction: BigInt(25), // 25% weight for Jurisdiction
-            weightAccreditation: BigInt(25), // 25% weight for Accreditation
-            minimumComplianceLevel: BigInt(minimumComplianceLevel),
-          });
-        generationTime = Date.now() - startTime;
+      const generator = await this.realGenerator();
+      const startTime = Date.now();
+      const realProofResult = await generator.generateComplianceProof({
+        kycScore: BigInt(scores.kyc),
+        amlScore: BigInt(scores.aml),
+        jurisdictionScore: BigInt(scores.jurisdiction),
+        accreditationScore: BigInt(scores.accreditation),
+        weightKyc: BigInt(25), // 25% weight for KYC
+        weightAml: BigInt(25), // 25% weight for AML
+        weightJurisdiction: BigInt(25), // 25% weight for Jurisdiction
+        weightAccreditation: BigInt(25), // 25% weight for Accreditation
+        minimumComplianceLevel: BigInt(minimumComplianceLevel),
+      });
+      generationTime = Date.now() - startTime;
 
-        proof = realProofResult.proof;
-        console.log(`✅ Real proof generated in ${generationTime}ms`);
-      } else {
-        console.log("\n🔧 MOCK MODE: Using fast mock proof...");
-        proof = this.createMockGroth16Proof();
-        generationTime = 1;
-      }
+      proof = realProofResult.proof;
+      console.log(`✅ Real proof generated in ${generationTime}ms`);
 
       this.state.proofGenerationTimes.set(
         "Compliance Aggregation",
@@ -2897,7 +2449,7 @@ class PrivacyModule {
 
       displaySuccess("COMPLIANCE AGGREGATION PROOF GENERATED!");
       console.log(`   ⏱️  Generation time: ${generationTime}ms`);
-      console.log(`   🔒 Proof type: ${this.state.zkMode.toUpperCase()}`);
+      console.log(`   🔒 Proof type: REAL`);
       console.log(`   📊 Individual scores: PRIVATE`);
       console.log(`   ✅ Overall compliance: VERIFIED`);
     } catch (error) {
@@ -2908,9 +2460,7 @@ class PrivacyModule {
   async submitAllPrivateProofs() {
     console.log("\n🎯 SUBMIT ALL PRIVATE PROOFS (BATCH)");
     console.log("=".repeat(50));
-    console.log(
-      `🔐 Generating all proof types in ${this.state.zkMode.toUpperCase()} mode...`,
-    );
+    console.log(`🔐 Generating all proof types with real proofs...`);
     console.log("");
 
     try {
@@ -2938,7 +2488,7 @@ class PrivacyModule {
       console.log("");
       displaySuccess("ALL PROOFS GENERATED SUCCESSFULLY!");
       console.log(`   📊 Total proofs: ${proofs.length}`);
-      console.log(`   🔒 Proof mode: ${this.state.zkMode.toUpperCase()}`);
+      console.log(`   🔒 Proof mode: REAL`);
       console.log(`   ✅ Ready for submission`);
     } catch (error) {
       displayError(`Batch proof generation failed: ${error.message}`);
@@ -2947,7 +2497,7 @@ class PrivacyModule {
 
   async viewPrivacySettings() {
     console.log("\n📋 CURRENT PRIVACY SETTINGS:");
-    console.log(`   ZK Mode: ${this.state.zkMode.toUpperCase()}`);
+    console.log("   ZK Proofs: REAL (no mock mode)");
     console.log(`   Proof Caching: Enabled (24 hours)`);
     console.log(`   Nullifier Tracking: Active`);
     console.log(`   Privacy Level: Maximum`);

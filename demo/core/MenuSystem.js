@@ -38,7 +38,7 @@ class MenuSystem {
     console.log("=".repeat(70));
     console.log("");
     console.log("🏗️  === CORE SYSTEM ===");
-    console.log("1.  Deploy All Contracts (core layer only)");
+    console.log("1.  Deploy All Contracts (core layer + privacy pair)");
     console.log(
       "1a. 🚀 ONE-CLICK: Deploy Everything (core + compliance + token + investor types + governance)",
     );
@@ -95,26 +95,16 @@ class MenuSystem {
     console.log("40. Test Complete Oracle Integration");
     console.log("");
     console.log("🔐 === PRIVACY & ZK VERIFICATION (Options 41-50) ===");
-
-    // Display current ZK mode status
-    const modeIcon = this.state.zkMode === "real" ? "🔐" : "🔧";
-    const modeText =
-      this.state.zkMode === "real"
-        ? "REAL (production cryptography)"
-        : "MOCK (fast, for demonstration)";
-    console.log(`${modeIcon} Current ZK Mode: ${modeText}`);
-    if (this.state.zkMode === "mock") {
-      console.log(
-        "💡 Tip: Use option 41a to switch to REAL mode for production ZK proofs",
-      );
-    }
+    console.log("🔐 Real ZK proofs only (PLONK whitelist, Groth16 others)");
     console.log("");
 
-    console.log("41. Deploy Privacy & ZK Verification System");
-    console.log("41a. Toggle ZK Mode (Mock ↔ Real)");
-    console.log("41b. View ZK Mode Status & Performance");
-    console.log("41c. Demo Phase 5: Batch Verification & Gas Savings");
-    console.log("42. Submit Private Compliance Proofs");
+    console.log(
+      "41. Attach Privacy & ZK System (option 1 deploys it; prints the VSC wiring)",
+    );
+    console.log("41b. View ZK Status (verifier, circuits, generator)");
+    console.log(
+      "42. Submit Private Compliance Proofs (1 = whitelist live on VSC)",
+    );
     console.log("43. Verify Private Whitelist Membership");
     console.log("44. Verify Private Jurisdiction Eligibility");
     console.log("45. Verify Private Accreditation Status");
@@ -376,14 +366,8 @@ class MenuSystem {
         case "41":
           await privacy.deployPrivacySystem();
           break;
-        case "41a":
-          await privacy.toggleZKMode();
-          break;
         case "41b":
           await privacy.viewZKModeStatus();
-          break;
-        case "41c":
-          await privacy.demoBatchVerification();
           break;
         case "42":
           await privacy.submitPrivateProofs();
