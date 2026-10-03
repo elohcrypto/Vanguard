@@ -190,6 +190,51 @@ describe("Privacy contracts are governable by proposal (3.3)", function () {
     expect(await pm.whitelistVersion()).to.equal(2n);
   });
 
+  // Task 3.7b: the attestation setters are plain onlyOwner calls, so a type
+  // 11 vote reaches them with no governance change.
+  it("PrivacyManager: trusted attestor keys and policies by vote (3.7b)", async function () {
+    await pm.transferOwnership(govAddr);
+    await gov.setPrivacyManager(pmAddr);
+    await passByVote(T.Privacy, pm, accept(pm));
+    const JUR = ethers.id("JURISDICTION_PROOF");
+    const [ax, ay] = [11n, 22n];
+    await expect(
+      pm.setTrustedAttestor(JUR, ax, ay, true),
+    ).to.be.revertedWithCustomError(pm, "OwnableUnauthorizedAccount");
+    const call = (fn: string, a: unknown[]) =>
+      pm.interface.encodeFunctionData(fn, a);
+    await passByVote(
+      T.Privacy,
+      pm,
+      call("setTrustedAttestor", [JUR, ax, ay, true]),
+    );
+    await passByVote(T.Privacy, pm, call("setMinimumAccreditation", [100000]));
+    await passByVote(
+      T.Privacy,
+      pm,
+      call("setCompliancePolicy", [70, 25, 25, 25, 25]),
+    );
+    const key = ethers.keccak256(
+      ethers.AbiCoder.defaultAbiCoder().encode(
+        ["uint256", "uint256"],
+        [ax, ay],
+      ),
+    );
+    expect(await pm.trustedAttestor(JUR, key)).to.equal(true);
+    expect(await pm.trustedAttestorCount(JUR)).to.equal(1n);
+    expect(await pm.minimumAccreditation()).to.equal(100000n);
+    expect(
+      await pm.currentPolicy(ethers.id("COMPLIANCE_AGGREGATION")),
+    ).to.deep.equal([70n, 25n, 25n, 25n, 25n]);
+    // The jurisdiction policy follows the registry, also by vote.
+    await passByVote(
+      T.Privacy,
+      pm,
+      call("updateJurisdictionStatus", ["CA", false]),
+    );
+    expect(await pm.allowedJurisdictionMask()).to.equal(7n);
+  });
+
   it("ZKVerifierIntegrated: accepted by vote, updateVerifier only by vote", async function () {
     await zk.transferOwnership(govAddr);
     await gov.setZKVerifier(zkAddr);
