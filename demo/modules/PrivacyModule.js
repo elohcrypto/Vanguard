@@ -1108,88 +1108,63 @@ class PrivacyModule {
     }
   }
 
-  /** Option 43: Verify Private Whitelist Membership */
+  /**
+   * Option 43: whitelist status as ComplianceRules reads it. Since Task 3.3
+   * PrivacyManager calls the verifier, so ProofVerified names PrivacyManager,
+   * never the wallet; the truth is the wallet's binding on PrivacyManager
+   * (version, nullifier, expiresAt) against the current root version.
+   */
   async verifyWhitelistMembership() {
     displaySection("VERIFY PRIVATE WHITELIST MEMBERSHIP", "🕵️");
 
-    const zkVerifierIntegrated = this.state.getContract("zkVerifierIntegrated");
-    if (!zkVerifierIntegrated) {
-      displayError("No ZK verifier: run option 1 (or 41)");
+    const pm = this.state.getContract("privacyManager");
+    if (!pm) {
+      displayError("No PrivacyManager: run option 1 (or 41)");
       return;
     }
 
     try {
-      console.log("🔍 Checking private whitelist membership...");
-      const userAddress = this.state.signers[0].address;
-
-      console.log(`   📍 User Address: ${userAddress}`);
-      console.log(`   🔍 Contract: ${await zkVerifierIntegrated.getAddress()}`);
-
-      // Query ProofVerified events for this user
-      console.log("   🔎 Querying blockchain for ProofVerified events...");
-      const filter = zkVerifierIntegrated.filters.ProofVerified(
-        "whitelist",
-        userAddress,
-      );
-      const events = await zkVerifierIntegrated.queryFilter(filter);
-
-      console.log(`   📊 Found ${events.length} proof event(s)`);
-
-      if (events.length > 0) {
-        // Get the most recent proof
-        const latestEvent = events[events.length - 1];
-        const block = await latestEvent.getBlock();
-        const timestamp = block.timestamp;
-        const proofAge = Date.now() / 1000 - Number(timestamp);
-        const expiryTime = 24 * 60 * 60; // 24 hours in seconds
-        const timeRemaining = expiryTime - proofAge;
-
-        console.log(`   ⏰ Proof timestamp: ${timestamp}`);
-        console.log(`   📅 Proof age: ${Math.floor(proofAge)} seconds`);
+      const current = await pm.whitelistVersion();
+      console.log(`🔍 PrivacyManager: ${await pm.getAddress()}`);
+      console.log(`   📜 Current whitelist root version: ${current}`);
+      let found = 0;
+      for (const [i, s] of this.state.signers.entries()) {
+        const b = await pm.whitelistBindings(s.address);
+        if (b.version === 0n) continue;
+        found++;
+        const valid = await pm.hasValidWhitelistProof(s.address);
+        const why = valid
+          ? "valid"
+          : b.version !== current
+            ? `lapsed: bound under version ${b.version}, the root was rotated since`
+            : "expired";
         console.log(
-          `   ⏳ Time remaining: ${Math.floor(timeRemaining)} seconds`,
+          `\n   ${valid ? "✅" : "❌"} wallet ${i} ${s.address}: ${why}`,
         );
-
-        if (timeRemaining > 0) {
-          displaySuccess("PRIVATE WHITELIST MEMBERSHIP VERIFIED!");
-          console.log("   🔒 User is privately verified as whitelisted");
-          console.log("   🕵️ No personal information revealed");
-          console.log("   ⏰ Proof is valid and not expired");
-          console.log(
-            `   📋 Proof submitted at: ${new Date(Number(timestamp) * 1000).toLocaleString()}`,
-          );
-          console.log(`   ⏳ Proof age: ${Math.floor(proofAge / 60)} minutes`);
-          console.log(
-            `   ⌛ Expires in: ${Math.floor(timeRemaining / 3600)} hours ${Math.floor((timeRemaining % 3600) / 60)} minutes`,
-          );
-          console.log(`   🔗 Transaction: ${latestEvent.transactionHash}`);
-          console.log(`   🧱 Block: ${latestEvent.blockNumber}`);
-        } else {
-          displayError("PRIVATE WHITELIST MEMBERSHIP NOT VERIFIED");
-          console.log("   ⏰ Proof has expired (24 hour limit)");
-          console.log(
-            `   📋 Last proof submitted: ${new Date(Number(timestamp) * 1000).toLocaleString()}`,
-          );
-          console.log("   💡 Submit a new whitelist proof (option 42)");
-        }
+        console.log(`      🔢 nullifier ${b.nullifier}`);
+        console.log(
+          `      ⏳ expires ${new Date(Number(b.expiresAt) * 1000).toISOString()} (root version ${b.version})`,
+        );
+      }
+      if (found === 0) {
+        displayError("NO WALLET HAS A WHITELIST BINDING");
+        console.log("   💡 Prove and bind a wallet first (option 42 -> 1)");
       } else {
-        displayError("PRIVATE WHITELIST MEMBERSHIP NOT VERIFIED");
-        console.log("   Possible reasons:");
-        console.log("   • No whitelist proof submitted");
-        console.log("   • Proof has expired");
-        console.log("   • Invalid proof");
-        console.log("   💡 Submit a whitelist proof first (option 42)");
+        console.log(
+          "\n🕵️ Only the binding is public: no identity, secret or list position",
+        );
       }
     } catch (error) {
       displayError(`Private whitelist verification failed: ${error.message}`);
-      console.error("   Stack trace:", error.stack);
     }
   }
 
   /**
    * The latest ProofVerified(proofType, user) event the verifier emitted with
-   * result true, or null. Options 44 and 45 read the proofs option 42
-   * submitted (3 and 4) the way option 43 does for the whitelist.
+   * result true, or null. Options 42 -> 3 and 42 -> 4 call the wrapper's
+   * Groth16 verify directly from wallet 0 (the deployer, the verifier's
+   * runner), so the event names wallet 0 and options 44 and 45 filter on it.
+   * (The whitelist goes through PrivacyManager instead: option 43.)
    */
   async latestVerifiedProof(zkVerifierIntegrated, proofType, user) {
     const events = await zkVerifierIntegrated.queryFilter(
@@ -1312,24 +1287,14 @@ class PrivacyModule {
 
       const expiryTime = 24 * 60 * 60; // 24 hours in seconds
 
-      // Check whitelist membership (via events)
+      // Whitelist: the wallet's PrivacyManager binding (PrivacyManager, not
+      // the wallet, calls the verifier since Task 3.3; see option 43).
       console.log("1️⃣  Checking whitelist membership (private)...");
       try {
-        const filter = zkVerifierIntegrated.filters.ProofVerified(
-          "whitelist",
-          userAddress,
-        );
-        const events = await zkVerifierIntegrated.queryFilter(filter);
-
-        if (events.length > 0) {
-          const latestEvent = events[events.length - 1];
-          const block = await latestEvent.getBlock();
-          const timestamp = block.timestamp;
-          const proofAge = Date.now() / 1000 - Number(timestamp);
-          const timeRemaining = expiryTime - proofAge;
-
-          results.whitelist = timeRemaining > 0;
-        }
+        const pm = this.state.getContract("privacyManager");
+        results.whitelist = pm
+          ? await pm.hasValidWhitelistProof(userAddress)
+          : false;
 
         console.log(
           `   ${results.whitelist ? "✅" : "❌"} Whitelist: ${results.whitelist ? "VERIFIED" : "NOT VERIFIED"}`,
