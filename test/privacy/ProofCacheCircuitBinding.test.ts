@@ -5,21 +5,17 @@ import { ethers } from "hardhat";
 // circuit identifier and checked that shared cache BEFORE its own verifier.
 // Four circuits shared the identical uint256[1] signal shape, so a proof that
 // verified once under whitelist satisfied verifyBlacklistNonMembership on the
-// cache hit — the blacklist verifier was never called. Whitelist (3.1) and
-// blacklist (3.7) are PLONK now; the Groth16 pair below is jurisdiction and
-// accreditation.
+// cache hit — the blacklist verifier was never called. Every circuit is
+// PLONK now (whitelist 3.1, blacklist 3.7, the attestation circuits 3.7b);
+// jurisdiction and accreditation share the 5-signal shape.
 describe("Proof cache is bound to the circuit that verified it", () => {
-  const a: [number, number] = [1, 2];
-  const b: [[number, number], [number, number]] = [
-    [3, 4],
-    [5, 6],
-  ];
-  const c: [number, number] = [7, 8];
   // Whitelist is PLONK since Task 3.1: 24 proof words, 3 public signals.
   const P = Array.from({ length: 24 }, (_, i) => i + 1);
   const S: [number, number, number] = [1, 2, 3];
   // Blacklist is PLONK since Task 3.7: 24 proof words, 4 public signals.
   const S4: [number, number, number, number] = [1, 2, 3, 4];
+  // Jurisdiction and accreditation (Task 3.7b): 5 signals.
+  const S5: [number, number, number, number, number] = [1, 2, 3, 4, 5];
 
   async function deployReal(accepting: string[] = ["whitelist"]) {
     // testingMode=false: only a real verifier accepts. AlwaysTrueVerifier on
@@ -47,20 +43,13 @@ describe("Proof cache is bound to the circuit that verified it", () => {
     );
   });
 
-  // Groth16 vs Groth16: the same (a, b, c, [1]) tuple and preimage length,
-  // so only the circuit tag in the key keeps these entries apart.
-  it("a jurisdiction-verified Groth16 proof does not satisfy accreditation", async () => {
+  // Same shape (24 words, 5 signals) and preimage length, so only the
+  // circuit tag in the key keeps these entries apart.
+  it("a jurisdiction-verified proof does not satisfy accreditation", async () => {
     const zk = await deployReal(["jurisdiction"]);
-    await expect(zk.verifyJurisdictionProof(a, b, c, [1])).to.emit(
-      zk,
-      "ProofCached",
-    );
-    expect(await zk.verifyJurisdictionProof.staticCall(a, b, c, [1])).to.equal(
-      true,
-    ); // same circuit: cache hit is correct
-    expect(await zk.verifyAccreditationProof.staticCall(a, b, c, [1])).to.equal(
-      false,
-    );
+    await expect(zk.verifyJurisdictionProof(P, S5)).to.emit(zk, "ProofCached");
+    expect(await zk.verifyJurisdictionProof.staticCall(P, S5)).to.equal(true); // same circuit: cache hit is correct
+    expect(await zk.verifyAccreditationProof.staticCall(P, S5)).to.equal(false);
   });
 
   // PLONK vs PLONK: a blacklist entry must not answer the whitelist.
@@ -81,14 +70,11 @@ describe("Proof cache is bound to the circuit that verified it", () => {
   // accreditation entry must not answer jurisdiction from the cache.
   it("the circuit tag alone keeps two slots apart when they share a verifier", async () => {
     const zk = await deployReal(["accreditation", "jurisdiction"]);
-    expect(await zk.proofCacheKey("accreditation", a, b, c, [1])).to.not.equal(
-      await zk.proofCacheKey("jurisdiction", a, b, c, [1]),
+    expect(await zk.proofCacheKey("accreditation", P, S5)).to.not.equal(
+      await zk.proofCacheKey("jurisdiction", P, S5),
     );
-    await expect(zk.verifyAccreditationProof(a, b, c, [1])).to.emit(
-      zk,
-      "ProofCached",
-    );
-    await expect(zk.verifyJurisdictionProof(a, b, c, [1]))
+    await expect(zk.verifyAccreditationProof(P, S5)).to.emit(zk, "ProofCached");
+    await expect(zk.verifyJurisdictionProof(P, S5))
       .to.emit(zk, "ProofCached")
       .and.not.to.emit(zk, "ProofCacheHit");
   });
@@ -130,11 +116,17 @@ describe("Proof cache is bound to the circuit that verified it", () => {
     expect(await zk.verifyWhitelistMembership.staticCall(P, S)).to.equal(false);
   });
 
-  it("the compliance-proof tag keys the 2-signal path, separate from compliance", async () => {
-    const zk = await deployReal();
-    expect(
-      await zk.proofCacheKey("compliance-proof", a, b, c, [1, 2]),
-    ).to.not.equal(await zk.proofCacheKey("compliance", a, b, c, [1, 2]));
+  it("the routed and typed attestation paths share one key per circuit", async () => {
+    const zk = await deployReal(["compliance"]);
+    const S9 = [1, 2, 3, 4, 5, 6, 7, 8, 9];
+    const COMP = ethers.id("COMPLIANCE_AGGREGATION");
+    await expect(zk.verifyCircuitProof(COMP, P, S9))
+      .to.emit(zk, "ProofCached")
+      .withArgs(await zk.proofCacheKey("compliance", P, S9), "compliance");
+    await expect(zk.verifyComplianceAggregation(P, S9 as never)).to.emit(
+      zk,
+      "ProofCacheHit",
+    );
   });
 
   it("proofCacheKey exposes the bound key so clearExpiredProofs still works", async () => {

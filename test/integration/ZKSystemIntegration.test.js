@@ -202,16 +202,26 @@ describe("ZK System Integration Tests", function () {
 
       // Jurisdiction proof
       console.log("  📊 Testing jurisdiction proof gas cost...");
+      // An issuer-signed attestation (Task 3.7b): mask 1 (US) in allowed 15.
+      const { signAttestation, newAttestorKey } = require(
+        path.join(__dirname, "../../scripts/zk/attest.js"),
+      );
+      const att = await signAttestation({
+        key: newAttestorKey(),
+        circuit: "jurisdiction",
+        identity: 12345n,
+        mask: 1,
+      });
       const jurisdictionResult =
         await realProofGenerator.generateJurisdictionProof({
-          userJurisdiction: 840,
-          allowedJurisdictions: [840, 276, 826],
+          ...att,
+          mask: att.attributes[0],
+          allowedMask: 15n,
+          walletBinding: user1.address,
         });
 
       const jurisdictionTx = await zkVerifierIntegrated.verifyJurisdictionProof(
-        jurisdictionResult.proof.a,
-        jurisdictionResult.proof.b,
-        jurisdictionResult.proof.c,
+        jurisdictionResult.proof,
         jurisdictionResult.publicSignals,
       );
       const jurisdictionReceipt = await jurisdictionTx.wait();

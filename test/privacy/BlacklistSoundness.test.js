@@ -427,40 +427,28 @@ describe("Blacklist non-membership soundness (Task 3.7)", function () {
       await expect(tx).to.not.emit(zk, "ProofCacheHit");
     });
 
-    it("the Groth16 router refuses the blacklist id", async function () {
+    it("the attestation router refuses the blacklist id", async function () {
       const BL = ethers.keccak256(ethers.toUtf8Bytes("BLACKLIST_MEMBERSHIP"));
       expect(await verifier.isCircuitRegistered(BL)).to.equal(true);
-      const zero = {
-        a: [0, 0],
-        b: [
-          [0, 0],
-          [0, 0],
-        ],
-        c: [0, 0],
-      };
       await expect(
-        verifier.verifyCircuitProof(BL, zero, [1, 2, 3, 4]),
+        verifier.verifyCircuitProof(BL, r.proof, r.publicSignals),
       ).to.be.revertedWith("use verifyBlacklistNonMembership");
     });
   });
 
   describe("F: PrivacyManager does not take the blacklist proof (D2)", function () {
-    it("submitPrivateProof(BLACKLIST_ID) is refused and nothing is stored", async function () {
+    it("submitAttestationProof(BLACKLIST_ID) is refused and nothing is stored", async function () {
       const pm = await (
         await ethers.getContractFactory("PrivacyManager")
       ).deploy(await verifier.getAddress());
       const BL = ethers.keccak256(ethers.toUtf8Bytes("BLACKLIST_MEMBERSHIP"));
-      const zero = {
-        a: [0, 0],
-        b: [
-          [0, 0],
-          [0, 0],
-        ],
-        c: [0, 0],
-      };
       await expect(
-        pm.connect(wallets[1]).submitPrivateProof(BL, zero, r.publicSignals),
+        pm
+          .connect(wallets[1])
+          .submitAttestationProof(BL, r.proof, r.publicSignals),
       ).to.be.revertedWithCustomError(pm, "NonGatingBlacklistProof");
+      const rec = await pm.attestationRecords(wallets[1].address, BL);
+      expect(rec.expiresAt).to.equal(0n);
     });
   });
 });

@@ -21,8 +21,11 @@ describe("Real ZK Proof Verification Tests", function () {
     // Get signers
     [owner, user1, user2] = await ethers.getSigners();
 
-    // Deploy ZKVerifierIntegrated with testingMode=true (for compliance proof compatibility)
-    // Note: Compliance verifier needs to be updated to compliance_aggregation_fixed
+    // testingMode=true: the proofs below are real; the wrapper's mock path
+    // is what this file measures. The attestation proofs (3.7b) are generated
+    // and verified on a real-mode wrapper in
+    // test/proof-generation/RealProofGenerator.test.js and the three
+    // *AttestationSoundness tests.
     console.log("📦 Deploying ZKVerifierIntegrated (testingMode=true)...");
     const ZKVerifierIntegratedFactory = await ethers.getContractFactory(
       "ZKVerifierIntegrated",
@@ -157,164 +160,6 @@ describe("Real ZK Proof Verification Tests", function () {
       const tx = await zkVerifierIntegrated.verifyBlacklistNonMembership(
         result.proof,
         result.publicSignals,
-      );
-      const receipt = await tx.wait();
-
-      console.log(
-        `  ✅ Proof verified on-chain! Gas used: ${receipt.gasUsed.toString()}`,
-      );
-      expect(receipt.status).to.equal(1);
-    });
-  });
-
-  describe("3. Jurisdiction Eligibility Proofs", function () {
-    it("should generate and verify valid jurisdiction proof", async function () {
-      console.log("  🔐 Generating jurisdiction proof (~60ms)...");
-
-      const userJurisdiction = 840; // US
-      const allowedJurisdictions = [840, 276, 826]; // US, EU, UK
-
-      const startTime = Date.now();
-      const result = await realProofGenerator.generateJurisdictionProof({
-        userJurisdiction,
-        allowedJurisdictions,
-      });
-      const duration = Date.now() - startTime;
-
-      console.log(`  ✅ Proof generated in ${duration}ms`);
-      expect(duration).to.be.lessThan(1000); // Should be < 1 second
-
-      // Verify proof structure
-      expect(result.proof).to.have.property("a");
-      expect(result.publicSignals).to.be.an("array");
-      expect(result.publicSignals.length).to.equal(1);
-
-      // Verify on-chain
-      console.log("  🔍 Verifying proof on-chain...");
-      const tx = await zkVerifierIntegrated.verifyJurisdictionProof(
-        result.proof.a,
-        result.proof.b,
-        result.proof.c,
-        result.publicSignals,
-      );
-      const receipt = await tx.wait();
-
-      console.log(
-        `  ✅ Proof verified on-chain! Gas used: ${receipt.gasUsed.toString()}`,
-      );
-      expect(receipt.status).to.equal(1);
-    });
-
-    it("should reject jurisdiction proof for disallowed jurisdiction", async function () {
-      console.log("  🧪 Testing disallowed jurisdiction rejection...");
-
-      const userJurisdiction = 156; // China (not in allowed list)
-      const allowedJurisdictions = [840, 276, 826]; // US, EU, UK
-
-      // This should fail during proof generation
-      await expect(
-        realProofGenerator.generateJurisdictionProof({
-          userJurisdiction,
-          allowedJurisdictions,
-        }),
-      ).to.be.rejected;
-
-      console.log("  ✅ Disallowed jurisdiction correctly rejected");
-    });
-  });
-
-  describe("4. Accreditation Status Proofs", function () {
-    it("should generate and verify valid accreditation proof", async function () {
-      console.log("  🔐 Generating accreditation proof (~70ms)...");
-
-      const userAccreditation = BigInt(150000); // User has $150k
-      const minimumAccreditation = BigInt(100000); // Proving >= $100k
-
-      const startTime = Date.now();
-      const result = await realProofGenerator.generateAccreditationProof({
-        userAccreditation,
-        minimumAccreditation,
-      });
-      const duration = Date.now() - startTime;
-
-      console.log(`  ✅ Proof generated in ${duration}ms`);
-      expect(duration).to.be.lessThan(1000); // Should be < 1 second
-
-      // Verify proof structure
-      expect(result.proof).to.have.property("a");
-      expect(result.publicSignals).to.be.an("array");
-      expect(result.publicSignals.length).to.equal(1);
-
-      // Verify on-chain
-      console.log("  🔍 Verifying proof on-chain...");
-      const tx = await zkVerifierIntegrated.verifyAccreditationProof(
-        result.proof.a,
-        result.proof.b,
-        result.proof.c,
-        result.publicSignals,
-      );
-      const receipt = await tx.wait();
-
-      console.log(
-        `  ✅ Proof verified on-chain! Gas used: ${receipt.gasUsed.toString()}`,
-      );
-      expect(receipt.status).to.equal(1);
-    });
-
-    it("should reject accreditation proof when user below minimum", async function () {
-      console.log("  🧪 Testing insufficient accreditation rejection...");
-
-      const userAccreditation = BigInt(50000); // User has only $50k
-      const minimumAccreditation = BigInt(100000); // Requires $100k
-
-      // This should fail during proof generation
-      await expect(
-        realProofGenerator.generateAccreditationProof({
-          userAccreditation,
-          minimumAccreditation,
-        }),
-      ).to.be.rejected;
-
-      console.log("  ✅ Insufficient accreditation correctly rejected");
-    });
-  });
-
-  describe("5. Compliance Aggregation Proofs", function () {
-    it("should generate and verify valid compliance proof", async function () {
-      console.log("  🔐 Generating compliance proof (~233ms)...");
-
-      const complianceParams = {
-        kycScore: BigInt(80),
-        amlScore: BigInt(76),
-        jurisdictionScore: BigInt(84),
-        accreditationScore: BigInt(60),
-        weightKyc: BigInt(25),
-        weightAml: BigInt(25),
-        weightJurisdiction: BigInt(25),
-        weightAccreditation: BigInt(25),
-        minimumComplianceLevel: BigInt(70),
-      };
-
-      const startTime = Date.now();
-      const result =
-        await realProofGenerator.generateComplianceProof(complianceParams);
-      const duration = Date.now() - startTime;
-
-      console.log(`  ✅ Proof generated in ${duration}ms`);
-      expect(duration).to.be.lessThan(2000); // Should be < 2 seconds
-
-      // Verify proof structure
-      expect(result.proof).to.have.property("a");
-      expect(result.publicSignals).to.be.an("array");
-      expect(result.publicSignals.length).to.equal(2); // meetsCompliance, complianceLevel
-
-      // Verify on-chain
-      console.log("  🔍 Verifying proof on-chain...");
-      const tx = await zkVerifierIntegrated.verifyComplianceProof(
-        result.proof.a,
-        result.proof.b,
-        result.proof.c,
-        result.publicSignals, // Pass both: meetsCompliance, complianceLevel
       );
       const receipt = await tx.wait();
 

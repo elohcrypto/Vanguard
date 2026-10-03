@@ -11,7 +11,7 @@ const {
 
 /**
  * @title RealProofGenerator
- * @dev Generate real ZK proofs for all 5 circuit types
+ * @dev Generate real PLONK proofs for all 5 circuits
  */
 class RealProofGenerator {
   constructor() {
@@ -276,224 +276,166 @@ class RealProofGenerator {
   }
 
   /**
-   * Generate jurisdiction proof
-   * @param {Object} params - Proof parameters
-   * @param {BigInt} params.userJurisdiction - User's jurisdiction code
-   * @param {BigInt[]} params.allowedJurisdictions - Array of allowed jurisdictions
-   * @param {BigInt} params.userSalt - Random salt for privacy (optional)
-   * @returns {Object} Generated proof
+   * Prove an attestation circuit (Task 3.7b, D31 a). Shared by the three
+   * generators below: checks the required fields, builds the witness input,
+   * proves with PLONK and formats the calldata.
+   * @returns {Object} { proof: 24 words, publicSignals, rawProof, inputs:
+   *          { nullifier } }
+   */
+  async _proveAttestation(
+    circuitName,
+    params,
+    attributeInput,
+    policyInput,
+    policyHash,
+  ) {
+    await this.initialize();
+    const missing = [
+      "identity",
+      "salt",
+      "R8x",
+      "R8y",
+      "S",
+      "Ax",
+      "Ay",
+      "walletBinding",
+    ].filter((k) => params[k] === undefined || params[k] === null);
+    if (missing.length) {
+      throw new Error(
+        `${missing.join(", ")} required (an issuer attestation and the wallet)`,
+      );
+    }
+    if (BigInt(params.walletBinding) === 0n) {
+      throw new Error("walletBinding is required and must be non-zero");
+    }
+    const str = (v) => BigInt(v).toString();
+    const input = {
+      identity: str(params.identity),
+      ...attributeInput,
+      salt: str(params.salt),
+      R8x: str(params.R8x),
+      R8y: str(params.R8y),
+      S: str(params.S),
+      Ax: str(params.Ax),
+      Ay: str(params.Ay),
+      ...policyInput,
+      walletBinding: str(params.walletBinding),
+    };
+    const paths = this.getCircuitPaths(circuitName);
+    console.log("  🔐 Generating witness and proof...");
+    const { proof, publicSignals } = await snarkjs.plonk.fullProve(
+      input,
+      paths.wasm,
+      paths.zkey,
+    );
+    console.log("  ✅ Proof generated successfully");
+    const calldata = await ProofFormatter.formatPlonkForSolidity(
+      proof,
+      publicSignals,
+    );
+    return {
+      proof: calldata.proof,
+      publicSignals: calldata.publicSignals,
+      rawProof: proof,
+      inputs: {
+        nullifier: this.hash([BigInt(params.salt), policyHash]).toString(),
+        walletBinding: input.walletBinding,
+      },
+    };
+  }
+
+  /** The value of a required policy or attribute field, as a BigInt. */
+  _required(params, name) {
+    if (params[name] === undefined || params[name] === null) {
+      throw new Error(`${name} is required`);
+    }
+    return BigInt(params[name]);
+  }
+
+  /**
+   * Generate a PLONK jurisdiction attestation proof.
+   * @param {Object} params - an issuer attestation (scripts/zk/attest.js):
+   *        identity, mask (the registry mask bit), salt, R8x, R8y, S, Ax, Ay;
+   *        plus allowedMask (PrivacyManager.allowedJurisdictionMask) and
+   *        walletBinding (the submitting wallet)
+   * @returns {Object} { proof, publicSignals: [nullifier, Ax, Ay,
+   *          allowedMask, walletBinding], rawProof, inputs }
    */
   async generateJurisdictionProof(params) {
-    await this.initialize();
-    console.log("\n🔐 Generating Jurisdiction Proof...");
-
-    const {
-      userJurisdiction,
-      allowedJurisdictions,
-      userSalt = BigInt(12345),
-    } = params;
-
-    // Check if user's jurisdiction is allowed
-    const isAllowed = allowedJurisdictions.includes(userJurisdiction);
-    if (!isAllowed) {
-      throw new Error("User jurisdiction not in allowed list");
+    console.log("\n🔐 Generating Jurisdiction Attestation Proof (PLONK)...");
+    const mask = this._required(params, "mask");
+    const allowedMask = this._required(params, "allowedMask");
+    if ((mask & allowedMask) === 0n) {
+      throw new Error("the attested jurisdiction is not in allowedMask");
     }
-
-    // Create commitment with salt
-    const commitmentHash = this.hash([userJurisdiction, userSalt]);
-
-    // For simplicity, use first allowed jurisdiction as mask
-    const allowedJurisdictionsMask = allowedJurisdictions[0];
-
-    // Prepare circuit inputs matching the circuit signature
-    const input = {
-      userJurisdiction: userJurisdiction.toString(),
-      userSalt: userSalt.toString(),
-      allowedJurisdictionsMask: allowedJurisdictionsMask.toString(),
-      commitmentHash: commitmentHash.toString(),
-    };
-
-    console.log("  🧮 Generating witness...");
-    const paths = this.getCircuitPaths("jurisdiction_proof");
-
-    console.log("  🔐 Generating proof...");
-    const { proof, publicSignals } = await snarkjs.groth16.fullProve(
-      input,
-      paths.wasm,
-      paths.zkey,
+    return this._proveAttestation(
+      "jurisdiction_proof",
+      params,
+      { userMask: mask.toString() },
+      { allowedMask: allowedMask.toString() },
+      allowedMask,
     );
-
-    console.log("  ✅ Proof generated successfully");
-
-    return {
-      proof: ProofFormatter.formatForSolidity(proof, publicSignals),
-      publicSignals,
-      inputs: {
-        userJurisdiction: userJurisdiction.toString(),
-        userSalt: userSalt.toString(),
-        commitmentHash: commitmentHash.toString(),
-      },
-    };
   }
 
   /**
-   * Generate accreditation proof
-   * @param {Object} params - Proof parameters
-   * @param {BigInt} params.accreditationLevel - User's accreditation level
-   * @param {BigInt} params.minimumLevel - Minimum required level
-   * @param {BigInt} params.userSalt - Random salt for privacy (optional)
-   * @param {BigInt[]} params.issuerSignature - Issuer signature (optional)
-   * @param {BigInt[]} params.issuerPublicKey - Issuer public key (optional)
-   * @returns {Object} Generated proof
+   * Generate a PLONK accreditation attestation proof.
+   * @param {Object} params - an issuer attestation: identity, amount, salt,
+   *        R8x, R8y, S, Ax, Ay; plus minimumAccreditation and walletBinding
+   * @returns {Object} { proof, publicSignals: [nullifier, Ax, Ay,
+   *          minimumAccreditation, walletBinding], rawProof, inputs }
    */
   async generateAccreditationProof(params) {
-    await this.initialize();
-    console.log("\n🔐 Generating Accreditation Proof...");
-
-    const {
-      userAccreditation,
-      minimumAccreditation,
-      userSalt = BigInt(12345),
-      issuerSignature = [BigInt(111), BigInt(222)],
-      issuerPublicKey = [BigInt(333), BigInt(444)],
-    } = params;
-
-    // Check if user meets minimum level
-    if (userAccreditation < minimumAccreditation) {
-      throw new Error("Accreditation level below minimum");
+    console.log("\n🔐 Generating Accreditation Attestation Proof (PLONK)...");
+    const amount = this._required(params, "amount");
+    const minimum = this._required(params, "minimumAccreditation");
+    if (amount < minimum) {
+      throw new Error("the attested amount is below minimumAccreditation");
     }
-
-    // Create commitment with salt
-    const commitmentHash = this.hash([userAccreditation, userSalt]);
-
-    // Prepare circuit inputs matching the circuit signature
-    const input = {
-      userAccreditation: userAccreditation.toString(),
-      userSalt: userSalt.toString(),
-      issuerSignature: issuerSignature.map((x) => x.toString()),
-      minimumAccreditation: minimumAccreditation.toString(),
-      commitmentHash: commitmentHash.toString(),
-      issuerPublicKey: issuerPublicKey.map((x) => x.toString()),
-    };
-
-    console.log("  🧮 Generating witness...");
-    const paths = this.getCircuitPaths("accreditation_proof");
-
-    console.log("  🔐 Generating proof...");
-    const { proof, publicSignals } = await snarkjs.groth16.fullProve(
-      input,
-      paths.wasm,
-      paths.zkey,
+    return this._proveAttestation(
+      "accreditation_proof",
+      params,
+      { amount: amount.toString() },
+      { minimumAccreditation: minimum.toString() },
+      minimum,
     );
-
-    console.log("  ✅ Proof generated successfully");
-
-    return {
-      proof: ProofFormatter.formatForSolidity(proof, publicSignals),
-      publicSignals,
-      inputs: {
-        userAccreditation: userAccreditation.toString(),
-        minimumAccreditation: minimumAccreditation.toString(),
-        commitmentHash: commitmentHash.toString(),
-      },
-    };
   }
 
   /**
-   * Generate compliance aggregation proof
-   * @param {Object} params - Proof parameters
-   * @param {BigInt} params.userSalt - Random salt for privacy (optional)
-   * @returns {Object} Generated proof
+   * Generate a PLONK compliance-aggregation attestation proof.
+   * @param {Object} params - an issuer attestation: identity, scores [kyc,
+   *        aml, jurisdiction, accreditation] (0..100), salt, R8x, R8y, S, Ax,
+   *        Ay; plus minimum, weights [wK, wA, wJ, wAcc] (sum 100) and
+   *        walletBinding
+   * @returns {Object} { proof, publicSignals: [nullifier, Ax, Ay, minimum,
+   *          wK, wA, wJ, wAcc, walletBinding], rawProof, inputs }
    */
   async generateComplianceProof(params) {
-    await this.initialize();
-    console.log("\n🔐 Generating Compliance Aggregation Proof...");
-
-    const {
-      kycScore,
-      amlScore,
-      jurisdictionScore,
-      accreditationScore,
-      weightKyc,
-      weightAml,
-      weightJurisdiction,
-      weightAccreditation,
-      minimumComplianceLevel,
-      userSalt = BigInt(12345),
-    } = params;
-
-    // Calculate weighted compliance score
-    // The circuit will validate this internally, but we pre-check for better error messages
-    const totalScore =
-      kycScore * weightKyc +
-      amlScore * weightAml +
-      jurisdictionScore * weightJurisdiction +
-      accreditationScore * weightAccreditation;
-
-    // Convert to number for display (avoid BigInt division)
-    const totalScoreNum = Number(totalScore);
-    const avgScore = totalScoreNum / 100;
-    console.log(`  📊 Weighted sum: ${totalScore}, Average score: ${avgScore}`);
-
-    // Pre-check: Validate compliance score meets minimum requirement
-    // minimumComplianceLevel is 0-100, gets multiplied by 100 in circuit
-    const minimumWeightedSum = minimumComplianceLevel * BigInt(100);
-    if (totalScore < minimumWeightedSum) {
-      const error = new Error(
-        `Insufficient compliance score: ${totalScore} < ${minimumWeightedSum} (minimum required)`,
-      );
-      console.log(`  ❌ ${error.message}`);
-      throw error;
-    }
-
-    // Create commitment with salt (matching circuit: 5 inputs)
-    const commitmentHash = this.hash([
-      kycScore,
-      amlScore,
-      jurisdictionScore,
-      accreditationScore,
-      userSalt,
-    ]);
-
-    // Prepare circuit inputs matching the circuit signature
-    const input = {
-      kycScore: kycScore.toString(),
-      amlScore: amlScore.toString(),
-      jurisdictionScore: jurisdictionScore.toString(),
-      accreditationScore: accreditationScore.toString(),
-      userSalt: userSalt.toString(),
-      minimumComplianceLevel: minimumComplianceLevel.toString(),
-      commitmentHash: commitmentHash.toString(),
-      weightKyc: weightKyc.toString(),
-      weightAml: weightAml.toString(),
-      weightJurisdiction: weightJurisdiction.toString(),
-      weightAccreditation: weightAccreditation.toString(),
-    };
-
-    console.log("  🧮 Generating witness...");
-    const paths = this.getCircuitPaths("compliance_aggregation");
-
-    console.log("  🔐 Generating proof...");
-    const { proof, publicSignals } = await snarkjs.groth16.fullProve(
-      input,
-      paths.wasm,
-      paths.zkey,
+    console.log(
+      "\n🔐 Generating Compliance Aggregation Attestation Proof (PLONK)...",
     );
-
-    console.log("  ✅ Proof generated successfully");
-
-    return {
-      proof: ProofFormatter.formatForSolidity(proof, publicSignals),
-      publicSignals,
-      inputs: {
-        minimumComplianceLevel: minimumComplianceLevel.toString(),
-        commitmentHash: commitmentHash.toString(),
-        weightKyc: weightKyc.toString(),
-        weightAml: weightAml.toString(),
-        weightJurisdiction: weightJurisdiction.toString(),
-        weightAccreditation: weightAccreditation.toString(),
-      },
-    };
+    const minimum = this._required(params, "minimum");
+    for (const k of ["scores", "weights"]) {
+      if (!Array.isArray(params[k]) || params[k].length !== 4) {
+        throw new Error(`${k} is required (four values)`);
+      }
+    }
+    const scores = params.scores.map(BigInt);
+    const weights = params.weights.map(BigInt);
+    const weighted = scores.reduce((acc, s, i) => acc + s * weights[i], 0n);
+    if (weighted < minimum * 100n) {
+      throw new Error(
+        `Insufficient compliance score: weighted sum ${weighted} < ${minimum * 100n}`,
+      );
+    }
+    await this.initialize();
+    const policyHash = this.hash([minimum, ...weights]);
+    return this._proveAttestation(
+      "compliance_aggregation",
+      params,
+      { scores: scores.map(String) },
+      { minimum: minimum.toString(), weights: weights.map(String) },
+      policyHash,
+    );
   }
 }
 

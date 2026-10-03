@@ -5,23 +5,14 @@ describe("ZKVerifierIntegrated - Phase 2 Features", function () {
   let zkVerifier;
   let owner, user1, user2;
 
-  // Sample proof data for testing
-  const sampleProof = {
-    a: [1, 2],
-    b: [
-      [3, 4],
-      [5, 6],
-    ],
-    c: [7, 8],
-  };
-
-  // Whitelist is PLONK since Task 3.1: 24 proof words and
+  // Every circuit is PLONK (24 proof words). Whitelist signals:
   // [nullifier, merkleRoot, walletBinding].
   const samplePlonkProof = Array.from({ length: 24 }, (_, i) => i + 1);
+  const sampleProof = samplePlonkProof;
   const samplePublicSignals = [12345, 777, 4242]; // testingMode: all non-zero
   // verifyCircuitProof/verifyBatchProofs refuse the whitelist circuit since
   // Task 3.3 (use verifyWhitelistMembership): the batch reports false for it.
-  const whitelistInputs = [...samplePlonkProof, ...samplePublicSignals];
+  const whitelistInputs = samplePublicSignals;
 
   beforeEach(async function () {
     [owner, user1, user2] = await ethers.getSigners();
@@ -213,8 +204,8 @@ describe("ZKVerifierIntegrated - Phase 2 Features", function () {
 
       const publicInputsArray = [
         whitelistInputs,
-        [1], // blacklist is PLONK since Task 3.7: the batch reports false
-        [67890],
+        [1], // blacklist has its own route since Task 3.7: the batch reports false
+        [67890, 1, 2, 3, 4], // jurisdiction (Task 3.7b): 5 signals
       ];
 
       const tx = await zkVerifier.verifyBatchProofs(
@@ -268,7 +259,7 @@ describe("ZKVerifierIntegrated - Phase 2 Features", function () {
 
       const publicInputsArray = [
         whitelistInputs,
-        [1], // Wrong number of inputs for compliance (needs 6)
+        [1], // Wrong number of inputs for compliance (needs 9)
       ];
 
       // Should not revert, but return partial results

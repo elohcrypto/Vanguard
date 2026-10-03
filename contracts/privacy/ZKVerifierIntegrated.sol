@@ -20,11 +20,15 @@ import "./verifiers/compliance_aggregationVerifier.sol";
  *        blacklistRoot, walletBinding]); sound; typed entry
  *        verifyBlacklistNonMembership. A non-gating demonstration (D2):
  *        nothing on chain consumes its result.
- *      - jurisdiction, accreditation, compliance: Groth16 with no phase-2
- *        contribution, so forgeable until Task 3.7 moves each to PLONK with
- *        the same signal range check the PLONK paths have.
- *      Not `is IZKVerifier`: that interface also carries the legacy
- *      verifyProof/setVerifyingKey/getVerifyingKey ABI this contract never had.
+ *      - jurisdiction, accreditation, compliance (Task 3.7b, D31 a): PLONK
+ *        proofs over an issuer-signed EdDSA attestation; signals
+ *        [nullifier, Ax, Ay, policy..., walletBinding]; typed entries
+ *        verifyJurisdictionProof / verifyAccreditationProof /
+ *        verifyComplianceAggregation, also routed by id through
+ *        verifyCircuitProof. Trusting (Ax, Ay), comparing the policy signals
+ *        and the wallet, and the nullifier map belong to PrivacyManager
+ *        (submitAttestationProof).
+ *      Every circuit is PLONK on the universal ptau (D28 c).
  */
 /**
  * @dev Uses Ownable2Step so ownership can migrate as governance matures —
@@ -230,194 +234,112 @@ contract ZKVerifierIntegrated is Ownable2Step, ReentrancyGuard {
     }
 
     /**
-     * @dev Verify jurisdiction proof
-     * @param a Proof point A
-     * @param b Proof point B
-     * @param c Proof point C
-     * @param publicSignals Public inputs for the proof (1 element)
-     * @return True if the proof is valid
+     * @dev Verify a PLONK jurisdiction attestation proof.
+     * @param proof 24-word PLONK proof (snarkjs `plonk exportSolidityCallData`)
+     * @param pubSignals [nullifier, Ax, Ay, allowedMask, walletBinding]
+     * @return True if the proof verifies against these public signals
+     *
+     * Checks the proof only: whether (Ax, Ay) is a trusted issuer key, the
+     * mask the current policy, walletBinding the submitter and the nullifier
+     * free is PrivacyManager.submitAttestationProof's job.
+     *
+     * testingMode (demo only): the proof words are not checked and no
+     * verifier is called; a proof is accepted when the nullifier, Ax, Ay and
+     * walletBinding are non-zero (every signal below the field order). The
+     * policy signals may be 0 (a weight of 0 is a legitimate policy).
      */
     function verifyJurisdictionProof(
-        uint256[2] memory a,
-        uint256[2][2] memory b,
-        uint256[2] memory c,
-        uint256[1] memory publicSignals
+        uint256[24] calldata proof,
+        uint256[5] calldata pubSignals
     ) external nonReentrant returns (bool) {
-        return _verifyJurisdiction(a, b, c, publicSignals);
+        uint256[] memory s = new uint256[](5);
+        for (uint256 i = 0; i < 5; i++) s[i] = pubSignals[i];
+        return _verifyAttestation("jurisdiction", proof, s);
     }
 
-    function _verifyJurisdiction(
-        uint256[2] memory a, uint256[2][2] memory b, uint256[2] memory c, uint256[1] memory publicSignals
-    ) internal returns (bool) {
-        bytes32 proofHash = _proofCacheKey("jurisdiction", a, b, c, abi.encodePacked(publicSignals));
-        if (verifiedProofs[proofHash] && block.timestamp <= proofTimestamp[proofHash] + proofCacheExpiry) {
-            emit ProofCacheHit(proofHash, "jurisdiction");
-            return true; // Cached proof, ~5k gas instead of ~300k
-        }
-
-        totalProofs["jurisdiction"]++;
-        userProofCount[msg.sender]++;
-
-        bool result;
-        if (testingMode) {
-            // Mock verification for testing - always return true for valid inputs
-            result = (publicSignals.length == 1 && publicSignals[0] > 0);
-        } else {
-            result = jurisdictionVerifier.verifyProof(a, b, c, publicSignals);
-        }
-
-        if (result) {
-            validProofs["jurisdiction"]++;
-            verifiedProofs[proofHash] = true;
-            proofTimestamp[proofHash] = block.timestamp;
-            emit ProofCached(proofHash, "jurisdiction");
-        }
-
-        emit ProofVerified("jurisdiction", msg.sender, result);
-        return result;
-    }
-    
     /**
-     * @dev Verify accreditation proof
-     * @param a Proof point A
-     * @param b Proof point B
-     * @param c Proof point C
-     * @param publicSignals Public inputs for the proof (1 element)
-     * @return True if the proof is valid
+     * @dev Verify a PLONK accreditation attestation proof; same rules as
+     *      verifyJurisdictionProof.
+     * @param pubSignals [nullifier, Ax, Ay, minimumAccreditation, walletBinding]
      */
     function verifyAccreditationProof(
-        uint256[2] memory a,
-        uint256[2][2] memory b,
-        uint256[2] memory c,
-        uint256[1] memory publicSignals
+        uint256[24] calldata proof,
+        uint256[5] calldata pubSignals
     ) external nonReentrant returns (bool) {
-        return _verifyAccreditation(a, b, c, publicSignals);
-    }
-
-    function _verifyAccreditation(
-        uint256[2] memory a, uint256[2][2] memory b, uint256[2] memory c, uint256[1] memory publicSignals
-    ) internal returns (bool) {
-        bytes32 proofHash = _proofCacheKey("accreditation", a, b, c, abi.encodePacked(publicSignals));
-        if (verifiedProofs[proofHash] && block.timestamp <= proofTimestamp[proofHash] + proofCacheExpiry) {
-            emit ProofCacheHit(proofHash, "accreditation");
-            return true; // Cached proof, ~5k gas instead of ~300k
-        }
-
-        totalProofs["accreditation"]++;
-        userProofCount[msg.sender]++;
-
-        bool result;
-        if (testingMode) {
-            // Mock verification for testing - always return true for valid inputs
-            result = (publicSignals.length == 1 && publicSignals[0] > 0);
-        } else {
-            result = accreditationVerifier.verifyProof(a, b, c, publicSignals);
-        }
-
-        if (result) {
-            validProofs["accreditation"]++;
-            verifiedProofs[proofHash] = true;
-            proofTimestamp[proofHash] = block.timestamp;
-            emit ProofCached(proofHash, "accreditation");
-        }
-
-        emit ProofVerified("accreditation", msg.sender, result);
-        return result;
+        uint256[] memory s = new uint256[](5);
+        for (uint256 i = 0; i < 5; i++) s[i] = pubSignals[i];
+        return _verifyAttestation("accreditation", proof, s);
     }
 
     /**
-     * @dev Verify compliance aggregation proof
-     * @param a Proof point A
-     * @param b Proof point B
-     * @param c Proof point C
-     * @param publicSignals Public inputs for the proof (6 elements: minimumComplianceLevel, commitmentHash, weightKyc, weightAml, weightJurisdiction, weightAccreditation)
-     * @return True if the proof is valid
+     * @dev Verify a PLONK compliance-aggregation attestation proof; same rules
+     *      as verifyJurisdictionProof.
+     * @param pubSignals [nullifier, Ax, Ay, minimum, wK, wA, wJ, wAcc,
+     *        walletBinding]
      */
     function verifyComplianceAggregation(
-        uint256[2] memory a,
-        uint256[2][2] memory b,
-        uint256[2] memory c,
-        uint256[6] memory publicSignals
+        uint256[24] calldata proof,
+        uint256[9] calldata pubSignals
     ) external nonReentrant returns (bool) {
-        return _verifyComplianceAggregation(a, b, c, publicSignals);
+        uint256[] memory s = new uint256[](9);
+        for (uint256 i = 0; i < 9; i++) s[i] = pubSignals[i];
+        return _verifyAttestation("compliance", proof, s);
     }
 
-    function _verifyComplianceAggregation(
-        uint256[2] memory a, uint256[2][2] memory b, uint256[2] memory c, uint256[6] memory publicSignals
+    /// @dev Shared body of the three attestation routes; mirrors
+    ///      _verifyWhitelist: range check before any bookkeeping, cache key
+    ///      bound to the circuit tag and verifier instance, stats and events.
+    ///      The caller guarantees the circuit's signal count.
+    function _verifyAttestation(
+        string memory circuit,
+        uint256[24] memory proof,
+        uint256[] memory s
     ) internal returns (bool) {
-        bytes32 proofHash = _proofCacheKey("compliance", a, b, c, abi.encodePacked(publicSignals));
+        uint256 n = s.length;
+        for (uint256 i = 0; i < n; i++) {
+            if (s[i] >= SNARK_SCALAR_FIELD) return false;
+        }
+        bytes32 proofHash = _plonkCacheKey(circuit, proof, abi.encodePacked(s));
         if (verifiedProofs[proofHash] && block.timestamp <= proofTimestamp[proofHash] + proofCacheExpiry) {
-            emit ProofCacheHit(proofHash, "compliance");
-            return true; // Cached proof, ~5k gas instead of ~300k
+            emit ProofCacheHit(proofHash, circuit);
+            return true;
         }
 
-        totalProofs["compliance"]++;
+        totalProofs[circuit]++;
         userProofCount[msg.sender]++;
 
         bool result;
         if (testingMode) {
-            // Mock verification for testing - always return true for valid inputs
-            result = (publicSignals.length == 6 && publicSignals[0] > 0);
+            // nullifier, Ax, Ay and walletBinding; policy signals may be 0.
+            result = s[0] != 0 && s[1] != 0 && s[2] != 0 && s[n - 1] != 0;
         } else {
-            // The actual circuit only has 2 public inputs, extract them from the 6-element array
-            uint256[2] memory actualPublicSignals = [publicSignals[0], publicSignals[1]];
-            result = complianceVerifier.verifyProof(a, b, c, actualPublicSignals);
+            result = _callAttestationVerifier(circuit, proof, s);
         }
 
         if (result) {
-            validProofs["compliance"]++;
+            validProofs[circuit]++;
             verifiedProofs[proofHash] = true;
             proofTimestamp[proofHash] = block.timestamp;
-            emit ProofCached(proofHash, "compliance");
+            emit ProofCached(proofHash, circuit);
         }
 
-        emit ProofVerified("compliance", msg.sender, result);
+        emit ProofVerified(circuit, msg.sender, result);
         return result;
     }
 
-    /**
-     * @dev Alias for verifyComplianceAggregation for compatibility
-     * @param a Proof point A
-     * @param b Proof point B
-     * @param c Proof point C
-     * @param publicSignals Public inputs for the proof (6 elements: minimumComplianceLevel, commitmentHash, weightKyc, weightAml, weightJurisdiction, weightAccreditation)
-     * @return True if the proof is valid
-     */
-    function verifyComplianceProof(
-        uint256[2] memory a,
-        uint256[2][2] memory b,
-        uint256[2] memory c,
-        uint256[2] memory publicSignals // compliance_aggregation_fixed outputs 2 signals
-    ) external nonReentrant returns (bool) {
-        // Gas Optimization: Check proof cache first
-        bytes32 proofHash = _proofCacheKey("compliance-proof", a, b, c, abi.encodePacked(publicSignals));
-        if (verifiedProofs[proofHash] && block.timestamp <= proofTimestamp[proofHash] + proofCacheExpiry) {
-            emit ProofCacheHit(proofHash, "compliance");
-            return true; // Cached proof, ~5k gas instead of ~300k
+    function _callAttestationVerifier(
+        string memory circuit,
+        uint256[24] memory proof,
+        uint256[] memory s
+    ) private view returns (bool) {
+        bytes32 h = keccak256(bytes(circuit));
+        if (h == keccak256("jurisdiction")) {
+            return jurisdictionVerifier.verifyProof(proof, [s[0], s[1], s[2], s[3], s[4]]);
         }
-
-        totalProofs["compliance"]++;
-        userProofCount[msg.sender]++;
-
-        bool result;
-        if (testingMode) {
-            // Mock verification for testing - always return true for valid inputs
-            result = (publicSignals.length == 2 && publicSignals[0] > 0);
-        } else {
-            // The circuit has exactly 2 public inputs, pass them directly
-            result = complianceVerifier.verifyProof(a, b, c, publicSignals);
+        if (h == keccak256("accreditation")) {
+            return accreditationVerifier.verifyProof(proof, [s[0], s[1], s[2], s[3], s[4]]);
         }
-
-        if (result) {
-            validProofs["compliance"]++;
-            // Cache successful proof for gas optimization
-            verifiedProofs[proofHash] = true;
-            proofTimestamp[proofHash] = block.timestamp;
-            emit ProofCached(proofHash, "compliance");
-        }
-
-        emit ProofVerified("compliance", msg.sender, result);
-        return result;
+        return complianceVerifier.verifyProof(proof, [s[0], s[1], s[2], s[3], s[4], s[5], s[6], s[7], s[8]]);
     }
 
     /**
@@ -436,8 +358,7 @@ contract ZKVerifierIntegrated is Ownable2Step, ReentrancyGuard {
      * What is and is not guarded:
      *   - NO timelock or delay on the swap (documented trust assumption)
      *   - `newVerifier` must be a contract, but there is NO proof it implements
-     *     the circuit's PLONK (whitelist) or Groth16 (others) verifier — only
-     *     code presence is checked
+     *     the circuit's PLONK verifier — only code presence is checked
      *   - a `VerifierUpdated` event IS emitted, so swaps are observable on-chain
      *     and can be monitored
      *
@@ -534,47 +455,47 @@ contract ZKVerifierIntegrated is Ownable2Step, ReentrancyGuard {
     }
 
     /**
-     * @dev Verify a proof for a specific circuit, routed by circuit id.
-     * @param circuitId Identifier for the circuit
-     * @param proof Groth16 proof
-     * @param publicInputs Public inputs for the proof
-     * @return True if the proof is valid
-     *
-     * Groth16 circuits only. The PLONK circuits (24-word proof) are refused
-     * here: use verifyWhitelistMembership / verifyBlacklistNonMembership.
+     * @dev Verify an attestation proof routed by circuit id: jurisdiction
+     *      (5 signals), accreditation (5) or compliance aggregation (9).
+     * @param circuitId JURISDICTION_PROOF_CIRCUIT, ACCREDITATION_PROOF_CIRCUIT
+     *        or COMPLIANCE_AGGREGATION_CIRCUIT
+     * @param proof 24-word PLONK proof
+     * @param signals The circuit's public signals, in snarkjs order
+     * @return True if the proof verifies; false on a bad proof or a signal
+     *         >= the field order. Reverts on a wrong signal count, an unknown
+     *         id, or the whitelist/blacklist ids (they have typed entries:
+     *         verifyWhitelistMembership / verifyBlacklistNonMembership).
      */
     function verifyCircuitProof(
         bytes32 circuitId,
-        IZKVerifier.Proof memory proof,
-        uint256[] memory publicInputs
+        uint256[24] calldata proof,
+        uint256[] calldata signals
     ) external nonReentrant returns (bool) {
-        return _verifyCircuit(circuitId, proof, publicInputs, true);
+        return _verifyCircuit(circuitId, proof, signals, true);
     }
 
     /// @dev Shared router of verifyCircuitProof (strict: a malformed entry
     ///      reverts) and verifyBatchProofs (non-strict: it returns false).
     function _verifyCircuit(
         bytes32 circuitId,
-        IZKVerifier.Proof memory proof,
-        uint256[] memory pi,
+        uint256[24] memory proof,
+        uint256[] memory s,
         bool strict
     ) internal returns (bool) {
-        uint256 n = pi.length;
+        uint256 n = s.length;
         if (circuitId == WHITELIST_ID) {
             return _malformed(strict, "use verifyWhitelistMembership");
         } else if (circuitId == BLACKLIST_ID) {
             return _malformed(strict, "use verifyBlacklistNonMembership");
         } else if (circuitId == JURISDICTION_ID) {
-            if (n != 1) return _malformed(strict, "Invalid public inputs for jurisdiction circuit");
-            return _verifyJurisdiction(proof.a, proof.b, proof.c, [pi[0]]);
+            if (n != 5) return _malformed(strict, "Invalid public inputs for jurisdiction circuit");
+            return _verifyAttestation("jurisdiction", proof, s);
         } else if (circuitId == ACCREDITATION_ID) {
-            if (n != 1) return _malformed(strict, "Invalid public inputs for accreditation circuit");
-            return _verifyAccreditation(proof.a, proof.b, proof.c, [pi[0]]);
+            if (n != 5) return _malformed(strict, "Invalid public inputs for accreditation circuit");
+            return _verifyAttestation("accreditation", proof, s);
         } else if (circuitId == COMPLIANCE_ID) {
-            if (n != 6) return _malformed(strict, "Invalid public inputs for compliance circuit");
-            return _verifyComplianceAggregation(
-                proof.a, proof.b, proof.c, [pi[0], pi[1], pi[2], pi[3], pi[4], pi[5]]
-            );
+            if (n != 9) return _malformed(strict, "Invalid public inputs for compliance circuit");
+            return _verifyAttestation("compliance", proof, s);
         }
         return _malformed(strict, "ZKVerifierIntegrated: Unknown circuit ID");
     }
@@ -615,7 +536,7 @@ contract ZKVerifierIntegrated is Ownable2Step, ReentrancyGuard {
      */
     function verifyBatchProofs(
         bytes32[] calldata circuitIds,
-        IZKVerifier.Proof[] calldata proofs,
+        uint256[24][] calldata proofs,
         uint256[][] calldata publicInputsArray
     ) external nonReentrant returns (bool[] memory results, uint256 successCount) {
         require(
@@ -637,29 +558,16 @@ contract ZKVerifierIntegrated is Ownable2Step, ReentrancyGuard {
     }
 
     /**
-     * @dev Cache key for a verified proof, BOUND TO THE CIRCUIT that verified it.
-     *      The key used to be keccak256(a, b, c, publicSignals) with no circuit id,
-     *      and every verify* function checked that shared cache before calling its
-     *      own verifier. Four circuits share the uint256[1] signal shape, so a proof
-     *      verified once under whitelist satisfied verifyBlacklistNonMembership on
-     *      the cache hit; the blacklist verifier was never called.
+     * @dev Cache key for a verified PLONK proof (24 words), BOUND TO THE
+     *      CIRCUIT that verified it. The key used to carry no circuit id, and
+     *      every verify* function checked that shared cache before calling its
+     *      own verifier, so a proof verified once under one circuit satisfied
+     *      another circuit of the same signal shape on the cache hit.
+     *      The verifier INSTANCE is part of the key, not just the label: a
+     *      proof accepted by the old verifier must not keep answering true from
+     *      the cache after updateVerifier swaps in a new one. A rotation
+     *      invalidates every cached proof for that circuit at once.
      */
-    function _proofCacheKey(
-        string memory circuit,
-        uint256[2] memory a,
-        uint256[2][2] memory b,
-        uint256[2] memory c,
-        bytes memory packedSignals
-    ) internal view returns (bytes32) {
-        // The verifier INSTANCE is part of the key, not just the label: a
-        // proof accepted by the old verifier must not keep answering true from
-        // the cache after updateVerifier swaps in a new one. A rotation now
-        // invalidates every cached proof for that circuit at once.
-        return keccak256(abi.encodePacked(circuit, _verifierFor(circuit), a, b, c, packedSignals));
-    }
-
-    /// @dev Cache key for a PLONK proof (24 words); same binding to circuit
-    ///      tag and verifier instance as _proofCacheKey.
     function _plonkCacheKey(
         string memory circuit,
         uint256[24] memory proof,
@@ -677,13 +585,14 @@ contract ZKVerifierIntegrated is Ownable2Step, ReentrancyGuard {
         if (h == keccak256("blacklist")) return address(blacklistVerifier);
         if (h == keccak256("jurisdiction")) return address(jurisdictionVerifier);
         if (h == keccak256("accreditation")) return address(accreditationVerifier);
-        if (h == keccak256("compliance") || h == keccak256("compliance-proof")) return address(complianceVerifier);
+        if (h == keccak256("compliance")) return address(complianceVerifier);
         return address(0);
     }
 
     /**
      * @notice Cache key of a PLONK whitelist proof (single and batch); see
-     *         blacklistProofCacheKey, and proofCacheKey for the Groth16 circuits.
+     *         blacklistProofCacheKey, and proofCacheKey for the attestation
+     *         circuits.
      */
     function whitelistProofCacheKey(
         uint256[24] calldata proof,
@@ -703,21 +612,18 @@ contract ZKVerifierIntegrated is Ownable2Step, ReentrancyGuard {
     }
 
     /**
-     * @notice Cache key for a Groth16 proof under a given circuit tag:
-     *         "jurisdiction", "accreditation",
-     *         "compliance" (6-signal aggregation) or "compliance-proof"
-     *         (2-signal verifyComplianceProof). The key also folds in the
-     *         verifier instance bound to that tag, so it changes after
-     *         updateVerifier. Callers of clearExpiredProofs compute keys with this.
+     * @notice Cache key of an attestation proof under its circuit tag:
+     *         "jurisdiction", "accreditation" or "compliance". The key also
+     *         folds in the verifier instance bound to that tag, so it changes
+     *         after updateVerifier. Callers of clearExpiredProofs compute keys
+     *         with this.
      */
     function proofCacheKey(
         string calldata circuit,
-        uint256[2] calldata a,
-        uint256[2][2] calldata b,
-        uint256[2] calldata c,
+        uint256[24] calldata proof,
         uint256[] calldata publicSignals
     ) external view returns (bytes32) {
-        return _proofCacheKey(circuit, a, b, c, abi.encodePacked(publicSignals));
+        return _plonkCacheKey(circuit, proof, abi.encodePacked(publicSignals));
     }
 
     /**

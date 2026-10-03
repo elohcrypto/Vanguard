@@ -402,22 +402,13 @@ describe("PrivacyManager whitelist binder (Task 3.3)", function () {
       ).to.be.revertedWithCustomError(pm, "NotListOperator");
     });
 
-    it("submitPrivateProof refuses the whitelist circuit", async function () {
+    it("submitAttestationProof refuses the whitelist circuit", async function () {
       const pm = await deploy();
-      const empty = {
-        a: [0n, 0n] as [bigint, bigint],
-        b: [
-          [0n, 0n],
-          [0n, 0n],
-        ] as [[bigint, bigint], [bigint, bigint]],
-        c: [0n, 0n] as [bigint, bigint],
-      };
       await expect(
-        pm.submitPrivateProof(WL, empty, [
-          ...aliceR1.proof,
-          ...aliceR1.signals,
-        ]),
-      ).to.be.revertedWith("PrivacyManager: use submitWhitelistProof");
+        pm.submitAttestationProof(WL, aliceR1.proof, aliceR1.signals),
+      )
+        .to.be.revertedWithCustomError(pm, "NotAttestationCircuit")
+        .withArgs(WL);
       const [wl] = await pm.validateAllPrivateCompliance(alice.address);
       expect(wl).to.equal(false);
     });

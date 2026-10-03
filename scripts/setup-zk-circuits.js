@@ -36,16 +36,15 @@ function blake2b512(file) {
 
 // protocol per circuit. PLONK uses the universal ptau directly: no
 // per-circuit phase 2, no toxic waste, and `plonk setup` is deterministic,
-// so the committed verifier is reproducible (CI asserts it). The groth16
-// entries have no phase-2 contribution (gamma == delta) and are forgeable;
-// Task 3.7 moves them to PLONK (blacklist done; the three attestation
-// circuits wait for their trust model, D31).
+// so the committed verifier is reproducible (CI asserts it). Every circuit is
+// PLONK since Task 3.7 (D28 c); "groth16" stays a known protocol so the
+// readiness script can still name an unsound Groth16 key if one reappears.
 const CIRCUIT_SPECS = [
   { name: "whitelist_membership", protocol: "plonk" },
   { name: "blacklist_membership", protocol: "plonk" },
-  { name: "jurisdiction_proof", protocol: "groth16" },
-  { name: "accreditation_proof", protocol: "groth16" },
-  { name: "compliance_aggregation", protocol: "groth16" },
+  { name: "jurisdiction_proof", protocol: "plonk" },
+  { name: "accreditation_proof", protocol: "plonk" },
+  { name: "compliance_aggregation", protocol: "plonk" },
 ];
 const CIRCUITS = CIRCUIT_SPECS.map((c) => c.name);
 const PROTOCOLS = ["plonk", "groth16"];
@@ -356,11 +355,11 @@ function getCircuitDescription(circuitName) {
     blacklist_membership:
       "Proves a whitelisted commitment's identity is not in the sanctions tree (non-gating, D2)",
     jurisdiction_proof:
-      "Proves jurisdiction eligibility without revealing location",
+      "Proves an issuer-attested jurisdiction is in the allowed set without revealing it (D31 a)",
     accreditation_proof:
-      "Proves accreditation level meets requirements without revealing exact level",
+      "Proves an issuer-attested accreditation amount meets the minimum without revealing it (D31 a)",
     compliance_aggregation:
-      "Proves overall compliance score meets requirements without revealing individual scores",
+      "Proves issuer-attested scores meet the weighted minimum without revealing them (D31 a)",
   };
 
   return descriptions[circuitName] || "ZK proof circuit";

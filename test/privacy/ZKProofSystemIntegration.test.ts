@@ -28,21 +28,8 @@ describe("🔐 Complete ZK Proof System Integration Tests", function () {
   let accreditationVerifier: AccreditationProofVerifier;
   let complianceVerifier: ComplianceAggregationVerifier;
 
-  // Test Data
-  const mockProof: {
-    a: [number, number];
-    b: [[number, number], [number, number]];
-    c: [number, number];
-  } = {
-    a: [1, 2],
-    b: [
-      [3, 4],
-      [5, 6],
-    ],
-    c: [7, 8],
-  };
-
-  // Whitelist (Task 3.1) and blacklist (Task 3.7) are PLONK: 24 proof words.
+  // Every circuit is PLONK (whitelist 3.1, blacklist 3.7, attestations
+  // 3.7b): 24 proof words.
   const mockPlonkProof = Array.from({ length: 24 }, (_, i) => i + 1);
 
   const mockWhitelistRoot = ethers.keccak256(
@@ -167,57 +154,60 @@ describe("🔐 Complete ZK Proof System Integration Tests", function () {
       expect(result).to.equal(false);
     });
 
-    it("Should verify jurisdiction eligibility proof", async function () {
-      console.log("🧪 Testing jurisdiction eligibility verifier...");
-
-      const publicSignals: [number] = [840]; // US jurisdiction code
-      const result = await jurisdictionVerifier.verifyProof(
-        mockProof.a,
-        mockProof.b,
-        mockProof.c,
-        publicSignals,
-      );
-
-      console.log(`   🌍 Jurisdiction proof result: ${result}`);
-      expect(result).to.be.a("boolean");
-    });
-
-    it("Should verify accreditation status proof", async function () {
-      console.log("🧪 Testing accreditation status verifier...");
-
-      const publicSignals: [number] = [5]; // Tier 5 accreditation
-      const result = await accreditationVerifier.verifyProof(
-        mockProof.a,
-        mockProof.b,
-        mockProof.c,
-        publicSignals,
-      );
-
-      console.log(`   💰 Accreditation proof result: ${result}`);
-      expect(result).to.be.a("boolean");
-    });
-
-    it("Should verify compliance aggregation proof", async function () {
-      console.log("🧪 Testing compliance aggregation verifier...");
-
-      // Compliance verifier expects uint[2]:
-      // [0] = meetsCompliance (1 = meets compliance, 0 = does not)
-      // [1] = complianceLevel (the actual compliance score)
-      const publicSignals: [number, number] = [
-        1, // meetsCompliance (1 = meets compliance)
-        85, // complianceLevel (85%)
+    it("Should refuse a made-up jurisdiction attestation proof", async function () {
+      // [nullifier, Ax, Ay, allowedMask, walletBinding]
+      const publicSignals: [number, number, number, number, number] = [
+        mockNullifier,
+        1,
+        2,
+        15,
+        1,
       ];
-      const result = await complianceVerifier.verifyProof(
-        mockProof.a,
-        mockProof.b,
-        mockProof.c,
+      const result = await jurisdictionVerifier.verifyProof(
+        mockPlonkProof,
         publicSignals,
       );
+      console.log(`   🌍 Jurisdiction proof result: ${result}`);
+      expect(result).to.equal(false);
+    });
 
+    it("Should refuse a made-up accreditation attestation proof", async function () {
+      // [nullifier, Ax, Ay, minimumAccreditation, walletBinding]
+      const publicSignals: [number, number, number, number, number] = [
+        mockNullifier,
+        1,
+        2,
+        100000,
+        1,
+      ];
+      const result = await accreditationVerifier.verifyProof(
+        mockPlonkProof,
+        publicSignals,
+      );
+      console.log(`   💰 Accreditation proof result: ${result}`);
+      expect(result).to.equal(false);
+    });
+
+    it("Should refuse a made-up compliance aggregation proof", async function () {
+      // [nullifier, Ax, Ay, minimum, wK, wA, wJ, wAcc, walletBinding]; the
+      // aggregate is never public (the old complianceLevel output is gone).
+      const publicSignals: [
+        number,
+        number,
+        number,
+        number,
+        number,
+        number,
+        number,
+        number,
+        number,
+      ] = [mockNullifier, 1, 2, 70, 25, 25, 25, 25, 1];
+      const result = await complianceVerifier.verifyProof(
+        mockPlonkProof,
+        publicSignals,
+      );
       console.log(`   📊 Compliance proof result: ${result}`);
-      // Note: Mock proof will return false since it's not a valid ZK proof
-      // This test just verifies the contract can be called without reverting
-      expect(result).to.be.a("boolean");
+      expect(result).to.equal(false);
     });
   });
 

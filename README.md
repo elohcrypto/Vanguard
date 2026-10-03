@@ -42,10 +42,10 @@ Vanguard/
 ├── circuits/                    # Zero-Knowledge Circuits 
 │   ├── whitelist_membership.circom          # Whitelist membership proof
 │   ├── blacklist_membership.circom          # Blacklist non-membership proof (non-gating, D2)
-│   ├── jurisdiction_proof.circom            # Jurisdiction compliance proof
-│   ├── accreditation_proof.circom           # Accreditation status proof
-│   ├── compliance_aggregation.circom        # Aggregated compliance proof
-│   └── compliance_aggregation_fixed.circom  # Fixed aggregation circuit
+│   ├── jurisdiction_proof.circom            # Issuer-attested jurisdiction in the allowed set
+│   ├── accreditation_proof.circom           # Issuer-attested accreditation >= minimum
+│   ├── compliance_aggregation.circom        # Issuer-attested scores meet a weighted minimum
+│   └── attestation.circom                   # Shared EdDSA-Poseidon attestation templates
 ├── demo/                        # Interactive Demo System 
 │   ├── core/                    # Core demo functionality
 │   ├── modules/                 # Demo modules (89 menu options)

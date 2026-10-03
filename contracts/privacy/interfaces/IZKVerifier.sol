@@ -3,58 +3,28 @@ pragma solidity ^0.8.20;
 
 /**
  * @title IZKVerifier
- * @dev Interface for zero-knowledge proof verification
+ * @dev The ZKVerifierIntegrated entries PrivacyManager consumes. Every
+ *      circuit is PLONK (24-word proof); the Groth16 Proof/VerifyingKey ABI
+ *      that nothing implemented was removed in Task 3.7b.
  */
 interface IZKVerifier {
-    struct Proof {
-        uint256[2] a;
-        uint256[2][2] b;
-        uint256[2] c;
-    }
-
-    struct VerifyingKey {
-        uint256[2] alpha;
-        uint256[2][2] beta;
-        uint256[2][2] gamma;
-        uint256[2][2] delta;
-        uint256[][] ic;
-    }
-
     /**
-     * @dev Verify a zero-knowledge proof
-     * @param proof The proof to verify
-     * @param publicInputs Public inputs for the proof
-     * @return True if the proof is valid
-     */
-    function verifyProof(Proof memory proof, uint256[] memory publicInputs) external view returns (bool);
-
-    /**
-     * @dev Set the verifying key for a specific circuit
+     * @dev Verify an attestation proof routed by circuit id (Task 3.7b):
+     *      jurisdiction and accreditation [nullifier, Ax, Ay, policy,
+     *      walletBinding], compliance aggregation [nullifier, Ax, Ay, minimum,
+     *      wK, wA, wJ, wAcc, walletBinding]. Returns false on a bad proof or
+     *      any signal >= the BN254 scalar field order; reverts on a wrong
+     *      signal count, an unknown id, and the whitelist/blacklist ids
+     *      ("use verifyWhitelistMembership" / "use verifyBlacklistNonMembership").
      * @param circuitId Identifier for the circuit
-     * @param vk The verifying key
-     */
-    function setVerifyingKey(bytes32 circuitId, VerifyingKey memory vk) external;
-
-    /**
-     * @dev Get the verifying key for a specific circuit
-     * @param circuitId Identifier for the circuit
-     * @return The verifying key
-     */
-    function getVerifyingKey(bytes32 circuitId) external view returns (VerifyingKey memory);
-
-    /**
-     * @dev Verify a Groth16 proof for a specific circuit. The PLONK
-     *      circuits are refused (revert "use verifyWhitelistMembership" /
-     *      "use verifyBlacklistNonMembership").
-     * @param circuitId Identifier for the circuit
-     * @param proof The proof to verify
-     * @param publicInputs Public inputs for the proof
+     * @param proof 24-word PLONK proof
+     * @param signals Public signals, in snarkjs order
      * @return True if the proof is valid
      */
     function verifyCircuitProof(
         bytes32 circuitId,
-        Proof memory proof,
-        uint256[] memory publicInputs
+        uint256[24] calldata proof,
+        uint256[] calldata signals
     ) external returns (bool);
 
     /**
@@ -122,7 +92,4 @@ interface IZKVerifier {
      */
     function isCircuitRegistered(bytes32 circuitId) external view returns (bool);
 
-    // Events
-    event ProofVerified(bytes32 indexed circuitId, address indexed verifier, bool result);
-    event VerifyingKeyUpdated(bytes32 indexed circuitId, address indexed updater);
 }

@@ -12,15 +12,6 @@ pragma solidity ^0.8.20;
  * Never deploy this outside a test.
  */
 contract AlwaysTrueVerifier {
-    function verifyProof(
-        uint[2] calldata,
-        uint[2][2] calldata,
-        uint[2] calldata,
-        uint[1] calldata
-    ) public pure returns (bool) {
-        return true;
-    }
-
     /// @dev PLONK whitelist shape (since Task 3.1).
     function verifyProof(
         uint256[24] calldata,
@@ -33,6 +24,22 @@ contract AlwaysTrueVerifier {
     function verifyProof(
         uint256[24] calldata,
         uint256[4] calldata
+    ) public pure returns (bool) {
+        return true;
+    }
+
+    /// @dev PLONK jurisdiction and accreditation shape (since Task 3.7b).
+    function verifyProof(
+        uint256[24] calldata,
+        uint256[5] calldata
+    ) public pure returns (bool) {
+        return true;
+    }
+
+    /// @dev PLONK compliance-aggregation shape (since Task 3.7b).
+    function verifyProof(
+        uint256[24] calldata,
+        uint256[9] calldata
     ) public pure returns (bool) {
         return true;
     }

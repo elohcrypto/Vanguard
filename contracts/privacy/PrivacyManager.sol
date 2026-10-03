@@ -8,7 +8,7 @@ import "./interfaces/IZKVerifier.sol";
 /**
  * @title PrivacyManager
  * @dev Whitelist root registry and wallet binder for the PLONK whitelist
- *      proof, plus the private-proof store of the four Groth16 circuits.
+ *      proof, plus the attestation binder of the three attestation circuits.
  *
  *      Whitelist (plan Task 3.3, D29/D30, R-3R-7/R-3R-10): the list operator
  *      (or the owner) publishes ONE current Merkle root of commitments; a
@@ -17,17 +17,18 @@ import "./interfaces/IZKVerifier.sol";
  *      the binding (msg.sender), and one nullifier binds one wallet. Status
  *      lapses when the root rotates or when the binding's frozen expiry
  *      passes. `hasValidWhitelistProof` is the view a compliance gate reads.
+ *
+ *      Attestations (plan Task 3.7b, D31 a): a trusted issuer signs the
+ *      investor's attribute message off chain with an EdDSA Baby Jubjub key;
+ *      this contract holds the trusted issuer keys per circuit and the policy
+ *      (allowed-jurisdiction mask from the jurisdiction registry, minimum
+ *      accreditation, compliance weights and minimum). A wallet submits a
+ *      PLONK proof of the signature and the policy; it is recorded for the
+ *      wallet named in the binding, one wallet per attestation per policy,
+ *      and lapses on a policy change, an attestor revocation or expiry.
  */
 contract PrivacyManager is Ownable2Step, ReentrancyGuard {
     IZKVerifier public zkVerifier;
-
-    struct PrivateComplianceProof {
-        IZKVerifier.Proof zkProof;
-        bytes32 circuitId;
-        uint256[] publicInputs;
-        uint256 timestamp;
-        bool isValid;
-    }
 
     /// @dev User preference data. proofValidityPeriod here is kept for the
     ///      settings ABI only: validity is the owner's proofValidityPeriod.
@@ -55,10 +56,28 @@ contract PrivacyManager is Ownable2Step, ReentrancyGuard {
         uint256 expiresAt;
     }
 
+    /// @dev A wallet's attestation status for one circuit: valid while
+    ///      policyHash is the circuit's current policy hash, the attestor key
+    ///      is still trusted for the circuit and block.timestamp < expiresAt.
+    struct AttestationRecord {
+        bytes32 policyHash;
+        bytes32 attestor;
+        uint256 nullifier;
+        uint256 expiresAt;
+    }
+
+    /// @dev Compliance-aggregation policy: weighted sum of the four attested
+    ///      scores (each 0..100) >= minimum * 100; weights sum to 100.
+    struct CompliancePolicy {
+        uint256 minimum;
+        uint256 wK;
+        uint256 wA;
+        uint256 wJ;
+        uint256 wAcc;
+    }
+
     // Storage
-    mapping(address => mapping(bytes32 => PrivateComplianceProof)) private userProofs;
     mapping(address => PrivacySettings) public userPrivacySettings;
-    mapping(bytes32 => uint256) public circuitMinimumInputs;
 
     PrivacySettings public defaultPrivacySettings;
     uint256 public constant DEFAULT_PROOF_VALIDITY = 24 hours;
@@ -66,6 +85,12 @@ contract PrivacyManager is Ownable2Step, ReentrancyGuard {
     // Whitelist root registry and binder
     bytes32 private constant WHITELIST_ID = keccak256("WHITELIST_MEMBERSHIP");
     bytes32 private constant BLACKLIST_ID = keccak256("BLACKLIST_MEMBERSHIP");
+    bytes32 private constant JURISDICTION_ID = keccak256("JURISDICTION_PROOF");
+    bytes32 private constant ACCREDITATION_ID = keccak256("ACCREDITATION_PROOF");
+    bytes32 private constant COMPLIANCE_ID = keccak256("COMPLIANCE_AGGREGATION");
+    /// @dev The circuits range-check masks and the accreditation minimum to
+    ///      64 bits, and compliance values to 7 bits.
+    uint256 private constant MAX_MASK = type(uint64).max;
     uint256 public constant MIN_PROOF_VALIDITY = 1 days;
     uint256 public constant MAX_PROOF_VALIDITY = 365 days;
     uint256 internal constant SNARK_SCALAR_FIELD =
@@ -88,6 +113,22 @@ contract PrivacyManager is Ownable2Step, ReentrancyGuard {
     uint256[] public activeJurisdictionMasks;
     uint256 public nextJurisdictionMask = 1;
 
+    // Attestations (Task 3.7b)
+    /// @notice Trusted issuer keys per circuit, keyed by keccak256(abi.encode(Ax, Ay)).
+    mapping(bytes32 circuitId => mapping(bytes32 attestor => bool)) public trustedAttestor;
+    /// @notice Number of trusted issuer keys per circuit (the ceremony reports it).
+    mapping(bytes32 circuitId => uint256) public trustedAttestorCount;
+    /// @notice Accreditation policy: attested amount >= this; 0 = not set.
+    uint256 public minimumAccreditation;
+    /// @notice Compliance-aggregation policy; all zero = not set.
+    CompliancePolicy public compliancePolicy;
+    /// @notice Latest attestation record per wallet per circuit.
+    mapping(address user => mapping(bytes32 circuitId => AttestationRecord)) public attestationRecords;
+    /// @notice Wallet holding each attestation nullifier, per circuit and
+    ///         policy hash: one attestation binds one wallet per policy.
+    mapping(bytes32 circuitId => mapping(bytes32 policyHash => mapping(uint256 nullifier => address)))
+        public attestationNullifierWallet;
+
     // Errors
     error NotListOperator();
     error InvalidWhitelistRoot();
@@ -101,9 +142,28 @@ contract PrivacyManager is Ownable2Step, ReentrancyGuard {
     /// @dev The blacklist proof is a non-gating demonstration (D2): verify it
     ///      through ZKVerifierIntegrated.verifyBlacklistNonMembership.
     error NonGatingBlacklistProof();
+    error NotAttestationCircuit(bytes32 circuitId);
+    error InvalidSignalCount(uint256 expected, uint256 got);
+    error UntrustedAttestor(bytes32 circuitId, bytes32 attestor);
+    error PolicyNotSet(bytes32 circuitId);
+    error StalePolicy(bytes32 circuitId);
+    error AttestationNullifierBound(address wallet);
+    error InvalidAttestationProof();
+    error InvalidAttestorKey();
+    error InvalidPolicy();
+    error JurisdictionCapacity();
 
     // Events
-    event PrivateProofSubmitted(address indexed user, bytes32 indexed circuitId, uint256 timestamp, bool isValid);
+    event AttestationProofBound(
+        address indexed user,
+        bytes32 indexed circuitId,
+        uint256 indexed nullifier,
+        bytes32 policyHash,
+        uint256 expiresAt
+    );
+    event TrustedAttestorSet(bytes32 indexed circuitId, bytes32 indexed attestor, uint256 ax, uint256 ay, bool trusted);
+    event AccreditationPolicyUpdated(uint256 previousMinimum, uint256 newMinimum);
+    event CompliancePolicyUpdated(uint256 minimum, uint256 wK, uint256 wA, uint256 wJ, uint256 wAcc);
 
     event PrivacySettingsUpdated(
         address indexed user,
@@ -125,19 +185,6 @@ contract PrivacyManager is Ownable2Step, ReentrancyGuard {
     event JurisdictionRemoved(uint256 indexed mask, string name, string code, uint256 timestamp);
     event JurisdictionUpdated(uint256 indexed mask, string name, string code, bool isActive);
 
-    modifier validCircuit(bytes32 circuitId) {
-        require(zkVerifier.isCircuitRegistered(circuitId), "PrivacyManager: Invalid circuit");
-        _;
-    }
-
-    modifier validProof(address user, bytes32 circuitId) {
-        PrivateComplianceProof storage proof = userProofs[user][circuitId];
-        require(proof.timestamp > 0, "PrivacyManager: No proof found");
-        require(block.timestamp <= proof.timestamp + proofValidityPeriod, "PrivacyManager: Proof expired");
-        require(proof.isValid, "PrivacyManager: Invalid proof");
-        _;
-    }
-
     /// @param _zkVerifier ZKVerifierIntegrated; a testingMode instance is refused.
     constructor(address _zkVerifier) Ownable(msg.sender) {
         _setZKVerifier(_zkVerifier);
@@ -150,11 +197,6 @@ contract PrivacyManager is Ownable2Step, ReentrancyGuard {
             enablePrivateCompliance: true,
             proofValidityPeriod: DEFAULT_PROOF_VALIDITY
         });
-
-        // Minimum inputs of the Groth16 circuits submitPrivateProof serves
-        circuitMinimumInputs[keccak256("JURISDICTION_PROOF")] = 1;
-        circuitMinimumInputs[keccak256("ACCREDITATION_PROOF")] = 1;
-        circuitMinimumInputs[keccak256("COMPLIANCE_AGGREGATION")] = 1;
 
         // Initialize default jurisdictions
         _initializeDefaultJurisdictions();
@@ -317,98 +359,160 @@ contract PrivacyManager is Ownable2Step, ReentrancyGuard {
         revert RenounceDisabled();
     }
 
-    // ============ GROTH16 PRIVATE PROOFS ============
+    // ============ ATTESTATION PROOFS (Task 3.7b, D31 a) ============
 
     /**
-     * @dev Submit a private compliance proof for one of the three Groth16
-     *      circuits (jurisdiction, accreditation, compliance). The whitelist
-     *      circuit goes through submitWhitelistProof. The blacklist circuit is
-     *      refused and never stored: it is a non-gating demonstration (D2),
-     *      verified through ZKVerifierIntegrated.verifyBlacklistNonMembership.
-     * @param circuitId Circuit identifier for the proof type
-     * @param proof Zero-knowledge proof
-     * @param publicInputs Public inputs for the proof
-     * @return True if proof is valid and stored
+     * @notice Record the caller's attestation proof for one circuit.
+     * @param circuitId JURISDICTION_PROOF, ACCREDITATION_PROOF or
+     *        COMPLIANCE_AGGREGATION (keccak256 of the name)
+     * @param proof 24-word PLONK proof
+     * @param signals [nullifier, Ax, Ay, policy..., walletBinding]: policy is
+     *        [allowedMask], [minimumAccreditation] or [minimum, wK, wA, wJ, wAcc]
+     * @dev Reverts unless: the circuit is one of the three (the whitelist has
+     *      submitWhitelistProof; the blacklist is refused, D2); the signal
+     *      count is the circuit's; (Ax, Ay) is a trusted issuer key for the
+     *      circuit; the policy signals equal the current policy (which is
+     *      set); walletBinding == uint160(msg.sender); the nullifier is
+     *      unbound under this policy or bound to the caller; the proof
+     *      verifies through the wrapper (which refuses non-canonical signals).
+     *      A failing proof records nothing. Only the record is stored, not the
+     *      proof. Resubmitting refreshes the caller's record and its expiry.
      */
-    function submitPrivateProof(
+    function submitAttestationProof(
         bytes32 circuitId,
-        IZKVerifier.Proof memory proof,
-        uint256[] memory publicInputs
-    ) external validCircuit(circuitId) nonReentrant returns (bool) {
-        require(circuitId != WHITELIST_ID, "PrivacyManager: use submitWhitelistProof");
+        uint256[24] calldata proof,
+        uint256[] calldata signals
+    ) external nonReentrant {
         if (circuitId == BLACKLIST_ID) revert NonGatingBlacklistProof();
-        require(publicInputs.length >= circuitMinimumInputs[circuitId], "PrivacyManager: Insufficient public inputs");
+        uint256[] memory policy = currentPolicy(circuitId);
+        uint256 n = policy.length + 4;
+        if (signals.length != n) revert InvalidSignalCount(n, signals.length);
+        bytes32 attestor = keccak256(abi.encode(signals[1], signals[2]));
+        if (!trustedAttestor[circuitId][attestor]) revert UntrustedAttestor(circuitId, attestor);
+        if (!_policySet(circuitId, policy)) revert PolicyNotSet(circuitId);
+        for (uint256 i = 0; i < policy.length; i++) {
+            if (signals[3 + i] != policy[i]) revert StalePolicy(circuitId);
+        }
+        if (signals[n - 1] != uint256(uint160(msg.sender))) revert WalletBindingMismatch();
 
-        // Verify the proof
-        bool isValid = zkVerifier.verifyCircuitProof(circuitId, proof, publicInputs);
+        bytes32 policyHash = keccak256(abi.encode(circuitId, policy));
+        uint256 nullifier = signals[0];
+        address bound = attestationNullifierWallet[circuitId][policyHash][nullifier];
+        if (bound != address(0) && bound != msg.sender) revert AttestationNullifierBound(bound);
+        if (!zkVerifier.verifyCircuitProof(circuitId, proof, signals)) revert InvalidAttestationProof();
 
-        // Store the proof
-        userProofs[msg.sender][circuitId] = PrivateComplianceProof({
-            zkProof: proof,
-            circuitId: circuitId,
-            publicInputs: publicInputs,
-            timestamp: block.timestamp,
-            isValid: isValid
+        if (bound == address(0)) attestationNullifierWallet[circuitId][policyHash][nullifier] = msg.sender;
+        uint256 expiresAt = block.timestamp + proofValidityPeriod;
+        attestationRecords[msg.sender][circuitId] = AttestationRecord({
+            policyHash: policyHash,
+            attestor: attestor,
+            nullifier: nullifier,
+            expiresAt: expiresAt
         });
-
-        emit PrivateProofSubmitted(msg.sender, circuitId, block.timestamp, isValid);
-        return isValid;
+        emit AttestationProofBound(msg.sender, circuitId, nullifier, policyHash, expiresAt);
     }
 
     /**
-     * @dev Validate private jurisdiction eligibility
-     * @param user User address
-     * @return True if user has valid private jurisdiction proof
+     * @notice Trust or untrust an issuer key (Ax, Ay) for one attestation
+     *         circuit (owner; a type 11 vote after the handover). Untrusting
+     *         lapses every record made with that key.
      */
-    function validatePrivateJurisdiction(
-        address user
-    ) external validProof(user, keccak256("JURISDICTION_PROOF")) returns (bool) {
-        PrivacySettings memory settings = _getUserPrivacySettings(user);
-        if (!settings.enablePrivateJurisdiction) {
-            return false;
+    function setTrustedAttestor(bytes32 circuitId, uint256 ax, uint256 ay, bool trusted) external onlyOwner {
+        currentPolicy(circuitId); // reverts NotAttestationCircuit
+        if (ax == 0 || ay == 0 || ax >= SNARK_SCALAR_FIELD || ay >= SNARK_SCALAR_FIELD) revert InvalidAttestorKey();
+        bytes32 attestor = keccak256(abi.encode(ax, ay));
+        if (trustedAttestor[circuitId][attestor] != trusted) {
+            trustedAttestor[circuitId][attestor] = trusted;
+            if (trusted) trustedAttestorCount[circuitId]++;
+            else trustedAttestorCount[circuitId]--;
         }
+        emit TrustedAttestorSet(circuitId, attestor, ax, ay, trusted);
+    }
 
-        emit PrivateComplianceValidated(user, keccak256("JURISDICTION_PROOF"), true);
-        return true;
+    /// @notice Accreditation policy: attested amount >= minimum, in (0, 2^64).
+    function setMinimumAccreditation(uint256 minimum) external onlyOwner {
+        if (minimum == 0 || minimum > MAX_MASK) revert InvalidPolicy();
+        emit AccreditationPolicyUpdated(minimumAccreditation, minimum);
+        minimumAccreditation = minimum;
+    }
+
+    /// @notice Compliance policy: minimum <= 100, weights sum to 100.
+    function setCompliancePolicy(uint256 minimum, uint256 wK, uint256 wA, uint256 wJ, uint256 wAcc)
+        external
+        onlyOwner
+    {
+        if (minimum > 100 || wK > 100 || wA > 100 || wJ > 100 || wAcc > 100 || wK + wA + wJ + wAcc != 100) {
+            revert InvalidPolicy();
+        }
+        compliancePolicy = CompliancePolicy({minimum: minimum, wK: wK, wA: wA, wJ: wJ, wAcc: wAcc});
+        emit CompliancePolicyUpdated(minimum, wK, wA, wJ, wAcc);
+    }
+
+    /// @notice Jurisdiction policy: the OR of the active jurisdictions' masks.
+    function allowedJurisdictionMask() public view returns (uint256 mask) {
+        uint256 count = activeJurisdictionMasks.length;
+        for (uint256 i = 0; i < count; i++) mask |= activeJurisdictionMasks[i];
     }
 
     /**
-     * @dev Validate private accreditation status
-     * @param user User address
-     * @return True if user has valid private accreditation proof
+     * @notice The policy signals a proof for `circuitId` must carry now, in
+     *         signal order: [allowedMask], [minimumAccreditation] or
+     *         [minimum, wK, wA, wJ, wAcc]. Reverts for any other circuit.
      */
-    function validatePrivateAccreditation(
-        address user
-    ) external validProof(user, keccak256("ACCREDITATION_PROOF")) returns (bool) {
-        PrivacySettings memory settings = _getUserPrivacySettings(user);
-        if (!settings.enablePrivateAccreditation) {
-            return false;
+    function currentPolicy(bytes32 circuitId) public view returns (uint256[] memory policy) {
+        if (circuitId == JURISDICTION_ID) {
+            policy = new uint256[](1);
+            policy[0] = allowedJurisdictionMask();
+        } else if (circuitId == ACCREDITATION_ID) {
+            policy = new uint256[](1);
+            policy[0] = minimumAccreditation;
+        } else if (circuitId == COMPLIANCE_ID) {
+            CompliancePolicy memory c = compliancePolicy;
+            policy = new uint256[](5);
+            (policy[0], policy[1], policy[2], policy[3], policy[4]) = (c.minimum, c.wK, c.wA, c.wJ, c.wAcc);
+        } else {
+            revert NotAttestationCircuit(circuitId);
         }
-
-        emit PrivateComplianceValidated(user, keccak256("ACCREDITATION_PROOF"), true);
-        return true;
     }
 
-    /**
-     * @dev Validate private compliance aggregation
-     * @param user User address
-     * @return True if user has valid private compliance proof
-     */
-    function validatePrivateCompliance(
-        address user
-    ) external validProof(user, keccak256("COMPLIANCE_AGGREGATION")) returns (bool) {
-        PrivacySettings memory settings = _getUserPrivacySettings(user);
-        if (!settings.enablePrivateCompliance) {
-            return false;
-        }
+    /// @notice keccak256(abi.encode(circuitId, currentPolicy(circuitId))): the
+    ///         value a record must carry to be valid.
+    function currentPolicyHash(bytes32 circuitId) public view returns (bytes32) {
+        return keccak256(abi.encode(circuitId, currentPolicy(circuitId)));
+    }
 
-        emit PrivateComplianceValidated(user, keccak256("COMPLIANCE_AGGREGATION"), true);
-        return true;
+    /// @dev Jurisdiction and accreditation are set when non-zero; compliance
+    ///      when its weights are (the setter makes them sum to 100).
+    function _policySet(bytes32 circuitId, uint256[] memory policy) private pure returns (bool) {
+        if (circuitId == COMPLIANCE_ID) return policy[1] + policy[2] + policy[3] + policy[4] != 0;
+        return policy[0] != 0;
+    }
+
+    /// @notice Whether `user` holds a valid jurisdiction attestation and has
+    ///         not opted out of private jurisdiction checks.
+    function validatePrivateJurisdiction(address user) external returns (bool) {
+        return _validate(user, JURISDICTION_ID, _getUserPrivacySettings(user).enablePrivateJurisdiction);
+    }
+
+    /// @notice Same for the accreditation attestation.
+    function validatePrivateAccreditation(address user) external returns (bool) {
+        return _validate(user, ACCREDITATION_ID, _getUserPrivacySettings(user).enablePrivateAccreditation);
+    }
+
+    /// @notice Same for the compliance-aggregation attestation.
+    function validatePrivateCompliance(address user) external returns (bool) {
+        return _validate(user, COMPLIANCE_ID, _getUserPrivacySettings(user).enablePrivateCompliance);
+    }
+
+    function _validate(address user, bytes32 circuitId, bool enabled) private returns (bool result) {
+        result = enabled && _hasValidProof(user, circuitId);
+        emit PrivateComplianceValidated(user, circuitId, result);
     }
 
     /**
      * @dev Comprehensive private compliance validation. The whitelist entry
-     *      is hasValidWhitelistProof (not a user preference).
+     *      is hasValidWhitelistProof (not a user preference); the other three
+     *      are the attestation records under the user's preference flags.
      * @param user User address
      * @return whitelistValid True if the user holds a valid whitelist binding
      * @return jurisdictionValid True if jurisdiction proof is valid
@@ -423,23 +527,10 @@ contract PrivacyManager is Ownable2Step, ReentrancyGuard {
         returns (bool whitelistValid, bool jurisdictionValid, bool accreditationValid, bool complianceValid)
     {
         PrivacySettings memory settings = _getUserPrivacySettings(user);
-
         whitelistValid = hasValidWhitelistProof(user);
-
-        // Check jurisdiction eligibility
-        if (settings.enablePrivateJurisdiction && _hasValidProof(user, keccak256("JURISDICTION_PROOF"))) {
-            jurisdictionValid = true;
-        }
-
-        // Check accreditation status
-        if (settings.enablePrivateAccreditation && _hasValidProof(user, keccak256("ACCREDITATION_PROOF"))) {
-            accreditationValid = true;
-        }
-
-        // Check compliance aggregation
-        if (settings.enablePrivateCompliance && _hasValidProof(user, keccak256("COMPLIANCE_AGGREGATION"))) {
-            complianceValid = true;
-        }
+        jurisdictionValid = settings.enablePrivateJurisdiction && _hasValidProof(user, JURISDICTION_ID);
+        accreditationValid = settings.enablePrivateAccreditation && _hasValidProof(user, ACCREDITATION_ID);
+        complianceValid = settings.enablePrivateCompliance && _hasValidProof(user, COMPLIANCE_ID);
     }
 
     /**
@@ -473,21 +564,19 @@ contract PrivacyManager is Ownable2Step, ReentrancyGuard {
     }
 
     /**
-     * @dev Get user's Groth16 proof information
-     * @param user User address
-     * @param circuitId Circuit identifier
-     * @return timestamp Proof submission timestamp
-     * @return isValid True if proof is valid
-     * @return isExpired True if proof is expired
+     * @notice A wallet's attestation status for one circuit.
+     * @return expiresAt Expiry of the latest record (0 if none)
+     * @return isValid True if the record counts now (current policy, trusted
+     *         attestor, not expired); preference flags not applied
+     * @return isExpired True if there is no record or it has expired
      */
     function getUserProofInfo(
         address user,
         bytes32 circuitId
-    ) external view returns (uint256 timestamp, bool isValid, bool isExpired) {
-        PrivateComplianceProof storage proof = userProofs[user][circuitId];
-        timestamp = proof.timestamp;
-        isValid = proof.isValid;
-        isExpired = timestamp == 0 || block.timestamp > timestamp + proofValidityPeriod;
+    ) external view returns (uint256 expiresAt, bool isValid, bool isExpired) {
+        expiresAt = attestationRecords[user][circuitId].expiresAt;
+        isValid = _hasValidProof(user, circuitId);
+        isExpired = expiresAt == 0 || block.timestamp >= expiresAt;
     }
 
     /**
@@ -506,20 +595,15 @@ contract PrivacyManager is Ownable2Step, ReentrancyGuard {
         return userSettings;
     }
 
-    /**
-     * @dev Check if user has valid proof for circuit
-     * @param user User address
-     * @param circuitId Circuit identifier
-     * @return True if proof exists and is valid
-     */
+    /// @dev The record counts while its policy is current, its attestor is
+    ///      still trusted for the circuit and it has not expired.
     function _hasValidProof(address user, bytes32 circuitId) internal view returns (bool) {
-        PrivateComplianceProof storage proof = userProofs[user][circuitId];
-
-        if (proof.timestamp == 0 || !proof.isValid) {
-            return false;
-        }
-
-        return block.timestamp <= proof.timestamp + proofValidityPeriod;
+        AttestationRecord storage r = attestationRecords[user][circuitId];
+        return
+            r.expiresAt != 0 &&
+            block.timestamp < r.expiresAt &&
+            trustedAttestor[circuitId][r.attestor] &&
+            r.policyHash == currentPolicyHash(circuitId);
     }
 
     // ============ JURISDICTION MANAGEMENT ============
@@ -535,6 +619,8 @@ contract PrivacyManager is Ownable2Step, ReentrancyGuard {
         require(jurisdictionCodeToMask[code] == 0, "PrivacyManager: Jurisdiction already exists");
 
         uint256 mask = nextJurisdictionMask;
+        // The jurisdiction circuit carries masks in 64 bits.
+        if (mask > MAX_MASK) revert JurisdictionCapacity();
         nextJurisdictionMask = nextJurisdictionMask * 2; // Binary shift for unique masks
 
         jurisdictions[mask] = JurisdictionInfo({

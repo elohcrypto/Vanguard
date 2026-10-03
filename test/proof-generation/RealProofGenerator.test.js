@@ -206,172 +206,187 @@ describe("RealProofGenerator - All 5 Proof Types", function () {
     });
   });
 
-  describe("3. Jurisdiction Proof", function () {
-    it("should generate valid jurisdiction proof", async function () {
-      console.log("\n  🧪 Testing Jurisdiction Proof Generation");
-
-      const userJurisdiction = BigInt(1); // US
-      const allowedJurisdictions = [BigInt(1), BigInt(2), BigInt(3)];
-
-      const startTime = Date.now();
-      const result = await generator.generateJurisdictionProof({
-        userJurisdiction,
-        allowedJurisdictions,
-      });
-      const duration = Date.now() - startTime;
-
-      console.log(`  ⏱️  Generation time: ${duration}ms`);
-      console.log(`  📊 Public signals: ${result.publicSignals.length}`);
-
-      // Validate proof structure
-      expect(result.proof).to.have.property("a");
-      expect(result.publicSignals).to.have.lengthOf(1);
-
-      // Verify on-chain
-      const tx = await zkVerifier.verifyJurisdictionProof(
-        result.proof.a,
-        result.proof.b,
-        result.proof.c,
-        result.publicSignals,
-      );
-      const receipt = await tx.wait();
-
-      console.log(`  ⛽ Gas used: ${receipt.gasUsed.toString()}`);
-      expect(tx).to.not.be.reverted;
+  // Task 3.7b (D31 a): the three attestation circuits prove an issuer's
+  // EdDSA signature (scripts/zk/attest.js) and the policy; verified here on
+  // a real-mode wrapper.
+  describe("3-5. Attestation proofs (jurisdiction, accreditation, compliance)", function () {
+    const {
+      signAttestation,
+      newAttestorKey,
+    } = require("../../scripts/zk/attest");
+    const key = newAttestorKey();
+    const identity = 0x5fbdb2315678afecb367f032d93f642f64180aa3n;
+    let real;
+    const fields = (a) => ({
+      identity: a.identity,
+      salt: a.salt,
+      R8x: a.R8x,
+      R8y: a.R8y,
+      S: a.S,
+      Ax: a.Ax,
+      Ay: a.Ay,
+      walletBinding: owner.address,
     });
 
-    it("should reject disallowed jurisdiction", async function () {
-      const userJurisdiction = BigInt(99); // Not allowed
-      const allowedJurisdictions = [BigInt(1), BigInt(2)];
+    before(async function () {
+      real = await (
+        await ethers.getContractFactory("ZKVerifierIntegrated")
+      ).deploy(false);
+    });
 
+    it("should generate a valid jurisdiction proof", async function () {
+      const a = await signAttestation({
+        key,
+        circuit: "jurisdiction",
+        identity,
+        mask: 4,
+      });
+      const result = await generator.generateJurisdictionProof({
+        ...fields(a),
+        mask: a.attributes[0],
+        allowedMask: 15n,
+      });
+      // [nullifier, Ax, Ay, allowedMask, walletBinding]
+      expect(result.proof).to.have.lengthOf(24);
+      expect(result.publicSignals).to.have.lengthOf(5);
+      expect(result.publicSignals[0]).to.equal(result.inputs.nullifier);
+      expect(result.publicSignals.slice(1)).to.deep.equal([
+        a.Ax,
+        a.Ay,
+        "15",
+        BigInt(owner.address).toString(),
+      ]);
+      expect(
+        await real.verifyJurisdictionProof.staticCall(
+          result.proof,
+          result.publicSignals,
+        ),
+      ).to.equal(true);
+      const rx = await (
+        await real.verifyJurisdictionProof(result.proof, result.publicSignals)
+      ).wait();
+      console.log(
+        `  ⛽ ${"verifyJurisdictionProof"} gas (real verifier): ${rx.gasUsed}`,
+      );
+    });
+
+    it("should generate a valid accreditation proof", async function () {
+      const a = await signAttestation({
+        key,
+        circuit: "accreditation",
+        identity,
+        amount: 250000,
+      });
+      const result = await generator.generateAccreditationProof({
+        ...fields(a),
+        amount: a.attributes[0],
+        minimumAccreditation: 100000n,
+      });
+      expect(result.publicSignals).to.have.lengthOf(5);
+      expect(
+        await real.verifyAccreditationProof.staticCall(
+          result.proof,
+          result.publicSignals,
+        ),
+      ).to.equal(true);
+      const rx = await (
+        await real.verifyAccreditationProof(result.proof, result.publicSignals)
+      ).wait();
+      console.log(
+        `  ⛽ ${"verifyAccreditationProof"} gas (real verifier): ${rx.gasUsed}`,
+      );
+    });
+
+    it("should generate a valid compliance proof", async function () {
+      const a = await signAttestation({
+        key,
+        circuit: "compliance",
+        identity,
+        scores: [88, 88, 88, 88],
+      });
+      const result = await generator.generateComplianceProof({
+        ...fields(a),
+        scores: a.attributes,
+        minimum: 50n,
+        weights: [30n, 30n, 20n, 20n],
+      });
+      // [nullifier, Ax, Ay, minimum, wK, wA, wJ, wAcc, walletBinding]: the
+      // aggregate (88) is not among them.
+      expect(result.publicSignals).to.have.lengthOf(9);
+      expect(result.publicSignals.slice(3, 8)).to.deep.equal([
+        "50",
+        "30",
+        "30",
+        "20",
+        "20",
+      ]);
+      expect(
+        await real.verifyComplianceAggregation.staticCall(
+          result.proof,
+          result.publicSignals,
+        ),
+      ).to.equal(true);
+      const rx = await (
+        await real.verifyComplianceAggregation(
+          result.proof,
+          result.publicSignals,
+        )
+      ).wait();
+      console.log(
+        `  ⛽ ${"verifyComplianceAggregation"} gas (real verifier): ${rx.gasUsed}`,
+      );
+    });
+
+    it("should refuse attributes below the policy before proving", async function () {
+      const j = await signAttestation({
+        key,
+        circuit: "jurisdiction",
+        identity,
+        mask: 16,
+      });
       await expect(
         generator.generateJurisdictionProof({
-          userJurisdiction,
-          allowedJurisdictions,
+          ...fields(j),
+          mask: 16n,
+          allowedMask: 15n,
         }),
-      ).to.be.rejectedWith("User jurisdiction not in allowed list");
-    });
-  });
-
-  describe("4. Accreditation Proof", function () {
-    it("should generate valid accreditation proof", async function () {
-      console.log("\n  🧪 Testing Accreditation Proof Generation");
-
-      const userAccreditation = BigInt(5);
-      const minimumAccreditation = BigInt(3);
-
-      const startTime = Date.now();
-      const result = await generator.generateAccreditationProof({
-        userAccreditation,
-        minimumAccreditation,
+      ).to.be.rejectedWith("not in allowedMask");
+      const c = await signAttestation({
+        key,
+        circuit: "compliance",
+        identity,
+        scores: [50, 50, 50, 50],
       });
-      const duration = Date.now() - startTime;
-
-      console.log(`  ⏱️  Generation time: ${duration}ms`);
-      console.log(`  📊 Public signals: ${result.publicSignals.length}`);
-
-      // Validate proof structure
-      expect(result.proof).to.have.property("a");
-      expect(result.publicSignals).to.have.lengthOf(1);
-
-      // Verify on-chain
-      const tx = await zkVerifier.verifyAccreditationProof(
-        result.proof.a,
-        result.proof.b,
-        result.proof.c,
-        result.publicSignals,
-      );
-      const receipt = await tx.wait();
-
-      console.log(`  ⛽ Gas used: ${receipt.gasUsed.toString()}`);
-      expect(tx).to.not.be.reverted;
+      await expect(
+        generator.generateComplianceProof({
+          ...fields(c),
+          scores: c.attributes,
+          minimum: 90n,
+          weights: [25n, 25n, 25n, 25n],
+        }),
+      ).to.be.rejectedWith("Insufficient compliance score");
     });
 
-    it("should reject insufficient accreditation level", async function () {
-      const userAccreditation = BigInt(2);
-      const minimumAccreditation = BigInt(5);
-
+    it("should require the attestation fields and the wallet", async function () {
+      const a = await signAttestation({
+        key,
+        circuit: "accreditation",
+        identity,
+        amount: 5,
+      });
+      const base = { ...fields(a), amount: 5n, minimumAccreditation: 3n };
+      await expect(
+        generator.generateAccreditationProof({ ...base, S: undefined }),
+      ).to.be.rejectedWith("S required");
+      await expect(
+        generator.generateAccreditationProof({ ...base, walletBinding: 0n }),
+      ).to.be.rejectedWith("walletBinding is required");
       await expect(
         generator.generateAccreditationProof({
-          userAccreditation,
-          minimumAccreditation,
+          ...base,
+          minimumAccreditation: undefined,
         }),
-      ).to.be.rejectedWith("Accreditation level below minimum");
-    });
-  });
-
-  describe("5. Compliance Aggregation Proof", function () {
-    it("should generate valid compliance proof", async function () {
-      console.log("\n  🧪 Testing Compliance Proof Generation");
-
-      const params = {
-        kycScore: BigInt(88),
-        amlScore: BigInt(88),
-        jurisdictionScore: BigInt(88),
-        accreditationScore: BigInt(88),
-        weightKyc: BigInt(30),
-        weightAml: BigInt(30),
-        weightJurisdiction: BigInt(20),
-        weightAccreditation: BigInt(20),
-        // Weighted sum = 88*30 + 88*30 + 88*20 + 88*20 = 8800 (divisible by 100 → 88)
-        // minimumComplianceLevel is 0-100 (gets multiplied by 100 in circuit)
-        // So 50 means minimum weighted sum of 5000
-        minimumComplianceLevel: BigInt(50),
-      };
-
-      const startTime = Date.now();
-      const result = await generator.generateComplianceProof(params);
-      const duration = Date.now() - startTime;
-
-      console.log(`  ⏱️  Generation time: ${duration}ms`);
-      console.log(`  📊 Public signals: ${result.publicSignals.length}`);
-
-      // Validate proof structure
-      expect(result.proof).to.have.property("a");
-      expect(result.publicSignals).to.have.lengthOf(2); // meetsCompliance and complianceLevel
-
-      // Verify on-chain
-      // Note: Contract expects 6 public inputs (not the 2 circuit outputs)
-      // Construct the public inputs array manually
-      const publicInputs = [
-        params.minimumComplianceLevel,
-        result.inputs.commitmentHash,
-        params.weightKyc,
-        params.weightAml,
-        params.weightJurisdiction,
-        params.weightAccreditation,
-      ];
-
-      const tx = await zkVerifier.verifyComplianceAggregation(
-        result.proof.a,
-        result.proof.b,
-        result.proof.c,
-        publicInputs,
-      );
-      const receipt = await tx.wait();
-
-      console.log(`  ⛽ Gas used: ${receipt.gasUsed.toString()}`);
-      expect(tx).to.not.be.reverted;
-    });
-
-    it("should reject insufficient compliance score", async function () {
-      const params = {
-        kycScore: BigInt(50),
-        amlScore: BigInt(50),
-        jurisdictionScore: BigInt(50),
-        accreditationScore: BigInt(50),
-        weightKyc: BigInt(25),
-        weightAml: BigInt(25),
-        weightJurisdiction: BigInt(25),
-        weightAccreditation: BigInt(25),
-        // Weighted sum = 50*25 + 50*25 + 50*25 + 50*25 = 5000
-        // minimumComplianceLevel is 0-100 (gets multiplied by 100 in circuit)
-        // So 90 means minimum weighted sum of 9000 (which is > 5000, so should fail)
-        minimumComplianceLevel: BigInt(90),
-      };
-
-      // Circuit will fail with assertion error instead of throwing custom error
-      await expect(generator.generateComplianceProof(params)).to.be.rejected; // Accept any rejection (circuit assertion failure)
+      ).to.be.rejectedWith("minimumAccreditation is required");
     });
   });
 
