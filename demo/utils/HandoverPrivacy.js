@@ -9,7 +9,8 @@
  * contracts and the wrapper's five verifiers must carry the compiled code
  * (HandoverCodeHash.js), ops becomes the list operator, and the completion
  * lines. Task 3.4 adds the PrivacyManager ComplianceRules wires: it joins
- * the ceremony even before governance is bound to it.
+ * the ceremony even before governance is bound to it. Task 3.8: its
+ * jurisdiction policy must read the ceremony's ComplianceRules rule for VSC.
  */
 
 const { ethers } = require("hardhat");
@@ -87,6 +88,7 @@ async function preflightPrivacy(o) {
   const pm = o.privacyManager;
   const zk = o.zkVerifier;
   if (pm) {
+    await preflightJurisdictionSource(o);
     const used = await pm.zkVerifier();
     if (!(zk && same(await addrOf(zk), used))) {
       fail(
@@ -102,6 +104,36 @@ async function preflightPrivacy(o) {
   // Review 3.3 MEDIUM-1/2: the flags above are self-reported.
   for (const c of await codeHashChecks(pm, [zk])) {
     if (!c.ok) fail(codeHashRefusal(c));
+  }
+}
+
+/**
+ * Task 3.8: the jurisdiction set of the private proofs is ComplianceRules'
+ * rule for VSC, so PrivacyManager must read the ceremony's ComplianceRules
+ * with VSC as the policy token; another one would let a contract governance
+ * does not hold decide which countries the private path admits.
+ */
+async function preflightJurisdictionSource(o) {
+  const pm = o.privacyManager;
+  const pmAddr = await addrOf(pm);
+  const src = await pm.complianceRules().catch(async (e) => {
+    if (e.code !== "CALL_EXCEPTION" && !/revert/i.test(e.message)) throw e;
+    fail(
+      `PrivacyManager ${pmAddr} has no complianceRules() (predates Task 3.8): redeploy it before the ceremony`,
+    );
+  });
+  const rules = await addrOf(o.complianceRules);
+  if (!same(src, rules)) {
+    fail(
+      `PrivacyManager ${pmAddr} reads its jurisdiction policy from ComplianceRules ${src}, not the ceremony's ${rules}: setJurisdictionSource before the ceremony`,
+    );
+  }
+  const vsc = await addrOf(o.token);
+  const policyToken = await pm.policyToken();
+  if (!same(policyToken, vsc)) {
+    fail(
+      `PrivacyManager ${pmAddr} takes its jurisdiction policy from token ${policyToken}, not VSC ${vsc}: setJurisdictionSource before the ceremony`,
+    );
   }
 }
 
@@ -153,6 +185,22 @@ async function privacyLines(o, dAddr, ops, govAddr, warnings = []) {
     lines.push([
       "PrivacyManager pendingOwner is not the deployer",
       !same(await c.pendingOwner(), dAddr),
+    ]);
+    // Task 3.8: the one jurisdiction source.
+    const rules = await addrOf(o.complianceRules);
+    lines.push([
+      `PrivacyManager jurisdiction source: ComplianceRules ${rules}`,
+      same(await c.complianceRules(), rules),
+    ]);
+    const vsc = await addrOf(o.token);
+    lines.push([
+      `PrivacyManager jurisdiction policy token: VSC ${vsc}`,
+      same(await c.policyToken(), vsc),
+    ]);
+    const [codes] = await c.getAllJurisdictions();
+    lines.push([
+      `PrivacyManager jurisdiction bits registered: ${codes.length}`,
+      true,
     ]);
     // Task 3.7b: who may vouch for the attestation proofs. Informational;
     // none trusted refuses every proof of that circuit until a vote trusts
