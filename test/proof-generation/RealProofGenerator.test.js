@@ -3,6 +3,7 @@ const { ethers } = require("hardhat");
 const { RealProofGenerator } = require("../../scripts/generate-real-proofs");
 const { MerkleTreeBuilder } = require("../../utils/merkle-tree-builder");
 const { ProofFormatter } = require("../../utils/proof-formatter");
+const { describeProofs } = require("../helpers/zkProofs");
 
 describe("RealProofGenerator - All 5 Proof Types", function () {
   let generator;
@@ -27,7 +28,7 @@ describe("RealProofGenerator - All 5 Proof Types", function () {
     await generator.initialize();
   });
 
-  describe("1. Whitelist Membership Proof", function () {
+  describeProofs("1. Whitelist Membership Proof", function () {
     it("should generate valid whitelist proof", async function () {
       console.log("\n  🧪 Testing Whitelist Proof Generation");
 
@@ -126,7 +127,7 @@ describe("RealProofGenerator - All 5 Proof Types", function () {
     });
   });
 
-  describe("2. Blacklist Non-Membership Proof", function () {
+  describeProofs("2. Blacklist Non-Membership Proof", function () {
     const members = [11111n, 12345n, 33333n].map((identity, i) => ({
       identity,
       secret: BigInt(i + 1) * 1000n,
@@ -209,186 +210,192 @@ describe("RealProofGenerator - All 5 Proof Types", function () {
   // Task 3.7b (D31 a): the three attestation circuits prove an issuer's
   // EdDSA signature (scripts/zk/attest.js) and the policy; verified here on
   // a real-mode wrapper.
-  describe("3-5. Attestation proofs (jurisdiction, accreditation, compliance)", function () {
-    const {
-      signAttestation,
-      newAttestorKey,
-    } = require("../../scripts/zk/attest");
-    const key = newAttestorKey();
-    const identity = 0x5fbdb2315678afecb367f032d93f642f64180aa3n;
-    let real;
-    const fields = (a) => ({
-      identity: a.identity,
-      salt: a.salt,
-      R8x: a.R8x,
-      R8y: a.R8y,
-      S: a.S,
-      Ax: a.Ax,
-      Ay: a.Ay,
-      walletBinding: owner.address,
-    });
+  describeProofs(
+    "3-5. Attestation proofs (jurisdiction, accreditation, compliance)",
+    function () {
+      const {
+        signAttestation,
+        newAttestorKey,
+      } = require("../../scripts/zk/attest");
+      const key = newAttestorKey();
+      const identity = 0x5fbdb2315678afecb367f032d93f642f64180aa3n;
+      let real;
+      const fields = (a) => ({
+        identity: a.identity,
+        salt: a.salt,
+        R8x: a.R8x,
+        R8y: a.R8y,
+        S: a.S,
+        Ax: a.Ax,
+        Ay: a.Ay,
+        walletBinding: owner.address,
+      });
 
-    before(async function () {
-      real = await (
-        await ethers.getContractFactory("ZKVerifierIntegrated")
-      ).deploy(false);
-    });
+      before(async function () {
+        real = await (
+          await ethers.getContractFactory("ZKVerifierIntegrated")
+        ).deploy(false);
+      });
 
-    it("should generate a valid jurisdiction proof", async function () {
-      const a = await signAttestation({
-        key,
-        circuit: "jurisdiction",
-        identity,
-        mask: 4,
-      });
-      const result = await generator.generateJurisdictionProof({
-        ...fields(a),
-        mask: a.attributes[0],
-        allowedMask: 15n,
-      });
-      // [nullifier, Ax, Ay, allowedMask, walletBinding]
-      expect(result.proof).to.have.lengthOf(24);
-      expect(result.publicSignals).to.have.lengthOf(5);
-      expect(result.publicSignals[0]).to.equal(result.inputs.nullifier);
-      expect(result.publicSignals.slice(1)).to.deep.equal([
-        a.Ax,
-        a.Ay,
-        "15",
-        BigInt(owner.address).toString(),
-      ]);
-      expect(
-        await real.verifyJurisdictionProof.staticCall(
-          result.proof,
-          result.publicSignals,
-        ),
-      ).to.equal(true);
-      const rx = await (
-        await real.verifyJurisdictionProof(result.proof, result.publicSignals)
-      ).wait();
-      console.log(
-        `  ⛽ ${"verifyJurisdictionProof"} gas (real verifier): ${rx.gasUsed}`,
-      );
-    });
-
-    it("should generate a valid accreditation proof", async function () {
-      const a = await signAttestation({
-        key,
-        circuit: "accreditation",
-        identity,
-        amount: 250000,
-      });
-      const result = await generator.generateAccreditationProof({
-        ...fields(a),
-        amount: a.attributes[0],
-        minimumAccreditation: 100000n,
-      });
-      expect(result.publicSignals).to.have.lengthOf(5);
-      expect(
-        await real.verifyAccreditationProof.staticCall(
-          result.proof,
-          result.publicSignals,
-        ),
-      ).to.equal(true);
-      const rx = await (
-        await real.verifyAccreditationProof(result.proof, result.publicSignals)
-      ).wait();
-      console.log(
-        `  ⛽ ${"verifyAccreditationProof"} gas (real verifier): ${rx.gasUsed}`,
-      );
-    });
-
-    it("should generate a valid compliance proof", async function () {
-      const a = await signAttestation({
-        key,
-        circuit: "compliance",
-        identity,
-        scores: [88, 88, 88, 88],
-      });
-      const result = await generator.generateComplianceProof({
-        ...fields(a),
-        scores: a.attributes,
-        minimum: 50n,
-        weights: [30n, 30n, 20n, 20n],
-      });
-      // [nullifier, Ax, Ay, minimum, wK, wA, wJ, wAcc, walletBinding]: the
-      // aggregate (88) is not among them.
-      expect(result.publicSignals).to.have.lengthOf(9);
-      expect(result.publicSignals.slice(3, 8)).to.deep.equal([
-        "50",
-        "30",
-        "30",
-        "20",
-        "20",
-      ]);
-      expect(
-        await real.verifyComplianceAggregation.staticCall(
-          result.proof,
-          result.publicSignals,
-        ),
-      ).to.equal(true);
-      const rx = await (
-        await real.verifyComplianceAggregation(
-          result.proof,
-          result.publicSignals,
-        )
-      ).wait();
-      console.log(
-        `  ⛽ ${"verifyComplianceAggregation"} gas (real verifier): ${rx.gasUsed}`,
-      );
-    });
-
-    it("should refuse attributes below the policy before proving", async function () {
-      const j = await signAttestation({
-        key,
-        circuit: "jurisdiction",
-        identity,
-        mask: 16,
-      });
-      await expect(
-        generator.generateJurisdictionProof({
-          ...fields(j),
-          mask: 16n,
+      it("should generate a valid jurisdiction proof", async function () {
+        const a = await signAttestation({
+          key,
+          circuit: "jurisdiction",
+          identity,
+          mask: 4,
+        });
+        const result = await generator.generateJurisdictionProof({
+          ...fields(a),
+          mask: a.attributes[0],
           allowedMask: 15n,
-        }),
-      ).to.be.rejectedWith("not in allowedMask");
-      const c = await signAttestation({
-        key,
-        circuit: "compliance",
-        identity,
-        scores: [50, 50, 50, 50],
+        });
+        // [nullifier, Ax, Ay, allowedMask, walletBinding]
+        expect(result.proof).to.have.lengthOf(24);
+        expect(result.publicSignals).to.have.lengthOf(5);
+        expect(result.publicSignals[0]).to.equal(result.inputs.nullifier);
+        expect(result.publicSignals.slice(1)).to.deep.equal([
+          a.Ax,
+          a.Ay,
+          "15",
+          BigInt(owner.address).toString(),
+        ]);
+        expect(
+          await real.verifyJurisdictionProof.staticCall(
+            result.proof,
+            result.publicSignals,
+          ),
+        ).to.equal(true);
+        const rx = await (
+          await real.verifyJurisdictionProof(result.proof, result.publicSignals)
+        ).wait();
+        console.log(
+          `  ⛽ ${"verifyJurisdictionProof"} gas (real verifier): ${rx.gasUsed}`,
+        );
       });
-      await expect(
-        generator.generateComplianceProof({
-          ...fields(c),
-          scores: c.attributes,
-          minimum: 90n,
-          weights: [25n, 25n, 25n, 25n],
-        }),
-      ).to.be.rejectedWith("Insufficient compliance score");
-    });
 
-    it("should require the attestation fields and the wallet", async function () {
-      const a = await signAttestation({
-        key,
-        circuit: "accreditation",
-        identity,
-        amount: 5,
+      it("should generate a valid accreditation proof", async function () {
+        const a = await signAttestation({
+          key,
+          circuit: "accreditation",
+          identity,
+          amount: 250000,
+        });
+        const result = await generator.generateAccreditationProof({
+          ...fields(a),
+          amount: a.attributes[0],
+          minimumAccreditation: 100000n,
+        });
+        expect(result.publicSignals).to.have.lengthOf(5);
+        expect(
+          await real.verifyAccreditationProof.staticCall(
+            result.proof,
+            result.publicSignals,
+          ),
+        ).to.equal(true);
+        const rx = await (
+          await real.verifyAccreditationProof(
+            result.proof,
+            result.publicSignals,
+          )
+        ).wait();
+        console.log(
+          `  ⛽ ${"verifyAccreditationProof"} gas (real verifier): ${rx.gasUsed}`,
+        );
       });
-      const base = { ...fields(a), amount: 5n, minimumAccreditation: 3n };
-      await expect(
-        generator.generateAccreditationProof({ ...base, S: undefined }),
-      ).to.be.rejectedWith("S required");
-      await expect(
-        generator.generateAccreditationProof({ ...base, walletBinding: 0n }),
-      ).to.be.rejectedWith("walletBinding is required");
-      await expect(
-        generator.generateAccreditationProof({
-          ...base,
-          minimumAccreditation: undefined,
-        }),
-      ).to.be.rejectedWith("minimumAccreditation is required");
-    });
-  });
+
+      it("should generate a valid compliance proof", async function () {
+        const a = await signAttestation({
+          key,
+          circuit: "compliance",
+          identity,
+          scores: [88, 88, 88, 88],
+        });
+        const result = await generator.generateComplianceProof({
+          ...fields(a),
+          scores: a.attributes,
+          minimum: 50n,
+          weights: [30n, 30n, 20n, 20n],
+        });
+        // [nullifier, Ax, Ay, minimum, wK, wA, wJ, wAcc, walletBinding]: the
+        // aggregate (88) is not among them.
+        expect(result.publicSignals).to.have.lengthOf(9);
+        expect(result.publicSignals.slice(3, 8)).to.deep.equal([
+          "50",
+          "30",
+          "30",
+          "20",
+          "20",
+        ]);
+        expect(
+          await real.verifyComplianceAggregation.staticCall(
+            result.proof,
+            result.publicSignals,
+          ),
+        ).to.equal(true);
+        const rx = await (
+          await real.verifyComplianceAggregation(
+            result.proof,
+            result.publicSignals,
+          )
+        ).wait();
+        console.log(
+          `  ⛽ ${"verifyComplianceAggregation"} gas (real verifier): ${rx.gasUsed}`,
+        );
+      });
+
+      it("should refuse attributes below the policy before proving", async function () {
+        const j = await signAttestation({
+          key,
+          circuit: "jurisdiction",
+          identity,
+          mask: 16,
+        });
+        await expect(
+          generator.generateJurisdictionProof({
+            ...fields(j),
+            mask: 16n,
+            allowedMask: 15n,
+          }),
+        ).to.be.rejectedWith("not in allowedMask");
+        const c = await signAttestation({
+          key,
+          circuit: "compliance",
+          identity,
+          scores: [50, 50, 50, 50],
+        });
+        await expect(
+          generator.generateComplianceProof({
+            ...fields(c),
+            scores: c.attributes,
+            minimum: 90n,
+            weights: [25n, 25n, 25n, 25n],
+          }),
+        ).to.be.rejectedWith("Insufficient compliance score");
+      });
+
+      it("should require the attestation fields and the wallet", async function () {
+        const a = await signAttestation({
+          key,
+          circuit: "accreditation",
+          identity,
+          amount: 5,
+        });
+        const base = { ...fields(a), amount: 5n, minimumAccreditation: 3n };
+        await expect(
+          generator.generateAccreditationProof({ ...base, S: undefined }),
+        ).to.be.rejectedWith("S required");
+        await expect(
+          generator.generateAccreditationProof({ ...base, walletBinding: 0n }),
+        ).to.be.rejectedWith("walletBinding is required");
+        await expect(
+          generator.generateAccreditationProof({
+            ...base,
+            minimumAccreditation: undefined,
+          }),
+        ).to.be.rejectedWith("minimumAccreditation is required");
+      });
+    },
+  );
 
   describe("Utility Functions", function () {
     describe("MerkleTreeBuilder", function () {

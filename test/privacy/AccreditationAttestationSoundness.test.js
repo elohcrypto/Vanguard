@@ -13,6 +13,7 @@ const {
 } = require("../helpers/attestationFixture");
 const { proveAttestation } = require("../../scripts/zk/prove-attestation");
 
+const { describeProofs } = require("../helpers/zkProofs");
 // Task 3.7b (D31 a): the accreditation proof states "a trusted issuer signed
 // this identity's accreditation amount, and it is at least PrivacyManager's
 // minimum". The old self-attested "issuer signature" (Poseidon over the
@@ -20,7 +21,7 @@ const { proveAttestation } = require("../../scripts/zk/prove-attestation");
 const IN_MAIN = /Assert Failed\. Error in template AccreditationProof/;
 const MIN = 100000n;
 
-describe("Accreditation attestation soundness (Task 3.7b)", function () {
+describeProofs("Accreditation attestation soundness (Task 3.7b)", function () {
   this.timeout(600000);
 
   let f;

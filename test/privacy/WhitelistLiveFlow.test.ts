@@ -1,6 +1,10 @@
 import { expect } from "chai";
 import { ethers } from "hardhat";
 
+// eslint-disable-next-line @typescript-eslint/no-var-requires
+const { describeProofs } = require("../helpers/zkProofs") as {
+  describeProofs: Mocha.PendingSuiteFunction;
+};
 /**
  * Plan v2 Task 3.6: demo option 42 -> 1 on the live token. The privacy
  * pair option 1 deploys, wired by option 21; the menu path binds wallet 0
@@ -9,7 +13,7 @@ import { ethers } from "hardhat";
  * root (refused), re-onboards and re-proves (transfer again). Every value
  * below is read from the chain.
  */
-describe("Whitelist live flow on VSC (demo option 42 -> 1)", function () {
+describeProofs("Whitelist live flow on VSC (demo option 42 -> 1)", function () {
   this.timeout(300_000);
 
   it("Either, bound transfer, unbound refused, sender removed and refused, re-proof transfer", async function () {

@@ -20,6 +20,7 @@ const { ProofFormatter } = require(
 );
 const { loadAliasingSnarkjs } = require("../helpers/plonkAliasProver.js");
 
+const { describeProofs } = require("../helpers/zkProofs");
 // Task 3.7 (plan v2): the blacklist circuit states "the wallet's holder owns a
 // commitment in the current whitelist root whose identity is not in the
 // sanctions tree". It is a non-gating demonstration (D2): the wrapper
@@ -35,7 +36,7 @@ const IN_SMT =
 const IN_WHITELIST = /Assert Failed\. Error in template MerkleInclusion/;
 const IN_MAIN = /Assert Failed\. Error in template BlacklistNonMembership/;
 
-describe("Blacklist non-membership soundness (Task 3.7)", function () {
+describeProofs("Blacklist non-membership soundness (Task 3.7)", function () {
   this.timeout(600000);
 
   // Whitelist commitments the operator publishes.

@@ -14,6 +14,7 @@ const { ProofFormatter } = require(
 );
 const { loadAliasingSnarkjs } = require("../helpers/plonkAliasProver.js");
 
+const { describeProofs } = require("../helpers/zkProofs");
 // Guard tests from .omc/plans/2026-09-23-zk-kyc-ownership-cleanup.md, Task 0.1,
 // amended by R-3R-2 (owner decisions §N). Each names a soundness property the
 // whitelist proof must have before the ZK layer may gate live transfers.
@@ -34,7 +35,7 @@ function inv(a) {
   return mod(s0);
 }
 
-describe("ZK soundness guards (plan Task 0.1)", function () {
+describeProofs("ZK soundness guards (plan Task 0.1)", function () {
   this.timeout(300000);
 
   let verifier;

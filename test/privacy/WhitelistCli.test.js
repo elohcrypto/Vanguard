@@ -23,6 +23,7 @@ const {
   proveForDemoUser,
 } = require("../../demo/utils/WhitelistBinderFlow");
 
+const { describeProofs } = require("../helpers/zkProofs");
 const ROOT = path.join(__dirname, "../..");
 const BUILDER = path.join(ROOT, "scripts/zk/build-whitelist-root.js");
 const PROVER = path.join(ROOT, "scripts/zk/prove-whitelist.js");
@@ -44,7 +45,7 @@ const randomSecret = () => BigInt(ethers.hexlify(ethers.randomBytes(31)));
 /** Every printed form of a secret: decimal, bare hex, 0x hex. */
 const secretForms = (s) => [s.toString(), s.toString(16), hex32(s)];
 
-describe("Whitelist root builder and prover CLI (Task 3.5)", function () {
+describeProofs("Whitelist root builder and prover CLI (Task 3.5)", function () {
   this.timeout(600000);
 
   let owner, alice, bob, carol;

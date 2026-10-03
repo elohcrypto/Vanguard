@@ -30,9 +30,12 @@ jobs:
     runs-on: ubuntu-latest
     # Measured: 16 min end to end at 19d75cb on a normal runner; a 1.7x
     # slower runner at 93f6fff needed ~28 min for tests + coverage alone;
-    # the real-proof CLI tests (3.5) add ~3 min on 2 vCPU. This limit is a
-    # hang guard, not a pace target.
-    timeout-minutes: 60
+    # the real-proof CLI tests (3.5) add ~3 min on 2 vCPU. Run 37099152276
+    # took 41 min at a 369 s local suite (tests 13 min, coverage 24 min);
+    # the local suite is 631 s since Task 3.7b, and coverage skips the
+    # real-proof suites (ZK_PROOFS=0). This limit is a hang guard, not a
+    # pace target.
+    timeout-minutes: 90
 
     steps:
       # Actions are pinned by commit SHA and updated by hand (no Dependabot
@@ -127,11 +130,11 @@ jobs:
       # error. Its stdout is also truncated under a pipe (process.exit before
       # flush), so the report goes to a file and is counted from there. Any
       # error fails; warnings fail only when they RISE above the baseline.
-      # Baseline 944 (2026-10-02, was 976; 965 measured after 3.2, 944 after
-      # the Task 3.3 PrivacyManager rewrite).
+      # Baseline 933 (2026-10-03, was 976; 965 measured after 3.2, 944 after
+      # the Task 3.3 PrivacyManager rewrite, 933 after Task 3.7b).
       - name: Lint ratchet (no solhint errors, no NEW warnings)
         run: |
-          BASELINE=944
+          BASELINE=933
           npx solhint -f unix 'contracts/**/*.sol' > solhint.log 2>&1 || true
           errors=$(grep -c '\[Error/' solhint.log || true)
           warnings=$(grep -c '\[Warning/' solhint.log || true)
@@ -191,8 +194,12 @@ jobs:
       # bytecode into artifacts/; nothing else may compile in this tree while it
       # runs, which is why this step follows "Run tests" rather than sharing it.
       # DEPLOY_GAS_LIMIT (set by the npm script) lifts one hard-coded 10M deploy
-      # cap that instrumented initcode exceeds.
+      # cap that instrumented initcode exceeds. ZK_PROOFS=0 skips the
+      # real-proof suites (test/helpers/zkProofs.js): "Run tests" above
+      # proves everything, coverage measures contract lines.
       - name: Coverage ratchet (no DROP in line coverage)
+        env:
+          ZK_PROOFS: '0'
         run: |
           BASELINE=88
           npm run test:coverage > coverage.log 2>&1 || true

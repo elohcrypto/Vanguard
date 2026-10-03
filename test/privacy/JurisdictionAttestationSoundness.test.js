@@ -13,13 +13,14 @@ const {
 } = require("../helpers/attestationFixture");
 const { signAttestation } = require("../../scripts/zk/attest");
 
+const { describeProofs } = require("../helpers/zkProofs");
 // Task 3.7b (D31 a): the jurisdiction proof states "a trusted issuer signed
 // this identity's registry mask bit, and that bit is in PrivacyManager's
 // allowed mask". A-F mirror the whitelist guards in ZKSoundness.test.js.
 // Proofs are generated once in `before` and reused.
 const IN_MAIN = /Assert Failed\. Error in template JurisdictionProof/;
 
-describe("Jurisdiction attestation soundness (Task 3.7b)", function () {
+describeProofs("Jurisdiction attestation soundness (Task 3.7b)", function () {
   this.timeout(600000);
 
   let f; // fixture

@@ -23,6 +23,7 @@ const {
   submitAttestationProof,
 } = require("../../scripts/zk/prove-attestation");
 
+const { describeProofs } = require("../helpers/zkProofs");
 const ROOT = path.join(__dirname, "../..");
 const run = (script, args, env = {}) =>
   new Promise((resolve) =>
@@ -51,7 +52,7 @@ function expectNoSecrets(out, att, key) {
   }
 }
 
-describe("Attestation CLIs (Task 3.7b)", function () {
+describeProofs("Attestation CLIs (Task 3.7b)", function () {
   this.timeout(300000);
 
   const key = newAttestorKey();

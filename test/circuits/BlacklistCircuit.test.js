@@ -10,6 +10,7 @@ const {
   nonInclusionWitness,
 } = require("../../utils/smt-builder");
 
+const { describeProofs } = require("../helpers/zkProofs");
 /**
  * @title Blacklist Circuit Test
  * @dev Circuit-level checks of blacklist_membership (Task 3.7): build
@@ -17,7 +18,7 @@ const {
  *      circomlib's non-inclusion proof. Soundness (what cannot be proven) is
  *      in test/privacy/BlacklistSoundness.test.js.
  */
-describe("Blacklist Membership Circuit", function () {
+describeProofs("Blacklist Membership Circuit", function () {
   this.timeout(120000);
 
   const CIRCUIT_NAME = "blacklist_membership";

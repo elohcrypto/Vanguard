@@ -2,12 +2,13 @@ const { expect } = require("chai");
 const { ethers } = require("hardhat");
 const path = require("path");
 
+const { describeProofs } = require("../helpers/zkProofs");
 // Import RealProofGenerator
 const { RealProofGenerator } = require(
   path.join(__dirname, "../../scripts/generate-real-proofs.js"),
 );
 
-describe("Real ZK Proof Verification Tests", function () {
+describeProofs("Real ZK Proof Verification Tests", function () {
   let zkVerifierIntegrated;
   let realProofGenerator;
   let owner, user1, user2;
