@@ -104,9 +104,6 @@ async function runHandoverSmoke(state, failures) {
     failures.push("handover smoke: no privacy pair in state (option 1)");
     return;
   }
-  // 3.4: VSC reads bindings only (Either, no oracle) for the CLI step.
-  const vsc = await c("digitalToken").getAddress();
-  await (await c("complianceRules").setWhitelistMode(vsc, 2)).wait();
   // Before the ceremony the deployer (owner) publishes the root, so the
   // version moves past every deployer-era binding.
   const root = ethers.toBeHex(ethers.toBigInt(ethers.randomBytes(31)), 32);

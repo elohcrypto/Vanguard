@@ -1,0 +1,170 @@
+/**
+ * Privacy section of scripts/demo-smoke.js (plan v2 Task 3.6): the privacy
+ * pair option 1 deploys, wired by option 21, and the ZK allow list on the
+ * live VSC, driven through the same code as demo option 42 -> 1
+ * (demo/utils/WhitelistBinderFlow.js, demo/utils/WhitelistLiveFlow.js) and
+ * the scripts/zk library. Every assertion reads the chain.
+ *
+ * checkPrivacyWiring runs right after the deploy; runPrivacySmoke after the
+ * escrow smoke and before the handover, which hands the pair to governance.
+ */
+
+const { ethers } = require("hardhat");
+const ProofGenerator = require("../demo/utils/ProofGenerator");
+const {
+  demoWhitelist,
+  proveForDemoUser,
+  publishAndBind,
+} = require("../demo/utils/WhitelistBinderFlow");
+const { runLiveWhitelistFlow } = require("../demo/utils/WhitelistLiveFlow");
+
+const same = (a, b) => a.toLowerCase() === b.toLowerCase();
+const ALICE = 6; // the wallets demo-smoke.js onboarded for the vote (6-8)
+const BOB = 7;
+const CAROL = 8;
+
+/** Option 1 deployed the pair, option 21 wired it, the mode is unchanged. */
+async function checkPrivacyWiring(state, failures) {
+  const rules = state.getContract("complianceRules");
+  const token = state.getContract("digitalToken");
+  const pm = state.getContract("privacyManager");
+  const zk = state.getContract("zkVerifierIntegrated");
+  if (!pm || !zk) {
+    failures.push(
+      "3.6: option 1 did not deploy PrivacyManager and its verifier",
+    );
+    return;
+  }
+  const vsc = await token.getAddress();
+  const pmAddr = await pm.getAddress();
+  const wired = await rules.privacyManager(vsc);
+  if (!same(wired, pmAddr)) {
+    failures.push(
+      `3.6: rules.privacyManager(VSC) = ${wired}, expected ${pmAddr}`,
+    );
+  }
+  const mode = Number(await rules.whitelistMode(vsc));
+  if (mode !== 0) {
+    failures.push(
+      `3.6: whitelistMode(VSC) = ${mode} after deploy, expected 0 (OracleOnly)`,
+    );
+  }
+  if (await zk.testingMode()) {
+    failures.push("3.6: the demo deployed a testingMode verifier");
+  }
+  if (!same(await pm.zkVerifier(), await zk.getAddress())) {
+    failures.push("3.6: PrivacyManager does not use the deployed verifier");
+  }
+  if (state.getContract("zkVerifier") !== zk) {
+    failures.push(
+      "3.6: state key zkVerifier is not the zkVerifierIntegrated alias",
+    );
+  }
+}
+
+/**
+ * snarkjs keeps its bn128 curve (worker threads) alive after a proof, which
+ * keeps the smoke's process from exiting; end it once the proofs are done.
+ */
+async function releaseProver() {
+  const ff = require(
+    require.resolve("ffjavascript", { paths: [require.resolve("snarkjs")] }),
+  );
+  await (await ff.buildBn128()).terminate();
+}
+
+/** Steps (a) to (e) of option 42 -> 1 on VSC, then the chain read back. */
+async function runPrivacySmoke(state, failures) {
+  try {
+    await privacyFlow(state, failures);
+  } finally {
+    await releaseProver();
+  }
+}
+
+async function privacyFlow(state, failures) {
+  const s = state.signers;
+  const [alice, bob, carol] = [ALICE, BOB, CAROL].map((i) => s[i]);
+  const token = state.getContract("digitalToken");
+  const rules = state.getContract("complianceRules");
+  const pm = state.getContract("privacyManager");
+  const vsc = await token.getAddress();
+  const amount = ethers.parseEther("10");
+
+  await new ProofGenerator(state).initializeRealProofGenerator();
+  // Onboarding as in option 42 -> 1: alice and bob hand in commitments,
+  // the owner publishes the root, alice proves and binds her wallet.
+  const listed = [alice, bob];
+  const { rootFile } = await demoWhitelist(state, listed);
+  const calldata = await proveForDemoUser(state, alice, rootFile);
+  await publishAndBind({
+    state,
+    privacyManager: pm,
+    user: alice,
+    proof: calldata.proof,
+    signals: calldata.signals,
+  });
+
+  const bobBefore = await token.balanceOf(bob.address);
+  const lines = [];
+  let r = null;
+  try {
+    r = await runLiveWhitelistFlow({
+      state,
+      sender: alice,
+      listed,
+      rootFile,
+      outsider: carol,
+      amount,
+      log: (...a) => lines.push(a.join(" ")),
+    });
+  } catch (e) {
+    failures.push(
+      `3.6: live whitelist flow threw: ${e.message.split("\n")[0]}`,
+    );
+  }
+  for (const l of lines) console.log(l);
+  if (!r) {
+    failures.push("3.6: live whitelist flow stopped on a precondition");
+    return;
+  }
+
+  const failed = failures.length;
+  const fail = (m) => failures.push(`3.6: ${m}`);
+  const mode = Number(await rules.whitelistMode(vsc));
+  if (mode !== 2)
+    fail(`whitelistMode(VSC) = ${mode} after the flow, expected 2 (Either)`);
+  const moved = (await token.balanceOf(bob.address)) - bobBefore;
+  if (!r.transferred)
+    fail("(b) the bound wallet's transfer did not go through");
+  if (moved !== 2n * amount) {
+    fail(
+      `bob received ${ethers.formatEther(moved)} VSC, expected ${ethers.formatEther(2n * amount)} (b + e)`,
+    );
+  }
+  if (!r.outsiderRefused)
+    fail("(c) an unbound verified wallet was not refused");
+  if (await token.canTransfer(alice.address, carol.address, amount)) {
+    fail("(c) canTransfer(alice -> carol, unbound) is true");
+  }
+  if (!r.rotatedRefused)
+    fail("(d) after the rotation the bound wallet could still transfer");
+  if (!r.reproved) fail("(e) after re-proving the transfer did not go through");
+  if (!(await token.canTransfer(alice.address, bob.address, amount))) {
+    fail("(e) canTransfer(alice -> bob) is false after re-proving");
+  }
+  for (const w of [alice, bob]) {
+    if (!(await pm.hasValidWhitelistProof(w.address))) {
+      fail(`hasValidWhitelistProof(${w.address}) is false after re-proving`);
+    }
+  }
+  if (await pm.hasValidWhitelistProof(carol.address)) {
+    fail("carol holds a binding she never proved");
+  }
+  if (failures.length > failed) return;
+  console.log(
+    `✅ Privacy smoke: VSC in Either, bound transfer, unbound refused, rotation refused, re-proof transfer (root version ${await pm.whitelistVersion()}).`,
+  );
+}
+
+module.exports = { checkPrivacyWiring, runPrivacySmoke };

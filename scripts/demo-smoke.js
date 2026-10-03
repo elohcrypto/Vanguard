@@ -65,6 +65,7 @@ async function main() {
   }
 
   await deployer.deployOracleSystem();
+  await require("./demo-smoke-privacy").checkPrivacyWiring(state, failures);
 
   // 1. Every expected contract exists and has code on chain.
   for (const name of EXPECTED) {
@@ -477,7 +478,9 @@ async function main() {
     await require("./demo-smoke-escrow").runEscrowSmoke(state, failures);
   }
 
-  // 7. Plan 2C.1: the handover ceremony, last because it strips the deployer.
+  // 6b. Task 3.6: the ZK allow list on VSC (demo-smoke-privacy.js); 7. Plan
+  // 2C.1: the handover ceremony, last because it strips the deployer.
+  await require("./demo-smoke-privacy").runPrivacySmoke(state, failures);
   await require("./demo-smoke-handover").runHandoverSmoke(state, failures);
 
   if (failures.length) {
