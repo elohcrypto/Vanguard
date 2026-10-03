@@ -443,18 +443,33 @@ that a trusted issuer signed the investor's attributes and that they meet
 PrivacyManager's policy, without revealing them. The issuer holds an EdDSA
 Baby Jubjub key; PrivacyManager trusts its public key (Ax, Ay) per circuit
 (`setTrustedAttestor`) and holds the policy: the allowed jurisdiction mask
-is the OR of its active jurisdictions' registry masks (64 at most),
-`minimumAccreditation`, and the compliance minimum with four weights
-summing to 100 (`setCompliancePolicy`). A proof records
+(below), `minimumAccreditation`, and the compliance minimum with four
+weights summing to 100 (`setCompliancePolicy`). A proof records
 {policyHash, attestor, nullifier, expiresAt} for the wallet that submits
 it, one wallet per attestation per policy; a policy change, an untrusted
 issuer key or expiry lapses it, and a policy change re-admits the same
 attestation for a new proof. Like a whitelist root version, every policy
-change (any jurisdiction added, removed or toggled, either policy setter)
-and every trust change of a key starts a new epoch: restoring a policy or
-re-trusting a key never revives an old record, holders resubmit. A
-jurisdiction registry change therefore lapses every jurisdiction record,
-whatever the holder's jurisdiction.
+change (a jurisdiction source or code registration, either policy
+setter) and every trust change of a key starts a new epoch: restoring a
+policy or re-trusting a key never revives an old record, holders resubmit.
+
+The jurisdiction set for private proofs is ComplianceRules' rule for VSC
+(Task 3.8): the one transfers enforce, with no second list to keep in
+step. PrivacyManager names it with `setJurisdictionSource(complianceRules,
+VSC)` and keeps only the code-to-bit table issuers attest: each ISO 3166-1
+numeric code gets the next of 64 bits with `registerJurisdictionCode`, and
+a bit never moves. The allowed mask is the OR of the bits of the
+registered codes that `ComplianceRules.validateJurisdiction(VSC, code)`
+admits (the default blocked list, then VSC's own rule). Blocking a country
+in ComplianceRules (a ComplianceRules vote after the handover) is enough
+to stop its holders on the private path; every `setJurisdictionRule` or
+`clearJurisdictionRule` for VSC bumps `jurisdictionRuleVersion(VSC)`,
+which is part of the policy, so it lapses every jurisdiction record
+whatever the holder's country, and restoring the rule revives none. A
+code without a bit cannot be attested until it is registered. Option 21
+points PrivacyManager at VSC's rule and registers its allow list in order
+(840 is bit 1), printing the bits; the ceremony refuses a PrivacyManager
+reading another ComplianceRules or token.
 
 ```bash
 # Issuer, once: the private key is printed once; keep it offline
@@ -462,7 +477,8 @@ node scripts/zk/attest.js --new-key
 # Issuer: the public key for the setTrustedAttestor vote, then sign
 ATTESTOR_KEY=<key> node scripts/zk/attest.js --public-key
 ATTESTOR_KEY=<key> node scripts/zk/attest.js --sign --circuit jurisdiction \
-  --identity <onchainID> --mask <registry mask> --out att.json
+  --identity <onchainID> --country <ISO numeric> --rpc <url> \
+  --privacy-manager <addr> --out att.json   # offline: --mask <its bit>
 #   ... --circuit accreditation --amount <amount>
 #   ... --circuit compliance --scores <kyc,aml,jurisdiction,accreditation>
 # Investor: policy and issuer trust read from PrivacyManager
@@ -480,17 +496,20 @@ the proof locally, and with `--submit` exits non-zero unless the record
 reads valid. Before the handover the owner calls the setters; after it a
 PrivacyParameters vote (type 11) does: trust the issuer's key for each
 circuit it vouches for, untrust the demo key, and set
-`setMinimumAccreditation` / `setCompliancePolicy`; the jurisdiction policy
-follows the registry (`addJurisdiction`, `updateJurisdictionStatus`).
+`setMinimumAccreditation` / `setCompliancePolicy`, and give new codes a
+bit (`registerJurisdictionCode`); which codes are allowed is VSC's
+ComplianceRules rule.
 
 In the demo, option 1 (or 41 when it deploys the pair) makes a demo issuer
 key for the session, never printed, trusts it for the three circuits and
 sets minimum accreditation 100000 and compliance minimum 70 with weights
-25/25/25/25, printing the public key and the policies. Options 42 -> 3, 4
-and 5 sign for the chosen wallet, prove and bind through the same library
+25/25/25/25, printing the public key and the policies; option 21 wires the
+jurisdiction source, and 42 -> 3 asks for an ISO numeric code. Options
+42 -> 3, 4 and 5 sign for the chosen wallet, prove and bind through the same library
 and print the record and the validator's answer; 44, 45 and 46 read
 PrivacyManager's records and validators. The handover completion lists the
-trusted attestors per circuit and warns when one has none; the demo key
+trusted attestors per circuit and warns when one has none, the jurisdiction
+source and policy token, and the number of jurisdiction bits; the demo key
 stays trusted after the ceremony until a vote untrusts it.
 
 ## Waiting instead of jumping

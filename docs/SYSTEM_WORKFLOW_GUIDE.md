@@ -444,8 +444,8 @@ Jurisdiction, accreditation and compliance aggregation are issuer-signed
 attestations (D31 a). A trusted issuer signs the investor's attributes
 with an EdDSA Baby Jubjub key (`scripts/zk/attest.js`); the investor
 proves the signature and PrivacyManager's policy (the allowed jurisdiction
-mask from its registry, the minimum accreditation, the compliance minimum
-and weights) without revealing the attributes, and binds the record with
+mask, the minimum accreditation, the compliance minimum and weights)
+without revealing the attributes, and binds the record with
 `submitAttestationProof` (`scripts/zk/prove-attestation.js`). PrivacyManager
 accepts only issuer keys it trusts for the circuit, the current policy and
 the submitting wallet, and keeps one wallet per attestation per policy;
@@ -456,6 +456,16 @@ this with the demo's issuer key; 44, 45 and 46 show the records. The
 issuer keys and the policies are owner settings, PrivacyParameters votes
 (type 11) after the handover. See `docs/TESTNET_DEMO.md` for the
 command-line tools and the runbook rules.
+
+The jurisdiction set for private proofs is ComplianceRules' rule for VSC,
+the same one transfers enforce (Task 3.8): the allowed mask is the OR of
+the bits of the registered ISO codes ComplianceRules admits for VSC.
+PrivacyManager only assigns each ISO 3166-1 numeric code an append-only
+bit (`registerJurisdictionCode`, at most 64; the issuer attests the bit,
+`attest.js --country`); a code gets a bit before it can be attested.
+Blocking a country in ComplianceRules is enough to stop it on the private
+path, and any rule change for VSC lapses the jurisdiction records (rule
+version), so restoring a rule revives none.
 
 ---
 

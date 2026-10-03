@@ -589,7 +589,7 @@ sig.R8x <== R8x; sig.R8y <== R8y; sig.S <== S; sig.M <== message.out;
 
 | Circuit | Attested (private) | Policy (public) | Public signals |
 |---|---|---|---|
-| `jurisdiction_proof` | the registry mask bit of the investor's jurisdiction | `allowedMask` = OR of PrivacyManager's active masks | `[nullifier, Ax, Ay, allowedMask, walletBinding]` |
+| `jurisdiction_proof` | PrivacyManager's bit for the investor's ISO country code | `allowedMask` = OR of the bits of the registered codes ComplianceRules allows for VSC | `[nullifier, Ax, Ay, allowedMask, walletBinding]` |
 | `accreditation_proof` | the accreditation amount (< 2^64) | `minimumAccreditation` | `[nullifier, Ax, Ay, minimumAccreditation, walletBinding]` |
 | `compliance_aggregation` | four scores 0..100 in one attestation | minimum and four weights summing to 100 | `[nullifier, Ax, Ay, minimum, wK, wA, wJ, wAcc, walletBinding]` |
 
