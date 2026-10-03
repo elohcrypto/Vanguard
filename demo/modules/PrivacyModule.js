@@ -270,6 +270,10 @@ class PrivacyModule {
     console.log("4. Add to Disallowed List");
     console.log("5. Remove from Disallowed List");
     console.log("6. Reset to Defaults");
+    // Review 3.8 L3: the private path needs a bit for a newly allowed code.
+    console.log(
+      "   ℹ️  A newly allowed code needs a PrivacyManager bit (registerJurisdictionCode: rerun option 21/41, or a PrivacyParameters vote) before investors can attest it",
+    );
     console.log("0. Back to Main Menu");
 
     const choice = await this.promptUser("\nSelect option (0-6): ");
