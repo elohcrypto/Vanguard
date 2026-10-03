@@ -38,10 +38,11 @@ function blake2b512(file) {
 // per-circuit phase 2, no toxic waste, and `plonk setup` is deterministic,
 // so the committed verifier is reproducible (CI asserts it). The groth16
 // entries have no phase-2 contribution (gamma == delta) and are forgeable;
-// Task 3.7 moves them to PLONK.
+// Task 3.7 moves them to PLONK (blacklist done; the three attestation
+// circuits wait for their trust model, D31).
 const CIRCUIT_SPECS = [
   { name: "whitelist_membership", protocol: "plonk" },
-  { name: "blacklist_membership", protocol: "groth16" },
+  { name: "blacklist_membership", protocol: "plonk" },
   { name: "jurisdiction_proof", protocol: "groth16" },
   { name: "accreditation_proof", protocol: "groth16" },
   { name: "compliance_aggregation", protocol: "groth16" },
@@ -352,6 +353,8 @@ function getCircuitDescription(circuitName) {
   const descriptions = {
     whitelist_membership:
       "Proves membership in a whitelist without revealing identity",
+    blacklist_membership:
+      "Proves a whitelisted commitment's identity is not in the sanctions tree (non-gating, D2)",
     jurisdiction_proof:
       "Proves jurisdiction eligibility without revealing location",
     accreditation_proof:

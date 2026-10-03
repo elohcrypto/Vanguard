@@ -16,9 +16,13 @@ import "./verifiers/compliance_aggregationVerifier.sol";
  *      - whitelist: PLONK (24-word proof, signals [nullifier, merkleRoot,
  *        walletBinding]); sound; the typed entry PrivacyManager uses is
  *        verifyWhitelistMembership (see IZKVerifier).
- *      - blacklist, jurisdiction, accreditation, compliance: Groth16 with no
- *        phase-2 contribution, so forgeable until Task 3.7 moves each to PLONK
- *        with the same signal range check the whitelist path has.
+ *      - blacklist: PLONK (24-word proof, signals [nullifier, whitelistRoot,
+ *        blacklistRoot, walletBinding]); sound; typed entry
+ *        verifyBlacklistNonMembership. A non-gating demonstration (D2):
+ *        nothing on chain consumes its result.
+ *      - jurisdiction, accreditation, compliance: Groth16 with no phase-2
+ *        contribution, so forgeable until Task 3.7 moves each to PLONK with
+ *        the same signal range check the PLONK paths have.
  *      Not `is IZKVerifier`: that interface also carries the legacy
  *      verifyProof/setVerifyingKey/getVerifyingKey ABI this contract never had.
  */
@@ -166,29 +170,39 @@ contract ZKVerifierIntegrated is Ownable2Step, ReentrancyGuard {
     }
 
     /**
-     * @dev Verify blacklist non-membership proof
-     * @param a Proof point A
-     * @param b Proof point B
-     * @param c Proof point C
-     * @param publicSignals Public inputs for the proof (1 element: isNotBlacklisted)
-     * @return True if the proof is valid (user is NOT blacklisted)
+     * @dev Verify a PLONK blacklist non-membership proof: the wallet's holder
+     *      owns a commitment in the whitelist root whose identity is not in
+     *      the sanctions tree.
+     * @param proof 24-word PLONK proof (snarkjs `plonk exportSolidityCallData`)
+     * @param pubSignals [nullifier, whitelistRoot, blacklistRoot, walletBinding]
+     * @return True if the proof verifies against these public signals
+     *
+     * Checks the proof only; comparing the roots with the published ones and
+     * walletBinding with a wallet is the caller's job. Nothing on chain gates
+     * on this result (D2): the sanctions list stays explicit and immediate,
+     * and PrivacyManager refuses this circuit.
+     *
+     * testingMode (demo only): the proof words are not checked and no
+     * verifier is called; a proof is accepted when all four signals are
+     * non-zero (and below the field order).
      */
     function verifyBlacklistNonMembership(
-        uint256[2] memory a,
-        uint256[2][2] memory b,
-        uint256[2] memory c,
-        uint256[1] memory publicSignals
+        uint256[24] calldata proof,
+        uint256[4] calldata pubSignals
     ) external nonReentrant returns (bool) {
-        return _verifyBlacklist(a, b, c, publicSignals);
+        return _verifyBlacklist(proof, pubSignals);
     }
 
     function _verifyBlacklist(
-        uint256[2] memory a, uint256[2][2] memory b, uint256[2] memory c, uint256[1] memory publicSignals
+        uint256[24] memory proof,
+        uint256[4] memory pubSignals
     ) internal returns (bool) {
-        bytes32 proofHash = _proofCacheKey("blacklist", a, b, c, abi.encodePacked(publicSignals));
+        if (pubSignals[0] >= SNARK_SCALAR_FIELD || pubSignals[1] >= SNARK_SCALAR_FIELD ||
+            pubSignals[2] >= SNARK_SCALAR_FIELD || pubSignals[3] >= SNARK_SCALAR_FIELD) return false;
+        bytes32 proofHash = _plonkCacheKey("blacklist", proof, abi.encodePacked(pubSignals));
         if (verifiedProofs[proofHash] && block.timestamp <= proofTimestamp[proofHash] + proofCacheExpiry) {
             emit ProofCacheHit(proofHash, "blacklist");
-            return true; // Cached proof, ~5k gas instead of ~300k
+            return true;
         }
 
         totalProofs["blacklist"]++;
@@ -196,10 +210,9 @@ contract ZKVerifierIntegrated is Ownable2Step, ReentrancyGuard {
 
         bool result;
         if (testingMode) {
-            // Mock verification for testing - always return true for valid inputs
-            result = (publicSignals.length == 1 && publicSignals[0] == 1);
+            result = pubSignals[0] != 0 && pubSignals[1] != 0 && pubSignals[2] != 0 && pubSignals[3] != 0;
         } else {
-            result = blacklistVerifier.verifyProof(a, b, c, publicSignals);
+            result = blacklistVerifier.verifyProof(proof, pubSignals);
         }
 
         if (result) {
@@ -212,7 +225,7 @@ contract ZKVerifierIntegrated is Ownable2Step, ReentrancyGuard {
         emit ProofVerified("blacklist", msg.sender, result);
         return result;
     }
-    
+
     /**
      * @dev Verify jurisdiction proof
      * @param a Proof point A
@@ -524,8 +537,8 @@ contract ZKVerifierIntegrated is Ownable2Step, ReentrancyGuard {
      * @param publicInputs Public inputs for the proof
      * @return True if the proof is valid
      *
-     * Groth16 circuits only. The whitelist circuit (PLONK, 24-word proof) is
-     * refused here: use verifyWhitelistMembership.
+     * Groth16 circuits only. The PLONK circuits (24-word proof) are refused
+     * here: use verifyWhitelistMembership / verifyBlacklistNonMembership.
      */
     function verifyCircuitProof(
         bytes32 circuitId,
@@ -547,8 +560,7 @@ contract ZKVerifierIntegrated is Ownable2Step, ReentrancyGuard {
         if (circuitId == WHITELIST_ID) {
             return _malformed(strict, "use verifyWhitelistMembership");
         } else if (circuitId == BLACKLIST_ID) {
-            if (n != 1) return _malformed(strict, "Invalid public inputs for blacklist circuit");
-            return _verifyBlacklist(proof.a, proof.b, proof.c, [pi[0]]);
+            return _malformed(strict, "use verifyBlacklistNonMembership");
         } else if (circuitId == JURISDICTION_ID) {
             if (n != 1) return _malformed(strict, "Invalid public inputs for jurisdiction circuit");
             return _verifyJurisdiction(proof.a, proof.b, proof.c, [pi[0]]);
@@ -668,7 +680,7 @@ contract ZKVerifierIntegrated is Ownable2Step, ReentrancyGuard {
 
     /**
      * @notice Cache key of a PLONK whitelist proof (single and batch); see
-     *         proofCacheKey for the Groth16 circuits.
+     *         blacklistProofCacheKey, and proofCacheKey for the Groth16 circuits.
      */
     function whitelistProofCacheKey(
         uint256[24] calldata proof,
@@ -678,8 +690,18 @@ contract ZKVerifierIntegrated is Ownable2Step, ReentrancyGuard {
     }
 
     /**
+     * @notice Cache key of a PLONK blacklist non-membership proof.
+     */
+    function blacklistProofCacheKey(
+        uint256[24] calldata proof,
+        uint256[4] calldata pubSignals
+    ) external view returns (bytes32) {
+        return _plonkCacheKey("blacklist", proof, abi.encodePacked(pubSignals));
+    }
+
+    /**
      * @notice Cache key for a Groth16 proof under a given circuit tag:
-     *         "blacklist", "jurisdiction", "accreditation",
+     *         "jurisdiction", "accreditation",
      *         "compliance" (6-signal aggregation) or "compliance-proof"
      *         (2-signal verifyComplianceProof). The key also folds in the
      *         verifier instance bound to that tag, so it changes after

@@ -43,8 +43,9 @@ interface IZKVerifier {
     function getVerifyingKey(bytes32 circuitId) external view returns (VerifyingKey memory);
 
     /**
-     * @dev Verify a Groth16 proof for a specific circuit. The whitelist
-     *      circuit is refused (reverts "use verifyWhitelistMembership").
+     * @dev Verify a Groth16 proof for a specific circuit. The PLONK
+     *      circuits are refused (revert "use verifyWhitelistMembership" /
+     *      "use verifyBlacklistNonMembership").
      * @param circuitId Identifier for the circuit
      * @param proof The proof to verify
      * @param publicInputs Public inputs for the proof
@@ -77,6 +78,27 @@ interface IZKVerifier {
     function whitelistProofCacheKey(
         uint256[24] calldata proof,
         uint256[3] calldata pubSignals
+    ) external view returns (bytes32);
+
+    /**
+     * @dev Verify a PLONK blacklist non-membership proof: the wallet's holder
+     *      owns a commitment in the whitelist root whose identity is not in
+     *      the sanctions tree. A non-gating demonstration (D2): nothing on
+     *      chain consumes the result. Returns false on a bad proof or on any
+     *      signal >= the BN254 scalar field order.
+     * @param proof 24-word PLONK proof (snarkjs `plonk exportSolidityCallData`)
+     * @param pubSignals [nullifier, whitelistRoot, blacklistRoot, walletBinding]
+     */
+    function verifyBlacklistNonMembership(
+        uint256[24] calldata proof,
+        uint256[4] calldata pubSignals
+    ) external returns (bool);
+
+    /// @dev Proof-cache key of a blacklist proof, bound to the current
+    ///      blacklist verifier instance (for clearExpiredProofs).
+    function blacklistProofCacheKey(
+        uint256[24] calldata proof,
+        uint256[4] calldata pubSignals
     ) external view returns (bytes32);
 
     /// @dev True on a demo deployment whose verify functions do not check proofs.

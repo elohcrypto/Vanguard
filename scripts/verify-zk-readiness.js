@@ -4,8 +4,8 @@
  * ZK Circuits Readiness Verification Script
  *
  * Checks the artifacts of every circuit and whether its setup is sound:
- * protocol and nPublic per circuit, PLONK required for the whitelist, and
- * any Groth16 key or verifier with gamma == delta (no phase-2 contribution,
+ * protocol and nPublic per circuit, PLONK required for the whitelist and the
+ * blacklist with their expected public-signal counts, and any Groth16 key or verifier with gamma == delta (no phase-2 contribution,
  * so forgeable) reported as UNSOUND.
  *
  * Exit 0: all present and sound. Exit 2: present, at least one circuit
@@ -25,6 +25,14 @@ console.log("=".repeat(60));
 // setup:zk); a Groth16 key needs a per-circuit phase-2 contribution, and
 // without one gamma == delta and anyone can forge a proof.
 const { CIRCUITS: circuits, protocolOf } = require("./setup-zk-circuits");
+
+// Public-signal count each sound circuit must expose (outputs first, then
+// public inputs): whitelist [nullifier, merkleRoot, walletBinding],
+// blacklist [nullifier, whitelistRoot, blacklistRoot, walletBinding].
+const EXPECTED_NPUBLIC = {
+  whitelist_membership: 3,
+  blacklist_membership: 4,
+};
 
 // Circuits whose setup does not make proofs sound, with the reason.
 const unsound = [];
@@ -97,8 +105,16 @@ circuits.forEach((circuit) => {
     } else if (vkey.protocol !== expected) {
       console.log(`     ❌ vkey: protocol ${vkey.protocol}, expected ${expected}`);
       allPassed = false;
-    } else if (circuit === "whitelist_membership" && vkey.protocol !== "plonk") {
-      console.log(`     ❌ vkey: the whitelist circuit must be PLONK`);
+    } else if (circuit in EXPECTED_NPUBLIC && vkey.protocol !== "plonk") {
+      console.log(`     ❌ vkey: ${circuit} must be PLONK`);
+      allPassed = false;
+    } else if (
+      circuit in EXPECTED_NPUBLIC &&
+      vkey.nPublic !== EXPECTED_NPUBLIC[circuit]
+    ) {
+      console.log(
+        `     ❌ vkey: nPublic ${vkey.nPublic}, expected ${EXPECTED_NPUBLIC[circuit]}`,
+      );
       allPassed = false;
     } else if (
       vkey.protocol === "groth16" &&
@@ -256,7 +272,8 @@ if (allPassed && unsound.length === 0) {
     "\n  Artifacts are present, so the demo and tests run, but a forged proof",
   );
   console.log(
-    "  verifies for every circuit above. Task 3.7 moves them to PLONK.\n",
+    "  verifies for every circuit above. Task 3.7 moves them to PLONK once\n" +
+      "  their trust model is decided (D31).\n",
   );
   process.exit(2);
 } else {

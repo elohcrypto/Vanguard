@@ -21,10 +21,18 @@ contract AlwaysTrueVerifier {
         return true;
     }
 
-    /// @dev PLONK shape (the whitelist verifier since Task 3.1).
+    /// @dev PLONK whitelist shape (since Task 3.1).
     function verifyProof(
         uint256[24] calldata,
         uint256[3] calldata
+    ) public pure returns (bool) {
+        return true;
+    }
+
+    /// @dev PLONK blacklist shape (since Task 3.7).
+    function verifyProof(
+        uint256[24] calldata,
+        uint256[4] calldata
     ) public pure returns (bool) {
         return true;
     }
