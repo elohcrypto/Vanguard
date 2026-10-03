@@ -589,9 +589,9 @@ sig.R8x <== R8x; sig.R8y <== R8y; sig.S <== S; sig.M <== message.out;
 
 | Circuit | Attested (private) | Policy (public) | Public signals |
 |---|---|---|---|
-| `jurisdiction_proof` | PrivacyManager's bit for the investor's ISO country code | `allowedMask` = OR of the bits of the registered codes ComplianceRules allows for VSC | `[nullifier, Ax, Ay, allowedMask, walletBinding]` |
-| `accreditation_proof` | the accreditation amount (< 2^64) | `minimumAccreditation` | `[nullifier, Ax, Ay, minimumAccreditation, walletBinding]` |
-| `compliance_aggregation` | four scores 0..100 in one attestation | minimum and four weights summing to 100 | `[nullifier, Ax, Ay, minimum, wK, wA, wJ, wAcc, walletBinding]` |
+| `jurisdiction_proof` | PrivacyManager's bit for the investor's ISO country code | `allowedMask` = OR of the bits of the registered codes ComplianceRules allows for VSC | `[nullifier, Ax, Ay, chainId, verifierContext, allowedMask, walletBinding]` |
+| `accreditation_proof` | the accreditation amount (< 2^64) | `minimumAccreditation` | `[nullifier, Ax, Ay, chainId, verifierContext, minimumAccreditation, walletBinding]` |
+| `compliance_aggregation` | four scores 0..100 in one attestation | minimum and four weights summing to 100 | `[nullifier, Ax, Ay, chainId, verifierContext, minimum, wK, wA, wJ, wAcc, walletBinding]` |
 
 Every check is a hard constraint: the mask has exactly one bit and it is set
 in `allowedMask` (both range-checked to 64 bits); `amount >= minimum`; the

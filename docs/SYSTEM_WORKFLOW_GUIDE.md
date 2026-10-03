@@ -459,13 +459,16 @@ command-line tools and the runbook rules.
 
 The jurisdiction set for private proofs is ComplianceRules' rule for VSC,
 the same one transfers enforce (Task 3.8): the allowed mask is the OR of
-the bits of the registered ISO codes ComplianceRules admits for VSC.
+the bits of the registered ISO codes ComplianceRules (`VSC.compliance()`,
+read on every use) admits for VSC.
 PrivacyManager only assigns each ISO 3166-1 numeric code an append-only
 bit (`registerJurisdictionCode`, at most 64; the issuer attests the bit,
 `attest.js --country`); a code gets a bit before it can be attested.
 Blocking a country in ComplianceRules is enough to stop it on the private
 path, and any rule change for VSC lapses the jurisdiction records (rule
-version), so restoring a rule revives none.
+version) and frees the attestation for a re-proof, so restoring a rule
+revives none. An attestation is signed for one chain and one
+PrivacyManager; another deployment refuses it.
 
 ---
 

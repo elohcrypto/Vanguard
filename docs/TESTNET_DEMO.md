@@ -447,16 +447,27 @@ Baby Jubjub key; PrivacyManager trusts its public key (Ax, Ay) per circuit
 weights summing to 100 (`setCompliancePolicy`). A proof records
 {policyHash, attestor, nullifier, expiresAt} for the wallet that submits
 it, one wallet per attestation per policy; a policy change, an untrusted
-issuer key or expiry lapses it, and a policy change re-admits the same
-attestation for a new proof. Like a whitelist root version, every policy
-change (a jurisdiction source or code registration, either policy
-setter) and every trust change of a key starts a new epoch: restoring a
-policy or re-trusting a key never revives an old record, holders resubmit.
+issuer key or expiry lapses it, and a policy change (a ComplianceRules
+rule change for VSC included) re-admits the same attestation for a new
+proof, from any wallet. Like a whitelist root version, every policy change
+(a policy token or code registration, either policy setter) and every
+trust change of a key starts a new epoch: restoring a policy or
+re-trusting a key never revives an old record, holders resubmit.
+
+An attestation is per chain and per PrivacyManager (Task 3.8 review M1):
+the issuer signs the chain id and the PrivacyManager address with the
+attributes, PrivacyManager refuses a proof naming another chain or
+another PrivacyManager, and the prover refuses before proving. An issuer
+key trusted on two deployments therefore cannot carry an attestation from
+one to the other, where the same bit may mean another country; after a
+redeploy, issuers sign again for the new PrivacyManager.
 
 The jurisdiction set for private proofs is ComplianceRules' rule for VSC
 (Task 3.8): the one transfers enforce, with no second list to keep in
-step. PrivacyManager names it with `setJurisdictionSource(complianceRules,
-VSC)` and keeps only the code-to-bit table issuers attest: each ISO 3166-1
+step. PrivacyManager names the token with `setPolicyToken(VSC)` and reads
+its ComplianceRules from `VSC.compliance()` on every use, so a Token vote
+moving VSC to a new ComplianceRules moves the private path with it; it
+keeps only the code-to-bit table issuers attest: each ISO 3166-1
 numeric code gets the next of 64 bits with `registerJurisdictionCode`, and
 a bit never moves. The allowed mask is the OR of the bits of the
 registered codes that `ComplianceRules.validateJurisdiction(VSC, code)`
@@ -469,7 +480,11 @@ whatever the holder's country, and restoring the rule revives none. A
 code without a bit cannot be attested until it is registered. Option 21
 points PrivacyManager at VSC's rule and registers its allow list in order
 (840 is bit 1), printing the bits; the ceremony refuses a PrivacyManager
-reading another ComplianceRules or token.
+whose policy token is not VSC. A code added to VSC's allow list later
+(the jurisdiction-list menu, or a ComplianceRules vote) gets no bit by
+itself: rerun option 21 or 41 before the handover, or pass a
+PrivacyParameters vote for `registerJurisdictionCode` after it, before
+investors from that country can attest.
 
 ```bash
 # Issuer, once: the private key is printed once; keep it offline
@@ -478,7 +493,8 @@ node scripts/zk/attest.js --new-key
 ATTESTOR_KEY=<key> node scripts/zk/attest.js --public-key
 ATTESTOR_KEY=<key> node scripts/zk/attest.js --sign --circuit jurisdiction \
   --identity <onchainID> --country <ISO numeric> --rpc <url> \
-  --privacy-manager <addr> --out att.json   # offline: --mask <its bit>
+  --privacy-manager <addr> --out att.json
+#   offline: --chain-id <id> --privacy-manager <addr> --mask <its bit>
 #   ... --circuit accreditation --amount <amount>
 #   ... --circuit compliance --scores <kyc,aml,jurisdiction,accreditation>
 # Investor: policy and issuer trust read from PrivacyManager

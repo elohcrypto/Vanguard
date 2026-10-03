@@ -121,16 +121,20 @@ const proof = await generator.generateWhitelistProof({
 
 // Attestation proofs (Task 3.7b): an issuer signs, the investor proves
 const { signAttestation } = require('./scripts/zk/attest.js');
+// An attestation is for one chain and one PrivacyManager (Task 3.8).
 const att = await signAttestation({
     key: process.env.ATTESTOR_KEY, circuit: 'compliance',
+    chainId, privacyManager: pmAddress,
     identity: onchainID, scores: [80, 75, 85, 70],
 });
 const complianceProof = await generator.generateComplianceProof({
     identity: att.identity, scores: att.attributes, salt: att.salt,
     R8x: att.R8x, R8y: att.R8y, S: att.S, Ax: att.Ax, Ay: att.Ay,
+    chainId: att.chainId, verifierContext: BigInt(att.privacyManager),
     minimum: 70n, weights: [25n, 25n, 25n, 25n], walletBinding: wallet,
 });
-// publicSignals: [nullifier, Ax, Ay, 70, 25, 25, 25, 25, wallet]
+// publicSignals: [nullifier, Ax, Ay, chainId, pmAddress, 70, 25, 25, 25,
+//                 25, wallet]
 // scripts/zk/prove-attestation.js reads the policy and the issuer trust
 // from PrivacyManager and wraps this for investors.
 ```
