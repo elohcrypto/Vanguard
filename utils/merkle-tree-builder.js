@@ -34,18 +34,6 @@ class MerkleTreeBuilder {
     }
 
     /**
-     * Hash a single value using Poseidon
-     * @param {BigInt} value - Value to hash
-     * @returns {BigInt} Hash result
-     */
-    hashSingle(value) {
-        if (!this.poseidon) {
-            throw new Error("MerkleTreeBuilder not initialized. Call initialize() first.");
-        }
-        return this.poseidon.F.toObject(this.poseidon([value]));
-    }
-
-    /**
      * Build Merkle tree from leaves.
      *
      * SPARSE. The tree has 2^levels leaf slots (2^20 = 1,048,576 at the
@@ -278,21 +266,6 @@ class MerkleTreeBuilder {
         const builder = new MerkleTreeBuilder(levels);
         await builder.initialize();
         builder.buildTree(commitments.map((c) => BigInt(c)));
-        return builder;
-    }
-
-    /**
-     * Create tree with Poseidon(identity) leaves.
-     * Kept only for the blacklist circuit path (Task 3.7); the whitelist
-     * uses createFromCommitments.
-     * @param {BigInt[]} identities - Array of identity values
-     * @param {number} levels - Tree levels
-     * @returns {MerkleTreeBuilder} Tree instance
-     */
-    static async createFromIdentities(identities, levels = 20) {
-        const builder = new MerkleTreeBuilder(levels);
-        await builder.initialize();
-        builder.buildTree(identities.map((id) => builder.hashSingle(id)));
         return builder;
     }
 

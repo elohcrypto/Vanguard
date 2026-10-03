@@ -4,6 +4,10 @@ const path = require("path");
 const fs = require("fs");
 const { MerkleTreeBuilder } = require("../utils/merkle-tree-builder");
 const { ProofFormatter } = require("../utils/proof-formatter");
+const {
+  buildBlacklistSmt,
+  nonInclusionWitness,
+} = require("../utils/smt-builder");
 
 /**
  * @title RealProofGenerator
@@ -158,69 +162,115 @@ class RealProofGenerator {
   }
 
   /**
-   * Generate blacklist non-membership proof
+   * Generate a PLONK blacklist non-membership proof (Task 3.7): the wallet's
+   * holder owns a commitment in the whitelist root whose identity is not in
+   * the sanctions tree. Non-gating (D2): nothing on chain consumes it.
    * @param {Object} params - Proof parameters
-   * @param {BigInt} params.identity - User's secret identity
-   * @param {BigInt[]} params.blacklistIdentities - Array of blacklisted identities
-   * @param {BigInt} params.challengeHash - Challenge hash
-   * @returns {Object} Generated proof
+   * @param {BigInt} params.identity - The prover's identity (sanctions-tree key)
+   * @param {BigInt} params.secret - The prover's secret; the whitelist leaf is
+   *        Poseidon(identity, secret), nullifier = Poseidon(secret, blacklistRoot)
+   * @param {BigInt|string} params.walletBinding - Wallet the proof is for
+   *        (an address or a field element), non-zero
+   * @param {BigInt[]} [params.commitments] - Published whitelist leaves
+   * @param {{identity: BigInt, secret: BigInt}[]} [params.members] - Or the
+   *        whitelist members, committed here (tests)
+   * @param {BigInt[]} params.blacklistIdentities - Listed identities; the
+   *        sanctions SMT is built from them (utils/smt-builder.js)
+   * @returns {Object} { proof: 24 words, publicSignals: [nullifier,
+   *          whitelistRoot, blacklistRoot, walletBinding], rawProof, inputs };
+   *          pass proof and publicSignals to
+   *          ZKVerifierIntegrated.verifyBlacklistNonMembership
+   * @throws before proving when the identity is listed or its commitment is
+   *         not in the whitelist
    */
   async generateBlacklistProof(params) {
     await this.initialize();
-    console.log("\n🔐 Generating Blacklist Non-Membership Proof...");
+    console.log("\n🔐 Generating Blacklist Non-Membership Proof (PLONK)...");
 
     const {
       identity,
+      secret,
+      walletBinding,
+      commitments,
+      members,
       blacklistIdentities,
-      challengeHash = BigInt(Math.floor(Math.random() * 1000000)),
     } = params;
+    if (identity === undefined || identity === null) {
+      throw new Error("identity is required");
+    }
+    if (secret === undefined || secret === null) {
+      throw new Error(
+        "secret is required: the whitelist leaf is Poseidon(identity, secret)",
+      );
+    }
+    if (
+      walletBinding === undefined ||
+      walletBinding === null ||
+      BigInt(walletBinding) === 0n
+    ) {
+      throw new Error("walletBinding is required and must be non-zero");
+    }
+    if (!commitments === !members) {
+      throw new Error("pass exactly one of commitments or members");
+    }
+    if (!Array.isArray(blacklistIdentities)) {
+      throw new Error(
+        "blacklistIdentities is required (an array; empty for an empty list)",
+      );
+    }
 
-    // Build merkle tree
-    console.log("  📊 Building Merkle tree...");
-    const tree =
-      await MerkleTreeBuilder.createFromIdentities(blacklistIdentities);
-    const identityHash = tree.hashSingle(identity);
-    const blacklistRoot = tree.getRoot();
+    console.log("  📊 Building whitelist tree and sanctions tree...");
+    const leaves =
+      commitments ||
+      members.map((m) => this.hash([BigInt(m.identity), BigInt(m.secret)]));
+    const tree = await MerkleTreeBuilder.createFromCommitments(leaves);
+    const leafIndex = tree.findLeafIndex(tree.commitment(identity, secret));
+    if (leafIndex === -1) {
+      throw new Error("Commitment not found in whitelist");
+    }
+    const whitelistRoot = tree.getRoot();
+    const { pathElements, pathIndices } = tree.getProof(leafIndex);
 
-    // For non-membership proof, we need a sibling hash
-    // Use a dummy position (0) and get its sibling
-    const { pathElements, pathIndices } = tree.getProof(0);
-    const siblingHash = pathElements[0];
+    const smt = await buildBlacklistSmt(blacklistIdentities);
+    // Throws "... is on the sanctions list ..." for a listed identity.
+    const w = await nonInclusionWitness(smt.tree, identity);
 
-    // Generate nullifier
-    const nullifierHash = this.hash([identity, blacklistRoot, challengeHash]);
-
-    // Prepare circuit inputs
     const input = {
-      identity: identity.toString(),
+      identity: BigInt(identity).toString(),
+      secret: BigInt(secret).toString(),
       pathElements: pathElements.map((x) => x.toString()),
       pathIndices: pathIndices,
-      siblingHash: siblingHash.toString(),
-      blacklistRoot: blacklistRoot.toString(),
-      nullifierHash: nullifierHash.toString(),
-      challengeHash: challengeHash.toString(),
+      siblings: w.siblings.map((x) => x.toString()),
+      oldKey: w.oldKey.toString(),
+      oldValue: w.oldValue.toString(),
+      isOld0: w.isOld0,
+      whitelistRoot: whitelistRoot.toString(),
+      blacklistRoot: smt.root.toString(),
+      walletBinding: BigInt(walletBinding).toString(),
     };
 
-    console.log("  🧮 Generating witness...");
     const paths = this.getCircuitPaths("blacklist_membership");
-
-    console.log("  🔐 Generating proof...");
-    const { proof, publicSignals } = await snarkjs.groth16.fullProve(
+    console.log("  🔐 Generating witness and proof...");
+    const { proof, publicSignals } = await snarkjs.plonk.fullProve(
       input,
       paths.wasm,
       paths.zkey,
     );
-
     console.log("  ✅ Proof generated successfully");
 
-    return {
-      proof: ProofFormatter.formatForSolidity(proof, publicSignals),
+    const calldata = await ProofFormatter.formatPlonkForSolidity(
+      proof,
       publicSignals,
+    );
+    return {
+      proof: calldata.proof,
+      publicSignals: calldata.publicSignals,
+      rawProof: proof,
       inputs: {
-        identity: identity.toString(),
-        blacklistRoot: blacklistRoot.toString(),
-        nullifierHash: nullifierHash.toString(),
-        challengeHash: challengeHash.toString(),
+        whitelistRoot: whitelistRoot.toString(),
+        blacklistRoot: smt.root.toString(),
+        walletBinding: input.walletBinding,
+        nullifier: this.hash([BigInt(secret), smt.root]).toString(),
       },
     };
   }

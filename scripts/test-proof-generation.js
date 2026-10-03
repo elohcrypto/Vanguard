@@ -52,10 +52,16 @@ async function main() {
     console.log("\n2️⃣  Testing Blacklist Proof...");
     const startTime = Date.now();
 
+    // A whitelisted commitment whose identity is not on the sanctions list.
     const blacklistResult = await generator.generateBlacklistProof({
-      identity: BigInt(12345),
+      identity: 12345n,
+      secret: 202n,
+      members: [
+        { identity: 11111n, secret: 101n },
+        { identity: 12345n, secret: 202n },
+      ],
       blacklistIdentities: [BigInt(11111), BigInt(22222)],
-      challengeHash: BigInt(999),
+      walletBinding: "0x000000000000000000000000000000000000dEaD",
     });
 
     const duration = Date.now() - startTime;
