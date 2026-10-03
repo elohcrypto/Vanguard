@@ -65,6 +65,7 @@ contract PrivacyManager is Ownable2Step, ReentrancyGuard {
 
     // Whitelist root registry and binder
     bytes32 private constant WHITELIST_ID = keccak256("WHITELIST_MEMBERSHIP");
+    bytes32 private constant BLACKLIST_ID = keccak256("BLACKLIST_MEMBERSHIP");
     uint256 public constant MIN_PROOF_VALIDITY = 1 days;
     uint256 public constant MAX_PROOF_VALIDITY = 365 days;
     uint256 internal constant SNARK_SCALAR_FIELD =
@@ -97,6 +98,9 @@ contract PrivacyManager is Ownable2Step, ReentrancyGuard {
     error InvalidValidityPeriod();
     error TestingModeVerifier();
     error RenounceDisabled();
+    /// @dev The blacklist proof is a non-gating demonstration (D2): verify it
+    ///      through ZKVerifierIntegrated.verifyBlacklistNonMembership.
+    error NonGatingBlacklistProof();
 
     // Events
     event PrivateProofSubmitted(address indexed user, bytes32 indexed circuitId, uint256 timestamp, bool isValid);
@@ -316,9 +320,11 @@ contract PrivacyManager is Ownable2Step, ReentrancyGuard {
     // ============ GROTH16 PRIVATE PROOFS ============
 
     /**
-     * @dev Submit a private compliance proof for one of the four Groth16
-     *      circuits (blacklist, jurisdiction, accreditation, compliance). The
-     *      whitelist circuit goes through submitWhitelistProof.
+     * @dev Submit a private compliance proof for one of the three Groth16
+     *      circuits (jurisdiction, accreditation, compliance). The whitelist
+     *      circuit goes through submitWhitelistProof. The blacklist circuit is
+     *      refused and never stored: it is a non-gating demonstration (D2),
+     *      verified through ZKVerifierIntegrated.verifyBlacklistNonMembership.
      * @param circuitId Circuit identifier for the proof type
      * @param proof Zero-knowledge proof
      * @param publicInputs Public inputs for the proof
@@ -330,6 +336,7 @@ contract PrivacyManager is Ownable2Step, ReentrancyGuard {
         uint256[] memory publicInputs
     ) external validCircuit(circuitId) nonReentrant returns (bool) {
         require(circuitId != WHITELIST_ID, "PrivacyManager: use submitWhitelistProof");
+        if (circuitId == BLACKLIST_ID) revert NonGatingBlacklistProof();
         require(publicInputs.length >= circuitMinimumInputs[circuitId], "PrivacyManager: Insufficient public inputs");
 
         // Verify the proof
