@@ -95,28 +95,20 @@ async function runHandoverSmoke(state, failures) {
     [PROPOSER, ...VOTERS].map((i) => s[i]),
   );
 
-  // 3.3 (R-3R-4): the privacy contracts join the ceremony. Option 41 in
-  // real mode deploys them; otherwise the smoke deploys the same pair.
-  let privacyManager = c("privacyManager");
-  let zkVerifier = c("zkVerifierIntegrated");
-  if (!privacyManager) {
-    zkVerifier = await (
-      await ethers.getContractFactory("ZKVerifierIntegrated")
-    ).deploy(false);
-    privacyManager = await (
-      await ethers.getContractFactory("PrivacyManager")
-    ).deploy(await zkVerifier.getAddress());
-    state.setContract("zkVerifierIntegrated", zkVerifier);
-    state.setContract("privacyManager", privacyManager);
-    // 3.4 (R-3R-15): wired as VSC's whitelist source (Either), so the
-    // ceremony derives it from ComplianceRules (the deployer owns it now).
-    const rules = c("complianceRules");
-    const vsc = await c("digitalToken").getAddress();
-    const pmAddr = await privacyManager.getAddress();
-    await (await rules.setPrivacyManager(vsc, pmAddr)).wait();
-    await (await rules.setWhitelistMode(vsc, 2)).wait();
+  // 3.3 (R-3R-4): the privacy contracts join the ceremony. Option 1
+  // deployed them and option 21 wired them for VSC (3.6), so the ceremony
+  // derives the PrivacyManager from ComplianceRules (R-3R-15).
+  const privacyManager = c("privacyManager");
+  const zkVerifier = c("zkVerifierIntegrated");
+  if (!privacyManager || !zkVerifier) {
+    failures.push("handover smoke: no privacy pair in state (option 1)");
+    return;
   }
-  // Before the ceremony the deployer (owner) publishes the root.
+  // 3.4: VSC reads bindings only (Either, no oracle) for the CLI step.
+  const vsc = await c("digitalToken").getAddress();
+  await (await c("complianceRules").setWhitelistMode(vsc, 2)).wait();
+  // Before the ceremony the deployer (owner) publishes the root, so the
+  // version moves past every deployer-era binding.
   const root = ethers.toBeHex(ethers.toBigInt(ethers.randomBytes(31)), 32);
   await (await privacyManager.publishWhitelistRoot(root)).wait();
 

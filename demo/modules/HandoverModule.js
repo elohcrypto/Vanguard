@@ -113,8 +113,8 @@ class HandoverModule {
       // Optional (2F.5): option 60 / option 1 deploy them.
       escrowWalletFactory: s.getContract("escrowFactory") || undefined,
       onchainIDFactory: s.getContract("onchainIDFactory") || undefined,
-      // Optional (3.3): option 41 deploys them; a testingMode verifier
-      // (ZK_TESTING_MODE=1) is refused by the preflight.
+      // Optional (3.3): option 1 deploys them (option 41 when run alone);
+      // a testingMode verifier is refused by the preflight.
       privacyManager: s.getContract("privacyManager") || undefined,
       zkVerifier: s.getContract("zkVerifierIntegrated") || undefined,
       oracles: pick(["whitelistOracle", "blacklistOracle", "consensusOracle"]),

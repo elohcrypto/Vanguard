@@ -96,7 +96,8 @@ class ContractDeployer {
    * THE ORDER, AND WHY (verified by running the menu, not inferred)
    * ---------------------------------------------------------------
    *   1. deployAllContracts       (menu 1)  OnchainID contracts + ERC-3643
-   *                                         registries -> `identityRegistry`
+   *                                         registries -> `identityRegistry`,
+   *                                         privacy pair -> `privacyManager`
    *   2. deployDigitalTokenSystem (menu 21) -> `digitalToken`, and deploys
    *                                         `complianceRules` itself if absent
    *   3. investor type registry   (menu 51) -> `investorTypeRegistry`
@@ -127,9 +128,13 @@ class ContractDeployer {
 
     console.log("\nDeploys the whole system in dependency order:");
     console.log(
-      "   1. Core contracts (OnchainID, issuers, ERC-3643 registries)",
+      "   1. Core contracts (OnchainID, issuers, ERC-3643 registries,",
     );
-    console.log("   2. ERC-3643 digital token — also deploys ComplianceRules");
+    console.log("      ZKVerifierIntegrated + PrivacyManager)");
+    console.log(
+      "   2. ERC-3643 digital token — also deploys ComplianceRules and",
+    );
+    console.log("      wires the ZK allow list (mode OracleOnly: OFF)");
     console.log(
       `      whitelist: ${DEFAULT_ALLOWED_COUNTRIES.length} countries incl. Hong Kong (344)`,
     );
@@ -220,6 +225,16 @@ class ContractDeployer {
 
     for (const d of done) {
       console.log(`   ✅ ${d.name.padEnd(26)} ${d.address}`);
+      if (d.name === "Core contracts") {
+        // The privacy pair deploys with the core layer (Task 3.6).
+        for (const [label, key] of [
+          ["ZKVerifierIntegrated", "zkVerifierIntegrated"],
+          ["PrivacyManager", "privacyManager"],
+        ]) {
+          const c = this.state.getContract(key);
+          if (c) console.log(`   ✅ ${label.padEnd(26)} ${c.target}`);
+        }
+      }
     }
     for (let i = done.length; i < steps.length; i++) {
       console.log(`   ⏭️  ${steps[i].name.padEnd(26)} not deployed`);
@@ -262,6 +277,10 @@ class ContractDeployer {
 
       // Deploy ERC-3643 registries
       await this.deployERC3643Registries();
+
+      // The privacy pair (plan v2 Task 3.6): option 21 wires it into
+      // ComplianceRules for VSC, option 42 -> 1 uses it on the live token.
+      await this.deployPrivacyPair();
 
       displaySuccess("ALL CONTRACTS DEPLOYED SUCCESSFULLY!");
 
@@ -371,6 +390,89 @@ class ContractDeployer {
     console.log(`   ✅ Trusted issuer for AML: ${amlIssuerAddr}`);
     await identityRegistry.addClaimTopic(AML_TOPIC);
     console.log(`   ✅ Required claim topic: AML (${AML_TOPIC})`);
+  }
+
+  /**
+   * Deploy ZKVerifierIntegrated(testingMode = false) and PrivacyManager on
+   * it, unless demo state already holds both. testingMode is immutable and
+   * PrivacyManager refuses a testingMode verifier, so the demo has no mock
+   * mode; mocks live in test/ only. Option 41 calls this too, so the
+   * privacy menu works when option 1 has not run.
+   * @returns {Promise<{zkVerifier: Object, privacyManager: Object}>}
+   */
+  async deployPrivacyPair() {
+    let zkVerifier = this.state.getContract("zkVerifierIntegrated");
+    let privacyManager = this.state.getContract("privacyManager");
+    if (zkVerifier && privacyManager) return { zkVerifier, privacyManager };
+
+    displayProgress("Deploying ZKVerifierIntegrated (real verification)...");
+    zkVerifier = await (
+      await ethers.getContractFactory("ZKVerifierIntegrated")
+    ).deploy(false);
+    await zkVerifier.waitForDeployment();
+    this.state.setContract("zkVerifierIntegrated", zkVerifier);
+    this.state.setContract("zkVerifier", zkVerifier); // alias, options 42-50
+    this.state.zkVerifier = zkVerifier;
+    await this.logger.logContractDeployment(
+      "ZKVerifierIntegrated",
+      zkVerifier,
+      [false],
+    );
+
+    displayProgress("Deploying PrivacyManager (whitelist root + bindings)...");
+    const zkAddr = await zkVerifier.getAddress();
+    privacyManager = await (
+      await ethers.getContractFactory("PrivacyManager")
+    ).deploy(zkAddr);
+    await privacyManager.waitForDeployment();
+    this.state.setContract("privacyManager", privacyManager);
+    await this.logger.logContractDeployment("PrivacyManager", privacyManager, [
+      zkAddr,
+    ]);
+
+    console.log(`   ✅ ZKVerifierIntegrated: ${zkAddr} (testingMode false)`);
+    console.log(
+      `   ✅ PrivacyManager:       ${await privacyManager.getAddress()} (owner publishes roots until the handover makes ops the listOperator)`,
+    );
+    return { zkVerifier, privacyManager };
+  }
+
+  /**
+   * Point ComplianceRules at the PrivacyManager for VSC, leaving the
+   * whitelist mode as it is (OracleOnly after deploy, so nothing changes for
+   * transfers). The handover ceremony derives the PrivacyManager from this
+   * wiring (R-3R-15); option 42 -> 1 switches VSC to Either.
+   * @returns {Promise<boolean>} true when VSC reads this PrivacyManager
+   */
+  async wirePrivacyManager() {
+    const rules = this.state.getContract("complianceRules");
+    const token = this.state.getContract("digitalToken");
+    const pm = this.state.getContract("privacyManager");
+    if (!rules || !token || !pm) {
+      console.log(
+        "   ℹ️  ZK allow list not wired: needs ComplianceRules, VSC and the privacy pair (options 1 and 21)",
+      );
+      return false;
+    }
+    const vsc = await token.getAddress();
+    const pmAddr = await pm.getAddress();
+    const wired = await rules.privacyManager(vsc);
+    if (wired.toLowerCase() !== pmAddr.toLowerCase()) {
+      const owner = await rules.owner();
+      if (owner.toLowerCase() !== this.state.signers[0].address.toLowerCase()) {
+        console.log(
+          `   ⚠️  ComplianceRules.privacyManager(VSC) = ${wired}; the owner (${owner}) wires ${pmAddr} by a ComplianceRules vote`,
+        );
+        return false;
+      }
+      await (await rules.setPrivacyManager(vsc, pmAddr)).wait();
+    }
+    const mode = Number(await rules.whitelistMode(vsc));
+    console.log(`   ✅ ComplianceRules.privacyManager(VSC) = ${pmAddr}`);
+    console.log(
+      `   ℹ️  Whitelist mode ${["OracleOnly", "ZkOnly", "Either"][mode]}: the ZK allow list is wired but ${mode === 0 ? "OFF until option 42 -> 1 switches VSC to Either" : "ON"}`,
+    );
+    return true;
   }
 
   /**
@@ -572,6 +674,13 @@ class ContractDeployer {
       console.log(
         "   ✅ Users from blocked countries will be REJECTED during KYC/AML",
       );
+
+      // Task 3.6: the privacy pair option 1 deployed becomes VSC's ZK
+      // whitelist source, with the mode left OracleOnly (no change yet).
+      console.log(
+        "\n📝 Step 2.7: Wiring the ZK allow list (PrivacyManager)...",
+      );
+      await this.wirePrivacyManager();
 
       // Check if InvestorTypeRegistry is deployed
       console.log(
@@ -857,7 +966,17 @@ class ContractDeployer {
         ).wait();
         console.log("   ✅ Blacklist oracle now gates VSC transfers");
         console.log(
-          "   ℹ️  Whitelist gate left OFF (default-deny would block all holders)",
+          "   ℹ️  Whitelist oracle not bound (default-deny would block all holders)",
+        );
+        const zkWired =
+          (await rules.privacyManager(tokenAddr)) !== ethers.ZeroAddress;
+        const wlMode = Number(await rules.whitelistMode(tokenAddr));
+        console.log(
+          !zkWired
+            ? "   ℹ️  ZK allow list not wired (options 1 and 21 wire it)"
+            : wlMode === 0
+              ? "   ℹ️  ZK allow list wired but OFF (OracleOnly) until option 42 -> 1 switches VSC to Either"
+              : "   ℹ️  ZK allow list ON: VSC holders need a live PrivacyManager binding",
         );
       } else {
         console.log(

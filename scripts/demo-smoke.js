@@ -5,8 +5,7 @@
  * The interactive demo (`npm run demo:interactive:proof`) exercises code the
  * unit tests do not: ContractDeployer wires contracts together the way an
  * operator would. It cannot run in CI because readline over a non-TTY pipe
- * closes before the first prompt resolves, and deployment sits behind menu
- * option 1.
+ * closes before the first prompt resolves.
  *
  * This drives the same ContractDeployer directly and asserts the wiring is
  * real — reading state back from chain rather than trusting console output.
@@ -34,6 +33,8 @@ const EXPECTED = [
   "whitelistOracle",
   "blacklistOracle",
   "consensusOracle",
+  "zkVerifierIntegrated",
+  "privacyManager",
 ];
 
 async function main() {
@@ -41,17 +42,14 @@ async function main() {
 
   const state = new DemoState();
   if (state.initialize) await state.initialize();
-  // demo/index.js:114 does this; DemoState.initialize() does not.
-  state.signers = await ethers.getSigners();
+  state.signers = await ethers.getSigners(); // as demo/index.js does
 
   const deployer = new ContractDeployer(state, new EnhancedLogger());
   await deployer.deployAllContracts();
   await deployer.deployComplianceRules();
 
-  // deployDigitalTokenSystem is the only place a Token receives its compliance
-  // address, and it must run the production-compliance guard first. Capture
-  // its output so the guard's success line can be asserted below; the guard
-  // throwing is caught by main()'s catch and fails the run outright.
+  // The production-compliance guard runs before the Token gets its compliance
+  // address: its success line is asserted below, a throw fails the run.
   const deployLog = [];
   const realDeployLog = console.log;
   console.log = (...args) => deployLog.push(args.join(" "));
