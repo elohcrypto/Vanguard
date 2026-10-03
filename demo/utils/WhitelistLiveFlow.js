@@ -40,6 +40,8 @@ async function publish(state, pm, rootFile, log) {
     privacyManager: await pm.getAddress(),
     signer,
   });
+  // The blacklist proof (option 42 -> 2) proves under the current root.
+  state.whitelistRootFile = rootFile;
   log(
     `   📜 root ${rootFile.root.slice(0, 18)}… (${rootFile.count} commitments) published by ${signer.address}, version ${r.version}`,
   );

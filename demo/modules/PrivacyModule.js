@@ -21,6 +21,7 @@ const {
   publishAndBind,
 } = require("../utils/WhitelistBinderFlow");
 const { runLiveWhitelistFlow } = require("../utils/WhitelistLiveFlow");
+const { runBlacklistProofFlow } = require("../utils/BlacklistProofFlow");
 const ContractDeployer = require("../core/ContractDeployer");
 const { ethers } = require("hardhat");
 
@@ -81,7 +82,7 @@ class PrivacyModule {
       try {
         await this.realGenerator();
         console.log(
-          "✅ Real proof generator ready (PLONK whitelist, Groth16 others)",
+          "✅ Real proof generator ready (PLONK whitelist and blacklist, Groth16 others)",
         );
       } catch (error) {
         console.log(
@@ -97,7 +98,9 @@ class PrivacyModule {
       console.log(
         "   ✅ Whitelist Membership Proofs (bind a wallet on VSC, option 42 -> 1)",
       );
-      console.log("   ✅ Blacklist Non-Membership Proofs (Privacy-preserving)");
+      console.log(
+        "   ✅ Blacklist Non-Membership Proofs (Privacy-preserving, non-gating: D2; needs a binding from 42 -> 1)",
+      );
       console.log("   ✅ Jurisdiction Eligibility Proofs (Location privacy)");
       console.log("   ✅ Accreditation Status Proofs (Credential privacy)");
       console.log(
@@ -140,7 +143,7 @@ class PrivacyModule {
     console.log("\n🔐 Circuits (build/circuits):");
     for (const [name, system] of [
       ["whitelist_membership", "PLONK"],
-      ["blacklist_membership", "Groth16"],
+      ["blacklist_membership", "PLONK"],
       ["jurisdiction_proof", "Groth16"],
       ["accreditation_proof", "Groth16"],
       ["compliance_aggregation", "Groth16"],
@@ -1802,6 +1805,7 @@ class PrivacyModule {
         signals: publicSignals,
       });
       this.state.gasTracker.set("Whitelist Proof", receipt.gasUsed);
+      this.state.whitelistRootFile = rootFile;
       displaySuccess("WHITELIST MEMBERSHIP PROOF BOUND TO THE WALLET!");
 
       // Task 3.6: the same binding on the live token, steps (a) to (e).
@@ -1816,6 +1820,12 @@ class PrivacyModule {
     }
   }
 
+  /**
+   * Option 42 -> 2 (Task 3.7): prove the bound wallet's holder owns a
+   * commitment in the current whitelist root whose identity is not on the
+   * BlacklistOracle's list, verify it through the wrapper, then show a
+   * listed identity cannot prove. A non-gating demonstration (D2).
+   */
   async submitBlacklistNonMembershipProof() {
     console.log("\n🚫 SUBMIT BLACKLIST NON-MEMBERSHIP PROOF");
     console.log("-".repeat(40));
@@ -1828,251 +1838,8 @@ class PrivacyModule {
     }
 
     try {
-      let proof;
-      let finalBlacklistRoot;
-      let finalNullifierHash;
-      let finalChallengeHash;
-      let generationTime = 0;
-
-      // Generate a real ZK proof with security options
-      console.log("\n🔐 Generating a real ZK proof...");
-      console.log("⏳ This may take ~50 seconds for blacklist proof...");
-
-      // Ask user for security mode (same as whitelist)
-      console.log("\n🛡️  SECURITY MODE OPTIONS:");
-      console.log("1. Demo mode (simplified - uses hardcoded values)");
-      console.log("2. Custom input mode (manual identity entry)");
-      console.log(
-        "3. Secure mode (4-layer security: Registry + Signature + KYC + Nullifier) ⭐ RECOMMENDED",
-      );
-      const securityChoice = await this.promptUser("Select option (1-3): ");
-
-      let identity;
-      let blacklistIdentities;
-
-      if (securityChoice === "3") {
-        // 🛡️ SECURE MODE: 4-Layer Security
-        console.log("\n🛡️  SECURE MODE ACTIVATED");
-        console.log("=".repeat(60));
-        console.log("Implementing 4-Layer Security:");
-        console.log("  1️⃣  On-Chain Identity Registry Check");
-        console.log("  2️⃣  Cryptographic Signature Verification");
-        console.log("  3️⃣  KYC/AML Status Verification");
-        console.log("  4️⃣  Nullifier Tracking (automatic)");
-        console.log("=".repeat(60));
-        console.log("");
-
-        // LAYER 1: Check On-Chain Identity Registry
-        console.log("🔍 LAYER 1: Checking On-Chain Identity Registry...");
-        const userSigner = this.state.signers[1] || this.state.signers[0];
-        const userAddress = userSigner.address;
-        console.log(`   📍 User Address: ${userAddress}`);
-
-        const identityRegistry = this.state.getContract("identityRegistry");
-        if (!identityRegistry) {
-          console.log("   ⚠️  Identity Registry not deployed (demo mode)");
-          console.log("   ℹ️  Using simulated registry check...");
-          identity = BigInt(userAddress) % BigInt(1000000000);
-          console.log(`   🔢 Derived Identity: ${identity}`);
-        } else {
-          const onchainID = await identityRegistry.identity(userAddress);
-          if (onchainID === ethers.ZeroAddress) {
-            console.log(
-              "   ⚠️  No identity registered. Using simulated identity...",
-            );
-            identity = BigInt(userAddress) % BigInt(1000000000);
-          } else {
-            console.log(`   ✅ OnchainID Found: ${onchainID}`);
-            identity = BigInt(onchainID) % BigInt(1000000000);
-          }
-          console.log(`   🔢 Derived Identity: ${identity}`);
-        }
-
-        // LAYER 2: Platform Owner Signature
-        console.log("\n🔏 LAYER 2: Platform Owner Signature Verification...");
-        console.log(
-          "   🔒 SECURITY: Blacklist proofs verified by platform owner",
-        );
-        console.log("   ✅ Layer 2 ready (signature verification)");
-
-        // LAYER 3: KYC/AML Verification
-        console.log("\n🎫 LAYER 3: KYC/AML Status Verification...");
-        console.log("   ℹ️  Checking KYC/AML claims...");
-        console.log("   ✅ Layer 3 ready");
-
-        // LAYER 4: Nullifier Tracking
-        console.log("\n🔐 LAYER 4: Nullifier Tracking...");
-        console.log("   ℹ️  Nullifier will be automatically tracked on-chain");
-        console.log("   ✅ Layer 4 ready (handled by smart contract)");
-
-        // Setup blacklist
-        console.log("\n📋 Setting up blacklist...");
-        const blacklistChoice = await this.promptUser(
-          "Use default blacklist? (yes/no): ",
-        );
-
-        if (
-          blacklistChoice.toLowerCase() === "yes" ||
-          !blacklistChoice.trim()
-        ) {
-          blacklistIdentities = [BigInt(99999), BigInt(88888)]; // User NOT in blacklist
-          console.log(`   ✅ Blacklist: [99999, 88888]`);
-          console.log(`   ✅ Your identity (${identity}) is NOT in blacklist`);
-        } else {
-          const blacklistInput = await this.promptUser(
-            "Enter blacklist (comma-separated): ",
-          );
-          blacklistIdentities = blacklistInput
-            .split(",")
-            .map((id) => BigInt(id.trim()));
-
-          // Check if identity is in blacklist
-          const isInBlacklist = blacklistIdentities.some(
-            (id) => id === identity,
-          );
-          if (isInBlacklist) {
-            console.log(`   ⚠️  WARNING: Your identity IS in the blacklist!`);
-            console.log(
-              `   ⚠️  Removing your identity from blacklist for valid proof...`,
-            );
-            blacklistIdentities = blacklistIdentities.filter(
-              (id) => id !== identity,
-            );
-          }
-          console.log(`   ✅ Blacklist: [${blacklistIdentities.join(", ")}]`);
-        }
-
-        console.log("\n✅ ALL 4 SECURITY LAYERS PASSED!");
-        console.log("   Proceeding to ZK proof generation...\n");
-      } else if (securityChoice === "2") {
-        // Custom input mode
-        console.log("\n📋 CUSTOM INPUT MODE");
-        console.log("Enter your identity and blacklist identities as numbers.");
-        console.log(
-          "Note: Your identity should NOT be in the blacklist for a valid proof!\n",
-        );
-
-        const identityInput = await this.promptUser(
-          "Enter your identity (e.g., 12345): ",
-        );
-        identity = BigInt(identityInput.trim() || "12345");
-
-        const blacklistInput = await this.promptUser(
-          "Enter blacklist identities (comma-separated, e.g., 99999,88888): ",
-        );
-        if (blacklistInput.trim()) {
-          blacklistIdentities = blacklistInput
-            .split(",")
-            .map((id) => BigInt(id.trim()));
-        } else {
-          blacklistIdentities = [BigInt(99999), BigInt(88888)];
-        }
-
-        // Check if identity is in blacklist
-        const isInBlacklist = blacklistIdentities.some((id) => id === identity);
-        if (isInBlacklist) {
-          console.log("\n⚠️  WARNING: Your identity IS in the blacklist!");
-          console.log("   The proof will fail verification.");
-          const continueAnyway = await this.promptUser(
-            "Continue anyway? (yes/no): ",
-          );
-          if (continueAnyway.toLowerCase() !== "yes") {
-            console.log("❌ Proof generation cancelled.");
-            return;
-          }
-        }
-
-        console.log("\n📊 PROOF PARAMETERS:");
-        console.log(`   🆔 Your Identity: ${identity}`);
-        console.log(`   🚫 Blacklist: [${blacklistIdentities.join(", ")}]`);
-        console.log(
-          `   ✅ Identity in blacklist: ${isInBlacklist ? "YES (will fail!)" : "NO (valid)"}`,
-        );
-        console.log("");
-      } else {
-        // Demo mode - use sample identities
-        identity = BigInt(12345);
-        blacklistIdentities = [BigInt(99999), BigInt(88888)]; // User NOT in blacklist
-        console.log("\n📊 Using demo values:");
-        console.log(`   🆔 Identity: ${identity}`);
-        console.log(`   🚫 Blacklist: [${blacklistIdentities.join(", ")}]`);
-        console.log(`   ✅ Identity NOT in blacklist`);
-        console.log("");
-      }
-
       const generator = await this.realGenerator();
-      const startTime = Date.now();
-      const realProofResult = await generator.generateBlacklistProof({
-        identity,
-        blacklistIdentities,
-      });
-      generationTime = Date.now() - startTime;
-
-      proof = realProofResult.proof;
-
-      // For blacklist proof, the circuit only outputs isNotBlacklisted (0 or 1)
-      // The blacklistRoot, nullifierHash, challengeHash are private inputs (not public signals)
-      // We store them for display purposes only
-      finalBlacklistRoot = BigInt(realProofResult.inputs.blacklistRoot);
-      finalNullifierHash = BigInt(realProofResult.inputs.nullifierHash);
-      finalChallengeHash = BigInt(realProofResult.inputs.challengeHash);
-
-      console.log(
-        `✅ Real proof generated in ${generationTime}ms (${(generationTime / 1000).toFixed(2)}s)`,
-      );
-      console.log(
-        `   ℹ️  Public Signal (isNotBlacklisted): ${realProofResult.publicSignals[0]}`,
-      );
-
-      this.state.proofGenerationTimes.set(
-        "Blacklist Non-Membership",
-        generationTime,
-      );
-
-      // Submit proof to ZKVerifierIntegrated
-      console.log("\n🔍 Submitting blacklist non-membership proof...");
-      console.log(`   🚫 Blacklist Root (private): ${finalBlacklistRoot}`);
-      console.log(`   🔢 Nullifier Hash (private): ${finalNullifierHash}`);
-      console.log(`   🎯 Challenge Hash (private): ${finalChallengeHash}`);
-      console.log(`   🔐 Mode: REAL`);
-      console.log(
-        `   ℹ️  Note: Only public signal (isNotBlacklisted=1) is sent to contract`,
-      );
-
-      // The contract expects uint256[1] containing only the public signal (isNotBlacklisted)
-      // The blacklistRoot, nullifierHash, and challengeHash are PRIVATE inputs to the circuit
-      const tx = await zkVerifierIntegrated.verifyBlacklistNonMembership(
-        proof.a,
-        proof.b,
-        proof.c,
-        [1], // Public signal: 1 = not blacklisted, 0 = blacklisted
-      );
-      const receipt = await tx.wait();
-
-      this.state.gasTracker.set("Blacklist Proof", receipt.gasUsed);
-
-      displaySuccess("BLACKLIST NON-MEMBERSHIP PROOF VERIFIED!");
-      console.log(`   ✅ Public Signal: isNotBlacklisted = 1`);
-      console.log(`   🔒 Private Inputs (hidden from contract):`);
-      console.log(
-        `      🚫 Blacklist Root: ${finalBlacklistRoot.toString().substring(0, 20)}...`,
-      );
-      console.log(
-        `      🔢 Nullifier Hash: ${finalNullifierHash.toString().substring(0, 20)}...`,
-      );
-      console.log(`      🎯 Challenge Hash: ${finalChallengeHash}`);
-      console.log(`   🔗 Transaction: ${receipt.hash}`);
-      console.log(`   🧱 Block: ${receipt.blockNumber}`);
-      console.log(`   💰 Gas Used: ${receipt.gasUsed.toLocaleString()}`);
-      if (generationTime > 0) {
-        console.log(
-          `   ⏱️  Proof Generation: ${generationTime}ms (${(generationTime / 1000).toFixed(2)}s)`,
-        );
-      }
-      console.log(`   🎉 Anonymous blacklist verification successful!`);
-      console.log(
-        `   🔐 Your identity remains private - contract only knows you're NOT blacklisted!`,
-      );
+      return await runBlacklistProofFlow({ state: this.state, generator });
     } catch (error) {
       displayError(`Blacklist proof submission failed: ${error.message}`);
     }

@@ -197,6 +197,14 @@ class DemoState {
      */
     this.zkSecrets = new Map();
 
+    /**
+     * @property {Object|null} whitelistRootFile - The commitments behind the
+     *   last whitelist root the demo published (buildWhitelistRoot output);
+     *   the blacklist proof (option 42 -> 2) proves inclusion under it
+     * @type {Object|null}
+     */
+    this.whitelistRootFile = null;
+
     // ========== ZK PROOFS (real only; mocks live in test/) ==========
 
     /**
