@@ -173,5 +173,6 @@ module.exports = {
   demoSecret,
   demoWhitelist,
   proveForDemoUser,
+  publisherFor,
   publishAndBind,
 };

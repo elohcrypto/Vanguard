@@ -20,6 +20,7 @@ const {
   proveForDemoUser,
   publishAndBind,
 } = require("../utils/WhitelistBinderFlow");
+const { runLiveWhitelistFlow } = require("../utils/WhitelistLiveFlow");
 const ContractDeployer = require("../core/ContractDeployer");
 const { ethers } = require("hardhat");
 
@@ -1834,6 +1835,14 @@ class PrivacyModule {
       });
       this.state.gasTracker.set("Whitelist Proof", receipt.gasUsed);
       displaySuccess("WHITELIST MEMBERSHIP PROOF BOUND TO THE WALLET!");
+
+      // Task 3.6: the same binding on the live token, steps (a) to (e).
+      await runLiveWhitelistFlow({
+        state: this.state,
+        sender: proofUser,
+        listed,
+        rootFile,
+      });
     } catch (error) {
       displayError(`Whitelist proof submission failed: ${error.message}`);
     }
