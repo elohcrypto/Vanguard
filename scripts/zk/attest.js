@@ -13,7 +13,9 @@
  *   ATTESTOR_KEY=0x.. node scripts/zk/attest.js --public-key
  *   # sign an attestation for an investor
  *   ATTESTOR_KEY=0x.. node scripts/zk/attest.js --sign --circuit jurisdiction \
- *        --identity <OnchainID> --mask <registry mask bit> [--out att.json]
+ *        --identity <OnchainID> --country <ISO 3166-1 numeric> \
+ *        --rpc <url> --privacy-manager <addr> [--out att.json]
+ *        (offline: --mask <the code's PrivacyManager.jurisdictionBit>)
  *        ... --circuit accreditation --amount <amount>
  *        ... --circuit compliance --scores <kyc,aml,jurisdiction,accreditation>
  *
@@ -120,14 +122,14 @@ function toUint(value, label, max) {
 
 /**
  * The circuit's attributes, validated, in circuit order.
- * jurisdiction { mask }: exactly one bit, below 2^64 (a registry mask);
+ * jurisdiction { mask }: exactly one bit, below 2^64 (a jurisdiction bit);
  * accreditation { amount }: below 2^64; compliance { scores: [4] } each 0..100.
  */
 function parseAttributes(circuit, { mask, amount, scores }) {
   if (circuit === "jurisdiction") {
     const m = toUint(mask, "mask", MAX_64 - 1n);
     if (m === 0n || (m & (m - 1n)) !== 0n) {
-      throw new Error("mask: must be one registry mask bit (a power of two)");
+      throw new Error("mask: must be one jurisdiction bit (a power of two)");
     }
     return [m];
   }
@@ -245,6 +247,33 @@ async function loadAttestation(a) {
   return att;
 }
 
+/**
+ * The bit PrivacyManager assigned to an ISO 3166-1 numeric code (Task 3.8),
+ * and whether ComplianceRules allows the code for the policy token now. A
+ * code without a bit cannot be attested until the owner (a PrivacyParameters
+ * vote after the handover) calls registerJurisdictionCode.
+ * @returns {Promise<{code: bigint, bit: bigint, active: boolean}>}
+ */
+async function countryBit({ country, privacyManager, runner }) {
+  const code = toUint(country, "country", 999n);
+  if (code === 0n) throw new Error("country: zero");
+  const pm = new ethers.Contract(
+    privacyManager,
+    [
+      "function jurisdictionBit(uint256) view returns (uint256)",
+      "function isJurisdictionActive(uint256) view returns (bool)",
+    ],
+    runner,
+  );
+  const bit = await pm.jurisdictionBit(code);
+  if (bit === 0n) {
+    throw new Error(
+      `country ${code}: no jurisdiction bit on PrivacyManager (owner: registerJurisdictionCode)`,
+    );
+  }
+  return { code, bit, active: await pm.isJurisdictionActive(code) };
+}
+
 function parseArgs(argv) {
   const args = {};
   for (let i = 0; i < argv.length; i++) {
@@ -259,7 +288,17 @@ function parseArgs(argv) {
     const k = a.slice(2);
     if (["new-key", "public-key", "sign", "help"].includes(k)) args[k] = true;
     else if (
-      ["circuit", "identity", "mask", "amount", "scores", "out"].includes(k)
+      [
+        "circuit",
+        "identity",
+        "mask",
+        "country",
+        "rpc",
+        "privacy-manager",
+        "amount",
+        "scores",
+        "out",
+      ].includes(k)
     ) {
       if (i + 1 >= argv.length) throw new Error(`${a} needs a value`);
       args[k] = argv[++i];
@@ -271,7 +310,8 @@ function parseArgs(argv) {
 const USAGE = `Usage: node scripts/zk/attest.js --new-key
        node scripts/zk/attest.js --public-key
        node scripts/zk/attest.js --sign --circuit <jurisdiction|accreditation|compliance>
-            --identity <id> (--mask <m> | --amount <a> | --scores <k,a,j,acc>) [--out <file>]
+            --identity <id> (--country <iso> --rpc <url> --privacy-manager <addr> | --mask <m>
+            | --amount <a> | --scores <k,a,j,acc>) [--out <file>]
 Key: env ATTESTOR_KEY (0x, 32 bytes).`;
 
 function readKey(env) {
@@ -308,11 +348,33 @@ async function main(keyBox) {
   if (!args.circuit || args.identity === undefined) {
     throw new Error(`--circuit and --identity are required\n${USAGE}`);
   }
+  let mask = args.mask;
+  if (args.country !== undefined) {
+    if (args.circuit !== "jurisdiction" || mask !== undefined) {
+      throw new Error(
+        "--country is for --circuit jurisdiction, without --mask",
+      );
+    }
+    if (!args.rpc || !args["privacy-manager"]) {
+      throw new Error(
+        "--country needs --rpc and --privacy-manager (offline: --mask)",
+      );
+    }
+    const c = await countryBit({
+      country: args.country,
+      privacyManager: args["privacy-manager"],
+      runner: new ethers.JsonRpcProvider(args.rpc),
+    });
+    mask = c.bit;
+    console.error(
+      `country ${c.code}: bit ${c.bit}${c.active ? "" : " (ComplianceRules does not allow it for the policy token now: a proof fails until it does)"}`,
+    );
+  }
   const att = await signAttestation({
     key: keyBox.value,
     circuit: args.circuit,
     identity: args.identity,
-    mask: args.mask,
+    mask,
     amount: args.amount,
     scores: args.scores,
   });
@@ -357,4 +419,5 @@ module.exports = {
   signAttestation,
   loadAttestation,
   attestationMessage,
+  countryBit,
 };
