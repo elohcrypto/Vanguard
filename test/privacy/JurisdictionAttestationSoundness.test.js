@@ -270,12 +270,17 @@ describe("Jurisdiction attestation soundness (Task 3.7b)", function () {
         await pm.validatePrivateJurisdiction.staticCall(w1.address),
       ).to.equal(false);
 
-      // Revoking the issuer lapses the record.
+      // Revoking the issuer lapses the record; re-trusting the key does not
+      // revive it (attestor epoch, review 3.7b L1): the holder resubmits.
       await pm.setTrustedAttestor(f.id, f.Ax, f.Ay, false);
       expect((await pm.getUserProofInfo(w1.address, f.id)).isValid).to.equal(
         false,
       );
       await pm.setTrustedAttestor(f.id, f.Ax, f.Ay, true);
+      expect((await pm.getUserProofInfo(w1.address, f.id)).isValid).to.equal(
+        false,
+      );
+      await pm.connect(w1).submitAttestationProof(f.id, r1.proof, r1.signals);
       expect((await pm.getUserProofInfo(w1.address, f.id)).isValid).to.equal(
         true,
       );
@@ -302,9 +307,22 @@ describe("Jurisdiction attestation soundness (Task 3.7b)", function () {
       await expect(
         pm.connect(f.wallets[1]).setTrustedAttestor(f.id, 1, 2, true),
       ).to.be.revertedWithCustomError(pm, "OwnableUnauthorizedAccount");
-      await expect(
-        pm.setTrustedAttestor(f.id, 0, 2, true),
-      ).to.be.revertedWithCustomError(pm, "InvalidAttestorKey");
+      // Zero, the identity point (0, 1), an off-curve pair and a
+      // coordinate at the field order are refused (review 3.7b L3).
+      const P =
+        21888242871839275222246405745257275088548364400416034343698204186575808495617n;
+      for (const [x, y] of [
+        [0n, 2n],
+        [0n, 1n],
+        [1n, 2n],
+        [BigInt(f.Ax) + 1n, BigInt(f.Ay)],
+        [BigInt(f.Ax) + P, BigInt(f.Ay)],
+      ]) {
+        await expect(
+          pm.setTrustedAttestor(f.id, x, y, true),
+          `${x}, ${y}`,
+        ).to.be.revertedWithCustomError(pm, "InvalidAttestorKey");
+      }
       const WL = ethers.id("WHITELIST_MEMBERSHIP");
       await expect(pm.setTrustedAttestor(WL, 1, 2, true))
         .to.be.revertedWithCustomError(pm, "NotAttestationCircuit")

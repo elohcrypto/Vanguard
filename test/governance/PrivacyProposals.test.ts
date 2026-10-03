@@ -197,7 +197,12 @@ describe("Privacy contracts are governable by proposal (3.3)", function () {
     await gov.setPrivacyManager(pmAddr);
     await passByVote(T.Privacy, pm, accept(pm));
     const JUR = ethers.id("JURISDICTION_PROOF");
-    const [ax, ay] = [11n, 22n];
+    // eslint-disable-next-line @typescript-eslint/no-var-requires
+    const {
+      attestorPublicKey,
+      newAttestorKey,
+    } = require("../../scripts/zk/attest");
+    const { Ax: ax, Ay: ay } = await attestorPublicKey(newAttestorKey());
     await expect(
       pm.setTrustedAttestor(JUR, ax, ay, true),
     ).to.be.revertedWithCustomError(pm, "OwnableUnauthorizedAccount");

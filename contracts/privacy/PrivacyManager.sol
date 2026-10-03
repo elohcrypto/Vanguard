@@ -57,13 +57,18 @@ contract PrivacyManager is Ownable2Step, ReentrancyGuard {
     }
 
     /// @dev A wallet's attestation status for one circuit: valid while
-    ///      policyHash is the circuit's current policy hash, the attestor key
-    ///      is still trusted for the circuit and block.timestamp < expiresAt.
+    ///      policyEpoch is the circuit's current epoch (and policyHash its
+    ///      current policy hash), the attestor key is still trusted for the
+    ///      circuit under the same attestorEpoch, and block.timestamp <
+    ///      expiresAt. Like whitelistVersion (R-3R-10), an epoch only grows:
+    ///      restoring a policy or re-trusting a key never revives a record.
     struct AttestationRecord {
         bytes32 policyHash;
         bytes32 attestor;
         uint256 nullifier;
         uint256 expiresAt;
+        uint256 policyEpoch;
+        uint256 attestorEpoch;
     }
 
     /// @dev Compliance-aggregation policy: weighted sum of the four attested
@@ -124,9 +129,15 @@ contract PrivacyManager is Ownable2Step, ReentrancyGuard {
     CompliancePolicy public compliancePolicy;
     /// @notice Latest attestation record per wallet per circuit.
     mapping(address user => mapping(bytes32 circuitId => AttestationRecord)) public attestationRecords;
+    /// @notice Bumped on every policy change of a circuit (jurisdiction
+    ///         registry changes, setMinimumAccreditation, setCompliancePolicy).
+    mapping(bytes32 circuitId => uint256) public policyEpoch;
+    /// @notice Bumped on every trust change of an issuer key for a circuit.
+    mapping(bytes32 circuitId => mapping(bytes32 attestor => uint256)) public attestorEpoch;
     /// @notice Wallet holding each attestation nullifier, per circuit and
-    ///         policy hash: one attestation binds one wallet per policy.
-    mapping(bytes32 circuitId => mapping(bytes32 policyHash => mapping(uint256 nullifier => address)))
+    ///         policy epoch: one attestation binds one wallet per epoch, and
+    ///         a new epoch frees it (like nullifierWallet per root version).
+    mapping(bytes32 circuitId => mapping(uint256 epoch => mapping(uint256 nullifier => address)))
         public attestationNullifierWallet;
 
     // Errors
@@ -161,7 +172,15 @@ contract PrivacyManager is Ownable2Step, ReentrancyGuard {
         bytes32 policyHash,
         uint256 expiresAt
     );
-    event TrustedAttestorSet(bytes32 indexed circuitId, bytes32 indexed attestor, uint256 ax, uint256 ay, bool trusted);
+    event TrustedAttestorSet(
+        bytes32 indexed circuitId,
+        bytes32 indexed attestor,
+        address indexed by,
+        uint256 ax,
+        uint256 ay,
+        bool trusted
+    );
+    event PolicyEpochBumped(bytes32 indexed circuitId, uint256 epoch);
     event AccreditationPolicyUpdated(uint256 previousMinimum, uint256 newMinimum);
     event CompliancePolicyUpdated(uint256 minimum, uint256 wK, uint256 wA, uint256 wJ, uint256 wAcc);
 
@@ -396,37 +415,63 @@ contract PrivacyManager is Ownable2Step, ReentrancyGuard {
         if (signals[n - 1] != uint256(uint160(msg.sender))) revert WalletBindingMismatch();
 
         bytes32 policyHash = keccak256(abi.encode(circuitId, policy));
+        uint256 epoch = policyEpoch[circuitId];
         uint256 nullifier = signals[0];
-        address bound = attestationNullifierWallet[circuitId][policyHash][nullifier];
+        address bound = attestationNullifierWallet[circuitId][epoch][nullifier];
         if (bound != address(0) && bound != msg.sender) revert AttestationNullifierBound(bound);
         if (!zkVerifier.verifyCircuitProof(circuitId, proof, signals)) revert InvalidAttestationProof();
 
-        if (bound == address(0)) attestationNullifierWallet[circuitId][policyHash][nullifier] = msg.sender;
+        if (bound == address(0)) attestationNullifierWallet[circuitId][epoch][nullifier] = msg.sender;
         uint256 expiresAt = block.timestamp + proofValidityPeriod;
         attestationRecords[msg.sender][circuitId] = AttestationRecord({
             policyHash: policyHash,
             attestor: attestor,
             nullifier: nullifier,
-            expiresAt: expiresAt
+            expiresAt: expiresAt,
+            policyEpoch: epoch,
+            attestorEpoch: attestorEpoch[circuitId][attestor]
         });
         emit AttestationProofBound(msg.sender, circuitId, nullifier, policyHash, expiresAt);
     }
 
     /**
      * @notice Trust or untrust an issuer key (Ax, Ay) for one attestation
-     *         circuit (owner; a type 11 vote after the handover). Untrusting
-     *         lapses every record made with that key.
+     *         circuit (owner; a type 11 vote after the handover). Any
+     *         change bumps the key's epoch: untrusting lapses every record
+     *         made with the key, and trusting it again does not revive them.
+     * @dev The key must be a Baby Jubjub point other than the identity
+     *      (canonical, non-zero coordinates): an off-curve "key" could never
+     *      sign, and its forgery resistance is unproven.
      */
     function setTrustedAttestor(bytes32 circuitId, uint256 ax, uint256 ay, bool trusted) external onlyOwner {
         currentPolicy(circuitId); // reverts NotAttestationCircuit
-        if (ax == 0 || ay == 0 || ax >= SNARK_SCALAR_FIELD || ay >= SNARK_SCALAR_FIELD) revert InvalidAttestorKey();
+        if (ax == 0 || ay == 0 || ax >= SNARK_SCALAR_FIELD || ay >= SNARK_SCALAR_FIELD || !_onBabyJubjub(ax, ay)) {
+            revert InvalidAttestorKey();
+        }
         bytes32 attestor = keccak256(abi.encode(ax, ay));
         if (trustedAttestor[circuitId][attestor] != trusted) {
             trustedAttestor[circuitId][attestor] = trusted;
+            attestorEpoch[circuitId][attestor]++;
             if (trusted) trustedAttestorCount[circuitId]++;
             else trustedAttestorCount[circuitId]--;
         }
-        emit TrustedAttestorSet(circuitId, attestor, ax, ay, trusted);
+        emit TrustedAttestorSet(circuitId, attestor, msg.sender, ax, ay, trusted);
+    }
+
+    /// @dev a*x^2 + y^2 == 1 + d*x^2*y^2 over the BN254 scalar field, with
+    ///      circomlib's Baby Jubjub constants a = 168700, d = 168696.
+    function _onBabyJubjub(uint256 x, uint256 y) private pure returns (bool) {
+        uint256 p = SNARK_SCALAR_FIELD;
+        uint256 x2 = mulmod(x, x, p);
+        uint256 y2 = mulmod(y, y, p);
+        return addmod(mulmod(168700, x2, p), y2, p) == addmod(1, mulmod(168696, mulmod(x2, y2, p), p), p);
+    }
+
+    /// @dev Every policy change starts a new epoch (records lapse, the
+    ///      nullifier reservations reset), even one that restores an earlier
+    ///      policy.
+    function _bumpPolicy(bytes32 circuitId) private {
+        emit PolicyEpochBumped(circuitId, ++policyEpoch[circuitId]);
     }
 
     /// @notice Accreditation policy: attested amount >= minimum, in (0, 2^64).
@@ -434,6 +479,7 @@ contract PrivacyManager is Ownable2Step, ReentrancyGuard {
         if (minimum == 0 || minimum > MAX_MASK) revert InvalidPolicy();
         emit AccreditationPolicyUpdated(minimumAccreditation, minimum);
         minimumAccreditation = minimum;
+        _bumpPolicy(ACCREDITATION_ID);
     }
 
     /// @notice Compliance policy: minimum <= 100, weights sum to 100.
@@ -446,6 +492,7 @@ contract PrivacyManager is Ownable2Step, ReentrancyGuard {
         }
         compliancePolicy = CompliancePolicy({minimum: minimum, wK: wK, wA: wA, wJ: wJ, wAcc: wAcc});
         emit CompliancePolicyUpdated(minimum, wK, wA, wJ, wAcc);
+        _bumpPolicy(COMPLIANCE_ID);
     }
 
     /// @notice Jurisdiction policy: the OR of the active jurisdictions' masks.
@@ -595,14 +642,17 @@ contract PrivacyManager is Ownable2Step, ReentrancyGuard {
         return userSettings;
     }
 
-    /// @dev The record counts while its policy is current, its attestor is
-    ///      still trusted for the circuit and it has not expired.
+    /// @dev The record counts while its policy epoch and policy are
+    ///      current, its attestor is still trusted for the circuit under the
+    ///      same attestor epoch, and it has not expired.
     function _hasValidProof(address user, bytes32 circuitId) internal view returns (bool) {
         AttestationRecord storage r = attestationRecords[user][circuitId];
         return
             r.expiresAt != 0 &&
             block.timestamp < r.expiresAt &&
+            r.policyEpoch == policyEpoch[circuitId] &&
             trustedAttestor[circuitId][r.attestor] &&
+            r.attestorEpoch == attestorEpoch[circuitId][r.attestor] &&
             r.policyHash == currentPolicyHash(circuitId);
     }
 
@@ -635,6 +685,7 @@ contract PrivacyManager is Ownable2Step, ReentrancyGuard {
         activeJurisdictionMasks.push(mask);
 
         emit JurisdictionAdded(mask, name, code, block.timestamp);
+        _bumpPolicy(JURISDICTION_ID);
     }
 
     /**
@@ -660,6 +711,7 @@ contract PrivacyManager is Ownable2Step, ReentrancyGuard {
         }
 
         emit JurisdictionRemoved(mask, jurisdiction.name, code, block.timestamp);
+        _bumpPolicy(JURISDICTION_ID);
     }
 
     /**
@@ -691,6 +743,7 @@ contract PrivacyManager is Ownable2Step, ReentrancyGuard {
         }
 
         emit JurisdictionUpdated(mask, jurisdiction.name, code, isActive);
+        _bumpPolicy(JURISDICTION_ID);
     }
 
     /**

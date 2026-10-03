@@ -221,15 +221,25 @@ describe("Compliance aggregation attestation soundness (Task 3.7b)", function ()
       expect(
         await pm.validatePrivateCompliance.staticCall(w2.address),
       ).to.equal(true);
-      // Back to the first policy: w1's record counts again (a policy hash,
-      // not a version, keys the record); w2's no longer does.
+      // Back to the first policy (A -> B -> A): neither old record revives
+      // (policy epoch, review 3.7b L1); a fresh submission is required and
+      // the nullifier reservation starts over, so w2 may take it now.
       await pm.setCompliancePolicy(...POLICY);
       expect(
         await pm.validatePrivateCompliance.staticCall(w1.address),
-      ).to.equal(true);
+      ).to.equal(false);
       expect(
         await pm.validatePrivateCompliance.staticCall(w2.address),
       ).to.equal(false);
+      await pm.connect(w2).submitAttestationProof(f.id, r2.proof, r2.signals);
+      expect(
+        await pm.validatePrivateCompliance.staticCall(w2.address),
+      ).to.equal(true);
+      await expect(
+        pm.connect(w1).submitAttestationProof(f.id, r1.proof, r1.signals),
+      )
+        .to.be.revertedWithCustomError(pm, "AttestationNullifierBound")
+        .withArgs(w2.address);
     });
   });
 

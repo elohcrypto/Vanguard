@@ -38,7 +38,7 @@ const PM_ABI = [
   "function trustedAttestor(bytes32 circuitId, bytes32 attestor) view returns (bool)",
   "function currentPolicy(bytes32 circuitId) view returns (uint256[])",
   "function submitAttestationProof(bytes32 circuitId, uint256[24] proof, uint256[] signals)",
-  "function attestationRecords(address user, bytes32 circuitId) view returns (bytes32 policyHash, bytes32 attestor, uint256 nullifier, uint256 expiresAt)",
+  "function attestationRecords(address user, bytes32 circuitId) view returns (bytes32 policyHash, bytes32 attestor, uint256 nullifier, uint256 expiresAt, uint256 policyEpoch, uint256 attestorEpoch)",
   "function getUserProofInfo(address user, bytes32 circuitId) view returns (uint256 expiresAt, bool isValid, bool isExpired)",
   "error NotAttestationCircuit(bytes32 circuitId)",
   "error NonGatingBlacklistProof()",

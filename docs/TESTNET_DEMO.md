@@ -449,7 +449,12 @@ summing to 100 (`setCompliancePolicy`). A proof records
 {policyHash, attestor, nullifier, expiresAt} for the wallet that submits
 it, one wallet per attestation per policy; a policy change, an untrusted
 issuer key or expiry lapses it, and a policy change re-admits the same
-attestation for a new proof.
+attestation for a new proof. Like a whitelist root version, every policy
+change (any jurisdiction added, removed or toggled, either policy setter)
+and every trust change of a key starts a new epoch: restoring a policy or
+re-trusting a key never revives an old record, holders resubmit. A
+jurisdiction registry change therefore lapses every jurisdiction record,
+whatever the holder's jurisdiction.
 
 ```bash
 # Issuer, once: the private key is printed once; keep it offline
