@@ -138,7 +138,7 @@ const result = await zkVerifier.verifyWhitelistMembership(
 | Circuit | Proof Gen Time | Verification Gas | Constraints |
 |---------|----------------|------------------|-------------|
 | whitelist_membership | ~50s | 147k | 11,339 |
-| blacklist_membership | ~50s | 63k | 11,339 |
+| blacklist_membership (PLONK) | ~9s | ~390-420k via the wrapper | 24,394 |
 | jurisdiction_proof | ~86ms | 130k | 1,339 |
 | accreditation_proof | ~82ms | 64k | 2,839 |
 | compliance_aggregation | ~65ms | 130k | 2,339 |

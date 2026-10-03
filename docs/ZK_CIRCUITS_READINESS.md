@@ -39,7 +39,7 @@ All 5 circuits are compiled with **REAL cryptographic artifacts** (not mocks):
 | Circuit | WASM Size | zkey Size | Constraints | Status |
 |---------|-----------|-----------|-------------|--------|
 | **whitelist_membership** | 2.0 MB | 5.0 MB | 11,339 | ✅ READY |
-| **blacklist_membership** | 2.4 MB | 5.0 MB | 11,339 | ✅ READY |
+| **blacklist_membership** | 2.2 MB | 63 MB (PLONK) | 24,394 | ✅ READY (sound, Task 3.7) |
 | **jurisdiction_proof** | 1.7 MB | 261 KB | 1,339 | ✅ READY |
 | **accreditation_proof** | 2.1 MB | 545 KB | 2,839 | ✅ READY |
 | **compliance_aggregation** | 2.1 MB | 415 KB | 2,339 | ✅ READY |
@@ -188,7 +188,7 @@ npx hardhat test test/privacy/ZKProofSystemIntegration.test.ts
 | Operation | Mock Mode | REAL Mode |
 |-----------|-----------|-----------|
 | Whitelist proof generation | N/A | ~50 seconds |
-| Blacklist proof generation | N/A | ~50 seconds |
+| Blacklist proof generation | N/A | ~9 seconds (PLONK) |
 | Jurisdiction proof generation | N/A | ~86 ms |
 | Accreditation proof generation | N/A | ~82 ms |
 | Compliance proof generation | N/A | ~65 ms |

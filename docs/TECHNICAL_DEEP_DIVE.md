@@ -531,72 +531,41 @@ template WhitelistMembership(levels) {
 
 ### 2. Blacklist Non-Membership Circuit
 
-**Circuit Logic:**
+`circuits/blacklist_membership.circom` (PLONK since Task 3.7). Statement:
+the wallet's holder owns a commitment in the current whitelist root whose
+identity is not in the sanctions tree; nothing on chain gates on it (D2).
+
+**Circuit Logic (every check a hard constraint, no validity output):**
 ```circom
-template BlacklistMembership(levels) {
-    // Private inputs
-    signal input identity;
-    signal input pathElements[levels];
-    signal input pathIndices[levels];
-    signal input siblingHash;  // Hash at position where user would be
-    
-    // Public inputs
-    signal input blacklistRoot;
-    signal input nullifierHash;
-    signal input challengeHash;
-    
-    // Output
-    signal output isNotBlacklisted;
-    
-    // Step 1: Hash identity
-    component identityHasher = Poseidon(1);
-    identityHasher.inputs[0] <== identity;
-    
-    // Step 2: Verify sibling hash is in tree (not user hash)
-    component merkleProof = MerkleTreeInclusionProof(levels);
-    merkleProof.leaf <== siblingHash;
-    merkleProof.root <== blacklistRoot;
-    
-    for (var i = 0; i < levels; i++) {
-        merkleProof.pathElements[i] <== pathElements[i];
-        merkleProof.pathIndices[i] <== pathIndices[i];
-    }
-    
-    // Step 3: Verify sibling != user hash
-    component notEqual = IsEqual();
-    notEqual.in[0] <== identityHasher.out;
-    notEqual.in[1] <== siblingHash;
-    
-    component not = NOT();
-    not.in <== notEqual.out;
-    
-    // Step 4: Combine checks
-    component and = AND();
-    and.a <== merkleProof.out;
-    and.b <== not.out;
-    
-    // Step 5: Verify nullifier
-    component nullifierHasher = Poseidon(3);
-    nullifierHasher.inputs[0] <== identity;
-    nullifierHasher.inputs[1] <== blacklistRoot;
-    nullifierHasher.inputs[2] <== challengeHash;
-    
-    component nullifierCheck = IsEqual();
-    nullifierCheck.in[0] <== nullifierHasher.out;
-    nullifierCheck.in[1] <== nullifierHash;
-    
-    component finalAnd = AND();
-    finalAnd.a <== and.out;
-    finalAnd.b <== nullifierCheck.out;
-    
-    isNotBlacklisted <== finalAnd.out;
+template BlacklistNonMembership(levels, smtLevels) {
+    // Private: identity, secret, whitelist path, sanctions-tree witness
+    // (siblings[smtLevels], oldKey, oldValue, isOld0)
+    // Public:  whitelistRoot, blacklistRoot, walletBinding
+    // Output:  nullifier
+
+    // 1. Poseidon(identity, secret) is a leaf under whitelistRoot
+    //    (MerkleInclusion: binary path bits, computed root === whitelistRoot)
+    // 2. identity is NOT a key of the sanctions sparse Merkle tree:
+    //    circomlib SMTVerifier with enabled = 1, fnc = 1 (non-inclusion),
+    //    root = blacklistRoot, key = identity
+    // 3. nullifier = Poseidon(secret, blacklistRoot)
+    // 4. walletBinding kept in the constraint system (walletBindingSq)
 }
+component main {public [whitelistRoot, blacklistRoot, walletBinding]} =
+    BlacklistNonMembership(20, 20);
 ```
 
-**Innovation:**
-- ✅ Proves **non-membership** (harder than membership)
-- ✅ Uses sibling hash technique
-- ✅ Challenge-response for additional security
+Public signals: `[nullifier, whitelistRoot, blacklistRoot, walletBinding]`
+(24,394 R1CS constraints, PLONK power 15 on the universal ptau). The
+operator's sanctions tree is built with `utils/smt-builder.js` from the
+listed identities; the prover gets the non-membership witness from it and
+refuses a listed identity before proving.
+
+**Properties:**
+- ✅ Proves **non-membership** of an onboarded identity, not of an arbitrary value: the identity is tied to a whitelisted commitment
+- ✅ A listed identity has no witness (`oldKey == key` and root mismatch both fail)
+- ✅ The wrapper refuses any signal at or above the field order (no aliased signals)
+- ℹ️ A privacy demonstration only: the blacklist gate is the BlacklistOracle (D2)
 
 ### 3. Jurisdiction Proof Circuit
 

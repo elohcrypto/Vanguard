@@ -41,7 +41,7 @@ Vanguard/
 │   └── test/                    # Test contracts and helpers
 ├── circuits/                    # Zero-Knowledge Circuits 
 │   ├── whitelist_membership.circom          # Whitelist membership proof
-│   ├── blacklist_membership.circom          # Blacklist membership proof
+│   ├── blacklist_membership.circom          # Blacklist non-membership proof (non-gating, D2)
 │   ├── jurisdiction_proof.circom            # Jurisdiction compliance proof
 │   ├── accreditation_proof.circom           # Accreditation status proof
 │   ├── compliance_aggregation.circom        # Aggregated compliance proof

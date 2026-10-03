@@ -423,6 +423,16 @@ re-bind under the new root, and the transfer goes through again. The
 smoke (`scripts/demo-smoke-privacy.js`) runs the same steps on wallets 6
 to 8 before the handover and leaves VSC in Either.
 
+Option 42 -> 2 (blacklist proof, Task 3.7) proves that the wallet's holder
+owns a commitment in the current whitelist root whose identity is not in
+the sanctions tree, a sparse Merkle tree built from the wallets the
+BlacklistOracle lists, each resolved to its OnchainID (wallets without one
+are skipped). It needs a live whitelist binding from option 42 -> 1 and
+verifies through `ZKVerifierIntegrated.verifyBlacklistNonMembership`; it then
+shows that a listed identity cannot prove. Nothing on chain gates on it
+(D2): VSC's blacklist gate reads the BlacklistOracle directly and at once,
+and PrivacyManager refuses the circuit.
+
 ## Waiting instead of jumping
 
 The four demo paths that used to call `evm_increaseTime` (governance option

@@ -76,7 +76,7 @@ We have successfully implemented a **production-ready Vanguard StableCoin system
 - **Technology**: Groth16 ZK proof system with **5 Circom circuits**
 - **Features**:
   - Whitelist membership proofs without revealing identity
-  - Blacklist membership proofs without revealing identity
+  - Blacklist non-membership proofs without revealing identity (a demonstration; the blacklist gate itself stays explicit, D2)
   - Jurisdiction compliance proofs without revealing location
   - Accreditation proofs without revealing exact levels
   - Compliance aggregation proofs without revealing scores
