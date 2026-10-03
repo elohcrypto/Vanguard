@@ -47,7 +47,7 @@ All 6 core Vanguard StableCoin workflows are fully implemented and production-re
 
 ### ✅ Privacy & ZK Verification Workflow (Options 41-50)
 - **Purpose**: Privacy-preserving compliance validation
-- **Components**: 4 ZK circuits, Groth16 proof system, privacy manager
+- **Components**: 5 ZK circuits (PLONK, universal setup): whitelist binding, blacklist demonstration, and three issuer-signed attestations (jurisdiction, accreditation, compliance aggregation); ZKVerifierIntegrated and PrivacyManager
 - **Features**: Prove compliance without revealing personal data
 - **Status**: ✅ PRODUCTION READY
 

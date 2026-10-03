@@ -206,14 +206,14 @@ BOB
    │   status = getUserStatus(0xBob...)
    │   ✅ Status: WHITELISTED
    │
-   ├─► Generate ZK proof (Option 1)
-   │   • Add identity to Merkle tree
+   ├─► Generate ZK proof (Option 42 -> 1)
+   │   • Commitment Poseidon(identity, secret) in the published root
    │   • Generate witness
-   │   • Generate Groth16 proof (~50 seconds)
-   │   • Proof: [pA, pB, pC, publicSignals]
+   │   • Generate PLONK proof (~5 seconds)
+   │   • Proof: 24 words, signals [nullifier, merkleRoot, walletBinding]
    │
-   ├─► Submit proof to ZKVerifierIntegrated
-   │   verifyWhitelistProof(pA, pB, pC, publicSignals)
+   ├─► Submit proof to PrivacyManager (it calls ZKVerifierIntegrated)
+   │   submitWhitelistProof(proof, signals)
    │
    ├─► Verification checks
    │   1. ✅ ZK proof cryptography valid
