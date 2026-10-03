@@ -52,9 +52,9 @@ async function boundMember(state, pm, rootFile) {
   for (const s of state.signers) {
     if (!state.zkSecrets.has(s.address)) continue;
     if (!(await pm.hasValidWhitelistProof(s.address))) continue;
-    const { identity } = await demoIdentity(state, s.address);
+    const { identity, onchainID } = await demoIdentity(state, s.address);
     const c = await computeCommitment(identity, state.zkSecrets.get(s.address));
-    if (leaves.has(BigInt(c))) return { signer: s, identity };
+    if (leaves.has(BigInt(c))) return { signer: s, identity, onchainID };
   }
   return null;
 }
@@ -66,7 +66,6 @@ async function boundMember(state, pm, rootFile) {
 async function runBlacklistProofFlow({ state, generator, log = console.log }) {
   const zk = state.getContract("zkVerifierIntegrated");
   const pm = state.getContract("privacyManager");
-  const idReg = state.getContract("identityRegistry");
   log(
     "ℹ️  Nothing on chain gates on this proof (D2): VSC's blacklist gate reads the BlacklistOracle directly, and PrivacyManager refuses this circuit.",
   );
@@ -90,7 +89,11 @@ async function runBlacklistProofFlow({ state, generator, log = console.log }) {
   }
   const user = member.signer;
   log(`\n👤 Prover: ${user.address} (live whitelist binding)`);
-  log(`   🔢 Identity: OnchainID as a field element (${member.identity})`);
+  log(
+    member.onchainID
+      ? `   🔢 Identity: OnchainID as a field element (${member.identity})`
+      : `   🔢 Identity: the wallet address (simulated, no OnchainID) (${member.identity})`,
+  );
   log(
     `   🌳 Whitelist root: ${rootFile.root.slice(0, 18)}… (${rootFile.count} commitments)`,
   );
@@ -107,18 +110,19 @@ async function runBlacklistProofFlow({ state, generator, log = console.log }) {
   log(
     `\n🚫 BlacklistOracle ${await oracle.getAddress()}: ${wallets.length} listed wallet(s)`,
   );
+  // Keyed by the whitelist's own resolver (demoIdentity): the OnchainID,
+  // else the wallet address (simulated onboarding). A listed wallet is
+  // never skipped, or it would be whitelisted under an identity the
+  // sanctions tree does not hold and could prove "not sanctioned".
   const sanctioned = new Map(); // identity -> first listed wallet
   for (const w of wallets) {
-    const onchainID = idReg ? await idReg.identity(w) : ethers.ZeroAddress;
-    if (same(onchainID, ethers.ZeroAddress)) {
-      log(
-        `   ⚠️  ${w} has no OnchainID in the IdentityRegistry: skipped (the tree is keyed by identity)`,
-      );
-      continue;
-    }
-    const id = BigInt(onchainID);
+    const { identity: id, onchainID } = await demoIdentity(state, w);
     if (!sanctioned.has(id)) sanctioned.set(id, w);
-    log(`   • ${w} -> OnchainID ${onchainID}`);
+    log(
+      onchainID
+        ? `   • ${w} -> OnchainID ${onchainID}`
+        : `   • ${w} -> its own address (simulated identity, no OnchainID)`,
+    );
   }
   const identities = [...sanctioned.keys()];
   if (!identities.length)
