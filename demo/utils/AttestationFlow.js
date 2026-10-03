@@ -46,13 +46,23 @@ function demoAttestorKey(state) {
   return state.attestorKey;
 }
 
-/** A policy as printed: the allowed mask with its codes, or the numbers. */
+const same = (a, b) => String(a).toLowerCase() === String(b).toLowerCase();
+
+/**
+ * A policy as printed: the allowed mask with its source and ISO codes, or
+ * the numbers. The jurisdiction set is ComplianceRules' rule for VSC (Task
+ * 3.8): PrivacyManager keeps only the code-to-bit assignment.
+ */
 async function describePolicy(pm, circuit) {
   const p = (await pm.currentPolicy(CIRCUITS[circuit].id)).map(BigInt);
   if (circuit === "jurisdiction") {
-    const [masks, , codes] = await pm.getActiveJurisdictions();
-    const named = masks.map((m, i) => `${codes[i]}=${m}`).join(", ");
-    return `allowed mask ${p[0]} (${named || "none active"})`;
+    const rules = await pm.complianceRules();
+    if (same(rules, "0x" + "0".repeat(40))) {
+      return "allowed mask 0: no source yet (option 21 points it at ComplianceRules' rule for VSC)";
+    }
+    const [codes, bits] = await pm.getActiveJurisdictions();
+    const named = codes.map((c, i) => `${c}=${bits[i]}`).join(", ");
+    return `allowed mask ${p[0]} from ComplianceRules ${rules} rule for VSC ${await pm.policyToken()} (ISO code=bit: ${named || "none allowed"})`;
   }
   if (circuit === "accreditation") return `minimum accreditation ${p[0]}`;
   return `minimum ${p[0]}, weights kyc ${p[1]} / aml ${p[2]} / jurisdiction ${p[3]} / accreditation ${p[4]}`;
@@ -101,6 +111,61 @@ async function setupDemoAttestations({
     );
   }
   return { Ax, Ay, attestor: id };
+}
+
+/**
+ * Task 3.8: point PrivacyManager's jurisdiction policy at ComplianceRules'
+ * rule for VSC and give a bit to every code of the rule's allow list that
+ * the rule admits, in list order; prints the source and the bits. Bits are
+ * append-only, so a rerun registers only new codes. Without ownership it
+ * prints the PrivacyParameters vote instead.
+ * @returns {Promise<number|null>} codes registered, or null when unwired
+ */
+async function wireJurisdictionSource({
+  privacyManager: pm,
+  complianceRules: rules,
+  token,
+  log = console.log,
+}) {
+  const rulesAddr = await rules.getAddress();
+  const vsc = await token.getAddress();
+  const owner = await pm.owner();
+  const isOwner = same(owner, await pm.runner.getAddress());
+  if (
+    !same(await pm.complianceRules(), rulesAddr) ||
+    !same(await pm.policyToken(), vsc)
+  ) {
+    if (!isOwner) {
+      log(
+        `   ⚠️  PrivacyManager's jurisdiction source is not ComplianceRules ${rulesAddr} for VSC: the owner (${owner}) sets it by a PrivacyParameters vote (setJurisdictionSource)`,
+      );
+      return null;
+    }
+    await (await pm.setJurisdictionSource(rulesAddr, vsc)).wait();
+  }
+  const [, allowed] = await rules.getJurisdictionRule(vsc);
+  for (const code of allowed) {
+    if ((await pm.jurisdictionBit(code)) !== 0n) continue;
+    if (!(await rules.validateJurisdiction(vsc, code))[0]) continue;
+    if (!isOwner) {
+      log(
+        `   ⚠️  ${code} has no jurisdiction bit: registerJurisdictionCode(${code}) by a PrivacyParameters vote`,
+      );
+      continue;
+    }
+    await (await pm.registerJurisdictionCode(code)).wait();
+  }
+  const [codes] = await pm.getAllJurisdictions();
+  log(
+    `   ✅ Private jurisdiction proofs use ${await describePolicy(pm, "jurisdiction")}`,
+  );
+  log(`   ✅ Jurisdiction bits registered: ${codes.length}`);
+  if (allowed.length === 0) {
+    log(
+      "   ℹ️  VSC's rule has no allow list (every code not blocked passes): give the codes issuers attest a bit with registerJurisdictionCode",
+    );
+  }
+  return codes.length;
 }
 
 /**
@@ -219,6 +284,7 @@ module.exports = {
   DEFAULT_COMPLIANCE,
   demoAttestorKey,
   setupDemoAttestations,
+  wireJurisdictionSource,
   runAttestationFlow,
   attestationStatus,
 };

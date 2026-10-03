@@ -298,18 +298,36 @@ describe("🔐 Complete ZK Proof System Integration Tests", function () {
     });
 
     // Folded from scripts/test-zk-final.js and test-zk-integration.js
-    // (Task 3.5), the only callers of these reads until then.
-    it("lists the default jurisdictions and finds one by code", async function () {
-      const [masks, names, codes] = await privacyManager.getAllJurisdictions();
-      expect(codes).to.deep.equal(["US", "EU", "UK", "CA"]);
-      expect(names[0]).to.equal("United States");
-      const us = await privacyManager.getJurisdictionByCode("US");
-      expect(us.name).to.equal("United States");
-      expect(us.mask).to.equal(masks[0]);
-      expect(us.isActive).to.equal(true);
-      await expect(
-        privacyManager.getJurisdictionByCode("ZZ"),
-      ).to.be.revertedWith("PrivacyManager: Jurisdiction not found");
+    // (Task 3.5); since Task 3.8 the views read ComplianceRules' rule.
+    it("lists registered jurisdiction codes over ComplianceRules", async function () {
+      expect(await privacyManager.getAllJurisdictions()).to.deep.equal([
+        [],
+        [],
+      ]);
+      expect(await privacyManager.allowedJurisdictionMask()).to.equal(0n);
+      const [admin] = await ethers.getSigners();
+      const rules = await (
+        await ethers.getContractFactory("ComplianceRules")
+      ).deploy(admin.address, [], [643]);
+      const token = "0x" + "c5".repeat(20);
+      await privacyManager.setJurisdictionSource(
+        await rules.getAddress(),
+        token,
+      );
+      await privacyManager.registerJurisdictionCode(840);
+      await privacyManager.registerJurisdictionCode(643);
+      expect(await privacyManager.getAllJurisdictions()).to.deep.equal([
+        [840n, 643n],
+        [true, false],
+      ]);
+      expect(await privacyManager.getActiveJurisdictions()).to.deep.equal([
+        [840n],
+        [1n],
+      ]);
+      expect(await privacyManager.isJurisdictionActive(840)).to.equal(true);
+      expect(await privacyManager.isJurisdictionActive(643)).to.equal(false);
+      expect(await privacyManager.isJurisdictionActive(276)).to.equal(false);
+      expect(await privacyManager.allowedJurisdictionMask()).to.equal(1n);
     });
 
     it("the accreditation circuit id is registered under its name", async function () {

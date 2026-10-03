@@ -50,19 +50,25 @@ describeProofs(
       let deploy: any, jur: any, inactive: any, unknown: any, low: any;
       let acc: any, comp: any, v44: any, v45: any, v46: any;
       try {
-        deploy = await step("deploy", () => deployer.deployAllContracts());
-        answers.push("1", "US");
+        deploy = await step("deploy", async () => {
+          await deployer.deployAllContracts();
+          await deployer.deployDigitalTokenSystem(); // option 21: VSC's rule
+        });
+        answers.push("1", "840");
         jur = await step("42-3", () =>
           privacy.submitJurisdictionEligibilityProof(),
         );
-        answers.push("1", "ZZ");
-        unknown = await step("42-3 ZZ", () =>
+        answers.push("1", "999");
+        unknown = await step("42-3 999", () =>
           privacy.submitJurisdictionEligibilityProof(),
         );
+        // Task 3.8: blocking CA (124) for VSC in ComplianceRules is all it
+        // takes; PrivacyManager has no list of its own.
+        const vsc = await state.getContract("digitalToken").getAddress();
         await state
-          .getContract("privacyManager")
-          .updateJurisdictionStatus("CA", false);
-        answers.push("2", "CA");
+          .getContract("complianceRules")
+          .setJurisdictionRule(vsc, [], [124]);
+        answers.push("2", "124");
         inactive = await step("42-3 CA", () =>
           privacy.submitJurisdictionEligibilityProof(),
         );
@@ -101,8 +107,12 @@ describeProofs(
       expect(jur.r, jur.out).to.equal(true);
       expect(jur.out).to.contain("JURISDICTION ATTESTATION BOUND AND VALID");
       expect(jur.out).to.contain("validatePrivateJurisdiction");
+      expect(deploy.out).to.contain(
+        "Private jurisdiction proofs use allowed mask",
+      );
+      expect(deploy.out).to.contain("rule for VSC");
       expect(unknown.out).to.contain(
-        "ZZ is not in PrivacyManager's jurisdiction registry",
+        "999 has no jurisdiction bit on PrivacyManager",
       );
       expect(inactive.r, inactive.out).to.equal(false);
       expect(inactive.out).to.contain("not in the allowed mask");

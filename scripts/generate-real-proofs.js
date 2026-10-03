@@ -355,7 +355,7 @@ class RealProofGenerator {
   /**
    * Generate a PLONK jurisdiction attestation proof.
    * @param {Object} params - an issuer attestation (scripts/zk/attest.js):
-   *        identity, mask (the registry mask bit), salt, R8x, R8y, S, Ax, Ay;
+   *        identity, mask (the country's jurisdiction bit), salt, R8x, R8y, S, Ax, Ay;
    *        plus allowedMask (PrivacyManager.allowedJurisdictionMask) and
    *        walletBinding (the submitting wallet)
    * @returns {Object} { proof, publicSignals: [nullifier, Ax, Ay,

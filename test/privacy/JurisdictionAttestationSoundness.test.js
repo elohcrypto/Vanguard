@@ -4,6 +4,7 @@ const fs = require("fs");
 const {
   IN_SIGNATURE,
   deployAttestationFixture,
+  wireJurisdictionSource,
   circuitInput,
   witness,
   cachedEvents,
@@ -15,8 +16,8 @@ const { signAttestation } = require("../../scripts/zk/attest");
 
 const { describeProofs } = require("../helpers/zkProofs");
 // Task 3.7b (D31 a): the jurisdiction proof states "a trusted issuer signed
-// this identity's registry mask bit, and that bit is in PrivacyManager's
-// allowed mask". A-F mirror the whitelist guards in ZKSoundness.test.js.
+// this identity's jurisdiction bit, and that bit is in PrivacyManager's
+// allowed mask" (the codes ComplianceRules allows on the policy token, 3.8). A-F mirror the whitelist guards in ZKSoundness.test.js.
 // Proofs are generated once in `before` and reused.
 const IN_MAIN = /Assert Failed\. Error in template JurisdictionProof/;
 
@@ -24,7 +25,7 @@ describeProofs("Jurisdiction attestation soundness (Task 3.7b)", function () {
   this.timeout(600000);
 
   let f; // fixture
-  let att; // US (mask 1), signed by the trusted issuer
+  let att; // US (840, bit 1), signed by the trusted issuer
   let r1; // wallet 1's proof under the default policy (mask 15)
   let r2; // the same attestation bound to wallet 2
 
@@ -118,7 +119,8 @@ describeProofs("Jurisdiction attestation soundness (Task 3.7b)", function () {
 
     it("PrivacyManager refuses stale policy signals", async function () {
       const pm = f.pm;
-      await pm.updateJurisdictionStatus("CA", false);
+      // CA (124, bit 8) blocked in ComplianceRules for the policy token.
+      await f.rules.setJurisdictionRule(f.token, [], [124]);
       try {
         expect(await pm.allowedJurisdictionMask()).to.equal(7n);
         await expect(
@@ -138,7 +140,7 @@ describeProofs("Jurisdiction attestation soundness (Task 3.7b)", function () {
           }),
         ).to.be.rejectedWith(/stale policy/);
       } finally {
-        await pm.updateJurisdictionStatus("CA", true);
+        await f.rules.clearJurisdictionRule(f.token);
       }
       expect(await pm.allowedJurisdictionMask()).to.equal(15n);
     });
@@ -287,7 +289,7 @@ describeProofs("Jurisdiction attestation soundness (Task 3.7b)", function () {
       );
 
       // A policy change lapses it and frees the attestation for a re-prove.
-      await pm.addJurisdiction("Singapore", "SG");
+      await pm.registerJurisdictionCode(702); // Singapore, bit 16
       expect(await pm.allowedJurisdictionMask()).to.equal(31n);
       expect((await pm.getUserProofInfo(w1.address, f.id)).isValid).to.equal(
         false,
@@ -333,14 +335,17 @@ describeProofs("Jurisdiction attestation soundness (Task 3.7b)", function () {
       expect(await pm.trustedAttestorCount(f.id)).to.equal(1n);
     });
 
-    it("the registry stops at 64 masks, the width the circuit carries", async function () {
+    it("bits stop at 64 codes, the width the circuit carries", async function () {
       const pm = await (
         await ethers.getContractFactory("PrivacyManager")
       ).deploy(await f.zk.getAddress());
-      // 4 defaults; masks 2^4 .. 2^63 fit.
-      for (let i = 4; i < 64; i++) await pm.addJurisdiction(`J${i}`, `J${i}`);
+      // Bits 2^0 .. 2^63 for codes 1 .. 64.
+      await wireJurisdictionSource(
+        pm,
+        Array.from({ length: 64 }, (_, i) => i + 1),
+      );
       await expect(
-        pm.addJurisdiction("J64", "J64"),
+        pm.registerJurisdictionCode(65),
       ).to.be.revertedWithCustomError(pm, "JurisdictionCapacity");
       expect(await pm.allowedJurisdictionMask()).to.equal(2n ** 64n - 1n);
     });

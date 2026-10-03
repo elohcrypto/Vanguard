@@ -81,8 +81,29 @@ async function checkPrivacyWiring(state, failures) {
   if (comp.join() !== DEFAULT_COMPLIANCE.join()) {
     failures.push(`3.7b: compliance policy is [${comp}], not the demo default`);
   }
-  if ((await pm.allowedJurisdictionMask()) !== 15n) {
-    failures.push("3.7b: allowed jurisdiction mask is not 15 (US, EU, UK, CA)");
+  // Task 3.8: one jurisdiction source. Option 21 points PrivacyManager at
+  // ComplianceRules' rule for VSC and gives every allowed code a bit, in
+  // the rule's order, so the mask is all of them.
+  if (!same(await pm.complianceRules(), await rules.getAddress())) {
+    failures.push("3.8: PrivacyManager.complianceRules() is not the demo's");
+  }
+  if (!same(await pm.policyToken(), vsc)) {
+    failures.push("3.8: PrivacyManager.policyToken() is not VSC");
+  }
+  const [, allowed] = await rules.getJurisdictionRule(vsc);
+  const [codes, bits] = await pm.getActiveJurisdictions();
+  const n = BigInt(allowed.length);
+  if (
+    n === 0n ||
+    codes.map(String).join() !== allowed.map(String).join() ||
+    (await pm.allowedJurisdictionMask()) !== (1n << n) - 1n
+  ) {
+    failures.push(
+      `3.8: active jurisdictions [${codes}] (bits [${bits}]) are not VSC's allow list [${allowed}]`,
+    );
+  }
+  if ((await pm.jurisdictionBit(840)) !== 1n) {
+    failures.push("3.8: US (840) does not hold bit 1");
   }
 }
 
@@ -217,7 +238,7 @@ async function attestationSmoke(state, failures) {
       generator: state.realProofGenerator,
       circuit: "jurisdiction",
       user: bob,
-      attributes: { mask: await pm.jurisdictionCodeToMask("US") },
+      attributes: { mask: await pm.jurisdictionBit(840) }, // US
       log: (...a) => lines.push(a.join(" ")),
     });
   } catch (e) {

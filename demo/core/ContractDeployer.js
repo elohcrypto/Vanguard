@@ -13,7 +13,10 @@
 const { ethers } = require("hardhat");
 const { DeploymentHelper } = require("../../scripts/deploy-helpers");
 const { KYC_TOPIC, AML_TOPIC } = require("../utils/Kyc");
-const { setupDemoAttestations } = require("../utils/AttestationFlow");
+const {
+  setupDemoAttestations,
+  wireJurisdictionSource,
+} = require("../utils/AttestationFlow");
 const {
   displaySection,
   displaySuccess,
@@ -460,6 +463,12 @@ class ContractDeployer {
     }
     const vsc = await token.getAddress();
     const pmAddr = await pm.getAddress();
+    // Task 3.8: private jurisdiction proofs use VSC's ComplianceRules rule.
+    await wireJurisdictionSource({
+      privacyManager: pm,
+      complianceRules: rules,
+      token,
+    });
     const wired = await rules.privacyManager(vsc);
     if (wired.toLowerCase() !== pmAddr.toLowerCase()) {
       const owner = await rules.owner();

@@ -1767,8 +1767,8 @@ class PrivacyModule {
 
   /**
    * Option 42 -> 3: an issuer attests the user's jurisdiction as its
-   * PrivacyManager registry mask bit; the proof shows the bit is in the
-   * allowed mask (the OR of the active jurisdictions) without revealing it.
+   * country's PrivacyManager bit; the proof shows the bit is in the allowed
+   * mask (the codes ComplianceRules allows for VSC) without revealing it.
    */
   async submitJurisdictionEligibilityProof() {
     console.log("\n🌍 SUBMIT JURISDICTION ELIGIBILITY PROOF");
@@ -1778,27 +1778,35 @@ class PrivacyModule {
       displayError("No PrivacyManager: run option 1 (or 41)");
       return;
     }
-    const [masks, names, codes] = await pm.getActiveJurisdictions();
+    const [codes, bits] = await pm.getActiveJurisdictions();
     console.log(
-      "🎯 Attested jurisdiction, proved against PrivacyManager's registry (not ComplianceRules' ISO lists):",
+      "🎯 Attested jurisdiction, proved against ComplianceRules' rule for VSC (ISO 3166-1 numeric code, PrivacyManager bit):",
     );
-    codes.forEach((c, i) =>
-      console.log(`   ${c} = ${names[i]} (mask ${masks[i]}, active)`),
-    );
+    if (codes.length === 0) {
+      console.log(
+        "   none allowed yet: option 21 points PrivacyManager at VSC's rule and registers its codes",
+      );
+    }
+    codes.forEach((c, i) => console.log(`   ${c} (bit ${bits[i]}, allowed)`));
     const user = await this.pickAttestationUser();
     if (!user) return;
-    const code =
-      (await this.promptUser("Your jurisdiction code (default US): "))
-        .trim()
-        .toUpperCase() || "US";
-    const mask = await pm.jurisdictionCodeToMask(code);
+    const input =
+      (
+        await this.promptUser("Your country, ISO numeric (default 840 = US): ")
+      ).trim() || "840";
+    if (!/^[0-9]{1,3}$/.test(input)) {
+      displayError(`${input} is not an ISO 3166-1 numeric code`);
+      return;
+    }
+    const code = BigInt(input);
+    const mask = await pm.jurisdictionBit(code);
     if (mask === 0n) {
       displayError(
-        `${code} is not in PrivacyManager's jurisdiction registry (owner: addJurisdiction)`,
+        `${code} has no jurisdiction bit on PrivacyManager (owner: registerJurisdictionCode, a PrivacyParameters vote after the handover)`,
       );
       return;
     }
-    console.log(`   🌍 Attested: ${code} (mask ${mask}), private in the proof`);
+    console.log(`   🌍 Attested: ${code} (bit ${mask}), private in the proof`);
     return this.attest("jurisdiction", user, { mask }, "JURISDICTION");
   }
 

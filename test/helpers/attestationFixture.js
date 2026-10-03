@@ -30,9 +30,28 @@ const ROOT = path.join(__dirname, "../..");
 const IN_SIGNATURE =
   /Assert Failed\. Error in template (ForceEqualIfEnabled|EdDSAPoseidonVerifier|BabyCheck)/;
 
+/** The token whose ComplianceRules rule is the jurisdiction policy. */
+const JURISDICTION_TOKEN = "0x" + "c5".repeat(20);
+
+/**
+ * Task 3.8: a ComplianceRules (empty default rule: every code allowed) as
+ * `pm`'s jurisdiction source for JURISDICTION_TOKEN, and `codes` registered
+ * in order (the n-th gets bit 1 << n). Default US, DE, GB, CA: mask 15.
+ */
+async function wireJurisdictionSource(pm, codes = [840, 276, 826, 124]) {
+  const [owner] = await ethers.getSigners();
+  const rules = await (
+    await ethers.getContractFactory("ComplianceRules")
+  ).deploy(owner.address, [], []);
+  await pm.setJurisdictionSource(await rules.getAddress(), JURISDICTION_TOKEN);
+  for (const c of codes) await pm.registerJurisdictionCode(c);
+  return { rules, token: JURISDICTION_TOKEN };
+}
+
 /**
  * Deploy the wrapper and PrivacyManager, trust a fresh issuer key for
- * `circuit` and return the context. Policies are the caller's.
+ * `circuit` and return the context. Policies are the caller's, except the
+ * jurisdiction source (wireJurisdictionSource, mask 15).
  */
 async function deployAttestationFixture(circuit) {
   const wallets = await ethers.getSigners();
@@ -46,9 +65,12 @@ async function deployAttestationFixture(circuit) {
   const { Ax, Ay } = await attestorPublicKey(key);
   const id = CIRCUITS[circuit].id;
   await pm.setTrustedAttestor(id, Ax, Ay, true);
+  const source =
+    circuit === "jurisdiction" ? await wireJurisdictionSource(pm) : {};
   const gen = new RealProofGenerator();
   await gen.initialize();
   return {
+    ...source,
     wallets,
     zk,
     pm,
@@ -219,6 +241,8 @@ async function expectTamperedRefused(zk, route, r) {
 module.exports = {
   Q,
   IN_SIGNATURE,
+  JURISDICTION_TOKEN,
+  wireJurisdictionSource,
   deployAttestationFixture,
   circuitInput,
   witness,

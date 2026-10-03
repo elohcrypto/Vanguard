@@ -5,6 +5,16 @@ import "@openzeppelin/contracts/access/Ownable2Step.sol";
 import "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
 import "./interfaces/IZKVerifier.sol";
 
+/// @dev The slice of ComplianceRules the jurisdiction policy reads (Task 3.8).
+interface IJurisdictionRuleSource {
+    function validateJurisdiction(address token, uint256 countryCode)
+        external
+        view
+        returns (bool isValid, string memory reason);
+
+    function jurisdictionRuleVersion(address token) external view returns (uint256);
+}
+
 /**
  * @title PrivacyManager
  * @dev Whitelist root registry and wallet binder for the PLONK whitelist
@@ -21,8 +31,13 @@ import "./interfaces/IZKVerifier.sol";
  *      Attestations (plan Task 3.7b, D31 a): a trusted issuer signs the
  *      investor's attribute message off chain with an EdDSA Baby Jubjub key;
  *      this contract holds the trusted issuer keys per circuit and the policy
- *      (allowed-jurisdiction mask from the jurisdiction registry, minimum
- *      accreditation, compliance weights and minimum). A wallet submits a
+ *      (allowed-jurisdiction mask, minimum accreditation, compliance weights
+ *      and minimum).
+ *
+ *      Jurisdictions (plan Task 3.8, one source): the allowed set is the one
+ *      ComplianceRules enforces for `policyToken` (its validateJurisdiction
+ *      verdict); this contract only keeps the append-only ISO-code-to-bit
+ *      assignment issuers attest, because an attested bit must never move. A wallet submits a
  *      PLONK proof of the signature and the policy; it is recorded for the
  *      wallet named in the binding, one wallet per attestation per policy,
  *      and lapses on a policy change, an attestor revocation or expiry.
@@ -38,14 +53,6 @@ contract PrivacyManager is Ownable2Step, ReentrancyGuard {
         bool enablePrivateAccreditation;
         bool enablePrivateCompliance;
         uint256 proofValidityPeriod;
-    }
-
-    struct JurisdictionInfo {
-        string name;
-        string code;
-        uint256 mask;
-        bool isActive;
-        uint256 addedTimestamp;
     }
 
     /// @dev A wallet's whitelist status: valid while version is the current
@@ -112,11 +119,17 @@ contract PrivacyManager is Ownable2Step, ReentrancyGuard {
     ///         (rotation or a republish of the same root) frees it.
     mapping(uint256 version => mapping(uint256 nullifier => address)) public nullifierWallet;
 
-    // Jurisdiction management
-    mapping(uint256 => JurisdictionInfo) public jurisdictions;
-    mapping(string => uint256) public jurisdictionCodeToMask;
-    uint256[] public activeJurisdictionMasks;
-    uint256 public nextJurisdictionMask = 1;
+    // Jurisdiction source (Task 3.8)
+    /// @notice ComplianceRules whose rule for policyToken is the jurisdiction
+    ///         policy of the private path; unset = policy not set.
+    IJurisdictionRuleSource public complianceRules;
+    /// @notice The token whose jurisdiction rule defines the set (VSC).
+    address public policyToken;
+    /// @notice Attested bit of a registered ISO 3166-1 numeric code (0 =
+    ///         unassigned). Append-only: the n-th registered code gets 1 << n.
+    mapping(uint256 isoCode => uint256) public jurisdictionBit;
+    /// @dev Registered codes in bit order: jurisdictionCodes[i] has bit 1 << i.
+    uint256[] private jurisdictionCodes;
 
     // Attestations (Task 3.7b)
     /// @notice Trusted issuer keys per circuit, keyed by keccak256(abi.encode(Ax, Ay)).
@@ -129,8 +142,10 @@ contract PrivacyManager is Ownable2Step, ReentrancyGuard {
     CompliancePolicy public compliancePolicy;
     /// @notice Latest attestation record per wallet per circuit.
     mapping(address user => mapping(bytes32 circuitId => AttestationRecord)) public attestationRecords;
-    /// @notice Bumped on every policy change of a circuit (jurisdiction
-    ///         registry changes, setMinimumAccreditation, setCompliancePolicy).
+    /// @notice Bumped on every policy change of a circuit (a jurisdiction
+    ///         source or code registration, setMinimumAccreditation,
+    ///         setCompliancePolicy). ComplianceRules' own rule changes reach
+    ///         the jurisdiction records through jurisdictionRuleVersion.
     mapping(bytes32 circuitId => uint256) public policyEpoch;
     /// @notice Bumped on every trust change of an issuer key for a circuit.
     mapping(bytes32 circuitId => mapping(bytes32 attestor => uint256)) public attestorEpoch;
@@ -163,6 +178,8 @@ contract PrivacyManager is Ownable2Step, ReentrancyGuard {
     error InvalidAttestorKey();
     error InvalidPolicy();
     error JurisdictionCapacity();
+    error InvalidJurisdictionCode(uint256 isoCode);
+    error InvalidJurisdictionSource();
 
     // Events
     event AttestationProofBound(
@@ -200,9 +217,8 @@ contract PrivacyManager is Ownable2Step, ReentrancyGuard {
     event ProofValidityPeriodUpdated(uint256 previousPeriod, uint256 newPeriod);
     event ZKVerifierUpdated(address indexed previousVerifier, address indexed newVerifier);
 
-    event JurisdictionAdded(uint256 indexed mask, string name, string code, uint256 timestamp);
-    event JurisdictionRemoved(uint256 indexed mask, string name, string code, uint256 timestamp);
-    event JurisdictionUpdated(uint256 indexed mask, string name, string code, bool isActive);
+    event JurisdictionSourceSet(address indexed complianceRules, address indexed policyToken);
+    event JurisdictionCodeRegistered(uint256 indexed isoCode, uint256 bit);
 
     /// @param _zkVerifier ZKVerifierIntegrated; a testingMode instance is refused.
     constructor(address _zkVerifier) Ownable(msg.sender) {
@@ -217,65 +233,6 @@ contract PrivacyManager is Ownable2Step, ReentrancyGuard {
             proofValidityPeriod: DEFAULT_PROOF_VALIDITY
         });
 
-        // Initialize default jurisdictions
-        _initializeDefaultJurisdictions();
-    }
-
-    /**
-     * @dev Initialize default jurisdictions
-     */
-    function _initializeDefaultJurisdictions() private {
-        // United States
-        uint256 usMask = nextJurisdictionMask;
-        nextJurisdictionMask *= 2;
-        jurisdictions[usMask] = JurisdictionInfo({
-            name: "United States",
-            code: "US",
-            mask: usMask,
-            isActive: true,
-            addedTimestamp: block.timestamp
-        });
-        jurisdictionCodeToMask["US"] = usMask;
-        activeJurisdictionMasks.push(usMask);
-
-        // European Union
-        uint256 euMask = nextJurisdictionMask;
-        nextJurisdictionMask *= 2;
-        jurisdictions[euMask] = JurisdictionInfo({
-            name: "European Union",
-            code: "EU",
-            mask: euMask,
-            isActive: true,
-            addedTimestamp: block.timestamp
-        });
-        jurisdictionCodeToMask["EU"] = euMask;
-        activeJurisdictionMasks.push(euMask);
-
-        // United Kingdom
-        uint256 ukMask = nextJurisdictionMask;
-        nextJurisdictionMask *= 2;
-        jurisdictions[ukMask] = JurisdictionInfo({
-            name: "United Kingdom",
-            code: "UK",
-            mask: ukMask,
-            isActive: true,
-            addedTimestamp: block.timestamp
-        });
-        jurisdictionCodeToMask["UK"] = ukMask;
-        activeJurisdictionMasks.push(ukMask);
-
-        // Canada
-        uint256 caMask = nextJurisdictionMask;
-        nextJurisdictionMask *= 2;
-        jurisdictions[caMask] = JurisdictionInfo({
-            name: "Canada",
-            code: "CA",
-            mask: caMask,
-            isActive: true,
-            addedTimestamp: block.timestamp
-        });
-        jurisdictionCodeToMask["CA"] = caMask;
-        activeJurisdictionMasks.push(caMask);
     }
 
     // ============ WHITELIST ROOT REGISTRY AND BINDER ============
@@ -414,7 +371,7 @@ contract PrivacyManager is Ownable2Step, ReentrancyGuard {
         }
         if (signals[n - 1] != uint256(uint160(msg.sender))) revert WalletBindingMismatch();
 
-        bytes32 policyHash = keccak256(abi.encode(circuitId, policy));
+        bytes32 policyHash = _policyHash(circuitId, policy);
         uint256 epoch = policyEpoch[circuitId];
         uint256 nullifier = signals[0];
         address bound = attestationNullifierWallet[circuitId][epoch][nullifier];
@@ -495,10 +452,51 @@ contract PrivacyManager is Ownable2Step, ReentrancyGuard {
         _bumpPolicy(COMPLIANCE_ID);
     }
 
-    /// @notice Jurisdiction policy: the OR of the active jurisdictions' masks.
+    /**
+     * @notice Point the jurisdiction policy at ComplianceRules' rule for
+     *         `token` (owner; a type 11 vote after the handover). Starts a new
+     *         jurisdiction epoch.
+     * @dev `rules` must answer jurisdictionRuleVersion (a pre-3.8
+     *      ComplianceRules is refused here, not at the first proof).
+     */
+    function setJurisdictionSource(address rules, address token) external onlyOwner {
+        if (rules.code.length == 0 || token == address(0)) revert InvalidJurisdictionSource();
+        IJurisdictionRuleSource(rules).jurisdictionRuleVersion(token);
+        complianceRules = IJurisdictionRuleSource(rules);
+        policyToken = token;
+        emit JurisdictionSourceSet(rules, token);
+        _bumpPolicy(JURISDICTION_ID);
+    }
+
+    /**
+     * @notice Assign the next bit to an ISO 3166-1 numeric code so issuers
+     *         can attest it (owner; a type 11 vote after the handover).
+     *         Bits never move; at most 64 codes (the circuit's mask width).
+     */
+    function registerJurisdictionCode(uint256 isoCode) external onlyOwner {
+        if (isoCode == 0 || isoCode > 999 || jurisdictionBit[isoCode] != 0) revert InvalidJurisdictionCode(isoCode);
+        uint256 n = jurisdictionCodes.length;
+        if (n == 64) revert JurisdictionCapacity();
+        jurisdictionBit[isoCode] = 1 << n;
+        jurisdictionCodes.push(isoCode);
+        emit JurisdictionCodeRegistered(isoCode, 1 << n);
+        _bumpPolicy(JURISDICTION_ID);
+    }
+
+    /// @dev The verdict ComplianceRules applies to a holder of `isoCode` on
+    ///      policyToken (default blocked list, then the token's rule).
+    function _countryAllowed(uint256 isoCode) private view returns (bool allowed) {
+        (allowed, ) = complianceRules.validateJurisdiction(policyToken, isoCode);
+    }
+
+    /// @notice Jurisdiction policy: the OR of the bits of the registered codes
+    ///         ComplianceRules allows on policyToken; 0 while no source is set.
     function allowedJurisdictionMask() public view returns (uint256 mask) {
-        uint256 count = activeJurisdictionMasks.length;
-        for (uint256 i = 0; i < count; i++) mask |= activeJurisdictionMasks[i];
+        if (address(complianceRules) == address(0)) return 0;
+        uint256 n = jurisdictionCodes.length;
+        for (uint256 i = 0; i < n; i++) {
+            if (_countryAllowed(jurisdictionCodes[i])) mask |= 1 << i;
+        }
     }
 
     /**
@@ -522,10 +520,20 @@ contract PrivacyManager is Ownable2Step, ReentrancyGuard {
         }
     }
 
-    /// @notice keccak256(abi.encode(circuitId, currentPolicy(circuitId))): the
-    ///         value a record must carry to be valid.
+    /// @notice The value a record must carry to be valid:
+    ///         keccak256(abi.encode(circuitId, currentPolicy(circuitId), v)),
+    ///         v = ComplianceRules.jurisdictionRuleVersion(policyToken) for the
+    ///         jurisdiction circuit (so a restored rule revives nothing), else 0.
     function currentPolicyHash(bytes32 circuitId) public view returns (bytes32) {
-        return keccak256(abi.encode(circuitId, currentPolicy(circuitId)));
+        return _policyHash(circuitId, currentPolicy(circuitId));
+    }
+
+    function _policyHash(bytes32 circuitId, uint256[] memory policy) private view returns (bytes32) {
+        uint256 version;
+        if (circuitId == JURISDICTION_ID && address(complianceRules) != address(0)) {
+            version = complianceRules.jurisdictionRuleVersion(policyToken);
+        }
+        return keccak256(abi.encode(circuitId, policy, version));
     }
 
     /// @dev Jurisdiction and accreditation are set when non-zero; compliance
@@ -656,154 +664,39 @@ contract PrivacyManager is Ownable2Step, ReentrancyGuard {
             r.policyHash == currentPolicyHash(circuitId);
     }
 
-    // ============ JURISDICTION MANAGEMENT ============
+    // ============ JURISDICTION VIEWS (over ComplianceRules) ============
 
-    /**
-     * @dev Add a new jurisdiction to the whitelist
-     * @param name Jurisdiction name (e.g., "United States")
-     * @param code Jurisdiction code (e.g., "US")
-     */
-    function addJurisdiction(string memory name, string memory code) external onlyOwner {
-        require(bytes(name).length > 0, "PrivacyManager: Name cannot be empty");
-        require(bytes(code).length > 0, "PrivacyManager: Code cannot be empty");
-        require(jurisdictionCodeToMask[code] == 0, "PrivacyManager: Jurisdiction already exists");
-
-        uint256 mask = nextJurisdictionMask;
-        // The jurisdiction circuit carries masks in 64 bits.
-        if (mask > MAX_MASK) revert JurisdictionCapacity();
-        nextJurisdictionMask = nextJurisdictionMask * 2; // Binary shift for unique masks
-
-        jurisdictions[mask] = JurisdictionInfo({
-            name: name,
-            code: code,
-            mask: mask,
-            isActive: true,
-            addedTimestamp: block.timestamp
-        });
-
-        jurisdictionCodeToMask[code] = mask;
-        activeJurisdictionMasks.push(mask);
-
-        emit JurisdictionAdded(mask, name, code, block.timestamp);
-        _bumpPolicy(JURISDICTION_ID);
-    }
-
-    /**
-     * @dev Remove a jurisdiction from the whitelist
-     * @param code Jurisdiction code to remove
-     */
-    function removeJurisdiction(string memory code) external onlyOwner {
-        uint256 mask = jurisdictionCodeToMask[code];
-        require(mask != 0, "PrivacyManager: Jurisdiction not found");
-
-        JurisdictionInfo storage jurisdiction = jurisdictions[mask];
-        require(jurisdiction.isActive, "PrivacyManager: Jurisdiction already inactive");
-
-        jurisdiction.isActive = false;
-
-        // Remove from active list
-        for (uint256 i = 0; i < activeJurisdictionMasks.length; i++) {
-            if (activeJurisdictionMasks[i] == mask) {
-                activeJurisdictionMasks[i] = activeJurisdictionMasks[activeJurisdictionMasks.length - 1];
-                activeJurisdictionMasks.pop();
-                break;
+    /// @notice Registered codes ComplianceRules allows on policyToken now,
+    ///         with their bits.
+    function getActiveJurisdictions() external view returns (uint256[] memory codes, uint256[] memory bits) {
+        uint256 mask = allowedJurisdictionMask();
+        uint256 n = jurisdictionCodes.length;
+        uint256 count;
+        for (uint256 i = 0; i < n; i++) {
+            if (mask & (1 << i) != 0) count++;
+        }
+        codes = new uint256[](count);
+        bits = new uint256[](count);
+        uint256 j;
+        for (uint256 i = 0; i < n; i++) {
+            if (mask & (1 << i) != 0) {
+                codes[j] = jurisdictionCodes[i];
+                bits[j++] = 1 << i;
             }
         }
-
-        emit JurisdictionRemoved(mask, jurisdiction.name, code, block.timestamp);
-        _bumpPolicy(JURISDICTION_ID);
     }
 
-    /**
-     * @dev Update jurisdiction status
-     * @param code Jurisdiction code
-     * @param isActive New active status
-     */
-    function updateJurisdictionStatus(string memory code, bool isActive) external onlyOwner {
-        uint256 mask = jurisdictionCodeToMask[code];
-        require(mask != 0, "PrivacyManager: Jurisdiction not found");
-
-        JurisdictionInfo storage jurisdiction = jurisdictions[mask];
-        require(jurisdiction.isActive != isActive, "PrivacyManager: Status already set");
-
-        jurisdiction.isActive = isActive;
-
-        if (isActive) {
-            // Add back to active list
-            activeJurisdictionMasks.push(mask);
-        } else {
-            // Remove from active list
-            for (uint256 i = 0; i < activeJurisdictionMasks.length; i++) {
-                if (activeJurisdictionMasks[i] == mask) {
-                    activeJurisdictionMasks[i] = activeJurisdictionMasks[activeJurisdictionMasks.length - 1];
-                    activeJurisdictionMasks.pop();
-                    break;
-                }
-            }
-        }
-
-        emit JurisdictionUpdated(mask, jurisdiction.name, code, isActive);
-        _bumpPolicy(JURISDICTION_ID);
+    /// @notice Whether `isoCode` has a bit and ComplianceRules allows it now.
+    function isJurisdictionActive(uint256 isoCode) external view returns (bool) {
+        return jurisdictionBit[isoCode] != 0 && address(complianceRules) != address(0) && _countryAllowed(isoCode);
     }
 
-    /**
-     * @dev Get all active jurisdictions
-     * @return masks Array of active jurisdiction masks
-     * @return names Array of jurisdiction names
-     * @return codes Array of jurisdiction codes
-     */
-    function getActiveJurisdictions() external view returns (
-        uint256[] memory masks,
-        string[] memory names,
-        string[] memory codes
-    ) {
-        uint256 activeCount = activeJurisdictionMasks.length;
-        masks = new uint256[](activeCount);
-        names = new string[](activeCount);
-        codes = new string[](activeCount);
-
-        for (uint256 i = 0; i < activeCount; i++) {
-            uint256 mask = activeJurisdictionMasks[i];
-            JurisdictionInfo storage jurisdiction = jurisdictions[mask];
-            masks[i] = mask;
-            names[i] = jurisdiction.name;
-            codes[i] = jurisdiction.code;
-        }
-    }
-
-    /**
-     * @dev Get jurisdiction info by code
-     * @param code Jurisdiction code
-     * @return info Jurisdiction information
-     */
-    function getJurisdictionByCode(string memory code) external view returns (JurisdictionInfo memory info) {
-        uint256 mask = jurisdictionCodeToMask[code];
-        require(mask != 0, "PrivacyManager: Jurisdiction not found");
-        return jurisdictions[mask];
-    }
-
-    /**
-     * @dev Check if jurisdiction is active
-     * @param code Jurisdiction code
-     * @return True if jurisdiction is active
-     */
-    function isJurisdictionActive(string memory code) external view returns (bool) {
-        uint256 mask = jurisdictionCodeToMask[code];
-        if (mask == 0) return false;
-        return jurisdictions[mask].isActive;
-    }
-
-    /**
-     * @dev Get all active jurisdictions (alias for getActiveJurisdictions)
-     * @return masks Array of active jurisdiction masks
-     * @return names Array of jurisdiction names
-     * @return codes Array of jurisdiction codes
-     */
-    function getAllJurisdictions() external view returns (
-        uint256[] memory masks,
-        string[] memory names,
-        string[] memory codes
-    ) {
-        return this.getActiveJurisdictions();
+    /// @notice Every registered code in bit order (codes[i] has bit 1 << i)
+    ///         and whether ComplianceRules allows it now.
+    function getAllJurisdictions() external view returns (uint256[] memory codes, bool[] memory allowed) {
+        codes = jurisdictionCodes;
+        allowed = new bool[](codes.length);
+        if (address(complianceRules) == address(0)) return (codes, allowed);
+        for (uint256 i = 0; i < codes.length; i++) allowed[i] = _countryAllowed(codes[i]);
     }
 }

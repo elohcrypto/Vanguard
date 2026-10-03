@@ -513,6 +513,11 @@ contract ComplianceRules is IComplianceRules, IComplianceHooks, Ownable2Step, Re
     mapping(address => bool) public authorizedTokens;
     mapping(address => bool) public ruleAdministrators;
     mapping(address => address) public tokenIdentityRegistry; // Maps token address to its IdentityRegistry
+    /// @notice Bumped by every setJurisdictionRule/clearJurisdictionRule for
+    ///         the token (never decreases): PrivacyManager folds it into the
+    ///         jurisdiction attestation policy so a restored rule (A -> B -> A)
+    ///         does not revive an attestation made under the first A.
+    mapping(address => uint256) public jurisdictionRuleVersion;
 
     // Default rules
     JurisdictionRule public defaultJurisdictionRule;
@@ -633,6 +638,7 @@ contract ComplianceRules is IComplianceRules, IComplianceHooks, Ownable2Step, Re
             rule.blockedCountryMap[blockedCountries[i]] = true;
         }
 
+        jurisdictionRuleVersion[token]++;
         emit JurisdictionRuleUpdated(token, allowedCountries, blockedCountries);
     }
 
@@ -653,6 +659,7 @@ contract ComplianceRules is IComplianceRules, IComplianceHooks, Ownable2Step, Re
         delete rule.blockedCountries;
         rule.isActive = false;
         rule.lastUpdated = block.timestamp;
+        jurisdictionRuleVersion[token]++;
         emit JurisdictionRuleCleared(token);
     }
 

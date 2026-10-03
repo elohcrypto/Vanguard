@@ -231,13 +231,26 @@ describe("Privacy contracts are governable by proposal (3.3)", function () {
     expect(
       await pm.currentPolicy(ethers.id("COMPLIANCE_AGGREGATION")),
     ).to.deep.equal([70n, 25n, 25n, 25n, 25n]);
-    // The jurisdiction policy follows the registry, also by vote.
+    // Task 3.8: the jurisdiction source and a code's bit, also by vote.
+    await expect(
+      pm.setJurisdictionSource(
+        await rules.getAddress(),
+        await vsc.getAddress(),
+      ),
+    ).to.be.revertedWithCustomError(pm, "OwnableUnauthorizedAccount");
     await passByVote(
       T.Privacy,
       pm,
-      call("updateJurisdictionStatus", ["CA", false]),
+      call("setJurisdictionSource", [
+        await rules.getAddress(),
+        await vsc.getAddress(),
+      ]),
     );
-    expect(await pm.allowedJurisdictionMask()).to.equal(7n);
+    await passByVote(T.Privacy, pm, call("registerJurisdictionCode", [840]));
+    expect(await pm.complianceRules()).to.equal(await rules.getAddress());
+    expect(await pm.policyToken()).to.equal(await vsc.getAddress());
+    expect(await pm.jurisdictionBit(840)).to.equal(1n);
+    expect(await pm.allowedJurisdictionMask()).to.equal(1n);
   });
 
   it("ZKVerifierIntegrated: accepted by vote, updateVerifier only by vote", async function () {
