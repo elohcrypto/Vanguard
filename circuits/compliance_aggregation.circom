@@ -18,13 +18,14 @@ include "./attestation.circom";
  *     most 100 and the weights summing to 100).
  *  2. kyc*wK + aml*wA + jur*wJ + acc*wAcc >= minimum * 100.
  *  3. (R8x, R8y, S) is the issuer's EdDSA-Poseidon signature under the
- *     public (Ax, Ay) of M = Poseidon(3, identity, kyc, aml, jur, acc, salt);
- *     domain 3.
+ *     public (Ax, Ay) of M = Poseidon(3, chainId, verifierContext, identity,
+ *     kyc, aml, jur, acc, salt); domain 3; chainId and verifierContext are
+ *     public.
  *  4. nullifier = Poseidon(salt, Poseidon(minimum, wK, wA, wJ, wAcc)).
  *  5. walletBinding is kept in the constraint system (walletBindingSq).
  *
- * Public signals, in snarkjs order: [nullifier, Ax, Ay, minimum, wK, wA, wJ,
- * wAcc, walletBinding].
+ * Public signals, in snarkjs order: [nullifier, Ax, Ay, chainId,
+ * verifierContext, minimum, wK, wA, wJ, wAcc, walletBinding].
  */
 template ComplianceAggregation() {
     // Private inputs
@@ -38,6 +39,8 @@ template ComplianceAggregation() {
     // Public inputs
     signal input Ax;
     signal input Ay;
+    signal input chainId;
+    signal input verifierContext;
     signal input minimum;
     signal input weights[4]; // wK, wA, wJ, wAcc
     signal input walletBinding;
@@ -82,6 +85,8 @@ template ComplianceAggregation() {
     // 3. Issuer signature over the attestation.
     component attestation = AttestationSignature(4);
     attestation.domain <== 3;
+    attestation.chainId <== chainId;
+    attestation.verifierContext <== verifierContext;
     attestation.identity <== identity;
     for (var j = 0; j < 4; j++) {
         attestation.attributes[j] <== scores[j];
@@ -110,4 +115,4 @@ template ComplianceAggregation() {
     walletBindingSq <== walletBinding * walletBinding;
 }
 
-component main {public [Ax, Ay, minimum, weights, walletBinding]} = ComplianceAggregation();
+component main {public [Ax, Ay, chainId, verifierContext, minimum, weights, walletBinding]} = ComplianceAggregation();

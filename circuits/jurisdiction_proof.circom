@@ -9,21 +9,24 @@ include "./attestation.circom";
  *      jurisdiction is in the policy's allowed set; the jurisdiction itself
  *      stays private (plan v2 Task 3.7b, D31 a).
  *
- * The attested attribute is the jurisdiction's registry MASK BIT, the power
- * of two PrivacyManager.jurisdictionCodeToMask gives (append-only registry).
+ * The attested attribute is the investor's jurisdiction BIT: the power of
+ * two PrivacyManager.jurisdictionBit assigns to the ISO 3166-1 numeric code
+ * (append-only; Task 3.8).
  *
  * Statement, every part a hard constraint (no validity output):
  *  1. userMask has exactly one bit set, within 64 bits.
  *  2. That bit is set in the public allowedMask (64 bits): PrivacyManager
- *     requires allowedMask == the OR of its active jurisdictions' masks.
+ *     requires allowedMask == the OR of the bits of the registered codes
+ *     ComplianceRules allows for its policy token.
  *  3. (R8x, R8y, S) is the issuer's EdDSA-Poseidon signature under the
- *     public (Ax, Ay) of M = Poseidon(1, identity, userMask, salt); domain 1.
- *  4. nullifier = Poseidon(salt, allowedMask): one wallet per attestation per
- *     allowed set; a registry change re-admits.
+ *     public (Ax, Ay) of M = Poseidon(1, chainId, verifierContext, identity,
+ *     userMask, salt); domain 1; chainId and verifierContext are public.
+ *  4. nullifier = Poseidon(salt, allowedMask).
  *  5. walletBinding is kept in the constraint system (walletBindingSq).
  *
  * Public signals, in snarkjs order (outputs first, then public inputs in
- * declaration order): [nullifier, Ax, Ay, allowedMask, walletBinding].
+ * declaration order): [nullifier, Ax, Ay, chainId, verifierContext,
+ * allowedMask, walletBinding].
  */
 template JurisdictionProof() {
     // Private inputs
@@ -37,6 +40,8 @@ template JurisdictionProof() {
     // Public inputs
     signal input Ax;
     signal input Ay;
+    signal input chainId;
+    signal input verifierContext;
     signal input allowedMask;
     signal input walletBinding;
 
@@ -63,6 +68,8 @@ template JurisdictionProof() {
     // 3. Issuer signature over the attestation.
     component attestation = AttestationSignature(1);
     attestation.domain <== 1;
+    attestation.chainId <== chainId;
+    attestation.verifierContext <== verifierContext;
     attestation.identity <== identity;
     attestation.attributes[0] <== userMask;
     attestation.salt <== salt;
@@ -84,4 +91,4 @@ template JurisdictionProof() {
     walletBindingSq <== walletBinding * walletBinding;
 }
 
-component main {public [Ax, Ay, allowedMask, walletBinding]} = JurisdictionProof();
+component main {public [Ax, Ay, chainId, verifierContext, allowedMask, walletBinding]} = JurisdictionProof();

@@ -21,13 +21,16 @@
  *
  * The key comes from env ATTESTOR_KEY only (32 bytes, 0x hex), never argv,
  * and is never printed except by --new-key. The message is
- * M = Poseidon(domain, identity, attributes..., salt) with a per-circuit
- * domain (jurisdiction 1, accreditation 2, compliance 3), so an attestation
- * signed for one circuit never verifies in another; the salt is 31 fresh
- * random bytes. Output, the attestation handed to the investor (it carries
- * the salt and the signature: treat it as the investor's secret):
- * { circuit, identity, attributes, salt, R8x, R8y, S, Ax, Ay }, decimal
- * strings, on stdout; with --out it goes only to that file (created with
+ * M = Poseidon(domain, chainId, verifierContext, identity, attributes...,
+ * salt) with a per-circuit domain (jurisdiction 1, accreditation 2,
+ * compliance 3), so an attestation signed for one circuit never verifies in
+ * another, and the chain id and PrivacyManager address (verifierContext) it
+ * is for (--chain-id and --privacy-manager, or the chain id read from
+ * --rpc): PrivacyManager refuses one signed for another chain or contract
+ * (Task 3.8 M1). The salt is 31 fresh random bytes. Output, the attestation
+ * handed to the investor (it carries the salt and the signature: treat it as
+ * the investor's secret): { circuit, chainId, privacyManager, identity,
+ * attributes, salt, R8x, R8y, S, Ax, Ay }, decimal strings, on stdout; with --out it goes only to that file (created with
  * mode 0600, an existing file is refused) and stdout carries the path and
  * the public (Ax, Ay). Plain node; no hardhat runtime.
  */
@@ -153,11 +156,47 @@ function toIdentity(identity) {
   return v;
 }
 
-/** M = Poseidon(domain, identity, attributes..., salt). */
-async function attestationMessage(circuit, identity, attributes, salt) {
+/** A non-zero chain id. */
+function toChainId(chainId) {
+  const v = toField(chainId, "chainId");
+  if (v === 0n) throw new Error("chainId: zero");
+  return v;
+}
+
+/** The PrivacyManager an attestation is for, checksummed and non-zero. */
+function toPrivacyManager(address) {
+  let a;
+  try {
+    a = ethers.getAddress(String(address));
+  } catch {
+    throw new Error("privacyManager: not an address");
+  }
+  if (a === ethers.ZeroAddress) throw new Error("privacyManager: zero");
+  return a;
+}
+
+/**
+ * M = Poseidon(domain, chainId, verifierContext, identity, attributes...,
+ * salt); verifierContext = the PrivacyManager address as a field element.
+ */
+async function attestationMessage(
+  circuit,
+  chainId,
+  privacyManager,
+  identity,
+  attributes,
+  salt,
+) {
   const p = await poseidon();
   return p.F.toObject(
-    p([circuitOf(circuit).domain, identity, ...attributes, salt]),
+    p([
+      circuitOf(circuit).domain,
+      chainId,
+      BigInt(privacyManager),
+      identity,
+      ...attributes,
+      salt,
+    ]),
   );
 }
 
@@ -166,23 +205,38 @@ async function attestationMessage(circuit, identity, attributes, salt) {
  * @param {Object} p
  * @param {string} p.key - the issuer key (0x, 32 bytes); never logged
  * @param {string} p.circuit - jurisdiction | accreditation | compliance
+ * @param {*} p.chainId - the chain the attestation is for
+ * @param {string} p.privacyManager - the PrivacyManager it is for
  * @param {*} p.identity - OnchainID address or field element
  * @param {*} [p.mask] [p.amount] [p.scores] - the circuit's attributes
  * @param {bigint} [p.salt] - tests only; default 31 fresh random bytes
- * @returns {Promise<Object>} { circuit, identity, attributes, salt, R8x,
- *          R8y, S, Ax, Ay } as decimal strings
+ * @returns {Promise<Object>} { circuit, chainId, privacyManager, identity,
+ *          attributes, salt, R8x, R8y, S, Ax, Ay }, decimal strings (the
+ *          address checksummed)
  */
-async function signAttestation({ key, circuit, identity, salt, ...attrs }) {
+async function signAttestation({
+  key,
+  circuit,
+  chainId,
+  privacyManager,
+  identity,
+  salt,
+  ...attrs
+}) {
   const prv = toAttestorKey(key);
+  const chain = toChainId(chainId);
+  const pm = toPrivacyManager(privacyManager);
   const id = toIdentity(identity);
   const attributes = parseAttributes(circuit, attrs);
   const s = salt ?? BigInt("0x" + crypto.randomBytes(31).toString("hex"));
   const e = await eddsa();
-  const M = await attestationMessage(circuit, id, attributes, s);
+  const M = await attestationMessage(circuit, chain, pm, id, attributes, s);
   const sig = e.signPoseidon(prv, e.F.e(M));
   const { Ax, Ay } = await attestorPublicKey(key);
   return {
     circuit,
+    chainId: chain.toString(),
+    privacyManager: pm,
     identity: id.toString(),
     attributes: attributes.map(String),
     salt: s.toString(),
@@ -216,6 +270,8 @@ async function loadAttestation(a) {
       : { [names[0]]: a.attributes[0] };
   const att = {
     circuit: a.circuit,
+    chainId: toChainId(a.chainId),
+    privacyManager: toPrivacyManager(a.privacyManager),
     identity: toIdentity(a.identity),
     attributes: parseAttributes(a.circuit, attrs),
   };
@@ -223,8 +279,11 @@ async function loadAttestation(a) {
     att[k] = toField(a[k], `attestation ${k}`);
   }
   const e = await eddsa();
+  att.verifierContext = BigInt(att.privacyManager);
   const M = await attestationMessage(
     att.circuit,
+    att.chainId,
+    att.privacyManager,
     att.identity,
     att.attributes,
     att.salt,
@@ -295,6 +354,7 @@ function parseArgs(argv) {
         "country",
         "rpc",
         "privacy-manager",
+        "chain-id",
         "amount",
         "scores",
         "out",
@@ -310,8 +370,9 @@ function parseArgs(argv) {
 const USAGE = `Usage: node scripts/zk/attest.js --new-key
        node scripts/zk/attest.js --public-key
        node scripts/zk/attest.js --sign --circuit <jurisdiction|accreditation|compliance>
-            --identity <id> (--country <iso> --rpc <url> --privacy-manager <addr> | --mask <m>
-            | --amount <a> | --scores <k,a,j,acc>) [--out <file>]
+            --identity <id> --privacy-manager <addr> (--rpc <url> | --chain-id <n>)
+            (--country <iso> (needs --rpc) | --mask <m> | --amount <a> | --scores <k,a,j,acc>)
+            [--out <file>]
 Key: env ATTESTOR_KEY (0x, 32 bytes).`;
 
 function readKey(env) {
@@ -348,6 +409,22 @@ async function main(keyBox) {
   if (!args.circuit || args.identity === undefined) {
     throw new Error(`--circuit and --identity are required\n${USAGE}`);
   }
+  // Task 3.8 M1: the attestation is for one chain and one PrivacyManager.
+  if (!args["privacy-manager"]) {
+    throw new Error(`--privacy-manager is required\n${USAGE}`);
+  }
+  const provider = args.rpc ? new ethers.JsonRpcProvider(args.rpc) : null;
+  let chainId = args["chain-id"];
+  if (provider) {
+    const live = (await provider.getNetwork()).chainId;
+    if (chainId !== undefined && toChainId(chainId) !== live) {
+      throw new Error(`--chain-id ${chainId} is not --rpc's chain ${live}`);
+    }
+    chainId = live;
+  }
+  if (chainId === undefined) {
+    throw new Error("--chain-id or --rpc is required");
+  }
   let mask = args.mask;
   if (args.country !== undefined) {
     if (args.circuit !== "jurisdiction" || mask !== undefined) {
@@ -355,15 +432,13 @@ async function main(keyBox) {
         "--country is for --circuit jurisdiction, without --mask",
       );
     }
-    if (!args.rpc || !args["privacy-manager"]) {
-      throw new Error(
-        "--country needs --rpc and --privacy-manager (offline: --mask)",
-      );
+    if (!provider) {
+      throw new Error("--country needs --rpc (offline: --mask)");
     }
     const c = await countryBit({
       country: args.country,
       privacyManager: args["privacy-manager"],
-      runner: new ethers.JsonRpcProvider(args.rpc),
+      runner: provider,
     });
     mask = c.bit;
     console.error(
@@ -373,6 +448,8 @@ async function main(keyBox) {
   const att = await signAttestation({
     key: keyBox.value,
     circuit: args.circuit,
+    chainId,
+    privacyManager: args["privacy-manager"],
     identity: args.identity,
     mask,
     amount: args.amount,

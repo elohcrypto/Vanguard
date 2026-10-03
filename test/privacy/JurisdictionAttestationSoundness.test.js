@@ -66,6 +66,8 @@ describeProofs("Jurisdiction attestation soundness (Task 3.7b)", function () {
     it("an accreditation attestation of amount 1 is not a mask-1 attestation (domain)", async function () {
       const acc = await signAttestation({
         key: f.key,
+        chainId: 31337,
+        privacyManager: f.pm.target,
         circuit: "accreditation",
         identity: att.identity,
         amount: 1,
@@ -96,6 +98,44 @@ describeProofs("Jurisdiction attestation soundness (Task 3.7b)", function () {
       } finally {
         await pm.setTrustedAttestor(f.id, f.Ax, f.Ay, true);
       }
+    });
+  });
+
+  describe("A2: an attestation is for one chain and one PrivacyManager (review 3.8 M1)", function () {
+    it("an attestation issued for PM1 is refused on PM2 trusting the same key", async function () {
+      // PM2: same wrapper, same trusted key, the same codes in another
+      // order, so bit 1 is CA there (the review's scenario).
+      const pm2 = await (
+        await ethers.getContractFactory("PrivacyManager")
+      ).deploy(await f.zk.getAddress());
+      await pm2.setTrustedAttestor(f.id, f.Ax, f.Ay, true);
+      await wireJurisdictionSource(pm2, [124, 276, 826, 840]);
+      expect(await pm2.allowedJurisdictionMask()).to.equal(15n);
+      const w1 = f.wallets[1];
+      // The real proof for PM1 carries PM1's address: PM2 refuses it.
+      await expect(
+        pm2.connect(w1).submitAttestationProof(f.id, r1.proof, r1.signals),
+      )
+        .to.be.revertedWithCustomError(pm2, "WrongVerifierContext")
+        .withArgs(BigInt(f.pm.target));
+      // Re-targeting the signal breaks the issuer's signature (no witness).
+      const input = circuitInput(att, [15n], w1.address, {
+        verifierContext: BigInt(pm2.target).toString(),
+      });
+      await expect(witness(f.paths, input)).to.be.rejectedWith(IN_SIGNATURE);
+      // So does another chain id.
+      const other = circuitInput(att, [15n], w1.address, { chainId: "1" });
+      await expect(witness(f.paths, other)).to.be.rejectedWith(IN_SIGNATURE);
+      // The prover refuses before proving.
+      await expect(
+        require("../../scripts/zk/prove-attestation").proveAttestation({
+          attestation: att,
+          wallet: w1.address,
+          privacyManager: pm2.target,
+          runner: w1,
+          generator: f.gen,
+        }),
+      ).to.be.rejectedWith(/the attestation is for PrivacyManager/);
     });
   });
 
@@ -153,11 +193,12 @@ describeProofs("Jurisdiction attestation soundness (Task 3.7b)", function () {
 
     for (const [name, i] of [
       ["nullifier", 0],
-      ["walletBinding", 4],
+      ["verifierContext", 4],
+      ["walletBinding", 6],
     ]) {
       it(`${name} aliased by + q, which the raw verifier accepts`, async function () {
         const input = circuitInput(att, [15n], f.wallets[1].address);
-        const a = await aliasedProof(f.paths, input, i, 5);
+        const a = await aliasedProof(f.paths, input, i, 7);
         const raw = await ethers.getContractAt(
           "JurisdictionProofVerifier",
           await f.zk.jurisdictionVerifier(),
@@ -180,12 +221,14 @@ describeProofs("Jurisdiction attestation soundness (Task 3.7b)", function () {
   });
 
   describe("D: the PLONK setup property", function () {
-    it("signals are [Poseidon(salt, allowedMask), Ax, Ay, allowedMask, walletBinding]", async function () {
+    it("signals are [Poseidon(salt, allowedMask), Ax, Ay, chainId, verifierContext, allowedMask, walletBinding]", async function () {
       expect(r1.proof).to.have.lengthOf(24);
       expect(r1.signals).to.deep.equal([
         f.gen.hash([BigInt(att.salt), 15n]).toString(),
         att.Ax,
         att.Ay,
+        "31337",
+        BigInt(f.pm.target).toString(),
         "15",
         BigInt(f.wallets[1].address).toString(),
       ]);
@@ -195,17 +238,17 @@ describeProofs("Jurisdiction attestation soundness (Task 3.7b)", function () {
       ).to.equal(r1.signals[0]);
     });
 
-    it("the committed verifier is PLONK with nPublic 5", async function () {
+    it("the committed verifier is PLONK with nPublic 7", async function () {
       const artifact = await artifacts.readArtifact(
         "JurisdictionProofVerifier",
       );
       const fn = artifact.abi.find((x) => x.name === "verifyProof");
       expect(fn.inputs.map((i) => i.type)).to.deep.equal([
         "uint256[24]",
-        "uint256[5]",
+        "uint256[7]",
       ]);
       const vkey = JSON.parse(fs.readFileSync(f.paths.vkey, "utf8"));
-      expect([vkey.protocol, vkey.nPublic]).to.deep.equal(["plonk", 5]);
+      expect([vkey.protocol, vkey.nPublic]).to.deep.equal(["plonk", 7]);
     });
 
     it("the committed verifier is reproduced from the committed circuit", function () {
@@ -295,7 +338,7 @@ describeProofs("Jurisdiction attestation soundness (Task 3.7b)", function () {
         false,
       );
       const r3 = await f.prove(att, w2);
-      expect(r3.signals[3]).to.equal("31");
+      expect(r3.signals[5]).to.equal("31");
       expect(r3.signals[0]).to.not.equal(r1.signals[0]);
       await pm.connect(w2).submitAttestationProof(f.id, r3.proof, r3.signals);
       expect(

@@ -57,6 +57,9 @@ describeProofs("Attestation CLIs (Task 3.7b)", function () {
 
   const key = newAttestorKey();
   const identity = "0x5FbDB2315678afecb367f032d93F642f64180aa3";
+  // Task 3.8 M1: an attestation is for one chain and one PrivacyManager.
+  const PMX = "0x" + "11".repeat(20);
+  const TARGET = ["--chain-id", "31337", "--privacy-manager", PMX];
   let tmp;
 
   before(function () {
@@ -94,6 +97,7 @@ describeProofs("Attestation CLIs (Task 3.7b)", function () {
           "--sign",
           "--circuit",
           "jurisdiction",
+          ...TARGET,
           "--identity",
           identity,
           "--mask",
@@ -106,6 +110,8 @@ describeProofs("Attestation CLIs (Task 3.7b)", function () {
       const att = JSON.parse(s.stdout);
       expect(Object.keys(att)).to.deep.equal([
         "circuit",
+        "chainId",
+        "privacyManager",
         "identity",
         "attributes",
         "salt",
@@ -114,6 +120,10 @@ describeProofs("Attestation CLIs (Task 3.7b)", function () {
         "S",
         "Ax",
         "Ay",
+      ]);
+      expect([att.chainId, att.privacyManager]).to.deep.equal([
+        "31337",
+        ethers.getAddress(PMX),
       ]);
       expect(att.identity).to.equal(BigInt(identity).toString());
       expect(att.attributes).to.deep.equal(["4"]);
@@ -128,6 +138,7 @@ describeProofs("Attestation CLIs (Task 3.7b)", function () {
         "--sign",
         "--circuit",
         "jurisdiction",
+        ...TARGET,
         "--identity",
         identity,
         "--mask",
@@ -164,6 +175,8 @@ describeProofs("Attestation CLIs (Task 3.7b)", function () {
         ids.map((i) =>
           signAttestation({
             key,
+            chainId: 31337,
+            privacyManager: PMX,
             circuit: "accreditation",
             identity: i,
             amount: 5,
@@ -196,7 +209,7 @@ describeProofs("Attestation CLIs (Task 3.7b)", function () {
       for (const [args, re] of cases) {
         const r = await run(
           "attest.js",
-          ["--sign", "--identity", identity, ...args],
+          ["--sign", "--identity", identity, ...TARGET, ...args],
           {
             ATTESTOR_KEY: key,
           },
@@ -205,6 +218,31 @@ describeProofs("Attestation CLIs (Task 3.7b)", function () {
         expect(r.stderr).to.match(re);
         expect(r.stdout).to.equal("");
         expectNoSecrets(r, null, key);
+      }
+      // The deployment it is for is required (review 3.8 M1).
+      for (const [args, re] of [
+        [["--chain-id", "31337"], /--privacy-manager is required/],
+        [["--privacy-manager", PMX], /--chain-id or --rpc is required/],
+        [["--chain-id", "0", "--privacy-manager", PMX], /chainId: zero/],
+        [["--chain-id", "1", "--privacy-manager", "0x12"], /not an address/],
+      ]) {
+        const r = await run(
+          "attest.js",
+          [
+            "--sign",
+            "--identity",
+            identity,
+            "--circuit",
+            "accreditation",
+            "--amount",
+            "5",
+            ...args,
+          ],
+          { ATTESTOR_KEY: key },
+        );
+        expect(r.code, args.join(" ")).to.equal(1);
+        expect(r.stderr).to.match(re);
+        expect(r.stdout).to.equal("");
       }
       const badKey = await run("attest.js", ["--public-key"], {
         ATTESTOR_KEY: "0x1234",
@@ -223,6 +261,8 @@ describeProofs("Attestation CLIs (Task 3.7b)", function () {
       [, wallet] = await ethers.getSigners();
       att = await signAttestation({
         key,
+        chainId: 31337,
+        privacyManager: PMX,
         circuit: "compliance",
         identity,
         scores: [90, 80, 70, 60],
@@ -250,6 +290,8 @@ describeProofs("Attestation CLIs (Task 3.7b)", function () {
       expect(cd.signals.slice(1)).to.deep.equal([
         att.Ax,
         att.Ay,
+        "31337",
+        BigInt(PMX).toString(),
         "70",
         "25",
         "25",
@@ -316,7 +358,8 @@ describeProofs("Attestation CLIs (Task 3.7b)", function () {
         await ethers.getContractFactory("PrivacyManager")
       ).deploy(await zk.getAddress());
       await pm.connect(owner).setCompliancePolicy(70, 25, 25, 25, 25);
-      // Untrusted issuer: refused before proving.
+      // An attestation for another PrivacyManager or chain: refused before
+      // proving (review 3.8 M1).
       await expect(
         proveAttestation({
           attestation: att,
@@ -324,10 +367,37 @@ describeProofs("Attestation CLIs (Task 3.7b)", function () {
           privacyManager: pm.target,
           runner: wallet,
         }),
+      ).to.be.rejectedWith(/the attestation is for PrivacyManager/);
+      const forPm = (chainId) =>
+        signAttestation({
+          key,
+          chainId,
+          privacyManager: pm.target,
+          circuit: "compliance",
+          identity,
+          scores: [90, 80, 70, 60],
+        });
+      await expect(
+        proveAttestation({
+          attestation: await forPm(1),
+          wallet: wallet.address,
+          privacyManager: pm.target,
+          runner: wallet,
+        }),
+      ).to.be.rejectedWith(/the attestation is for chain 1, not chain 31337/);
+      const mine = await forPm(31337);
+      // Untrusted issuer: refused before proving.
+      await expect(
+        proveAttestation({
+          attestation: mine,
+          wallet: wallet.address,
+          privacyManager: pm.target,
+          runner: wallet,
+        }),
       ).to.be.rejectedWith(/not trusted for compliance/);
       await pm.setTrustedAttestor(CIRCUITS.compliance.id, att.Ax, att.Ay, true);
       const cd = await proveAttestation({
-        attestation: att,
+        attestation: mine,
         wallet: wallet.address,
         privacyManager: pm.target,
         runner: wallet,

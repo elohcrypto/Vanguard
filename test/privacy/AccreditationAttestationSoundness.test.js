@@ -133,11 +133,12 @@ describeProofs("Accreditation attestation soundness (Task 3.7b)", function () {
 
     for (const [name, i] of [
       ["Ax", 1],
-      ["minimumAccreditation", 3],
+      ["chainId", 3],
+      ["minimumAccreditation", 5],
     ]) {
       it(`${name} aliased by + q, which the raw verifier accepts`, async function () {
         const input = circuitInput(att, [MIN], f.wallets[1].address);
-        const a = await aliasedProof(f.paths, input, i, 5);
+        const a = await aliasedProof(f.paths, input, i, 7);
         const raw = await ethers.getContractAt(
           "AccreditationProofVerifier",
           await f.zk.accreditationVerifier(),
@@ -156,11 +157,13 @@ describeProofs("Accreditation attestation soundness (Task 3.7b)", function () {
   });
 
   describe("D: the PLONK setup property", function () {
-    it("signals are [Poseidon(salt, minimum), Ax, Ay, minimum, walletBinding]", async function () {
+    it("signals are [Poseidon(salt, minimum), Ax, Ay, chainId, verifierContext, minimum, walletBinding]", async function () {
       expect(r1.signals).to.deep.equal([
         f.gen.hash([BigInt(att.salt), MIN]).toString(),
         att.Ax,
         att.Ay,
+        "31337",
+        BigInt(f.pm.target).toString(),
         MIN.toString(),
         BigInt(f.wallets[1].address).toString(),
       ]);
@@ -170,17 +173,17 @@ describeProofs("Accreditation attestation soundness (Task 3.7b)", function () {
       );
     });
 
-    it("the committed verifier is PLONK with nPublic 5", async function () {
+    it("the committed verifier is PLONK with nPublic 7", async function () {
       const artifact = await artifacts.readArtifact(
         "AccreditationProofVerifier",
       );
       const fn = artifact.abi.find((x) => x.name === "verifyProof");
       expect(fn.inputs.map((i) => i.type)).to.deep.equal([
         "uint256[24]",
-        "uint256[5]",
+        "uint256[7]",
       ]);
       const vkey = JSON.parse(fs.readFileSync(f.paths.vkey, "utf8"));
-      expect([vkey.protocol, vkey.nPublic]).to.deep.equal(["plonk", 5]);
+      expect([vkey.protocol, vkey.nPublic]).to.deep.equal(["plonk", 7]);
     });
 
     it("the committed verifier is reproduced from the committed circuit", function () {
@@ -226,7 +229,7 @@ describeProofs("Accreditation attestation soundness (Task 3.7b)", function () {
         runner: w2,
         generator: f.gen,
       });
-      expect(r3.signals[3]).to.equal("200000");
+      expect(r3.signals[5]).to.equal("200000");
       await pm.connect(w2).submitAttestationProof(f.id, r3.proof, r3.signals);
       expect(
         await pm.validatePrivateAccreditation.staticCall(w2.address),

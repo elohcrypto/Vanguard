@@ -242,9 +242,10 @@ describe("ZKVerifierIntegrated wrapper (Task 3.2)", function () {
 
     it("attestation mocks require nullifier, Ax, Ay, binding non-zero; policy may be 0", async function () {
       const zk = await deploy(true);
-      for (const n of [5, 9]) {
+      // Task 3.8 M1: 7 and 11 signals (chainId, verifierContext added).
+      for (const n of [7, 11]) {
         const call = (s: bigint[]) =>
-          n === 5
+          n === 7
             ? zk.verifyJurisdictionProof.staticCall(EMPTY, s as never)
             : zk.verifyComplianceAggregation.staticCall(EMPTY, s as never);
         const policyZero = ones(n);
@@ -262,7 +263,7 @@ describe("ZKVerifierIntegrated wrapper (Task 3.2)", function () {
         );
       }
       expect(
-        await zk.verifyAccreditationProof.staticCall(EMPTY, ones(5) as never),
+        await zk.verifyAccreditationProof.staticCall(EMPTY, ones(7) as never),
       ).to.equal(true);
     });
 
@@ -293,11 +294,11 @@ describe("ZKVerifierIntegrated wrapper (Task 3.2)", function () {
       const ids = [WL, JUR, BL, COMP, ethers.ZeroHash, JUR];
       const inputs = [
         [...signals], // whitelist has its own route: refused here, false
-        [7n, 1n, 2n, 3n, 4n], // accepted by the jurisdiction slot
+        [7n, 1n, 2n, 3n, 4n, 5n, 6n], // accepted by the jurisdiction slot
         [1n], // blacklist has its own route: refused here, false
-        [1n], // compliance needs 9 signals: false, not a revert
+        [1n], // compliance needs 11 signals: false, not a revert
         [1n], // unknown circuit: false, not a revert
-        [7n, 1n, 2n, 3n, 4n], // cache hit
+        [7n, 1n, 2n, 3n, 4n, 5n, 6n], // cache hit
       ];
       const proofs = ids.map(() => EMPTY);
       const [results, successCount] = await zk.verifyBatchProofs.staticCall(
@@ -320,8 +321,8 @@ describe("ZKVerifierIntegrated wrapper (Task 3.2)", function () {
         [1n, 1n, 1n],
         [1n], // blacklist has its own route: refused like the whitelist
         [0n],
-        [7n, 1n, 1n, 0n, 1n],
-        [5n, 1n, 1n, 0n, 0n, 0n, 0n, 0n, 1n],
+        [7n, 1n, 1n, 1n, 1n, 0n, 1n],
+        [5n, 1n, 1n, 1n, 1n, 0n, 0n, 0n, 0n, 0n, 1n],
       ];
       const [results, successCount] = await zk.verifyBatchProofs.staticCall(
         ids,
@@ -365,7 +366,7 @@ describe("ZKVerifierIntegrated wrapper (Task 3.2)", function () {
         await zk.updateVerifier(slot, await yes.getAddress());
         for (const other of routed) {
           expect(
-            await zk.verifyCircuitProof.staticCall(other, EMPTY, ones(5)),
+            await zk.verifyCircuitProof.staticCall(other, EMPTY, ones(7)),
             `${slot} slot accepting, querying ${other}`,
           ).to.equal(other === id);
         }
@@ -376,7 +377,7 @@ describe("ZKVerifierIntegrated wrapper (Task 3.2)", function () {
         );
         expect(batch[0], `${slot} slot accepting, querying BL`).to.equal(false);
         expect(
-          await zk.verifyCircuitProof.staticCall(COMP, EMPTY, ones(9)),
+          await zk.verifyCircuitProof.staticCall(COMP, EMPTY, ones(11)),
         ).to.equal(false);
       }
     });

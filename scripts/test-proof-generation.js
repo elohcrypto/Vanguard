@@ -93,6 +93,8 @@ async function main() {
     S: a.S,
     Ax: a.Ax,
     Ay: a.Ay,
+    chainId: a.chainId,
+    verifierContext: BigInt(a.privacyManager),
     walletBinding: "0x000000000000000000000000000000000000dEaD",
   });
   const attestationCases = [
@@ -101,6 +103,8 @@ async function main() {
       async () => {
         const a = await signAttestation({
           key,
+          chainId: 31337,
+          privacyManager: "0x" + "11".repeat(20),
           circuit: "jurisdiction",
           identity: 12345n,
           mask: 1,
@@ -108,7 +112,7 @@ async function main() {
         return generator.generateJurisdictionProof({
           ...sig(a),
           mask: 1n,
-          allowedMask: 15n, // US, EU, UK, CA: PrivacyManager's default registry
+          allowedMask: 15n, // four registered codes, all allowed
         });
       },
     ],
@@ -117,6 +121,8 @@ async function main() {
       async () => {
         const a = await signAttestation({
           key,
+          chainId: 31337,
+          privacyManager: "0x" + "11".repeat(20),
           circuit: "accreditation",
           identity: 12345n,
           amount: 250000,
@@ -133,6 +139,8 @@ async function main() {
       async () => {
         const a = await signAttestation({
           key,
+          chainId: 31337,
+          privacyManager: "0x" + "11".repeat(20),
           circuit: "compliance",
           identity: 12345n,
           scores: [80, 75, 85, 70],

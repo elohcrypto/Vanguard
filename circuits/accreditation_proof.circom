@@ -16,12 +16,13 @@ include "./attestation.circom";
  *  2. amount >= minimumAccreditation (PrivacyManager requires the public
  *     minimum to equal its owner-set policy).
  *  3. (R8x, R8y, S) is the issuer's EdDSA-Poseidon signature under the
- *     public (Ax, Ay) of M = Poseidon(2, identity, amount, salt); domain 2.
+ *     public (Ax, Ay) of M = Poseidon(2, chainId, verifierContext, identity,
+ *     amount, salt); domain 2; chainId and verifierContext are public.
  *  4. nullifier = Poseidon(salt, minimumAccreditation).
  *  5. walletBinding is kept in the constraint system (walletBindingSq).
  *
- * Public signals, in snarkjs order: [nullifier, Ax, Ay, minimumAccreditation,
- * walletBinding].
+ * Public signals, in snarkjs order: [nullifier, Ax, Ay, chainId,
+ * verifierContext, minimumAccreditation, walletBinding].
  */
 template AccreditationProof() {
     // Private inputs
@@ -35,6 +36,8 @@ template AccreditationProof() {
     // Public inputs
     signal input Ax;
     signal input Ay;
+    signal input chainId;
+    signal input verifierContext;
     signal input minimumAccreditation;
     signal input walletBinding;
 
@@ -56,6 +59,8 @@ template AccreditationProof() {
     // 3. Issuer signature over the attestation.
     component attestation = AttestationSignature(1);
     attestation.domain <== 2;
+    attestation.chainId <== chainId;
+    attestation.verifierContext <== verifierContext;
     attestation.identity <== identity;
     attestation.attributes[0] <== amount;
     attestation.salt <== salt;
@@ -77,4 +82,4 @@ template AccreditationProof() {
     walletBindingSq <== walletBinding * walletBinding;
 }
 
-component main {public [Ax, Ay, minimumAccreditation, walletBinding]} = AccreditationProof();
+component main {public [Ax, Ay, chainId, verifierContext, minimumAccreditation, walletBinding]} = AccreditationProof();

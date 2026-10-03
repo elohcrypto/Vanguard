@@ -231,20 +231,14 @@ describe("Privacy contracts are governable by proposal (3.3)", function () {
     expect(
       await pm.currentPolicy(ethers.id("COMPLIANCE_AGGREGATION")),
     ).to.deep.equal([70n, 25n, 25n, 25n, 25n]);
-    // Task 3.8: the jurisdiction source and a code's bit, also by vote.
+    // Task 3.8: the policy token and a code's bit, also by vote.
     await expect(
-      pm.setJurisdictionSource(
-        await rules.getAddress(),
-        await vsc.getAddress(),
-      ),
+      pm.setPolicyToken(await vsc.getAddress()),
     ).to.be.revertedWithCustomError(pm, "OwnableUnauthorizedAccount");
     await passByVote(
       T.Privacy,
       pm,
-      call("setJurisdictionSource", [
-        await rules.getAddress(),
-        await vsc.getAddress(),
-      ]),
+      call("setPolicyToken", [await vsc.getAddress()]),
     );
     await passByVote(T.Privacy, pm, call("registerJurisdictionCode", [840]));
     expect(await pm.complianceRules()).to.equal(await rules.getAddress());

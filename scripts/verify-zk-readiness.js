@@ -29,15 +29,15 @@ const { CIRCUITS: circuits, protocolOf } = require("./setup-zk-circuits");
 // Public-signal count each sound circuit must expose (outputs first, then
 // public inputs): whitelist [nullifier, merkleRoot, walletBinding],
 // blacklist [nullifier, whitelistRoot, blacklistRoot, walletBinding],
-// jurisdiction [nullifier, Ax, Ay, allowedMask, walletBinding],
-// accreditation [nullifier, Ax, Ay, minimumAccreditation, walletBinding],
-// compliance [nullifier, Ax, Ay, minimum, wK, wA, wJ, wAcc, walletBinding].
+// the attestations carry [nullifier, Ax, Ay, chainId, verifierContext,
+// policy..., walletBinding] (Task 3.8 M1): jurisdiction policy [allowedMask],
+// accreditation [minimumAccreditation], compliance [minimum, wK, wA, wJ, wAcc].
 const EXPECTED_NPUBLIC = {
   whitelist_membership: 3,
   blacklist_membership: 4,
-  jurisdiction_proof: 5,
-  accreditation_proof: 5,
-  compliance_aggregation: 9,
+  jurisdiction_proof: 7,
+  accreditation_proof: 7,
+  compliance_aggregation: 11,
 };
 
 // Circuits whose setup does not make proofs sound, with the reason.

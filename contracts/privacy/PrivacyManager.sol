@@ -15,6 +15,11 @@ interface IJurisdictionRuleSource {
     function jurisdictionRuleVersion(address token) external view returns (uint256);
 }
 
+/// @dev The ERC-3643 getter the policy token answers (Token.compliance()).
+interface IPolicyToken {
+    function compliance() external view returns (address);
+}
+
 /**
  * @title PrivacyManager
  * @dev Whitelist root registry and wallet binder for the PLONK whitelist
@@ -35,9 +40,12 @@ interface IJurisdictionRuleSource {
  *      and minimum).
  *
  *      Jurisdictions (plan Task 3.8, one source): the allowed set is the one
- *      ComplianceRules enforces for `policyToken` (its validateJurisdiction
- *      verdict); this contract only keeps the append-only ISO-code-to-bit
- *      assignment issuers attest, because an attested bit must never move. A wallet submits a
+ *      the policy token's ComplianceRules (`policyToken.compliance()`, read
+ *      on every use, so a Token vote moving it is followed) enforces for the
+ *      token (its validateJurisdiction verdict); this contract only keeps the
+ *      append-only ISO-code-to-bit assignment issuers attest, because an
+ *      attested bit must never move. An attestation is signed for one chain
+ *      and one PrivacyManager (public chainId and verifierContext signals). A wallet submits a
  *      PLONK proof of the signature and the policy; it is recorded for the
  *      wallet named in the binding, one wallet per attestation per policy,
  *      and lapses on a policy change, an attestor revocation or expiry.
@@ -120,10 +128,8 @@ contract PrivacyManager is Ownable2Step, ReentrancyGuard {
     mapping(uint256 version => mapping(uint256 nullifier => address)) public nullifierWallet;
 
     // Jurisdiction source (Task 3.8)
-    /// @notice ComplianceRules whose rule for policyToken is the jurisdiction
-    ///         policy of the private path; unset = policy not set.
-    IJurisdictionRuleSource public complianceRules;
-    /// @notice The token whose jurisdiction rule defines the set (VSC).
+    /// @notice The token whose ComplianceRules rule defines the set (VSC);
+    ///         unset = policy not set. Its compliance() is read on every use.
     address public policyToken;
     /// @notice Attested bit of a registered ISO 3166-1 numeric code (0 =
     ///         unassigned). Append-only: the n-th registered code gets 1 << n.
@@ -142,18 +148,19 @@ contract PrivacyManager is Ownable2Step, ReentrancyGuard {
     CompliancePolicy public compliancePolicy;
     /// @notice Latest attestation record per wallet per circuit.
     mapping(address user => mapping(bytes32 circuitId => AttestationRecord)) public attestationRecords;
-    /// @notice Bumped on every policy change of a circuit (a jurisdiction
-    ///         source or code registration, setMinimumAccreditation,
+    /// @notice Bumped on every policy change of a circuit (a policy
+    ///         token or code registration, setMinimumAccreditation,
     ///         setCompliancePolicy). ComplianceRules' own rule changes reach
     ///         the jurisdiction records through jurisdictionRuleVersion.
     mapping(bytes32 circuitId => uint256) public policyEpoch;
     /// @notice Bumped on every trust change of an issuer key for a circuit.
     mapping(bytes32 circuitId => mapping(bytes32 attestor => uint256)) public attestorEpoch;
-    /// @notice Wallet holding each attestation nullifier, per circuit and
-    ///         policy epoch: one attestation binds one wallet per epoch, and
-    ///         a new epoch frees it (like nullifierWallet per root version).
-    mapping(bytes32 circuitId => mapping(uint256 epoch => mapping(uint256 nullifier => address)))
-        public attestationNullifierWallet;
+    /// @notice Wallet holding each attestation nullifier, per policy hash
+    ///         (currentPolicyHash: circuit, epoch, policy and, for the
+    ///         jurisdiction circuit, ComplianceRules and its rule version):
+    ///         one attestation binds one wallet per policy, and any policy
+    ///         change, a ComplianceRules rule change included, frees it.
+    mapping(bytes32 policyHash => mapping(uint256 nullifier => address)) public attestationNullifierWallet;
 
     // Errors
     error NotListOperator();
@@ -179,7 +186,9 @@ contract PrivacyManager is Ownable2Step, ReentrancyGuard {
     error InvalidPolicy();
     error JurisdictionCapacity();
     error InvalidJurisdictionCode(uint256 isoCode);
-    error InvalidJurisdictionSource();
+    error InvalidPolicyToken();
+    error WrongChainId(uint256 signal);
+    error WrongVerifierContext(uint256 signal);
 
     // Events
     event AttestationProofBound(
@@ -217,7 +226,7 @@ contract PrivacyManager is Ownable2Step, ReentrancyGuard {
     event ProofValidityPeriodUpdated(uint256 previousPeriod, uint256 newPeriod);
     event ZKVerifierUpdated(address indexed previousVerifier, address indexed newVerifier);
 
-    event JurisdictionSourceSet(address indexed complianceRules, address indexed policyToken);
+    event PolicyTokenSet(address indexed policyToken, address complianceRules);
     event JurisdictionCodeRegistered(uint256 indexed isoCode, uint256 bit);
 
     /// @param _zkVerifier ZKVerifierIntegrated; a testingMode instance is refused.
@@ -342,12 +351,15 @@ contract PrivacyManager is Ownable2Step, ReentrancyGuard {
      * @param circuitId JURISDICTION_PROOF, ACCREDITATION_PROOF or
      *        COMPLIANCE_AGGREGATION (keccak256 of the name)
      * @param proof 24-word PLONK proof
-     * @param signals [nullifier, Ax, Ay, policy..., walletBinding]: policy is
-     *        [allowedMask], [minimumAccreditation] or [minimum, wK, wA, wJ, wAcc]
+     * @param signals [nullifier, Ax, Ay, chainId, verifierContext, policy...,
+     *        walletBinding]: policy is [allowedMask], [minimumAccreditation]
+     *        or [minimum, wK, wA, wJ, wAcc]
      * @dev Reverts unless: the circuit is one of the three (the whitelist has
      *      submitWhitelistProof; the blacklist is refused, D2); the signal
      *      count is the circuit's; (Ax, Ay) is a trusted issuer key for the
-     *      circuit; the policy signals equal the current policy (which is
+     *      circuit; chainId is block.chainid and verifierContext this
+     *      contract (the issuer signed for this deployment, review 3.8 M1);
+     *      the policy signals equal the current policy (which is
      *      set); walletBinding == uint160(msg.sender); the nullifier is
      *      unbound under this policy or bound to the caller; the proof
      *      verifies through the wrapper (which refuses non-canonical signals).
@@ -361,24 +373,26 @@ contract PrivacyManager is Ownable2Step, ReentrancyGuard {
     ) external nonReentrant {
         if (circuitId == BLACKLIST_ID) revert NonGatingBlacklistProof();
         uint256[] memory policy = currentPolicy(circuitId);
-        uint256 n = policy.length + 4;
+        uint256 n = policy.length + 6;
         if (signals.length != n) revert InvalidSignalCount(n, signals.length);
         bytes32 attestor = keccak256(abi.encode(signals[1], signals[2]));
         if (!trustedAttestor[circuitId][attestor]) revert UntrustedAttestor(circuitId, attestor);
         if (!_policySet(circuitId, policy)) revert PolicyNotSet(circuitId);
+        if (signals[3] != block.chainid) revert WrongChainId(signals[3]);
+        if (signals[4] != uint256(uint160(address(this)))) revert WrongVerifierContext(signals[4]);
         for (uint256 i = 0; i < policy.length; i++) {
-            if (signals[3 + i] != policy[i]) revert StalePolicy(circuitId);
+            if (signals[5 + i] != policy[i]) revert StalePolicy(circuitId);
         }
         if (signals[n - 1] != uint256(uint160(msg.sender))) revert WalletBindingMismatch();
 
         bytes32 policyHash = _policyHash(circuitId, policy);
         uint256 epoch = policyEpoch[circuitId];
         uint256 nullifier = signals[0];
-        address bound = attestationNullifierWallet[circuitId][epoch][nullifier];
+        address bound = attestationNullifierWallet[policyHash][nullifier];
         if (bound != address(0) && bound != msg.sender) revert AttestationNullifierBound(bound);
         if (!zkVerifier.verifyCircuitProof(circuitId, proof, signals)) revert InvalidAttestationProof();
 
-        if (bound == address(0)) attestationNullifierWallet[circuitId][epoch][nullifier] = msg.sender;
+        if (bound == address(0)) attestationNullifierWallet[policyHash][nullifier] = msg.sender;
         uint256 expiresAt = block.timestamp + proofValidityPeriod;
         attestationRecords[msg.sender][circuitId] = AttestationRecord({
             policyHash: policyHash,
@@ -453,19 +467,27 @@ contract PrivacyManager is Ownable2Step, ReentrancyGuard {
     }
 
     /**
-     * @notice Point the jurisdiction policy at ComplianceRules' rule for
-     *         `token` (owner; a type 11 vote after the handover). Starts a new
+     * @notice Take the jurisdiction policy from `token`'s ComplianceRules rule
+     *         for it (owner; a type 11 vote after the handover). Starts a new
      *         jurisdiction epoch.
-     * @dev `rules` must answer jurisdictionRuleVersion (a pre-3.8
-     *      ComplianceRules is refused here, not at the first proof).
+     * @dev The token must be a contract answering compliance(), and that
+     *      ComplianceRules must answer jurisdictionRuleVersion (a pre-3.8 one
+     *      is refused here, not at the first proof).
      */
-    function setJurisdictionSource(address rules, address token) external onlyOwner {
-        if (rules.code.length == 0 || token == address(0)) revert InvalidJurisdictionSource();
+    function setPolicyToken(address token) external onlyOwner {
+        if (token.code.length == 0) revert InvalidPolicyToken();
+        address rules = IPolicyToken(token).compliance();
+        if (rules.code.length == 0) revert InvalidPolicyToken();
         IJurisdictionRuleSource(rules).jurisdictionRuleVersion(token);
-        complianceRules = IJurisdictionRuleSource(rules);
         policyToken = token;
-        emit JurisdictionSourceSet(rules, token);
+        emit PolicyTokenSet(token, rules);
         _bumpPolicy(JURISDICTION_ID);
+    }
+
+    /// @notice The ComplianceRules whose rule is the jurisdiction policy:
+    ///         policyToken.compliance() now (0 while no policy token is set).
+    function complianceRules() public view returns (address) {
+        return policyToken == address(0) ? address(0) : IPolicyToken(policyToken).compliance();
     }
 
     /**
@@ -483,19 +505,25 @@ contract PrivacyManager is Ownable2Step, ReentrancyGuard {
         _bumpPolicy(JURISDICTION_ID);
     }
 
-    /// @dev The verdict ComplianceRules applies to a holder of `isoCode` on
+    /// @dev The verdict `rules` applies to a holder of `isoCode` on
     ///      policyToken (default blocked list, then the token's rule).
-    function _countryAllowed(uint256 isoCode) private view returns (bool allowed) {
-        (allowed, ) = complianceRules.validateJurisdiction(policyToken, isoCode);
+    function _countryAllowed(IJurisdictionRuleSource rules, uint256 isoCode) private view returns (bool allowed) {
+        (allowed, ) = rules.validateJurisdiction(policyToken, isoCode);
+    }
+
+    /// @dev complianceRules() as the view slice (zero while no token is set).
+    function _source() private view returns (IJurisdictionRuleSource) {
+        return IJurisdictionRuleSource(complianceRules());
     }
 
     /// @notice Jurisdiction policy: the OR of the bits of the registered codes
-    ///         ComplianceRules allows on policyToken; 0 while no source is set.
+    ///         ComplianceRules allows on policyToken; 0 while no token is set.
     function allowedJurisdictionMask() public view returns (uint256 mask) {
-        if (address(complianceRules) == address(0)) return 0;
+        IJurisdictionRuleSource rules = _source();
+        if (address(rules) == address(0)) return 0;
         uint256 n = jurisdictionCodes.length;
         for (uint256 i = 0; i < n; i++) {
-            if (_countryAllowed(jurisdictionCodes[i])) mask |= 1 << i;
+            if (_countryAllowed(rules, jurisdictionCodes[i])) mask |= 1 << i;
         }
     }
 
@@ -520,20 +548,24 @@ contract PrivacyManager is Ownable2Step, ReentrancyGuard {
         }
     }
 
-    /// @notice The value a record must carry to be valid:
-    ///         keccak256(abi.encode(circuitId, currentPolicy(circuitId), v)),
-    ///         v = ComplianceRules.jurisdictionRuleVersion(policyToken) for the
-    ///         jurisdiction circuit (so a restored rule revives nothing), else 0.
+    /// @notice The value a record must carry to be valid, and the key of
+    ///         the nullifier reservation: keccak256(abi.encode(circuitId,
+    ///         policyEpoch, currentPolicy(circuitId), rules, v)), with rules =
+    ///         complianceRules() and v its jurisdictionRuleVersion(policyToken)
+    ///         for the jurisdiction circuit (so a restored rule revives
+    ///         nothing and a rule change frees the nullifier), else 0 and 0.
     function currentPolicyHash(bytes32 circuitId) public view returns (bytes32) {
         return _policyHash(circuitId, currentPolicy(circuitId));
     }
 
     function _policyHash(bytes32 circuitId, uint256[] memory policy) private view returns (bytes32) {
+        IJurisdictionRuleSource rules;
         uint256 version;
-        if (circuitId == JURISDICTION_ID && address(complianceRules) != address(0)) {
-            version = complianceRules.jurisdictionRuleVersion(policyToken);
+        if (circuitId == JURISDICTION_ID) {
+            rules = _source();
+            if (address(rules) != address(0)) version = rules.jurisdictionRuleVersion(policyToken);
         }
-        return keccak256(abi.encode(circuitId, policy, version));
+        return keccak256(abi.encode(circuitId, policyEpoch[circuitId], policy, rules, version));
     }
 
     /// @dev Jurisdiction and accreditation are set when non-zero; compliance
@@ -688,7 +720,8 @@ contract PrivacyManager is Ownable2Step, ReentrancyGuard {
 
     /// @notice Whether `isoCode` has a bit and ComplianceRules allows it now.
     function isJurisdictionActive(uint256 isoCode) external view returns (bool) {
-        return jurisdictionBit[isoCode] != 0 && address(complianceRules) != address(0) && _countryAllowed(isoCode);
+        IJurisdictionRuleSource rules = _source();
+        return jurisdictionBit[isoCode] != 0 && address(rules) != address(0) && _countryAllowed(rules, isoCode);
     }
 
     /// @notice Every registered code in bit order (codes[i] has bit 1 << i)
@@ -696,7 +729,8 @@ contract PrivacyManager is Ownable2Step, ReentrancyGuard {
     function getAllJurisdictions() external view returns (uint256[] memory codes, bool[] memory allowed) {
         codes = jurisdictionCodes;
         allowed = new bool[](codes.length);
-        if (address(complianceRules) == address(0)) return (codes, allowed);
-        for (uint256 i = 0; i < codes.length; i++) allowed[i] = _countryAllowed(codes[i]);
+        IJurisdictionRuleSource rules = _source();
+        if (address(rules) == address(0)) return (codes, allowed);
+        for (uint256 i = 0; i < codes.length; i++) allowed[i] = _countryAllowed(rules, codes[i]);
     }
 }

@@ -13,7 +13,9 @@
  * The attestation file holds the salt and the issuer's signature; neither
  * is ever printed. Before proving it refuses: a signature that does not
  * verify, an issuer key (Ax, Ay) PrivacyManager does not trust for the
- * circuit, a policy given explicitly that differs from the current one, and
+ * circuit, an attestation signed for another chain or PrivacyManager than
+ * the target (Task 3.8 M1), a policy given explicitly that differs from the
+ * current one, and
  * attributes that do not meet the policy. The proof is verified locally with
  * the circuit's verification key before it is printed. --submit (key: env
  * WHITELIST_WALLET_KEY, which must be the --wallet's) sends
@@ -47,6 +49,8 @@ const PM_ABI = [
   "error PolicyNotSet(bytes32 circuitId)",
   "error StalePolicy(bytes32 circuitId)",
   "error WalletBindingMismatch()",
+  "error WrongChainId(uint256 signal)",
+  "error WrongVerifierContext(uint256 signal)",
   "error AttestationNullifierBound(address wallet)",
   "error InvalidAttestationProof()",
 ];
@@ -141,6 +145,19 @@ async function proveAttestation({
   const w = walletOf(wallet);
   let p = policy === undefined ? undefined : parsePolicy(att.circuit, policy);
   if (privacyManager) {
+    // Task 3.8 M1: PrivacyManager refuses another deployment's attestation.
+    if (ethers.getAddress(privacyManager) !== att.privacyManager) {
+      throw new Error(
+        `the attestation is for PrivacyManager ${att.privacyManager}, not ${ethers.getAddress(privacyManager)}`,
+      );
+    }
+    const provider = runner && (runner.provider ?? runner);
+    const live = (await provider.getNetwork()).chainId;
+    if (live !== att.chainId) {
+      throw new Error(
+        `the attestation is for chain ${att.chainId}, not chain ${live}`,
+      );
+    }
     const chain = await readChainPolicy({
       circuit: att.circuit,
       Ax: att.Ax,
@@ -180,6 +197,8 @@ async function proveAttestation({
     S: att.S,
     Ax: att.Ax,
     Ay: att.Ay,
+    chainId: att.chainId,
+    verifierContext: att.verifierContext,
     walletBinding: w,
   };
   let r;
@@ -205,7 +224,14 @@ async function proveAttestation({
   }
   const proof = r.proof.map((x) => BigInt(x).toString());
   const signals = r.publicSignals.map((x) => BigInt(x).toString());
-  const expected = [att.Ax, att.Ay, ...p, BigInt(w)].map(String);
+  const expected = [
+    att.Ax,
+    att.Ay,
+    att.chainId,
+    att.verifierContext,
+    ...p,
+    BigInt(w),
+  ].map(String);
   if (proof.length !== 24 || signals.slice(1).join() !== expected.join()) {
     throw new Error("prover returned a malformed proof");
   }

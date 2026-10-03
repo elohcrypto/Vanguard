@@ -208,6 +208,8 @@ describe("ZK System Integration Tests", function () {
       );
       const att = await signAttestation({
         key: newAttestorKey(),
+        chainId: 31337,
+        privacyManager: "0x" + "11".repeat(20),
         circuit: "jurisdiction",
         identity: 12345n,
         mask: 1,
@@ -215,6 +217,7 @@ describe("ZK System Integration Tests", function () {
       const jurisdictionResult =
         await realProofGenerator.generateJurisdictionProof({
           ...att,
+          verifierContext: BigInt(att.privacyManager),
           mask: att.attributes[0],
           allowedMask: 15n,
           walletBinding: user1.address,

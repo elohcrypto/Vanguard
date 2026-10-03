@@ -86,10 +86,7 @@ export async function handoverFixture() {
   );
   // Task 3.8: the private jurisdiction policy is VSC's rule (the ceremony
   // refuses another source).
-  await privacyManager.setJurisdictionSource(
-    rulesAddr,
-    await token.getAddress(),
-  );
+  await privacyManager.setPolicyToken(await token.getAddress());
   const dynamicListManager = await deploy(
     "DynamicListManager",
     deployer.address,

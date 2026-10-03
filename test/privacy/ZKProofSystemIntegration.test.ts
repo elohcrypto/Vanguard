@@ -155,14 +155,9 @@ describe("🔐 Complete ZK Proof System Integration Tests", function () {
     });
 
     it("Should refuse a made-up jurisdiction attestation proof", async function () {
-      // [nullifier, Ax, Ay, allowedMask, walletBinding]
-      const publicSignals: [number, number, number, number, number] = [
-        mockNullifier,
-        1,
-        2,
-        15,
-        1,
-      ];
+      // [nullifier, Ax, Ay, chainId, verifierContext, allowedMask,
+      // walletBinding]
+      const publicSignals = [mockNullifier, 1, 2, 31337, 9, 15, 1];
       const result = await jurisdictionVerifier.verifyProof(
         mockPlonkProof,
         publicSignals,
@@ -172,14 +167,9 @@ describe("🔐 Complete ZK Proof System Integration Tests", function () {
     });
 
     it("Should refuse a made-up accreditation attestation proof", async function () {
-      // [nullifier, Ax, Ay, minimumAccreditation, walletBinding]
-      const publicSignals: [number, number, number, number, number] = [
-        mockNullifier,
-        1,
-        2,
-        100000,
-        1,
-      ];
+      // [nullifier, Ax, Ay, chainId, verifierContext, minimumAccreditation,
+      // walletBinding]
+      const publicSignals = [mockNullifier, 1, 2, 31337, 9, 100000, 1];
       const result = await accreditationVerifier.verifyProof(
         mockPlonkProof,
         publicSignals,
@@ -189,19 +179,22 @@ describe("🔐 Complete ZK Proof System Integration Tests", function () {
     });
 
     it("Should refuse a made-up compliance aggregation proof", async function () {
-      // [nullifier, Ax, Ay, minimum, wK, wA, wJ, wAcc, walletBinding]; the
-      // aggregate is never public (the old complianceLevel output is gone).
-      const publicSignals: [
-        number,
-        number,
-        number,
-        number,
-        number,
-        number,
-        number,
-        number,
-        number,
-      ] = [mockNullifier, 1, 2, 70, 25, 25, 25, 25, 1];
+      // [nullifier, Ax, Ay, chainId, verifierContext, minimum, wK, wA, wJ,
+      // wAcc, walletBinding]; the aggregate is never public (the old
+      // complianceLevel output is gone).
+      const publicSignals = [
+        mockNullifier,
+        1,
+        2,
+        31337,
+        9,
+        70,
+        25,
+        25,
+        25,
+        25,
+        1,
+      ];
       const result = await complianceVerifier.verifyProof(
         mockPlonkProof,
         publicSignals,
@@ -309,11 +302,10 @@ describe("🔐 Complete ZK Proof System Integration Tests", function () {
       const rules = await (
         await ethers.getContractFactory("ComplianceRules")
       ).deploy(admin.address, [], [643]);
-      const token = "0x" + "c5".repeat(20);
-      await privacyManager.setJurisdictionSource(
-        await rules.getAddress(),
-        token,
-      );
+      const token = await (
+        await ethers.getContractFactory("MockPolicyToken")
+      ).deploy(await rules.getAddress());
+      await privacyManager.setPolicyToken(await token.getAddress());
       await privacyManager.registerJurisdictionCode(840);
       await privacyManager.registerJurisdictionCode(643);
       expect(await privacyManager.getAllJurisdictions()).to.deep.equal([

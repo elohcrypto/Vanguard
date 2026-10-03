@@ -131,17 +131,21 @@ async function wireJurisdictionSource({
   const vsc = await token.getAddress();
   const owner = await pm.owner();
   const isOwner = same(owner, await pm.runner.getAddress());
-  if (
-    !same(await pm.complianceRules(), rulesAddr) ||
-    !same(await pm.policyToken(), vsc)
-  ) {
+  // Review 3.8 L2: PrivacyManager derives ComplianceRules from VSC
+  // (compliance()), so only the token is set and a Token vote is followed.
+  if (!same(await pm.policyToken(), vsc)) {
     if (!isOwner) {
       log(
-        `   ⚠️  PrivacyManager's jurisdiction source is not ComplianceRules ${rulesAddr} for VSC: the owner (${owner}) sets it by a PrivacyParameters vote (setJurisdictionSource)`,
+        `   ⚠️  PrivacyManager's jurisdiction policy token is not VSC ${vsc}: the owner (${owner}) sets it by a PrivacyParameters vote (setPolicyToken)`,
       );
       return null;
     }
-    await (await pm.setJurisdictionSource(rulesAddr, vsc)).wait();
+    await (await pm.setPolicyToken(vsc)).wait();
+  }
+  if (!same(await pm.complianceRules(), rulesAddr)) {
+    log(
+      `   ⚠️  VSC's compliance is ${await pm.complianceRules()}, not ComplianceRules ${rulesAddr}`,
+    );
   }
   const [, allowed] = await rules.getJurisdictionRule(vsc);
   for (const code of allowed) {
@@ -197,9 +201,13 @@ async function runAttestationFlow({
   log(`   📜 Policy on PrivacyManager: ${await describePolicy(pm, circuit)}`);
 
   // 1. The issuer signs (off chain); the attestation goes to the investor.
+  // Task 3.8 M1: signed for this chain and this PrivacyManager only.
+  const { chainId } = await pm.runner.provider.getNetwork();
   const attestation = await signAttestation({
     key: demoAttestorKey(state),
     circuit,
+    chainId,
+    privacyManager: pm.target,
     identity,
     ...attributes,
   });

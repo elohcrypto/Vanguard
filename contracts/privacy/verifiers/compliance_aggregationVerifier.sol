@@ -40,25 +40,25 @@ contract ComplianceAggregationVerifier {
     
     // Verification Key data
     uint32 constant n         = 32768;
-    uint16 constant nPublic   = 9;
-    uint16 constant nLagrange = 9;
+    uint16 constant nPublic   = 11;
+    uint16 constant nLagrange = 11;
     
-    uint256 constant Qmx  = 13511900746463512677390982140658514414773737811852251886340975923864942148681;
-    uint256 constant Qmy  = 1514727697827692292842879113246094224874162300426649794847515893649914322875;
-    uint256 constant Qlx  = 19253007132099405887906336302502199070726003063784717634733556129495661899481;
-    uint256 constant Qly  = 13031612422683577918791301224051310890638044845054871554545196957811413335043;
-    uint256 constant Qrx  = 20048948340542294430125404935282449901915407986673108648657461579879045571411;
-    uint256 constant Qry  = 11546179020574045179783747360956338837789098906649944611614571361803705073;
-    uint256 constant Qox  = 10287747233845895330294251530744592100750389352425744644350957366905315882999;
-    uint256 constant Qoy  = 19775401989232912110778508599806381716627166215444875879367462251687584822012;
-    uint256 constant Qcx  = 10184261018251134611637124555950911552415607441207286815249667726329584452177;
-    uint256 constant Qcy  = 8044511421661688111893391976205348332512064929661207437781578298125163272005;
-    uint256 constant S1x  = 3962566827616796789520299092503580063975203586341186382925113337594358205855;
-    uint256 constant S1y  = 5528293732962831529891013288348347364535984569072887563367386788190595714676;
-    uint256 constant S2x  = 3724011960140465737968031610187149799318519582666287617404807191557512381675;
-    uint256 constant S2y  = 16540893262391908906967718382954741667263636186555508720468823057939630316273;
-    uint256 constant S3x  = 4640260438106906540703559419674476731337490686760282925653285772349841200015;
-    uint256 constant S3y  = 11940651496389597863552675235792858621215155579878898853947885444067905079186;
+    uint256 constant Qmx  = 8700532474726774764260792626672199687022017321572677306704980525684170677808;
+    uint256 constant Qmy  = 16171365517081272062956218075710855858913189982432820506989930250357458176577;
+    uint256 constant Qlx  = 15591332088886344763500271906529281948296541481921202670156162774627903758149;
+    uint256 constant Qly  = 21265097284659617197614540245516281564942099561796848841834935347137129778665;
+    uint256 constant Qrx  = 16354500850942221106603158144614517810412715929219713428790385981422930075396;
+    uint256 constant Qry  = 11801155387306818252964019615401784184799895026822797235058032908060715491052;
+    uint256 constant Qox  = 7370605615286375493023888803940445308087894905112766166030026121200371287613;
+    uint256 constant Qoy  = 12994978457286336761969843189214290773924531767888544508418687680739768038139;
+    uint256 constant Qcx  = 6746279478894592281644248530016661675610558230404456739732202883544295561331;
+    uint256 constant Qcy  = 11441042145974912260812475400981844746252207671589842675849863476312824107042;
+    uint256 constant S1x  = 4105882347399721666103656114731659944166926253922943958048818896737899740187;
+    uint256 constant S1y  = 4710616139202355589654247118871304796726279982709334511006807687641848824278;
+    uint256 constant S2x  = 6143342722772853700145604401103261917451625407053350720638436274223113957850;
+    uint256 constant S2y  = 11165659965206814546332421488976416997187919580917592548238508689526213949411;
+    uint256 constant S3x  = 19568531477640465557874141417419772174978642155796515269525682947673359364460;
+    uint256 constant S3y  = 21573017720963220877583416516116993157081957127120441431454870149907674586921;
     uint256 constant k1   = 2;
     uint256 constant k2   = 3;
     uint256 constant X2x1 = 21831381940315734285607113342023901060522397560371972897001948545212302161822;
@@ -130,11 +130,15 @@ contract ComplianceAggregationVerifier {
     
     uint16 constant pEval_l9 = 1056;
     
+    uint16 constant pEval_l10 = 1088;
+    
+    uint16 constant pEval_l11 = 1120;
     
     
-    uint16 constant lastMem = 1088;
+    
+    uint16 constant lastMem = 1152;
 
-    function verifyProof(uint256[24] calldata _proof, uint256[9] calldata _pubSignals) public view returns (bool) {
+    function verifyProof(uint256[24] calldata _proof, uint256[11] calldata _pubSignals) public view returns (bool) {
         assembly {
             /////////
             // Computes the inverse using the extended euclidean algorithm
@@ -312,14 +316,18 @@ contract ComplianceAggregationVerifier {
                 
                 mstore(add(mIn, 768), calldataload(add(pPublic, 256)))
                 
-                mstore(add(mIn, 800 ), calldataload(pA))
-                mstore(add(mIn, 832 ), calldataload(add(pA, 32)))
-                mstore(add(mIn, 864 ), calldataload(pB))
-                mstore(add(mIn, 896 ), calldataload(add(pB, 32)))
-                mstore(add(mIn, 928 ), calldataload(pC))
-                mstore(add(mIn, 960 ), calldataload(add(pC, 32)))
+                mstore(add(mIn, 800), calldataload(add(pPublic, 288)))
                 
-                beta := mod(keccak256(mIn, 992), q) 
+                mstore(add(mIn, 832), calldataload(add(pPublic, 320)))
+                
+                mstore(add(mIn, 864 ), calldataload(pA))
+                mstore(add(mIn, 896 ), calldataload(add(pA, 32)))
+                mstore(add(mIn, 928 ), calldataload(pB))
+                mstore(add(mIn, 960 ), calldataload(add(pB, 32)))
+                mstore(add(mIn, 992 ), calldataload(pC))
+                mstore(add(mIn, 1024 ), calldataload(add(pC, 32)))
+                
+                beta := mod(keccak256(mIn, 1056), q) 
                 mstore(add(pMem, pBeta), beta)
 
                 // challenges.gamma
@@ -609,9 +617,51 @@ contract ComplianceAggregationVerifier {
                     )
                 )
                 
+                w := mulmod(w, w1, q)
                 
                 
-                inverseArray(add(pMem, pZhInv), 10 )
+                mstore(
+                    add(pMem, pEval_l10), 
+                    mulmod(
+                        n, 
+                        mod(
+                            add(
+                                sub(
+                                    mload(add(pMem, pXi)), 
+                                    w
+                                ), 
+                                q
+                            ),
+                            q
+                        ), 
+                        q
+                    )
+                )
+                
+                w := mulmod(w, w1, q)
+                
+                
+                mstore(
+                    add(pMem, pEval_l11), 
+                    mulmod(
+                        n, 
+                        mod(
+                            add(
+                                sub(
+                                    mload(add(pMem, pXi)), 
+                                    w
+                                ), 
+                                q
+                            ),
+                            q
+                        ), 
+                        q
+                    )
+                )
+                
+                
+                
+                inverseArray(add(pMem, pZhInv), 12 )
                 
                 let zh := mload(add(pMem, pZh))
                 w := 1
@@ -771,6 +821,42 @@ contract ComplianceAggregationVerifier {
                 )
                 
                 
+                w := mulmod(w, w1, q)
+                
+                
+                
+                mstore(
+                    add(pMem, pEval_l10), 
+                    mulmod(
+                        w,
+                        mulmod(
+                            mload(add(pMem, pEval_l10)),
+                            zh,
+                            q
+                        ),
+                        q
+                    )
+                )
+                
+                
+                w := mulmod(w, w1, q)
+                
+                
+                
+                mstore(
+                    add(pMem, pEval_l11), 
+                    mulmod(
+                        w,
+                        mulmod(
+                            mload(add(pMem, pEval_l11)),
+                            zh,
+                            q
+                        ),
+                        q
+                    )
+                )
+                
+                
                 
 
 
@@ -907,6 +993,36 @@ contract ComplianceAggregationVerifier {
                             mulmod(
                                 mload(add(pMem, pEval_l9)),
                                 calldataload(add(pPub, 256)),
+                                q
+                            )
+                        ),
+                        q
+                    ),
+                    q
+                )
+                 
+                pl := mod(
+                    add(
+                        sub(
+                            pl,  
+                            mulmod(
+                                mload(add(pMem, pEval_l10)),
+                                calldataload(add(pPub, 288)),
+                                q
+                            )
+                        ),
+                        q
+                    ),
+                    q
+                )
+                 
+                pl := mod(
+                    add(
+                        sub(
+                            pl,  
+                            mulmod(
+                                mload(add(pMem, pEval_l11)),
+                                calldataload(add(pPub, 320)),
                                 q
                             )
                         ),

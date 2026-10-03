@@ -298,6 +298,8 @@ class RealProofGenerator {
       "S",
       "Ax",
       "Ay",
+      "chainId",
+      "verifierContext",
       "walletBinding",
     ].filter((k) => params[k] === undefined || params[k] === null);
     if (missing.length) {
@@ -307,6 +309,13 @@ class RealProofGenerator {
     }
     if (BigInt(params.walletBinding) === 0n) {
       throw new Error("walletBinding is required and must be non-zero");
+    }
+    // Task 3.8 M1: the attestation names its chain and PrivacyManager.
+    if (
+      BigInt(params.chainId) === 0n ||
+      BigInt(params.verifierContext) === 0n
+    ) {
+      throw new Error("chainId and verifierContext must be non-zero");
     }
     const str = (v) => BigInt(v).toString();
     const input = {
@@ -318,6 +327,8 @@ class RealProofGenerator {
       S: str(params.S),
       Ax: str(params.Ax),
       Ay: str(params.Ay),
+      chainId: str(params.chainId),
+      verifierContext: str(params.verifierContext),
       ...policyInput,
       walletBinding: str(params.walletBinding),
     };
@@ -355,11 +366,12 @@ class RealProofGenerator {
   /**
    * Generate a PLONK jurisdiction attestation proof.
    * @param {Object} params - an issuer attestation (scripts/zk/attest.js):
-   *        identity, mask (the country's jurisdiction bit), salt, R8x, R8y, S, Ax, Ay;
-   *        plus allowedMask (PrivacyManager.allowedJurisdictionMask) and
-   *        walletBinding (the submitting wallet)
-   * @returns {Object} { proof, publicSignals: [nullifier, Ax, Ay,
-   *          allowedMask, walletBinding], rawProof, inputs }
+   *        identity, mask (the country's jurisdiction bit), salt, R8x, R8y, S, Ax, Ay,
+   *        chainId and verifierContext (the PrivacyManager address it was
+   *        signed for); plus allowedMask (PrivacyManager.allowedJurisdictionMask)
+   *        and walletBinding (the submitting wallet)
+   * @returns {Object} { proof, publicSignals: [nullifier, Ax, Ay, chainId,
+   *          verifierContext, allowedMask, walletBinding], rawProof, inputs }
    */
   async generateJurisdictionProof(params) {
     console.log("\n🔐 Generating Jurisdiction Attestation Proof (PLONK)...");
@@ -380,9 +392,11 @@ class RealProofGenerator {
   /**
    * Generate a PLONK accreditation attestation proof.
    * @param {Object} params - an issuer attestation: identity, amount, salt,
-   *        R8x, R8y, S, Ax, Ay; plus minimumAccreditation and walletBinding
-   * @returns {Object} { proof, publicSignals: [nullifier, Ax, Ay,
-   *          minimumAccreditation, walletBinding], rawProof, inputs }
+   *        R8x, R8y, S, Ax, Ay, chainId, verifierContext; plus
+   *        minimumAccreditation and walletBinding
+   * @returns {Object} { proof, publicSignals: [nullifier, Ax, Ay, chainId,
+   *          verifierContext, minimumAccreditation, walletBinding], rawProof,
+   *          inputs }
    */
   async generateAccreditationProof(params) {
     console.log("\n🔐 Generating Accreditation Attestation Proof (PLONK)...");
@@ -404,10 +418,11 @@ class RealProofGenerator {
    * Generate a PLONK compliance-aggregation attestation proof.
    * @param {Object} params - an issuer attestation: identity, scores [kyc,
    *        aml, jurisdiction, accreditation] (0..100), salt, R8x, R8y, S, Ax,
-   *        Ay; plus minimum, weights [wK, wA, wJ, wAcc] (sum 100) and
-   *        walletBinding
-   * @returns {Object} { proof, publicSignals: [nullifier, Ax, Ay, minimum,
-   *          wK, wA, wJ, wAcc, walletBinding], rawProof, inputs }
+   *        Ay, chainId, verifierContext; plus minimum, weights [wK, wA, wJ,
+   *        wAcc] (sum 100) and walletBinding
+   * @returns {Object} { proof, publicSignals: [nullifier, Ax, Ay, chainId,
+   *          verifierContext, minimum, wK, wA, wJ, wAcc, walletBinding],
+   *          rawProof, inputs }
    */
   async generateComplianceProof(params) {
     console.log(

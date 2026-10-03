@@ -12,9 +12,15 @@ include "circomlib/circuits/eddsaposeidon.circom";
  *      issuer keys and the policy.
  *
  * AttestationSignature(n): the message is
- *     M = Poseidon(domain, identity, attributes[0..n-1], salt)
+ *     M = Poseidon(domain, chainId, verifierContext, identity,
+ *                  attributes[0..n-1], salt)
  * and (R8x, R8y, S) must be a valid signature of M under the PUBLIC key
- * (Ax, Ay). `domain` is a per-circuit constant, so an attestation signed for
+ * (Ax, Ay). chainId and verifierContext (the PrivacyManager address as a
+ * field element) are public inputs PrivacyManager compares to block.chainid
+ * and itself (Task 3.8 review M1): an attestation is valid for one chain and
+ * one PrivacyManager only, so a second deployment trusting the same key,
+ * whose jurisdiction bits may be assigned in another order, cannot accept
+ * it. `domain` is a per-circuit constant, so an attestation signed for
  * one circuit never verifies in another (an accreditation amount of 4 must
  * not pass as the jurisdiction mask 4 when one issuer key is trusted for
  * both). enabled is the constant 1: the check cannot be switched off. R8 is
@@ -27,6 +33,8 @@ include "circomlib/circuits/eddsaposeidon.circom";
  */
 template AttestationSignature(n) {
     signal input domain;
+    signal input chainId;
+    signal input verifierContext;
     signal input identity;
     signal input attributes[n];
     signal input salt;
@@ -36,13 +44,15 @@ template AttestationSignature(n) {
     signal input R8y;
     signal input S;
 
-    component message = Poseidon(n + 3);
+    component message = Poseidon(n + 5);
     message.inputs[0] <== domain;
-    message.inputs[1] <== identity;
+    message.inputs[1] <== chainId;
+    message.inputs[2] <== verifierContext;
+    message.inputs[3] <== identity;
     for (var i = 0; i < n; i++) {
-        message.inputs[2 + i] <== attributes[i];
+        message.inputs[4 + i] <== attributes[i];
     }
-    message.inputs[n + 2] <== salt;
+    message.inputs[n + 4] <== salt;
 
     component r8OnCurve = BabyCheck();
     r8OnCurve.x <== R8x;

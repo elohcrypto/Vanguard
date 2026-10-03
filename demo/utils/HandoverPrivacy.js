@@ -108,31 +108,25 @@ async function preflightPrivacy(o) {
 }
 
 /**
- * Task 3.8: the jurisdiction set of the private proofs is ComplianceRules'
- * rule for VSC, so PrivacyManager must read the ceremony's ComplianceRules
- * with VSC as the policy token; another one would let a contract governance
- * does not hold decide which countries the private path admits.
+ * Task 3.8: the jurisdiction set of the private proofs is the rule VSC's
+ * ComplianceRules (VSC.compliance(), derived on chain, review L2) holds for
+ * VSC, so PrivacyManager's policy token must be VSC; another token would
+ * let a contract governance does not hold decide which countries the
+ * private path admits.
  */
 async function preflightJurisdictionSource(o) {
   const pm = o.privacyManager;
   const pmAddr = await addrOf(pm);
-  const src = await pm.complianceRules().catch(async (e) => {
+  const policyToken = await pm.policyToken().catch(async (e) => {
     if (e.code !== "CALL_EXCEPTION" && !/revert/i.test(e.message)) throw e;
     fail(
-      `PrivacyManager ${pmAddr} has no complianceRules() (predates Task 3.8): redeploy it before the ceremony`,
+      `PrivacyManager ${pmAddr} has no policyToken() (predates Task 3.8): redeploy it before the ceremony`,
     );
   });
-  const rules = await addrOf(o.complianceRules);
-  if (!same(src, rules)) {
-    fail(
-      `PrivacyManager ${pmAddr} reads its jurisdiction policy from ComplianceRules ${src}, not the ceremony's ${rules}: setJurisdictionSource before the ceremony`,
-    );
-  }
   const vsc = await addrOf(o.token);
-  const policyToken = await pm.policyToken();
   if (!same(policyToken, vsc)) {
     fail(
-      `PrivacyManager ${pmAddr} takes its jurisdiction policy from token ${policyToken}, not VSC ${vsc}: setJurisdictionSource before the ceremony`,
+      `PrivacyManager ${pmAddr} takes its jurisdiction policy from token ${policyToken}, not VSC ${vsc}: setPolicyToken before the ceremony`,
     );
   }
 }
@@ -188,14 +182,14 @@ async function privacyLines(o, dAddr, ops, govAddr, warnings = []) {
     ]);
     // Task 3.8: the one jurisdiction source.
     const rules = await addrOf(o.complianceRules);
-    lines.push([
-      `PrivacyManager jurisdiction source: ComplianceRules ${rules}`,
-      same(await c.complianceRules(), rules),
-    ]);
     const vsc = await addrOf(o.token);
     lines.push([
       `PrivacyManager jurisdiction policy token: VSC ${vsc}`,
       same(await c.policyToken(), vsc),
+    ]);
+    lines.push([
+      `PrivacyManager jurisdiction source (VSC.compliance()): ComplianceRules ${rules}`,
+      same(await c.complianceRules(), rules),
     ]);
     const [codes] = await c.getAllJurisdictions();
     lines.push([

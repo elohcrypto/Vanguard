@@ -228,6 +228,8 @@ describe("RealProofGenerator - All 5 Proof Types", function () {
         S: a.S,
         Ax: a.Ax,
         Ay: a.Ay,
+        chainId: a.chainId,
+        verifierContext: BigInt(a.privacyManager),
         walletBinding: owner.address,
       });
 
@@ -240,6 +242,8 @@ describe("RealProofGenerator - All 5 Proof Types", function () {
       it("should generate a valid jurisdiction proof", async function () {
         const a = await signAttestation({
           key,
+          chainId: 31337,
+          privacyManager: "0x" + "11".repeat(20),
           circuit: "jurisdiction",
           identity,
           mask: 4,
@@ -249,13 +253,16 @@ describe("RealProofGenerator - All 5 Proof Types", function () {
           mask: a.attributes[0],
           allowedMask: 15n,
         });
-        // [nullifier, Ax, Ay, allowedMask, walletBinding]
+        // [nullifier, Ax, Ay, chainId, verifierContext, allowedMask,
+        // walletBinding]
         expect(result.proof).to.have.lengthOf(24);
-        expect(result.publicSignals).to.have.lengthOf(5);
+        expect(result.publicSignals).to.have.lengthOf(7);
         expect(result.publicSignals[0]).to.equal(result.inputs.nullifier);
         expect(result.publicSignals.slice(1)).to.deep.equal([
           a.Ax,
           a.Ay,
+          "31337",
+          BigInt(a.privacyManager).toString(),
           "15",
           BigInt(owner.address).toString(),
         ]);
@@ -276,6 +283,8 @@ describe("RealProofGenerator - All 5 Proof Types", function () {
       it("should generate a valid accreditation proof", async function () {
         const a = await signAttestation({
           key,
+          chainId: 31337,
+          privacyManager: "0x" + "11".repeat(20),
           circuit: "accreditation",
           identity,
           amount: 250000,
@@ -285,7 +294,7 @@ describe("RealProofGenerator - All 5 Proof Types", function () {
           amount: a.attributes[0],
           minimumAccreditation: 100000n,
         });
-        expect(result.publicSignals).to.have.lengthOf(5);
+        expect(result.publicSignals).to.have.lengthOf(7);
         expect(
           await real.verifyAccreditationProof.staticCall(
             result.proof,
@@ -306,6 +315,8 @@ describe("RealProofGenerator - All 5 Proof Types", function () {
       it("should generate a valid compliance proof", async function () {
         const a = await signAttestation({
           key,
+          chainId: 31337,
+          privacyManager: "0x" + "11".repeat(20),
           circuit: "compliance",
           identity,
           scores: [88, 88, 88, 88],
@@ -316,10 +327,10 @@ describe("RealProofGenerator - All 5 Proof Types", function () {
           minimum: 50n,
           weights: [30n, 30n, 20n, 20n],
         });
-        // [nullifier, Ax, Ay, minimum, wK, wA, wJ, wAcc, walletBinding]: the
-        // aggregate (88) is not among them.
-        expect(result.publicSignals).to.have.lengthOf(9);
-        expect(result.publicSignals.slice(3, 8)).to.deep.equal([
+        // [nullifier, Ax, Ay, chainId, verifierContext, minimum, wK, wA, wJ,
+        // wAcc, walletBinding]: the aggregate (88) is not among them.
+        expect(result.publicSignals).to.have.lengthOf(11);
+        expect(result.publicSignals.slice(5, 10)).to.deep.equal([
           "50",
           "30",
           "30",
@@ -346,6 +357,8 @@ describe("RealProofGenerator - All 5 Proof Types", function () {
       it("should refuse attributes below the policy before proving", async function () {
         const j = await signAttestation({
           key,
+          chainId: 31337,
+          privacyManager: "0x" + "11".repeat(20),
           circuit: "jurisdiction",
           identity,
           mask: 16,
@@ -359,6 +372,8 @@ describe("RealProofGenerator - All 5 Proof Types", function () {
         ).to.be.rejectedWith("not in allowedMask");
         const c = await signAttestation({
           key,
+          chainId: 31337,
+          privacyManager: "0x" + "11".repeat(20),
           circuit: "compliance",
           identity,
           scores: [50, 50, 50, 50],
@@ -376,6 +391,8 @@ describe("RealProofGenerator - All 5 Proof Types", function () {
       it("should require the attestation fields and the wallet", async function () {
         const a = await signAttestation({
           key,
+          chainId: 31337,
+          privacyManager: "0x" + "11".repeat(20),
           circuit: "accreditation",
           identity,
           amount: 5,

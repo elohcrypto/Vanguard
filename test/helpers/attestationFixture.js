@@ -30,22 +30,25 @@ const ROOT = path.join(__dirname, "../..");
 const IN_SIGNATURE =
   /Assert Failed\. Error in template (ForceEqualIfEnabled|EdDSAPoseidonVerifier|BabyCheck)/;
 
-/** The token whose ComplianceRules rule is the jurisdiction policy. */
-const JURISDICTION_TOKEN = "0x" + "c5".repeat(20);
-
 /**
- * Task 3.8: a ComplianceRules (empty default rule: every code allowed) as
- * `pm`'s jurisdiction source for JURISDICTION_TOKEN, and `codes` registered
- * in order (the n-th gets bit 1 << n). Default US, DE, GB, CA: mask 15.
+ * Task 3.8: a ComplianceRules (empty default rule: every code allowed)
+ * behind a policy token (MockPolicyToken.compliance()) as `pm`'s
+ * jurisdiction source, and `codes` registered in order (the n-th gets bit
+ * 1 << n). Default US, DE, GB, CA: mask 15. `token` is the address,
+ * `policyToken` the contract (setCompliance models a Token vote).
  */
 async function wireJurisdictionSource(pm, codes = [840, 276, 826, 124]) {
   const [owner] = await ethers.getSigners();
   const rules = await (
     await ethers.getContractFactory("ComplianceRules")
   ).deploy(owner.address, [], []);
-  await pm.setJurisdictionSource(await rules.getAddress(), JURISDICTION_TOKEN);
+  const policyToken = await (
+    await ethers.getContractFactory("MockPolicyToken")
+  ).deploy(await rules.getAddress());
+  const token = await policyToken.getAddress();
+  await pm.setPolicyToken(token);
   for (const c of codes) await pm.registerJurisdictionCode(c);
-  return { rules, token: JURISDICTION_TOKEN };
+  return { rules, token, policyToken };
 }
 
 /**
@@ -81,8 +84,16 @@ async function deployAttestationFixture(circuit) {
     attestor: attestorId(Ax, Ay),
     gen,
     paths: gen.getCircuitPaths(CIRCUITS[circuit].build),
-    sign: (attrs, k = key) =>
-      signAttestation({ key: k, circuit, identity: 0xa11ce, ...attrs }),
+    // Task 3.8 M1: signed for this chain and this PrivacyManager.
+    sign: (attrs, k = key, target = pm.target) =>
+      signAttestation({
+        key: k,
+        circuit,
+        chainId: 31337,
+        privacyManager: target,
+        identity: 0xa11ce,
+        ...attrs,
+      }),
     prove: (attestation, wallet) =>
       proveAttestation({
         attestation,
@@ -104,6 +115,8 @@ function circuitInput(att, policy, wallet, overrides = {}) {
     S: att.S,
     Ax: att.Ax,
     Ay: att.Ay,
+    chainId: String(att.chainId),
+    verifierContext: BigInt(att.privacyManager).toString(),
     walletBinding: BigInt(wallet).toString(),
   };
   const p = policy.map(String);
@@ -241,7 +254,6 @@ async function expectTamperedRefused(zk, route, r) {
 module.exports = {
   Q,
   IN_SIGNATURE,
-  JURISDICTION_TOKEN,
   wireJurisdictionSource,
   deployAttestationFixture,
   circuitInput,

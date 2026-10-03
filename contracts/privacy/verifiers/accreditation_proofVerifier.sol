@@ -40,25 +40,25 @@ contract AccreditationProofVerifier {
     
     // Verification Key data
     uint32 constant n         = 32768;
-    uint16 constant nPublic   = 5;
-    uint16 constant nLagrange = 5;
+    uint16 constant nPublic   = 7;
+    uint16 constant nLagrange = 7;
     
-    uint256 constant Qmx  = 20820162976702330646400795234175026385151530374148828318768967274274125509451;
-    uint256 constant Qmy  = 3565367185460908530496332543977204189936937376404304692125036353947238720211;
-    uint256 constant Qlx  = 8129889603344923654980222974564092696755909118732795232841103315422434412945;
-    uint256 constant Qly  = 20092726681768731950823613180059069722152998424311107899059983350714222036933;
-    uint256 constant Qrx  = 21130542785014110307333268129525446041105873406146012595817024683555669953451;
-    uint256 constant Qry  = 17760964194439089806303843370235201170889161449728613666814720554189885811466;
-    uint256 constant Qox  = 4979106670079700813514643572240450243074452799998319887045216520405764288872;
-    uint256 constant Qoy  = 18726633440179138475851182653074332379021413668333983964538741705358048549612;
-    uint256 constant Qcx  = 4086591174369055996639736671027560851135410076244713280052909168559588699418;
-    uint256 constant Qcy  = 19331971266888090971062822377943488385389305708932786757570015504113867695985;
-    uint256 constant S1x  = 17540837798423798461028362538750797649896363005888807892079629314566331312575;
-    uint256 constant S1y  = 7733567401357136679049290522266929590578129007220007390644494307920372767612;
-    uint256 constant S2x  = 18466344204328567299707511606383884439717287750416415430334062972844738385709;
-    uint256 constant S2y  = 18144901647457996439228101787078512478345216096519827966824477539245123510887;
-    uint256 constant S3x  = 14540778837760437061883412166450620226696581455617462883500880647676654282412;
-    uint256 constant S3y  = 16753834941193710873105506521832146216627945973534395544031374559567103618852;
+    uint256 constant Qmx  = 2212870844461814477597188184634069071178505017945495924032193694893993256343;
+    uint256 constant Qmy  = 20381559217399786996346994178417013067984105400232844274472750716113855236226;
+    uint256 constant Qlx  = 6205884348903965565872161900593537464873207241957795406863661041976302401261;
+    uint256 constant Qly  = 18006492900613028164404009949801158617159835058597006911191136663307197196371;
+    uint256 constant Qrx  = 6048990022660308273881446949687358692094327990209075768122623943496230891677;
+    uint256 constant Qry  = 7999382628348186051175425097509184209282479065330502362855524246149629000562;
+    uint256 constant Qox  = 5439089780580278643489407395462668786041703403151920204442497234150104019871;
+    uint256 constant Qoy  = 18999172956076219830074473851843219576092211323038705835090751676958042565297;
+    uint256 constant Qcx  = 18081256181965862973663120118804121636683721938685339067617792060260085892632;
+    uint256 constant Qcy  = 12640505626525931593761676702136546812980338198143783691910799362837894247256;
+    uint256 constant S1x  = 5250235140712211071958936700857642995544200413696714798795656323116091675670;
+    uint256 constant S1y  = 6109049685162898590700982389308426368689211030917856486670437222374008131583;
+    uint256 constant S2x  = 16374789496599426200407925673615503646363862180123257814766450417734903700115;
+    uint256 constant S2y  = 6986478240410032564215466282296214590636071144429913733430291936093235549365;
+    uint256 constant S3x  = 10163922230369856198190270079937071908883726508647975572628022994000715100695;
+    uint256 constant S3y  = 2151370947779451273287315104931248462492717553969709204688712446772051342597;
     uint256 constant k1   = 2;
     uint256 constant k2   = 3;
     uint256 constant X2x1 = 21831381940315734285607113342023901060522397560371972897001948545212302161822;
@@ -122,11 +122,15 @@ contract AccreditationProofVerifier {
     
     uint16 constant pEval_l5 = 928;
     
+    uint16 constant pEval_l6 = 960;
+    
+    uint16 constant pEval_l7 = 992;
     
     
-    uint16 constant lastMem = 960;
+    
+    uint16 constant lastMem = 1024;
 
-    function verifyProof(uint256[24] calldata _proof, uint256[5] calldata _pubSignals) public view returns (bool) {
+    function verifyProof(uint256[24] calldata _proof, uint256[7] calldata _pubSignals) public view returns (bool) {
         assembly {
             /////////
             // Computes the inverse using the extended euclidean algorithm
@@ -296,14 +300,18 @@ contract AccreditationProofVerifier {
                 
                 mstore(add(mIn, 640), calldataload(add(pPublic, 128)))
                 
-                mstore(add(mIn, 672 ), calldataload(pA))
-                mstore(add(mIn, 704 ), calldataload(add(pA, 32)))
-                mstore(add(mIn, 736 ), calldataload(pB))
-                mstore(add(mIn, 768 ), calldataload(add(pB, 32)))
-                mstore(add(mIn, 800 ), calldataload(pC))
-                mstore(add(mIn, 832 ), calldataload(add(pC, 32)))
+                mstore(add(mIn, 672), calldataload(add(pPublic, 160)))
                 
-                beta := mod(keccak256(mIn, 864), q) 
+                mstore(add(mIn, 704), calldataload(add(pPublic, 192)))
+                
+                mstore(add(mIn, 736 ), calldataload(pA))
+                mstore(add(mIn, 768 ), calldataload(add(pA, 32)))
+                mstore(add(mIn, 800 ), calldataload(pB))
+                mstore(add(mIn, 832 ), calldataload(add(pB, 32)))
+                mstore(add(mIn, 864 ), calldataload(pC))
+                mstore(add(mIn, 896 ), calldataload(add(pC, 32)))
+                
+                beta := mod(keccak256(mIn, 928), q) 
                 mstore(add(pMem, pBeta), beta)
 
                 // challenges.gamma
@@ -509,9 +517,51 @@ contract AccreditationProofVerifier {
                     )
                 )
                 
+                w := mulmod(w, w1, q)
                 
                 
-                inverseArray(add(pMem, pZhInv), 6 )
+                mstore(
+                    add(pMem, pEval_l6), 
+                    mulmod(
+                        n, 
+                        mod(
+                            add(
+                                sub(
+                                    mload(add(pMem, pXi)), 
+                                    w
+                                ), 
+                                q
+                            ),
+                            q
+                        ), 
+                        q
+                    )
+                )
+                
+                w := mulmod(w, w1, q)
+                
+                
+                mstore(
+                    add(pMem, pEval_l7), 
+                    mulmod(
+                        n, 
+                        mod(
+                            add(
+                                sub(
+                                    mload(add(pMem, pXi)), 
+                                    w
+                                ), 
+                                q
+                            ),
+                            q
+                        ), 
+                        q
+                    )
+                )
+                
+                
+                
+                inverseArray(add(pMem, pZhInv), 8 )
                 
                 let zh := mload(add(pMem, pZh))
                 w := 1
@@ -599,6 +649,42 @@ contract AccreditationProofVerifier {
                 )
                 
                 
+                w := mulmod(w, w1, q)
+                
+                
+                
+                mstore(
+                    add(pMem, pEval_l6), 
+                    mulmod(
+                        w,
+                        mulmod(
+                            mload(add(pMem, pEval_l6)),
+                            zh,
+                            q
+                        ),
+                        q
+                    )
+                )
+                
+                
+                w := mulmod(w, w1, q)
+                
+                
+                
+                mstore(
+                    add(pMem, pEval_l7), 
+                    mulmod(
+                        w,
+                        mulmod(
+                            mload(add(pMem, pEval_l7)),
+                            zh,
+                            q
+                        ),
+                        q
+                    )
+                )
+                
+                
                 
 
 
@@ -675,6 +761,36 @@ contract AccreditationProofVerifier {
                             mulmod(
                                 mload(add(pMem, pEval_l5)),
                                 calldataload(add(pPub, 128)),
+                                q
+                            )
+                        ),
+                        q
+                    ),
+                    q
+                )
+                 
+                pl := mod(
+                    add(
+                        sub(
+                            pl,  
+                            mulmod(
+                                mload(add(pMem, pEval_l6)),
+                                calldataload(add(pPub, 160)),
+                                q
+                            )
+                        ),
+                        q
+                    ),
+                    q
+                )
+                 
+                pl := mod(
+                    add(
+                        sub(
+                            pl,  
+                            mulmod(
+                                mload(add(pMem, pEval_l7)),
+                                calldataload(add(pPub, 192)),
                                 q
                             )
                         ),
