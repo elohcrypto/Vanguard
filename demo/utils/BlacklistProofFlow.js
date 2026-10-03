@@ -91,7 +91,9 @@ async function runBlacklistProofFlow({ state, generator, log = console.log }) {
   const user = member.signer;
   log(`\n👤 Prover: ${user.address} (live whitelist binding)`);
   log(`   🔢 Identity: OnchainID as a field element (${member.identity})`);
-  log(`   🌳 Whitelist root: ${rootFile.root.slice(0, 18)}… (${rootFile.count} commitments)`);
+  log(
+    `   🌳 Whitelist root: ${rootFile.root.slice(0, 18)}… (${rootFile.count} commitments)`,
+  );
 
   // The sanctions tree from the live BlacklistOracle.
   const oracle = await sanctionsOracle(state);
@@ -102,12 +104,16 @@ async function runBlacklistProofFlow({ state, generator, log = console.log }) {
     return null;
   }
   const wallets = await listedWallets(oracle);
-  log(`\n🚫 BlacklistOracle ${await oracle.getAddress()}: ${wallets.length} listed wallet(s)`);
+  log(
+    `\n🚫 BlacklistOracle ${await oracle.getAddress()}: ${wallets.length} listed wallet(s)`,
+  );
   const sanctioned = new Map(); // identity -> first listed wallet
   for (const w of wallets) {
     const onchainID = idReg ? await idReg.identity(w) : ethers.ZeroAddress;
     if (same(onchainID, ethers.ZeroAddress)) {
-      log(`   ⚠️  ${w} has no OnchainID in the IdentityRegistry: skipped (the tree is keyed by identity)`);
+      log(
+        `   ⚠️  ${w} has no OnchainID in the IdentityRegistry: skipped (the tree is keyed by identity)`,
+      );
       continue;
     }
     const id = BigInt(onchainID);
@@ -115,13 +121,18 @@ async function runBlacklistProofFlow({ state, generator, log = console.log }) {
     log(`   • ${w} -> OnchainID ${onchainID}`);
   }
   const identities = [...sanctioned.keys()];
-  if (!identities.length) log("   ℹ️  Sanctions tree is empty (root 0): the proof still binds the list version");
+  if (!identities.length)
+    log(
+      "   ℹ️  Sanctions tree is empty (root 0): the proof still binds the list version",
+    );
 
   let verified = false;
   const commitments = rootFile.leaves.map((l) => BigInt(l));
   const secret = state.zkSecrets.get(user.address);
   if (sanctioned.has(member.identity)) {
-    log(`\n🚫 ${user.address}'s identity is on the sanctions list: it cannot prove non-membership`);
+    log(
+      `\n🚫 ${user.address}'s identity is on the sanctions list: it cannot prove non-membership`,
+    );
   } else {
     log("\n🔐 Generating a real ZK proof (PLONK)...");
     const t0 = Date.now();
@@ -144,20 +155,27 @@ async function runBlacklistProofFlow({ state, generator, log = console.log }) {
     log(`   👛 walletBinding: ${ethers.toBeHex(BigInt(binding), 20)}`);
 
     const verifier = zk.connect(user);
-    const ok = await verifier.verifyBlacklistNonMembership.staticCall(r.proof, r.publicSignals);
+    const ok = await verifier.verifyBlacklistNonMembership.staticCall(
+      r.proof,
+      r.publicSignals,
+    );
     log(`\n🔍 verifyBlacklistNonMembership (staticCall): ${ok}`);
     if (!ok) {
       log("❌ The verifier refused the proof: nothing sent");
       return { verified };
     }
-    const receipt = await (await verifier.verifyBlacklistNonMembership(r.proof, r.publicSignals)).wait();
+    const receipt = await (
+      await verifier.verifyBlacklistNonMembership(r.proof, r.publicSignals)
+    ).wait();
     state.gasTracker.set("Blacklist Proof", receipt.gasUsed);
     verified = true;
     log("✅ BLACKLIST NON-MEMBERSHIP PROOF VERIFIED!");
     log(`   🔗 Transaction: ${receipt.hash}`);
     log(`   🧱 Block: ${receipt.blockNumber}`);
     log(`   💰 Gas Used: ${receipt.gasUsed.toLocaleString()}`);
-    log("   🔐 The verifier learns neither the identity nor the commitment: only that the holder of a whitelisted commitment is not sanctioned");
+    log(
+      "   🔐 The verifier learns neither the identity nor the commitment: only that the holder of a whitelisted commitment is not sanctioned",
+    );
   }
 
   // A listed identity cannot prove: a sanctioned whitelist member if there
@@ -169,14 +187,20 @@ async function runBlacklistProofFlow({ state, generator, log = console.log }) {
     const { identity } = await demoIdentity(state, s.address);
     const c = await computeCommitment(identity, state.zkSecrets.get(s.address));
     if (sanctioned.has(identity) && commitments.includes(BigInt(c))) {
-      who = { identity, secret: state.zkSecrets.get(s.address), wallet: s.address };
+      who = {
+        identity,
+        secret: state.zkSecrets.get(s.address),
+        wallet: s.address,
+      };
       break;
     }
   }
   const list = who ? identities : [...identities, member.identity];
   if (!who) {
     who = { identity: member.identity, secret, wallet: user.address };
-    log(`   ℹ️  No whitelisted wallet is listed: adding ${user.address}'s identity to a copy of the list`);
+    log(
+      `   ℹ️  No whitelisted wallet is listed: adding ${user.address}'s identity to a copy of the list`,
+    );
   }
   try {
     await generator.generateBlacklistProof({

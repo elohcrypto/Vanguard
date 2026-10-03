@@ -106,7 +106,9 @@ describe("Blacklist Membership Circuit", function () {
     async function input(member, blacklist) {
       const smt = await buildBlacklistSmt(blacklist);
       const w = await nonInclusionWitness(smt.tree, member.identity);
-      const idx = wl.findLeafIndex(wl.commitment(member.identity, member.secret));
+      const idx = wl.findLeafIndex(
+        wl.commitment(member.identity, member.secret),
+      );
       const { pathElements, pathIndices } = wl.getProof(idx);
       return {
         w,

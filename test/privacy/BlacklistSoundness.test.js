@@ -12,10 +12,9 @@ const { RealProofGenerator } = require(
 const { MerkleTreeBuilder } = require(
   path.join(__dirname, "../../utils/merkle-tree-builder.js"),
 );
-const {
-  buildBlacklistSmt,
-  nonInclusionWitness,
-} = require(path.join(__dirname, "../../utils/smt-builder.js"));
+const { buildBlacklistSmt, nonInclusionWitness } = require(
+  path.join(__dirname, "../../utils/smt-builder.js"),
+);
 const { ProofFormatter } = require(
   path.join(__dirname, "../../utils/proof-formatter.js"),
 );
@@ -31,7 +30,8 @@ const P =
 const CIRCUIT = "blacklist_membership";
 // Where a witness fails: the sanctions check, the whitelist inclusion, or the
 // circuit's own isOld0 binary constraint.
-const IN_SMT = /Assert Failed\. Error in template SMTVerifier|ForceEqualIfEnabled/;
+const IN_SMT =
+  /Assert Failed\. Error in template SMTVerifier|ForceEqualIfEnabled/;
 const IN_WHITELIST = /Assert Failed\. Error in template MerkleInclusion/;
 const IN_MAIN = /Assert Failed\. Error in template BlacklistNonMembership/;
 
@@ -273,7 +273,10 @@ describe("Blacklist non-membership soundness (Task 3.7)", function () {
           ),
           `signal ${i} + q`,
         ).to.equal(false);
-        const tx = await verifier.verifyBlacklistNonMembership(c.proof, aliased);
+        const tx = await verifier.verifyBlacklistNonMembership(
+          c.proof,
+          aliased,
+        );
         expect(await cachedEvents(tx)).to.have.lengthOf(0);
       }
       const [totalAfter] = await verifier.getCircuitStats("blacklist");
@@ -299,7 +302,9 @@ describe("Blacklist non-membership soundness (Task 3.7)", function () {
     });
 
     it("the committed verifier is PLONK with nPublic 4", async function () {
-      const artifact = await artifacts.readArtifact("BlacklistMembershipVerifier");
+      const artifact = await artifacts.readArtifact(
+        "BlacklistMembershipVerifier",
+      );
       const fn = artifact.abi.find((x) => x.name === "verifyProof");
       expect(fn.inputs.map((i) => i.type)).to.deep.equal([
         "uint256[24]",
@@ -319,7 +324,9 @@ describe("Blacklist non-membership soundness (Task 3.7)", function () {
       ].filter(Boolean);
       const circom = candidates.find((c) => {
         try {
-          return /\b2\.\d+\.\d+/.test(execFileSync(c, ["--version"]).toString());
+          return /\b2\.\d+\.\d+/.test(
+            execFileSync(c, ["--version"]).toString(),
+          );
         } catch {
           return false;
         }
@@ -360,7 +367,11 @@ describe("Blacklist non-membership soundness (Task 3.7)", function () {
             "contract BlacklistMembershipVerifier",
           );
         const committed = fs.readFileSync(
-          path.join(root, "contracts/privacy/verifiers", `${CIRCUIT}Verifier.sol`),
+          path.join(
+            root,
+            "contracts/privacy/verifiers",
+            `${CIRCUIT}Verifier.sol`,
+          ),
           "utf8",
         );
         const sha = (s) => crypto.createHash("sha256").update(s).digest("hex");
@@ -379,7 +390,10 @@ describe("Blacklist non-membership soundness (Task 3.7)", function () {
           r.publicSignals,
         ),
       ).to.equal(true);
-      const key = await verifier.blacklistProofCacheKey(r.proof, r.publicSignals);
+      const key = await verifier.blacklistProofCacheKey(
+        r.proof,
+        r.publicSignals,
+      );
       const tx1 = await verifier.verifyBlacklistNonMembership(
         r.proof,
         r.publicSignals,
@@ -416,7 +430,14 @@ describe("Blacklist non-membership soundness (Task 3.7)", function () {
     it("the Groth16 router refuses the blacklist id", async function () {
       const BL = ethers.keccak256(ethers.toUtf8Bytes("BLACKLIST_MEMBERSHIP"));
       expect(await verifier.isCircuitRegistered(BL)).to.equal(true);
-      const zero = { a: [0, 0], b: [[0, 0], [0, 0]], c: [0, 0] };
+      const zero = {
+        a: [0, 0],
+        b: [
+          [0, 0],
+          [0, 0],
+        ],
+        c: [0, 0],
+      };
       await expect(
         verifier.verifyCircuitProof(BL, zero, [1, 2, 3, 4]),
       ).to.be.revertedWith("use verifyBlacklistNonMembership");
@@ -429,7 +450,14 @@ describe("Blacklist non-membership soundness (Task 3.7)", function () {
         await ethers.getContractFactory("PrivacyManager")
       ).deploy(await verifier.getAddress());
       const BL = ethers.keccak256(ethers.toUtf8Bytes("BLACKLIST_MEMBERSHIP"));
-      const zero = { a: [0, 0], b: [[0, 0], [0, 0]], c: [0, 0] };
+      const zero = {
+        a: [0, 0],
+        b: [
+          [0, 0],
+          [0, 0],
+        ],
+        c: [0, 0],
+      };
       await expect(
         pm.connect(wallets[1]).submitPrivateProof(BL, zero, r.publicSignals),
       ).to.be.revertedWithCustomError(pm, "NonGatingBlacklistProof");

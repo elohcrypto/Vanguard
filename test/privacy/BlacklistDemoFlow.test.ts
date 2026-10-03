@@ -73,8 +73,8 @@ describe("Blacklist proof on the live lists (demo option 42 -> 2)", function () 
     expect([total, valid]).to.deep.equal([1n, 1n]);
     // D2: the blacklist proof binds nothing; VSC still refuses wallet 2.
     const token = state.getContract("digitalToken");
-    expect(
-      await token.canTransfer(s[1].address, s[2].address, 1n),
-    ).to.equal(false);
+    expect(await token.canTransfer(s[1].address, s[2].address, 1n)).to.equal(
+      false,
+    );
   });
 });
