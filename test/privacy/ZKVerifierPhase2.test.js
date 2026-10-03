@@ -111,22 +111,20 @@ describe("ZKVerifierIntegrated - Phase 2 Features", function () {
     });
 
     it("should cache successful blacklist proof", async function () {
-      const blacklistSignals = [1]; // isNotBlacklisted = 1
+      // PLONK since Task 3.7: [nullifier, whitelistRoot, blacklistRoot,
+      // walletBinding]; testingMode accepts four non-zero signals.
+      const blacklistSignals = [12345, 777, 888, 4242];
 
       // First verification
       const tx1 = await zkVerifier.verifyBlacklistNonMembership(
-        sampleProof.a,
-        sampleProof.b,
-        sampleProof.c,
+        samplePlonkProof,
         blacklistSignals,
       );
       await tx1.wait();
 
       // Second verification (should hit cache)
       const tx2 = await zkVerifier.verifyBlacklistNonMembership(
-        sampleProof.a,
-        sampleProof.b,
-        sampleProof.c,
+        samplePlonkProof,
         blacklistSignals,
       );
       const receipt2 = await tx2.wait();
@@ -215,7 +213,7 @@ describe("ZKVerifierIntegrated - Phase 2 Features", function () {
 
       const publicInputsArray = [
         whitelistInputs,
-        [1], // isNotBlacklisted
+        [1], // blacklist is PLONK since Task 3.7: the batch reports false
         [67890],
       ];
 

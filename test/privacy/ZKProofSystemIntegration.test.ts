@@ -42,7 +42,7 @@ describe("🔐 Complete ZK Proof System Integration Tests", function () {
     c: [7, 8],
   };
 
-  // Whitelist is PLONK since Task 3.1: 24 proof words.
+  // Whitelist (Task 3.1) and blacklist (Task 3.7) are PLONK: 24 proof words.
   const mockPlonkProof = Array.from({ length: 24 }, (_, i) => i + 1);
 
   const mockWhitelistRoot = ethers.keccak256(
@@ -147,22 +147,24 @@ describe("🔐 Complete ZK Proof System Integration Tests", function () {
       expect(result).to.equal(false);
     });
 
-    it("Should verify blacklist non-membership proof", async function () {
+    it("Should refuse a made-up blacklist non-membership proof", async function () {
       console.log("🧪 Testing blacklist non-membership verifier...");
 
-      // Blacklist verifier expects uint[1] - just the isNotBlacklisted flag (1 = not blacklisted)
-      const publicSignals: [number] = [1]; // User is NOT in blacklist
+      // [nullifier, whitelistRoot, blacklistRoot, walletBinding]; the PLONK
+      // verifier is real.
+      const publicSignals: [number, number, number, number] = [
+        mockNullifier,
+        1,
+        1,
+        1,
+      ];
       const result = await blacklistVerifier.verifyProof(
-        mockProof.a,
-        mockProof.b,
-        mockProof.c,
+        mockPlonkProof,
         publicSignals,
       );
 
       console.log(`   🚫 Blacklist proof result: ${result}`);
-      // Note: Mock proof will return false since it's not a valid ZK proof
-      // This test just verifies the contract can be called without reverting
-      expect(result).to.be.a("boolean");
+      expect(result).to.equal(false);
     });
 
     it("Should verify jurisdiction eligibility proof", async function () {
@@ -241,17 +243,17 @@ describe("🔐 Complete ZK Proof System Integration Tests", function () {
     it("Should verify blacklist non-membership through integrated verifier", async function () {
       console.log("🧪 Testing integrated blacklist verification...");
 
-      // ZKVerifierIntegrated.verifyBlacklistNonMembership expects uint256[1]
-      // publicSignals[0] = isNotBlacklisted (1 = user is NOT in blacklist)
-      const publicSignals: [number] = [1]; // User is NOT blacklisted
+      // [nullifier, whitelistRoot, blacklistRoot, walletBinding]; testingMode
+      // accepts any four non-zero signals.
+      const publicSignals: [number, number, number, number] = [
+        mockNullifier,
+        1,
+        1,
+        1,
+      ];
       const tx = await zkVerifier
         .connect(user2)
-        .verifyBlacklistNonMembership(
-          mockProof.a,
-          mockProof.b,
-          mockProof.c,
-          publicSignals,
-        );
+        .verifyBlacklistNonMembership(mockPlonkProof, publicSignals);
 
       const receipt = await tx.wait();
       console.log(`   ✅ Transaction hash: ${receipt?.hash}`);

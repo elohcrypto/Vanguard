@@ -47,11 +47,11 @@ describe("MerkleTreeBuilder (sparse)", function () {
   ]) {
     it(`matches the dense reference at ${levels} levels, ${n} leaves`, async () => {
       const ids = Array.from({ length: n }, (_, i) => BigInt(i * 7919 + 13));
-      const s = await MerkleTreeBuilder.createFromIdentities(ids, levels);
-      const d = denseBuild(
-        s,
-        ids.map((id) => s.hashSingle(id)),
-      );
+      const b = new MerkleTreeBuilder(levels);
+      await b.initialize();
+      const leaves = ids.map((id) => b.commitment(id, 101n));
+      const s = await MerkleTreeBuilder.createFromCommitments(leaves, levels);
+      const d = denseBuild(s, leaves);
       expect(s.getRoot()).to.equal(d.root);
       for (let i = 0; i < n; i++) {
         const ps = s.getProof(i),
@@ -60,19 +60,19 @@ describe("MerkleTreeBuilder (sparse)", function () {
         expect(ps.pathIndices).to.deep.equal(pd.pathIndices);
         expect(
           s.verifyProof(
-            s.hashSingle(ids[i]),
+            leaves[i],
             s.getRoot(),
             ps.pathElements,
             ps.pathIndices,
           ),
         ).to.equal(true);
       }
-      expect(s.findLeafIndex(s.hashSingle(ids[n - 1]))).to.equal(n - 1);
+      expect(s.findLeafIndex(leaves[n - 1])).to.equal(n - 1);
       expect(s.findLeafIndex(424242n)).to.equal(-1);
     });
   }
 
-  it("empty tree matches the dense reference (blacklist non-membership path)", async () => {
+  it("empty tree matches the dense reference", async () => {
     const s = await MerkleTreeBuilder.createEmptyTree(8);
     const d = denseBuild(s, [0n]);
     expect(s.getRoot()).to.equal(d.root);
@@ -83,7 +83,7 @@ describe("MerkleTreeBuilder (sparse)", function () {
     // The dense build took ~37s here and timed out on CI. Generous bound so a
     // slow runner passes; a regression to dense would be two orders over it.
     const t = Date.now();
-    const s = await MerkleTreeBuilder.createFromIdentities([
+    const s = await MerkleTreeBuilder.createFromCommitments([
       11111n,
       12345n,
       33333n,

@@ -2,15 +2,23 @@ const { expect } = require("chai");
 const path = require("path");
 const fs = require("fs");
 const snarkjs = require("snarkjs");
-const { buildPoseidon } = require("circomlibjs");
+const { MerkleTreeBuilder } = require("../../utils/merkle-tree-builder");
+const {
+  SMT_LEVELS,
+  buildBlacklistSmt,
+  isListed,
+  nonInclusionWitness,
+} = require("../../utils/smt-builder");
 
 /**
  * @title Blacklist Circuit Test
- * @dev Tests the blacklist_membership circuit compilation and functionality
+ * @dev Circuit-level checks of blacklist_membership (Task 3.7): build
+ *      artifacts, the sanctions SMT builder, and a witness for each branch of
+ *      circomlib's non-inclusion proof. Soundness (what cannot be proven) is
+ *      in test/privacy/BlacklistSoundness.test.js.
  */
-
 describe("Blacklist Membership Circuit", function () {
-  this.timeout(120000); // 2 minutes for circuit operations
+  this.timeout(120000);
 
   const CIRCUIT_NAME = "blacklist_membership";
   const BUILD_DIR = path.join(__dirname, "../../build/circuits", CIRCUIT_NAME);
@@ -22,292 +30,141 @@ describe("Blacklist Membership Circuit", function () {
   const ZKEY_PATH = path.join(BUILD_DIR, `${CIRCUIT_NAME}.zkey`);
   const VKEY_PATH = path.join(BUILD_DIR, `${CIRCUIT_NAME}_vkey.json`);
 
-  let poseidon;
-
-  before(async function () {
-    // Initialize Poseidon hash
-    poseidon = await buildPoseidon();
-
-    console.log("\n🔍 Checking circuit build files...");
-    console.log(`   WASM: ${fs.existsSync(WASM_PATH) ? "✅" : "❌"}`);
-    console.log(`   ZKEY: ${fs.existsSync(ZKEY_PATH) ? "✅" : "❌"}`);
-    console.log(`   VKEY: ${fs.existsSync(VKEY_PATH) ? "✅" : "❌"}`);
-  });
-
   describe("Circuit Build Verification", function () {
-    it("should have WASM witness calculator", function () {
+    it("should have the witness calculator, proving and verification keys", function () {
       expect(fs.existsSync(WASM_PATH)).to.be.true;
-    });
-
-    it("should have proving key (.zkey)", function () {
       expect(fs.existsSync(ZKEY_PATH)).to.be.true;
-    });
-
-    it("should have verification key (_vkey.json)", function () {
       expect(fs.existsSync(VKEY_PATH)).to.be.true;
     });
 
-    it("should have valid verification key format", function () {
+    it("should have a PLONK verification key with four public signals", function () {
       const vkey = JSON.parse(fs.readFileSync(VKEY_PATH, "utf8"));
-      expect(vkey).to.have.property("protocol");
-      expect(vkey).to.have.property("curve");
-      expect(vkey).to.have.property("nPublic");
-      expect(vkey.protocol).to.equal("groth16");
+      expect(vkey.protocol).to.equal("plonk");
       expect(vkey.curve).to.equal("bn128");
-      expect(vkey.nPublic).to.equal(1); // isNotBlacklisted output
+      // [nullifier, whitelistRoot, blacklistRoot, walletBinding]
+      expect(vkey.nPublic).to.equal(4);
     });
   });
 
-  /**
-   * Helper function to create a simple merkle tree
-   */
-  function createSimpleMerkleTree(leaves, levels = 20) {
-    const tree = [];
-    tree[0] = leaves;
+  describe("Sanctions tree builder", function () {
+    it("refuses zero, duplicates and out-of-field identities", async function () {
+      await expect(buildBlacklistSmt([0n])).to.be.rejectedWith(/must be in 1/);
+      await expect(buildBlacklistSmt([5n, 5n])).to.be.rejectedWith(
+        /duplicate identity/,
+      );
+      await expect(buildBlacklistSmt([1n << 254n])).to.be.rejectedWith(
+        /must be in 1/,
+      );
+    });
 
-    // Build tree bottom-up
-    for (let level = 0; level < levels; level++) {
-      const currentLevel = tree[level];
-      const nextLevel = [];
+    it("refuses identities that collide below the circuit depth", async function () {
+      // Same low SMT_LEVELS bits: the leaves would sit deeper than the
+      // circuit can check.
+      const a = 7n;
+      const b = 7n + (1n << BigInt(SMT_LEVELS));
+      await expect(buildBlacklistSmt([a, b])).to.be.rejectedWith(
+        /deeper than the circuit/,
+      );
+    });
 
-      for (let i = 0; i < currentLevel.length; i += 2) {
-        const left = currentLevel[i] || BigInt(0);
-        const right = currentLevel[i + 1] || BigInt(0);
-        const hash = poseidon.F.toObject(poseidon([left, right]));
-        nextLevel.push(hash);
-      }
+    it("an empty list has root 0 and lists nobody", async function () {
+      const smt = await buildBlacklistSmt([]);
+      expect(smt.root).to.equal(0n);
+      expect(await isListed(smt.tree, 1n)).to.equal(false);
+      const w = await nonInclusionWitness(smt.tree, 1n);
+      expect(w.isOld0).to.equal(1);
+      expect(w.siblings).to.have.lengthOf(SMT_LEVELS);
+    });
 
-      tree[level + 1] = nextLevel;
-    }
-
-    return tree;
-  }
-
-  /**
-   * Helper function to get merkle proof
-   */
-  function getMerkleProof(tree, leafIndex, levels = 20) {
-    const pathElements = [];
-    const pathIndices = [];
-    let index = leafIndex;
-
-    for (let level = 0; level < levels; level++) {
-      const isLeft = index % 2 === 0;
-      const siblingIndex = isLeft ? index + 1 : index - 1;
-      const sibling = tree[level][siblingIndex] || BigInt(0);
-
-      pathElements.push(sibling);
-      pathIndices.push(isLeft ? 0 : 1);
-
-      index = Math.floor(index / 2);
-    }
-
-    return { pathElements, pathIndices };
-  }
+    it("the same list gives the same root in any order", async function () {
+      const a = await buildBlacklistSmt([2n, 6n, 9n]);
+      const b = await buildBlacklistSmt([9n, 2n, 6n]);
+      expect(a.root).to.equal(b.root);
+      expect(await isListed(a.tree, 6n)).to.equal(true);
+    });
+  });
 
   describe("Circuit Functionality", function () {
-    it("should prove non-membership in empty blacklist", async function () {
-      console.log("\n   🧪 Test: Non-membership in empty blacklist");
+    // Whitelist members; identities chosen for the SMT branches below.
+    const members = [
+      { identity: 1n, secret: 11n },
+      { identity: 10n, secret: 22n },
+      { identity: 3n, secret: 33n },
+    ];
+    // Keys 2 (..010) and 6 (..110) share bit 0 = 0, so the root's right
+    // child (odd keys) is empty: key 1 lands on an empty slot (isOld0 = 1);
+    // key 10 (..1010) lands on key 2's leaf (isOld0 = 0, oldKey 2).
+    const sanctioned = [2n, 6n];
+    let wl;
 
-      // User identity (not in blacklist)
-      const userIdentity = BigInt(12345);
-      const identityHash = poseidon.F.toObject(poseidon([userIdentity]));
-
-      // Empty blacklist (all zeros)
-      const emptyLeaves = new Array(4).fill(BigInt(0));
-      const blacklistTree = createSimpleMerkleTree(emptyLeaves);
-      const blacklistRoot = blacklistTree[blacklistTree.length - 1][0];
-
-      // Sibling hash (proof that user is not in tree)
-      const siblingHash = BigInt(0);
-
-      // Get merkle proof for position 0
-      const { pathElements, pathIndices } = getMerkleProof(blacklistTree, 0);
-
-      // Generate nullifier
-      const nullifierHash = poseidon.F.toObject(
-        poseidon([userIdentity, blacklistRoot, BigInt(999)]),
-      );
-
-      // Challenge hash
-      const challengeHash = BigInt(999);
-
-      // Circuit inputs
-      const input = {
-        identity: userIdentity.toString(),
-        pathElements: pathElements.map((x) => x.toString()),
-        pathIndices: pathIndices,
-        siblingHash: siblingHash.toString(),
-        blacklistRoot: blacklistRoot.toString(),
-        nullifierHash: nullifierHash.toString(),
-        challengeHash: challengeHash.toString(),
-      };
-
-      console.log("   📝 Generating witness...");
-      const { proof, publicSignals } = await snarkjs.groth16.fullProve(
-        input,
-        WASM_PATH,
-        ZKEY_PATH,
-      );
-
-      console.log("   ✅ Witness generated");
-      console.log("   🔐 Verifying proof...");
-
-      // Verify proof
-      const vkey = JSON.parse(fs.readFileSync(VKEY_PATH, "utf8"));
-      const verified = await snarkjs.groth16.verify(vkey, publicSignals, proof);
-
-      console.log(
-        `   ${verified ? "✅" : "❌"} Proof verification: ${verified}`,
-      );
-      expect(verified).to.be.true;
+    before(async function () {
+      wl = new MerkleTreeBuilder();
+      await wl.initialize();
+      wl.buildTree(members.map((m) => wl.commitment(m.identity, m.secret)));
     });
 
-    it("should prove non-membership when user is not in blacklist", async function () {
-      console.log("\n   🧪 Test: Non-membership with populated blacklist");
-
-      // Create blacklist with some users
-      const blacklistedUsers = [
-        BigInt(111),
-        BigInt(222),
-        BigInt(333),
-        BigInt(444),
-      ];
-
-      const blacklistLeaves = blacklistedUsers.map((id) =>
-        poseidon.F.toObject(poseidon([id])),
-      );
-
-      const blacklistTree = createSimpleMerkleTree(blacklistLeaves);
-      const blacklistRoot = blacklistTree[blacklistTree.length - 1][0];
-
-      // User identity (NOT in blacklist)
-      const userIdentity = BigInt(12345);
-      const identityHash = poseidon.F.toObject(poseidon([userIdentity]));
-
-      // Sibling hash at position 0 (where user would be if they were in tree)
-      const siblingHash = blacklistLeaves[0]; // This is different from user's hash
-
-      // Get merkle proof for position 0
-      const { pathElements, pathIndices } = getMerkleProof(blacklistTree, 0);
-
-      // Generate nullifier
-      const challengeHash = BigInt(777);
-      const nullifierHash = poseidon.F.toObject(
-        poseidon([userIdentity, blacklistRoot, challengeHash]),
-      );
-
-      // Circuit inputs
-      const input = {
-        identity: userIdentity.toString(),
-        pathElements: pathElements.map((x) => x.toString()),
-        pathIndices: pathIndices,
-        siblingHash: siblingHash.toString(),
-        blacklistRoot: blacklistRoot.toString(),
-        nullifierHash: nullifierHash.toString(),
-        challengeHash: challengeHash.toString(),
+    async function input(member, blacklist) {
+      const smt = await buildBlacklistSmt(blacklist);
+      const w = await nonInclusionWitness(smt.tree, member.identity);
+      const idx = wl.findLeafIndex(wl.commitment(member.identity, member.secret));
+      const { pathElements, pathIndices } = wl.getProof(idx);
+      return {
+        w,
+        smt,
+        input: {
+          identity: member.identity.toString(),
+          secret: member.secret.toString(),
+          pathElements: pathElements.map(String),
+          pathIndices,
+          siblings: w.siblings.map(String),
+          oldKey: w.oldKey.toString(),
+          oldValue: w.oldValue.toString(),
+          isOld0: w.isOld0,
+          whitelistRoot: wl.getRoot().toString(),
+          blacklistRoot: smt.root.toString(),
+          walletBinding: "1234",
+        },
       };
+    }
 
-      console.log("   📝 Generating witness...");
-      const { proof, publicSignals } = await snarkjs.groth16.fullProve(
-        input,
-        WASM_PATH,
-        ZKEY_PATH,
-      );
+    async function publicSignals(inp) {
+      const wtns = { type: "mem" };
+      await snarkjs.wtns.calculate(inp, WASM_PATH, wtns);
+      const w = await snarkjs.wtns.exportJson(wtns);
+      // Wire 0 is the constant 1; then outputs, then public inputs.
+      return w.slice(1, 5).map(String);
+    }
 
-      console.log("   ✅ Witness generated");
-      console.log("   🔐 Verifying proof...");
-
-      // Verify proof
-      const vkey = JSON.parse(fs.readFileSync(VKEY_PATH, "utf8"));
-      const verified = await snarkjs.groth16.verify(vkey, publicSignals, proof);
-
-      console.log(
-        `   ${verified ? "✅" : "❌"} Proof verification: ${verified}`,
-      );
-      expect(verified).to.be.true;
+    it("proves non-membership in an empty sanctions list", async function () {
+      const { input: inp, w } = await input(members[0], []);
+      expect(w.isOld0).to.equal(1);
+      const sig = await publicSignals(inp);
+      expect(sig.slice(1)).to.deep.equal([
+        wl.getRoot().toString(),
+        "0",
+        "1234",
+      ]);
     });
 
-    it("should have correct public signals format", async function () {
-      console.log("\n   🧪 Test: Public signals format");
-
-      // Simple test case
-      const userIdentity = BigInt(99999);
-      const emptyLeaves = new Array(4).fill(BigInt(0));
-      const blacklistTree = createSimpleMerkleTree(emptyLeaves);
-      const blacklistRoot = blacklistTree[blacklistTree.length - 1][0];
-      const challengeHash = BigInt(555);
-
-      const nullifierHash = poseidon.F.toObject(
-        poseidon([userIdentity, blacklistRoot, challengeHash]),
-      );
-
-      const { pathElements, pathIndices } = getMerkleProof(blacklistTree, 0);
-
-      const input = {
-        identity: userIdentity.toString(),
-        pathElements: pathElements.map((x) => x.toString()),
-        pathIndices: pathIndices,
-        siblingHash: BigInt(0).toString(),
-        blacklistRoot: blacklistRoot.toString(),
-        nullifierHash: nullifierHash.toString(),
-        challengeHash: challengeHash.toString(),
-      };
-
-      const { proof, publicSignals } = await snarkjs.groth16.fullProve(
-        input,
-        WASM_PATH,
-        ZKEY_PATH,
-      );
-
-      console.log("   📊 Public signals:");
-      console.log(`      [0] isNotBlacklisted: ${publicSignals[0]}`);
-
-      // Verify public signals - should be 1 (user is NOT blacklisted)
-      expect(publicSignals).to.have.lengthOf(1);
-      expect(BigInt(publicSignals[0])).to.equal(BigInt(1));
+    it("proves non-membership where the key's slot is empty (isOld0 = 1)", async function () {
+      const { input: inp, w, smt } = await input(members[0], sanctioned);
+      expect(w.isOld0).to.equal(1);
+      expect(smt.root).to.not.equal(0n);
+      const sig = await publicSignals(inp);
+      expect(sig[2]).to.equal(smt.root.toString());
     });
-  });
 
-  describe("Gas Cost Estimation", function () {
-    it("should estimate proof size", async function () {
-      // Generate a simple proof
-      const userIdentity = BigInt(12345);
-      const emptyLeaves = new Array(4).fill(BigInt(0));
-      const blacklistTree = createSimpleMerkleTree(emptyLeaves);
-      const blacklistRoot = blacklistTree[blacklistTree.length - 1][0];
-      const challengeHash = BigInt(999);
+    it("proves non-membership where another key's leaf sits on the path (isOld0 = 0)", async function () {
+      const { input: inp, w } = await input(members[1], sanctioned);
+      expect(w.isOld0).to.equal(0);
+      expect(w.oldKey).to.equal(2n);
+      await publicSignals(inp);
+    });
 
-      const nullifierHash = poseidon.F.toObject(
-        poseidon([userIdentity, blacklistRoot, challengeHash]),
-      );
-
-      const { pathElements, pathIndices } = getMerkleProof(blacklistTree, 0);
-
-      const input = {
-        identity: userIdentity.toString(),
-        pathElements: pathElements.map((x) => x.toString()),
-        pathIndices: pathIndices,
-        siblingHash: BigInt(0).toString(),
-        blacklistRoot: blacklistRoot.toString(),
-        nullifierHash: nullifierHash.toString(),
-        challengeHash: challengeHash.toString(),
-      };
-
-      const { proof, publicSignals } = await snarkjs.groth16.fullProve(
-        input,
-        WASM_PATH,
-        ZKEY_PATH,
-      );
-
-      console.log("\n   📊 Proof Size Estimation:");
-      console.log(`      Proof points: ${JSON.stringify(proof).length} bytes`);
-      console.log(`      Public signals: ${publicSignals.length} values`);
-      console.log(`      Estimated gas: ~320,000-380,000 gas`);
-
-      expect(proof).to.have.property("pi_a");
-      expect(proof).to.have.property("pi_b");
-      expect(proof).to.have.property("pi_c");
+    it("the nullifier is Poseidon(secret, blacklistRoot)", async function () {
+      const { input: inp, smt } = await input(members[2], sanctioned);
+      const sig = await publicSignals(inp);
+      expect(sig[0]).to.equal(wl.hash(members[2].secret, smt.root).toString());
     });
   });
 });

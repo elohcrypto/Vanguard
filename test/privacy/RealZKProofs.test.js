@@ -127,13 +127,20 @@ describe("Real ZK Proof Verification Tests", function () {
         "  🔐 Generating blacklist proof (this may take ~50 seconds)...",
       );
 
-      const identity = BigInt(12345);
+      // The prover is a whitelisted commitment; the sanctions list is a
+      // sparse Merkle tree of identities (Task 3.7).
+      const members = [
+        { identity: 11111n, secret: 101n },
+        { identity: 12345n, secret: 202n },
+      ];
       const blacklistIdentities = [BigInt(99999), BigInt(88888)]; // User NOT in blacklist
 
       const startTime = Date.now();
       const result = await realProofGenerator.generateBlacklistProof({
-        identity,
+        ...members[1],
+        members,
         blacklistIdentities,
+        walletBinding: user1.address,
       });
       const duration = Date.now() - startTime;
 
@@ -141,17 +148,16 @@ describe("Real ZK Proof Verification Tests", function () {
         `  ✅ Proof generated in ${duration}ms (${(duration / 1000).toFixed(2)}s)`,
       );
 
-      // Verify proof structure
-      expect(result.proof).to.have.property("a");
+      // PLONK: 24 proof words,
+      // [nullifier, whitelistRoot, blacklistRoot, walletBinding]
+      expect(result.proof).to.have.lengthOf(24);
       expect(result.publicSignals).to.be.an("array");
-      expect(result.publicSignals.length).to.equal(1); // isNotBlacklisted output
+      expect(result.publicSignals.length).to.equal(4);
 
       // Verify on-chain
       console.log("  🔍 Verifying proof on-chain...");
       const tx = await zkVerifierIntegrated.verifyBlacklistNonMembership(
-        result.proof.a,
-        result.proof.b,
-        result.proof.c,
+        result.proof,
         result.publicSignals,
       );
       const receipt = await tx.wait();

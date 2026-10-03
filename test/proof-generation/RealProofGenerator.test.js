@@ -127,46 +127,82 @@ describe("RealProofGenerator - All 5 Proof Types", function () {
   });
 
   describe("2. Blacklist Non-Membership Proof", function () {
+    const members = [11111n, 12345n, 33333n].map((identity, i) => ({
+      identity,
+      secret: BigInt(i + 1) * 1000n,
+    }));
+    const blacklistIdentities = [22222n, 33333n, 44444n];
+
     it("should generate valid blacklist proof", async function () {
       console.log("\n  🧪 Testing Blacklist Proof Generation");
 
-      const identity = BigInt(12345);
-      const blacklistIdentities = [
-        BigInt(11111),
-        BigInt(22222),
-        BigInt(33333),
-        // Identity NOT in blacklist
-      ];
-      const challengeHash = BigInt(999);
-
       const startTime = Date.now();
       const result = await generator.generateBlacklistProof({
-        identity,
+        ...members[1],
+        members,
         blacklistIdentities,
-        challengeHash,
+        walletBinding: owner.address,
       });
       const duration = Date.now() - startTime;
 
       console.log(`  ⏱️  Generation time: ${duration}ms`);
       console.log(`  📊 Public signals: ${result.publicSignals.length}`);
 
-      // Validate proof structure
-      expect(result.proof).to.have.property("a");
-      expect(result.publicSignals).to.have.lengthOf(1);
-      // Circuit returns 0 for non-membership (not blacklisted)
-      expect(result.publicSignals[0]).to.equal("0");
+      // PLONK: 24 proof words,
+      // [nullifier, whitelistRoot, blacklistRoot, walletBinding]
+      expect(result.proof).to.have.lengthOf(24);
+      expect(result.publicSignals).to.have.lengthOf(4);
+      expect(result.publicSignals[2]).to.equal(result.inputs.blacklistRoot);
+      expect(result.publicSignals[3]).to.equal(
+        BigInt(owner.address).toString(),
+      );
 
       // Verify on-chain
       const tx = await zkVerifier.verifyBlacklistNonMembership(
-        result.proof.a,
-        result.proof.b,
-        result.proof.c,
+        result.proof,
         result.publicSignals,
       );
       const receipt = await tx.wait();
 
       console.log(`  ⛽ Gas used: ${receipt.gasUsed.toString()}`);
       expect(tx).to.not.be.reverted;
+    });
+
+    it("should refuse a listed identity and an unknown commitment", async function () {
+      await expect(
+        generator.generateBlacklistProof({
+          ...members[2],
+          members,
+          blacklistIdentities,
+          walletBinding: owner.address,
+        }),
+      ).to.be.rejectedWith("is on the sanctions list");
+      await expect(
+        generator.generateBlacklistProof({
+          identity: 99999n,
+          secret: 1n,
+          members,
+          blacklistIdentities,
+          walletBinding: owner.address,
+        }),
+      ).to.be.rejectedWith("Commitment not found in whitelist");
+    });
+
+    it("should require secret, walletBinding and the sanctions list", async function () {
+      const base = { ...members[0], members, blacklistIdentities };
+      await expect(
+        generator.generateBlacklistProof({ ...base, secret: undefined }),
+      ).to.be.rejectedWith("secret is required");
+      await expect(
+        generator.generateBlacklistProof({ ...base, walletBinding: 0n }),
+      ).to.be.rejectedWith("walletBinding is required");
+      await expect(
+        generator.generateBlacklistProof({
+          ...base,
+          walletBinding: owner.address,
+          blacklistIdentities: undefined,
+        }),
+      ).to.be.rejectedWith("blacklistIdentities is required");
     });
   });
 
@@ -350,8 +386,8 @@ describe("RealProofGenerator - All 5 Proof Types", function () {
       });
 
       it("should generate valid merkle proofs", async function () {
-        const identities = [BigInt(1), BigInt(2), BigInt(3), BigInt(4)];
-        const tree = await MerkleTreeBuilder.createFromIdentities(identities);
+        const commitments = [BigInt(1), BigInt(2), BigInt(3), BigInt(4)];
+        const tree = await MerkleTreeBuilder.createFromCommitments(commitments);
 
         const { pathElements, pathIndices } = tree.getProof(0);
         expect(pathElements).to.have.lengthOf(20);

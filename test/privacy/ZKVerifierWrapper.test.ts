@@ -9,7 +9,8 @@ import {
 } from "../../typechain-types";
 
 // Wrapper unit tests for Task 3.2 (plan v2 §7): batch, cache, the closed
-// whitelist route of verifyCircuitProof (Task 3.3), testingMode,
+// whitelist route of verifyCircuitProof (Task 3.3) and its closed blacklist
+// route (Task 3.7), testingMode,
 // verifyBatchProofs and the typed IZKVerifier ABI that PrivacyManager consumes. Real PLONK proofs,
 // built the way ZKSoundness.test.js test D builds them.
 /* eslint-disable @typescript-eslint/no-var-requires */
@@ -162,7 +163,7 @@ describe("ZKVerifierIntegrated wrapper (Task 3.2)", function () {
     });
   });
 
-  describe("(c) verifyCircuitProof refuses the whitelist circuit", function () {
+  describe("(c) verifyCircuitProof refuses the PLONK circuits", function () {
     it("reverts in strict mode, real and testingMode alike", async function () {
       for (const mode of [false, true]) {
         const zk = await deploy(mode);
@@ -170,6 +171,17 @@ describe("ZKVerifierIntegrated wrapper (Task 3.2)", function () {
           await expect(
             zk.verifyCircuitProof(WL, EMPTY, inputs),
           ).to.be.revertedWith("use verifyWhitelistMembership");
+        }
+      }
+    });
+
+    it("refuses the blacklist circuit (PLONK since Task 3.7) the same way", async function () {
+      for (const mode of [false, true]) {
+        const zk = await deploy(mode);
+        for (const inputs of [[1n], [...proof, 1n, 1n, 1n, 1n]]) {
+          await expect(
+            zk.verifyCircuitProof(BL, EMPTY, inputs),
+          ).to.be.revertedWith("use verifyBlacklistNonMembership");
         }
       }
     });
@@ -191,6 +203,36 @@ describe("ZKVerifierIntegrated wrapper (Task 3.2)", function () {
       expect(
         await zk.verifyWhitelistMembership.staticCall(garbage, [1n, 1n, 1n]),
       ).to.equal(true);
+    });
+
+    it("blacklist mock requires all four signals non-zero", async function () {
+      const zk = await deploy(true);
+      const garbage = Array<bigint>(24).fill(0n);
+      for (let i = 0; i < 4; i++) {
+        const s: [bigint, bigint, bigint, bigint] = [1n, 1n, 1n, 1n];
+        s[i] = 0n;
+        expect(
+          await zk.verifyBlacklistNonMembership.staticCall(garbage, s),
+          `signal ${i} zero`,
+        ).to.equal(false);
+      }
+      expect(
+        await zk.verifyBlacklistNonMembership.staticCall(garbage, [
+          1n,
+          1n,
+          1n,
+          1n,
+        ]),
+      ).to.equal(true);
+      expect(
+        await zk.verifyBlacklistNonMembership.staticCall(garbage, [
+          1n,
+          1n,
+          Q,
+          1n,
+        ]),
+        "out of field even in testingMode",
+      ).to.equal(false);
     });
 
     it("never forwards the proof to the verifier in the whitelist slot", async function () {
@@ -221,7 +263,7 @@ describe("ZKVerifierIntegrated wrapper (Task 3.2)", function () {
       const inputs = [
         route(proof, signals), // a real whitelist proof: refused here, false
         [7n], // accepted by the jurisdiction slot
-        [1n], // garbage Groth16 proof: the real blacklist verifier refuses it
+        [1n], // blacklist is PLONK: refused here, false
         [1n], // compliance needs 6 inputs: false, not a revert
         [1n], // unknown circuit: false, not a revert
         [7n], // cache hit
@@ -245,7 +287,7 @@ describe("ZKVerifierIntegrated wrapper (Task 3.2)", function () {
       const ids = [WL, BL, BL, JUR, COMP];
       const inputs = [
         route(Array<bigint>(24).fill(0n), [1n, 1n, 1n]),
-        [1n], // isNotBlacklisted
+        [1n], // blacklist is PLONK: refused like the whitelist
         [0n],
         [7n],
         [5n, 1n, 1n, 1n, 1n, 1n],
@@ -255,8 +297,8 @@ describe("ZKVerifierIntegrated wrapper (Task 3.2)", function () {
         ids.map(() => EMPTY),
         inputs,
       );
-      expect(results).to.deep.equal([false, true, false, true, true]);
-      expect(successCount).to.equal(3n);
+      expect(results).to.deep.equal([false, false, false, true, true]);
+      expect(successCount).to.equal(2n);
 
       await zk.verifyBatchProofs(
         ids,
@@ -264,15 +306,17 @@ describe("ZKVerifierIntegrated wrapper (Task 3.2)", function () {
         inputs,
       );
       // Internal routing: stats go to the caller, not to the wrapper itself;
-      // the refused whitelist entry reaches no verifier and counts nothing.
-      expect(await zk.userProofCount(caller.address)).to.equal(4n);
+      // the refused PLONK entries reach no verifier and count nothing.
+      expect(await zk.userProofCount(caller.address)).to.equal(2n);
       expect(await zk.userProofCount(await zk.getAddress())).to.equal(0n);
     });
   });
 
   // Review 3.2 L1: a mutation that routed the blacklist id to the
   // jurisdiction internal survived every test, because the batch entries were
-  // garbage under both verifiers. Pin each Groth16 id to its own slot.
+  // garbage under both verifiers. Pin each Groth16 id to its own slot (the
+  // blacklist left the router in Task 3.7: an accepting blacklist slot must
+  // not answer any routed id).
   describe("(g) every Groth16 id reaches its own verifier", function () {
     const ACC = ethers.keccak256(ethers.toUtf8Bytes("ACCREDITATION_PROOF"));
 
@@ -282,17 +326,24 @@ describe("ZKVerifierIntegrated wrapper (Task 3.2)", function () {
         ["jurisdiction", JUR],
         ["accreditation", ACC],
       ] as [string, string][]) {
+        const routed = [JUR, ACC];
         const zk = await deploy(false);
         const yes = await (
           await ethers.getContractFactory("AlwaysTrueVerifier")
         ).deploy();
         await zk.updateVerifier(slot, await yes.getAddress());
-        for (const other of [BL, JUR, ACC]) {
+        for (const other of routed) {
           expect(
             await zk.verifyCircuitProof.staticCall(other, EMPTY, [1n]),
             `${slot} slot accepting, querying ${other}`,
           ).to.equal(other === id);
         }
+        const [batch] = await zk.verifyBatchProofs.staticCall(
+          [BL],
+          [EMPTY],
+          [[1n]],
+        );
+        expect(batch[0], `${slot} slot accepting, querying BL`).to.equal(false);
         expect(
           await zk.verifyCircuitProof.staticCall(COMP, EMPTY, [
             1n,
@@ -309,7 +360,7 @@ describe("ZKVerifierIntegrated wrapper (Task 3.2)", function () {
     it("strict mode keeps the original revert messages", async function () {
       const zk = await deploy(false);
       const cases: [string, bigint[], string][] = [
-        [BL, [1n, 2n], "Invalid public inputs for blacklist circuit"],
+        [BL, [1n, 2n], "use verifyBlacklistNonMembership"],
         [JUR, [], "Invalid public inputs for jurisdiction circuit"],
         [ACC, [1n, 2n], "Invalid public inputs for accreditation circuit"],
         [COMP, [1n], "Invalid public inputs for compliance circuit"],
@@ -345,6 +396,8 @@ describe("ZKVerifierIntegrated wrapper (Task 3.2)", function () {
       for (const sig of [
         "verifyWhitelistMembership(uint256[24],uint256[3])",
         "whitelistProofCacheKey(uint256[24],uint256[3])",
+        "verifyBlacklistNonMembership(uint256[24],uint256[4])",
+        "blacklistProofCacheKey(uint256[24],uint256[4])",
         "testingMode()",
       ]) {
         expect(iface.hasFunction(sig), sig).to.equal(true);
