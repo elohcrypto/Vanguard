@@ -106,6 +106,18 @@ async function privacyFlow(state, failures) {
   });
 
   const bobBefore = await token.balanceOf(bob.address);
+  const failed = failures.length;
+  const fail = (m) => failures.push(`3.6: ${m}`);
+  // (d) read from chain in that state: the recipient re-bound under the
+  // rotated root, the sender did not, so only the sender is refused.
+  const onRotated = async () => {
+    if (!(await pm.hasValidWhitelistProof(bob.address)))
+      fail("(d) the kept recipient is not bound under the rotated root");
+    if (await pm.hasValidWhitelistProof(alice.address))
+      fail("(d) the removed sender is still bound");
+    if (await token.canTransfer(alice.address, bob.address, amount))
+      fail("(d) canTransfer(alice -> bob) is true after the rotation");
+  };
   const lines = [];
   let r = null;
   try {
@@ -117,6 +129,7 @@ async function privacyFlow(state, failures) {
       outsider: carol,
       amount,
       log: (...a) => lines.push(a.join(" ")),
+      onRotated,
     });
   } catch (e) {
     failures.push(
@@ -129,8 +142,6 @@ async function privacyFlow(state, failures) {
     return;
   }
 
-  const failed = failures.length;
-  const fail = (m) => failures.push(`3.6: ${m}`);
   const mode = Number(await rules.whitelistMode(vsc));
   if (mode !== 2)
     fail(`whitelistMode(VSC) = ${mode} after the flow, expected 2 (Either)`);
@@ -149,6 +160,8 @@ async function privacyFlow(state, failures) {
   }
   if (!r.rotatedRefused)
     fail("(d) after the rotation the bound wallet could still transfer");
+  if (!r.senderRemoved)
+    fail("(d) the rotated root still admits the sender (it could re-prove)");
   if (!r.reproved) fail("(e) after re-proving the transfer did not go through");
   if (!(await token.canTransfer(alice.address, bob.address, amount))) {
     fail("(e) canTransfer(alice -> bob) is false after re-proving");
@@ -163,7 +176,7 @@ async function privacyFlow(state, failures) {
   }
   if (failures.length > failed) return;
   console.log(
-    `✅ Privacy smoke: VSC in Either, bound transfer, unbound refused, rotation refused, re-proof transfer (root version ${await pm.whitelistVersion()}).`,
+    `✅ Privacy smoke: VSC in Either, bound transfer, unbound refused, sender removed and refused, re-proof transfer (root version ${await pm.whitelistVersion()}).`,
   );
 }
 

@@ -23,6 +23,8 @@ const {
 const EITHER = 2;
 const MODES = ["OracleOnly", "ZkOnly", "Either"];
 const same = (a, b) => a.toLowerCase() === b.toLowerCase();
+// scripts/zk/prove-whitelist.js refuses a commitment outside the root so.
+const NOT_IN_ROOT = /is not in the root file/;
 const fmt = (x) => ethers.formatEther(x);
 
 /** Publish `rootFile` as the list operator, or the owner while none is set. */
@@ -91,6 +93,8 @@ async function showRefused(token, from, to, amount, log) {
  * @param {Object} p.rootFile - buildWhitelistRoot output, the current root
  * @param {Object} [p.outsider] - verified signer with no binding
  * @param {bigint} [p.amount] - VSC moved per transfer
+ * @param {Function} [p.onRotated] - awaited right after step (d), so a
+ *   caller (the smoke) can read the chain in that state
  * @returns {Promise<Object|null>} null when a precondition is missing
  */
 async function runLiveWhitelistFlow({
@@ -101,6 +105,7 @@ async function runLiveWhitelistFlow({
   outsider,
   amount = ethers.parseEther("10"),
   log = console.log,
+  onRotated,
 }) {
   const token = state.getContract("digitalToken");
   const rules = state.getContract("complianceRules");
@@ -213,20 +218,40 @@ async function runLiveWhitelistFlow({
     log("   ℹ️  every other verified wallet is listed: nothing to show");
   }
 
-  // (d) Root rotation without the sender's commitment: its binding (and,
-  //     by the version bump, every binding) lapses; it cannot re-prove.
+  // (d) Root rotation without the sender's commitment. The kept recipient
+  //     re-onboards with a fresh commitment, so the rotated root is new on
+  //     every run (an old root is never republished), and re-binds under
+  //     it: the sender is then the only party without a binding.
   log("\n(d) ops/owner rotates the root without the sender");
   const rest = listed.filter((s) => !same(s.address, sender.address));
+  state.zkSecrets.delete(recipient.address);
   const { rootFile: root2 } = await demoWhitelist(state, rest);
+  log(
+    `   ♻️  ${recipient.address} re-onboards with a fresh commitment; ${sender.address} is left out`,
+  );
   await publish(state, pm, root2, log);
+  await proveAndBind(state, pm, recipient, root2, log);
   log(`   🔍 hasValidWhitelistProof(sender): ${await bound(sender)}`);
+  log(`   🔍 hasValidWhitelistProof(recipient): ${await bound(recipient)}`);
   out.rotatedRefused = await showRefused(token, sender, recipient, amount, log);
+  // Removal is proven only by the library's not-in-the-root refusal.
+  out.senderRemoved = false;
   try {
     await proveForDemoUser(state, sender, root2);
     log("   ❌ the removed wallet could still prove");
   } catch (e) {
-    log(`   🚫 the sender cannot re-prove: ${e.message.split(":")[0]}`);
+    out.senderRemoved = NOT_IN_ROOT.test(e.message);
+    log(
+      out.senderRemoved
+        ? "   🚫 the sender cannot re-prove: its commitment is not in the root"
+        : `   ❌ the re-prove failed for another reason: ${e.message.split("\n")[0]}`,
+    );
   }
+  out.afterRotation = {
+    sender: await bound(sender),
+    recipient: await bound(recipient),
+  };
+  if (onRotated) await onRotated({ sender, recipient });
 
   // (e) Re-onboarding is a new commitment (a fresh secret), so the new
   //     root differs from every old one; both wallets re-prove and re-bind.
@@ -239,8 +264,8 @@ async function runLiveWhitelistFlow({
   }
   out.reproved = await tryTransfer(token, sender, recipient, amount, log);
   log(
-    out.transferred && out.rotatedRefused && out.reproved
-      ? "\n✅ ZK allow list on VSC: bound -> transfer, rotated -> refused, re-proved -> transfer"
+    out.transferred && out.rotatedRefused && out.senderRemoved && out.reproved
+      ? "\n✅ ZK allow list on VSC: bound -> transfer, sender removed -> refused, re-proved -> transfer"
       : "\n⚠️  ZK allow list on VSC: a step did not behave as expected (see above)",
   );
   return { ...out, recipient: recipient.address, outsider: outsider?.address };
