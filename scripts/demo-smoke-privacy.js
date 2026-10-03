@@ -3,7 +3,9 @@
  * pair option 1 deploys, wired by option 21, and the ZK allow list on the
  * live VSC, driven through the same code as demo option 42 -> 1
  * (demo/utils/WhitelistBinderFlow.js, demo/utils/WhitelistLiveFlow.js) and
- * the scripts/zk library. Every assertion reads the chain.
+ * the scripts/zk library, and one attestation proof (Task 3.7b) through the
+ * code of option 42 -> 3 (demo/utils/AttestationFlow.js). Every assertion
+ * reads the chain.
  *
  * checkPrivacyWiring runs right after the deploy; runPrivacySmoke after the
  * escrow smoke and before the handover, which hands the pair to governance.
@@ -17,6 +19,12 @@ const {
   publishAndBind,
 } = require("../demo/utils/WhitelistBinderFlow");
 const { runLiveWhitelistFlow } = require("../demo/utils/WhitelistLiveFlow");
+const {
+  DEFAULT_MINIMUM_ACCREDITATION,
+  DEFAULT_COMPLIANCE,
+  runAttestationFlow,
+} = require("../demo/utils/AttestationFlow");
+const { CIRCUITS } = require("./zk/attest");
 
 const same = (a, b) => a.toLowerCase() === b.toLowerCase();
 const ALICE = 6; // the wallets demo-smoke.js onboarded for the vote (6-8)
@@ -59,6 +67,22 @@ async function checkPrivacyWiring(state, failures) {
     failures.push(
       "3.6: state key zkVerifier is not the zkVerifierIntegrated alias",
     );
+  }
+  // Task 3.7b: option 1 trusts the demo issuer key and sets the policies.
+  for (const [name, c] of Object.entries(CIRCUITS)) {
+    if ((await pm.trustedAttestorCount(c.id)) < 1n) {
+      failures.push(`3.7b: no trusted attestor for ${name} after deploy`);
+    }
+  }
+  if ((await pm.minimumAccreditation()) !== DEFAULT_MINIMUM_ACCREDITATION) {
+    failures.push("3.7b: minimumAccreditation is not the demo default");
+  }
+  const comp = (await pm.currentPolicy(CIRCUITS.compliance.id)).map(BigInt);
+  if (comp.join() !== DEFAULT_COMPLIANCE.join()) {
+    failures.push(`3.7b: compliance policy is [${comp}], not the demo default`);
+  }
+  if ((await pm.allowedJurisdictionMask()) !== 15n) {
+    failures.push("3.7b: allowed jurisdiction mask is not 15 (US, EU, UK, CA)");
   }
 }
 
@@ -177,6 +201,42 @@ async function privacyFlow(state, failures) {
   if (failures.length > failed) return;
   console.log(
     `✅ Privacy smoke: VSC in Either, bound transfer, unbound refused, sender removed and refused, re-proof transfer (root version ${await pm.whitelistVersion()}).`,
+  );
+  await attestationSmoke(state, failures);
+}
+
+/** Option 42 -> 3 for bob: the demo issuer attests US, bob proves and binds. */
+async function attestationSmoke(state, failures) {
+  const bob = state.signers[BOB];
+  const pm = state.getContract("privacyManager");
+  const lines = [];
+  let r = null;
+  try {
+    r = await runAttestationFlow({
+      state,
+      generator: state.realProofGenerator,
+      circuit: "jurisdiction",
+      user: bob,
+      attributes: { mask: await pm.jurisdictionCodeToMask("US") },
+      log: (...a) => lines.push(a.join(" ")),
+    });
+  } catch (e) {
+    failures.push(`3.7b: attestation flow threw: ${e.message.split("\n")[0]}`);
+  }
+  for (const l of lines) console.log(l);
+  if (!r) return;
+  const id = CIRCUITS.jurisdiction.id;
+  const rec = await pm.attestationRecords(bob.address, id);
+  if (!r.valid || !(await pm.getUserProofInfo(bob.address, id)).isValid) {
+    failures.push("3.7b: bob's jurisdiction record does not read valid");
+    return;
+  }
+  if (rec.policyHash !== (await pm.currentPolicyHash(id))) {
+    failures.push("3.7b: bob's record is not under the current policy");
+    return;
+  }
+  console.log(
+    `✅ Attestation smoke: jurisdiction record bound for ${bob.address} (nullifier ${rec.nullifier}).`,
   );
 }
 

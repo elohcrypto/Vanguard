@@ -13,6 +13,7 @@
 const { ethers } = require("hardhat");
 const { DeploymentHelper } = require("../../scripts/deploy-helpers");
 const { KYC_TOPIC, AML_TOPIC } = require("../utils/Kyc");
+const { setupDemoAttestations } = require("../utils/AttestationFlow");
 const {
   displaySection,
   displaySuccess,
@@ -434,6 +435,9 @@ class ContractDeployer {
     console.log(
       `   ✅ PrivacyManager:       ${await privacyManager.getAddress()} (owner publishes roots until the handover makes ops the listOperator)`,
     );
+    // Task 3.7b: the demo issuer key trusted for the three attestation
+    // circuits, and the default policies.
+    await setupDemoAttestations({ state: this.state, privacyManager });
     return { zkVerifier, privacyManager };
   }
 

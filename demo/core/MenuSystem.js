@@ -95,7 +95,7 @@ class MenuSystem {
     console.log("40. Test Complete Oracle Integration");
     console.log("");
     console.log("🔐 === PRIVACY & ZK VERIFICATION (Options 41-50) ===");
-    console.log("🔐 Real ZK proofs only (PLONK whitelist, Groth16 others)");
+    console.log("🔐 Real ZK proofs only (PLONK, all five circuits)");
     console.log("");
 
     console.log(

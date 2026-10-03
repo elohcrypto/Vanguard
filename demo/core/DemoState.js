@@ -198,6 +198,15 @@ class DemoState {
     this.zkSecrets = new Map();
 
     /**
+     * @property {string|null} attestorKey - The demo attestation issuer's
+     *   EdDSA Baby Jubjub key (Task 3.7b): 32 random bytes made once per
+     *   session (demo/utils/AttestationFlow.js), never printed; PrivacyManager
+     *   trusts its public key (Ax, Ay) for the three attestation circuits
+     * @type {string|null}
+     */
+    this.attestorKey = null;
+
+    /**
      * @property {Object|null} whitelistRootFile - The commitments behind the
      *   last whitelist root the demo published (buildWhitelistRoot output);
      *   the blacklist proof (option 42 -> 2) proves inclusion under it

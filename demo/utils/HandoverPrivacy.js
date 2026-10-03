@@ -26,6 +26,11 @@ const {
 const check = (cond, msg) => cond || fail(msg);
 const ZERO = ethers.ZeroAddress;
 const MODE = ["OracleOnly", "ZkOnly", "Either"];
+const ATTESTATION_CIRCUITS = [
+  ["jurisdiction", ethers.id("JURISDICTION_PROOF")],
+  ["accreditation", ethers.id("ACCREDITATION_PROOF")],
+  ["compliance", ethers.id("COMPLIANCE_AGGREGATION")],
+];
 
 /**
  * Task 3.4 (R-3R-15): the PrivacyManager ComplianceRules wires for VSC and
@@ -129,9 +134,10 @@ async function privacySteps({ o, d, dAddr, ok, log }) {
 
 /**
  * Completion lines: [label, pass] for both privacy contracts, including the
- * code-hash pins. Pushes to `warnings` (review 3.3 LOW-3) when the current
- * whitelist root was published by the deployer: bindings made under it stay
- * live until ops rotates the root.
+ * code-hash pins and the trusted attestor count per attestation circuit.
+ * Pushes to `warnings` (review 3.3 LOW-3) when the current whitelist root
+ * was published by the deployer: bindings made under it stay live until ops
+ * rotates the root; and when a circuit trusts no attestor (Task 3.7b).
  */
 async function privacyLines(o, dAddr, ops, govAddr, warnings = []) {
   const lines = [];
@@ -148,6 +154,18 @@ async function privacyLines(o, dAddr, ops, govAddr, warnings = []) {
       "PrivacyManager pendingOwner is not the deployer",
       !same(await c.pendingOwner(), dAddr),
     ]);
+    // Task 3.7b: who may vouch for the attestation proofs. Informational;
+    // none trusted refuses every proof of that circuit until a vote trusts
+    // an issuer key (setTrustedAttestor).
+    for (const [name, id] of ATTESTATION_CIRCUITS) {
+      const n = await c.trustedAttestorCount(id);
+      lines.push([`PrivacyManager trusted attestors for ${name}: ${n}`, true]);
+      if (n === 0n) {
+        warnings.push(
+          `PrivacyManager trusts no attestor for ${name}: its proofs are refused until a PrivacyParameters vote calls setTrustedAttestor`,
+        );
+      }
+    }
     used = await c.zkVerifier();
     const v = await ethers.getContractAt("ZKVerifierIntegrated", used);
     lines.push([

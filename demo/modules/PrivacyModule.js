@@ -22,6 +22,10 @@ const {
 } = require("../utils/WhitelistBinderFlow");
 const { runLiveWhitelistFlow } = require("../utils/WhitelistLiveFlow");
 const { runBlacklistProofFlow } = require("../utils/BlacklistProofFlow");
+const {
+  runAttestationFlow,
+  attestationStatus,
+} = require("../utils/AttestationFlow");
 const ContractDeployer = require("../core/ContractDeployer");
 const { ethers } = require("hardhat");
 
@@ -81,9 +85,7 @@ class PrivacyModule {
 
       try {
         await this.realGenerator();
-        console.log(
-          "✅ Real proof generator ready (PLONK whitelist and blacklist, Groth16 others)",
-        );
+        console.log("✅ Real proof generator ready (PLONK, all five circuits)");
       } catch (error) {
         console.log(
           `   ⚠️  Real proof generator failed to initialise: ${error.message}`,
@@ -101,10 +103,8 @@ class PrivacyModule {
       console.log(
         "   ✅ Blacklist Non-Membership Proofs (Privacy-preserving, non-gating: D2; needs a binding from 42 -> 1)",
       );
-      console.log("   ✅ Jurisdiction Eligibility Proofs (Location privacy)");
-      console.log("   ✅ Accreditation Status Proofs (Credential privacy)");
       console.log(
-        "   ✅ Compliance Aggregation Proofs (Comprehensive privacy)",
+        "   ✅ Jurisdiction / Accreditation / Compliance Aggregation Proofs: issuer-signed attestations (EdDSA), bound on PrivacyManager (option 42 -> 3, 4, 5)",
       );
     } catch (error) {
       displayError(`Privacy system attach failed: ${error.message}`);
@@ -144,9 +144,9 @@ class PrivacyModule {
     for (const [name, system] of [
       ["whitelist_membership", "PLONK"],
       ["blacklist_membership", "PLONK"],
-      ["jurisdiction_proof", "Groth16"],
-      ["accreditation_proof", "Groth16"],
-      ["compliance_aggregation", "Groth16"],
+      ["jurisdiction_proof", "PLONK"],
+      ["accreditation_proof", "PLONK"],
+      ["compliance_aggregation", "PLONK"],
     ]) {
       const ok = files.verifyCircuitFiles(name);
       console.log(
@@ -1163,231 +1163,94 @@ class PrivacyModule {
   }
 
   /**
-   * The latest ProofVerified(proofType, user) event the verifier emitted with
-   * result true, or null. Options 42 -> 3 and 42 -> 4 call the wrapper's
-   * Groth16 verify directly from wallet 0 (the deployer, the verifier's
-   * runner), so the event names wallet 0 and options 44 and 45 filter on it.
-   * (The whitelist goes through PrivacyManager instead: option 43.)
+   * Options 44 and 45: the attestation records on PrivacyManager for every
+   * demo wallet, with the validator's answer (Task 3.7b). PrivacyManager,
+   * not the wallet, calls the verifier, so the verifier's events cannot say
+   * who holds a valid proof (R-3R-27): the records and validators can.
    */
-  async latestVerifiedProof(zkVerifierIntegrated, proofType, user) {
-    const events = await zkVerifierIntegrated.queryFilter(
-      zkVerifierIntegrated.filters.ProofVerified(proofType, user),
-    );
-    const ok = events.filter((e) => e.args.result);
-    console.log(
-      `   📊 ${events.length} ${proofType} proof event(s) for ${user}, ${ok.length} verified`,
-    );
-    return ok.length ? ok[ok.length - 1] : null;
+  async attestationView(circuit, title, emoji, option) {
+    displaySection(title, emoji);
+    try {
+      const rows = await attestationStatus({ state: this.state, circuit });
+      if (rows.some((r) => r.valid)) {
+        displaySuccess(
+          `${rows.filter((r) => r.valid).length} WALLET(S) HOLD A VALID ${circuit.toUpperCase()} ATTESTATION`,
+        );
+        console.log(
+          "   🕵️ Only the record is public: no attribute, salt or signature",
+        );
+      } else {
+        displayError(`NO VALID ${circuit.toUpperCase()} ATTESTATION`);
+        console.log(`   💡 Sign, prove and bind one first (option ${option})`);
+      }
+    } catch (error) {
+      displayError(`${title} failed: ${error.message}`);
+    }
   }
 
   /** Option 44: Verify Private Jurisdiction Eligibility */
   async verifyJurisdiction() {
-    displaySection("VERIFY PRIVATE JURISDICTION ELIGIBILITY", "🌍");
-
-    const zkVerifierIntegrated = this.state.getContract("zkVerifierIntegrated");
-    if (!zkVerifierIntegrated) {
-      displayError("No ZK verifier: run option 1 (or 41)");
-      return;
-    }
-
-    try {
-      console.log("🔍 Checking private jurisdiction eligibility...");
-      const user = this.state.signers[0].address;
-      const event = await this.latestVerifiedProof(
-        zkVerifierIntegrated,
-        "jurisdiction",
-        user,
-      );
-
-      if (event) {
-        displaySuccess("PRIVATE JURISDICTION ELIGIBILITY VERIFIED!");
-        console.log(
-          "   🌍 User is eligible to participate from their jurisdiction",
-        );
-        console.log("   🕵️ Actual location remains private");
-        console.log("   ⚖️ Complies with regulatory requirements");
-        console.log(`   🔗 Transaction: ${event.transactionHash}`);
-        console.log(`   🧱 Block: ${event.blockNumber}`);
-      } else {
-        displayError("JURISDICTION ELIGIBILITY NOT VERIFIED");
-        console.log("   Possible reasons:");
-        console.log("   • No jurisdiction proof submitted (option 42 -> 3)");
-        console.log("   • User not in allowed jurisdiction");
-        console.log("   • Invalid jurisdiction proof");
-      }
-    } catch (error) {
-      displayError(
-        `Private jurisdiction verification failed: ${error.message}`,
-      );
-    }
+    await this.attestationView(
+      "jurisdiction",
+      "VERIFY PRIVATE JURISDICTION ELIGIBILITY",
+      "🌍",
+      "42 -> 3",
+    );
   }
 
   /** Option 45: Verify Private Accreditation Status */
   async verifyAccreditation() {
-    displaySection("VERIFY PRIVATE ACCREDITATION STATUS", "💰");
-
-    const zkVerifierIntegrated = this.state.getContract("zkVerifierIntegrated");
-    if (!zkVerifierIntegrated) {
-      displayError("No ZK verifier: run option 1 (or 41)");
-      return;
-    }
-
-    try {
-      console.log("🔍 Checking private accreditation status...");
-      const user = this.state.signers[0].address;
-      const event = await this.latestVerifiedProof(
-        zkVerifierIntegrated,
-        "accreditation",
-        user,
-      );
-
-      if (event) {
-        displaySuccess("PRIVATE ACCREDITATION STATUS VERIFIED!");
-        console.log("   💰 User meets the minimum the proof was made for");
-        console.log("   🕵️ Actual net worth remains private");
-        console.log("   📊 Eligible for corresponding investment products");
-        console.log(`   🔗 Transaction: ${event.transactionHash}`);
-        console.log(`   🧱 Block: ${event.blockNumber}`);
-      } else {
-        displayError("ACCREDITATION STATUS NOT VERIFIED");
-        console.log("   Possible reasons:");
-        console.log("   • No accreditation proof submitted (option 42 -> 4)");
-        console.log("   • User does not meet the threshold");
-        console.log("   • Invalid accreditation proof");
-      }
-    } catch (error) {
-      displayError(
-        `Private accreditation verification failed: ${error.message}`,
-      );
-    }
+    await this.attestationView(
+      "accreditation",
+      "VERIFY PRIVATE ACCREDITATION STATUS",
+      "💰",
+      "42 -> 4",
+    );
   }
 
-  /** Option 46: Privacy-Preserving Compliance Validation */
+  /**
+   * Option 46: Privacy-Preserving Compliance Validation, read from
+   * PrivacyManager.validateAllPrivateCompliance for every demo wallet with
+   * any status: the whitelist binding and the three attestation records
+   * (each under the user's preference flags).
+   */
   async privacyPreservingValidation() {
     displaySection("PRIVACY-PRESERVING COMPLIANCE VALIDATION", "📊");
 
-    const zkVerifierIntegrated = this.state.getContract("zkVerifierIntegrated");
-
-    if (!zkVerifierIntegrated) {
-      displayError("No ZK verifier: run option 1 (or 41)");
+    const pm = this.state.getContract("privacyManager");
+    if (!pm) {
+      displayError("No PrivacyManager: run option 1 (or 41)");
       return;
     }
 
     try {
       console.log(
-        "🔍 Running comprehensive privacy-preserving compliance check...",
+        "🔍 PrivacyManager.validateAllPrivateCompliance per wallet (whitelist, jurisdiction, accreditation, compliance):\n",
       );
-      console.log("   ℹ️  Checking for previously submitted ZK proofs...");
-      console.log("");
-
-      const userAddress = this.state.signers[0].address;
-      const results = {
-        whitelist: false,
-        jurisdiction: false,
-        accreditation: false,
-        overall: false,
-      };
-
-      const expiryTime = 24 * 60 * 60; // 24 hours in seconds
-
-      // Whitelist: the wallet's PrivacyManager binding (PrivacyManager, not
-      // the wallet, calls the verifier since Task 3.3; see option 43).
-      console.log("1️⃣  Checking whitelist membership (private)...");
-      try {
-        const pm = this.state.getContract("privacyManager");
-        results.whitelist = pm
-          ? await pm.hasValidWhitelistProof(userAddress)
-          : false;
-
+      const mark = (b) => (b ? "✅" : "❌");
+      let shown = 0;
+      let full = 0;
+      for (const [i, s] of this.state.signers.entries()) {
+        const [w, j, a, c] = await pm.validateAllPrivateCompliance(s.address);
+        if (!(w || j || a || c)) continue;
+        shown++;
+        if (w && j && a && c) full++;
         console.log(
-          `   ${results.whitelist ? "✅" : "❌"} Whitelist: ${results.whitelist ? "VERIFIED" : "NOT VERIFIED"}`,
+          `   wallet ${i} ${s.address}: whitelist ${mark(w)} jurisdiction ${mark(j)} accreditation ${mark(a)} compliance ${mark(c)}`,
         );
-      } catch (error) {
-        console.log(`   ❌ Whitelist: ERROR - ${error.message}`);
       }
-
-      // Check jurisdiction eligibility (via events)
-      console.log("\n2️⃣  Checking jurisdiction eligibility (private)...");
-      try {
-        const filter = zkVerifierIntegrated.filters.ProofVerified(
-          "jurisdiction",
-          userAddress,
-        );
-        const events = await zkVerifierIntegrated.queryFilter(filter);
-
-        if (events.length > 0) {
-          const latestEvent = events[events.length - 1];
-          const block = await latestEvent.getBlock();
-          const timestamp = block.timestamp;
-          const proofAge = Date.now() / 1000 - Number(timestamp);
-          const timeRemaining = expiryTime - proofAge;
-
-          results.jurisdiction = timeRemaining > 0;
-        }
-
-        console.log(
-          `   ${results.jurisdiction ? "✅" : "❌"} Jurisdiction: ${results.jurisdiction ? "ELIGIBLE" : "NOT ELIGIBLE"}`,
-        );
-      } catch (error) {
-        console.log(`   ❌ Jurisdiction: ERROR - ${error.message}`);
-      }
-
-      // Check accreditation status (via events)
-      console.log("\n3️⃣  Checking accreditation status (private)...");
-      try {
-        const filter = zkVerifierIntegrated.filters.ProofVerified(
-          "accreditation",
-          userAddress,
-        );
-        const events = await zkVerifierIntegrated.queryFilter(filter);
-
-        if (events.length > 0) {
-          const latestEvent = events[events.length - 1];
-          const block = await latestEvent.getBlock();
-          const timestamp = block.timestamp;
-          const proofAge = Date.now() / 1000 - Number(timestamp);
-          const timeRemaining = expiryTime - proofAge;
-
-          results.accreditation = timeRemaining > 0;
-        }
-
-        console.log(
-          `   ${results.accreditation ? "✅" : "❌"} Accreditation: ${results.accreditation ? "QUALIFIED" : "NOT QUALIFIED"}`,
-        );
-      } catch (error) {
-        console.log(`   ❌ Accreditation: ERROR - ${error.message}`);
-      }
-
-      // Overall compliance
-      results.overall =
-        results.whitelist && results.jurisdiction && results.accreditation;
-
-      console.log("\n📊 COMPLIANCE SUMMARY:");
-      console.log("=".repeat(50));
-      console.log(
-        `   Whitelist Membership: ${results.whitelist ? "✅ PASS" : "❌ FAIL"}`,
-      );
-      console.log(
-        `   Jurisdiction Eligibility: ${results.jurisdiction ? "✅ PASS" : "❌ FAIL"}`,
-      );
-      console.log(
-        `   Accreditation Status: ${results.accreditation ? "✅ PASS" : "❌ FAIL"}`,
-      );
       console.log("");
-      console.log(
-        `   Overall Compliance: ${results.overall ? "✅ COMPLIANT" : "❌ NON-COMPLIANT"}`,
-      );
-      console.log("");
-
-      if (results.overall) {
-        displaySuccess("USER IS FULLY COMPLIANT!");
-        console.log("   🎉 All privacy-preserving checks passed");
-        console.log("   🔒 User identity remains private");
-        console.log("   ✅ Eligible for all platform features");
+      if (shown === 0) {
+        displayError("NO WALLET HOLDS ANY PRIVATE COMPLIANCE STATUS");
+        console.log(
+          "   💡 Bind a whitelist proof (42 -> 1) and attestations (42 -> 3, 4, 5)",
+        );
+      } else if (full > 0) {
+        displaySuccess(`${full} WALLET(S) PASS ALL FOUR PRIVATE CHECKS`);
+        console.log("   🔒 Identities and attributes remain private");
       } else {
-        displayError("USER IS NOT FULLY COMPLIANT");
-        console.log("   ⚠️  Some compliance checks failed");
-        console.log("   💡 Complete missing requirements to gain full access");
+        displayError("NO WALLET PASSES ALL FOUR PRIVATE CHECKS");
+        console.log("   💡 Complete the missing ones (option 42)");
       }
     } catch (error) {
       displayError(`Privacy-preserving validation failed: ${error.message}`);
@@ -1446,7 +1309,7 @@ class PrivacyModule {
       console.log("=".repeat(60));
 
       // Mode information
-      console.log("\n🔐 Proofs: REAL (PLONK whitelist, Groth16 others)");
+      console.log("\n🔐 Proofs: REAL (PLONK, all five circuits)");
 
       // Proof generation statistics
       if (this.state.proofGenerationTimes.size > 0) {
@@ -1845,360 +1708,168 @@ class PrivacyModule {
     }
   }
 
+  /**
+   * The wallet that signs-then-proves in 42 -> 3/4/5: a typed index, else
+   * the first KYC/AML verified wallet after the deployer, else wallet 1.
+   * Returns null on a bad index.
+   */
+  async pickAttestationUser() {
+    const signers = this.state.signers;
+    const idReg = this.state.getContract("identityRegistry");
+    let fallback = signers[1] || signers[0];
+    for (const s of signers.slice(1)) {
+      if (idReg && (await idReg.isVerified(s.address))) {
+        fallback = s;
+        break;
+      }
+    }
+    const input = (
+      await this.promptUser(
+        `Wallet index that proves (default ${signers.indexOf(fallback)}): `,
+      )
+    ).trim();
+    if (!input) return fallback;
+    if (!/^\d+$/.test(input) || !signers[Number(input)]) {
+      displayError(
+        `"${input}" is not a wallet index (0-${signers.length - 1})`,
+      );
+      return null;
+    }
+    return signers[Number(input)];
+  }
+
+  /**
+   * Shared tail of 42 -> 3/4/5 (Task 3.7b): the demo issuer signs, the user
+   * proves through scripts/zk/prove-attestation.js and binds the record on
+   * PrivacyManager; success is printed only when the validator reads true.
+   */
+  async attest(circuit, user, attributes, label) {
+    const generator = await this.realGenerator();
+    try {
+      const { valid } = await runAttestationFlow({
+        state: this.state,
+        generator,
+        circuit,
+        user,
+        attributes,
+      });
+      if (valid) displaySuccess(`${label} ATTESTATION BOUND AND VALID`);
+      else
+        displayError(
+          `${label} attestation bound but the validator reads false (privacy settings opt-out?)`,
+        );
+      return valid;
+    } catch (error) {
+      displayError(`${label} attestation refused: ${error.message}`);
+      return false;
+    }
+  }
+
+  /**
+   * Option 42 -> 3: an issuer attests the user's jurisdiction as its
+   * PrivacyManager registry mask bit; the proof shows the bit is in the
+   * allowed mask (the OR of the active jurisdictions) without revealing it.
+   */
   async submitJurisdictionEligibilityProof() {
     console.log("\n🌍 SUBMIT JURISDICTION ELIGIBILITY PROOF");
     console.log("-".repeat(40));
-    console.log(`🎯 Location privacy using real ZK proofs`);
-
-    const zkVerifierIntegrated = this.state.getContract("zkVerifierIntegrated");
-    if (!zkVerifierIntegrated) {
-      displayError("No ZK verifier: run option 1 (or 41)");
+    const pm = this.state.getContract("privacyManager");
+    if (!pm) {
+      displayError("No PrivacyManager: run option 1 (or 41)");
       return;
     }
-
-    try {
-      // Load jurisdiction lists from on-chain ComplianceRules contract
-      await this.loadJurisdictionListsFromContract();
-
-      let proof;
-      let realProofResult;
-      let generationTime = 0;
-
-      // Ask user for their jurisdiction
-      console.log("\n🌍 SELECT YOUR JURISDICTION:");
-      console.log("Common ISO 3166-1 Numeric Codes:");
-      console.log("  840 = United States");
-      console.log("  826 = United Kingdom");
-      console.log("  276 = Germany (EU)");
-      console.log("  124 = Canada");
-      console.log("  392 = Japan");
-      console.log("  156 = China");
-      console.log("  356 = India");
-      console.log("  036 = Australia");
-      console.log("  702 = Singapore");
-      console.log("  756 = Switzerland");
-      console.log("");
-
-      const jurisdictionInput = await this.promptUser(
-        "Enter your jurisdiction code (default: 840): ",
+    const [masks, names, codes] = await pm.getActiveJurisdictions();
+    console.log(
+      "🎯 Attested jurisdiction, proved against PrivacyManager's registry (not ComplianceRules' ISO lists):",
+    );
+    codes.forEach((c, i) =>
+      console.log(`   ${c} = ${names[i]} (mask ${masks[i]}, active)`),
+    );
+    const user = await this.pickAttestationUser();
+    if (!user) return;
+    const code =
+      (await this.promptUser("Your jurisdiction code (default US): "))
+        .trim()
+        .toUpperCase() || "US";
+    const mask = await pm.jurisdictionCodeToMask(code);
+    if (mask === 0n) {
+      displayError(
+        `${code} is not in PrivacyManager's jurisdiction registry (owner: addJurisdiction)`,
       );
-      const userJurisdiction = jurisdictionInput.trim()
-        ? BigInt(jurisdictionInput.trim())
-        : BigInt(840);
-
-      // Convert Set to Array for proof generation
-      const allowedJurisdictions = Array.from(this.state.allowedJurisdictions);
-
-      // Check if allowed list is empty
-      if (allowedJurisdictions.length === 0) {
-        console.log("\n⚠️  WARNING: No allowed jurisdictions configured!");
-        console.log("   The allowed jurisdictions list is empty.");
-        console.log("");
-        console.log("   OPTIONS:");
-        console.log(
-          "   1. Add jurisdictions to allowed list (Option 42 → 7 → 2)",
-        );
-        console.log(
-          "   2. Continue with demo mode (uses your jurisdiction as allowed)",
-        );
-        console.log("   3. Cancel");
-        console.log("");
-
-        const choice = await this.promptUser("   Select option (1-3): ");
-
-        if (choice === "1") {
-          console.log(
-            "   💡 Please use Option 42 → 7 → 2 to add allowed jurisdictions",
-          );
-          return;
-        } else if (choice === "2") {
-          console.log(
-            `   📝 Demo mode: Adding ${userJurisdiction} to allowed list temporarily`,
-          );
-          allowedJurisdictions.push(userJurisdiction);
-          this.state.allowedJurisdictions.add(userJurisdiction);
-        } else {
-          console.log("   ❌ Proof generation cancelled");
-          return;
-        }
-      }
-
-      // Check if user's jurisdiction is allowed
-      const isAllowed = this.state.allowedJurisdictions.has(userJurisdiction);
-      const isDisallowed =
-        this.state.disallowedJurisdictions.has(userJurisdiction);
-
-      if (isDisallowed) {
-        displayError(`Jurisdiction ${userJurisdiction} is DISALLOWED!`);
-        console.log("   ❌ Cannot generate proof for disallowed jurisdiction");
-        console.log(
-          "   💡 Tip: Use option 42 → 7 to manage jurisdiction lists",
-        );
-        return;
-      }
-
-      if (!isAllowed) {
-        console.log(
-          `\n⚠️  WARNING: Jurisdiction ${userJurisdiction} is NOT in allowed list!`,
-        );
-        console.log("   Current allowed jurisdictions:");
-        if (this.state.allowedJurisdictions.size === 0) {
-          console.log("      (empty)");
-        } else {
-          for (const code of this.state.allowedJurisdictions) {
-            console.log(`      • ${code}`);
-          }
-        }
-        console.log(
-          "   💡 Tip: Use option 42 → 7 to add your jurisdiction to allowed list",
-        );
-
-        const continueAnyway = await this.promptUser(
-          "\nContinue anyway? (yes/no): ",
-        );
-        if (continueAnyway.toLowerCase() !== "yes") {
-          console.log("❌ Proof generation cancelled");
-          return;
-        }
-
-        // Add to allowed list temporarily for proof generation
-        console.log(
-          `   📝 Adding ${userJurisdiction} to allowed list temporarily for this proof`,
-        );
-        allowedJurisdictions.push(userJurisdiction);
-        this.state.allowedJurisdictions.add(userJurisdiction);
-      }
-
-      console.log("\n📊 Jurisdiction Parameters:");
-      console.log(`   🌍 User Jurisdiction: ${userJurisdiction} (US)`);
-      console.log(
-        `   ✅ Allowed Jurisdictions: [${allowedJurisdictions.map((j) => j.toString()).join(", ")}]`,
-      );
-      console.log(`      840 = United States`);
-      console.log(`      826 = United Kingdom`);
-      console.log(`      276 = Germany (EU)`);
-      console.log(`      124 = Canada`);
-      console.log("");
-
-      const generator = await this.realGenerator();
-      const startTime = Date.now();
-      realProofResult = await generator.generateJurisdictionProof({
-        userJurisdiction,
-        allowedJurisdictions,
-      });
-      generationTime = Date.now() - startTime;
-
-      proof = realProofResult.proof;
-      console.log(`✅ Real proof generated in ${generationTime}ms`);
-
-      this.state.proofGenerationTimes.set(
-        "Jurisdiction Eligibility",
-        generationTime,
-      );
-
-      // Verify proof
-      console.log("\n🔍 Verifying jurisdiction proof...");
-
-      // The contract expects uint256[1] containing the public signal
-      // For jurisdiction proof, this is typically the allowedJurisdictionsMask or commitment
-      const publicSignal = realProofResult.publicSignals[0];
-
-      const tx = await zkVerifierIntegrated.verifyJurisdictionProof(
-        proof.a,
-        proof.b,
-        proof.c,
-        [publicSignal],
-      );
-      const receipt = await tx.wait();
-
-      this.state.gasTracker.set("Jurisdiction Proof", receipt.gasUsed);
-
-      displaySuccess("JURISDICTION ELIGIBILITY PROOF VERIFIED!");
-      console.log(`   ✅ Public Signal: ${publicSignal}`);
-      console.log(`   🔗 Transaction: ${receipt.hash}`);
-      console.log(`   🧱 Block: ${receipt.blockNumber}`);
-      console.log(`   💰 Gas Used: ${receipt.gasUsed.toLocaleString()}`);
-      console.log(`   ⏱️  Generation time: ${generationTime}ms`);
-      console.log(`   🔒 Proof type: REAL`);
-      console.log(`   🌍 User jurisdiction: PRIVATE (hidden from contract)`);
-      console.log(`   ✅ Eligible for participation`);
-    } catch (error) {
-      displayError(`Jurisdiction proof submission failed: ${error.message}`);
+      return;
     }
+    console.log(`   🌍 Attested: ${code} (mask ${mask}), private in the proof`);
+    return this.attest("jurisdiction", user, { mask }, "JURISDICTION");
   }
 
+  /**
+   * Option 42 -> 4: an issuer attests the user's accreditation amount; the
+   * proof shows it meets PrivacyManager's minimum without revealing it.
+   */
   async submitAccreditationStatusProof() {
     console.log("\n💰 SUBMIT ACCREDITATION STATUS PROOF");
     console.log("-".repeat(40));
-    console.log(`🎯 Wealth privacy using real ZK proofs`);
-
-    const zkVerifierIntegrated = this.state.getContract("zkVerifierIntegrated");
-    if (!zkVerifierIntegrated) {
-      displayError("No ZK verifier: run option 1 (or 41)");
+    const pm = this.state.getContract("privacyManager");
+    if (!pm) {
+      displayError("No PrivacyManager: run option 1 (or 41)");
       return;
     }
-
-    try {
-      const accreditationLevels = [
-        { level: 100000, name: "Retail Investor ($100K+)" },
-        { level: 1000000, name: "Accredited Investor ($1M+)" },
-        { level: 5000000, name: "Qualified Purchaser ($5M+)" },
-        { level: 25000000, name: "Institutional Investor ($25M+)" },
-      ];
-
-      console.log(
-        "\n📊 STEP 1: Select YOUR accreditation level (your actual wealth):",
-      );
-      accreditationLevels.forEach((level, index) => {
-        console.log(`   ${index + 1}. ${level.name}`);
-      });
-
-      const userChoice = await this.promptUser("\nSelect your level (1-4): ");
-      const userLevel =
-        accreditationLevels[parseInt(userChoice) - 1] || accreditationLevels[1];
-
-      console.log(
-        "\n📊 STEP 2: Select MINIMUM required level (what you want to prove):",
-      );
-      accreditationLevels.forEach((level, index) => {
-        console.log(`   ${index + 1}. ${level.name}`);
-      });
-
-      const minChoice = await this.promptUser("\nSelect minimum level (1-4): ");
-      const minLevel =
-        accreditationLevels[parseInt(minChoice) - 1] || accreditationLevels[0];
-      const minimumAccreditation = minLevel.level;
-
-      let proof;
-      let generationTime = 0;
-
-      console.log("\n📊 Accreditation Parameters:");
-      console.log(
-        `   💰 Your Wealth: ${userLevel.name} ($${userLevel.level.toLocaleString()})`,
-      );
-      console.log(
-        `   ✅ Minimum Required: ${minLevel.name} ($${minimumAccreditation.toLocaleString()})`,
-      );
-
-      // Check if user meets minimum
-      if (userLevel.level < minimumAccreditation) {
-        console.log(
-          `   ❌ Your wealth ($${userLevel.level.toLocaleString()}) is below minimum ($${minimumAccreditation.toLocaleString()})`,
-        );
-        console.log(`   💡 You cannot prove you meet this requirement!`);
-        console.log("");
-        displayError("Accreditation level below minimum requirement");
-        return;
-      }
-
-      console.log(`   ✅ You meet the requirement! Generating proof...`);
-      console.log("");
-
-      const generator = await this.realGenerator();
-      const startTime = Date.now();
-      const realProofResult = await generator.generateAccreditationProof({
-        userAccreditation: userLevel.level,
-        minimumAccreditation,
-      });
-      generationTime = Date.now() - startTime;
-
-      proof = realProofResult.proof;
-      console.log(`✅ Real proof generated in ${generationTime}ms`);
-
-      this.state.proofGenerationTimes.set(
-        "Accreditation Status",
-        generationTime,
-      );
-
-      // Verify proof
-      console.log("\n🔍 Verifying accreditation proof...");
-      const isValid = await zkVerifierIntegrated.verifyAccreditationProof(
-        proof.a,
-        proof.b,
-        proof.c,
-        [minimumAccreditation],
-      );
-
-      if (isValid) {
-        displaySuccess("ACCREDITATION STATUS PROOF VERIFIED!");
-        console.log(`   ⏱️  Generation time: ${generationTime}ms`);
-        console.log(`   🔒 Proof type: REAL`);
-        console.log(`   💰 User net worth: PRIVATE`);
-        console.log(
-          `   ✅ Meets minimum requirement: $${minimumAccreditation.toLocaleString()}`,
-        );
-      } else {
-        displayError("ACCREDITATION PROOF VERIFICATION FAILED");
-      }
-    } catch (error) {
-      displayError(`Accreditation proof submission failed: ${error.message}`);
-    }
+    const minimum = await pm.minimumAccreditation();
+    console.log(
+      `🎯 PrivacyManager's minimum accreditation: ${minimum.toLocaleString()} (owner policy; a type 11 vote after the handover)`,
+    );
+    const levels = [
+      { level: 50000n, name: "Retail ($50K)" },
+      { level: 250000n, name: "Accredited ($250K)" },
+      { level: 1000000n, name: "Accredited Investor ($1M)" },
+      { level: 25000000n, name: "Institutional ($25M)" },
+    ];
+    levels.forEach((l, i) => console.log(`   ${i + 1}. ${l.name}`));
+    const user = await this.pickAttestationUser();
+    if (!user) return;
+    const pick =
+      levels[
+        parseInt(await this.promptUser("Attested amount (1-4, default 2): ")) -
+          1
+      ] || levels[1];
+    console.log(
+      `   💰 Attested: ${pick.name}, private in the proof${pick.level < minimum ? " (below the minimum: the prover refuses)" : ""}`,
+    );
+    return this.attest(
+      "accreditation",
+      user,
+      { amount: pick.level },
+      "ACCREDITATION",
+    );
   }
 
+  /**
+   * Option 42 -> 5: an issuer attests four compliance scores in one
+   * attestation; the proof shows the weighted sum meets PrivacyManager's
+   * minimum without revealing the scores or the aggregate.
+   */
   async submitComplianceAggregationProof() {
     console.log("\n📊 SUBMIT COMPLIANCE AGGREGATION PROOF");
     console.log("-".repeat(40));
-    console.log(`🎯 Comprehensive compliance using real ZK proofs`);
-
-    const zkVerifierIntegrated = this.state.getContract("zkVerifierIntegrated");
-    if (!zkVerifierIntegrated) {
-      displayError("No ZK verifier: run option 1 (or 41)");
+    const pm = this.state.getContract("privacyManager");
+    if (!pm) {
+      displayError("No PrivacyManager: run option 1 (or 41)");
       return;
     }
-
-    try {
-      const scores = {
-        kyc: 95,
-        aml: 90,
-        jurisdiction: 100,
-        accreditation: 85,
-      };
-      const minimumComplianceLevel = 80;
-
-      console.log("\n📋 Compliance Scores (PRIVATE):");
-      console.log(`   KYC: ${scores.kyc}/100`);
-      console.log(`   AML: ${scores.aml}/100`);
-      console.log(`   Jurisdiction: ${scores.jurisdiction}/100`);
-      console.log(`   Accreditation: ${scores.accreditation}/100`);
-      console.log(`   Minimum Required: ${minimumComplianceLevel}/100`);
-
-      let proof;
-      let generationTime = 0;
-
-      console.log(`\n🔐 Generating REAL compliance aggregation proof...`);
-      console.log("⏳ This may take ~233ms for real ZK proof...");
-
-      const generator = await this.realGenerator();
-      const startTime = Date.now();
-      const realProofResult = await generator.generateComplianceProof({
-        kycScore: BigInt(scores.kyc),
-        amlScore: BigInt(scores.aml),
-        jurisdictionScore: BigInt(scores.jurisdiction),
-        accreditationScore: BigInt(scores.accreditation),
-        weightKyc: BigInt(25), // 25% weight for KYC
-        weightAml: BigInt(25), // 25% weight for AML
-        weightJurisdiction: BigInt(25), // 25% weight for Jurisdiction
-        weightAccreditation: BigInt(25), // 25% weight for Accreditation
-        minimumComplianceLevel: BigInt(minimumComplianceLevel),
-      });
-      generationTime = Date.now() - startTime;
-
-      proof = realProofResult.proof;
-      console.log(`✅ Real proof generated in ${generationTime}ms`);
-
-      this.state.proofGenerationTimes.set(
-        "Compliance Aggregation",
-        generationTime,
-      );
-
-      displaySuccess("COMPLIANCE AGGREGATION PROOF GENERATED!");
-      console.log(`   ⏱️  Generation time: ${generationTime}ms`);
-      console.log(`   🔒 Proof type: REAL`);
-      console.log(`   📊 Individual scores: PRIVATE`);
-      console.log(`   ✅ Overall compliance: VERIFIED`);
-    } catch (error) {
-      displayError(`Compliance aggregation proof failed: ${error.message}`);
-    }
+    const p = await pm.compliancePolicy();
+    console.log(
+      `🎯 Policy: weighted sum >= ${p.minimum} x 100, weights kyc ${p.wK} / aml ${p.wA} / jurisdiction ${p.wJ} / accreditation ${p.wAcc}`,
+    );
+    const user = await this.pickAttestationUser();
+    if (!user) return;
+    const input = (
+      await this.promptUser(
+        "Attested scores kyc,aml,jurisdiction,accreditation (default 95,90,100,85): ",
+      )
+    ).trim();
+    const scores = (input || "95,90,100,85").split(",").map((x) => x.trim());
+    console.log(`   📋 Attested scores: PRIVATE in the proof`);
+    return this.attest("compliance", user, { scores }, "COMPLIANCE");
   }
 
   async submitAllPrivateProofs() {

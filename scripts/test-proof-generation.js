@@ -81,94 +81,87 @@ async function main() {
     });
   }
 
-  // Test 3: Jurisdiction Proof
-  try {
-    console.log("\n3️⃣  Testing Jurisdiction Proof...");
-    const startTime = Date.now();
-
-    const jurisdictionResult = await generator.generateJurisdictionProof({
-      userJurisdiction: BigInt(1),
-      allowedJurisdictions: [BigInt(1), BigInt(2), BigInt(3)],
-    });
-
-    const duration = Date.now() - startTime;
-    console.log(`   ✅ PASSED - Generated in ${duration}ms`);
-    console.log(
-      `   📊 Public signals: ${jurisdictionResult.publicSignals.length}`,
-    );
-    results.passed++;
-    results.tests.push({ name: "Jurisdiction", status: "PASSED", duration });
-  } catch (error) {
-    console.log(`   ❌ FAILED - ${error.message}`);
-    results.failed++;
-    results.tests.push({
-      name: "Jurisdiction",
-      status: "FAILED",
-      error: error.message,
-    });
-  }
-
-  // Test 4: Accreditation Proof
-  try {
-    console.log("\n4️⃣  Testing Accreditation Proof...");
-    const startTime = Date.now();
-
-    const accreditationResult = await generator.generateAccreditationProof({
-      accreditationLevel: BigInt(5),
-      minimumLevel: BigInt(3),
-    });
-
-    const duration = Date.now() - startTime;
-    console.log(`   ✅ PASSED - Generated in ${duration}ms`);
-    console.log(
-      `   📊 Public signals: ${accreditationResult.publicSignals.length}`,
-    );
-    results.passed++;
-    results.tests.push({ name: "Accreditation", status: "PASSED", duration });
-  } catch (error) {
-    console.log(`   ❌ FAILED - ${error.message}`);
-    results.failed++;
-    results.tests.push({
-      name: "Accreditation",
-      status: "FAILED",
-      error: error.message,
-    });
-  }
-
-  // Test 5: Compliance Proof
-  try {
-    console.log("\n5️⃣  Testing Compliance Proof...");
-    const startTime = Date.now();
-
-    // Use smaller values to avoid circuit constraints
-    // Circuit divides weighted sum by 100
-    const complianceResult = await generator.generateComplianceProof({
-      kycScore: BigInt(80),
-      amlScore: BigInt(75),
-      jurisdictionScore: BigInt(85),
-      accreditationScore: BigInt(70),
-      weightKyc: BigInt(25),
-      weightAml: BigInt(25),
-      weightJurisdiction: BigInt(25),
-      weightAccreditation: BigInt(25),
-      minimumComplianceLevel: BigInt(70), // After division: (80*25+75*25+85*25+70*25)/100 = 77.5
-    });
-
-    const duration = Date.now() - startTime;
-    console.log(`   ✅ PASSED - Generated in ${duration}ms`);
-    console.log(
-      `   📊 Public signals: ${complianceResult.publicSignals.length}`,
-    );
-    results.passed++;
-    results.tests.push({ name: "Compliance", status: "PASSED", duration });
-  } catch (error) {
-    console.log(`   ❌ FAILED - ${error.message}`);
-    results.failed++;
-    results.tests.push({
-      name: "Compliance",
-      status: "FAILED",
-      error: error.message,
-    });
+  // Tests 3-5: the attestation circuits (Task 3.7b, D31 a). A throwaway
+  // issuer key signs; the proofs carry the issuer's (Ax, Ay) and the policy.
+  const { signAttestation, newAttestorKey } = require("./zk/attest");
+  const key = newAttestorKey();
+  const sig = (a) => ({
+    identity: a.identity,
+    salt: a.salt,
+    R8x: a.R8x,
+    R8y: a.R8y,
+    S: a.S,
+    Ax: a.Ax,
+    Ay: a.Ay,
+    walletBinding: "0x000000000000000000000000000000000000dEaD",
+  });
+  const attestationCases = [
+    [
+      "Jurisdiction",
+      async () => {
+        const a = await signAttestation({
+          key,
+          circuit: "jurisdiction",
+          identity: 12345n,
+          mask: 1,
+        });
+        return generator.generateJurisdictionProof({
+          ...sig(a),
+          mask: 1n,
+          allowedMask: 15n, // US, EU, UK, CA: PrivacyManager's default registry
+        });
+      },
+    ],
+    [
+      "Accreditation",
+      async () => {
+        const a = await signAttestation({
+          key,
+          circuit: "accreditation",
+          identity: 12345n,
+          amount: 250000,
+        });
+        return generator.generateAccreditationProof({
+          ...sig(a),
+          amount: 250000n,
+          minimumAccreditation: 100000n,
+        });
+      },
+    ],
+    [
+      "Compliance",
+      async () => {
+        const a = await signAttestation({
+          key,
+          circuit: "compliance",
+          identity: 12345n,
+          scores: [80, 75, 85, 70],
+        });
+        // Weighted (80+75+85+70)*25 = 7750 >= 70 * 100.
+        return generator.generateComplianceProof({
+          ...sig(a),
+          scores: a.attributes,
+          minimum: 70n,
+          weights: [25n, 25n, 25n, 25n],
+        });
+      },
+    ],
+  ];
+  for (const [k, [name, prove]] of attestationCases.entries()) {
+    try {
+      console.log(`\n${k + 3}️⃣  Testing ${name} Proof...`);
+      const startTime = Date.now();
+      const r = await prove();
+      const duration = Date.now() - startTime;
+      console.log(`   ✅ PASSED - Generated in ${duration}ms`);
+      console.log(`   📊 Public signals: ${r.publicSignals.length}`);
+      results.passed++;
+      results.tests.push({ name, status: "PASSED", duration });
+    } catch (error) {
+      console.log(`   ❌ FAILED - ${error.message}`);
+      results.failed++;
+      results.tests.push({ name, status: "FAILED", error: error.message });
+    }
   }
 
   // Summary
