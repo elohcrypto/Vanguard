@@ -177,9 +177,10 @@ jobs:
       - name: Run tests
         run: npm test
 
-      # Coverage ratchet. Baseline 86: measured at 88.55% lines on CI at
-      # 19d75cb (2026-10-02; earlier baselines 63.73% -> 65 -> 84 -> 86, each
-      # raised after the notice fired).
+      # Coverage ratchet. Baseline 88: measured at 88.55% lines on CI at
+      # 19d75cb, 89.1% at 2e05e97, 89.17% at 15f26f3 (2026-10-03; earlier
+      # baselines 63.73% -> 65 -> 84 -> 86 -> 88, each raised after the
+      # notice fired).
       # Fails only when the number DROPS below BASELINE; notices when it climbs
       # 2+ points so the baseline can be raised. The plugin compiles instrumented
       # bytecode into artifacts/; nothing else may compile in this tree while it
@@ -188,7 +189,7 @@ jobs:
       # cap that instrumented initcode exceeds.
       - name: Coverage ratchet (no DROP in line coverage)
         run: |
-          BASELINE=86
+          BASELINE=88
           npm run test:coverage > coverage.log 2>&1 || true
           lines=$(grep -E '^All files' coverage.log | awk -F'|' '{gsub(/ /,"",$5); print $5}')
           echo "line coverage: ${lines:-<none>}% (baseline $BASELINE)"
@@ -297,6 +298,26 @@ jobs:
       #   leave the pins; clearing them needs overrides. `npm audit
       #   --omit=dev` reports 10: these 8 plus mocha 8.4.0's copies of mocha
       #   and serialize-javascript.
+      # 22 -> 34 on 2026-10-03 (CI run 37090710733 at 15f26f3): advisories
+      # published upstream against an unchanged tree (no dependency changed;
+      # an install from days earlier reports 34 too). `npm audit fix
+      # --dry-run` (non-breaking) only adds fsevents and leaves 34. The 12
+      # new highs, by chain:
+      # - @fastify/busboy (GHSA-x8mw-p69m-v3mx), under undici under hardhat
+      #   and hardhat-verify (1). Fix: the Hardhat 3 majors above (npm
+      #   offers solidity-coverage 0.7.22).
+      # - braces (GHSA-vfj7-8cjw-p6xm) -> micromatch -> fast-glob -> globby
+      #   -> solidity-coverage, and braces -> chokidar -> mocha (the copies
+      #   under solidity-coverage, eth-gas-reporter, circom_runtime) (5:
+      #   braces, micromatch, fast-glob, globby, chokidar). Fix: the
+      #   solidity-coverage major above; circom_runtime's needs overrides.
+      # - http-cache-semantics (GHSA-ch52-4w7c-c8xp) -> cacheable-request ->
+      #   got -> package-json -> latest-version -> solhint (6). Fix: npm
+      #   offers solhint 3.6.2 (major downgrade).
+      # The same audit lists further highs on packages already in the 22
+      # (js-yaml, minimatch, nanoid, undici, ws, tmp, underscore,
+      # serialize-javascript, adm-zip); the count is per package, so they
+      # do not move it.
       # The count is checked against the live advisory database, so a newly
       # published advisory in an unchanged dependency reddens every branch
       # at once; raise BASELINE with the advisory recorded here.
@@ -305,7 +326,7 @@ jobs:
       # introduced high is caught while the known backlog stays visible.
       - name: Audit ratchet (no NEW high vulnerabilities)
         run: |
-          BASELINE=22
+          BASELINE=34
           count=$(npm audit --json 2>/dev/null \
             | node -e "let s='';process.stdin.on('data',d=>s+=d).on('end',()=>{
                 console.log(JSON.parse(s).metadata.vulnerabilities.high)})")
