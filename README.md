@@ -243,7 +243,7 @@ npx hardhat coverage
 
 ### **3. Privacy & Zero-Knowledge**
 - ✅ **5 ZK Circuits**: Whitelist, blacklist, jurisdiction, accreditation, compliance aggregation
-- ✅ **Groth16 Proofs**: Privacy-preserving compliance validation
+- ✅ **PLONK Proofs**: Privacy-preserving compliance validation (universal setup, all five circuits)
 - ✅ **Selective Disclosure**: Prove compliance without revealing personal data
 - ✅ **Complete Integration**: ZK proofs integrated with existing compliance systems
 
@@ -339,7 +339,7 @@ npx hardhat coverage
 │  └──────────────┘  └──────────────┘  └──────────────┘           │
 │                                                                 │
 │  ┌────────────────────────────────────────────────────────┐     │
-│  │      Privacy Layer (5 ZK Circuits - Groth16)           │     │
+│  │      Privacy Layer (5 ZK Circuits - PLONK)             │     │
 │  │  - Whitelist/Blacklist membership proofs               │     │
 │  │  - Jurisdiction compliance proofs                      │     │
 │  │  - Accreditation status proofs                         │     │

@@ -43,30 +43,13 @@ npx hardhat run scripts/deploy.js --network mainnet
 
 ## 📋 Circuit Constraints
 
-### ⚠️ Compliance Aggregation - CRITICAL CONSTRAINT
-
-**The weighted sum MUST be divisible by 100!**
-
-```javascript
-// Calculate: (kyc*wKyc + aml*wAml + jur*wJur + acc*wAcc) % 100 === 0
-
-// ✅ VALID Examples:
-{ kyc: 80, aml: 76, jur: 84, acc: 60, weights: [25,25,25,25] } // Sum: 7500
-{ kyc: 88, aml: 88, jur: 88, acc: 88, weights: [30,30,20,20] } // Sum: 8800
-{ kyc: 90, aml: 90, jur: 90, acc: 90, weights: [25,25,25,25] } // Sum: 9000
-
-// ❌ INVALID Examples:
-{ kyc: 80, aml: 75, jur: 85, acc: 70, weights: [25,25,25,25] } // Sum: 7750 (not divisible)
-{ kyc: 90, aml: 85, jur: 95, acc: 80, weights: [30,30,20,20] } // Sum: 8750 (not divisible)
-```
-
-**Quick Validation:**
-```javascript
-const sum = (kyc * wKyc) + (aml * wAml) + (jur * wJur) + (acc * wAcc);
-if (sum % 100 !== 0) {
-    throw new Error(`Invalid input: sum ${sum} not divisible by 100`);
-}
-```
+### Attestation circuits (jurisdiction, accreditation, compliance)
+Since Task 3.7b the three circuits prove an issuer's EdDSA signature over
+the attributes and PrivacyManager's policy; there is no division and no
+divisibility rule. Inputs that miss the policy have no witness: the mask
+bit must be in `allowedMask`, `amount >= minimumAccreditation` (both below
+2^64), each score at most 100, the weights summing to 100 and
+`kyc*wK + aml*wA + jur*wJ + acc*wAcc >= minimum * 100`.
 
 ---
 
@@ -89,19 +72,21 @@ const proof = await generator.generateWhitelistProof({
 
 ### Generate Compliance Proof
 ```javascript
-const proof = await generator.generateComplianceProof({
-    kycScore: BigInt(80),
-    amlScore: BigInt(76),
-    jurisdictionScore: BigInt(84),
-    accreditationScore: BigInt(60),
-    weightKyc: BigInt(25),
-    weightAml: BigInt(25),
-    weightJurisdiction: BigInt(25),
-    weightAccreditation: BigInt(25),
-    minimumComplianceLevel: BigInt(70)
+// Attestation proofs (Task 3.7b): an issuer signs, the investor proves
+const { signAttestation } = require('./scripts/zk/attest.js');
+const att = await signAttestation({
+    key: process.env.ATTESTOR_KEY, circuit: 'compliance',
+    identity: onchainID, scores: [80, 75, 85, 70],
 });
-// Returns: { proof: {a, b, c}, publicSignals: [1, 75] }
-// Time: ~65 ms
+const complianceProof = await generator.generateComplianceProof({
+    identity: att.identity, scores: att.attributes, salt: att.salt,
+    R8x: att.R8x, R8y: att.R8y, S: att.S, Ax: att.Ax, Ay: att.Ay,
+    minimum: 70n, weights: [25n, 25n, 25n, 25n], walletBinding: wallet,
+});
+// publicSignals: [nullifier, Ax, Ay, 70, 25, 25, 25, 25, wallet]
+// scripts/zk/prove-attestation.js reads the policy and the issuer trust
+// from PrivacyManager and wraps this for investors.
+// Time: ~9 s
 ```
 
 ### Verify Proof On-Chain
@@ -139,17 +124,17 @@ const result = await zkVerifier.verifyWhitelistMembership(
 |---------|----------------|------------------|-------------|
 | whitelist_membership | ~50s | 147k | 11,339 |
 | blacklist_membership (PLONK) | ~9s | ~390-420k via the wrapper | 24,394 |
-| jurisdiction_proof | ~86ms | 130k | 1,339 |
-| accreditation_proof | ~82ms | 64k | 2,839 |
-| compliance_aggregation | ~65ms | 130k | 2,339 |
+| jurisdiction_proof (PLONK) | ~9s | ~424k via the wrapper, ~550k via submitAttestationProof | 9,539 |
+| accreditation_proof (PLONK) | ~9s | ~409k via the wrapper | 9,542 |
+| compliance_aggregation (PLONK) | ~9s | ~412k via the wrapper | 10,687 |
 
 ---
 
 ## 🐛 Troubleshooting
 
-### "Assert Failed" Error in Compliance Circuit
-**Cause:** Weighted sum not divisible by 100  
-**Fix:** Adjust scores so `(kyc*wKyc + aml*wAml + jur*wJur + acc*wAcc) % 100 === 0`
+### "Assert Failed" Error in an Attestation Circuit
+**Cause:** A forged or altered attestation (EdDSAPoseidonVerifier), or attributes that miss the policy  
+**Fix:** Use the issuer's attestation unchanged; `scripts/zk/prove-attestation.js` names the unmet policy before proving
 
 ### "ENOENT: no such file or directory" for WASM
 **Cause:** Circuits not compiled  
@@ -172,7 +157,7 @@ Before deploying to production:
 - [ ] Run `node scripts/verify-zk-readiness.js` - All checks pass
 - [ ] Run `npm test` - All 710 tests pass
 - [ ] Test real proof generation for each circuit type
-- [ ] Verify compliance inputs are divisible by 100
+- [ ] Trust each issuer's (Ax, Ay) and set the policies on PrivacyManager
 - [ ] Deploy with `testingMode=false`
 - [ ] Test on-chain verification with real proofs
 - [ ] Monitor gas costs and adjust limits if needed

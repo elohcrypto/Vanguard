@@ -569,109 +569,50 @@ refuses a listed identity before proving.
 - ✅ The wrapper refuses any signal at or above the field order (no aliased signals)
 - ℹ️ A privacy demonstration only: the blacklist gate is the BlacklistOracle (D2)
 
-### 3. Jurisdiction Proof Circuit
+### 3-5. Attestation circuits: jurisdiction, accreditation, compliance aggregation
 
-**Circuit Logic:**
+A trusted issuer signs the investor's attributes off chain with an EdDSA
+Baby Jubjub key (D31 a, `scripts/zk/attest.js`); the circuits verify the
+signature against the issuer's public key (Ax, Ay) and the public policy,
+bind the wallet and emit a nullifier. Shared templates live in
+`circuits/attestation.circom`:
+
 ```circom
-template JurisdictionProof() {
-    // Private inputs
-    signal input userJurisdiction;   // Actual jurisdiction code
-    signal input userSalt;           // Privacy salt
-    
-    // Public inputs
-    signal input allowedJurisdictionsMask;  // Bitmask of allowed jurisdictions
-    signal input commitmentHash;            // Commitment to jurisdiction
-    
-    // Output
-    signal output isEligible;
-    
-    // Step 1: Verify commitment
-    component commitmentHasher = Poseidon(2);
-    commitmentHasher.inputs[0] <== userJurisdiction;
-    commitmentHasher.inputs[1] <== userSalt;
-    
-    component commitmentCheck = IsEqual();
-    commitmentCheck.in[0] <== commitmentHasher.out;
-    commitmentCheck.in[1] <== commitmentHash;
-    
-    // Step 2: Check jurisdiction in allowed mask
-    // Extract bit at position userJurisdiction from mask
-    component bitExtractor = Num2Bits(256);
-    bitExtractor.in <== allowedJurisdictionsMask;
-    
-    component jurisdictionCheck = IsEqual();
-    jurisdictionCheck.in[0] <== bitExtractor.out[userJurisdiction];
-    jurisdictionCheck.in[1] <== 1;
-    
-    // Step 3: Combine checks
-    component and = AND();
-    and.a <== commitmentCheck.out;
-    and.b <== jurisdictionCheck.out;
-    
-    isEligible <== and.out;
-}
+// M = Poseidon(domain, identity, attributes..., salt); domain 1, 2, 3 per
+// circuit, so an attestation signed for one circuit fails in another.
+component sig = EdDSAPoseidonVerifier();
+sig.enabled <== 1;                 // constant: the check cannot be switched off
+sig.Ax <== Ax; sig.Ay <== Ay;      // public: PrivacyManager must trust them
+sig.R8x <== R8x; sig.R8y <== R8y; sig.S <== S; sig.M <== message.out;
+// nullifier = Poseidon(salt, policyHash): one wallet per attestation per policy
 ```
 
-**Features:**
-- ✅ Bitmask for efficient jurisdiction checking
-- ✅ Commitment scheme for privacy
-- ✅ Supports up to 256 jurisdictions
+| Circuit | Attested (private) | Policy (public) | Public signals |
+|---|---|---|---|
+| `jurisdiction_proof` | the registry mask bit of the investor's jurisdiction | `allowedMask` = OR of PrivacyManager's active masks | `[nullifier, Ax, Ay, allowedMask, walletBinding]` |
+| `accreditation_proof` | the accreditation amount (< 2^64) | `minimumAccreditation` | `[nullifier, Ax, Ay, minimumAccreditation, walletBinding]` |
+| `compliance_aggregation` | four scores 0..100 in one attestation | minimum and four weights summing to 100 | `[nullifier, Ax, Ay, minimum, wK, wA, wJ, wAcc, walletBinding]` |
 
-### 4. Compliance Aggregation Circuit
+Every check is a hard constraint: the mask has exactly one bit and it is set
+in `allowedMask` (both range-checked to 64 bits); `amount >= minimum`; the
+weighted sum `>= minimum * 100` (no aggregate is output, so nothing beyond
+"meets the policy" is disclosed). PLONK on the universal ptau: 24,187 /
+24,131 / 26,046 gates (power 15).
 
-**Circuit Logic:**
-```circom
-template ComplianceAggregation() {
-    // Private inputs (individual scores)
-    signal input kycScore;           // 0-100
-    signal input amlScore;           // 0-100
-    signal input jurisdictionScore;  // 0-100
-    signal input accreditationScore; // 0-100
-    signal input userSalt;
-    
-    // Public inputs
-    signal input minAggregateScore;  // Minimum required score
-    signal input commitmentHash;     // Commitment to scores
-    
-    // Output
-    signal output isCompliant;
-    
-    // Step 1: Verify commitment
-    component commitmentHasher = Poseidon(5);
-    commitmentHasher.inputs[0] <== kycScore;
-    commitmentHasher.inputs[1] <== amlScore;
-    commitmentHasher.inputs[2] <== jurisdictionScore;
-    commitmentHasher.inputs[3] <== accreditationScore;
-    commitmentHasher.inputs[4] <== userSalt;
-    
-    component commitmentCheck = IsEqual();
-    commitmentCheck.in[0] <== commitmentHasher.out;
-    commitmentCheck.in[1] <== commitmentHash;
-    
-    // Step 2: Calculate aggregate score (weighted average)
-    // weights: KYC=30%, AML=30%, Jurisdiction=20%, Accreditation=20%
-    signal aggregateScore;
-    aggregateScore <== (kycScore * 30 + amlScore * 30 + 
-                        jurisdictionScore * 20 + accreditationScore * 20) / 100;
-    
-    // Step 3: Check if aggregate meets minimum
-    component scoreCheck = GreaterEqThan(8);  // 8 bits for 0-255
-    scoreCheck.in[0] <== aggregateScore;
-    scoreCheck.in[1] <== minAggregateScore;
-    
-    // Step 4: Combine checks
-    component and = AND();
-    and.a <== commitmentCheck.out;
-    and.b <== scoreCheck.out;
-    
-    isCompliant <== and.out;
-}
-```
+PrivacyManager's `submitAttestationProof(circuitId, proof, signals)` requires
+the issuer key to be trusted for the circuit (`setTrustedAttestor`), the
+policy signals to equal the current policy, `walletBinding == msg.sender`
+and the nullifier to be free under the policy (or the caller's), verifies
+through the wrapper, and records `{policyHash, attestor, nullifier,
+expiresAt}`. A record counts while its policy is current, its issuer key is
+still trusted and it has not expired; `validatePrivate*` add the user's
+preference flags.
 
-**Features:**
-- ✅ Weighted score aggregation
-- ✅ Privacy-preserving compliance check
-- ✅ Flexible threshold configuration
+**Properties:**
+- ✅ A forged or altered attestation has no witness (EdDSA under the public key)
+- ✅ An untrusted issuer key or a stale policy is refused on chain
+- ✅ One wallet per attestation per policy; a policy change re-admits
+- ✅ The wrapper refuses any signal at or above the field order
 
 ---
 

@@ -434,8 +434,28 @@ bindings; (b) the bound wallet transfers VSC to another bound, verified
 wallet; (c) a verified wallet without a binding is refused; (d) the
 operator rotates the root without the sender's commitment and the
 sender's transfer is refused; (e) the sender re-onboards with a new
-secret, re-proves and re-binds, and the transfer succeeds again. See
-`docs/TESTNET_DEMO.md` for the command-line tools and the runbook rules.
+secret, re-proves and re-binds, and the transfer succeeds again.
+
+Option 42 -> 2 proves the bound wallet's identity is not on the
+BlacklistOracle's list; a demonstration only, nothing on chain gates on it
+(D2).
+
+Jurisdiction, accreditation and compliance aggregation are issuer-signed
+attestations (D31 a). A trusted issuer signs the investor's attributes
+with an EdDSA Baby Jubjub key (`scripts/zk/attest.js`); the investor
+proves the signature and PrivacyManager's policy (the allowed jurisdiction
+mask from its registry, the minimum accreditation, the compliance minimum
+and weights) without revealing the attributes, and binds the record with
+`submitAttestationProof` (`scripts/zk/prove-attestation.js`). PrivacyManager
+accepts only issuer keys it trusts for the circuit, the current policy and
+the submitting wallet, and keeps one wallet per attestation per policy;
+`validatePrivateJurisdiction`, `validatePrivateAccreditation`,
+`validatePrivateCompliance` and `validateAllPrivateCompliance` read the
+records under each user's preference flags. Options 42 -> 3, 4 and 5 run
+this with the demo's issuer key; 44, 45 and 46 show the records. The
+issuer keys and the policies are owner settings, PrivacyParameters votes
+(type 11) after the handover. See `docs/TESTNET_DEMO.md` for the
+command-line tools and the runbook rules.
 
 ---
 

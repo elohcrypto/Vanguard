@@ -51,9 +51,9 @@ The system builds **5 ZK circuits** for privacy-preserving compliance:
 |---|--------------|---------|------|
 | 1 | **Whitelist Membership** | Prove you're whitelisted without revealing identity | `whitelist_membership.circom` |
 | 2 | **Blacklist Non-Membership** | Prove you're NOT blacklisted privately | `blacklist_membership.circom` |
-| 3 | **Jurisdiction Proof** | Prove location eligibility without revealing country | `jurisdiction_proof.circom` |
-| 4 | **Accreditation Proof** | Prove wealth level without revealing exact amount | `accreditation_proof.circom` |
-| 5 | **Compliance Aggregation** | Prove overall compliance without revealing scores | `compliance_aggregation.circom` |
+| 3 | **Jurisdiction Proof** | Prove an issuer-attested jurisdiction is in PrivacyManager's allowed set without revealing it | `jurisdiction_proof.circom` |
+| 4 | **Accreditation Proof** | Prove an issuer-attested amount meets the minimum without revealing it | `accreditation_proof.circom` |
+| 5 | **Compliance Aggregation** | Prove issuer-attested scores meet the weighted minimum without revealing them | `compliance_aggregation.circom` |
 
 ---
 
@@ -207,7 +207,7 @@ contracts/privacy/verifiers/
 
 ### **1. Powers of Tau (.ptau)**
 - **File:** `powersOfTau28_hez_final_15.ptau`
-- **Purpose:** Trusted setup parameters for Groth16
+- **Purpose:** Universal setup parameters; every circuit is PLONK (`snarkjs plonk setup`), so there is no per-circuit phase 2
 - **Size:** 37.8 MB
 - **Source:** Hermez ceremony (trusted by Ethereum community); served from
   this repo's `ptau-hez-final-15` release since the public mirrors went dark.
@@ -268,7 +268,7 @@ circom circuits/whitelist_membership.circom \
 
 ```bash
 # Generate proving key for whitelist_membership
-snarkjs groth16 setup \
+snarkjs plonk setup \
   build/circuits/whitelist_membership/whitelist_membership.r1cs \
   build/circuits/powersOfTau28_hez_final_15.ptau \
   build/circuits/whitelist_membership/whitelist_membership.zkey
@@ -312,7 +312,7 @@ After building, check `build/circuits/circuit-info.json`:
     "jurisdiction_proof": {
       "id": "keccak256(\"JURISDICTION_PROOF\")",
       "name": "jurisdiction_proof",
-      "description": "Proves jurisdiction eligibility without revealing location",
+      "description": "Proves an issuer-attested jurisdiction is in the allowed set without revealing it (D31 a)",
       "verifyingKey": { ... },
       "buildPath": "build/circuits/jurisdiction_proof",
       "hasVerifier": true

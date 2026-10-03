@@ -40,9 +40,9 @@ All 5 circuits are compiled with **REAL cryptographic artifacts** (not mocks):
 |---------|-----------|-----------|-------------|--------|
 | **whitelist_membership** | 2.0 MB | 5.0 MB | 11,339 | ✅ READY |
 | **blacklist_membership** | 2.2 MB | 63 MB (PLONK) | 24,394 | ✅ READY (sound, Task 3.7) |
-| **jurisdiction_proof** | 1.7 MB | 261 KB | 1,339 | ✅ READY |
-| **accreditation_proof** | 2.1 MB | 545 KB | 2,839 | ✅ READY |
-| **compliance_aggregation** | 2.1 MB | 415 KB | 2,339 | ✅ READY |
+| **jurisdiction_proof** | PLONK | 24,187 gates | 9,539 | ✅ sound, issuer-signed (Task 3.7b) |
+| **accreditation_proof** | PLONK | 24,131 gates | 9,542 | ✅ sound, issuer-signed (Task 3.7b) |
+| **compliance_aggregation** | PLONK | 26,046 gates | 10,687 | ✅ sound, issuer-signed (Task 3.7b) |
 
 **Verification:** All WASM files start with `0061 736d` (WebAssembly magic number) - confirming they are real compiled circuits.
 
@@ -60,7 +60,7 @@ All 5 circuits are compiled with **REAL cryptographic artifacts** (not mocks):
 ### **REAL Mode (Production)**
 - **Purpose:** Actual zero-knowledge proof verification
 - **Deployment:** `ZKVerifierIntegrated(false)` - testingMode = false
-- **Behavior:** Cryptographically verifies ZK proofs using Groth16
+- **Behavior:** Cryptographically verifies PLONK proofs (all five circuits, universal setup)
 - **Use Case:** Mainnet, testnet, production environments
 - **Performance:** 
   - Proof generation: 50-100ms (simple) to 50s (complex Merkle proofs)
@@ -119,46 +119,33 @@ const proof = await generator.generateWhitelistProof({
     pathIndices: [0, 1, 0, ...]
 });
 
-// Example: Compliance proof
-const complianceProof = await generator.generateComplianceProof({
-    kycScore: BigInt(80),
-    amlScore: BigInt(76),
-    jurisdictionScore: BigInt(84),
-    accreditationScore: BigInt(60),
-    weightKyc: BigInt(25),
-    weightAml: BigInt(25),
-    weightJurisdiction: BigInt(25),
-    weightAccreditation: BigInt(25),
-    minimumComplianceLevel: BigInt(70)
+// Attestation proofs (Task 3.7b): an issuer signs, the investor proves
+const { signAttestation } = require('./scripts/zk/attest.js');
+const att = await signAttestation({
+    key: process.env.ATTESTOR_KEY, circuit: 'compliance',
+    identity: onchainID, scores: [80, 75, 85, 70],
 });
+const complianceProof = await generator.generateComplianceProof({
+    identity: att.identity, scores: att.attributes, salt: att.salt,
+    R8x: att.R8x, R8y: att.R8y, S: att.S, Ax: att.Ax, Ay: att.Ay,
+    minimum: 70n, weights: [25n, 25n, 25n, 25n], walletBinding: wallet,
+});
+// publicSignals: [nullifier, Ax, Ay, 70, 25, 25, 25, 25, wallet]
+// scripts/zk/prove-attestation.js reads the policy and the issuer trust
+// from PrivacyManager and wraps this for investors.
 ```
 
 ---
 
 ## ⚠️ Important Constraints
 
-### **Compliance Aggregation Circuit**
-The `compliance_aggregation` circuit uses field division, which requires:
-
-**CRITICAL:** The weighted sum MUST be divisible by 100!
-
-```javascript
-// ❌ WRONG - Will fail with "Assert Failed"
-kycScore: 80, weightKyc: 25,      // 80 * 25 = 2000
-amlScore: 75, weightAml: 25,      // 75 * 25 = 1875
-jurisdictionScore: 85, weightJur: 25,  // 85 * 25 = 2125
-accreditationScore: 70, weightAcc: 25  // 70 * 25 = 1750
-// Sum = 7750 → 7750 / 100 = 77.5 (NOT an integer!)
-
-// ✅ CORRECT - Will work
-kycScore: 80, weightKyc: 25,      // 80 * 25 = 2000
-amlScore: 76, weightAml: 25,      // 76 * 25 = 1900
-jurisdictionScore: 84, weightJur: 25,  // 84 * 25 = 2100
-accreditationScore: 60, weightAcc: 25  // 60 * 25 = 1500
-// Sum = 7500 → 7500 / 100 = 75 (Integer!)
-```
-
-**Formula:** `(kycScore * weightKyc + amlScore * weightAml + jurisdictionScore * weightJur + accreditationScore * weightAcc) % 100 === 0`
+### **Attestation circuits (jurisdiction, accreditation, compliance)**
+Since Task 3.7b the three circuits prove an issuer's EdDSA signature over
+the attributes and PrivacyManager's policy; there is no division and no
+divisibility rule. Inputs that miss the policy have no witness: the mask
+bit must be in `allowedMask`, `amount >= minimumAccreditation` (both below
+2^64), each score at most 100, the weights summing to 100 and
+`kyc*wK + aml*wA + jur*wJ + acc*wAcc >= minimum * 100`.
 
 ---
 
@@ -189,9 +176,9 @@ npx hardhat test test/privacy/ZKProofSystemIntegration.test.ts
 |-----------|-----------|-----------|
 | Whitelist proof generation | N/A | ~50 seconds |
 | Blacklist proof generation | N/A | ~9 seconds (PLONK) |
-| Jurisdiction proof generation | N/A | ~86 ms |
-| Accreditation proof generation | N/A | ~82 ms |
-| Compliance proof generation | N/A | ~65 ms |
+| Jurisdiction proof generation | N/A | ~9 seconds (PLONK) |
+| Accreditation proof generation | N/A | ~9 seconds (PLONK) |
+| Compliance proof generation | N/A | ~9 seconds (PLONK) |
 | On-chain verification | ~21k gas | 63-147k gas |
 
 ---
@@ -201,7 +188,7 @@ npx hardhat test test/privacy/ZKProofSystemIntegration.test.ts
 - [ ] Deploy `ZKVerifierIntegrated` with `testingMode = false`
 - [ ] Verify all 5 verifier contracts are deployed
 - [ ] Test real proof generation for each circuit type
-- [ ] Ensure compliance inputs are divisible by 100
+- [ ] Trust each issuer's (Ax, Ay) and set the policies on PrivacyManager (type 11 votes after the handover)
 - [ ] Set up proof generation backend/service
 - [ ] Configure gas limits (150k+ for verification)
 - [ ] Monitor proof verification costs
