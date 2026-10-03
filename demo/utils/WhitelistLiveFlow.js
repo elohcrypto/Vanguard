@@ -268,7 +268,47 @@ async function runLiveWhitelistFlow({
       ? "\n✅ ZK allow list on VSC: bound -> transfer, sender removed -> refused, re-proved -> transfer"
       : "\n⚠️  ZK allow list on VSC: a step did not behave as expected (see above)",
   );
+  log(
+    `\nℹ️  VSC STAYS in whitelist mode ${out.mode} (allow list of bindings ON): every verified wallet without a live PrivacyManager binding is refused on VSC from now on (option 43 shows the bindings).`,
+  );
+  log(
+    "   To switch back: the deployer calls ComplianceRules.setWhitelistMode(VSC, 0) before the handover; after it, a ComplianceRules vote (type 1).",
+  );
   return { ...out, recipient: recipient.address, outsider: outsider?.address };
 }
 
-module.exports = { runLiveWhitelistFlow };
+/**
+ * Hint lines for a refused VSC transfer or mint: one per party that VSC's
+ * whitelist refuses for want of a live PrivacyManager binding. Empty in
+ * OracleOnly, when the party is oracle-listed, or before option 21.
+ * @param {Object} state - DemoState
+ * @param {string[]} parties - addresses (address(0) is skipped)
+ * @returns {Promise<string[]>}
+ */
+async function whitelistHints(state, parties) {
+  const rules = state.getContract("complianceRules");
+  const token = state.getContract("digitalToken");
+  if (!rules || !token) return [];
+  const vsc = await token.getAddress();
+  const mode = Number(await rules.whitelistMode(vsc));
+  const pmAddr = await rules.privacyManager(vsc);
+  if (mode === 0 || pmAddr === ethers.ZeroAddress) return [];
+  const pm = await ethers.getContractAt("PrivacyManager", pmAddr);
+  const oracle = await rules.whitelistOracle(vsc);
+  const listedBy =
+    mode !== 1 && oracle !== ethers.ZeroAddress
+      ? await ethers.getContractAt("WhitelistOracle", oracle)
+      : null;
+  const hints = [];
+  for (const p of parties) {
+    if (!p || p === ethers.ZeroAddress) continue;
+    if (await pm.hasValidWhitelistProof(p)) continue;
+    if (listedBy && (await listedBy.isWhitelisted(p))) continue;
+    hints.push(
+      `VSC whitelist mode ${MODES[mode]}: ${p} has no live PrivacyManager binding (option 42 -> 1)`,
+    );
+  }
+  return hints;
+}
+
+module.exports = { runLiveWhitelistFlow, whitelistHints };

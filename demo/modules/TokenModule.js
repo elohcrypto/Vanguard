@@ -19,6 +19,7 @@ const {
   displayProgress,
 } = require("../utils/DisplayHelpers");
 const { attestAll, signClaim } = require("../utils/Kyc");
+const { whitelistHints } = require("../utils/WhitelistLiveFlow");
 const { ethers } = require("hardhat");
 
 /**
@@ -2245,8 +2246,11 @@ class TokenModule {
           : await ethers.getContractAt("InvestorTypeRegistry", a);
     }
     const balance = await digitalToken.balanceOf(to);
-    if (!registry || (await registry.canHoldAmount(to, balance + amountWei)))
-      return "compliance refused (jurisdiction or blacklist)";
+    if (!registry || (await registry.canHoldAmount(to, balance + amountWei))) {
+      // Task 3.6: after option 42 -> 1 VSC's allow list may be the cause.
+      const [hint] = await whitelistHints(this.state, [to]);
+      return hint || "compliance refused (jurisdiction or blacklist)";
+    }
     const type = await registry.getInvestorType(to);
     const cap = (await registry.getInvestorTypeConfig(type)).maxHoldingAmount;
     const names = ["Normal", "Retail", "Accredited", "Institutional"];
@@ -2893,6 +2897,12 @@ class TokenModule {
         console.error("💡 Sender has insufficient balance");
       } else if (error.message.includes("compliance")) {
         console.error("💡 Compliance check failed");
+      }
+      // Task 3.6: name a party VSC's allow list refuses (option 42 -> 1).
+      const parties = [sender?.address, recipient?.address];
+      const hints = await whitelistHints(this.state, parties).catch(() => []);
+      for (const h of hints) {
+        console.error(`💡 ${h}`);
       }
     }
   }

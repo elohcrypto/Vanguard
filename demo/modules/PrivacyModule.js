@@ -1731,31 +1731,34 @@ class PrivacyModule {
           "Choose which demo wallets the operator lists; each one is onboarded with its own identity and secret.",
         );
         console.log(
-          "Note: Your wallet (0) MUST be in the whitelist to generate a valid proof!\n",
+          "Note: the prover is the first listed wallet that is KYC/AML verified.\n",
         );
         const custom = await pickWallets(
           "Enter the listed wallet indices (comma-separated, e.g., 0,1,2): ",
         );
         if (custom === null) return;
         if (custom.length) listed = custom;
-
-        // Verify the user is in the whitelist
-        const isInWhitelist = listed.includes(proofUser);
-        if (!isInWhitelist) {
-          console.log("\n⚠️  WARNING: Your identity is NOT in the whitelist!");
-          const continueAnyway = await this.promptUser(
-            "Continue anyway? (yes/no): ",
-          );
-          if (continueAnyway.toLowerCase() !== "yes") {
-            console.log("❌ Proof generation cancelled.");
-            return;
-          }
-        }
-        console.log(
-          `   ✅ Identity in whitelist: ${isInWhitelist ? "YES" : "NO"}`,
-        );
       } else {
         console.log("\n📊 Using demo values: wallets 0-2 are listed");
+      }
+
+      if (securityChoice !== "3") {
+        // VSC refuses an unverified wallet whatever its binding, so the
+        // prover (the live flow's sender) is the first verified listed one.
+        const idReg = this.state.getContract("identityRegistry");
+        let pick = null;
+        for (const w of listed) {
+          if (idReg && (await idReg.isVerified(w.address))) {
+            pick = w;
+            break;
+          }
+        }
+        proofUser = pick || listed[0];
+        console.log(
+          pick
+            ? `   👤 Prover: ${pick.address}, the first listed wallet that is KYC/AML verified`
+            : `   ⚠️  No listed wallet is KYC/AML verified: ${proofUser.address} proves and binds, but VSC refuses it until it is onboarded (options 23/24, 3, 4), or use security mode 3`,
+        );
       }
 
       const { users, rootFile } = await demoWhitelist(this.state, listed);
@@ -1802,7 +1805,7 @@ class PrivacyModule {
       displaySuccess("WHITELIST MEMBERSHIP PROOF BOUND TO THE WALLET!");
 
       // Task 3.6: the same binding on the live token, steps (a) to (e).
-      await runLiveWhitelistFlow({
+      return await runLiveWhitelistFlow({
         state: this.state,
         sender: proofUser,
         listed,
