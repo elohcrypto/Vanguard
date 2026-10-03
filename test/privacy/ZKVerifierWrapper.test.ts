@@ -205,10 +205,20 @@ describe("ZKVerifierIntegrated wrapper (Task 3.2)", function () {
       ).to.equal(true);
     });
 
-    it("blacklist mock requires all four signals non-zero", async function () {
+    it("blacklist mock requires nullifier, whitelistRoot, binding non-zero", async function () {
       const zk = await deploy(true);
       const garbage = Array<bigint>(24).fill(0n);
-      for (let i = 0; i < 4; i++) {
+      // blacklistRoot 0 is an empty sanctions list: accepted, as in real mode.
+      expect(
+        await zk.verifyBlacklistNonMembership.staticCall(garbage, [
+          1n,
+          1n,
+          0n,
+          1n,
+        ]),
+        "empty sanctions list",
+      ).to.equal(true);
+      for (const i of [0, 1, 3]) {
         const s: [bigint, bigint, bigint, bigint] = [1n, 1n, 1n, 1n];
         s[i] = 0n;
         expect(

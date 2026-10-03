@@ -12,7 +12,7 @@ describe("Real ZK Proof Verification Tests", function () {
   let realProofGenerator;
   let owner, user1, user2;
 
-  // Increase timeout for proof generation (whitelist/blacklist take ~50 seconds)
+  // Increase timeout for proof generation (PLONK whitelist ~5 s, blacklist ~9 s)
   this.timeout(120000);
 
   before(async function () {
@@ -123,9 +123,7 @@ describe("Real ZK Proof Verification Tests", function () {
 
   describe("2. Blacklist Non-Membership Proofs", function () {
     it("should generate and verify valid blacklist proof", async function () {
-      console.log(
-        "  🔐 Generating blacklist proof (this may take ~50 seconds)...",
-      );
+      console.log("  🔐 Generating blacklist proof (PLONK, ~9 seconds)...");
 
       // The prover is a whitelisted commitment; the sanctions list is a
       // sparse Merkle tree of identities (Task 3.7).

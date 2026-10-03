@@ -476,7 +476,9 @@ function validateInvestorType(
 
 ### 1. Whitelist Membership Circuit
 
-**Circuit Logic:**
+**Circuit Logic (pre-Task 3.1 sketch; the committed circuit uses the hard
+`MerkleInclusion` template and commitment leaves, see
+`circuits/whitelist_membership.circom`):**
 ```circom
 template WhitelistMembership(levels) {
     // Private inputs (secret)
@@ -496,7 +498,7 @@ template WhitelistMembership(levels) {
     hasher.inputs[0] <== identity;
     
     // Step 2: Verify Merkle proof
-    component merkleProof = MerkleTreeChecker(levels);
+    component merkleProof = MerkleTreeChecker(levels); // soft template, deleted in Task 3.7
     merkleProof.leaf <== hasher.out;
     merkleProof.root <== merkleRoot;
     

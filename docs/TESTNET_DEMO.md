@@ -431,7 +431,10 @@ are skipped). It needs a live whitelist binding from option 42 -> 1 and
 verifies through `ZKVerifierIntegrated.verifyBlacklistNonMembership`; it then
 shows that a listed identity cannot prove. Nothing on chain gates on it
 (D2): VSC's blacklist gate reads the BlacklistOracle directly and at once,
-and PrivacyManager refuses the circuit.
+and PrivacyManager refuses the circuit. The proof's `blacklistRoot` is not
+published on chain, so whoever checks the proof rebuilds that root from the
+oracle's list (wallets resolved like the whitelist: OnchainID, else the
+wallet address) and compares it.
 
 ## Waiting instead of jumping
 

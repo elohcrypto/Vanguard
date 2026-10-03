@@ -42,11 +42,12 @@ function toKey(identity, label = "identity") {
  * @param {number} levels circuit depth (default SMT_LEVELS)
  * @returns {Promise<{root: bigint, tree: object, levels: number, size: number}>}
  *
- * Refuses a duplicate identity and any tree deeper than `levels`: two
- * identities sharing their lowest `levels` bits would need a deeper path
- * than the circuit can check, and every proof against that root that walks
- * the deep branch would fail. An empty list gives root 0 (circomlib's empty
- * tree).
+ * Refuses a duplicate identity and any leaf at depth `levels` or more:
+ * circomlib's SMTLevIns requires the last of the circuit's `levels`
+ * siblings to be 0, so a leaf can sit at depth `levels - 1` at most (19 for
+ * 20 levels). Two identities sharing their lowest `levels - 1` bits would
+ * need a deeper path, and every proof walking that branch would fail in the
+ * witness. An empty list gives root 0 (circomlib's empty tree).
  */
 async function buildBlacklistSmt(identities, levels = SMT_LEVELS) {
   if (!Array.isArray(identities)) {
@@ -64,10 +65,10 @@ async function buildBlacklistSmt(identities, levels = SMT_LEVELS) {
   }
   for (const key of seen) {
     const res = await tree.find(key);
-    if (res.siblings.length > levels) {
+    if (res.siblings.length >= levels) {
       throw new Error(
         `buildBlacklistSmt: identity ${key} sits at depth ${res.siblings.length}, ` +
-          `deeper than the circuit's ${levels} levels (identities collide in their low bits)`,
+          `deeper than the circuit's maximum ${levels - 1} for ${levels} levels (identities collide in their low bits)`,
       );
     }
   }
@@ -106,9 +107,9 @@ async function nonInclusionWitness(tree, identity, levels) {
       `Identity ${key} is on the sanctions list: no non-membership proof exists for it`,
     );
   }
-  if (res.siblings.length > depth) {
+  if (res.siblings.length >= depth) {
     throw new Error(
-      `Non-membership path has ${res.siblings.length} levels, more than the circuit's ${depth}`,
+      `Non-membership path has depth ${res.siblings.length}, deeper than the circuit's maximum ${depth - 1} for ${depth} levels`,
     );
   }
   const siblings = res.siblings.map((s) => F.toObject(s));

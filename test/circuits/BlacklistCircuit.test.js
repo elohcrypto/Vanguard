@@ -67,6 +67,44 @@ describe("Blacklist Membership Circuit", function () {
       );
     });
 
+    it("a leaf at depth 20 is refused, depth 19 proves (SMTLevIns)", async function () {
+      // circomlib's SMTLevIns needs the last of the 20 siblings to be 0, so
+      // the deepest provable leaf is at depth 19 (review 3.7a L1).
+      const d20 = [7n, 7n + (1n << 19n)]; // share 19 low bits: depth 20
+      await expect(buildBlacklistSmt(d20)).to.be.rejectedWith(
+        `deeper than the circuit's maximum ${SMT_LEVELS - 1} for ${SMT_LEVELS} levels`,
+      );
+      const d19 = [7n, 7n + (1n << 18n)]; // share 18 low bits: depth 19
+      const smt = await buildBlacklistSmt(d19);
+      const depth = (await smt.tree.find(d19[1])).siblings.length;
+      expect(depth).to.equal(SMT_LEVELS - 1);
+      // An unlisted key on that branch gets a witness the circuit accepts.
+      const outsider = 7n + (1n << 30n); // same 19 low bits as 7
+      const w = await nonInclusionWitness(smt.tree, outsider);
+      expect(w.isOld0).to.equal(0);
+      const wl = new MerkleTreeBuilder();
+      await wl.initialize();
+      wl.buildTree([wl.commitment(outsider, 77n)]);
+      const { pathElements, pathIndices } = wl.getProof(0);
+      await snarkjs.wtns.calculate(
+        {
+          identity: outsider.toString(),
+          secret: "77",
+          pathElements: pathElements.map(String),
+          pathIndices,
+          siblings: w.siblings.map(String),
+          oldKey: w.oldKey.toString(),
+          oldValue: w.oldValue.toString(),
+          isOld0: w.isOld0,
+          whitelistRoot: wl.getRoot().toString(),
+          blacklistRoot: smt.root.toString(),
+          walletBinding: "1",
+        },
+        WASM_PATH,
+        { type: "mem" },
+      );
+    });
+
     it("an empty list has root 0 and lists nobody", async function () {
       const smt = await buildBlacklistSmt([]);
       expect(smt.root).to.equal(0n);

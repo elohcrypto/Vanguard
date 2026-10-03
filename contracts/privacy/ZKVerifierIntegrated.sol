@@ -183,8 +183,10 @@ contract ZKVerifierIntegrated is Ownable2Step, ReentrancyGuard {
      * and PrivacyManager refuses this circuit.
      *
      * testingMode (demo only): the proof words are not checked and no
-     * verifier is called; a proof is accepted when all four signals are
-     * non-zero (and below the field order).
+     * verifier is called; a proof is accepted when the nullifier,
+     * whitelistRoot and walletBinding are non-zero (and every signal is below
+     * the field order). blacklistRoot may be 0: an empty sanctions list has
+     * root 0 and the real verifier accepts it.
      */
     function verifyBlacklistNonMembership(
         uint256[24] calldata proof,
@@ -210,7 +212,8 @@ contract ZKVerifierIntegrated is Ownable2Step, ReentrancyGuard {
 
         bool result;
         if (testingMode) {
-            result = pubSignals[0] != 0 && pubSignals[1] != 0 && pubSignals[2] != 0 && pubSignals[3] != 0;
+            // pubSignals[2] (blacklistRoot) is 0 for an empty sanctions list.
+            result = pubSignals[0] != 0 && pubSignals[1] != 0 && pubSignals[3] != 0;
         } else {
             result = blacklistVerifier.verifyProof(proof, pubSignals);
         }
