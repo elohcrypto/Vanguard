@@ -476,60 +476,77 @@ function validateInvestorType(
 
 ### 1. Whitelist Membership Circuit
 
-**Circuit Logic (pre-Task 3.1 sketch; the committed circuit uses the hard
-`MerkleInclusion` template and commitment leaves, see
-`circuits/whitelist_membership.circom`):**
+`circuits/whitelist_membership.circom` (PLONK, Tasks 3.1 and 3.3).
+Statement: the commitment `Poseidon(identity, secret)` is a leaf of the
+whitelist tree under the public root, for this wallet.
+
+**Circuit Logic (every check a hard constraint, no validity output):**
 ```circom
 template WhitelistMembership(levels) {
-    // Private inputs (secret)
-    signal input identity;              // User's secret identity
-    signal input pathElements[levels];  // Merkle path
-    signal input pathIndices[levels];   // Path indices
-    
+    // Private inputs
+    signal input identity;              // the investor's OnchainID address
+    signal input secret;                // chosen by the investor, >= 2^128
+    signal input pathElements[levels];
+    signal input pathIndices[levels];   // constrained binary in MerkleInclusion
+
     // Public inputs
-    signal input merkleRoot;            // Public whitelist root
-    signal input nullifierHash;         // Prevents reuse
-    
-    // Output
-    signal output isValid;
-    
-    // Step 1: Hash identity to create leaf
-    component hasher = Poseidon(1);
-    hasher.inputs[0] <== identity;
-    
-    // Step 2: Verify Merkle proof
-    component merkleProof = MerkleTreeChecker(levels); // soft template, deleted in Task 3.7
-    merkleProof.leaf <== hasher.out;
-    merkleProof.root <== merkleRoot;
-    
-    for (var i = 0; i < levels; i++) {
-        merkleProof.pathElements[i] <== pathElements[i];
-        merkleProof.pathIndices[i] <== pathIndices[i];
-    }
-    
-    // Step 3: Generate and verify nullifier
+    signal input merkleRoot;
+    signal input walletBinding;         // must equal msg.sender on chain
+
+    // Public output
+    signal output nullifier;
+
+    // Leaf = the commitment the investor handed the operator (D30 a)
+    component leafHasher = Poseidon(2);
+    leafHasher.inputs[0] <== identity;
+    leafHasher.inputs[1] <== secret;
+
+    // Hard inclusion: a non-member has no witness
+    component inclusion = MerkleInclusion(levels);
+    inclusion.leaf <== leafHasher.out;
+    inclusion.root <== merkleRoot;
+    // ... pathElements / pathIndices wired in a loop
+
+    // One nullifier per commitment per root (D29 a)
     component nullifierHasher = Poseidon(2);
-    nullifierHasher.inputs[0] <== identity;
+    nullifierHasher.inputs[0] <== secret;
     nullifierHasher.inputs[1] <== merkleRoot;
-    
-    component nullifierCheck = IsEqual();
-    nullifierCheck.in[0] <== nullifierHasher.out;
-    nullifierCheck.in[1] <== nullifierHash;
-    
-    // Step 4: Combine checks
-    component and = AND();
-    and.a <== merkleProof.out;
-    and.b <== nullifierCheck.out;
-    
-    isValid <== and.out;
+    nullifier <== nullifierHasher.out;
+
+    // Keeps walletBinding in the constraint system
+    signal walletBindingSq;
+    walletBindingSq <== walletBinding * walletBinding;
 }
+
+component main {public [merkleRoot, walletBinding]} = WhitelistMembership(20);
 ```
 
-**Security Properties:**
-- ✅ **Zero-Knowledge:** Identity never revealed
-- ✅ **Soundness:** Cannot prove membership without being in tree
-- ✅ **Completeness:** Valid members can always prove membership
-- ✅ **Non-Reusability:** Nullifier prevents proof replay
+Public signals, in snarkjs order: `[nullifier, merkleRoot, walletBinding]`
+(nPublic 3). Depth 20, so up to 2^20 commitments. Proved and verified
+with PLONK on the universal Hermez ptau (`powersOfTau28_hez_final_15`,
+2^15, BLAKE2b-checked by `npm run setup:zk`); the committed verifier is
+`contracts/privacy/verifiers/whitelist_membershipVerifier.sol`.
+
+**What PrivacyManager adds** (`submitWhitelistProof`): the root must be
+the one currently published by the list operator, `walletBinding` must
+equal `msg.sender`, each signal must be below the scalar field (the
+wrapper checks), and a nullifier binds one wallet per root version.
+Publishing a new root lapses every binding until its holder proves again.
+
+**Security Properties (what holds):**
+- ✅ **Soundness:** a wallet cannot bind without a commitment in the
+  current root and its secret (hard inclusion, binary path bits).
+- ✅ **Confidential list:** the leaves are commitments, so the list cannot
+  be enumerated from public identity data, and a proof does not say which
+  listed identity produced it.
+- ❌ **Not prover anonymity:** the wallet is public (ERC-3643 transfers
+  name it, and the proof binds it); the chain shows which wallets hold a
+  live binding.
+- ✅ **Replay:** a copied proof fails for any other wallet
+  (`WalletBindingMismatch`); a second wallet for the same nullifier under
+  one root is refused (`NullifierBoundToOtherWallet`).
+- ⚠️ **Bearer slot:** whoever holds the secret can bind one wallet per
+  root; recovering a lost wallet needs a new root from ops.
 
 ### 2. Blacklist Non-Membership Circuit
 

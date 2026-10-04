@@ -49,8 +49,8 @@ The system builds **5 ZK circuits** for privacy-preserving compliance:
 
 | # | Circuit Name | Purpose | File |
 |---|--------------|---------|------|
-| 1 | **Whitelist Membership** | Prove you're whitelisted without revealing identity | `whitelist_membership.circom` |
-| 2 | **Blacklist Non-Membership** | Prove you're NOT blacklisted privately | `blacklist_membership.circom` |
+| 1 | **Whitelist Membership** | Prove a whitelist slot (commitment `Poseidon(identity, secret)` in the published root) for your wallet, without revealing which listed identity it is; the wallet is public. The only proof that gates transfers (whitelist modes ZkOnly and Either) | `whitelist_membership.circom` |
+| 2 | **Blacklist Non-Membership** | Prove your whitelist identity is not in the sanctions tree; a demonstration that gates nothing (sanctions are enforced by the blacklist oracle) | `blacklist_membership.circom` |
 | 3 | **Jurisdiction Proof** | Prove an issuer-attested jurisdiction is in PrivacyManager's allowed set without revealing it | `jurisdiction_proof.circom` |
 | 4 | **Accreditation Proof** | Prove an issuer-attested amount meets the minimum without revealing it | `accreditation_proof.circom` |
 | 5 | **Compliance Aggregation** | Prove issuer-attested scores meet the weighted minimum without revealing them | `compliance_aggregation.circom` |
@@ -304,7 +304,7 @@ After building, check `build/circuits/circuit-info.json`:
     "whitelist_membership": {
       "id": "keccak256(\"WHITELIST_MEMBERSHIP\")",
       "name": "whitelist_membership",
-      "description": "Proves membership in a whitelist without revealing identity",
+      "description": "Proves a whitelist slot (Poseidon(identity, secret) in the root) for a public wallet, without revealing which listed identity",
       "verifyingKey": { ... },
       "buildPath": "build/circuits/whitelist_membership",
       "hasVerifier": true

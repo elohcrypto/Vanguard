@@ -2,7 +2,7 @@
 
 ## Overview
 
-This project implements a **production-ready Vanguard RWA StableCoin (VSC)** system with comprehensive compliance management integrated with **ERC-3643** standard and **OnchainID (ERC-734/ERC-735)**. The system provides:
+This project implements a **Vanguard RWA StableCoin (VSC)** system, under development and not yet audited, with comprehensive compliance management integrated with **ERC-3643** standard and **OnchainID (ERC-734/ERC-735)**. The system provides:
 
 - ✅ **Real-time compliance validation** through oracle networks
 - ✅ **Dynamic whitelist/blacklist management** with 2/3 consensus
@@ -14,7 +14,7 @@ This project implements a **production-ready Vanguard RWA StableCoin (VSC)** sys
 - ✅ **Payment protocol** with multi-type refunds
 - ✅ **89 interactive demo options** for complete system testing
 
-**Current Status**: ✅ **PRODUCTION READY** - All 11 core requirements fully implemented
+**Current Status**: under development. The contracts, the interactive demo, the tests and CI run end to end on a local Hardhat node; the remaining remediation phases and a third-party security audit come before any production or mainnet use.
 
 > **Building from a fresh clone:** the ZK circuit artifacts are gitignored build output.
 > Run `npm run setup:zk` before `npm test`, or the 4 ZK test suites fail with `ENOENT`
@@ -244,8 +244,8 @@ npx hardhat coverage
 ### **3. Privacy & Zero-Knowledge**
 - ✅ **5 ZK Circuits**: Whitelist, blacklist, jurisdiction, accreditation, compliance aggregation
 - ✅ **PLONK Proofs**: Privacy-preserving compliance validation (universal setup, all five circuits)
-- ✅ **Selective Disclosure**: Prove compliance without revealing personal data
-- ✅ **Complete Integration**: ZK proofs integrated with existing compliance systems
+- ✅ **What stays private**: which identity on the whitelist a wallet belongs to (each leaf is a commitment `Poseidon(identity, secret)`), and the attested attributes (an issuer-signed jurisdiction, accreditation amount or compliance scores, proved against a policy). The prover's wallet is public: ERC-3643 transfers name it and every proof binds it (`walletBinding`).
+- ✅ **What gates transfers**: only the whitelist binding (`PrivacyManager.hasValidWhitelistProof`), read by `ComplianceRules` when a token's whitelist mode is ZkOnly or Either. The attestation proofs are views (`validatePrivate*`) that nothing on the transfer path reads, and the blacklist proof gates nothing; sanctions are enforced by the blacklist oracle.
 
 ### **4. Investor Type Management**
 - ✅ **4 Investor Types**: Normal (0), Retail (1), Accredited (2), Institutional (3)
@@ -291,7 +291,7 @@ npx hardhat coverage
 
 ### **Privacy & Compliance**
 - ✅ **Zero-Knowledge Proofs**: Privacy-preserving compliance validation
-- ✅ **Selective Disclosure**: Prove compliance without revealing personal data
+- ✅ **Private allow-list membership**: a wallet proves it holds a whitelist slot without revealing which identity's slot; the wallet itself stays public
 - ✅ **Audit Trail**: Immutable compliance event logging
 - ✅ **KYC/AML Verification**: Trusted claim issuers for identity verification
 
@@ -362,7 +362,7 @@ npx hardhat coverage
 | **Governance** | 2 contracts | ✅ COMPLETE |
 | **Escrow** | 2 contracts | ✅ COMPLETE |
 | **Payment** | 3 contracts | ✅ COMPLETE |
-| **Total** | **32+ contracts** | ✅ **PRODUCTION READY** |
+| **Total** | **32+ contracts** | Implemented and tested; audit pending |
 
 ## 🚀 Getting Started with the Demo
 
@@ -445,7 +445,7 @@ MIT License - See LICENSE file for details
 
 ### **Implementation Summary**
 - ✅ **11 Core Requirements**: All fully implemented
-- ✅ **32+ Smart Contracts**: Production-ready
+- ✅ **32+ Smart Contracts**: implemented and tested, not yet audited
 - ✅ **5 ZK Circuits**: Privacy-preserving compliance
 - ✅ **83 Demo Options**: Complete system testing
 - ✅ **Comprehensive Documentation**: Complete guides and technical deep dives
@@ -458,4 +458,4 @@ MIT License - See LICENSE file for details
 - ⏳ **Gas Optimization**: Pending benchmarking and optimization
 - ⏳ **Mainnet Deployment**: Pending production deployment
 
-**This is production-ready technology ready for security audits and mainnet deployment! 🎉**
+This is not production software yet: the remaining remediation phases and a third-party security audit come before any mainnet deployment.

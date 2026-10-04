@@ -1,226 +1,107 @@
-# ZK Circuits Readiness Report
+# ZK Circuits: Build, Check and Use
 
-## ✅ Status: READY for Both Mock and REAL Usage
+What the five circuits are, how to build and check them, what each proof
+does on chain, and what it does not. For the operator and investor command
+lines see [TESTNET_DEMO.md](TESTNET_DEMO.md) ("Whitelist roots and proofs
+from the command line" and the privacy sections after it); for the build
+itself see [ZK_CIRCUIT_BUILD_GUIDE.md](ZK_CIRCUIT_BUILD_GUIDE.md).
 
-**Last Verified:** 2025-12-07  
-**All Circuits:** ✅ Operational  
-**Test Coverage:** 710/710 passing (100%)
+Status: the circuits, verifiers and consumers are implemented and tested
+in CI. Nothing here has had a third-party audit.
 
-> ### ⚠️ Artifacts are not in the repository — build them first
->
-> The `.wasm` / `.zkey` / `.r1cs` files described below are **gitignored build
-> output** (`.gitignore:55-68`). A fresh clone contains none of them, and the 4 ZK
-> test suites fail with `ENOENT` until they are generated:
->
-> ```bash
-> # Requires Rust circom 2.x — see docs/ZK_CIRCUIT_BUILD_GUIDE.md
-> npm run setup:zk
-> ```
->
-> **Measured on a clean checkout (2025-12-07):**
->
-> | State | Result |
-> |-------|--------|
-> | Before `setup:zk` | **23 failing** (all `ENOENT`) |
-> | After `setup:zk` | **0 failing** |
->
-> Pass counts are omitted deliberately: they move whenever tests are added, so a
-> figure written here goes stale. The failure count is the durable signal.
->
-> All 23 failures are missing-artifact errors in the ZK suites; every compliance,
-> ERC-3643, oracle, governance, payment, and identity test passes either way.
+## Build and check
 
----
+The `.wasm`, `.zkey` and `.r1cs` files are gitignored build output; the
+Solidity verifiers under `contracts/privacy/verifiers/` are committed.
 
-## 🔐 Circuit Inventory
-
-All 5 circuits are compiled with **REAL cryptographic artifacts** (not mocks):
-
-| Circuit | WASM Size | zkey Size | Constraints | Status |
-|---------|-----------|-----------|-------------|--------|
-| **whitelist_membership** | 2.0 MB | 5.0 MB | 11,339 | ✅ READY |
-| **blacklist_membership** | 2.2 MB | 63 MB (PLONK) | 24,394 | ✅ READY (sound, Task 3.7) |
-| **jurisdiction_proof** | PLONK | 24,187 gates | 9,539 | ✅ sound, issuer-signed (Task 3.7b) |
-| **accreditation_proof** | PLONK | 24,131 gates | 9,542 | ✅ sound, issuer-signed (Task 3.7b) |
-| **compliance_aggregation** | PLONK | 26,046 gates | 10,687 | ✅ sound, issuer-signed (Task 3.7b) |
-
-**Verification:** All WASM files start with `0061 736d` (WebAssembly magic number) - confirming they are real compiled circuits.
-
----
-
-## 🎭 Mock vs REAL Mode
-
-### **Mock Mode (Testing)**
-- **Purpose:** Fast testing without ZK proof generation
-- **Deployment:** `ZKVerifierIntegrated(true)` - testingMode = true
-- **Behavior:** Validates input format, always returns true for valid inputs
-- **Use Case:** Unit tests, integration tests, local development
-- **Performance:** Instant verification (~0ms)
-
-### **REAL Mode (Production)**
-- **Purpose:** Actual zero-knowledge proof verification
-- **Deployment:** `ZKVerifierIntegrated(false)` - testingMode = false
-- **Behavior:** Cryptographically verifies PLONK proofs (all five circuits, universal setup)
-- **Use Case:** Mainnet, testnet, production environments
-- **Performance:** 
-  - Proof generation: 50-100ms (simple) to 50s (complex Merkle proofs)
-  - Proof verification: 63-147k gas (~$2-5 at 50 gwei)
-
----
-
-## 🔧 How to Use
-
-### **1. Deploy for Testing (Mock Mode)**
-```solidity
-// Deploy with testingMode = true
-ZKVerifierIntegrated zkVerifier = new ZKVerifierIntegrated(true);
-
-// Mock proofs will be accepted
-uint256[2] memory a = [1, 2];
-uint256[2][2] memory b = [[3, 4], [5, 6]];
-uint256[2] memory c = [7, 8];
-uint256[1] memory publicSignals = [1];
-
-bool result = zkVerifier.verifyWhitelistMembership(a, b, c, publicSignals);
-// Returns: true (mock verification)
-```
-
-### **2. Deploy for Production (REAL Mode)**
-```solidity
-// Deploy with testingMode = false
-ZKVerifierIntegrated zkVerifier = new ZKVerifierIntegrated(false);
-
-// Only REAL ZK proofs will be accepted
-// Generate proof using RealProofGenerator
-RealProofGenerator generator = new RealProofGenerator();
-ProofResult memory proof = generator.generateWhitelistProof({
-    userLeaf: userHash,
-    merkleRoot: whitelistRoot,
-    pathElements: merklePath,
-    pathIndices: merkleIndices
-});
-
-bool result = zkVerifier.verifyWhitelistMembership(
-    proof.a, proof.b, proof.c, proof.publicSignals
-);
-// Returns: true only if proof is cryptographically valid
-```
-
-### **3. Generate REAL Proofs**
-```javascript
-const { RealProofGenerator } = require('./scripts/generate-real-proofs.js');
-const generator = new RealProofGenerator();
-
-// Example: Whitelist proof
-const proof = await generator.generateWhitelistProof({
-    userLeaf: BigInt("0x123..."),
-    merkleRoot: BigInt("0x456..."),
-    pathElements: [BigInt("0x789..."), ...],
-    pathIndices: [0, 1, 0, ...]
-});
-
-// Attestation proofs (Task 3.7b): an issuer signs, the investor proves
-const { signAttestation } = require('./scripts/zk/attest.js');
-// An attestation is for one chain and one PrivacyManager (Task 3.8).
-const att = await signAttestation({
-    key: process.env.ATTESTOR_KEY, circuit: 'compliance',
-    chainId, privacyManager: pmAddress,
-    identity: onchainID, scores: [80, 75, 85, 70],
-});
-const complianceProof = await generator.generateComplianceProof({
-    identity: att.identity, scores: att.attributes, salt: att.salt,
-    R8x: att.R8x, R8y: att.R8y, S: att.S, Ax: att.Ax, Ay: att.Ay,
-    chainId: att.chainId, verifierContext: BigInt(att.privacyManager),
-    minimum: 70n, weights: [25n, 25n, 25n, 25n], walletBinding: wallet,
-});
-// publicSignals: [nullifier, Ax, Ay, chainId, pmAddress, 70, 25, 25, 25,
-//                 25, wallet]
-// scripts/zk/prove-attestation.js reads the policy and the issuer trust
-// from PrivacyManager and wraps this for investors.
-```
-
----
-
-## ⚠️ Important Constraints
-
-### **Attestation circuits (jurisdiction, accreditation, compliance)**
-Since Task 3.7b the three circuits prove an issuer's EdDSA signature over
-the attributes and PrivacyManager's policy; there is no division and no
-divisibility rule. Inputs that miss the policy have no witness: the mask
-bit must be in `allowedMask`, `amount >= minimumAccreditation` (both below
-2^64), each score at most 100, the weights summing to 100 and
-`kyc*wK + aml*wA + jur*wJ + acc*wAcc >= minimum * 100`.
-
----
-
-## 🧪 Testing
-
-### **Run All Tests**
 ```bash
-npm test  # 710 passing tests
+# Requires the Rust circom 2.x compiler (the `circom` npm package is the
+# deprecated 0.5.x build); see ZK_CIRCUIT_BUILD_GUIDE.md
+npm run setup:zk    # compile, PLONK setup, export the five verifiers
+npm run verify:zk   # check the artifacts against the committed verifiers
 ```
 
-### **Test REAL Proof Generation**
-```bash
-npx hardhat test test/privacy/RealZKProofs.test.js
-# All 5 circuits generate and verify real proofs
-```
+`setup:zk` uses the Hermez universal ceremony file
+`powersOfTau28_hez_final_15.ptau` (2^15), checked against its published
+BLAKE2b-512 hash whether downloaded or cached. PLONK needs no per-circuit
+secret, and the setup is deterministic: CI runs `setup:zk` and fails if the
+regenerated verifiers differ from the committed ones.
 
-### **Test Mock Mode**
-```bash
-npx hardhat test test/privacy/ZKProofSystemIntegration.test.ts
-# Tests mock verification with testingMode=true
-```
+`verify:zk` checks, per circuit: the WASM is real, the zkey and vkey exist,
+the vkey is PLONK with the expected public-signal count, and every
+constant the committed verifier deploys (n, nPublic, k1, k2, w1, Qm, Ql,
+Qr, Qo, Qc, S1, S2, S3, X2) equals the vkey's. It exits 1 on any
+mismatch. It does not compare the vkey with the zkey, and it does not
+check the consumer's logic; the recompile tests and the CI verifier diff
+cover the first, the test suite the second.
 
----
+## Circuit inventory
 
-## 📊 Performance Benchmarks
+Numbers from `npm run verify:zk` and `snarkjs r1cs info` on the current
+tree.
 
-| Operation | Mock Mode | REAL Mode |
-|-----------|-----------|-----------|
-| Whitelist proof generation | N/A | ~50 seconds |
-| Blacklist proof generation | N/A | ~9 seconds (PLONK) |
-| Jurisdiction proof generation | N/A | ~9 seconds (PLONK) |
-| Accreditation proof generation | N/A | ~9 seconds (PLONK) |
-| Compliance proof generation | N/A | ~9 seconds (PLONK) |
-| On-chain verification | ~21k gas | 63-147k gas |
+| Circuit | Public signals (snarkjs order) | nPublic | Constraints | PLONK domain | WASM | zkey |
+|---|---|---|---|---|---|---|
+| whitelist_membership | nullifier, merkleRoot, walletBinding | 3 | 11,455 | 2^14 | 1.7 MB | 29 MB |
+| blacklist_membership | nullifier, whitelistRoot, blacklistRoot, walletBinding | 4 | 24,394 | 2^15 | 2.2 MB | 64 MB |
+| jurisdiction_proof | nullifier, Ax, Ay, chainId, verifierContext, allowedMask, walletBinding | 7 | 9,770 | 2^15 | 3.4 MB | 80 MB |
+| accreditation_proof | nullifier, Ax, Ay, chainId, verifierContext, minimumAccreditation, walletBinding | 7 | 9,773 | 2^15 | 3.4 MB | 80 MB |
+| compliance_aggregation | nullifier, Ax, Ay, chainId, verifierContext, minimum, wK, wA, wJ, wAcc, walletBinding | 11 | 10,837 | 2^15 | 3.7 MB | 101 MB |
 
----
+A proof takes seconds to generate (the attestation soundness tests take
+about 9 s per real proof). A PLONK verification through the wrapper costs
+roughly 0.4M gas.
 
-## 🚀 Production Deployment Checklist
+## What each proof does on chain
 
-- [ ] Deploy `ZKVerifierIntegrated` with `testingMode = false`
-- [ ] Verify all 5 verifier contracts are deployed
-- [ ] Test real proof generation for each circuit type
-- [ ] Trust each issuer's (Ax, Ay) and set the policies on PrivacyManager (type 11 votes after the handover)
-- [ ] Set up proof generation backend/service
-- [ ] Configure gas limits (150k+ for verification)
-- [ ] Monitor proof verification costs
-- [ ] Implement proof caching if needed
+- **Whitelist** (the only proof that gates transfers). The leaf is the
+  investor's commitment `Poseidon(identity, secret)`; the operator (ops,
+  the `listOperator`) publishes the root on `PrivacyManager`.
+  `submitWhitelistProof` requires the current root, `walletBinding ==
+  msg.sender`, and one wallet per nullifier `Poseidon(secret, root)` per
+  root version. `ComplianceRules` reads `hasValidWhitelistProof(wallet)`
+  when a token's whitelist mode is ZkOnly or Either (OracleOnly ignores
+  it). Publishing a new root lapses every binding until its holder proves
+  again.
+- **Blacklist**: the holder of a whitelist commitment proves its identity
+  is not in the sanctions tree. It gates nothing; sanctions on transfers
+  are enforced by the blacklist oracle.
+- **Jurisdiction, accreditation, compliance**: a trusted issuer signs the
+  investor's attributes with an EdDSA Baby Jubjub key, for one chain and
+  one PrivacyManager; the proof shows the signature and that the
+  attributes meet PrivacyManager's policy. The jurisdiction policy is the
+  set of countries `ComplianceRules` allows for VSC (one source, Task 3.8).
+  The records are read by the `validatePrivate*` views, which nothing on
+  the transfer path calls.
 
----
+What stays private: which listed identity a whitelist proof belongs to
+(the list cannot be enumerated from public identity data), and the
+attested attributes. What does not: the prover's wallet, which ERC-3643
+transfers name and every proof binds.
 
-## 🔒 Security Notes
+## The wrapper and testingMode
 
-1. **testingMode is IMMUTABLE** - Cannot be changed after deployment
-2. **Deploy separate contracts** for testnet (mock) and mainnet (real)
-3. **Never use mock mode in production** - No cryptographic security
-4. **Validate inputs** before proof generation to avoid wasted computation
-5. **Powers of Tau** - Using trusted setup from Hermez (2^28 constraints)
+`ZKVerifierIntegrated` routes each circuit to its verifier, refuses any
+signal at or above the scalar field, and caches results per verifier.
+Its `testingMode` is fixed at deploy and exists for unit tests only: in
+it, any non-zero signals pass. `PrivacyManager` refuses a testingMode
+wrapper (constructor and `setZKVerifier`), the handover ceremony refuses
+one, and the demo deploys `ZKVerifierIntegrated(false)`. There is no
+supported "mock deployment".
 
----
+## Soundness history
 
-## ✅ Verification Completed
+- 2026-09-23: the original Groth16 circuits were found unsound (private
+  roots, a soft Merkle check, no wallet binding) and the Groth16 keys had
+  no phase-2 contribution, so proofs were forgeable.
+- Tasks 3.1 to 3.3: whitelist circuit rebuilt (commitment leaves, hard
+  inclusion, binary path bits, wallet binding) and bound by PrivacyManager.
+- Task 3.7: all five circuits on PLONK; blacklist tied to the whitelist
+  commitment; jurisdiction, accreditation and compliance on issuer-signed
+  attestations.
+- Task 3.8: attestations bound to chain id and PrivacyManager; the
+  jurisdiction set read from ComplianceRules.
 
-**All circuits are READY for both mock and REAL usage!**
-
-- ✅ Real cryptographic artifacts generated
-- ✅ All tests passing (710/710)
-- ✅ Mock mode working for fast testing
-- ✅ REAL mode working for production
-- ✅ Proof generation verified
-- ✅ On-chain verification verified
-- ✅ Documentation complete
-
-**System Status:** 🟢 PRODUCTION READY
-
+The soundness tests (`test/privacy/ZKSoundness.test.js`,
+`BlacklistSoundness.test.js` and the three `*AttestationSoundness` suites)
+run on real proofs in CI.
