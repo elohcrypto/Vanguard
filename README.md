@@ -96,7 +96,7 @@ Vanguard/
 1. ✅ OnchainID System (ERC-734/735) - Blockchain identity management
 2. ✅ ERC-3643 System - Compliant security token
 3. ✅ Oracle System - Consensus-based access control
-4. ✅ ComplianceRules Engine - Multi-layer validation
+4. ✅ ComplianceRules - per-token jurisdiction rules, list gates and trusted contracts
 5. ✅ Privacy System - 5 ZK circuits for privacy-preserving compliance
 
 ### **Investor Management** 
@@ -232,7 +232,7 @@ npx hardhat coverage
 - ✅ **OnchainID (ERC-734/735)**: Blockchain-based identity with key and claim management
 - ✅ **ERC-3643 T-REX**: Compliant security token standard
 - ✅ **KYC/AML Verification**: Trusted claim issuers for identity verification
-- ✅ **ComplianceRules Engine**: Multi-layer validation (jurisdiction, investor type, holding period)
+- ✅ **ComplianceRules**: per-token jurisdiction rules, blacklist and whitelist gates (oracle or ZK binding), and per-token trusted contracts; investor-type transfer and holding caps live in `InvestorTypeRegistry`, which the token enforces
 
 ### **2. Oracle Access Control**
 - ✅ **Dynamic Whitelist**: 5-tier whitelist with oracle consensus (2/3 threshold)
@@ -317,11 +317,11 @@ npx hardhat coverage
 │         └─────────────────┼──────────────────┘                  │
 │                           │                                     │
 │  ┌────────────────────────────────────────────────────────┐     │
-│  │         ComplianceRules Engine (Multi-Layer)           │     │
-│  │  - Jurisdiction validation                             │     │
-│  │  - Investor type validation                            │     │
-│  │  - Holding period enforcement                          │     │
-│  │  - Compliance level validation                         │     │
+│  │         ComplianceRules (admin base + evaluation)      │     │
+│  │  - Jurisdiction rules per token                        │     │
+│  │  - Blacklist / whitelist gates (oracle or ZK binding)  │     │
+│  │  - Trusted contracts and rule administrators per token │     │
+│  │  (investor-type caps: InvestorTypeRegistry)            │     │
 │  └────────────────────────────────────────────────────────┘     │
 │                           │                                     │
 │  ┌────────────────────────────────────────────────────────┐     │

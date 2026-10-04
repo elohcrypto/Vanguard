@@ -349,7 +349,8 @@ sequenceDiagram
 - ✅ Whitelisted by oracles
 - ✅ Not blacklisted
 - ✅ Sufficient token balance
-- ✅ Holding period satisfied
+- ✅ Within its investor-type transfer cap (InvestorTypeRegistry; there is no holding-period rule)
+- ✅ Country allowed by the token's jurisdiction rule
 - ✅ Claims still valid
 
 #### Recipient Validation:
@@ -357,7 +358,7 @@ sequenceDiagram
 - ✅ Whitelisted by oracles
 - ✅ Not blacklisted
 - ✅ Country allowed
-- ✅ Investor type permitted
+- ✅ Within its investor-type holding cap (InvestorTypeRegistry)
 - ✅ Investor count not exceeded
 
 #### Transfer Rules:
@@ -512,7 +513,7 @@ sequenceDiagram
 #### 2. Escrow Payment
 - **Use Case**: Conditional payments with release conditions
 - **Process**: Tokens held in a one-time `MultiSigEscrowWallet`; see [Escrow Payment Workflow](#escrow-payment-workflow)
-- **Compliance**: Escrow contract must be a trusted contract in ComplianceRules
+- **Compliance**: Escrow contract must be a trusted contract on VSC in ComplianceRules (trust is per token)
 
 #### 3. Recurring Payment
 - **Use Case**: Subscription or installment payments
@@ -566,7 +567,7 @@ A conditional VSC payment between a **payer** and a **payee**, mediated by a reg
 
 The escrow holds **amount + 3% investor fee + 2% owner fee**, all fixed at creation. A 1000 VSC payment is funded with 1050 VSC. On release the payee gets 1000, the investor fee wallet 30, the platform fee wallet 20. On refund the payer gets the full 1050 back.
 
-The escrow wallet is added to ComplianceRules as a trusted contract when it is created (the demo does this; on your own deployment the ComplianceRules owner must). That is what lets VSC move in and out of a contract that has no identity of its own. Only addresses with code can be trusted: never a wallet, and never a wallet carrying an EIP-7702 delegation (the setter rejects the `0xef0100` indicator). The payer and payee are verified investors, and the other party to every transfer is still checked.
+The escrow wallet is added to ComplianceRules as a trusted contract on VSC when it is created (`addTrustedContract(VSC, wallet)`; the demo does this; on your own deployment the ComplianceRules owner must). Trust is per token since Task 4.1: an escrow trusted on VSC is not trusted on VGT, and governance, trusted on VGT to hold proposal fees, is not trusted on VSC. That is what lets VSC move in and out of a contract that has no identity of its own. Only addresses with code can be trusted: never a wallet, and never a wallet carrying an EIP-7702 delegation (the setter rejects the `0xef0100` indicator). The payer and payee are verified investors, and the other party to every transfer is still checked.
 
 ### Lifecycle
 

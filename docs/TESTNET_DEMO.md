@@ -83,8 +83,9 @@ call `deleteIdentity` for every such identity BEFORE creating a proposal;
 deleting mid-vote does not move the bar of a proposal already open. The case
 "expired claims inflate the denominator until deleteIdentity" in
 `test/governance/QuorumIntegrity.test.ts` is the executable version of this rule.
-Governance holds VGT fees as a trusted contract (option 74 adds it while the
-deployer still owns ComplianceRules): it has no identity and never counts in
+Governance holds VGT fees as a trusted contract on VGT (option 74 adds it
+while the deployer still owns ComplianceRules; trust is per token since Task
+4.1, so governance is not trusted on VSC): it has no identity and never counts in
 `registeredIdentityCount`, so the electorate is the onboarded humans.
 Ops keeps the VGT agent role but cannot freeze, burn, move or recover
 governance's VGT (D23). Ops can still stop voting reversibly through
@@ -235,16 +236,19 @@ pause blocks every vote until ops or a pre-voted unpause releases it"), and
 step 2 moves an oracle's `listManager` off the
 deployer to the DynamicListManager, or to zero when there is none.
 83e also checks: GovernanceToken has no guardian, no oracle's `listManager`
-is the deployer, the deployer is not an InvestorTypeRegistry governor or a
-trusted contract, governance is a trusted contract and has no registry
-identity (D21), and every address still trusted on ComplianceRules (found
-from `TrustedContractAdded` events) is a deployed contract, not a wallet or
+is the deployer, the deployer is not an InvestorTypeRegistry governor nor a
+trusted contract on VSC or VGT, governance is a trusted contract on VGT and
+has no registry identity (D21), and every (token, address) pair still
+trusted on ComplianceRules (found from the token-indexed
+`TrustedContractAdded` events) is a deployed contract, not a wallet or
 delegated wallet; a wallet trusted before 2E.1 must be removed by the owner
 before the handover counts as complete. It also fails on any live
-ComplianceRules rule administrator other than governance and ops (found
-from `RuleAdministratorUpdated` events and every past ComplianceRules
-owner, since the constructor authorizes its owner without the event): a rule administrator sets jurisdiction
-rules, which also lapses every private jurisdiction record. And it checks
+ComplianceRules rule administrator other than governance and ops, on any
+token (found from the token-indexed `RuleAdministratorUpdated` events, plus
+the deployer on VSC and VGT; the constructor authorizes nobody): a rule
+administrator sets that token's jurisdiction rule, which also lapses every
+private jurisdiction record. The ceremony makes governance the rule
+administrator for VSC and VGT and removes the deployer from both. And it checks
 "GovernanceToken whitelist mode is OracleOnly (D33)" and that VSC and VGT
 enforce the config's ComplianceRules. It checks every contract read from
 chain as well as those the config names, "EscrowWalletFactory owned by
@@ -363,8 +367,8 @@ acceptances and registry proposals still pending, then verifies.
   owner or signer role (D25 b), and never vote away the last trusted issuer
   of a required topic or the last topic (the registry refuses both).
 - Option 63 after the handover creates a ComplianceRules proposal to trust
-  the new escrow wallet (vote with 77, execute with 78); the wallet cannot
-  be funded until it passes.
+  the new escrow wallet on VSC (`addTrustedContract(VSC, wallet)`; vote with
+  77, execute with 78); the wallet cannot be funded until it passes.
 - Revoking a whitelist binding is root rotation: publish a root without
   the commitment (ops, or a PrivacyParameters vote). Expiry alone does not
   revoke, since a holder may resubmit the same proof under the same root
@@ -526,7 +530,9 @@ itself: rerun option 21 or 41 before the handover, or pass a
 PrivacyParameters vote for `registerJurisdictionCode` after it, before
 investors from that country can attest. Today a Token round trip back to
 an earlier ComplianceRules whose rule did not change (R1 -> R2 -> R1)
-revives the records made under it; Task 4.1 removes that. Task 4.1, the
+revives the records made under it. Task 4.1 does not change that:
+ComplianceRules never sees a `Token.setCompliance`, so the fix belongs to
+PrivacyManager (a test pins the current behaviour). Task 4.1, the
 ComplianceRules split, is fresh-deploy only (D34 a): governance binds its
 ComplianceRules at construction, so an existing deployment is redeployed
 rather than migrated, and a fresh ComplianceRules starts OracleOnly with
@@ -628,7 +634,7 @@ key.
 3. `GOV_TIME_SCALE=336 npx hardhat run demo/index.js --network sepolia`.
 4. Same menu walk. Option 79 waits about 40 minutes of real time.
 5. The rehearsal includes one real EIP-7702 (type-4) delegation: delegate a
-   role wallet, call `addTrustedContract` on it and expect the revert
+   role wallet, call `addTrustedContract(VSC, wallet)` on it and expect the revert
    "ComplianceRules: delegated wallet". Sending a type-4 transaction needs an
    ethers version with authorization-list support.
 

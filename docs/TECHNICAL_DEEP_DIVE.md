@@ -377,98 +377,66 @@ function updateOracleReputation(address oracle, bool correct) external onlyOwner
 
 ## 🔒 Compliance Rules Engine
 
-### Rule Validation Logic
+### Structure (plan v2 Task 4.1)
 
-**Jurisdiction Validation:**
+`ComplianceRules` is one deployed contract built from two files:
+`ComplianceRulesAdmin` (abstract) holds every setting and the functions
+that write them, and `ComplianceRules is ComplianceRulesAdmin,
+IComplianceHooks` holds the evaluation the token calls (`canTransfer`,
+`canReceive`, the `transferred`/`created`/`destroyed` hooks, which are
+empty, and the `isProductionCompliance` markers). One address, one
+governance type (ComplianceRules, type 1), one ABI.
+
+The only rule ComplianceRules evaluates is the jurisdiction rule. The
+investor-type, holding-period and compliance-level rules it once stored
+were removed in Task 4.1: no transfer ever read them. Investor-type
+limits live in `InvestorTypeRegistry`, which the token reads on every
+transfer and mint (`canTransferAmount`, `canHoldAmount`: "Transfer amount
+limit exceeded", "Holding limit exceeded"). The registry also records a
+cooldown and a required whitelist tier per type; no transfer path reads
+either today.
+
+### Jurisdiction verdict
+
+`validateJurisdiction(token, country)` returns the verdict `canTransfer`
+applies, from one shared function:
+
 ```solidity
-function validateJurisdiction(address token, uint256 countryCode) 
-    external 
-    view 
-    returns (bool isValid, string memory reason) 
-{
-    JurisdictionRule storage rule = jurisdictionRules[token];
-    
-    // If rule not active, allow all
-    if (!rule.isActive) {
-        return (true, "");
+function _countryVerdict(address token, uint256 country) internal view returns (uint8) {
+    if (defaultJurisdictionRule.blockedCountryMap[country]) return 1; // always applies
+    JurisdictionRule storage rule = _getJurisdictionRule(token);      // token rule, else default
+    if (!rule.isActive) return 0;
+    if (rule.blockedCountryMap[country]) return 1;                    // "Country is blocked"
+    if (rule.allowedCountries.length > 0 && !rule.allowedCountryMap[country]) {
+        return 2;                                                     // "Country not in allowed list"
     }
-    
-    // Check blocked countries first (blacklist)
-    if (rule.blockedCountryMap[countryCode]) {
-        return (false, "Country is blocked");
-    }
-    
-    // If allowed list exists, check membership
-    if (rule.allowedCountries.length > 0) {
-        if (!rule.allowedCountryMap[countryCode]) {
-            return (false, "Country not in allowed list");
-        }
-    }
-    
-    return (true, "");
+    return 0;
 }
 ```
 
-**Holding Period Enforcement:**
-```solidity
-function validateHoldingPeriod(
-    address token,
-    address holder,
-    uint256 amount
-) external view returns (bool isValid, string memory reason) {
-    HoldingPeriodRule storage rule = holdingPeriodRules[token];
-    
-    if (!rule.isActive) {
-        return (true, "");
-    }
-    
-    uint256 acquisitionTime = tokenAcquisitionTime[token][holder];
-    
-    // If no acquisition time recorded, use current time
-    if (acquisitionTime == 0) {
-        return (true, "");
-    }
-    
-    uint256 holdingDuration = block.timestamp - acquisitionTime;
-    
-    if (holdingDuration < rule.minimumHoldingPeriod) {
-        return (false, "Minimum holding period not met");
-    }
-    
-    return (true, "");
-}
-```
+The default blocked list (set at construction) applies to every token and
+a token rule cannot remove it. `setJurisdictionRule` and
+`clearJurisdictionRule` bump `jurisdictionRuleVersion[token]`, which
+PrivacyManager folds into its jurisdiction policy hash.
 
-**Investor Type Restrictions:**
-```solidity
-function validateInvestorType(
-    address token,
-    address investor,
-    uint256 investorType
-) external view returns (bool isValid, string memory reason) {
-    InvestorTypeRule storage rule = investorTypeRules[token];
-    
-    if (!rule.isActive) {
-        return (true, "");
-    }
-    
-    // Check if investor type is allowed
-    if (!rule.allowedInvestorTypes[investorType]) {
-        return (false, "Investor type not allowed");
-    }
-    
-    // Check transfer limits for this investor type
-    uint256 limit = rule.transferLimits[investorType];
-    if (limit > 0) {
-        uint256 currentTransfers = investorTransferCount[token][investor];
-        if (currentTransfers >= limit) {
-            return (false, "Transfer limit exceeded for investor type");
-        }
-    }
-    
-    return (true, "");
-}
-```
+### Per-token trust and administration (G5)
+
+Trusted contracts and rule administrators are kept per token:
+
+- `addTrustedContract(token, account)` / `removeTrustedContract(token,
+  account)` (owner; contracts only, never a wallet or an EIP-7702
+  delegated wallet; the owner stays trusted, D21). Trusting governance
+  for VGT, where it holds proposal fees, does not trust it on VSC.
+- `isTrustedContract(account)` answers for `msg.sender`: Token and
+  GovernanceToken call it as the token. Off-chain readers use
+  `isTrustedContract(token, account)` and the token-indexed
+  `TrustedContractAdded(token, account)` event.
+- `canReceive` (wallet recovery) refuses an account trusted on any token,
+  so a recovery on one token cannot move a holder's shared identity onto
+  a contract trusted on another.
+- `setRuleAdministrator(token, account, bool)` (owner) grants the right to
+  set or clear that token's jurisdiction rule; the constructor grants
+  nobody. After the handover governance holds it for VSC and VGT.
 
 ---
 
