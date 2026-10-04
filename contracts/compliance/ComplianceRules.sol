@@ -1,82 +1,33 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.20;
 
-import "@openzeppelin/contracts/access/Ownable2Step.sol";
-import "./interfaces/IComplianceRules.sol";
+import "./ComplianceRulesAdmin.sol";
 import "../erc3643/interfaces/ICompliance.sol";
 import "../erc3643/interfaces/IIdentityRegistry.sol";
 
-/// @dev Read-only slice of BlacklistOracle. Declared here rather than imported
-///      so ComplianceRules cannot reach any state-changing oracle function.
-interface IBlacklistOracleView {
-    function isBlacklisted(address subject) external view returns (bool);
-}
-
-/// @dev Read-only slice of WhitelistOracle. Same rationale as above.
-interface IWhitelistOracleView {
-    function isWhitelisted(address subject) external view returns (bool);
-}
-
-/// @dev Read-only slice of PrivacyManager (the ZK whitelist binder). Same rationale.
-interface IPrivacyManagerView {
-    function hasValidWhitelistProof(address user) external view returns (bool);
-}
-
 /**
  * @title ComplianceRules
- * @dev Configurable compliance rule engine bound to Token via IComplianceHooks
+ * @dev Compliance rule engine bound to Token via IComplianceHooks: the
+ *      evaluation half (canTransfer, canReceive, the oracle and whitelist
+ *      helpers, the hooks, the production marker). Every setting it reads,
+ *      and every function that writes one, lives in ComplianceRulesAdmin.
+ *      One deployed contract (plan v2 Task 4.1, split by inheritance).
  */
-contract ComplianceRules is IComplianceRules, IComplianceHooks, Ownable2Step {
+contract ComplianceRules is ComplianceRulesAdmin, IComplianceHooks {
     // Implements IComplianceHooks, the slice Token actually calls, so the
     // compiler enforces it. Not a full ICompliance: the module functions
     // that interface declares were empty stubs here and are gone.
-    /**
-     * @dev Check if a transfer is allowed based on all compliance rules
-     * This is the main function called by Token contract
-     * Enforces KYC/AML verification + business rules
-     */
-    // ========================================
-    // TRUSTED CONTRACTS (Escrow Wallets, etc.)
-    // ========================================
 
-    mapping(address => bool) private trustedContracts;
+    constructor(
+        address _owner,
+        uint256[] memory initialAllowedCountries,
+        uint256[] memory initialBlockedCountries
+    ) ComplianceRulesAdmin(_owner) {
+        // Initialize default rules with user-provided countries
+        _initializeDefaultRules(initialAllowedCountries, initialBlockedCountries);
 
-    event TrustedContractAdded(address indexed contractAddress);
-    event TrustedContractRemoved(address indexed contractAddress);
-
-    /**
-     * @dev Add a trusted contract (e.g., escrow wallet) that can bypass KYC/AML
-     * @param contractAddress Address of the trusted contract
-     */
-    function addTrustedContract(address contractAddress) external onlyOwner {
-        require(contractAddress != address(0), "Invalid address");
-        require(contractAddress.code.length > 0, "ComplianceRules: not a contract");
-        // EIP-7702 delegation indicator (0xef0100 || address, 23 bytes): a
-        // delegated EOA is still a wallet, so it must never be trusted.
-        if (contractAddress.code.length == 23) {
-            bytes memory code = contractAddress.code;
-            require(
-                !(code[0] == 0xef && code[1] == 0x01 && code[2] == 0x00),
-                "ComplianceRules: delegated wallet"
-            );
-        }
-        require(!trustedContracts[contractAddress], "Already trusted");
-        trustedContracts[contractAddress] = true;
-        emit TrustedContractAdded(contractAddress);
-    }
-
-    /**
-     * @dev Remove a trusted contract
-     * @param contractAddress Address of the contract to remove
-     */
-    function removeTrustedContract(address contractAddress) external onlyOwner {
-        require(trustedContracts[contractAddress], "Not trusted");
-        // After the handover the owner is governance, which holds VGT fees as
-        // a trusted contract with no identity (D21). Untrusting it would make
-        // every later fee pull revert, so no proposal could ever undo it.
-        require(contractAddress != owner(), "ComplianceRules: owner stays trusted");
-        trustedContracts[contractAddress] = false;
-        emit TrustedContractRemoved(contractAddress);
+        // Set deployer as rule administrator
+        ruleAdministrators[_owner] = true;
     }
 
     /**
@@ -90,141 +41,6 @@ contract ComplianceRules is IComplianceRules, IComplianceHooks, Ownable2Step {
         returns (bool)
     {
         return trustedContracts[contractAddress];
-    }
-
-    // ========================================
-    // ORACLE GATING (per token, opt-in)
-    // ========================================
-    //
-    // The blacklist and whitelist oracles are consulted on every transfer of a
-    // token that has one set. Both default to address(0) = OFF, because most
-    // deployments never stand up an oracle and must keep transferring; turning
-    // them on by default would brick every existing system on upgrade.
-    //
-    // Semantics, chosen deliberately:
-    //   blacklist -> DENY LIST. Set, and either party listed: block.
-    //   whitelist -> ALLOW LIST. Set, and either party NOT listed: block.
-    // The whitelist is therefore default-deny: switching it on blocks everyone
-    // until they are listed. That is the point of an allow list, but it means
-    // an operator must populate the oracle BEFORE pointing a live token at it.
-    // Blacklist wins over whitelist: a listed address is blocked even if it is
-    // also whitelisted.
-    //
-    // The whitelist source is chosen per token by whitelistMode (plan v2 Task
-    // 3.4): OracleOnly (the default, the behaviour above), ZkOnly (a live
-    // PrivacyManager binding, hasValidWhitelistProof) or Either. The
-    // blacklist never depends on the mode.
-
-    enum WhitelistMode {
-        OracleOnly,
-        ZkOnly,
-        Either
-    }
-
-    mapping(address => address) public blacklistOracle;
-    mapping(address => address) public whitelistOracle;
-    mapping(address => WhitelistMode) public whitelistMode;
-    mapping(address => address) public privacyManager;
-
-    /// @dev Oracle gates are per token; the zero address is not a token.
-    error InvalidTokenAddress();
-    /// @dev An oracle must be a contract. address(0) is allowed: it disables the gate.
-    error OracleNotAContract(address oracle);
-    /// @dev The oracle does not answer the selector this gate calls.
-    error OracleIncompatible(address oracle);
-    /// @dev A PrivacyManager must be a contract; address(0) clears it.
-    error PrivacyManagerNotAContract(address pm);
-    /// @dev The PrivacyManager does not answer hasValidWhitelistProof.
-    error PrivacyManagerIncompatible(address pm);
-    /// @dev ZkOnly and Either need a PrivacyManager for the token.
-    error PrivacyManagerNotSet(address token);
-    /// @dev The token's mode reads the PrivacyManager: set OracleOnly first.
-    error PrivacyManagerInUse(address token);
-
-    event BlacklistOracleSet(address indexed token, address indexed oracle);
-    event WhitelistOracleSet(address indexed token, address indexed oracle);
-    event PrivacyManagerSet(address indexed token, address indexed privacyManager);
-    event WhitelistModeSet(address indexed token, WhitelistMode mode);
-
-    /**
-     * @dev Point a token at a blacklist oracle, or pass address(0) to disable.
-     * @param token The token whose transfers this oracle should gate.
-     * @param oracle BlacklistOracle address, or address(0) to turn the gate off.
-     */
-    function setBlacklistOracle(address token, address oracle) external onlyOwner {
-        if (token == address(0)) revert InvalidTokenAddress();
-        if (oracle != address(0) && oracle.code.length == 0) revert OracleNotAContract(oracle);
-        // Bytecode is not enough: the gate calls isBlacklisted on EVERY
-        // transfer, so an incompatible contract here bricks the token until an
-        // owner notices and unsets it. Probe the selector now and fail at
-        // configuration time, where the mistake is made.
-        if (oracle != address(0)) {
-            (bool ok, bytes memory ret) = oracle.staticcall(
-                abi.encodeWithSelector(IBlacklistOracleView.isBlacklisted.selector, address(this))
-            );
-            if (!ok || ret.length != 32) revert OracleIncompatible(oracle);
-        }
-        blacklistOracle[token] = oracle;
-        emit BlacklistOracleSet(token, oracle);
-    }
-
-    /**
-     * @dev Point a token at a whitelist oracle, or pass address(0) to disable.
-     *      Switching this on is default-deny: populate the oracle first.
-     * @param token The token whose transfers this oracle should gate.
-     * @param oracle WhitelistOracle address, or address(0) to turn the gate off.
-     */
-    function setWhitelistOracle(address token, address oracle) external onlyOwner {
-        if (token == address(0)) revert InvalidTokenAddress();
-        if (oracle != address(0) && oracle.code.length == 0) revert OracleNotAContract(oracle);
-        // Same rationale as setBlacklistOracle: fail here, not on every transfer.
-        if (oracle != address(0)) {
-            (bool ok, bytes memory ret) = oracle.staticcall(
-                abi.encodeWithSelector(IWhitelistOracleView.isWhitelisted.selector, address(this))
-            );
-            if (!ok || ret.length != 32) revert OracleIncompatible(oracle);
-        }
-        whitelistOracle[token] = oracle;
-        emit WhitelistOracleSet(token, oracle);
-    }
-
-    /**
-     * @dev Point a token at the PrivacyManager whose whitelist bindings
-     *      ZkOnly/Either read, or pass address(0) to clear it (OracleOnly only).
-     *      Re-pointing an in-use mode to another PrivacyManager drops every
-     *      holder's binding until they re-bind on the new one.
-     * @param token The token whose whitelist this PrivacyManager may decide.
-     * @param pm PrivacyManager address, or address(0).
-     */
-    function setPrivacyManager(address token, address pm) external onlyOwner {
-        if (token == address(0)) revert InvalidTokenAddress();
-        if (pm == address(0)) {
-            // Clearing it under ZkOnly/Either would make every check call 0.
-            if (whitelistMode[token] != WhitelistMode.OracleOnly) revert PrivacyManagerInUse(token);
-        } else {
-            if (pm.code.length == 0) revert PrivacyManagerNotAContract(pm);
-            // Same rationale as setBlacklistOracle: fail here, not on every transfer.
-            (bool ok, bytes memory ret) = pm.staticcall(
-                abi.encodeWithSelector(IPrivacyManagerView.hasValidWhitelistProof.selector, address(this))
-            );
-            if (!ok || ret.length != 32) revert PrivacyManagerIncompatible(pm);
-        }
-        privacyManager[token] = pm;
-        emit PrivacyManagerSet(token, pm);
-    }
-
-    /**
-     * @dev Choose the whitelist source for a token. ZkOnly and Either need a
-     *      PrivacyManager; switching to them is default-deny for every holder
-     *      without a live binding (and, for Either, not on the oracle).
-     */
-    function setWhitelistMode(address token, WhitelistMode mode) external onlyOwner {
-        if (token == address(0)) revert InvalidTokenAddress();
-        if (mode != WhitelistMode.OracleOnly && privacyManager[token] == address(0)) {
-            revert PrivacyManagerNotSet(token);
-        }
-        whitelistMode[token] = mode;
-        emit WhitelistModeSet(token, mode);
     }
 
     /**
@@ -429,29 +245,6 @@ contract ComplianceRules is IComplianceRules, IComplianceHooks, Ownable2Step {
         return _countryVerdict(token, registry.investorCountry(party)) == 0;
     }
 
-    /**
-     * @dev 0 = allowed, 1 = blocked, 2 = not in allowed list. The default
-     *      blocked list (sanctions) always applies; a per-token rule, when
-     *      active, is checked on top of it and cannot remove it. With no
-     *      per-token rule the full default rule (blocked, then allowed) applies.
-     */
-    function _countryVerdict(address token, uint256 country) private view returns (uint8) {
-        if (defaultJurisdictionRule.blockedCountryMap[country]) {
-            return 1;
-        }
-        JurisdictionRule storage rule = _getJurisdictionRule(token);
-        if (!rule.isActive) {
-            return 0;
-        }
-        if (rule.blockedCountryMap[country]) {
-            return 1;
-        }
-        if (rule.allowedCountries.length > 0 && !rule.allowedCountryMap[country]) {
-            return 2;
-        }
-        return 0;
-    }
-
     // Token calls these three after every mint, burn and transfer through its
     // ICompliance reference. They are intentionally empty: this contract keeps
     // no per-transfer state, and all enforcement happens in canTransfer above.
@@ -462,180 +255,6 @@ contract ComplianceRules is IComplianceRules, IComplianceHooks, Ownable2Step {
     function created(address /* to */, uint256 /* amount */) external {}
 
     function destroyed(address /* from */, uint256 /* amount */) external {}
-    // Compliance rule structures
-    struct JurisdictionRule {
-        bool isActive;
-        uint256[] allowedCountries;
-        uint256[] blockedCountries;
-        mapping(uint256 => bool) allowedCountryMap;
-        mapping(uint256 => bool) blockedCountryMap;
-        uint256 lastUpdated;
-    }
-
-    // State variables
-    mapping(address => JurisdictionRule) private jurisdictionRules;
-
-    // Global rule configurations
-    mapping(address => bool) public ruleAdministrators;
-    mapping(address => address) public tokenIdentityRegistry; // Maps token address to its IdentityRegistry
-    /// @notice Bumped by every setJurisdictionRule/clearJurisdictionRule for
-    ///         the token (never decreases): PrivacyManager folds it into the
-    ///         jurisdiction attestation policy so a restored rule (A -> B -> A)
-    ///         does not revive an attestation made under the first A.
-    mapping(address => uint256) public jurisdictionRuleVersion;
-
-    // Default rules
-    JurisdictionRule private defaultJurisdictionRule;
-
-    // Constants
-    uint256 public constant MAX_COUNTRIES = 300;
-
-    // Events
-    event JurisdictionRuleUpdated(address indexed token, uint256[] allowedCountries, uint256[] blockedCountries);
-    event JurisdictionRuleCleared(address indexed token);
-    event RuleAdministratorUpdated(address indexed administrator, bool authorized);
-    event TokenIdentityRegistrySet(address indexed token, address indexed identityRegistry);
-
-    modifier onlyGovernance() {
-        require(
-            ruleAdministrators[msg.sender],
-            "ComplianceRules: Only governance can update rules"
-        );
-        _;
-    }
-
-    constructor(
-        address _owner,
-        uint256[] memory initialAllowedCountries,
-        uint256[] memory initialBlockedCountries
-    ) Ownable(_owner) {
-        // Initialize default rules with user-provided countries
-        _initializeDefaultRules(initialAllowedCountries, initialBlockedCountries);
-
-        // Set deployer as rule administrator
-        ruleAdministrators[_owner] = true;
-    }
-
-    /**
-     * @dev Set the IdentityRegistry for a token
-     * This allows ComplianceRules to verify KYC/AML status
-     */
-    function setTokenIdentityRegistry(
-        address token,
-        address identityRegistry
-    ) external onlyOwner {
-        require(token != address(0), "ComplianceRules: Invalid token address");
-        require(identityRegistry != address(0), "ComplianceRules: Invalid identity registry address");
-        require(identityRegistry.code.length > 0, "ComplianceRules: registry is not a contract");
-
-        tokenIdentityRegistry[token] = identityRegistry;
-        emit TokenIdentityRegistrySet(token, identityRegistry);
-    }
-
-    /**
-     * @dev Set jurisdiction-based validation rules
-     * @notice Can only be called by governance contract after voting
-     */
-    function setJurisdictionRule(
-        address token,
-        uint256[] calldata allowedCountries,
-        uint256[] calldata blockedCountries
-    ) external override onlyGovernance {
-        require(token != address(0), "ComplianceRules: Invalid token address");
-        require(allowedCountries.length <= MAX_COUNTRIES, "ComplianceRules: Too many allowed countries");
-        require(blockedCountries.length <= MAX_COUNTRIES, "ComplianceRules: Too many blocked countries");
-
-        JurisdictionRule storage rule = jurisdictionRules[token];
-
-        // Clear the mappings for the rule that is being REPLACED. These loops
-        // must read the STORED arrays: iterating the incoming calldata deleted
-        // only the keys about to be re-set, so removals never took effect and
-        // an un-blocked country stayed blocked forever.
-        uint256[] storage previousAllowed = rule.allowedCountries;
-        for (uint256 i = 0; i < previousAllowed.length; i++) {
-            delete rule.allowedCountryMap[previousAllowed[i]];
-        }
-        uint256[] storage previousBlocked = rule.blockedCountries;
-        for (uint256 i = 0; i < previousBlocked.length; i++) {
-            delete rule.blockedCountryMap[previousBlocked[i]];
-        }
-
-        // Set new rules
-        rule.isActive = true;
-        rule.allowedCountries = allowedCountries;
-        rule.blockedCountries = blockedCountries;
-        rule.lastUpdated = block.timestamp;
-
-        // Update mappings for efficient lookup
-        for (uint256 i = 0; i < allowedCountries.length; i++) {
-            rule.allowedCountryMap[allowedCountries[i]] = true;
-        }
-        for (uint256 i = 0; i < blockedCountries.length; i++) {
-            rule.blockedCountryMap[blockedCountries[i]] = true;
-        }
-
-        jurisdictionRuleVersion[token]++;
-        emit JurisdictionRuleUpdated(token, allowedCountries, blockedCountries);
-    }
-
-    /**
-     * @dev Remove a token's own jurisdiction rule so the default rule applies
-     *      again. Clears the stored arrays and lookup maps.
-     */
-    function clearJurisdictionRule(address token) external onlyGovernance {
-        require(token != address(0), "ComplianceRules: Invalid token address");
-        JurisdictionRule storage rule = jurisdictionRules[token];
-        for (uint256 i = 0; i < rule.allowedCountries.length; i++) {
-            delete rule.allowedCountryMap[rule.allowedCountries[i]];
-        }
-        for (uint256 i = 0; i < rule.blockedCountries.length; i++) {
-            delete rule.blockedCountryMap[rule.blockedCountries[i]];
-        }
-        delete rule.allowedCountries;
-        delete rule.blockedCountries;
-        rule.isActive = false;
-        rule.lastUpdated = block.timestamp;
-        jurisdictionRuleVersion[token]++;
-        emit JurisdictionRuleCleared(token);
-    }
-
-    /**
-     * @dev Validate jurisdiction compliance
-     */
-    function validateJurisdiction(
-        address token,
-        uint256 countryCode
-    ) external view override returns (bool isValid, string memory reason) {
-        // Same rule canTransfer applies: default blocked list always, then the
-        // per-token rule when active.
-        uint8 verdict = _countryVerdict(token, countryCode);
-        if (verdict == 1) {
-            return (false, "Country is blocked");
-        }
-        if (verdict == 2) {
-            return (false, "Country not in allowed list");
-        }
-        return (true, "Jurisdiction validation passed");
-    }
-
-    /**
-     * @dev Set rule administrator
-     */
-    function setRuleAdministrator(address administrator, bool authorized) external onlyOwner {
-        require(administrator != address(0), "ComplianceRules: Invalid administrator address");
-        ruleAdministrators[administrator] = authorized;
-        emit RuleAdministratorUpdated(administrator, authorized);
-    }
-
-    /**
-     * @dev Get jurisdiction rule for token (with fallback to default)
-     */
-    function _getJurisdictionRule(address token) private view returns (JurisdictionRule storage) {
-        if (jurisdictionRules[token].isActive) {
-            return jurisdictionRules[token];
-        }
-        return defaultJurisdictionRule;
-    }
 
     /**
      * @dev Initialize default compliance rules
@@ -663,24 +282,5 @@ contract ComplianceRules is IComplianceRules, IComplianceHooks, Ownable2Step {
             defaultJurisdictionRule.blockedCountries.push(initialBlockedCountries[i]);
             defaultJurisdictionRule.blockedCountryMap[initialBlockedCountries[i]] = true;
         }
-    }
-
-    /**
-     * @dev Get jurisdiction rule details
-     */
-    function getJurisdictionRule(
-        address token
-    )
-        external
-        view
-        returns (
-            bool isActive,
-            uint256[] memory allowedCountries,
-            uint256[] memory blockedCountries,
-            uint256 lastUpdated
-        )
-    {
-        JurisdictionRule storage rule = _getJurisdictionRule(token);
-        return (rule.isActive, rule.allowedCountries, rule.blockedCountries, rule.lastUpdated);
     }
 }
