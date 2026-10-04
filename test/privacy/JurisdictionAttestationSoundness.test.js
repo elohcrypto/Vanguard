@@ -140,7 +140,7 @@ describeProofs("Jurisdiction attestation soundness (Task 3.7b)", function () {
       ).to.be.rejectedWith(/the attestation is for PrivacyManager/);
     });
 
-    // Review 3.9 C-1 (probe /tmp/p3c): the chain id signal is compared with
+    // Phase 3 review C-1: the chain id signal is compared with
     // block.chainid on chain, not only inside the issuer's signature.
     it("a real proof signed for chainId 1 passes the wrapper and is refused WrongChainId", async function () {
       const w1 = f.wallets[1];

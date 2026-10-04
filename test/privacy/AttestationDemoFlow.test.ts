@@ -147,5 +147,45 @@ describeProofs(
         `wallet 2 ${s[2].address}: whitelist ❌ jurisdiction ❌ accreditation ✅ compliance ❌`,
       );
     });
+
+    // Phase 3 review B-L7 (fix round L5): options 44-46 tell an untrusted
+    // key from a re-trusted one whose record lapsed by epoch.
+    it("44-46 status: valid, key untrusted, key re-trusted, policy changed", async function () {
+      const {
+        deployAttestationFixture,
+      } = require("../helpers/attestationFixture");
+      const { attestationStatus } = require("../../demo/utils/AttestationFlow");
+      const f = await deployAttestationFixture("jurisdiction");
+      const w1 = f.wallets[1];
+      const r = await f.prove(await f.sign({ mask: 1 }), w1);
+      await f.pm.connect(w1).submitAttestationProof(f.id, r.proof, r.signals);
+      const state = { getContract: () => f.pm, signers: [f.wallets[0], w1] };
+      const status = async () => {
+        const lines: string[] = [];
+        await attestationStatus({
+          state,
+          circuit: "jurisdiction",
+          log: (m: string) => lines.push(m),
+        });
+        return lines.join("\n");
+      };
+      const line = (why: string) => `wallet 1 ${w1.address}: ${why}`;
+      expect(await status()).to.contain(line("valid"));
+      await f.pm.setTrustedAttestor(f.id, f.Ax, f.Ay, false);
+      expect(await status()).to.contain(
+        line("lapsed: the issuer key is no longer trusted"),
+      );
+      await f.pm.setTrustedAttestor(f.id, f.Ax, f.Ay, true);
+      expect(await status()).to.contain(
+        line(
+          "lapsed: the issuer key was untrusted and trusted again since (re-trusting revives no record): prove again",
+        ),
+      );
+      // setPolicyToken bumps the jurisdiction policy epoch.
+      await f.pm.setPolicyToken(await f.pm.policyToken());
+      expect(await status()).to.contain(
+        line("lapsed: the policy changed since"),
+      );
+    });
   },
 );

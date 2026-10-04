@@ -174,25 +174,29 @@ describeProofs(
         });
         // The CLI prints it before overwriting --out.
         const dir = fs.mkdtempSync(path.join(os.tmpdir(), "wl-root-"));
-        const entries = path.join(dir, "entries.json");
-        const out = path.join(dir, "root.json");
-        fs.writeFileSync(out, JSON.stringify(prev));
-        fs.writeFileSync(
-          entries,
-          JSON.stringify([
-            { identity: "21", commitment: a },
-            { identity: "23", commitment: d },
-          ]),
-        );
-        const r = await run(["--in", entries, "--out", out], {}, BUILDER);
-        expect(r.code).to.equal(0);
-        expect(r.stderr).to.include(
-          `against the current root file ${out}: 1 commitment(s) added, 1 removed (one per identity)`,
-        );
-        expect(r.stdout.trim()).to.equal(next.root);
-        expect(JSON.parse(fs.readFileSync(out, "utf8")).root).to.equal(
-          next.root,
-        );
+        try {
+          const entries = path.join(dir, "entries.json");
+          const out = path.join(dir, "root.json");
+          fs.writeFileSync(out, JSON.stringify(prev));
+          fs.writeFileSync(
+            entries,
+            JSON.stringify([
+              { identity: "21", commitment: a },
+              { identity: "23", commitment: d },
+            ]),
+          );
+          const r = await run(["--in", entries, "--out", out], {}, BUILDER);
+          expect(r.code).to.equal(0);
+          expect(r.stderr).to.include(
+            `against the current root file ${out}: 1 commitment(s) added, 1 removed (one per identity)`,
+          );
+          expect(r.stdout.trim()).to.equal(next.root);
+          expect(JSON.parse(fs.readFileSync(out, "utf8")).root).to.equal(
+            next.root,
+          );
+        } finally {
+          fs.rmSync(dir, { recursive: true, force: true });
+        }
       });
     });
 
@@ -308,37 +312,41 @@ describeProofs(
       // Review 3.9 B-L5: the secret file's mode is not left to the shell.
       it("--new-secret --out writes a new 0600 file and prints only its path; a readable file warns", async function () {
         const dir = fs.mkdtempSync(path.join(os.tmpdir(), "wl-secret-"));
-        const file = path.join(dir, "secret.txt");
-        const a = await run(["--new-secret", "--out", file]);
-        expect(a.code).to.equal(0);
-        expect(a.stdout).to.equal(file + "\n");
-        expect(a.stderr).to.equal("");
-        expect(fs.statSync(file).mode & 0o777).to.equal(0o600);
-        const secret = fs.readFileSync(file, "utf8");
-        expect(secret).to.match(/^0x[0-9a-f]{62}\n$/);
-        // An existing file is never overwritten.
-        const again = await run(["--new-secret", "--out", file]);
-        expect(again.code).to.equal(1);
-        expect(again.stderr).to.include("exists: refusing to overwrite");
-        expect(fs.readFileSync(file, "utf8")).to.equal(secret);
-        const commit = [
-          "--commitment",
-          "--identity",
-          "7",
-          "--secret-file",
-          file,
-        ];
-        const quiet = await run(commit);
-        expect(quiet.code).to.equal(0);
-        expect(quiet.stderr).to.equal("");
-        fs.chmodSync(file, 0o644);
-        const loud = await run(commit);
-        expect(loud.code).to.equal(0);
-        expect(loud.stdout).to.equal(quiet.stdout);
-        expect(loud.stderr).to.equal(
-          `warning: secret file ${file} is readable by group or others (mode 0644): chmod 600 it\n`,
-        );
-        expect(loud.stderr).to.not.include(secret.trim().slice(2));
+        try {
+          const file = path.join(dir, "secret.txt");
+          const a = await run(["--new-secret", "--out", file]);
+          expect(a.code).to.equal(0);
+          expect(a.stdout).to.equal(file + "\n");
+          expect(a.stderr).to.equal("");
+          expect(fs.statSync(file).mode & 0o777).to.equal(0o600);
+          const secret = fs.readFileSync(file, "utf8");
+          expect(secret).to.match(/^0x[0-9a-f]{62}\n$/);
+          // An existing file is never overwritten.
+          const again = await run(["--new-secret", "--out", file]);
+          expect(again.code).to.equal(1);
+          expect(again.stderr).to.include("exists: refusing to overwrite");
+          expect(fs.readFileSync(file, "utf8")).to.equal(secret);
+          const commit = [
+            "--commitment",
+            "--identity",
+            "7",
+            "--secret-file",
+            file,
+          ];
+          const quiet = await run(commit);
+          expect(quiet.code).to.equal(0);
+          expect(quiet.stderr).to.equal("");
+          fs.chmodSync(file, 0o644);
+          const loud = await run(commit);
+          expect(loud.code).to.equal(0);
+          expect(loud.stdout).to.equal(quiet.stdout);
+          expect(loud.stderr).to.equal(
+            `warning: secret file ${file} is readable by group or others (mode 0644): chmod 600 it\n`,
+          );
+          expect(loud.stderr).to.not.include(secret.trim().slice(2));
+        } finally {
+          fs.rmSync(dir, { recursive: true, force: true });
+        }
       });
     });
   },
