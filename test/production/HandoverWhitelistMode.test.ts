@@ -7,7 +7,9 @@ const {
   acceptAllByVote,
   assertHandoverComplete,
   handoverDeployerPowers,
+  preflight,
 } = require("../../demo/utils/Handover");
+const { checkFromBlock } = require("../../demo/utils/HandoverScans");
 
 // Plan v2 Task 3.4 (R-3R-15): the ceremony derives PrivacyManager from
 // ComplianceRules.privacyManager(token) as well as from the type-11 bound
@@ -129,7 +131,7 @@ describe("Handover: PrivacyManager wired in ComplianceRules (3.4)", function () 
     );
   });
 
-  // D33 (a), review B-M1 (probe /tmp/p3b/vgtzk.test.js): with VGT in a ZK
+  // D33 (a), Phase 3 review B-M1: with VGT in a ZK
   // mode the preflight used to pass, the deployer steps ran and every
   // fee-paying vote then reverted "Compliance check failed".
   for (const [mode, name] of [
@@ -179,6 +181,53 @@ describe("Handover: PrivacyManager wired in ComplianceRules (3.4)", function () 
       );
     });
   }
+
+  // Phase 3 review fix round L4: the D33 check reads whitelistMode(VGT);
+  // a ComplianceRules from before 3.4 has no such getter. Stand-in as
+  // above, with only whitelistMode routed to a contract without it. The
+  // full run names the missing privacyManager(token) first (wiredPrivacy),
+  // so this reaches the check where it alone runs: the accept phase.
+  it("names a ComplianceRules without whitelistMode (predates 3.4), sending nothing", async function () {
+    const rules = c.complianceRules;
+    const rulesAddr = await rules.getAddress();
+    const lacking = await ethers.getContractAt(
+      "ComplianceRules",
+      await c.identityRegistry.getAddress(),
+    );
+    await expect(lacking.whitelistMode(vgt)).to.be.rejected;
+    args.complianceRules = new Proxy(rules, {
+      get: (t, k) =>
+        k === "whitelistMode" ? lacking.whitelistMode : Reflect.get(t, k),
+    });
+    const nonce = await ethers.provider.getTransactionCount(deployer.address);
+    await expect(preflight(args, { acceptOnly: true })).to.be.rejectedWith(
+      new RegExp(
+        `ComplianceRules ${rulesAddr} has no whitelistMode\\(token\\) \\(predates Task 3.4\\): redeploy it before the ceremony`,
+      ),
+    );
+    expect(
+      await ethers.provider.getTransactionCount(deployer.address),
+    ).to.equal(nonce);
+  });
+
+  // Review 3.9 L2: a fromBlock after the ComplianceRules deploy would miss
+  // rule administrators authorized before it.
+  it("refuses a fromBlock after the ComplianceRules deploy", async function () {
+    const block = (await c.complianceRules.deploymentTransaction().wait())
+      .blockNumber;
+    await expect(
+      checkFromBlock({
+        fromBlock: block + 1,
+        complianceRules: c.complianceRules,
+      }),
+    ).to.be.rejectedWith(
+      `fromBlock ${block + 1} is after the ComplianceRules deploy (it has code at block ${block}): rule administrators added earlier would be missed; use a block before the ComplianceRules deploy`,
+    );
+    await checkFromBlock({
+      fromBlock: block,
+      complianceRules: c.complianceRules,
+    });
+  });
 
   it("refuses a wired PrivacyManager that is not the bound one", async function () {
     await c.privacyManager.transferOwnership(govAddr);

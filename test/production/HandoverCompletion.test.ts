@@ -419,15 +419,25 @@ describe("Handover completion check: deployer-era residue (3.9)", function () {
     });
   }
 
-  it("refuses a rule administrator the deployer authorized and never revoked", async function () {
+  // Review 3.9 L3: refused before Step 1, while the deployer can still
+  // revoke it in one transaction; the completion line is in the table.
+  it("refuses a rule administrator the deployer authorized before Step 1", async function () {
     const s = f.stranger.address;
     await c.complianceRules.setRuleAdministrator(s, true);
+    const nonce = await ethers.provider.getTransactionCount(f.deployer.address);
+    await expect(handoverDeployerPowers(args)).to.be.rejectedWith(
+      new RegExp(
+        `ComplianceRules rule administrator\\(s\\) ${s} besides the deployer, ops and governance: .*setRuleAdministrator\\(<address>, false\\) first`,
+      ),
+    );
+    expect(
+      await ethers.provider.getTransactionCount(f.deployer.address),
+    ).to.equal(nonce);
+    expect(await c.token.isAgent(f.deployer.address)).to.equal(true);
+    // Revoked, the same ceremony completes.
+    await c.complianceRules.setRuleAdministrator(s, false);
     await ceremony();
-    const { ok, failures } = await assertHandoverComplete(args);
-    expect(ok).to.equal(false);
-    expect(failures).to.deep.equal([
-      `${s} is still a ComplianceRules rule administrator (neither governance nor ops)`,
-    ]);
+    expect((await assertHandoverComplete(args)).failures).to.deep.equal([]);
   });
 
   // Review B-L4: the two deployer-era privacy warnings, as warnings.

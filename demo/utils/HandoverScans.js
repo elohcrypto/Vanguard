@@ -51,26 +51,38 @@ async function scanLogs(contract, filter, o) {
 /**
  * Review M-3: the scans start at o.fromBlock, so a block after the
  * IdentityRegistry deploy misses agents (and governors, trusted contracts)
- * added before it. Refused when the registry already had code at
- * fromBlock - 1; a warning when the RPC cannot serve historical code.
+ * added before it; Task 3.9 review L2: likewise a block after the
+ * ComplianceRules deploy misses rule administrators. Refused when either
+ * already had code at fromBlock - 1; a warning when the RPC cannot serve
+ * historical code.
  */
 async function checkFromBlock(o, log = () => {}) {
   const from = Number(o.fromBlock || 0);
-  if (from <= 0 || !o.identityRegistry) return;
-  const reg = await addrOf(o.identityRegistry);
-  let code;
-  try {
-    code = await ethers.provider.getCode(reg, from - 1);
-  } catch (e) {
-    log(
-      `   ⚠️  fromBlock ${from}: the RPC cannot serve historical code (${e.message.split("\n")[0]}); make sure it is a block before the IdentityRegistry deploy`,
-    );
-    return;
-  }
-  if (code !== "0x") {
-    fail(
-      `fromBlock ${from} is after the IdentityRegistry deploy (it has code at block ${from - 1}): agents, governors and trusted contracts added earlier would be missed; use a block before the IdentityRegistry deploy`,
-    );
+  if (from <= 0) return;
+  for (const [c, label, missed] of [
+    [
+      o.identityRegistry,
+      "IdentityRegistry",
+      "agents, governors and trusted contracts",
+    ],
+    [o.complianceRules, "ComplianceRules", "rule administrators"],
+  ]) {
+    if (!c) continue;
+    const a = await addrOf(c);
+    let code;
+    try {
+      code = await ethers.provider.getCode(a, from - 1);
+    } catch (e) {
+      log(
+        `   ⚠️  fromBlock ${from}: the RPC cannot serve historical code (${e.message.split("\n")[0]}); make sure it is a block before the ${label} deploy`,
+      );
+      return;
+    }
+    if (code !== "0x") {
+      fail(
+        `fromBlock ${from} is after the ${label} deploy (it has code at block ${from - 1}): ${missed} added earlier would be missed; use a block before the ${label} deploy`,
+      );
+    }
   }
 }
 

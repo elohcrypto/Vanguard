@@ -322,6 +322,18 @@ async function preflight(o, { acceptOnly = false } = {}) {
     }
     governanceOwned.add(e.key);
   }
+  // Review 3.9 L3: a stray rule administrator is refused while the
+  // deployer can still revoke it in one transaction (completion checks it
+  // again). Required here, not at the top: HandoverScans requires this file.
+  const { liveRuleAdministrators } = require("./HandoverScans");
+  const stray = (await liveRuleAdministrators(o, [dAddr])).filter(
+    (a) => !same(a, dAddr) && !same(a, ops) && !same(a, govAddr),
+  );
+  if (stray.length) {
+    fail(
+      `ComplianceRules rule administrator(s) ${stray.join(", ")} besides the deployer, ops and governance: after the handover they could set any token's jurisdiction rule (and lapse every private jurisdiction record); the ComplianceRules owner must setRuleAdministrator(<address>, false) first`,
+    );
+  }
   // Issuers the deployer holds go to issuerAdmin, never ops (D25 b).
   for (const issuer of o.issuers || []) {
     const label = await issuerLabel(issuer);
