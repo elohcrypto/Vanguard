@@ -490,6 +490,17 @@ key trusted on two deployments therefore cannot carry an attestation from
 one to the other, where the same bit may mean another country; after a
 redeploy, issuers sign again for the new PrivacyManager.
 
+An attestation also expires on a date the issuer sets (Task 3.10, D32 a):
+`attest.js --sign` requires `--valid-days <n>` or `--valid-until <ISO
+date>` and refuses a date not in the future; the issuer signs that
+`validUntil` with the attributes and the proof publishes it. PrivacyManager
+refuses the proof from `validUntil` on (`AttestationExpired`), and a
+record's `expiresAt` is `min(submission + proofValidityPeriod,
+validUntil)`, so a record never outlives its attestation and the same
+calldata cannot be resubmitted after it: a lapsed accreditation or a
+dropped score needs a new attestation, which renews the record. The
+prover refuses an expired attestation before proving, naming the date.
+
 The jurisdiction set for private proofs is ComplianceRules' rule for VSC
 (Task 3.8): the one transfers enforce, with no second list to keep in
 step. PrivacyManager names the token with `setPolicyToken(VSC)` and reads
@@ -527,7 +538,8 @@ node scripts/zk/attest.js --new-key
 ATTESTOR_KEY=<key> node scripts/zk/attest.js --public-key
 ATTESTOR_KEY=<key> node scripts/zk/attest.js --sign --circuit jurisdiction \
   --identity <onchainID> --country <ISO numeric> --rpc <url> \
-  --privacy-manager <addr> --out att.json
+  --privacy-manager <addr> --valid-days 365 --out att.json
+#   or --valid-until <ISO date>; the expiry is required
 #   offline: --chain-id <id> --privacy-manager <addr> --mask <its bit>
 #   ... --circuit accreditation --amount <amount>
 #   ... --circuit compliance --scores <kyc,aml,jurisdiction,accreditation>
@@ -540,8 +552,9 @@ WHITELIST_WALLET_KEY=<wallet key> node scripts/zk/prove-attestation.js \
 The issuer key comes from `ATTESTOR_KEY` only, never argv, and is printed
 only by `--new-key`. The attestation file carries the salt and the
 signature: it is the investor's secret, written with mode 0600, and the
-prover never prints either. The prover refuses an untrusted issuer key, a
-stale policy and attributes that miss the policy before proving, verifies
+prover never prints either. The prover refuses an untrusted issuer key, an
+expired attestation, a stale policy and attributes that miss the policy
+before proving, verifies
 the proof locally, and with `--submit` exits non-zero unless the record
 reads valid. Before the handover the owner calls the setters; after it a
 PrivacyParameters vote (type 11) does: trust the issuer's key for each
@@ -555,9 +568,11 @@ key for the session, never printed, trusts it for the three circuits and
 sets minimum accreditation 100000 and compliance minimum 70 with weights
 25/25/25/25, printing the public key and the policies; option 21 wires the
 jurisdiction source, and 42 -> 3 asks for an ISO numeric code. Options
-42 -> 3, 4 and 5 sign for the chosen wallet, prove and bind through the same library
-and print the record and the validator's answer; 44, 45 and 46 read
-PrivacyManager's records and validators. The handover completion lists the
+42 -> 3, 4 and 5 sign for the chosen wallet with a one-year validity,
+prove and bind through the same library and print the attestation's
+expiry, the record and the validator's answer; 44, 45 and 46 read
+PrivacyManager's records and validators and show each record's expiry
+next to its attestation's. The handover completion lists the
 trusted attestors per circuit and warns when one has none, the jurisdiction
 source and policy token, and the number of jurisdiction bits; the demo key
 stays trusted after the ceremony until a vote untrusts it.

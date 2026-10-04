@@ -470,6 +470,14 @@ version) and frees the attestation for a re-proof, so restoring a rule
 revives none. An attestation is signed for one chain and one
 PrivacyManager; another deployment refuses it.
 
+An attestation expires on the date the issuer signs into it (Task 3.10):
+`attest.js --sign` requires `--valid-days` or `--valid-until`, the proof
+publishes `validUntil`, PrivacyManager refuses the proof from that date on
+(`AttestationExpired`) and caps the record's `expiresAt` at it, so a
+record never outlives its attestation. Re-attestation renews: the issuer
+signs a new attestation and the investor proves again. The demo signs for
+one year.
+
 ---
 
 ## Token Payment Workflow

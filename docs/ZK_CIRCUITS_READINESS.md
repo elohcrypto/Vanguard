@@ -40,13 +40,15 @@ cover the first, the test suite the second.
 Numbers from `npm run verify:zk` and `snarkjs r1cs info` on the current
 tree.
 
-| Circuit | Public signals (snarkjs order) | nPublic | Constraints | PLONK domain | WASM | zkey |
-|---|---|---|---|---|---|---|
-| whitelist_membership | nullifier, merkleRoot, walletBinding | 3 | 11,455 | 2^14 | 1.7 MB | 29 MB |
-| blacklist_membership | nullifier, whitelistRoot, blacklistRoot, walletBinding | 4 | 24,394 | 2^15 | 2.2 MB | 64 MB |
-| jurisdiction_proof | nullifier, Ax, Ay, chainId, verifierContext, allowedMask, walletBinding | 7 | 9,770 | 2^15 | 3.4 MB | 80 MB |
-| accreditation_proof | nullifier, Ax, Ay, chainId, verifierContext, minimumAccreditation, walletBinding | 7 | 9,773 | 2^15 | 3.4 MB | 80 MB |
-| compliance_aggregation | nullifier, Ax, Ay, chainId, verifierContext, minimum, wK, wA, wJ, wAcc, walletBinding | 11 | 10,837 | 2^15 | 3.7 MB | 101 MB |
+| Circuit | Public signals (snarkjs order) | nPublic | R1CS constraints | PLONK gates | PLONK domain | WASM | zkey |
+|---|---|---|---|---|---|---|---|
+| whitelist_membership | nullifier, merkleRoot, walletBinding | 3 | 11,455 | 13,216 | 2^14 | 1.7 MB | 29 MB |
+| blacklist_membership | nullifier, whitelistRoot, blacklistRoot, walletBinding | 4 | 24,394 | 29,564 | 2^15 | 2.2 MB | 64 MB |
+| jurisdiction_proof | nullifier, Ax, Ay, chainId, verifierContext, validUntil, allowedMask, walletBinding | 8 | 9,949 | 25,100 | 2^15 | 3.5 MB | 83 MB |
+| accreditation_proof | nullifier, Ax, Ay, chainId, verifierContext, validUntil, minimumAccreditation, walletBinding | 8 | 9,952 | 25,044 | 2^15 | 3.5 MB | 83 MB |
+| compliance_aggregation | nullifier, Ax, Ay, chainId, verifierContext, validUntil, minimum, wK, wA, wJ, wAcc, walletBinding | 12 | 11,091 | 27,085 | 2^15 | 4.0 MB | 103 MB |
+
+PLONK gates are the "Plonk constraints" `snarkjs plonk setup` reports.
 
 A proof takes seconds to generate (the attestation soundness tests take
 about 9 s per real proof). A PLONK verification through the wrapper costs
@@ -67,9 +69,13 @@ roughly 0.4M gas.
   is not in the sanctions tree. It gates nothing; sanctions on transfers
   are enforced by the blacklist oracle.
 - **Jurisdiction, accreditation, compliance**: a trusted issuer signs the
-  investor's attributes with an EdDSA Baby Jubjub key, for one chain and
-  one PrivacyManager; the proof shows the signature and that the
-  attributes meet PrivacyManager's policy. The jurisdiction policy is the
+  investor's attributes with an EdDSA Baby Jubjub key, for one chain, one
+  PrivacyManager and until a date the issuer sets (`validUntil`, a public
+  signal); the proof shows the signature and that the attributes meet
+  PrivacyManager's policy. PrivacyManager refuses the proof from
+  `validUntil` on (`AttestationExpired`) and records it until
+  `min(now + proofValidityPeriod, validUntil)`, so a record never outlives
+  its attestation; a new attestation renews it. The jurisdiction policy is the
   set of countries `ComplianceRules` allows for VSC (one source, Task 3.8).
   The records are read by the `validatePrivate*` views, which nothing on
   the transfer path calls.
@@ -101,6 +107,8 @@ supported "mock deployment".
   attestations.
 - Task 3.8: attestations bound to chain id and PrivacyManager; the
   jurisdiction set read from ComplianceRules.
+- Task 3.10: attestations carry the issuer-signed expiry `validUntil`
+  (nPublic 8/8/12); an expired attestation's old calldata is refused.
 
 The soundness tests (`test/privacy/ZKSoundness.test.js`,
 `BlacklistSoundness.test.js` and the three `*AttestationSoundness` suites)
