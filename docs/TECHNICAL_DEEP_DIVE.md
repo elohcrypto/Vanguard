@@ -485,7 +485,10 @@ whitelist tree under the public root, for this wallet.
 template WhitelistMembership(levels) {
     // Private inputs
     signal input identity;              // the investor's OnchainID address
-    signal input secret;                // chosen by the investor, >= 2^128
+    signal input secret;                // chosen by the investor; the prover
+                                        // script (scripts/zk/prove-whitelist.js)
+                                        // refuses one below 2^128, the
+                                        // circuit does not constrain its size
     signal input pathElements[levels];
     signal input pathIndices[levels];   // constrained binary in MerkleInclusion
 

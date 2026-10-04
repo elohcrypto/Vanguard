@@ -17,9 +17,8 @@ This project implements a **Vanguard RWA StableCoin (VSC)** system, under develo
 **Current Status**: under development. The contracts, the interactive demo, the tests and CI run end to end on a local Hardhat node; the remaining remediation phases and a third-party security audit come before any production or mainnet use.
 
 > **Building from a fresh clone:** the ZK circuit artifacts are gitignored build output.
-> Run `npm run setup:zk` before `npm test`, or the 4 ZK test suites fail with `ENOENT`
-> (**23 failures** without them; **0 failures** with them — the pass count moves as tests
-> are added, so the failure count is the number to check).
+> Run `npm run setup:zk` before `npm test`; without the artifacts every suite that
+> generates real proofs fails with `ENOENT`.
 > `setup:zk` requires the **Rust circom 2.x** compiler — the `circom` npm package is the
 > deprecated 0.5.x JS build and cannot compile these circuits. See
 > [docs/ZK_CIRCUIT_BUILD_GUIDE.md](docs/ZK_CIRCUIT_BUILD_GUIDE.md).
@@ -440,8 +439,8 @@ MIT License - See LICENSE file for details
 
 ## 🎯 Project Status
 
-**Current Phase**: ✅ **Phase 5 Complete** - All core features implemented
-**Next Milestone**: Phase 6 - Production Deployment (Gas optimization, security audits, mainnet deployment)
+**Current Phase**: remediation plan v2, Phases 0 to 3 done (Phase 3 closed by Task 3.9); next are Task 3.10 (attestation lifetime) and Phase 4 (wire or delete), then Phase 5 (docs, coverage, third-party audit).
+**Before any mainnet deployment**: the remaining phases, gas optimization and a security audit.
 
 ### **Implementation Summary**
 - ✅ **11 Core Requirements**: All fully implemented

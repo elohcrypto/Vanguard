@@ -2,7 +2,7 @@
 
 ## 🎯 **System Summary**
 
-We have successfully implemented a **production-ready Vanguard StableCoin system** with comprehensive compliance, privacy, and regulatory features. The system demonstrates advanced blockchain technology integration with real-world regulatory requirements.
+We have implemented a **Vanguard StableCoin system** with compliance, privacy, and regulatory features; it is under development and not yet audited. The system demonstrates advanced blockchain technology integration with real-world regulatory requirements.
 
 ## 🏗️ **Architecture Overview**
 
@@ -214,7 +214,7 @@ We have successfully implemented a **production-ready Vanguard StableCoin system
 ### **System Integration**
 - ✅ All components working together seamlessly
 - ✅ Comprehensive testing through interactive demo system (83 options)
-- ✅ Production-ready architecture with error handling
+- ✅ Architecture with error handling, exercised by the test suite and the demo smoke in CI
 - ✅ Scalable design for enterprise deployment
 
 ## 📊 **Technical Specifications**
@@ -277,4 +277,4 @@ This Vanguard StableCoin system represents a **substantial technological achieve
 
 The system provides a **solid foundation** for a real-world Vanguard StableCoin implementation with all the necessary compliance, privacy, governance, payment, and regulatory features required for a modern compliant stablecoin system.
 
-**This is production-ready technology with 11 core requirements fully implemented, ready for security audits and mainnet deployment.**
+This is not production software yet: the remaining remediation phases and a third-party security audit come before any mainnet deployment.

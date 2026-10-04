@@ -419,7 +419,9 @@ unless `--force`, because an old root, rebuilt for instance from an old
 adds and removes against it. The prover warns on stderr when
 `--secret-file` is readable by group or others, and when `--new-secret`
 writes to stdout instead of `--out`.
-Demo option 42 -> 1 uses the same functions.
+Demo option 42 -> 1 builds roots and proofs with the same functions but
+publishes the root directly (`publishWhitelistRoot`), without the old-root
+history check, which is the CLI builder's.
 
 ### The ZK allow list on the live token (Task 3.6)
 

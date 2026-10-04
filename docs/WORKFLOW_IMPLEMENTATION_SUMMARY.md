@@ -2,22 +2,22 @@
 
 ## Overview
 
-This document summarizes the comprehensive workflow implementation for the Vanguard StableCoin system. All core user workflows have been successfully implemented, tested, and integrated into the production-ready system.
+This document summarizes the comprehensive workflow implementation for the Vanguard StableCoin system. All core user workflows are implemented, tested, and integrated; the system is under development and not yet audited.
 
 ## Workflow Coverage
 
 ### ✅ Complete Workflow Implementation
 
-All 6 core Vanguard StableCoin workflows are fully implemented and production-ready:
+All 6 core Vanguard StableCoin workflows are implemented and tested (not audited):
 
-| Workflow | Demo Options | Implementation Status | Interactive Testing | Production Ready |
+| Workflow | Demo Options | Implementation Status | Interactive Testing | Status |
 |----------|-------------|----------------------|-------------------|------------------|
-| **User Onboarding** | 3, 6-8 | ✅ COMPLETED | ✅ Menu-driven | ✅ READY |
-| **Token Minting** | 22-25 | ✅ COMPLETED | ✅ Menu-driven | ✅ READY |
-| **Token Transfer** | 26-27 | ✅ COMPLETED | ✅ Menu-driven | ✅ READY |
-| **Oracle Access Control** | 31-40 | ✅ COMPLETED | ✅ Menu-driven | ✅ READY |
-| **Privacy & ZK Proofs** | 41-50 | ✅ COMPLETED | ✅ Menu-driven | ✅ READY |
-| **Token Burning** | 51-58 | ✅ COMPLETED | ✅ Menu-driven | ✅ READY |
+| **User Onboarding** | 3, 6-8 | ✅ COMPLETED | ✅ Menu-driven | Tested, not audited |
+| **Token Minting** | 22-25 | ✅ COMPLETED | ✅ Menu-driven | Tested, not audited |
+| **Token Transfer** | 26-27 | ✅ COMPLETED | ✅ Menu-driven | Tested, not audited |
+| **Oracle Access Control** | 31-40 | ✅ COMPLETED | ✅ Menu-driven | Tested, not audited |
+| **Privacy & ZK Proofs** | 41-50 | ✅ COMPLETED | ✅ Menu-driven | Tested, not audited; options 42 -> 6 and 47-50 still simulate (Task 4.7) |
+| **Token Burning** | 51-58 | ✅ COMPLETED | ✅ Menu-driven | Tested, not audited |
 
 ## Implemented Workflows
 
