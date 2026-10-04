@@ -268,15 +268,20 @@ async function attestationStatus({ state, circuit, log = console.log }) {
     if (rec.expiresAt === 0n) continue;
     const info = await pm.getUserProofInfo(s.address, cid);
     const valid = await pm[VALIDATOR[circuit]].staticCall(s.address);
+    // Review 3.9 B-L7: an untrusted key and a re-trusted one read apart
+    // (re-trusting bumps the key's epoch, so its old records stay lapsed).
     const why = info.isValid
       ? valid
         ? "valid"
         : "valid record, but the user opted out (privacy settings)"
       : info.isExpired
         ? "expired"
-        : rec.policyHash !== current
+        : rec.policyHash !== current ||
+            rec.policyEpoch !== (await pm.policyEpoch(cid))
           ? "lapsed: the policy changed since"
-          : "lapsed: the issuer key is no longer trusted";
+          : !(await pm.trustedAttestor(cid, rec.attestor))
+            ? "lapsed: the issuer key is no longer trusted"
+            : "lapsed: the issuer key was untrusted and trusted again since (re-trusting revives no record): prove again";
     log(`   ${valid ? "✅" : "❌"} wallet ${i} ${s.address}: ${why}`);
     log(
       `      🔢 nullifier ${rec.nullifier}, expires ${new Date(Number(rec.expiresAt) * 1000).toISOString()}`,

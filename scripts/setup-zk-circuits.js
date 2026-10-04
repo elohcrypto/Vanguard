@@ -353,7 +353,7 @@ async function generateCircuitInfo() {
 function getCircuitDescription(circuitName) {
   const descriptions = {
     whitelist_membership:
-      "Proves membership in a whitelist without revealing identity",
+      "Proves a whitelist slot (Poseidon(identity, secret) in the root) for a public wallet, without revealing which listed identity",
     blacklist_membership:
       "Proves a whitelisted commitment's identity is not in the sanctions tree (non-gating, D2)",
     jurisdiction_proof:
