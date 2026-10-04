@@ -186,10 +186,10 @@ jobs:
       - name: Run tests
         run: npm test
 
-      # Coverage ratchet. Baseline 88: measured at 88.55% lines on CI at
-      # 19d75cb, 89.1% at 2e05e97, 89.17% at 15f26f3 (2026-10-03; earlier
-      # baselines 63.73% -> 65 -> 84 -> 86 -> 88, each raised after the
-      # notice fired).
+      # Coverage ratchet. Baseline 90: measured at 88.55% lines on CI at
+      # 19d75cb, 89.1% at 2e05e97, 89.17% at 15f26f3, 90.7% at c0e73fc
+      # (2026-10-04, run 37168472912; earlier baselines 63.73% -> 65 -> 84
+      # -> 86 -> 88 -> 90, each raised after the notice fired).
       # Fails only when the number DROPS below BASELINE; notices when it climbs
       # 2+ points so the baseline can be raised. The plugin compiles instrumented
       # bytecode into artifacts/; nothing else may compile in this tree while it
@@ -202,7 +202,7 @@ jobs:
         env:
           ZK_PROOFS: '0'
         run: |
-          BASELINE=88
+          BASELINE=90
           npm run test:coverage > coverage.log 2>&1 || true
           lines=$(grep -E '^All files' coverage.log | awk -F'|' '{gsub(/ /,"",$5); print $5}')
           echo "line coverage: ${lines:-<none>}% (baseline $BASELINE)"
