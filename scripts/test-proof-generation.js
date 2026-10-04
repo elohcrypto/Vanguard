@@ -85,6 +85,8 @@ async function main() {
   // issuer key signs; the proofs carry the issuer's (Ax, Ay) and the policy.
   const { signAttestation, newAttestorKey } = require("./zk/attest");
   const key = newAttestorKey();
+  // Task 3.10: the issuer signs an expiry; one year from now.
+  const validUntil = Math.floor(Date.now() / 1000) + 365 * 86400;
   const sig = (a) => ({
     identity: a.identity,
     salt: a.salt,
