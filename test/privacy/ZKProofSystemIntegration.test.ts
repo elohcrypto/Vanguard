@@ -155,9 +155,9 @@ describe("🔐 Complete ZK Proof System Integration Tests", function () {
     });
 
     it("Should refuse a made-up jurisdiction attestation proof", async function () {
-      // [nullifier, Ax, Ay, chainId, verifierContext, allowedMask,
-      // walletBinding]
-      const publicSignals = [mockNullifier, 1, 2, 31337, 9, 15, 1];
+      // [nullifier, Ax, Ay, chainId, verifierContext, validUntil,
+      // allowedMask, walletBinding]
+      const publicSignals = [mockNullifier, 1, 2, 31337, 9, 2 ** 40, 15, 1];
       const result = await jurisdictionVerifier.verifyProof(
         mockPlonkProof,
         publicSignals,
@@ -167,9 +167,9 @@ describe("🔐 Complete ZK Proof System Integration Tests", function () {
     });
 
     it("Should refuse a made-up accreditation attestation proof", async function () {
-      // [nullifier, Ax, Ay, chainId, verifierContext, minimumAccreditation,
-      // walletBinding]
-      const publicSignals = [mockNullifier, 1, 2, 31337, 9, 100000, 1];
+      // [nullifier, Ax, Ay, chainId, verifierContext, validUntil,
+      // minimumAccreditation, walletBinding]
+      const publicSignals = [mockNullifier, 1, 2, 31337, 9, 2 ** 40, 100000, 1];
       const result = await accreditationVerifier.verifyProof(
         mockPlonkProof,
         publicSignals,
@@ -179,15 +179,16 @@ describe("🔐 Complete ZK Proof System Integration Tests", function () {
     });
 
     it("Should refuse a made-up compliance aggregation proof", async function () {
-      // [nullifier, Ax, Ay, chainId, verifierContext, minimum, wK, wA, wJ,
-      // wAcc, walletBinding]; the aggregate is never public (the old
-      // complianceLevel output is gone).
+      // [nullifier, Ax, Ay, chainId, verifierContext, validUntil, minimum,
+      // wK, wA, wJ, wAcc, walletBinding]; the aggregate is never public (the
+      // old complianceLevel output is gone).
       const publicSignals = [
         mockNullifier,
         1,
         2,
         31337,
         9,
+        2 ** 40,
         70,
         25,
         25,
