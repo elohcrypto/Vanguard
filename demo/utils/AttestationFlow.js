@@ -221,8 +221,6 @@ async function runAttestationFlow({
     identity,
     ...attributes,
   });
-  state.attestationExpiry ??= {};
-  state.attestationExpiry[`${circuit}:${user.address}`] = validUntil;
   log(
     `   🖋️  Issuer signed the ${circuit} attestation, valid until ${isoOf(validUntil)} (salt and signature stay with the investor)`,
   );
@@ -247,6 +245,9 @@ async function runAttestationFlow({
     privacyManager: pm.target,
     signer: user,
   });
+  // Review 3.10 L3: remembered only once the record is bound.
+  state.attestationExpiry ??= {};
+  state.attestationExpiry[`${circuit}:${user.address}`] = validUntil;
   const rx = await user.provider.getTransactionReceipt(r.txHash);
   if (rx) state.gasTracker?.set(`${NAMES[circuit]} Proof`, rx.gasUsed);
   const valid = await pm
