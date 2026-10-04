@@ -28,18 +28,18 @@ contract AlwaysTrueVerifier {
         return true;
     }
 
-    /// @dev PLONK jurisdiction and accreditation shape (since Task 3.8 M1).
+    /// @dev PLONK jurisdiction and accreditation shape (since Task 3.10).
     function verifyProof(
         uint256[24] calldata,
-        uint256[7] calldata
+        uint256[8] calldata
     ) public pure returns (bool) {
         return true;
     }
 
-    /// @dev PLONK compliance-aggregation shape (since Task 3.8 M1).
+    /// @dev PLONK compliance-aggregation shape (since Task 3.10).
     function verifyProof(
         uint256[24] calldata,
-        uint256[11] calldata
+        uint256[12] calldata
     ) public pure returns (bool) {
         return true;
     }

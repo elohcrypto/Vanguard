@@ -1,6 +1,7 @@
 pragma circom 2.0.0;
 
 include "circomlib/circuits/poseidon.circom";
+include "circomlib/circuits/bitify.circom";
 include "circomlib/circuits/babyjub.circom";
 include "circomlib/circuits/eddsaposeidon.circom";
 
@@ -12,10 +13,14 @@ include "circomlib/circuits/eddsaposeidon.circom";
  *      issuer keys and the policy.
  *
  * AttestationSignature(n): the message is
- *     M = Poseidon(domain, chainId, verifierContext, identity,
+ *     M = Poseidon(domain, chainId, verifierContext, validUntil, identity,
  *                  attributes[0..n-1], salt)
  * and (R8x, R8y, S) must be a valid signature of M under the PUBLIC key
- * (Ax, Ay). chainId and verifierContext (the PrivacyManager address as a
+ * (Ax, Ay). validUntil (unix seconds, below 2^64) is the expiry the issuer
+ * signed; the three attestation circuits publish it and PrivacyManager
+ * refuses the proof from that time on and caps the record's expiresAt at it
+ * (Task 3.10, D32 a): a lapsed attestation cannot be re-proved, and old
+ * calldata cannot be resubmitted after it. chainId and verifierContext (the PrivacyManager address as a
  * field element) are public inputs PrivacyManager compares to block.chainid
  * and itself (Task 3.8 review M1): an attestation is valid for one chain and
  * one PrivacyManager only, so a second deployment trusting the same key,
@@ -35,6 +40,7 @@ template AttestationSignature(n) {
     signal input domain;
     signal input chainId;
     signal input verifierContext;
+    signal input validUntil;
     signal input identity;
     signal input attributes[n];
     signal input salt;
@@ -44,15 +50,22 @@ template AttestationSignature(n) {
     signal input R8y;
     signal input S;
 
-    component message = Poseidon(n + 5);
+    // validUntil is a unix time below 2^64, so the on-chain comparison with
+    // block.timestamp sees the value the issuer meant.
+    component validUntilBits = Num2Bits(64);
+    validUntilBits.in <== validUntil;
+
+    // n + 6 inputs: at most 10 for n = 4, within circomlib's Poseidon(16).
+    component message = Poseidon(n + 6);
     message.inputs[0] <== domain;
     message.inputs[1] <== chainId;
     message.inputs[2] <== verifierContext;
-    message.inputs[3] <== identity;
+    message.inputs[3] <== validUntil;
+    message.inputs[4] <== identity;
     for (var i = 0; i < n; i++) {
-        message.inputs[4 + i] <== attributes[i];
+        message.inputs[5 + i] <== attributes[i];
     }
-    message.inputs[n + 4] <== salt;
+    message.inputs[n + 5] <== salt;
 
     component r8OnCurve = BabyCheck();
     r8OnCurve.x <== R8x;

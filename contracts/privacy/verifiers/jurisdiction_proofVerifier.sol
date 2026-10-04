@@ -40,25 +40,25 @@ contract JurisdictionProofVerifier {
     
     // Verification Key data
     uint32 constant n         = 32768;
-    uint16 constant nPublic   = 7;
-    uint16 constant nLagrange = 7;
+    uint16 constant nPublic   = 8;
+    uint16 constant nLagrange = 8;
     
-    uint256 constant Qmx  = 7456731859589487982809763386467768334052030068299466194779716430538749109681;
-    uint256 constant Qmy  = 6665815285095520787622342120339555439481108705159772939415881422864365695495;
-    uint256 constant Qlx  = 19450174439338845633952121637313151946707174277602913687329064236436476389975;
-    uint256 constant Qly  = 18647941863962624691341421986720736331422376855001443320213544306954599558035;
-    uint256 constant Qrx  = 1685757586853664001295090995538385899385593318563370123724804980125690540741;
-    uint256 constant Qry  = 16752347427678256396691038168398802809180122773909763646297977853413968740551;
-    uint256 constant Qox  = 13322678268015903938992460959930505940836992699568925979655499791076658895176;
-    uint256 constant Qoy  = 11232704124185798355878839115602209269618066082562439028416367321307243022271;
-    uint256 constant Qcx  = 4732475120543828285279827126000578107530973796481913893397890938732373848406;
-    uint256 constant Qcy  = 6700727877912892323653527617751907973900450791058460855973465392719435299416;
-    uint256 constant S1x  = 17169849855129148127503270879246800068986178646470095499295936763502231691571;
-    uint256 constant S1y  = 2096484977655013419168932866845144786832926461441297731442792990655060900433;
-    uint256 constant S2x  = 10584447502430065458333927181622621497623014236508339454056964103730588336840;
-    uint256 constant S2y  = 444461048532166612711765411325617920008770643628228829581250717009085551314;
-    uint256 constant S3x  = 699651574829599043267839889886079331780384068415822664081581211688328130451;
-    uint256 constant S3y  = 6593197334405470452545046258922920896909293097152611086059571634184282507771;
+    uint256 constant Qmx  = 12039232431103314104131821474662953157695753831328620571955494960007550640193;
+    uint256 constant Qmy  = 9021232756427185304301911636955923833507631826912245309495572540752294573489;
+    uint256 constant Qlx  = 4116607048613932410313198718243970497183204844101210052496713508027880655787;
+    uint256 constant Qly  = 6287007453224587887926964516070031012306056321092747635456612587295880738348;
+    uint256 constant Qrx  = 3939333649197703550575487855620046086690017394977033417574865964697331961528;
+    uint256 constant Qry  = 7716429704186488688668270364500002904030002102713644658181253735381519561211;
+    uint256 constant Qox  = 11703567012997874040251439925211397567298539366603042422743613467825047377907;
+    uint256 constant Qoy  = 2826192640982507003749645015644897222251762056919828640905754030852165558821;
+    uint256 constant Qcx  = 13327075419573441267421448365205481108543883969258349787920028556367668160006;
+    uint256 constant Qcy  = 2783795695919989211683650409089794310007797339962889330399462263384166825604;
+    uint256 constant S1x  = 15054002814209804650644864381114892430167446135198500568104828396671022848849;
+    uint256 constant S1y  = 3401003274067065664174756721539424505794306958193875875018838509685220225159;
+    uint256 constant S2x  = 18081981141780478723792790715910576299849953692409322373365101107694598116428;
+    uint256 constant S2y  = 12783271792083259033176445362523528512252369794841760307026504428696541418333;
+    uint256 constant S3x  = 16189065483874375321911622731483193444898018545162554880827455131017797618915;
+    uint256 constant S3y  = 7686071589007115685459274947016427662140896285870134380417172370137420207911;
     uint256 constant k1   = 2;
     uint256 constant k2   = 3;
     uint256 constant X2x1 = 21831381940315734285607113342023901060522397560371972897001948545212302161822;
@@ -126,11 +126,13 @@ contract JurisdictionProofVerifier {
     
     uint16 constant pEval_l7 = 992;
     
+    uint16 constant pEval_l8 = 1024;
     
     
-    uint16 constant lastMem = 1024;
+    
+    uint16 constant lastMem = 1056;
 
-    function verifyProof(uint256[24] calldata _proof, uint256[7] calldata _pubSignals) public view returns (bool) {
+    function verifyProof(uint256[24] calldata _proof, uint256[8] calldata _pubSignals) public view returns (bool) {
         assembly {
             /////////
             // Computes the inverse using the extended euclidean algorithm
@@ -304,14 +306,16 @@ contract JurisdictionProofVerifier {
                 
                 mstore(add(mIn, 704), calldataload(add(pPublic, 192)))
                 
-                mstore(add(mIn, 736 ), calldataload(pA))
-                mstore(add(mIn, 768 ), calldataload(add(pA, 32)))
-                mstore(add(mIn, 800 ), calldataload(pB))
-                mstore(add(mIn, 832 ), calldataload(add(pB, 32)))
-                mstore(add(mIn, 864 ), calldataload(pC))
-                mstore(add(mIn, 896 ), calldataload(add(pC, 32)))
+                mstore(add(mIn, 736), calldataload(add(pPublic, 224)))
                 
-                beta := mod(keccak256(mIn, 928), q) 
+                mstore(add(mIn, 768 ), calldataload(pA))
+                mstore(add(mIn, 800 ), calldataload(add(pA, 32)))
+                mstore(add(mIn, 832 ), calldataload(pB))
+                mstore(add(mIn, 864 ), calldataload(add(pB, 32)))
+                mstore(add(mIn, 896 ), calldataload(pC))
+                mstore(add(mIn, 928 ), calldataload(add(pC, 32)))
+                
+                beta := mod(keccak256(mIn, 960), q) 
                 mstore(add(pMem, pBeta), beta)
 
                 // challenges.gamma
@@ -559,9 +563,30 @@ contract JurisdictionProofVerifier {
                     )
                 )
                 
+                w := mulmod(w, w1, q)
                 
                 
-                inverseArray(add(pMem, pZhInv), 8 )
+                mstore(
+                    add(pMem, pEval_l8), 
+                    mulmod(
+                        n, 
+                        mod(
+                            add(
+                                sub(
+                                    mload(add(pMem, pXi)), 
+                                    w
+                                ), 
+                                q
+                            ),
+                            q
+                        ), 
+                        q
+                    )
+                )
+                
+                
+                
+                inverseArray(add(pMem, pZhInv), 9 )
                 
                 let zh := mload(add(pMem, pZh))
                 w := 1
@@ -685,6 +710,24 @@ contract JurisdictionProofVerifier {
                 )
                 
                 
+                w := mulmod(w, w1, q)
+                
+                
+                
+                mstore(
+                    add(pMem, pEval_l8), 
+                    mulmod(
+                        w,
+                        mulmod(
+                            mload(add(pMem, pEval_l8)),
+                            zh,
+                            q
+                        ),
+                        q
+                    )
+                )
+                
+                
                 
 
 
@@ -791,6 +834,21 @@ contract JurisdictionProofVerifier {
                             mulmod(
                                 mload(add(pMem, pEval_l7)),
                                 calldataload(add(pPub, 192)),
+                                q
+                            )
+                        ),
+                        q
+                    ),
+                    q
+                )
+                 
+                pl := mod(
+                    add(
+                        sub(
+                            pl,  
+                            mulmod(
+                                mload(add(pMem, pEval_l8)),
+                                calldataload(add(pPub, 224)),
                                 q
                             )
                         ),

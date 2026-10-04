@@ -237,12 +237,13 @@ contract ZKVerifierIntegrated is Ownable2Step, ReentrancyGuard {
      * @dev Verify a PLONK jurisdiction attestation proof.
      * @param proof 24-word PLONK proof (snarkjs `plonk exportSolidityCallData`)
      * @param pubSignals [nullifier, Ax, Ay, chainId, verifierContext,
-     *        allowedMask, walletBinding]
+     *        validUntil, allowedMask, walletBinding]
      * @return True if the proof verifies against these public signals
      *
      * Checks the proof only: whether (Ax, Ay) is a trusted issuer key,
-     * chainId and verifierContext this chain and PrivacyManager, the mask the
-     * current policy, walletBinding the submitter and the nullifier free is
+     * chainId and verifierContext this chain and PrivacyManager, validUntil
+     * still ahead (Task 3.10), the mask the current policy, walletBinding
+     * the submitter and the nullifier free is
      * PrivacyManager.submitAttestationProof's job.
      *
      * testingMode (demo only): the proof words are not checked and no
@@ -252,10 +253,10 @@ contract ZKVerifierIntegrated is Ownable2Step, ReentrancyGuard {
      */
     function verifyJurisdictionProof(
         uint256[24] calldata proof,
-        uint256[7] calldata pubSignals
+        uint256[8] calldata pubSignals
     ) external nonReentrant returns (bool) {
-        uint256[] memory s = new uint256[](7);
-        for (uint256 i = 0; i < 7; i++) s[i] = pubSignals[i];
+        uint256[] memory s = new uint256[](8);
+        for (uint256 i = 0; i < 8; i++) s[i] = pubSignals[i];
         return _verifyAttestation("jurisdiction", proof, s);
     }
 
@@ -263,29 +264,29 @@ contract ZKVerifierIntegrated is Ownable2Step, ReentrancyGuard {
      * @dev Verify a PLONK accreditation attestation proof; same rules as
      *      verifyJurisdictionProof.
      * @param pubSignals [nullifier, Ax, Ay, chainId, verifierContext,
-     *        minimumAccreditation, walletBinding]
+     *        validUntil, minimumAccreditation, walletBinding]
      */
     function verifyAccreditationProof(
         uint256[24] calldata proof,
-        uint256[7] calldata pubSignals
+        uint256[8] calldata pubSignals
     ) external nonReentrant returns (bool) {
-        uint256[] memory s = new uint256[](7);
-        for (uint256 i = 0; i < 7; i++) s[i] = pubSignals[i];
+        uint256[] memory s = new uint256[](8);
+        for (uint256 i = 0; i < 8; i++) s[i] = pubSignals[i];
         return _verifyAttestation("accreditation", proof, s);
     }
 
     /**
      * @dev Verify a PLONK compliance-aggregation attestation proof; same rules
      *      as verifyJurisdictionProof.
-     * @param pubSignals [nullifier, Ax, Ay, chainId, verifierContext, minimum,
-     *        wK, wA, wJ, wAcc, walletBinding]
+     * @param pubSignals [nullifier, Ax, Ay, chainId, verifierContext,
+     *        validUntil, minimum, wK, wA, wJ, wAcc, walletBinding]
      */
     function verifyComplianceAggregation(
         uint256[24] calldata proof,
-        uint256[11] calldata pubSignals
+        uint256[12] calldata pubSignals
     ) external nonReentrant returns (bool) {
-        uint256[] memory s = new uint256[](11);
-        for (uint256 i = 0; i < 11; i++) s[i] = pubSignals[i];
+        uint256[] memory s = new uint256[](12);
+        for (uint256 i = 0; i < 12; i++) s[i] = pubSignals[i];
         return _verifyAttestation("compliance", proof, s);
     }
 
@@ -337,14 +338,14 @@ contract ZKVerifierIntegrated is Ownable2Step, ReentrancyGuard {
     ) private view returns (bool) {
         bytes32 h = keccak256(bytes(circuit));
         if (h == keccak256("jurisdiction")) {
-            return jurisdictionVerifier.verifyProof(proof, [s[0], s[1], s[2], s[3], s[4], s[5], s[6]]);
+            return jurisdictionVerifier.verifyProof(proof, [s[0], s[1], s[2], s[3], s[4], s[5], s[6], s[7]]);
         }
         if (h == keccak256("accreditation")) {
-            return accreditationVerifier.verifyProof(proof, [s[0], s[1], s[2], s[3], s[4], s[5], s[6]]);
+            return accreditationVerifier.verifyProof(proof, [s[0], s[1], s[2], s[3], s[4], s[5], s[6], s[7]]);
         }
         return complianceVerifier.verifyProof(
             proof,
-            [s[0], s[1], s[2], s[3], s[4], s[5], s[6], s[7], s[8], s[9], s[10]]
+            [s[0], s[1], s[2], s[3], s[4], s[5], s[6], s[7], s[8], s[9], s[10], s[11]]
         );
     }
 
@@ -462,7 +463,7 @@ contract ZKVerifierIntegrated is Ownable2Step, ReentrancyGuard {
 
     /**
      * @dev Verify an attestation proof routed by circuit id: jurisdiction
-     *      (7 signals), accreditation (7) or compliance aggregation (11).
+     *      (8 signals), accreditation (8) or compliance aggregation (12).
      * @param circuitId JURISDICTION_PROOF_CIRCUIT, ACCREDITATION_PROOF_CIRCUIT
      *        or COMPLIANCE_AGGREGATION_CIRCUIT
      * @param proof 24-word PLONK proof
@@ -494,13 +495,13 @@ contract ZKVerifierIntegrated is Ownable2Step, ReentrancyGuard {
         } else if (circuitId == BLACKLIST_ID) {
             return _malformed(strict, "use verifyBlacklistNonMembership");
         } else if (circuitId == JURISDICTION_ID) {
-            if (n != 7) return _malformed(strict, "Invalid public inputs for jurisdiction circuit");
+            if (n != 8) return _malformed(strict, "Invalid public inputs for jurisdiction circuit");
             return _verifyAttestation("jurisdiction", proof, s);
         } else if (circuitId == ACCREDITATION_ID) {
-            if (n != 7) return _malformed(strict, "Invalid public inputs for accreditation circuit");
+            if (n != 8) return _malformed(strict, "Invalid public inputs for accreditation circuit");
             return _verifyAttestation("accreditation", proof, s);
         } else if (circuitId == COMPLIANCE_ID) {
-            if (n != 11) return _malformed(strict, "Invalid public inputs for compliance circuit");
+            if (n != 12) return _malformed(strict, "Invalid public inputs for compliance circuit");
             return _verifyAttestation("compliance", proof, s);
         }
         return _malformed(strict, "ZKVerifierIntegrated: Unknown circuit ID");

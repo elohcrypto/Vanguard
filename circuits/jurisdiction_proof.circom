@@ -19,14 +19,16 @@ include "./attestation.circom";
  *     requires allowedMask == the OR of the bits of the registered codes
  *     ComplianceRules allows for its policy token.
  *  3. (R8x, R8y, S) is the issuer's EdDSA-Poseidon signature under the
- *     public (Ax, Ay) of M = Poseidon(1, chainId, verifierContext, identity,
- *     userMask, salt); domain 1; chainId and verifierContext are public.
+ *     public (Ax, Ay) of M = Poseidon(1, chainId, verifierContext, validUntil,
+ *     identity, userMask, salt); domain 1; chainId, verifierContext and
+ *     validUntil are public (PrivacyManager refuses the proof from
+ *     validUntil on and caps the record's expiresAt at it).
  *  4. nullifier = Poseidon(salt, allowedMask).
  *  5. walletBinding is kept in the constraint system (walletBindingSq).
  *
  * Public signals, in snarkjs order (outputs first, then public inputs in
  * declaration order): [nullifier, Ax, Ay, chainId, verifierContext,
- * allowedMask, walletBinding].
+ * validUntil, allowedMask, walletBinding].
  */
 template JurisdictionProof() {
     // Private inputs
@@ -42,6 +44,7 @@ template JurisdictionProof() {
     signal input Ay;
     signal input chainId;
     signal input verifierContext;
+    signal input validUntil;
     signal input allowedMask;
     signal input walletBinding;
 
@@ -70,6 +73,7 @@ template JurisdictionProof() {
     attestation.domain <== 1;
     attestation.chainId <== chainId;
     attestation.verifierContext <== verifierContext;
+    attestation.validUntil <== validUntil;
     attestation.identity <== identity;
     attestation.attributes[0] <== userMask;
     attestation.salt <== salt;
@@ -91,4 +95,4 @@ template JurisdictionProof() {
     walletBindingSq <== walletBinding * walletBinding;
 }
 
-component main {public [Ax, Ay, chainId, verifierContext, allowedMask, walletBinding]} = JurisdictionProof();
+component main {public [Ax, Ay, chainId, verifierContext, validUntil, allowedMask, walletBinding]} = JurisdictionProof();

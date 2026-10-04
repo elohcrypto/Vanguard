@@ -40,25 +40,25 @@ contract ComplianceAggregationVerifier {
     
     // Verification Key data
     uint32 constant n         = 32768;
-    uint16 constant nPublic   = 11;
-    uint16 constant nLagrange = 11;
+    uint16 constant nPublic   = 12;
+    uint16 constant nLagrange = 12;
     
-    uint256 constant Qmx  = 8700532474726774764260792626672199687022017321572677306704980525684170677808;
-    uint256 constant Qmy  = 16171365517081272062956218075710855858913189982432820506989930250357458176577;
-    uint256 constant Qlx  = 15591332088886344763500271906529281948296541481921202670156162774627903758149;
-    uint256 constant Qly  = 21265097284659617197614540245516281564942099561796848841834935347137129778665;
-    uint256 constant Qrx  = 16354500850942221106603158144614517810412715929219713428790385981422930075396;
-    uint256 constant Qry  = 11801155387306818252964019615401784184799895026822797235058032908060715491052;
-    uint256 constant Qox  = 7370605615286375493023888803940445308087894905112766166030026121200371287613;
-    uint256 constant Qoy  = 12994978457286336761969843189214290773924531767888544508418687680739768038139;
-    uint256 constant Qcx  = 6746279478894592281644248530016661675610558230404456739732202883544295561331;
-    uint256 constant Qcy  = 11441042145974912260812475400981844746252207671589842675849863476312824107042;
-    uint256 constant S1x  = 4105882347399721666103656114731659944166926253922943958048818896737899740187;
-    uint256 constant S1y  = 4710616139202355589654247118871304796726279982709334511006807687641848824278;
-    uint256 constant S2x  = 6143342722772853700145604401103261917451625407053350720638436274223113957850;
-    uint256 constant S2y  = 11165659965206814546332421488976416997187919580917592548238508689526213949411;
-    uint256 constant S3x  = 19568531477640465557874141417419772174978642155796515269525682947673359364460;
-    uint256 constant S3y  = 21573017720963220877583416516116993157081957127120441431454870149907674586921;
+    uint256 constant Qmx  = 4817724749447429060869068268453934861824980671440068207945031028072817307343;
+    uint256 constant Qmy  = 9134023938644595972610805490976779964110217422075827720018889082153862867897;
+    uint256 constant Qlx  = 18974237854260475605264918738536095470344613651998585885403844765333844640457;
+    uint256 constant Qly  = 17882038978801292573145864429386138043105771718852934403575213859747698100290;
+    uint256 constant Qrx  = 19989507467723966915644277572044677963003056684785589010260942857590847521901;
+    uint256 constant Qry  = 11921326633965143159109864870673050563124593629009510870005770673066392501206;
+    uint256 constant Qox  = 4485346920675985605284512733341180669146377349428527349327959538326927026276;
+    uint256 constant Qoy  = 13869641009124026766215006424377416299775548715676011925907295207586208426090;
+    uint256 constant Qcx  = 8668482749448754209944365238369717372829321738123494382027289732878514696754;
+    uint256 constant Qcy  = 18360757067930179976425424027721303438394020168079762298821074146154254978;
+    uint256 constant S1x  = 21144415970647375926445529018718254261254727563181637678709583409871441580415;
+    uint256 constant S1y  = 3067466957228853250571659753789561505985816382927358601959489261541410575408;
+    uint256 constant S2x  = 20801809678981273129867712240575018205325857465893259674308557674618231437921;
+    uint256 constant S2y  = 12872355905761217912607284762994078153131222811339077458537308556930991423074;
+    uint256 constant S3x  = 20954937095388114042417253278151265021634319907549141373538458380010847145401;
+    uint256 constant S3y  = 5220520084077242556585671240263212407781458488335291491244315587788751659858;
     uint256 constant k1   = 2;
     uint256 constant k2   = 3;
     uint256 constant X2x1 = 21831381940315734285607113342023901060522397560371972897001948545212302161822;
@@ -134,11 +134,13 @@ contract ComplianceAggregationVerifier {
     
     uint16 constant pEval_l11 = 1120;
     
+    uint16 constant pEval_l12 = 1152;
     
     
-    uint16 constant lastMem = 1152;
+    
+    uint16 constant lastMem = 1184;
 
-    function verifyProof(uint256[24] calldata _proof, uint256[11] calldata _pubSignals) public view returns (bool) {
+    function verifyProof(uint256[24] calldata _proof, uint256[12] calldata _pubSignals) public view returns (bool) {
         assembly {
             /////////
             // Computes the inverse using the extended euclidean algorithm
@@ -320,14 +322,16 @@ contract ComplianceAggregationVerifier {
                 
                 mstore(add(mIn, 832), calldataload(add(pPublic, 320)))
                 
-                mstore(add(mIn, 864 ), calldataload(pA))
-                mstore(add(mIn, 896 ), calldataload(add(pA, 32)))
-                mstore(add(mIn, 928 ), calldataload(pB))
-                mstore(add(mIn, 960 ), calldataload(add(pB, 32)))
-                mstore(add(mIn, 992 ), calldataload(pC))
-                mstore(add(mIn, 1024 ), calldataload(add(pC, 32)))
+                mstore(add(mIn, 864), calldataload(add(pPublic, 352)))
                 
-                beta := mod(keccak256(mIn, 1056), q) 
+                mstore(add(mIn, 896 ), calldataload(pA))
+                mstore(add(mIn, 928 ), calldataload(add(pA, 32)))
+                mstore(add(mIn, 960 ), calldataload(pB))
+                mstore(add(mIn, 992 ), calldataload(add(pB, 32)))
+                mstore(add(mIn, 1024 ), calldataload(pC))
+                mstore(add(mIn, 1056 ), calldataload(add(pC, 32)))
+                
+                beta := mod(keccak256(mIn, 1088), q) 
                 mstore(add(pMem, pBeta), beta)
 
                 // challenges.gamma
@@ -659,9 +663,30 @@ contract ComplianceAggregationVerifier {
                     )
                 )
                 
+                w := mulmod(w, w1, q)
                 
                 
-                inverseArray(add(pMem, pZhInv), 12 )
+                mstore(
+                    add(pMem, pEval_l12), 
+                    mulmod(
+                        n, 
+                        mod(
+                            add(
+                                sub(
+                                    mload(add(pMem, pXi)), 
+                                    w
+                                ), 
+                                q
+                            ),
+                            q
+                        ), 
+                        q
+                    )
+                )
+                
+                
+                
+                inverseArray(add(pMem, pZhInv), 13 )
                 
                 let zh := mload(add(pMem, pZh))
                 w := 1
@@ -857,6 +882,24 @@ contract ComplianceAggregationVerifier {
                 )
                 
                 
+                w := mulmod(w, w1, q)
+                
+                
+                
+                mstore(
+                    add(pMem, pEval_l12), 
+                    mulmod(
+                        w,
+                        mulmod(
+                            mload(add(pMem, pEval_l12)),
+                            zh,
+                            q
+                        ),
+                        q
+                    )
+                )
+                
+                
                 
 
 
@@ -1023,6 +1066,21 @@ contract ComplianceAggregationVerifier {
                             mulmod(
                                 mload(add(pMem, pEval_l11)),
                                 calldataload(add(pPub, 320)),
+                                q
+                            )
+                        ),
+                        q
+                    ),
+                    q
+                )
+                 
+                pl := mod(
+                    add(
+                        sub(
+                            pl,  
+                            mulmod(
+                                mload(add(pMem, pEval_l12)),
+                                calldataload(add(pPub, 352)),
                                 q
                             )
                         ),

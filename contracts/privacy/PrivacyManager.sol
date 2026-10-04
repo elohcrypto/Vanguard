@@ -44,11 +44,12 @@ interface IPolicyToken {
  *      on every use, so a Token vote moving it is followed) enforces for the
  *      token (its validateJurisdiction verdict); this contract only keeps the
  *      append-only ISO-code-to-bit assignment issuers attest, because an
- *      attested bit must never move. An attestation is signed for one chain
- *      and one PrivacyManager (public chainId and verifierContext signals). A wallet submits a
- *      PLONK proof of the signature and the policy; it is recorded for the
- *      wallet named in the binding, one wallet per attestation per policy,
- *      and lapses on a policy change, an attestor revocation or expiry.
+ *      attested bit must never move. An attestation is signed for one chain,
+ *      one PrivacyManager and an expiry (public chainId, verifierContext and
+ *      validUntil signals, Task 3.10). A wallet submits a PLONK proof of the
+ *      signature and the policy; it is recorded for the wallet named in the
+ *      binding, one wallet per attestation per policy, and lapses on a policy
+ *      change, an attestor revocation or expiry (never after validUntil).
  */
 contract PrivacyManager is Ownable2Step, ReentrancyGuard {
     IZKVerifier public zkVerifier;
@@ -189,6 +190,7 @@ contract PrivacyManager is Ownable2Step, ReentrancyGuard {
     error InvalidPolicyToken();
     error WrongChainId(uint256 signal);
     error WrongVerifierContext(uint256 signal);
+    error AttestationExpired(uint256 validUntil);
 
     // Events
     event AttestationProofBound(
@@ -351,20 +353,20 @@ contract PrivacyManager is Ownable2Step, ReentrancyGuard {
      * @param circuitId JURISDICTION_PROOF, ACCREDITATION_PROOF or
      *        COMPLIANCE_AGGREGATION (keccak256 of the name)
      * @param proof 24-word PLONK proof
-     * @param signals [nullifier, Ax, Ay, chainId, verifierContext, policy...,
-     *        walletBinding]: policy is [allowedMask], [minimumAccreditation]
-     *        or [minimum, wK, wA, wJ, wAcc]
+     * @param signals [nullifier, Ax, Ay, chainId, verifierContext,
+     *        validUntil, policy..., walletBinding]: policy is [allowedMask],
+     *        [minimumAccreditation] or [minimum, wK, wA, wJ, wAcc]
      * @dev Reverts unless: the circuit is one of the three (the whitelist has
      *      submitWhitelistProof; the blacklist is refused, D2); the signal
-     *      count is the circuit's; (Ax, Ay) is a trusted issuer key for the
-     *      circuit; chainId is block.chainid and verifierContext this
-     *      contract (the issuer signed for this deployment, review 3.8 M1);
-     *      the policy signals equal the current policy (which is
-     *      set); walletBinding == uint160(msg.sender); the nullifier is
-     *      unbound under this policy or bound to the caller; the proof
-     *      verifies through the wrapper (which refuses non-canonical signals).
-     *      A failing proof records nothing. Only the record is stored, not the
-     *      proof. Resubmitting refreshes the caller's record and its expiry.
+     *      count is the circuit's; (Ax, Ay) is a trusted issuer key for it;
+     *      chainId is block.chainid and verifierContext this contract (review
+     *      3.8 M1); now < validUntil, the expiry the issuer signed (3.10); the
+     *      policy signals equal the current, set policy; walletBinding ==
+     *      uint160(msg.sender); the nullifier is unbound under this policy or
+     *      bound to the caller; the proof verifies through the wrapper (which
+     *      refuses non-canonical signals). Only the record is stored; it
+     *      expires at min(now + proofValidityPeriod, validUntil), never after
+     *      the attestation. Resubmitting refreshes it within that cap.
      */
     function submitAttestationProof(
         bytes32 circuitId,
@@ -373,15 +375,16 @@ contract PrivacyManager is Ownable2Step, ReentrancyGuard {
     ) external nonReentrant {
         if (circuitId == BLACKLIST_ID) revert NonGatingBlacklistProof();
         uint256[] memory policy = currentPolicy(circuitId);
-        uint256 n = policy.length + 6;
+        uint256 n = policy.length + 7;
         if (signals.length != n) revert InvalidSignalCount(n, signals.length);
         bytes32 attestor = keccak256(abi.encode(signals[1], signals[2]));
         if (!trustedAttestor[circuitId][attestor]) revert UntrustedAttestor(circuitId, attestor);
         if (!_policySet(circuitId, policy)) revert PolicyNotSet(circuitId);
         if (signals[3] != block.chainid) revert WrongChainId(signals[3]);
         if (signals[4] != uint256(uint160(address(this)))) revert WrongVerifierContext(signals[4]);
+        if (block.timestamp >= signals[5]) revert AttestationExpired(signals[5]);
         for (uint256 i = 0; i < policy.length; i++) {
-            if (signals[5 + i] != policy[i]) revert StalePolicy(circuitId);
+            if (signals[6 + i] != policy[i]) revert StalePolicy(circuitId);
         }
         if (signals[n - 1] != uint256(uint160(msg.sender))) revert WalletBindingMismatch();
 
@@ -394,6 +397,7 @@ contract PrivacyManager is Ownable2Step, ReentrancyGuard {
 
         if (bound == address(0)) attestationNullifierWallet[policyHash][nullifier] = msg.sender;
         uint256 expiresAt = block.timestamp + proofValidityPeriod;
+        if (signals[5] < expiresAt) expiresAt = signals[5];
         attestationRecords[msg.sender][circuitId] = AttestationRecord({
             policyHash: policyHash,
             attestor: attestor,

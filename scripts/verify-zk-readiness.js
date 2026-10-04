@@ -43,9 +43,9 @@ const { CIRCUITS: circuits, protocolOf } = require("./setup-zk-circuits");
 const EXPECTED_NPUBLIC = {
   whitelist_membership: 3,
   blacklist_membership: 4,
-  jurisdiction_proof: 7,
-  accreditation_proof: 7,
-  compliance_aggregation: 11,
+  jurisdiction_proof: 8,
+  accreditation_proof: 8,
+  compliance_aggregation: 12,
 };
 
 // Circuits whose setup does not make proofs sound, with the reason.

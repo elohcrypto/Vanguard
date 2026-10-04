@@ -10,9 +10,11 @@ pragma solidity ^0.8.20;
 interface IZKVerifier {
     /**
      * @dev Verify an attestation proof routed by circuit id (Task 3.7b):
-     *      jurisdiction and accreditation [nullifier, Ax, Ay, policy,
-     *      walletBinding], compliance aggregation [nullifier, Ax, Ay, minimum,
-     *      wK, wA, wJ, wAcc, walletBinding]. Returns false on a bad proof or
+     *      jurisdiction and accreditation [nullifier, Ax, Ay, chainId,
+     *      verifierContext, validUntil, policy, walletBinding] (8 signals),
+     *      compliance aggregation [nullifier, Ax, Ay, chainId,
+     *      verifierContext, validUntil, minimum, wK, wA, wJ, wAcc,
+     *      walletBinding] (12). Returns false on a bad proof or
      *      any signal >= the BN254 scalar field order; reverts on a wrong
      *      signal count, an unknown id, and the whitelist/blacklist ids
      *      ("use verifyWhitelistMembership" / "use verifyBlacklistNonMembership").
