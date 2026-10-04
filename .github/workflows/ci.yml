@@ -331,6 +331,9 @@ jobs:
       # (js-yaml, minimatch, nanoid, undici, ws, tmp, underscore,
       # serialize-javascript, adm-zip); the count is per package, so they
       # do not move it.
+      # 34 -> 29 on 2026-10-04 (CI run 37176125602 at a56b24d; a local
+      # `npm audit` agrees): advisories withdrawn or re-scored upstream on an
+      # unchanged tree, so the baseline follows the count down.
       # The count is checked against the live advisory database, so a newly
       # published advisory in an unchanged dependency reddens every branch
       # at once; raise BASELINE with the advisory recorded here.
@@ -339,7 +342,7 @@ jobs:
       # introduced high is caught while the known backlog stays visible.
       - name: Audit ratchet (no NEW high vulnerabilities)
         run: |
-          BASELINE=34
+          BASELINE=29
           count=$(npm audit --json 2>/dev/null \
             | node -e "let s='';process.stdin.on('data',d=>s+=d).on('end',()=>{
                 console.log(JSON.parse(s).metadata.vulnerabilities.high)})")
