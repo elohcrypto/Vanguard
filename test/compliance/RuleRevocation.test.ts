@@ -5,7 +5,7 @@ import { SignerWithAddress } from "@nomicfoundation/hardhat-ethers/signers";
 /**
  * Compliance rule revocation must actually revoke.
  *
- * setJurisdictionRule and setInvestorTypeRule kept a lookup mapping alongside
+ * setJurisdictionRule keeps a lookup mapping alongside
  * the stored arrays. The "clear existing mappings" loops iterated the NEW
  * calldata arrays instead of the stored ones, then immediately re-set those
  * same keys — so the loops were no-ops and old entries were never removed.
@@ -77,36 +77,6 @@ describe("Compliance rule revocation", function () {
           `country ${c} should be refused`,
         ).to.be.false;
       }
-    });
-  });
-
-  describe("investor type", function () {
-    it("removing an allowed investor type takes effect", async function () {
-      await rules.setInvestorTypeRule(TOKEN, [1, 2], [], 0);
-      expect((await rules.validateInvestorType(TOKEN, 2, 0))[0]).to.be.true;
-
-      await rules.setInvestorTypeRule(TOKEN, [1], [], 0);
-
-      expect(
-        (await rules.validateInvestorType(TOKEN, 1, 0))[0],
-        "type 1 must stay allowed",
-      ).to.be.true;
-      expect(
-        (await rules.validateInvestorType(TOKEN, 2, 0))[0],
-        "type 2 must now be refused",
-      ).to.be.false;
-    });
-
-    it("un-blocking an investor type takes effect", async function () {
-      await rules.setInvestorTypeRule(TOKEN, [1], [2], 0);
-      expect((await rules.validateInvestorType(TOKEN, 2, 0))[0]).to.be.false;
-
-      await rules.setInvestorTypeRule(TOKEN, [1, 2], [], 0);
-
-      expect(
-        (await rules.validateInvestorType(TOKEN, 2, 0))[0],
-        "type 2 must no longer be blocked",
-      ).to.be.true;
     });
   });
 });

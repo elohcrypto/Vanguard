@@ -1125,10 +1125,12 @@ class GovernanceModule {
 
     console.log("\n🎯 Select compliance parameter to update:");
     console.log("1. Update jurisdiction rules (allowed/blocked countries)");
-    console.log("2. Update holding period rules");
-    console.log("3. Update compliance level rules");
+    console.log("2. Clear the token's jurisdiction rule (default rule applies)");
+    console.log(
+      "   (Investor limits are InvestorTypeConfig votes, type 0: Task 4.1)",
+    );
 
-    const actionChoice = await this.promptUser("Select action (1-3): ");
+    const actionChoice = await this.promptUser("Select action (1-2): ");
 
     const complianceRules = this.state.getContract("complianceRules");
     let title, description, callData;
@@ -1167,41 +1169,11 @@ class GovernanceModule {
         break;
 
       case "2":
-        // Update holding period rules
-        console.log("\n⏱️ HOLDING PERIOD RULES:");
-        const holdingDays = await this.promptUser(
-          "Enter minimum holding period (days): ",
-        );
-        const cooldownMinutes = await this.promptUser(
-          "Enter transfer cooldown (minutes): ",
-        );
-
-        const holdingSeconds = parseInt(holdingDays) * 24 * 60 * 60;
-        const cooldownSeconds = parseInt(cooldownMinutes) * 60;
-
-        title = `Update Holding Period to ${holdingDays} Days`;
-        description = `Set holding period: ${holdingDays} days, cooldown: ${cooldownMinutes} minutes`;
+        title = `Clear Jurisdiction Rule`;
+        description = `Clear the token's own jurisdiction rule; the default rule applies`;
         callData = complianceRules.interface.encodeFunctionData(
-          "setHoldingPeriodRule",
-          [tokenAddress, holdingSeconds, cooldownSeconds],
-        );
-        break;
-
-      case "3":
-        // Update compliance level rules
-        console.log("\n📊 COMPLIANCE LEVEL RULES:");
-        const minLevel = await this.promptUser(
-          "Enter minimum compliance level (0-3): ",
-        );
-        const maxLevel = await this.promptUser(
-          "Enter maximum compliance level (0-3): ",
-        );
-
-        title = `Update Compliance Levels`;
-        description = `Set min level: ${minLevel}, max level: ${maxLevel}`;
-        callData = complianceRules.interface.encodeFunctionData(
-          "setComplianceLevelRule",
-          [tokenAddress, parseInt(minLevel), parseInt(maxLevel), [], []],
+          "clearJurisdictionRule",
+          [tokenAddress],
         );
         break;
 

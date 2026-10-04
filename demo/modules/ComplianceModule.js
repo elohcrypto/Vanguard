@@ -1,9 +1,10 @@
 /**
  * @fileoverview Compliance rules management module
  * @module ComplianceModule
- * @description Handles all compliance-related operations including jurisdiction rules,
- * investor type rules, holding period rules, and compliance level rules.
- * Covers menu options 13-20.
+ * @description ComplianceRules jurisdiction rules and access control, plus
+ * read-only views of the investor-type limits, cooldowns and whitelist tiers
+ * that live in InvestorTypeRegistry (plan v2 Task 4.1 removed the inert
+ * copies ComplianceRules kept). Covers menu options 13-20.
  *
  * @example
  * const ComplianceModule = require('./modules/ComplianceModule');
@@ -11,6 +12,7 @@
  * await module.configureJurisdictionRules();
  */
 
+const { ethers } = require("hardhat");
 const {
   displaySection,
   displaySuccess,
@@ -18,10 +20,11 @@ const {
   displayInfo,
 } = require("../utils/DisplayHelpers");
 
+const TYPE_NAMES = ["Normal", "Retail", "Accredited", "Institutional"];
+
 /**
  * @class ComplianceModule
  * @description Manages compliance rules for the demo system.
- * Handles jurisdiction, investor type, holding period, and compliance level rules.
  */
 class ComplianceModule {
   /**
@@ -156,11 +159,13 @@ class ComplianceModule {
 
       console.log("\n🎉 COMPLIANCE RULES CONTRACT DEPLOYED SUCCESSFULLY!");
       console.log("📋 Features Available:");
-      console.log("   • Jurisdiction-based validation");
-      console.log("   • Investor type validation");
-      console.log("   • Holding period enforcement");
-      console.log("   • Compliance level checks");
+      console.log("   • Jurisdiction rules applied on every transfer and mint");
+      console.log("   • Blacklist/whitelist oracle and ZK whitelist gates");
+      console.log("   • Trusted contracts (escrow, governance)");
       console.log("   • Governance-controlled updates");
+      console.log(
+        "   (Investor-type limits live in InvestorTypeRegistry: options 15-17)",
+      );
     } catch (error) {
       displayError(`ComplianceRules deployment failed: ${error.message}`);
     }
@@ -428,323 +433,162 @@ class ComplianceModule {
   }
 
   /**
-   * Option 15: Configure investor type rules
+   * The registry Token enforces investor-type limits from, or null after
+   * printing why. Task 4.1 removed ComplianceRules' own investor-type,
+   * holding-period and level rules: they were stored and validated but no
+   * transfer ever read them. Their live home is InvestorTypeRegistry.
+   * @private
+   */
+  async _investorTypeContext() {
+    const registry = this.state.getContract("investorTypeRegistry");
+    const token = this.state.getContract("digitalToken");
+    if (!registry || !token) {
+      console.log("❌ InvestorTypeRegistry or VSC not deployed!");
+      console.log("💡 Deploy VSC (option 21) and the registry (option 51)");
+      return null;
+    }
+    const regAddr = await registry.getAddress();
+    const live = await token.investorTypeRegistry();
+    const wired = live.toLowerCase() === regAddr.toLowerCase();
+    console.log(`📦 InvestorTypeRegistry: ${regAddr}`);
+    console.log(
+      wired
+        ? "   ✅ VSC enforces this registry on every transfer and mint"
+        : `   ⚠️  VSC enforces ${live}, not this registry: nothing below gates VSC`,
+    );
+    return { registry, token, wired };
+  }
+
+  /** @private The four type configs, in enum order. */
+  async _typeConfigs(registry) {
+    const out = [];
+    for (let t = 0; t < TYPE_NAMES.length; t++) {
+      out.push(await registry.getInvestorTypeConfig(t));
+    }
+    return out;
+  }
+
+  /**
+   * Options 15 and 20b: investor-type limits, read from InvestorTypeRegistry,
+   * and what Token would decide for each demo wallet. These caps are live:
+   * Token refuses with "Transfer amount limit exceeded" or "Holding limit
+   * exceeded". Change them with an InvestorTypeConfig vote (option 76, type 0)
+   * or as the registry owner before the handover (options 51-60).
    *
    * @returns {Promise<void>}
    */
-  async configureInvestorTypeRules() {
-    console.log("\n👥 CONFIGURE INVESTOR TYPE RULES");
-    console.log("=".repeat(50));
-
-    const complianceRules = this.state.getContract("complianceRules");
-    if (!complianceRules) {
-      console.log("❌ ComplianceRules contract not deployed!");
-      console.log("💡 Please deploy ComplianceRules first using option 13");
-      return;
-    }
-
+  async showInvestorTypeLimits() {
+    displaySection("INVESTOR TYPE LIMITS (InvestorTypeRegistry)", "👥");
+    const ctx = await this._investorTypeContext();
+    if (!ctx) return;
     try {
-      const token = this.state.getContract("digitalToken");
-      if (!token) {
-        console.log("❌ Token not deployed!");
-        return;
-      }
-      const tokenAddress = await token.getAddress();
-
-      console.log("\n👥 Setting up investor type rules for Digital Token...");
-      console.log(`📦 Token: ${tokenAddress}`);
-
-      // Interactive configuration
-      console.log("\n📋 Configure allowed investor types:");
-      console.log(
-        "   0: Unverified, 1: Retail, 2: Accredited, 3: Institutional",
-      );
-      const allowedInput = await this.promptUser(
-        "Allowed types (default: 1,2,3): ",
-      );
-      const allowedTypes = allowedInput || "1,2,3";
-      const allowedArray = allowedTypes
-        .split(",")
-        .map((t) => parseInt(t.trim()));
-
-      console.log("\n📋 Configure blocked investor types:");
-      const blockedInput = await this.promptUser(
-        "Blocked types (default: 0): ",
-      );
-      const blockedTypes = blockedInput || "0";
-      const blockedArray = blockedTypes
-        .split(",")
-        .map((t) => parseInt(t.trim()));
-
-      console.log("\n💰 Set minimum accreditation level:");
-      const accreditationInput = await this.promptUser(
-        "Minimum accreditation (default: 100000): ",
-      );
-      const minimumAccreditation = parseInt(accreditationInput || "100000");
-
-      // Set investor type rules
-      console.log("\n📝 UPDATING INVESTOR TYPE RULES...");
-      console.log(`🔍 DEBUG - Writing to blockchain:`);
-      console.log(`   Token: ${tokenAddress}`);
-      console.log(`   Allowed Types: [${allowedArray.join(", ")}]`);
-      console.log(`   Blocked Types: [${blockedArray.join(", ")}]`);
-      console.log(`   Min Accreditation: ${minimumAccreditation}`);
-
-      const tx = await complianceRules
-        .connect(this.state.signers[0])
-        .setInvestorTypeRule(
-          tokenAddress,
-          allowedArray,
-          blockedArray,
-          minimumAccreditation,
-        );
-      const receipt = await tx.wait();
-
-      console.log(`✅ Transaction confirmed in block ${receipt.blockNumber}`);
-
-      console.log("\n✅ INVESTOR TYPE RULES CONFIGURED!");
-      console.log(`   Allowed types: ${allowedArray.join(", ")}`);
-      console.log(`   Blocked types: ${blockedArray.join(", ")}`);
-      console.log(
-        `   Minimum accreditation: $${minimumAccreditation.toLocaleString()}`,
-      );
-      console.log(`   Transaction: ${receipt.hash}`);
-
-      // Test the rules
-      console.log("\n🧪 Testing investor type validation...");
-      const testCases = [
-        { type: 2, accreditation: 150000, description: "Accredited ($150k)" },
-        { type: 1, accreditation: 50000, description: "Retail ($50k)" },
-        { type: 0, accreditation: 25000, description: "Unverified ($25k)" },
-      ];
-
-      for (const testCase of testCases) {
-        const [isValid, reason] = await complianceRules.validateInvestorType(
-          tokenAddress,
-          testCase.type,
-          testCase.accreditation,
-        );
+      const { registry, token } = ctx;
+      const configs = await this._typeConfigs(registry);
+      console.log("\n📊 LIMITS PER TYPE (enforced by Token):");
+      configs.forEach((c, t) => {
         console.log(
-          `   ${testCase.description}: ${isValid ? "✅ ALLOWED" : "❌ BLOCKED"} - ${reason}`,
+          `   ${t} ${TYPE_NAMES[t].padEnd(13)} max transfer ${ethers.formatEther(c.maxTransferAmount)} VSC, max holding ${ethers.formatEther(c.maxHoldingAmount)} VSC`,
+        );
+      });
+
+      const input = await this.promptUser(
+        "\nAmount to test per wallet in VSC (default 10000): ",
+      );
+      const amount = ethers.parseEther((input || "10000").trim());
+      console.log(`\n🧪 ${ethers.formatEther(amount)} VSC per demo wallet:`);
+      for (const s of this.state.signers.slice(1, 5)) {
+        const type = Number(await registry.getInvestorType(s.address));
+        const send = await registry.canTransferAmount(s.address, amount);
+        const balance = await token.balanceOf(s.address);
+        const hold = await registry.canHoldAmount(s.address, balance + amount);
+        console.log(
+          `   ${s.address} (${TYPE_NAMES[type]}): send ${send ? "✅ ALLOWED" : "❌ BLOCKED (Transfer amount limit exceeded)"}, receive ${hold ? "✅ ALLOWED" : "❌ BLOCKED (Holding limit exceeded)"}`,
         );
       }
-    } catch (error) {
-      console.error(
-        "❌ Investor type rules configuration failed:",
-        error.message,
+      console.log(
+        "\n💡 investorLimitExempt wallets (treasury, escrow fee wallets) skip both caps",
       );
+      console.log(
+        "💡 Change limits: InvestorTypeConfig vote (option 76, type 0) after the handover",
+      );
+    } catch (error) {
+      displayError(`Reading investor type limits failed: ${error.message}`);
     }
   }
 
   /**
-   * Option 16: Configure holding period rules
+   * Options 16 and 20c: transfer cooldowns. ComplianceRules' holding-period
+   * rule is gone (Task 4.1): nothing ever recorded a transfer, so it could
+   * not block one. InvestorTypeRegistry keeps a cooldown per type; Token
+   * does not enforce it today, and this option says so.
    *
    * @returns {Promise<void>}
    */
-  async configureHoldingPeriodRules() {
-    console.log("\n⏰ CONFIGURE HOLDING PERIOD RULES");
-    console.log("=".repeat(50));
-
-    const complianceRules = this.state.getContract("complianceRules");
-    if (!complianceRules) {
-      console.log("❌ ComplianceRules contract not deployed!");
-      console.log("💡 Please deploy ComplianceRules first using option 13");
-      return;
-    }
-
+  async showTransferCooldowns() {
+    displaySection("TRANSFER COOLDOWNS (InvestorTypeRegistry)", "⏰");
+    const ctx = await this._investorTypeContext();
+    if (!ctx) return;
     try {
-      const token = this.state.getContract("digitalToken");
-      if (!token) {
-        console.log("❌ Token not deployed!");
-        return;
-      }
-      const tokenAddress = await token.getAddress();
-
-      console.log("\n⏰ Setting up holding period rules for Digital Token...");
-      console.log(`📦 Token: ${tokenAddress}`);
-
-      // Interactive configuration
-      console.log("\n📋 Configure minimum holding period (in hours):");
-      const holdingInput = await this.promptUser(
-        "Holding period hours (default: 24): ",
-      );
-      const holdingHours = parseInt(holdingInput || "24");
-      const holdingPeriod = holdingHours * 60 * 60; // Convert to seconds
-
-      console.log("\n📋 Configure transfer cooldown (in minutes):");
-      const cooldownInput = await this.promptUser(
-        "Cooldown minutes (default: 60): ",
-      );
-      const cooldownMinutes = parseInt(cooldownInput || "60");
-      const transferCooldown = cooldownMinutes * 60; // Convert to seconds
-
-      // Set holding period rules
-      console.log("\n📝 UPDATING HOLDING PERIOD RULES...");
-      console.log(`🔍 DEBUG - Writing to blockchain:`);
-      console.log(`   Token: ${tokenAddress}`);
-      console.log(
-        `   Holding Period: ${holdingPeriod} seconds (${holdingHours} hours)`,
-      );
-      console.log(
-        `   Cooldown: ${transferCooldown} seconds (${cooldownMinutes} minutes)`,
-      );
-
-      const tx = await complianceRules
-        .connect(this.state.signers[0])
-        .setHoldingPeriodRule(tokenAddress, holdingPeriod, transferCooldown);
-      const receipt = await tx.wait();
-
-      console.log(`✅ Transaction confirmed in block ${receipt.blockNumber}`);
-
-      console.log("\n✅ HOLDING PERIOD RULES CONFIGURED!");
-      console.log(`   Minimum holding period: ${holdingHours} hours`);
-      console.log(`   Transfer cooldown: ${cooldownMinutes} minutes`);
-      console.log(`   Transaction: ${receipt.hash}`);
-
-      // Test the rules
-      console.log("\n🧪 Testing holding period validation...");
-      const ethers = require("hardhat").ethers;
-      const currentBlock = await ethers.provider.getBlock("latest");
-      const testCases = [
-        {
-          time: currentBlock.timestamp - 1,
-          description: "Recent acquisition (1 sec ago)",
-        },
-        {
-          time: currentBlock.timestamp - (holdingPeriod + 3600),
-          description: `Old acquisition (${holdingHours + 1} hrs ago)`,
-        },
-      ];
-
-      for (const testCase of testCases) {
-        const [isValid, reason] = await complianceRules.validateHoldingPeriod(
-          tokenAddress,
-          this.state.signers[1].address,
-          testCase.time,
-        );
+      const configs = await this._typeConfigs(ctx.registry);
+      console.log("\n📊 COOLDOWN PER TYPE (recorded, not enforced):");
+      configs.forEach((c, t) => {
         console.log(
-          `   ${testCase.description}: ${isValid ? "✅ ALLOWED" : "❌ BLOCKED"} - ${reason}`,
+          `   ${t} ${TYPE_NAMES[t].padEnd(13)} ${Number(c.transferCooldownMinutes)} minutes`,
         );
-      }
-    } catch (error) {
-      console.error(
-        "❌ Holding period rules configuration failed:",
-        error.message,
+      });
+      console.log(
+        "\n⚠️  Token reads no cooldown: a holder can transfer again at once.",
       );
+      console.log(
+        "   Token enforces the transfer and holding caps (option 15) only.",
+      );
+      console.log(
+        "   There is no minimum holding period on chain (ComplianceRules' was removed in Task 4.1).",
+      );
+    } catch (error) {
+      displayError(`Reading transfer cooldowns failed: ${error.message}`);
     }
   }
 
   /**
-   * Option 17: Configure compliance level rules
+   * Options 17 and 20d: the whitelist tier each investor type requires. The
+   * former ComplianceRules compliance-level rule (min/max level, inheritance)
+   * was removed in Task 4.1; it gated nothing. The tier lives in
+   * InvestorTypeRegistry and is readable through IdentityRegistry; no
+   * transfer path compares it today, and this option says so.
    *
    * @returns {Promise<void>}
    */
-  async configureComplianceLevelRules() {
-    console.log("\n📊 CONFIGURE COMPLIANCE LEVEL RULES");
-    console.log("=".repeat(50));
-
-    const complianceRules = this.state.getContract("complianceRules");
-    if (!complianceRules) {
-      console.log("❌ ComplianceRules contract not deployed!");
-      console.log("💡 Please deploy ComplianceRules first using option 13");
-      return;
-    }
-
+  async showWhitelistTiers() {
+    displaySection("REQUIRED WHITELIST TIERS (InvestorTypeRegistry)", "📊");
+    const ctx = await this._investorTypeContext();
+    if (!ctx) return;
     try {
-      const token = this.state.getContract("digitalToken");
-      if (!token) {
-        console.log("❌ Token not deployed!");
-        return;
-      }
-      const tokenAddress = await token.getAddress();
-
-      console.log(
-        "\n📊 Setting up compliance level rules for Digital Token...",
-      );
-      console.log(`📦 Token: ${tokenAddress}`);
-
-      // Interactive configuration
-      console.log("\n📋 Configure compliance level range:");
-      const minLevelInput = await this.promptUser(
-        "Minimum level (default: 1): ",
-      );
-      const minimumLevel = parseInt(minLevelInput || "1");
-
-      const maxLevelInput = await this.promptUser(
-        "Maximum level (default: 5): ",
-      );
-      const maximumLevel = parseInt(maxLevelInput || "5");
-
-      // Set up inheritance mapping
-      const levels = [];
-      const inheritanceLevels = [];
-      for (let i = minimumLevel; i <= maximumLevel; i++) {
-        levels.push(i);
-        // Simple inheritance: higher levels inherit from lower levels
-        inheritanceLevels.push(Math.max(1, i - 1));
-      }
-
-      console.log(
-        `\n📋 Level inheritance mapping: ${levels.map((l, i) => `${l}→${inheritanceLevels[i]}`).join(", ")}`,
-      );
-
-      // Set compliance level rules
-      console.log("\n📝 UPDATING COMPLIANCE LEVEL RULES...");
-      console.log(`🔍 DEBUG - Writing to blockchain:`);
-      console.log(`   Token: ${tokenAddress}`);
-      console.log(`   Min Level: ${minimumLevel}`);
-      console.log(`   Max Level: ${maximumLevel}`);
-      console.log(`   Levels: [${levels.join(", ")}]`);
-      console.log(`   Inheritance: [${inheritanceLevels.join(", ")}]`);
-
-      const tx = await complianceRules
-        .connect(this.state.signers[0])
-        .setComplianceLevelRule(
-          tokenAddress,
-          minimumLevel,
-          maximumLevel,
-          levels,
-          inheritanceLevels,
-        );
-      const receipt = await tx.wait();
-
-      console.log(`✅ Transaction confirmed in block ${receipt.blockNumber}`);
-
-      console.log("\n✅ COMPLIANCE LEVEL RULES CONFIGURED!");
-      console.log(`   Level range: ${minimumLevel} - ${maximumLevel}`);
-      console.log(
-        `   Inheritance mapping: ${levels.map((l, i) => `${l}→${inheritanceLevels[i]}`).join(", ")}`,
-      );
-      console.log(`   Transaction: ${receipt.hash}`);
-
-      // Test the rules
-      console.log("\n🧪 Testing compliance level aggregation...");
-      const testInputs = [
-        [3, 4, 2, 5],
-        [1, 1, 1],
-        [5, 4, 3, 2, 1],
-      ];
-
-      for (const inputLevels of testInputs) {
-        const [aggregatedLevel, isValid] =
-          await complianceRules.aggregateComplianceLevels(
-            tokenAddress,
-            inputLevels,
-          );
+      const configs = await this._typeConfigs(ctx.registry);
+      console.log("\n📊 REQUIRED TIER PER TYPE (recorded, not enforced):");
+      configs.forEach((c, t) => {
         console.log(
-          `   Input [${inputLevels.join(", ")}] → Level ${aggregatedLevel} (${isValid ? "✅ VALID" : "❌ INVALID"})`,
+          `   ${t} ${TYPE_NAMES[t].padEnd(13)} tier ${Number(c.requiredWhitelistTier)}+`,
         );
+      });
+      console.log("\n👤 Demo wallets:");
+      for (const s of this.state.signers.slice(1, 5)) {
+        const type = Number(await ctx.registry.getInvestorType(s.address));
+        const tier = Number(await ctx.registry.getRequiredWhitelistTier(s.address));
+        console.log(`   ${s.address}: ${TYPE_NAMES[type]}, tier ${tier}+`);
       }
-    } catch (error) {
-      console.error(
-        "❌ Compliance level rules configuration failed:",
-        error.message,
+      console.log(
+        "\n⚠️  No transfer path compares tiers; the whitelist gate is the oracle or the ZK whitelist mode.",
       );
+    } catch (error) {
+      displayError(`Reading whitelist tiers failed: ${error.message}`);
     }
   }
 
   /**
-   * Option 18: Test all compliance validations
+   * Option 18: every check this menu can evaluate against live state: the
+   * jurisdiction verdict ComplianceRules applies in canTransfer, and the
+   * investor-type caps Token applies from InvestorTypeRegistry.
    *
    * @returns {Promise<void>}
    */
@@ -770,8 +614,7 @@ class ComplianceModule {
         `🪙 Testing compliance validations with ERC-3643 Digital Token: ${tokenAddress}`,
       );
 
-      // Comprehensive test suite
-      console.log("\n🌍 JURISDICTION VALIDATION TESTS");
+      console.log("\n🌍 JURISDICTION VALIDATION TESTS (ComplianceRules)");
       console.log("-".repeat(40));
       const jurisdictionTests = [
         { country: 840, name: "United States" },
@@ -797,85 +640,19 @@ class ComplianceModule {
         }
       }
 
-      console.log("\n👥 INVESTOR TYPE VALIDATION TESTS");
+      console.log("\n👥 INVESTOR TYPE CAPS (InvestorTypeRegistry)");
       console.log("-".repeat(40));
-      const investorTests = [
-        { type: 0, accreditation: 25000, name: "Unverified ($25k)" },
-        { type: 1, accreditation: 50000, name: "Retail ($50k)" },
-        { type: 2, accreditation: 150000, name: "Accredited ($150k)" },
-        { type: 3, accreditation: 1000000, name: "Institutional ($1M)" },
-      ];
-
-      for (const test of investorTests) {
-        try {
-          const [isValid, reason] = await complianceRules.validateInvestorType(
-            tokenAddress,
-            test.type,
-            test.accreditation,
-          );
+      const registry = this.state.getContract("investorTypeRegistry");
+      if (!registry) {
+        console.log("   ℹ️  No InvestorTypeRegistry deployed (option 51)");
+      } else {
+        const amount = ethers.parseEther("10000");
+        for (const s of this.state.signers.slice(1, 5)) {
+          const type = Number(await registry.getInvestorType(s.address));
+          const ok = await registry.canTransferAmount(s.address, amount);
           console.log(
-            `   ${test.name}: ${isValid ? "✅ ALLOWED" : "❌ BLOCKED"} - ${reason}`,
+            `   ${TYPE_NAMES[type]} ${s.address} sending 10,000 VSC: ${ok ? "✅ ALLOWED" : "❌ BLOCKED - Transfer amount limit exceeded"}`,
           );
-        } catch (error) {
-          console.log(`   ${test.name}: ❌ ERROR - ${error.message}`);
-        }
-      }
-
-      console.log("\n⏰ HOLDING PERIOD VALIDATION TESTS");
-      console.log("-".repeat(40));
-      const ethers = require("hardhat").ethers;
-      const currentBlock = await ethers.provider.getBlock("latest");
-      const holdingTests = [
-        {
-          time: currentBlock.timestamp - 1,
-          name: "Recent acquisition (1 sec ago)",
-        },
-        {
-          time: currentBlock.timestamp - 12 * 60 * 60,
-          name: "Medium acquisition (12 hrs ago)",
-        },
-        {
-          time: currentBlock.timestamp - 48 * 60 * 60,
-          name: "Old acquisition (48 hrs ago)",
-        },
-      ];
-
-      for (const test of holdingTests) {
-        try {
-          const [isValid, reason] = await complianceRules.validateHoldingPeriod(
-            tokenAddress,
-            this.state.signers[1].address,
-            test.time,
-          );
-          console.log(
-            `   ${test.name}: ${isValid ? "✅ ALLOWED" : "❌ BLOCKED"} - ${reason}`,
-          );
-        } catch (error) {
-          console.log(`   ${test.name}: ❌ ERROR - ${error.message}`);
-        }
-      }
-
-      console.log("\n📊 COMPLIANCE LEVEL AGGREGATION TESTS");
-      console.log("-".repeat(40));
-      const levelTests = [
-        { levels: [1, 2, 3], name: "Basic levels" },
-        { levels: [3, 4, 2, 5], name: "Mixed levels" },
-        { levels: [5, 5, 5], name: "High levels" },
-        { levels: [1], name: "Single level" },
-      ];
-
-      for (const test of levelTests) {
-        try {
-          const [aggregatedLevel, isValid] =
-            await complianceRules.aggregateComplianceLevels(
-              tokenAddress,
-              test.levels,
-            );
-          console.log(
-            `   ${test.name} [${test.levels.join(", ")}]: Level ${aggregatedLevel} (${isValid ? "✅ VALID" : "❌ INVALID"})`,
-          );
-        } catch (error) {
-          console.log(`   ${test.name}: ❌ ERROR - ${error.message}`);
         }
       }
 
@@ -939,22 +716,6 @@ class ComplianceModule {
         console.log(`   🚨 Error: ${error.message}`);
       }
 
-      console.log("\n🧪 Testing owner can authorize tokens...");
-      try {
-        const tx2 = await complianceRules
-          .connect(this.state.signers[0])
-          .authorizeToken(tokenAddress, true);
-        const receipt2 = await tx2.wait();
-        console.log(`✅ SUCCESS: Owner authorized token`);
-        console.log(`   🪙 Token: ${tokenAddress}`);
-        console.log(`   🔗 Transaction: ${receipt2.hash}`);
-        console.log(`   🧱 Block: ${receipt2.blockNumber}`);
-        console.log(`   ⛽ Gas Used: ${receipt2.gasUsed.toLocaleString()}`);
-      } catch (error) {
-        console.log(`❌ FAILED: Owner could not authorize token`);
-        console.log(`   🚨 Error: ${error.message}`);
-      }
-
       // Test 2: Administrator Permissions
       console.log("\n👨‍💼 TEST 2: ADMINISTRATOR PERMISSIONS");
       console.log("=".repeat(40));
@@ -984,33 +745,6 @@ class ComplianceModule {
         console.log(`   🚨 Error: ${error.message}`);
       }
 
-      console.log("\n🧪 Testing administrator can set investor type rules...");
-      try {
-        const tx4 = await complianceRules
-          .connect(this.state.signers[1])
-          .setInvestorTypeRule(
-            tokenAddress,
-            [1, 2, 3], // Retail, Accredited, Institutional
-            [0], // Unverified
-            100000, // $100k minimum
-          );
-        const receipt4 = await tx4.wait();
-        console.log(`✅ SUCCESS: Administrator set investor type rules`);
-        console.log(
-          `   👥 Allowed Types: [1, 2, 3] (Retail, Accredited, Institutional)`,
-        );
-        console.log(`   🚫 Blocked Types: [0] (Unverified)`);
-        console.log(`   💰 Minimum Accreditation: $100,000`);
-        console.log(`   🔗 Transaction: ${receipt4.hash}`);
-        console.log(`   🧱 Block: ${receipt4.blockNumber}`);
-        console.log(`   ⛽ Gas Used: ${receipt4.gasUsed.toLocaleString()}`);
-      } catch (error) {
-        console.log(
-          `❌ FAILED: Administrator could not set investor type rules`,
-        );
-        console.log(`   🚨 Error: ${error.message}`);
-      }
-
       // Test 3: Regular User Restrictions
       console.log("\n👤 TEST 3: REGULAR USER ACCESS RESTRICTIONS");
       console.log("=".repeat(50));
@@ -1029,30 +763,6 @@ class ComplianceModule {
       } catch (error) {
         console.log(
           `✅ SUCCESS: Regular user correctly blocked from setting rules`,
-        );
-        console.log(`   👤 Blocked User: ${this.state.signers[2].address}`);
-        console.log(`   🛡️  Security Message: ${error.message.split("(")[0]}`);
-        console.log(`   🔒 Access Control: WORKING`);
-      }
-
-      console.log(
-        "\n🧪 Testing regular user CANNOT set investor type rules...",
-      );
-      try {
-        await complianceRules
-          .connect(this.state.signers[2])
-          .setInvestorTypeRule(
-            tokenAddress,
-            [1, 2], // Retail, Accredited
-            [3], // Institutional
-            50000, // $50k
-          );
-        console.log(
-          `❌ SECURITY BREACH: Regular user was able to set investor rules!`,
-        );
-      } catch (error) {
-        console.log(
-          `✅ SUCCESS: Regular user correctly blocked from setting investor rules`,
         );
         console.log(`   👤 Blocked User: ${this.state.signers[2].address}`);
         console.log(`   🛡️  Security Message: ${error.message.split("(")[0]}`);
@@ -1078,25 +788,6 @@ class ComplianceModule {
         );
         console.log(`   👤 Blocked User: ${this.state.signers[2].address}`);
         console.log(`   🎯 Attempted Target: ${this.state.signers[3].address}`);
-        console.log(`   🛡️  Security Message: ${error.message.split("(")[0]}`);
-        console.log(`   🔒 Owner-Only Protection: WORKING`);
-      }
-
-      console.log("\n🧪 Testing unauthorized user CANNOT authorize tokens...");
-      try {
-        await complianceRules
-          .connect(this.state.signers[3])
-          .authorizeToken(tokenAddress, true);
-        console.log(
-          `❌ CRITICAL SECURITY BREACH: Unauthorized user authorized token!`,
-        );
-        console.log(`   🚨 This is a MAJOR security vulnerability!`);
-      } catch (error) {
-        console.log(
-          `✅ SUCCESS: Unauthorized user correctly blocked from authorizing tokens`,
-        );
-        console.log(`   👤 Blocked User: ${this.state.signers[3].address}`);
-        console.log(`   🪙 Protected Token: ${tokenAddress}`);
         console.log(`   🛡️  Security Message: ${error.message.split("(")[0]}`);
         console.log(`   🔒 Owner-Only Protection: WORKING`);
       }
@@ -1151,12 +842,10 @@ class ComplianceModule {
       console.log("=".repeat(50));
       console.log("✅ Owner Permissions: WORKING");
       console.log("   • Can set rule administrators ✅");
-      console.log("   • Can authorize tokens ✅");
       console.log("   • Can revoke permissions ✅");
       console.log("");
       console.log("✅ Administrator Permissions: WORKING");
       console.log("   • Can set jurisdiction rules ✅");
-      console.log("   • Can set investor type rules ✅");
       console.log("   • Cannot perform owner actions ✅");
       console.log("");
       console.log("✅ Access Restrictions: WORKING");
@@ -1369,323 +1058,6 @@ class ComplianceModule {
       console.log("");
     } catch (error) {
       console.error("❌ Error viewing jurisdiction rules:", error.message);
-    }
-  }
-
-  /**
-   * Option 20b: View investor type rules
-   *
-   * @returns {Promise<void>}
-   */
-  async viewInvestorTypeRules() {
-    console.log("\n👥 INVESTOR TYPE RULES");
-    console.log("=".repeat(50));
-
-    const complianceRules = this.state.getContract("complianceRules");
-    if (!complianceRules) {
-      console.log("❌ ComplianceRules contract not deployed!");
-      console.log("💡 Please deploy ComplianceRules first using option 13");
-      return;
-    }
-
-    try {
-      // Get token address
-      const token = this.state.getContract("digitalToken");
-      if (!token) {
-        console.log("❌ Token not deployed!");
-        return;
-      }
-      const tokenAddress = await token.getAddress();
-
-      console.log(`\n📦 Token: ${tokenAddress}`);
-      console.log("");
-
-      // Get investor type rule - FORCE FRESH READ FROM BLOCKCHAIN
-      console.log("🔄 Reading current rules from blockchain...");
-      const rule = await complianceRules.getInvestorTypeRule(tokenAddress);
-
-      // Debug: Show raw data
-      console.log(`\n🔍 DEBUG - Raw blockchain data:`);
-      console.log(
-        `   Allowed Types (raw): [${rule.allowedTypes.map((t) => Number(t)).join(", ")}]`,
-      );
-      console.log(
-        `   Blocked Types (raw): [${rule.blockedTypes.map((t) => Number(t)).join(", ")}]`,
-      );
-      console.log(
-        `   Min Accreditation (raw): ${Number(rule.minimumAccreditation)}`,
-      );
-      console.log("");
-
-      console.log("📊 INVESTOR TYPE RULE STATUS:");
-      console.log(`   Active: ${rule.isActive ? "✅ YES" : "❌ NO"}`);
-      console.log(
-        `   Last Updated: ${new Date(Number(rule.lastUpdated) * 1000).toLocaleString()}`,
-      );
-      console.log("");
-
-      // Display allowed investor types
-      console.log("✅ ALLOWED INVESTOR TYPES:");
-      if (rule.allowedTypes.length === 0) {
-        console.log("   ℹ️  No whitelist configured");
-        console.log("   💡 All investor types are allowed (except blocked)");
-      } else {
-        console.log(`   📊 Total: ${rule.allowedTypes.length} types`);
-        console.log("   📋 Types:");
-
-        const typeNames = {
-          0: "Unverified",
-          1: "Retail",
-          2: "Accredited",
-          3: "Institutional",
-        };
-
-        for (let i = 0; i < rule.allowedTypes.length; i++) {
-          const type = Number(rule.allowedTypes[i]);
-          const name = typeNames[type] || "Unknown";
-          console.log(`      ${i + 1}. Type ${type} - ${name}`);
-        }
-        console.log("");
-        console.log("   💡 ONLY these investor types can participate");
-      }
-      console.log("");
-
-      // Display blocked investor types
-      console.log("❌ BLOCKED INVESTOR TYPES:");
-      if (rule.blockedTypes.length === 0) {
-        console.log("   ℹ️  No investor types blocked");
-        console.log("   💡 All investor types are allowed");
-      } else {
-        console.log(`   📊 Total: ${rule.blockedTypes.length} types`);
-        console.log("   📋 Types:");
-
-        const typeNames = {
-          0: "Unverified",
-          1: "Retail",
-          2: "Accredited",
-          3: "Institutional",
-        };
-
-        for (let i = 0; i < rule.blockedTypes.length; i++) {
-          const type = Number(rule.blockedTypes[i]);
-          const name = typeNames[type] || "Unknown";
-          console.log(`      ${i + 1}. Type ${type} - ${name}`);
-        }
-        console.log("");
-        console.log("   💡 These investor types are ALWAYS blocked");
-      }
-      console.log("");
-
-      // Display minimum accreditation
-      console.log("💰 MINIMUM ACCREDITATION:");
-      console.log(
-        `   Amount: $${Number(rule.minimumAccreditation).toLocaleString()}`,
-      );
-      console.log(
-        "   💡 Investors must have at least this amount to participate",
-      );
-      console.log("");
-
-      // Display logic explanation
-      console.log("📋 HOW IT WORKS:");
-      console.log(
-        "   1. Check if investor type is in BLOCKED list → ❌ BLOCKED",
-      );
-      console.log(
-        "   2. Check if investor type is in ALLOWED list → ✅ ALLOWED",
-      );
-      console.log("   3. Check if accreditation >= minimum → ✅ ALLOWED");
-      console.log("   4. If any check fails → ❌ BLOCKED");
-      console.log("");
-
-      // Display governance info
-      console.log("🗳️ GOVERNANCE:");
-      console.log("   💡 To update these rules, use governance voting:");
-      console.log("      79. Deploy Governance System");
-      console.log("      81. Create Proposal (Type 0: Investor Type Rules)");
-      console.log("      82. Vote on Proposal");
-      console.log("      83. Execute Proposal");
-      console.log("");
-    } catch (error) {
-      console.error("❌ Error viewing investor type rules:", error.message);
-    }
-  }
-
-  /**
-   * Option 20c: View holding period rules
-   *
-   * @returns {Promise<void>}
-   */
-  async viewHoldingPeriodRules() {
-    console.log("\n⏰ HOLDING PERIOD RULES");
-    console.log("=".repeat(50));
-
-    const complianceRules = this.state.getContract("complianceRules");
-    if (!complianceRules) {
-      console.log("❌ ComplianceRules contract not deployed!");
-      console.log("💡 Please deploy ComplianceRules first using option 13");
-      return;
-    }
-
-    try {
-      // Get token address
-      const token = this.state.getContract("digitalToken");
-      if (!token) {
-        console.log("❌ Token not deployed!");
-        return;
-      }
-      const tokenAddress = await token.getAddress();
-
-      console.log(`\n📦 Token: ${tokenAddress}`);
-      console.log("");
-
-      // Get holding period rule - FORCE FRESH READ FROM BLOCKCHAIN
-      console.log("🔄 Reading current rules from blockchain...");
-      const rule = await complianceRules.getHoldingPeriodRule(tokenAddress);
-
-      // Debug: Show raw data
-      console.log(`\n🔍 DEBUG - Raw blockchain data:`);
-      console.log(
-        `   Minimum Holding Period (raw): ${Number(rule.minimumHoldingPeriod)} seconds`,
-      );
-      console.log(
-        `   Transfer Cooldown (raw): ${Number(rule.transferCooldown)} seconds`,
-      );
-      console.log("");
-
-      console.log("📊 HOLDING PERIOD RULE STATUS:");
-      console.log(`   Active: ${rule.isActive ? "✅ YES" : "❌ NO"}`);
-      console.log(
-        `   Last Updated: ${new Date(Number(rule.lastUpdated) * 1000).toLocaleString()}`,
-      );
-      console.log("");
-
-      // Display holding period
-      const holdingPeriodSeconds = Number(rule.minimumHoldingPeriod);
-      const holdingPeriodHours = Math.floor(holdingPeriodSeconds / 3600);
-      const holdingPeriodDays = Math.floor(holdingPeriodHours / 24);
-
-      console.log("⏰ MINIMUM HOLDING PERIOD:");
-      console.log(`   Seconds: ${holdingPeriodSeconds.toLocaleString()}`);
-      console.log(`   Hours: ${holdingPeriodHours}`);
-      console.log(`   Days: ${holdingPeriodDays}`);
-      console.log(
-        "   💡 Tokens must be held for this duration before transfer",
-      );
-      console.log("");
-
-      // Display transfer cooldown
-      const cooldownSeconds = Number(rule.transferCooldown);
-      const cooldownMinutes = Math.floor(cooldownSeconds / 60);
-      const cooldownHours = Math.floor(cooldownMinutes / 60);
-
-      console.log("🔄 TRANSFER COOLDOWN:");
-      console.log(`   Seconds: ${cooldownSeconds.toLocaleString()}`);
-      console.log(`   Minutes: ${cooldownMinutes}`);
-      console.log(`   Hours: ${cooldownHours}`);
-      console.log("   💡 Time required between consecutive transfers");
-      console.log("");
-
-      // Display logic explanation
-      console.log("📋 HOW IT WORKS:");
-      console.log("   1. Check token acquisition time");
-      console.log("   2. Verify minimum holding period has passed");
-      console.log("   3. Check last transfer time");
-      console.log("   4. Verify cooldown period has passed");
-      console.log("   5. If all checks pass → ✅ ALLOWED");
-      console.log("");
-
-      // Display governance info
-      console.log("🗳️ GOVERNANCE:");
-      console.log("   💡 To update these rules, use governance voting:");
-      console.log("      79. Deploy Governance System");
-      console.log("      81. Create Proposal (Type 2: Holding Period Rules)");
-      console.log("      82. Vote on Proposal");
-      console.log("      83. Execute Proposal");
-      console.log("");
-    } catch (error) {
-      console.error("❌ Error viewing holding period rules:", error.message);
-    }
-  }
-
-  /**
-   * Option 20d: View compliance level rules
-   *
-   * @returns {Promise<void>}
-   */
-  async viewComplianceLevelRules() {
-    console.log("\n📊 COMPLIANCE LEVEL RULES");
-    console.log("=".repeat(50));
-
-    const complianceRules = this.state.getContract("complianceRules");
-    if (!complianceRules) {
-      console.log("❌ ComplianceRules contract not deployed!");
-      console.log("💡 Please deploy ComplianceRules first using option 13");
-      return;
-    }
-
-    try {
-      // Get token address
-      const token = this.state.getContract("digitalToken");
-      if (!token) {
-        console.log("❌ Token not deployed!");
-        return;
-      }
-      const tokenAddress = await token.getAddress();
-
-      console.log(`\n📦 Token: ${tokenAddress}`);
-      console.log("");
-
-      // Get compliance level rule - FORCE FRESH READ FROM BLOCKCHAIN
-      console.log("🔄 Reading current rules from blockchain...");
-      const rule = await complianceRules.getComplianceLevelRule(tokenAddress);
-
-      // Debug: Show raw data
-      console.log(`\n🔍 DEBUG - Raw blockchain data:`);
-      console.log(`   Minimum Level (raw): ${Number(rule.minimumLevel)}`);
-      console.log(`   Maximum Level (raw): ${Number(rule.maximumLevel)}`);
-      console.log("");
-
-      console.log("📊 COMPLIANCE LEVEL RULE STATUS:");
-      console.log(`   Active: ${rule.isActive ? "✅ YES" : "❌ NO"}`);
-      console.log(
-        `   Last Updated: ${new Date(Number(rule.lastUpdated) * 1000).toLocaleString()}`,
-      );
-      console.log("");
-
-      // Display level range
-      console.log("📈 COMPLIANCE LEVEL RANGE:");
-      console.log(`   Minimum Level: ${Number(rule.minimumLevel)}`);
-      console.log(`   Maximum Level: ${Number(rule.maximumLevel)}`);
-      console.log(
-        "   💡 Investors must have compliance level within this range",
-      );
-      console.log("");
-
-      // Display logic explanation
-      console.log("📋 HOW IT WORKS:");
-      console.log("   • Compliance levels represent verification depth");
-      console.log("   • Higher levels = more thorough verification");
-      console.log("   • Transfers require minimum compliance level");
-      console.log("");
-      console.log("   Example Levels:");
-      console.log("      Level 1: Basic KYC");
-      console.log("      Level 2: Enhanced KYC + AML");
-      console.log("      Level 3: Full verification + background check");
-      console.log("      Level 4: Institutional-grade verification");
-      console.log("      Level 5: Maximum compliance");
-      console.log("");
-
-      // Display governance info
-      console.log("🗳️ GOVERNANCE:");
-      console.log("   💡 To update these rules, use governance voting:");
-      console.log("      79. Deploy Governance System");
-      console.log("      81. Create Proposal (Type 4: Compliance Level Rules)");
-      console.log("      82. Vote on Proposal");
-      console.log("      83. Execute Proposal");
-      console.log("");
-    } catch (error) {
-      console.error("❌ Error viewing compliance level rules:", error.message);
     }
   }
 }

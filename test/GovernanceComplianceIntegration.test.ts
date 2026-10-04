@@ -353,8 +353,8 @@ describe("Governance → ComplianceRules Integration Test", function () {
       console.log("\n🚀 GOVERNANCE SYSTEM PROVEN TO WORK!");
     });
 
-    it("Should update holding period rules via governance", async function () {
-      console.log("\n🎯 GOVERNANCE → HOLDING PERIOD UPDATE TEST");
+    it("Should block a country for the token via governance", async function () {
+      console.log("\n🎯 GOVERNANCE → JURISDICTION BLOCK TEST");
       console.log("=".repeat(60));
 
       // Distribute tokens
@@ -379,19 +379,21 @@ describe("Governance → ComplianceRules Integration Test", function () {
         .connect(voter3)
         .approve(await vanguardGovernance.getAddress(), votingCost);
 
-      // Create proposal to update holding period
+      // Create proposal to block a country for this token. Task 4.1 removed
+      // the holding-period rule (it gated nothing); the vote now exercises
+      // the jurisdiction rule, the one ComplianceRules rule canTransfer reads.
       const tokenAddr = await token.getAddress();
-      const newMinHolding = 48 * 60 * 60; // 48 hours
-      const newCooldown = 24 * 60 * 60; // 24 hours
+      const versionBefore =
+        await complianceRules.jurisdictionRuleVersion(tokenAddr);
       const callData = complianceRules.interface.encodeFunctionData(
-        "setHoldingPeriodRule",
-        [tokenAddr, newMinHolding, newCooldown],
+        "setJurisdictionRule",
+        [tokenAddr, [840, 826], [156]],
       );
 
       await vanguardGovernance.connect(voter1).createProposal(
         1, // ComplianceRules
-        "Update Holding Period",
-        "Set 48h minimum holding and 24h cooldown",
+        "Block CN",
+        "Allow US and UK, block CN",
         await complianceRules.getAddress(),
         callData,
       );
@@ -407,16 +409,16 @@ describe("Governance → ComplianceRules Integration Test", function () {
       await vanguardGovernance.executeProposal(1);
 
       // Verify
-      const rule = await complianceRules.getHoldingPeriodRule(tokenAddr);
-      expect(rule.minimumHoldingPeriod).to.equal(newMinHolding);
-      expect(rule.transferCooldown).to.equal(newCooldown);
-
-      console.log("✅ Holding period rules updated via governance!");
-      console.log(
-        `   Minimum Holding: ${Number(rule.minimumHoldingPeriod) / 3600} hours`,
+      const rule = await complianceRules.getJurisdictionRule(tokenAddr);
+      expect(rule.blockedCountries).to.deep.equal([156n]);
+      const [cnOk, cnReason] = await complianceRules.validateJurisdiction(
+        tokenAddr,
+        156,
       );
-      console.log(
-        `   Transfer Cooldown: ${Number(rule.transferCooldown) / 3600} hours`,
+      expect(cnOk).to.equal(false);
+      expect(cnReason).to.equal("Country is blocked");
+      expect(await complianceRules.jurisdictionRuleVersion(tokenAddr)).to.equal(
+        versionBefore + 1n,
       );
     });
   });

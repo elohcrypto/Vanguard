@@ -226,7 +226,7 @@ describe("🔒 VSC & VGT Compliance Control - Complete Proof", function () {
 
       console.log("\n✅ TEST 4.1: ComplianceRules configured for VSC");
       const vscIdentityRegistry =
-        await complianceRules.getTokenIdentityRegistry(
+        await complianceRules.tokenIdentityRegistry(
           await vscToken.getAddress(),
         );
       expect(vscIdentityRegistry).to.equal(await identityRegistry.getAddress());
@@ -236,7 +236,7 @@ describe("🔒 VSC & VGT Compliance Control - Complete Proof", function () {
 
       console.log("\n✅ TEST 4.2: ComplianceRules configured for VGT");
       const vgtIdentityRegistry =
-        await complianceRules.getTokenIdentityRegistry(
+        await complianceRules.tokenIdentityRegistry(
           await vgtToken.getAddress(),
         );
       expect(vgtIdentityRegistry).to.equal(await identityRegistry.getAddress());
@@ -348,10 +348,10 @@ describe("🔒 VSC & VGT Compliance Control - Complete Proof", function () {
     });
 
     it("✅ ComplianceRules: Configured for both tokens", async function () {
-      const vscRegistry = await complianceRules.getTokenIdentityRegistry(
+      const vscRegistry = await complianceRules.tokenIdentityRegistry(
         await vscToken.getAddress(),
       );
-      const vgtRegistry = await complianceRules.getTokenIdentityRegistry(
+      const vgtRegistry = await complianceRules.tokenIdentityRegistry(
         await vgtToken.getAddress(),
       );
 

@@ -2,7 +2,6 @@
 pragma solidity ^0.8.20;
 
 import "@openzeppelin/contracts/access/Ownable2Step.sol";
-import "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
 import "./interfaces/IComplianceRules.sol";
 import "../erc3643/interfaces/ICompliance.sol";
 import "../erc3643/interfaces/IIdentityRegistry.sol";
@@ -27,9 +26,7 @@ interface IPrivacyManagerView {
  * @title ComplianceRules
  * @dev Configurable compliance rule engine bound to Token via IComplianceHooks
  */
-// 16 state variables since Task 3.4; the split (Task 4.1) brings it back under 15.
-// solhint-disable-next-line max-states-count
-contract ComplianceRules is IComplianceRules, IComplianceHooks, Ownable2Step, ReentrancyGuard {
+contract ComplianceRules is IComplianceRules, IComplianceHooks, Ownable2Step {
     // Implements IComplianceHooks, the slice Token actually calls, so the
     // compiler enforces it. Not a full ICompliance: the module functions
     // that interface declares were empty stubs here and are gone.
@@ -475,42 +472,10 @@ contract ComplianceRules is IComplianceRules, IComplianceHooks, Ownable2Step, Re
         uint256 lastUpdated;
     }
 
-    struct InvestorTypeRule {
-        bool isActive;
-        uint8[] allowedTypes;
-        uint8[] blockedTypes;
-        mapping(uint8 => bool) allowedTypeMap;
-        mapping(uint8 => bool) blockedTypeMap;
-        uint256 minimumAccreditation;
-        uint256 lastUpdated;
-    }
-
-    struct HoldingPeriodRule {
-        bool isActive;
-        uint256 minimumHoldingPeriod;
-        uint256 transferCooldown;
-        mapping(address => uint256) lastTransferTime;
-        mapping(address => uint256) tokenAcquisitionTime;
-        uint256 lastUpdated;
-    }
-
-    struct ComplianceLevelRule {
-        bool isActive;
-        uint8 minimumLevel;
-        uint8 maximumLevel;
-        mapping(uint8 => uint8) levelInheritance;
-        mapping(uint8 => uint256) levelRequirements;
-        uint256 lastUpdated;
-    }
-
     // State variables
     mapping(address => JurisdictionRule) private jurisdictionRules;
-    mapping(address => InvestorTypeRule) private investorTypeRules;
-    mapping(address => HoldingPeriodRule) private holdingPeriodRules;
-    mapping(address => ComplianceLevelRule) private complianceLevelRules;
 
     // Global rule configurations
-    mapping(address => bool) public authorizedTokens;
     mapping(address => bool) public ruleAdministrators;
     mapping(address => address) public tokenIdentityRegistry; // Maps token address to its IdentityRegistry
     /// @notice Bumped by every setJurisdictionRule/clearJurisdictionRule for
@@ -520,38 +485,16 @@ contract ComplianceRules is IComplianceRules, IComplianceHooks, Ownable2Step, Re
     mapping(address => uint256) public jurisdictionRuleVersion;
 
     // Default rules
-    JurisdictionRule public defaultJurisdictionRule;
-    InvestorTypeRule public defaultInvestorTypeRule;
-    HoldingPeriodRule public defaultHoldingPeriodRule;
-    ComplianceLevelRule public defaultComplianceLevelRule;
+    JurisdictionRule private defaultJurisdictionRule;
 
     // Constants
     uint256 public constant MAX_COUNTRIES = 300;
-    uint8 public constant MAX_INVESTOR_TYPES = 10;
-    uint8 public constant MAX_COMPLIANCE_LEVELS = 10;
 
     // Events
     event JurisdictionRuleUpdated(address indexed token, uint256[] allowedCountries, uint256[] blockedCountries);
     event JurisdictionRuleCleared(address indexed token);
-    event InvestorTypeRuleUpdated(address indexed token, uint8[] allowedTypes, uint8[] blockedTypes);
-    event HoldingPeriodRuleUpdated(address indexed token, uint256 minimumHoldingPeriod, uint256 transferCooldown);
-    event ComplianceLevelRuleUpdated(address indexed token, uint8 minimumLevel, uint8 maximumLevel);
-    event TokenAuthorized(address indexed token, bool authorized);
     event RuleAdministratorUpdated(address indexed administrator, bool authorized);
     event TokenIdentityRegistrySet(address indexed token, address indexed identityRegistry);
-
-    modifier onlyAuthorizedToken(address token) {
-        require(authorizedTokens[token], "ComplianceRules: Token not authorized");
-        _;
-    }
-
-    modifier onlyRuleAdministrator() {
-        require(
-            ruleAdministrators[msg.sender] || msg.sender == owner(),
-            "ComplianceRules: Not authorized administrator"
-        );
-        _;
-    }
 
     modifier onlyGovernance() {
         require(
@@ -587,13 +530,6 @@ contract ComplianceRules is IComplianceRules, IComplianceHooks, Ownable2Step, Re
 
         tokenIdentityRegistry[token] = identityRegistry;
         emit TokenIdentityRegistrySet(token, identityRegistry);
-    }
-
-    /**
-     * @dev Get the IdentityRegistry for a token
-     */
-    function getTokenIdentityRegistry(address token) external view returns (address) {
-        return tokenIdentityRegistry[token];
     }
 
     /**
@@ -664,104 +600,6 @@ contract ComplianceRules is IComplianceRules, IComplianceHooks, Ownable2Step, Re
     }
 
     /**
-     * @dev Set investor type validation rules
-     * @notice Can only be called by governance contract after voting
-     */
-    function setInvestorTypeRule(
-        address token,
-        uint8[] calldata allowedTypes,
-        uint8[] calldata blockedTypes,
-        uint256 minimumAccreditation
-    ) external override onlyGovernance {
-        require(token != address(0), "ComplianceRules: Invalid token address");
-        require(allowedTypes.length <= MAX_INVESTOR_TYPES, "ComplianceRules: Too many allowed types");
-        require(blockedTypes.length <= MAX_INVESTOR_TYPES, "ComplianceRules: Too many blocked types");
-
-        InvestorTypeRule storage rule = investorTypeRules[token];
-
-        // Clear existing mappings
-        // Same correction as setJurisdictionRule: clear what is stored, not
-        // what is arriving.
-        uint8[] storage previousAllowedTypes = rule.allowedTypes;
-        for (uint256 i = 0; i < previousAllowedTypes.length; i++) {
-            delete rule.allowedTypeMap[previousAllowedTypes[i]];
-        }
-        uint8[] storage previousBlockedTypes = rule.blockedTypes;
-        for (uint256 i = 0; i < previousBlockedTypes.length; i++) {
-            delete rule.blockedTypeMap[previousBlockedTypes[i]];
-        }
-
-        // Set new rules
-        rule.isActive = true;
-        rule.allowedTypes = allowedTypes;
-        rule.blockedTypes = blockedTypes;
-        rule.minimumAccreditation = minimumAccreditation;
-        rule.lastUpdated = block.timestamp;
-
-        // Update mappings for efficient lookup
-        for (uint256 i = 0; i < allowedTypes.length; i++) {
-            rule.allowedTypeMap[allowedTypes[i]] = true;
-        }
-        for (uint256 i = 0; i < blockedTypes.length; i++) {
-            rule.blockedTypeMap[blockedTypes[i]] = true;
-        }
-
-        emit InvestorTypeRuleUpdated(token, allowedTypes, blockedTypes);
-    }
-
-    /**
-     * @dev Set holding period and transfer cooldown rules
-     * @notice Can only be called by governance contract after voting
-     */
-    function setHoldingPeriodRule(
-        address token,
-        uint256 minimumHoldingPeriod,
-        uint256 transferCooldown
-    ) external override onlyGovernance {
-        require(token != address(0), "ComplianceRules: Invalid token address");
-        require(minimumHoldingPeriod <= 365 days, "ComplianceRules: Holding period too long");
-        require(transferCooldown <= 30 days, "ComplianceRules: Cooldown too long");
-
-        HoldingPeriodRule storage rule = holdingPeriodRules[token];
-        rule.isActive = true;
-        rule.minimumHoldingPeriod = minimumHoldingPeriod;
-        rule.transferCooldown = transferCooldown;
-        rule.lastUpdated = block.timestamp;
-
-        emit HoldingPeriodRuleUpdated(token, minimumHoldingPeriod, transferCooldown);
-    }
-
-    /**
-     * @dev Set compliance level aggregation and inheritance rules
-     * @notice Can only be called by governance contract after voting
-     */
-    function setComplianceLevelRule(
-        address token,
-        uint8 minimumLevel,
-        uint8 maximumLevel,
-        uint8[] calldata levels,
-        uint8[] calldata inheritanceLevels
-    ) external override onlyGovernance {
-        require(token != address(0), "ComplianceRules: Invalid token address");
-        require(minimumLevel <= maximumLevel, "ComplianceRules: Invalid level range");
-        require(maximumLevel <= MAX_COMPLIANCE_LEVELS, "ComplianceRules: Level too high");
-        require(levels.length == inheritanceLevels.length, "ComplianceRules: Array length mismatch");
-
-        ComplianceLevelRule storage rule = complianceLevelRules[token];
-        rule.isActive = true;
-        rule.minimumLevel = minimumLevel;
-        rule.maximumLevel = maximumLevel;
-        rule.lastUpdated = block.timestamp;
-
-        // Set inheritance rules
-        for (uint256 i = 0; i < levels.length; i++) {
-            rule.levelInheritance[levels[i]] = inheritanceLevels[i];
-        }
-
-        emit ComplianceLevelRuleUpdated(token, minimumLevel, maximumLevel);
-    }
-
-    /**
      * @dev Validate jurisdiction compliance
      */
     function validateJurisdiction(
@@ -781,130 +619,6 @@ contract ComplianceRules is IComplianceRules, IComplianceHooks, Ownable2Step, Re
     }
 
     /**
-     * @dev Validate investor type compliance
-     */
-    function validateInvestorType(
-        address token,
-        uint8 investorType,
-        uint256 accreditationLevel
-    ) external view override returns (bool isValid, string memory reason) {
-        InvestorTypeRule storage rule = _getInvestorTypeRule(token);
-
-        if (!rule.isActive) {
-            return (true, "No investor type rules active");
-        }
-
-        // Check if investor type is blocked
-        if (rule.blockedTypeMap[investorType]) {
-            return (false, "Investor type is blocked");
-        }
-
-        // If allowed types list exists, check if type is allowed
-        if (rule.allowedTypes.length > 0) {
-            if (!rule.allowedTypeMap[investorType]) {
-                return (false, "Investor type not allowed");
-            }
-        }
-
-        // Check minimum accreditation
-        if (accreditationLevel < rule.minimumAccreditation) {
-            return (false, "Insufficient accreditation level");
-        }
-
-        return (true, "Investor type validation passed");
-    }
-
-    /**
-     * @dev Validate holding period compliance
-     */
-    function validateHoldingPeriod(
-        address token,
-        address investor,
-        uint256 acquisitionTime
-    ) external view override returns (bool isValid, string memory reason) {
-        HoldingPeriodRule storage rule = _getHoldingPeriodRule(token);
-
-        if (!rule.isActive) {
-            return (true, "No holding period rules active");
-        }
-
-        // Check minimum holding period
-        if (block.timestamp < acquisitionTime + rule.minimumHoldingPeriod) {
-            return (false, "Minimum holding period not met");
-        }
-
-        // Check transfer cooldown
-        uint256 lastTransfer = rule.lastTransferTime[investor];
-        if (lastTransfer > 0 && block.timestamp < lastTransfer + rule.transferCooldown) {
-            return (false, "Transfer cooldown period active");
-        }
-
-        return (true, "Holding period validation passed");
-    }
-
-    /**
-     * @dev Aggregate compliance levels from multiple inputs
-     */
-    function aggregateComplianceLevels(
-        address token,
-        uint8[] calldata inputLevels
-    ) external view override returns (uint8 aggregatedLevel, bool isValid) {
-        ComplianceLevelRule storage rule = _getComplianceLevelRule(token);
-
-        if (!rule.isActive || inputLevels.length == 0) {
-            return (0, false);
-        }
-
-        // Start with the minimum level from inputs
-        uint8 minLevel = type(uint8).max;
-        for (uint256 i = 0; i < inputLevels.length; i++) {
-            if (inputLevels[i] < minLevel) {
-                minLevel = inputLevels[i];
-            }
-        }
-
-        // Apply inheritance rules
-        uint8 inheritedLevel = rule.levelInheritance[minLevel];
-        if (inheritedLevel > 0) {
-            minLevel = inheritedLevel;
-        }
-
-        // Check if aggregated level meets requirements
-        bool valid = minLevel >= rule.minimumLevel && minLevel <= rule.maximumLevel;
-
-        return (minLevel, valid);
-    }
-
-    /**
-     * @dev Record transfer for holding period tracking. Only the authorized
-     *      token itself may record; checking the argument alone let anyone
-     *      write holding-period state for any address (L1).
-     */
-    function recordTransfer(
-        address token,
-        address from,
-        address to,
-        uint256 acquisitionTime
-    ) external override onlyAuthorizedToken(token) {
-        require(msg.sender == token, "ComplianceRules: caller is not the token");
-        HoldingPeriodRule storage rule = holdingPeriodRules[token];
-
-        if (rule.isActive) {
-            rule.lastTransferTime[from] = block.timestamp;
-            rule.tokenAcquisitionTime[to] = acquisitionTime > 0 ? acquisitionTime : block.timestamp;
-        }
-    }
-
-    /**
-     * @dev Authorize token to use compliance rules
-     */
-    function authorizeToken(address token, bool authorized) external onlyOwner {
-        require(token != address(0), "ComplianceRules: Invalid token address");
-        authorizedTokens[token] = authorized;
-        emit TokenAuthorized(token, authorized);
-    }
-
-    /**
      * @dev Set rule administrator
      */
     function setRuleAdministrator(address administrator, bool authorized) external onlyOwner {
@@ -921,36 +635,6 @@ contract ComplianceRules is IComplianceRules, IComplianceHooks, Ownable2Step, Re
             return jurisdictionRules[token];
         }
         return defaultJurisdictionRule;
-    }
-
-    /**
-     * @dev Get investor type rule for token (with fallback to default)
-     */
-    function _getInvestorTypeRule(address token) private view returns (InvestorTypeRule storage) {
-        if (investorTypeRules[token].isActive) {
-            return investorTypeRules[token];
-        }
-        return defaultInvestorTypeRule;
-    }
-
-    /**
-     * @dev Get holding period rule for token (with fallback to default)
-     */
-    function _getHoldingPeriodRule(address token) private view returns (HoldingPeriodRule storage) {
-        if (holdingPeriodRules[token].isActive) {
-            return holdingPeriodRules[token];
-        }
-        return defaultHoldingPeriodRule;
-    }
-
-    /**
-     * @dev Get compliance level rule for token (with fallback to default)
-     */
-    function _getComplianceLevelRule(address token) private view returns (ComplianceLevelRule storage) {
-        if (complianceLevelRules[token].isActive) {
-            return complianceLevelRules[token];
-        }
-        return defaultComplianceLevelRule;
     }
 
     /**
@@ -979,23 +663,6 @@ contract ComplianceRules is IComplianceRules, IComplianceHooks, Ownable2Step, Re
             defaultJurisdictionRule.blockedCountries.push(initialBlockedCountries[i]);
             defaultJurisdictionRule.blockedCountryMap[initialBlockedCountries[i]] = true;
         }
-
-        // Default investor type rule - allow retail and accredited investors
-        defaultInvestorTypeRule.isActive = true;
-        defaultInvestorTypeRule.minimumAccreditation = 1;
-        defaultInvestorTypeRule.lastUpdated = block.timestamp;
-
-        // Default holding period rule - 24 hour minimum holding, 1 hour cooldown
-        defaultHoldingPeriodRule.isActive = true;
-        defaultHoldingPeriodRule.minimumHoldingPeriod = 24 hours;
-        defaultHoldingPeriodRule.transferCooldown = 1 hours;
-        defaultHoldingPeriodRule.lastUpdated = block.timestamp;
-
-        // Default compliance level rule - minimum level 1, maximum level 5
-        defaultComplianceLevelRule.isActive = true;
-        defaultComplianceLevelRule.minimumLevel = 1;
-        defaultComplianceLevelRule.maximumLevel = 5;
-        defaultComplianceLevelRule.lastUpdated = block.timestamp;
     }
 
     /**
@@ -1015,49 +682,5 @@ contract ComplianceRules is IComplianceRules, IComplianceHooks, Ownable2Step, Re
     {
         JurisdictionRule storage rule = _getJurisdictionRule(token);
         return (rule.isActive, rule.allowedCountries, rule.blockedCountries, rule.lastUpdated);
-    }
-
-    /**
-     * @dev Get investor type rule details
-     */
-    function getInvestorTypeRule(
-        address token
-    )
-        external
-        view
-        returns (
-            bool isActive,
-            uint8[] memory allowedTypes,
-            uint8[] memory blockedTypes,
-            uint256 minimumAccreditation,
-            uint256 lastUpdated
-        )
-    {
-        InvestorTypeRule storage rule = _getInvestorTypeRule(token);
-        return (rule.isActive, rule.allowedTypes, rule.blockedTypes, rule.minimumAccreditation, rule.lastUpdated);
-    }
-
-    /**
-     * @dev Get holding period rule details
-     */
-    function getHoldingPeriodRule(
-        address token
-    )
-        external
-        view
-        returns (bool isActive, uint256 minimumHoldingPeriod, uint256 transferCooldown, uint256 lastUpdated)
-    {
-        HoldingPeriodRule storage rule = _getHoldingPeriodRule(token);
-        return (rule.isActive, rule.minimumHoldingPeriod, rule.transferCooldown, rule.lastUpdated);
-    }
-
-    /**
-     * @dev Get compliance level rule details
-     */
-    function getComplianceLevelRule(
-        address token
-    ) external view returns (bool isActive, uint8 minimumLevel, uint8 maximumLevel, uint256 lastUpdated) {
-        ComplianceLevelRule storage rule = _getComplianceLevelRule(token);
-        return (rule.isActive, rule.minimumLevel, rule.maximumLevel, rule.lastUpdated);
     }
 }

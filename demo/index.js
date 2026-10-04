@@ -283,9 +283,9 @@ class InteractiveDemo {
     console.log("⚖️ === COMPLIANCE RULES ENGINE ===");
     console.log("13. 🏗️ Deploy ComplianceRules Contract");
     console.log("14. 🌍 Configure Jurisdiction Rules");
-    console.log("15. 👥 Configure Investor Type Rules");
-    console.log("16. ⏰ Configure Holding Period Rules");
-    console.log("17. 📊 Configure Compliance Level Rules");
+    console.log("15. 👥 Investor Type Limits (InvestorTypeRegistry)");
+    console.log("16. ⏰ Transfer Cooldowns (InvestorTypeRegistry)");
+    console.log("17. 📊 Required Whitelist Tiers (InvestorTypeRegistry)");
     console.log("18. 🧪 Test All Compliance Validations");
     console.log("19. 🔐 Test Access Control");
     console.log("20. 📋 Show ComplianceRules Dashboard");

@@ -142,28 +142,6 @@ describe("Investor caps on the trusted path (2F.4)", function () {
     });
   });
 
-  describe("ComplianceRules.recordTransfer (L1)", function () {
-    it("only the authorized token itself may record", async function () {
-      const { alice, bob, stranger, rules, token } = await deploy();
-      await rules.authorizeToken(token.target, true);
-      await expect(
-        rules
-          .connect(stranger)
-          .recordTransfer(token.target, alice.address, bob.address, 0),
-      ).to.be.revertedWith("ComplianceRules: caller is not the token");
-
-      const addr = await token.getAddress();
-      await ethers.provider.send("hardhat_setBalance", [
-        addr,
-        "0xDE0B6B3A7640000",
-      ]);
-      const asToken = await ethers.getImpersonatedSigner(addr);
-      await rules
-        .connect(asToken)
-        .recordTransfer(addr, alice.address, bob.address, 0);
-    });
-  });
-
   describe("escrow legs (MultiSigEscrowWallet on VSC)", function () {
     const AMOUNT = e("1000");
     const TOTAL = e("1050"); // amount + 3% investor fee + 2% owner fee

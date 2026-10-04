@@ -58,16 +58,16 @@ class MenuSystem {
     console.log("⚖️  === COMPLIANCE RULES ENGINE (Options 13-20) ===");
     console.log("13. Deploy ComplianceRules Contract");
     console.log("14. Configure Jurisdiction Rules");
-    console.log("15. Configure Investor Type Rules");
-    console.log("16. Configure Holding Period Rules");
-    console.log("17. Configure Compliance Level Rules");
+    console.log("15. Investor Type Limits (InvestorTypeRegistry)");
+    console.log("16. Transfer Cooldowns (InvestorTypeRegistry)");
+    console.log("17. Required Whitelist Tiers (InvestorTypeRegistry)");
     console.log("18. Test All Compliance Validations");
     console.log("19. Test Access Control");
     console.log("20. Show ComplianceRules Dashboard");
     console.log("20a. View Jurisdiction Rules (Whitelist/Blacklist)");
-    console.log("20b. View Investor Type Rules");
-    console.log("20c. View Holding Period Rules");
-    console.log("20d. View Compliance Level Rules");
+    console.log("20b. View Investor Type Limits");
+    console.log("20c. View Transfer Cooldowns");
+    console.log("20d. View Required Whitelist Tiers");
     console.log("");
     console.log("🏛️  === ERC-3643 DIGITAL TOKEN SYSTEM (Options 21-30) ===");
     console.log("21. Deploy ERC-3643 Vanguard StableCoin System");
@@ -265,13 +265,13 @@ class MenuSystem {
           await compliance.configureJurisdictionRules();
           break;
         case "15":
-          await compliance.configureInvestorTypeRules();
+          await compliance.showInvestorTypeLimits();
           break;
         case "16":
-          await compliance.configureHoldingPeriodRules();
+          await compliance.showTransferCooldowns();
           break;
         case "17":
-          await compliance.configureComplianceLevelRules();
+          await compliance.showWhitelistTiers();
           break;
         case "18":
           await compliance.testAllComplianceValidations();
@@ -286,13 +286,13 @@ class MenuSystem {
           await compliance.viewJurisdictionRules();
           break;
         case "20b":
-          await compliance.viewInvestorTypeRules();
+          await compliance.showInvestorTypeLimits();
           break;
         case "20c":
-          await compliance.viewHoldingPeriodRules();
+          await compliance.showTransferCooldowns();
           break;
         case "20d":
-          await compliance.viewComplianceLevelRules();
+          await compliance.showWhitelistTiers();
           break;
 
         // Token (21-30)
