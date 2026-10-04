@@ -222,8 +222,9 @@ describe("ComplianceRules whitelist modes (Task 3.4)", function () {
       await mode(M.ZkOnly);
       await expect(s.token.connect(alice).transfer(bob.address, 10n)).to.not.be
         .reverted;
-      await expect(s.token.connect(alice).transfer(carol.address, 10n)).to.be
-        .reverted;
+      await expect(
+        s.token.connect(alice).transfer(carol.address, 10n),
+      ).to.be.revertedWith("Compliance check failed");
     });
   });
 
@@ -249,7 +250,9 @@ describe("ComplianceRules whitelist modes (Task 3.4)", function () {
       ]);
       await mode(M.ZkOnly);
       await expect(s.token.mint(alice.address, 5n)).to.not.be.reverted;
-      await expect(s.token.mint(carol.address, 5n)).to.be.reverted;
+      await expect(s.token.mint(carol.address, 5n)).to.be.revertedWith(
+        "Compliance check failed",
+      );
     });
 
     it("trusted path: the counterparty obeys the mode, the escrow is exempt", async function () {
@@ -416,7 +419,9 @@ describe("ComplianceRules whitelist modes (Task 3.4)", function () {
       await expect(
         rules.setWhitelistMode(Z, M.OracleOnly),
       ).to.be.revertedWithCustomError(rules, "InvalidTokenAddress");
-      await expect(rules.setWhitelistMode(t, 3)).to.be.reverted;
+      // Out of enum range: the ABI decoder refuses the argument with an
+      // empty revert (no panic: no conversion in the body is reached).
+      await expect(rules.setWhitelistMode(t, 3)).to.be.revertedWithoutReason();
     });
 
     it("only the owner sets either", async function () {

@@ -332,7 +332,16 @@ describeProofs("Blacklist non-membership soundness (Task 3.7)", function () {
           return false;
         }
       });
-      if (!circom) this.skip(); // CI builds circom 2.x before the tests
+      if (!circom) {
+        // CI builds circom 2.x before the tests: a pending test there would
+        // hide a lost circom (review 3.9 C-7), so it fails instead.
+        if (process.env.CI) {
+          throw new Error(
+            "circom 2.x not found (CIRCOM_BIN, ~/.cargo/bin, /usr/local/bin): required when CI is set",
+          );
+        }
+        this.skip();
+      }
       const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "bl-setup-"));
       try {
         execFileSync(circom, [

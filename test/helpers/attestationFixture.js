@@ -190,7 +190,16 @@ function reproducesCommittedVerifier(ctx, build, contractName) {
       return false;
     }
   });
-  if (!circom) ctx.skip(); // CI builds circom 2.x before the tests
+  if (!circom) {
+    // CI builds circom 2.x before the tests: a pending test there would
+    // hide a lost circom (review 3.9 C-7), so it fails instead.
+    if (process.env.CI) {
+      throw new Error(
+        "circom 2.x not found (CIRCOM_BIN, ~/.cargo/bin, /usr/local/bin): required when CI is set",
+      );
+    }
+    ctx.skip();
+  }
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "att-setup-"));
   try {
     execFileSync(circom, [

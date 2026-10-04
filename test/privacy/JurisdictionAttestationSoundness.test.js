@@ -13,6 +13,8 @@ const {
   expectTamperedRefused,
 } = require("../helpers/attestationFixture");
 const { signAttestation } = require("../../scripts/zk/attest");
+const snarkjs = require("snarkjs");
+const { ProofFormatter } = require("../../utils/proof-formatter");
 
 const { describeProofs } = require("../helpers/zkProofs");
 // Task 3.7b (D31 a): the jurisdiction proof states "a trusted issuer signed
@@ -136,6 +138,50 @@ describeProofs("Jurisdiction attestation soundness (Task 3.7b)", function () {
           generator: f.gen,
         }),
       ).to.be.rejectedWith(/the attestation is for PrivacyManager/);
+    });
+
+    // Review 3.9 C-1 (probe /tmp/p3c): the chain id signal is compared with
+    // block.chainid on chain, not only inside the issuer's signature.
+    it("a real proof signed for chainId 1 passes the wrapper and is refused WrongChainId", async function () {
+      const w1 = f.wallets[1];
+      const signed = await signAttestation({
+        key: f.key,
+        circuit: "jurisdiction",
+        chainId: 1,
+        privacyManager: f.pm.target,
+        identity: 0xa11ce,
+        mask: 1,
+      });
+      const input = circuitInput(signed, [15n], w1.address);
+      const { proof, publicSignals } = await snarkjs.plonk.fullProve(
+        input,
+        f.paths.wasm,
+        f.paths.zkey,
+      );
+      const c = await ProofFormatter.formatPlonkForSolidity(
+        proof,
+        publicSignals,
+      );
+      expect(c.publicSignals[3]).to.equal("1");
+      // The cryptography accepts it: only PrivacyManager's check refuses.
+      expect(
+        await f.zk.verifyJurisdictionProof.staticCall(c.proof, c.publicSignals),
+      ).to.equal(true);
+      await expect(
+        f.pm.connect(w1).submitAttestationProof(f.id, c.proof, c.publicSignals),
+      )
+        .to.be.revertedWithCustomError(f.pm, "WrongChainId")
+        .withArgs(1n);
+    });
+
+    it("a short signal array is refused InvalidSignalCount", async function () {
+      await expect(
+        f.pm
+          .connect(f.wallets[1])
+          .submitAttestationProof(f.id, r1.proof, r1.signals.slice(0, 6)),
+      )
+        .to.be.revertedWithCustomError(f.pm, "InvalidSignalCount")
+        .withArgs(7n, 6n);
     });
   });
 

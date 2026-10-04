@@ -210,11 +210,12 @@ describe("One jurisdiction source (Task 3.8)", function () {
         );
       }
       // No compliance(); a compliance without jurisdictionRuleVersion.
-      for (const t of [
-        z,
-        await (await deploy("MockPolicyToken", z)).getAddress(),
-      ]) {
-        await expect(pm.setPolicyToken(t)).to.be.reverted;
+      // Both are low-level reverts with no data (review 3.9 C-2); the mock
+      // returns a contract, so its revert is the version probe's.
+      const noVersion = await deploy("MockPolicyToken", z);
+      expect(await noVersion.compliance()).to.equal(z);
+      for (const t of [z, await noVersion.getAddress()]) {
+        await expect(pm.setPolicyToken(t)).to.be.revertedWithoutReason();
       }
       await expect(
         pm.connect(stranger).setPolicyToken(token),
@@ -261,6 +262,36 @@ describe("One jurisdiction source (Task 3.8)", function () {
         `PrivacyManager jurisdiction source (VSC.compliance()): ComplianceRules ${rules}`,
         "PrivacyManager jurisdiction bits registered: 1",
       ]);
+    });
+
+    // Review 3.9 C-4: a PrivacyManager from before 3.8 has no policyToken().
+    // Stand-in (as HandoverWhitelistMode.test.ts does for 3.4): the real
+    // PrivacyManager, with that one call sent to a contract that lacks it on
+    // chain (the wrapper), so the code-hash pins still see the real code.
+    it("refuses a PrivacyManager that predates 3.8, sending nothing", async function () {
+      const f = await handoverFixture();
+      const { c, args, deployer } = f;
+      const pm = c.privacyManager;
+      const pmAddr = await pm.getAddress();
+      const lacking = await ethers.getContractAt(
+        "PrivacyManager",
+        await c.zkVerifier.getAddress(),
+      );
+      await expect(lacking.policyToken()).to.be.rejected;
+      args.privacyManager = new Proxy(pm, {
+        get: (t, k) =>
+          k === "policyToken" ? lacking.policyToken : Reflect.get(t, k),
+      });
+      const nonce = await ethers.provider.getTransactionCount(deployer.address);
+      await expect(handoverDeployerPowers(args)).to.be.rejectedWith(
+        new RegExp(
+          `PrivacyManager ${pmAddr} has no policyToken\\(\\) \\(predates Task 3.8\\): redeploy it before the ceremony`,
+        ),
+      );
+      expect(
+        await ethers.provider.getTransactionCount(deployer.address),
+      ).to.equal(nonce);
+      expect(await c.token.isAgent(deployer.address)).to.equal(true);
     });
   });
 
@@ -354,6 +385,34 @@ describe("One jurisdiction source (Task 3.8)", function () {
         )
           .to.be.revertedWithCustomError(pm, "AttestationNullifierBound")
           .withArgs(w2.address);
+      });
+
+      // Review 3.9 C-3 (A-L1): pins TODAY's known behaviour so Task 4.1 has
+      // a failing test to turn. PrivacyManager cannot observe the Token
+      // moving its compliance; the policy hash folds in the rules address
+      // and its rule version, and both come back unchanged. When 4.1 lands
+      // the fix (an epoch bumped when the derived source changes), flip the
+      // last assertion to false and rename the test.
+      it("KNOWN, flip in 4.1: Token compliance R1 -> R2 -> R1, R1's rule unchanged, revives an R1 record", async function () {
+        const { pm, rules, policyToken, wallets } = f;
+        const w2 = wallets[2];
+        const r1Addr = await rules.getAddress();
+        const valid = async () =>
+          (await pm.getUserProofInfo(w2.address, JUR)).isValid;
+        expect(await valid()).to.equal(true);
+        const version = await rules.jurisdictionRuleVersion(policyToken);
+        const r2 = await (
+          await ethers.getContractFactory("ComplianceRules")
+        ).deploy(wallets[0].address, [], []);
+        await policyToken.setCompliance(await r2.getAddress());
+        expect(await pm.complianceRules()).to.equal(await r2.getAddress());
+        expect(await valid()).to.equal(false);
+        await policyToken.setCompliance(r1Addr);
+        expect(await rules.jurisdictionRuleVersion(policyToken)).to.equal(
+          version,
+        );
+        // The revival 4.1 removes:
+        expect(await valid()).to.equal(true);
       });
     },
   );
