@@ -14,7 +14,7 @@
  */
 
 const { ethers } = require("hardhat");
-const { addrOf, same, fail } = require("./HandoverChecks");
+const { addrOf, same, fail, MODE } = require("./HandoverChecks");
 const { scanLogs } = require("./HandoverScans");
 const {
   codeHashChecks,
@@ -26,7 +26,6 @@ const {
 
 const check = (cond, msg) => cond || fail(msg);
 const ZERO = ethers.ZeroAddress;
-const MODE = ["OracleOnly", "ZkOnly", "Either"];
 const ATTESTATION_CIRCUITS = [
   ["jurisdiction", ethers.id("JURISDICTION_PROOF")],
   ["accreditation", ethers.id("ACCREDITATION_PROOF")],
@@ -164,8 +163,17 @@ async function privacySteps({ o, d, dAddr, ok, log }) {
  * Pushes to `warnings` (review 3.3 LOW-3) when the current whitelist root
  * was published by the deployer: bindings made under it stay live until ops
  * rotates the root; and when a circuit trusts no attestor (Task 3.7b).
+ * The deployer-era issuer-key and root warnings also go to `residual`
+ * (review B-L3): the deployer, or a key it chose, still vouches.
  */
-async function privacyLines(o, dAddr, ops, govAddr, warnings = []) {
+async function privacyLines(
+  o,
+  dAddr,
+  ops,
+  govAddr,
+  warnings = [],
+  residual = [],
+) {
   const lines = [];
   const pm = o.privacyManager;
   const pmAddr = pm ? await addrOf(pm) : o.derived?.factories?.privacyManager;
@@ -224,9 +232,9 @@ async function privacyLines(o, dAddr, ops, govAddr, warnings = []) {
         same(e.args.by, dAddr) &&
         (await c.trustedAttestor(e.args.circuitId, e.args.attestor))
       ) {
-        warnings.push(
-          `PrivacyManager issuer key (Ax ${e.args.ax}) for ${name ? name[0] : e.args.circuitId} was trusted by the deployer: re-approve it by a PrivacyParameters vote or untrust it`,
-        );
+        const w = `PrivacyManager issuer key (Ax ${e.args.ax}) for ${name ? name[0] : e.args.circuitId} was trusted by the deployer: re-approve it by a PrivacyParameters vote or untrust it`;
+        warnings.push(w);
+        residual.push(w);
       }
     }
     used = await c.zkVerifier();
@@ -244,9 +252,9 @@ async function privacyLines(o, dAddr, ops, govAddr, warnings = []) {
       const who = same(pub, dAddr)
         ? "the deployer"
         : `${pub}, not ops or governance`;
-      warnings.push(
-        `PrivacyManager whitelist root ${last.args.root} (version ${last.args.version}) was published by ${who}: republish as ops so deployer-era bindings lapse`,
-      );
+      const w = `PrivacyManager whitelist root ${last.args.root} (version ${last.args.version}) was published by ${who}: republish as ops so deployer-era bindings lapse`;
+      warnings.push(w);
+      residual.push(w);
     }
   }
   // Task 3.4: what ComplianceRules wires agrees with the ceremony's one.

@@ -237,11 +237,17 @@ export async function runHandover(
   });
 
   console.log("\n🔍 Handover: verify");
-  const { ok, checks, warnings } = await assertHandoverComplete(args);
+  const { ok, checks, warnings, residual } = await assertHandoverComplete(args);
   for (const c of checks) console.log(`   ${c.ok ? "✅" : "❌"} ${c.label}`);
   for (const w of warnings) console.log(`   ⚠️  ${w}`);
   if (!ok) throw new Error("handover incomplete (see ❌ above)");
-  console.log("\n✅ Handover complete: the deployer holds no power.");
+  // Review B-L3: a deployer-trusted issuer key or deployer-published root
+  // still vouches, so "no power" would overstate it.
+  console.log(
+    residual.length
+      ? "\n⚠️  Handover complete with warnings: see above."
+      : "\n✅ Handover complete: the deployer holds no power.",
+  );
 }
 
 async function main(): Promise<void> {

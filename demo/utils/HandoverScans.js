@@ -185,8 +185,36 @@ async function deployerEscrows(factory, dAddr, o) {
   return out;
 }
 
+/**
+ * Review B-L2: every live ComplianceRules rule administrator, from
+ * RuleAdministratorUpdated events plus the owners the constructor and
+ * transfers named (the constructor authorizes its owner without the event)
+ * and `extra` (the deployer). A rule administrator can set or clear any
+ * token's jurisdiction rule, which also lapses every private jurisdiction
+ * record (Task 3.8).
+ */
+async function liveRuleAdministrators(o, extra = []) {
+  const rules = o.complianceRules;
+  const admins = await scanLogs(
+    rules,
+    rules.filters.RuleAdministratorUpdated(),
+    o,
+  );
+  const owners = await scanLogs(rules, rules.filters.OwnershipTransferred(), o);
+  const live = [];
+  for (const a of uniq([
+    ...admins.map((ev) => ev.args[0]),
+    ...owners.map((ev) => ev.args[1]),
+    ...extra,
+  ])) {
+    if (await rules.ruleAdministrators(a)) live.push(a);
+  }
+  return live;
+}
+
 module.exports = {
   uniq,
+  liveRuleAdministrators,
   scanLogs,
   checkFromBlock,
   roleHolders,

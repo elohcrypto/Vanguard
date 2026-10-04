@@ -73,6 +73,40 @@ describe("Handover CLI (scripts/handover.ts)", function () {
     expect(await f.c.privacyManager.listOperator()).to.equal(f.ops.address);
   });
 
+  // Review B-L3: the closing line follows the deployer-era warnings.
+  it("closes with warnings while a deployer-trusted issuer key vouches", async function () {
+    const out: string[] = [];
+    console.log = (m: string) => out.push(m);
+    await runHandover(cfg);
+    expect(out).to.include(
+      "\n✅ Handover complete: the deployer holds no power.",
+    );
+    const g = await handoverFixture();
+    const {
+      attestorPublicKey,
+      newAttestorKey,
+    } = require("../../scripts/zk/attest");
+    const { Ax, Ay } = await attestorPublicKey(newAttestorKey());
+    await g.c.privacyManager.setTrustedAttestor(
+      ethers.id("JURISDICTION_PROOF"),
+      Ax,
+      Ay,
+      true,
+    );
+    const a = async (k: string) => g.c[k].getAddress();
+    for (const k of Object.keys(g.c)) {
+      if (k in cfg && k !== "governance") cfg[k] = await a(k);
+    }
+    cfg.governance = g.govAddr;
+    cfg.oracles = [await g.args.oracles[0].getAddress()];
+    cfg.issuers = [await g.args.issuers[0].getAddress()];
+    out.length = 0;
+    await runHandover(cfg);
+    expect(out).to.include("\n⚠️  Handover complete with warnings: see above.");
+    expect(out.join("\n")).to.not.include("holds no power");
+    expect(out.join("\n")).to.include("was trusted by the deployer");
+  });
+
   it("the full phase completes with oracles and issuers read from chain", async function () {
     const wl = f.args.oracles[0];
     await f.c.complianceRules.setWhitelistOracle(

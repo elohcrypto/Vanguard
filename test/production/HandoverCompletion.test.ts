@@ -38,7 +38,14 @@ describe("Handover completion check (table)", function () {
   // Review L6: every completion line fails when its power is given back.
   it("each completion line catches its power (table)", async function () {
     const { deployer, ops, guardian, stranger, govAddr } = f;
-    expect((await assertHandoverComplete(args)).failures).to.deep.equal([]);
+    const happy = await assertHandoverComplete(args);
+    expect(happy.failures).to.deep.equal([]);
+    // Task 3.9: the three lines the close-out added (B-L2, B-M2, D33).
+    expect(happy.checks.map((x: any) => x.label)).to.include.members([
+      "no ComplianceRules rule administrator but governance and ops",
+      `VSC and VGT enforce ComplianceRules ${await c.complianceRules.getAddress()}`,
+      "GovernanceToken whitelist mode is OracleOnly (D33)",
+    ]);
     await network.provider.send("hardhat_impersonateAccount", [govAddr]);
     await network.provider.send("hardhat_setBalance", [
       govAddr,
@@ -90,6 +97,11 @@ describe("Handover completion check (table)", function () {
     const fakeAddr = await fake.getAddress();
     await fake.setGovernance(govAddr);
     const issuerAdmin = f.issuerAdmin;
+    const otherRules = await (
+      await (
+        await ethers.getContractFactory("ComplianceRules")
+      ).deploy(d, [840], [])
+    ).getAddress();
     const kcKey = ethers.keccak256(
       ethers.solidityPacked(["address"], [ops.address]),
     );
@@ -203,6 +215,26 @@ describe("Handover completion check (table)", function () {
           await c.complianceRules
             .connect(gov)
             .setBlacklistOracle(vgtAddr, await bl.getAddress());
+        },
+      ],
+      // Task 3.9, review B-L2: any other live rule administrator.
+      [
+        `${s} is still a ComplianceRules rule administrator (neither governance nor ops)`,
+        () => c.complianceRules.connect(gov).setRuleAdministrator(s, true),
+      ],
+      // Review B-M2: a token moved to another ComplianceRules by its owner.
+      [
+        `VSC and VGT enforce ComplianceRules ${await c.complianceRules.getAddress()}`,
+        () => c.token.connect(gov).setCompliance(otherRules),
+      ],
+      // D33 (a): a ZK whitelist mode on VGT.
+      [
+        "GovernanceToken whitelist mode is OracleOnly (D33)",
+        async () => {
+          await c.complianceRules
+            .connect(gov)
+            .setPrivacyManager(vgtAddr, await pm.getAddress());
+          await c.complianceRules.connect(gov).setWhitelistMode(vgtAddr, 1);
         },
       ],
       ["deployer is not a Token agent", () => c.token.connect(gov).addAgent(d)],
@@ -361,5 +393,83 @@ describe("Handover completion check (table)", function () {
     const after = await assertHandoverComplete(args);
     expect(after.warnings.join("\n")).to.not.include(line);
     await network.provider.send("hardhat_stopImpersonatingAccount", [govAddr]);
+  });
+});
+
+// Task 3.9 (review B-L2, B-L4): what the deployer did before the ceremony.
+describe("Handover completion check: deployer-era residue (3.9)", function () {
+  let f: Awaited<ReturnType<typeof handoverFixture>>;
+  let c: Record<string, any>;
+  let args: Record<string, any>;
+
+  beforeEach(async function () {
+    f = await handoverFixture();
+    ({ c, args } = f);
+  });
+
+  async function ceremony() {
+    const report = await handoverDeployerPowers(args);
+    await acceptAllByVote({
+      governance: c.governance,
+      contracts: c,
+      proposer: f.proposer,
+      voters: f.voters,
+      registryProposals: report.registryProposals,
+      log: () => {},
+    });
+  }
+
+  it("refuses a rule administrator the deployer authorized and never revoked", async function () {
+    const s = f.stranger.address;
+    await c.complianceRules.setRuleAdministrator(s, true);
+    await ceremony();
+    const { ok, failures } = await assertHandoverComplete(args);
+    expect(ok).to.equal(false);
+    expect(failures).to.deep.equal([
+      `${s} is still a ComplianceRules rule administrator (neither governance nor ops)`,
+    ]);
+  });
+
+  // Review B-L4: the two deployer-era privacy warnings, as warnings.
+  it("warns, without failing, on an issuer key the deployer trusted", async function () {
+    const {
+      attestorPublicKey,
+      newAttestorKey,
+    } = require("../../scripts/zk/attest");
+    const { Ax, Ay } = await attestorPublicKey(newAttestorKey());
+    const JUR = ethers.id("JURISDICTION_PROOF");
+    await c.privacyManager.setTrustedAttestor(JUR, Ax, Ay, true);
+    await ceremony();
+    const line = `PrivacyManager issuer key (Ax ${Ax}) for jurisdiction was trusted by the deployer: re-approve it by a PrivacyParameters vote or untrust it`;
+    const before = await assertHandoverComplete(args);
+    expect(before.ok).to.equal(true);
+    expect(before.failures).to.deep.equal([]);
+    expect(before.warnings).to.include(line);
+    expect(before.residual).to.deep.equal([line]);
+    // Untrusted by governance (as a vote would): the warning goes.
+    await network.provider.send("hardhat_impersonateAccount", [f.govAddr]);
+    await network.provider.send("hardhat_setBalance", [
+      f.govAddr,
+      "0xDE0B6B3A7640000",
+    ]);
+    const gov = await ethers.getSigner(f.govAddr);
+    await c.privacyManager.connect(gov).setTrustedAttestor(JUR, Ax, Ay, false);
+    const after = await assertHandoverComplete(args);
+    expect(after.warnings).to.not.include(line);
+    expect(after.residual).to.deep.equal([]);
+    await network.provider.send("hardhat_stopImpersonatingAccount", [
+      f.govAddr,
+    ]);
+  });
+
+  it("warns, without failing, on a whitelist root the deployer published", async function () {
+    const root = ethers.toBeHex(5n, 32);
+    await c.privacyManager.publishWhitelistRoot(root);
+    await ceremony();
+    const line = `PrivacyManager whitelist root ${root} (version 1) was published by the deployer: republish as ops so deployer-era bindings lapse`;
+    const r = await assertHandoverComplete(args);
+    expect(r.ok).to.equal(true);
+    expect(r.warnings).to.include(line);
+    expect(r.residual).to.deep.equal([line]);
   });
 });

@@ -15,6 +15,8 @@ const {
   withBoundRegistry,
   liveOnToken,
   planFor,
+  vgtWhitelistMode,
+  complianceMismatches,
 } = require("./HandoverChecks");
 const {
   FACTORY_PLAN,
@@ -26,7 +28,11 @@ const {
   registryGovernors,
   openRegistryProposals,
 } = require("./HandoverPowers");
-const { factoryRoleLines, deployerEscrows } = require("./HandoverScans");
+const {
+  factoryRoleLines,
+  deployerEscrows,
+  liveRuleAdministrators,
+} = require("./HandoverScans");
 const { privacyLines } = require("./HandoverPrivacy");
 
 const ZERO = ethers.ZeroAddress;
@@ -35,10 +41,12 @@ const EXEMPT_ABI = [
 ];
 
 /**
- * Read-only verification. Returns { ok, failures, checks, warnings }; never
- * pauses. Checks every contract the config names AND every one derived from
- * chain (HandoverPowers.derivePowers), so an omitted oracle or factory
- * cannot pass as "no power". Warnings never fail the check.
+ * Read-only verification. Returns { ok, failures, checks, warnings,
+ * residual }; never pauses. Checks every contract the config names AND
+ * every one derived from chain (HandoverPowers.derivePowers), so an
+ * omitted oracle or factory cannot pass as "no power". Warnings never fail
+ * the check; `residual` lists those that mean a deployer-era key still
+ * vouches (review B-L3).
  */
 async function assertHandoverComplete(o) {
   o = await withBoundRegistry(o);
@@ -49,6 +57,8 @@ async function assertHandoverComplete(o) {
   const govAddr = await addrOf(o.governance);
   const checks = [];
   const warnings = [];
+  // Warnings that mean the deployer still vouches (review B-L3).
+  const residual = [];
   const add = (label, pass) => checks.push({ label, ok: Boolean(pass) });
   if (o.skippedRegistry) {
     add(
@@ -83,6 +93,7 @@ async function assertHandoverComplete(o) {
     ops,
     govAddr,
     warnings,
+    residual,
   )) {
     add(label, pass);
   }
@@ -125,6 +136,25 @@ async function assertHandoverComplete(o) {
     "deployer is not a ComplianceRules rule administrator",
     !(await o.complianceRules.ruleAdministrators(dAddr)),
   );
+  // Review B-L2: nor any other key the deployer ever authorized.
+  const extraAdmins = (await liveRuleAdministrators(o, [dAddr])).filter(
+    (a) => !same(a, govAddr) && !same(a, ops),
+  );
+  for (const a of extraAdmins) {
+    add(
+      `${a} is still a ComplianceRules rule administrator (neither governance nor ops)`,
+      false,
+    );
+  }
+  if (!extraAdmins.length) {
+    add("no ComplianceRules rule administrator but governance and ops", true);
+  }
+  // Review B-M2: both tokens enforce the ComplianceRules governance owns.
+  const mismatches = await complianceMismatches(o);
+  add(
+    `VSC and VGT enforce ComplianceRules ${await addrOf(o.complianceRules)}`,
+    mismatches.length === 0,
+  );
   add("ops is a Token agent", await o.token.isAgent(ops));
   add("ops is a GovernanceToken agent", await o.governanceToken.isAgent(ops));
   add(
@@ -152,6 +182,11 @@ async function assertHandoverComplete(o) {
       await o.complianceRules.blacklistOracle(await addrOf(o.governanceToken)),
       ZERO,
     ),
+  );
+  // D33 (a): no ZK whitelist mode on VGT (review B-M1).
+  add(
+    "GovernanceToken whitelist mode is OracleOnly (D33)",
+    (await vgtWhitelistMode(o)) === "OracleOnly",
   );
   if (o.investorTypeRegistry) {
     const reg = o.investorTypeRegistry;
@@ -243,7 +278,7 @@ async function assertHandoverComplete(o) {
 
   await residueWarnings(o, dAddr, govAddr, warnings);
   const failures = checks.filter((c) => !c.ok).map((c) => c.label);
-  return { ok: failures.length === 0, failures, checks, warnings };
+  return { ok: failures.length === 0, failures, checks, warnings, residual };
 }
 
 /**

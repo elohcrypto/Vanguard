@@ -154,6 +154,44 @@ async function withBoundRegistry(o, log) {
 const liveOnToken = async (o, reg) =>
   same(await o.token.investorTypeRegistry(), await addrOf(reg));
 
+/** ComplianceRules.WhitelistMode names, in enum order (Task 3.4). */
+const MODE = ["OracleOnly", "ZkOnly", "Either"];
+
+/**
+ * VGT's whitelist mode name in the config's ComplianceRules, or null when
+ * that ComplianceRules predates Task 3.4 (no getter). Only a revert means
+ * "no getter"; anything else (an RPC failure) is rethrown.
+ */
+async function vgtWhitelistMode(o) {
+  const vgt = await addrOf(o.governanceToken);
+  try {
+    return MODE[Number(await o.complianceRules.whitelistMode(vgt))];
+  } catch (e) {
+    if (e.code !== "CALL_EXCEPTION" && !/revert/i.test(e.message)) throw e;
+    return null;
+  }
+}
+
+/**
+ * Review B-M2: one refusal per token whose compliance() is not the config's
+ * ComplianceRules (empty when both match).
+ */
+async function complianceMismatches(o) {
+  const rules = await addrOf(o.complianceRules);
+  const out = [];
+  for (const [label, t] of [
+    ["Token (VSC)", o.token],
+    ["GovernanceToken (VGT)", o.governanceToken],
+  ]) {
+    const used = await t.compliance();
+    if (same(used, rules)) continue;
+    out.push(
+      `${label} ${await addrOf(t)} enforces ComplianceRules ${used} (compliance()), but the config names ComplianceRules ${rules}: name the one the token enforces, or move the token back by its owner (setCompliance) before the ceremony`,
+    );
+  }
+  return out;
+}
+
 /**
  * Every precondition, read-only, before the ceremony's first transaction
  * (plan v2 Task 2E.2): refuse to start rather than stop halfway. Returns
@@ -201,6 +239,9 @@ async function preflight(o, { acceptOnly = false } = {}) {
       "VGT is paused: every acceptance vote would revert; the owner must unpause first",
     );
   }
+  // Review B-M2: both tokens must enforce the ComplianceRules the ceremony
+  // hands to governance, or governance would own a contract no token reads.
+  for (const c of await complianceMismatches(o)) fail(c);
   // D23: a listed governance fails every VGT fee transfer (proposal and
   // vote fees, refunds), so no blacklist oracle may gate VGT.
   const vgtAddr = await addrOf(o.governanceToken);
@@ -208,6 +249,21 @@ async function preflight(o, { acceptOnly = false } = {}) {
   if (!same(vgtBlacklist, ethers.ZeroAddress)) {
     fail(
       `a blacklist oracle (${vgtBlacklist}) is bound to GovernanceToken: D23 forbids it (listing governance halts every fee flow); the ComplianceRules owner must setBlacklistOracle(VGT, 0) first`,
+    );
+  }
+  // D33 (a), review B-M1: the same rule by another route. In ZkOnly or
+  // Either every fee transfer needs a live whitelist binding, so the list
+  // operator (ops after the handover) could halt governance by publishing
+  // one root, and the acceptance votes below would revert halfway.
+  const vgtMode = await vgtWhitelistMode(o);
+  if (vgtMode === null) {
+    fail(
+      `ComplianceRules ${await addrOf(o.complianceRules)} has no whitelistMode(token) (predates Task 3.4): redeploy it before the ceremony`,
+    );
+  }
+  if (vgtMode !== "OracleOnly") {
+    fail(
+      `GovernanceToken ${vgtAddr} is in whitelist mode ${vgtMode}: D33 allows only OracleOnly on VGT (in a ZK mode every vote and proposal fee needs a whitelist binding, so the list operator, ops after the handover, could halt every governance fee flow by publishing one root); the ComplianceRules owner must setWhitelistMode(VGT, 0) (OracleOnly) before the ceremony`,
     );
   }
   // Governance must be bound to every contract it is about to own, or the
@@ -390,5 +446,8 @@ module.exports = {
   preflight,
   checkVoters,
   liveOnToken,
+  MODE,
+  vgtWhitelistMode,
+  complianceMismatches,
   fail,
 };

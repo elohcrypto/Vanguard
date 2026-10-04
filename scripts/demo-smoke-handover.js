@@ -317,7 +317,7 @@ async function runHandoverSmoke(state, failures) {
 
   if (result.ok) {
     console.log(
-      `✅ Handover ceremony: ${result.checks.length} checks pass, the deployer holds no power.`,
+      `✅ Handover ceremony: ${result.checks.length} checks pass, ${result.residual.length ? "with warnings (see below)" : "the deployer holds no power"}.`,
     );
     for (const w of result.warnings) console.log(`   ⚠️  ${w}`);
   }

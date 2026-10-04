@@ -129,6 +129,57 @@ describe("Handover: PrivacyManager wired in ComplianceRules (3.4)", function () 
     );
   });
 
+  // D33 (a), review B-M1 (probe /tmp/p3b/vgtzk.test.js): with VGT in a ZK
+  // mode the preflight used to pass, the deployer steps ran and every
+  // fee-paying vote then reverted "Compliance check failed".
+  for (const [mode, name] of [
+    [1, "ZkOnly"],
+    [2, "Either"],
+  ] as const) {
+    it(`refuses VGT in whitelist mode ${name} before Step 1 (D33)`, async function () {
+      await wire(vgt, pmAddr, mode);
+      const lines: string[] = [];
+      args.log = (m: string) => lines.push(m);
+      await refused(
+        new RegExp(
+          `GovernanceToken ${vgt} is in whitelist mode ${name}: D33 allows only OracleOnly on VGT .*setWhitelistMode\\(VGT, 0\\) \\(OracleOnly\\) before the ceremony`,
+        ),
+      );
+      expect(lines.join("\n")).to.not.include("Step 1");
+      expect(await c.token.isAgent(deployer.address)).to.equal(true);
+      expect(await c.token.isAgent(f.ops.address)).to.equal(false);
+      expect(await c.complianceRules.pendingOwner()).to.equal(
+        ethers.ZeroAddress,
+      );
+      // Back to OracleOnly, the same ceremony runs.
+      await c.complianceRules.setWhitelistMode(vgt, 0);
+      args.log = () => {};
+      await handoverDeployerPowers(args);
+    });
+  }
+
+  // Review B-M2: a token that enforces another ComplianceRules.
+  for (const key of ["token", "governanceToken"]) {
+    it(`refuses when ${key}.compliance() is not the config's ComplianceRules`, async function () {
+      const other = await (
+        await ethers.getContractFactory("ComplianceRules")
+      ).deploy(deployer.address, [840], []);
+      const otherAddr = await other.getAddress();
+      await c[key].setCompliance(otherAddr);
+      const label =
+        key === "token" ? "Token \\(VSC\\)" : "GovernanceToken \\(VGT\\)";
+      await refused(
+        new RegExp(
+          `${label} ${await c[key].getAddress()} enforces ComplianceRules ${otherAddr} \\(compliance\\(\\)\\), but the config names ComplianceRules ${await c.complianceRules.getAddress()}`,
+        ),
+      );
+      const { failures } = await assertHandoverComplete(args);
+      expect(failures).to.include(
+        `VSC and VGT enforce ComplianceRules ${await c.complianceRules.getAddress()}`,
+      );
+    });
+  }
+
   it("refuses a wired PrivacyManager that is not the bound one", async function () {
     await c.privacyManager.transferOwnership(govAddr);
     await c.governance.setPrivacyManager(pmAddr);

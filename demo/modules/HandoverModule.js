@@ -237,13 +237,16 @@ class HandoverModule {
     const args = this._ceremonyArgs();
     if (!args) return;
     try {
-      const { ok, checks, warnings } = await assertHandoverComplete(args);
+      const { ok, checks, warnings, residual } =
+        await assertHandoverComplete(args);
       for (const c of checks)
         console.log(`   ${c.ok ? "✅" : "❌"} ${c.label}`);
       for (const w of warnings) console.log(`   ⚠️  ${w}`);
       console.log(
         ok
-          ? "\n   ✅ Handover complete: the deployer holds no power."
+          ? residual.length
+            ? "\n   ⚠️  Handover complete with warnings: see above."
+            : "\n   ✅ Handover complete: the deployer holds no power."
           : `\n   ⚠️  Handover incomplete: ${checks.filter((c) => !c.ok).length} check(s) open.`,
       );
     } catch (error) {
