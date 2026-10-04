@@ -258,7 +258,7 @@ describe("Oracle gating in ComplianceRules", function () {
       ).deploy("T", "T", 0);
       const tAddr = await trusted.getAddress();
       // A trusted contract has no identity (governance, escrow wallets).
-      await rules.addTrustedContract(tAddr);
+      await rules.addTrustedContract(await token.getAddress(), tAddr);
     });
 
     it("a blacklisted sender cannot transfer TO a trusted contract", async function () {
@@ -293,7 +293,7 @@ describe("Oracle gating in ComplianceRules", function () {
       ).deploy("T", "T", 0);
       const tAddr = await trusted.getAddress();
       // A trusted contract has no identity (governance, escrow wallets).
-      await rules.addTrustedContract(tAddr);
+      await rules.addTrustedContract(await token.getAddress(), tAddr);
     });
 
     it("an unlisted sender cannot transfer TO a trusted contract", async function () {
@@ -346,7 +346,10 @@ describe("Oracle gating in ComplianceRules", function () {
       const other = await (
         await ethers.getContractFactory("MockToken")
       ).deploy("U", "U", 0);
-      await rules.addTrustedContract(await other.getAddress());
+      await rules.addTrustedContract(
+        await token.getAddress(),
+        await other.getAddress(),
+      );
       await token.connect(t).transfer(await other.getAddress(), E(4));
       expect(await token.balanceOf(await other.getAddress())).to.equal(E(4));
     });

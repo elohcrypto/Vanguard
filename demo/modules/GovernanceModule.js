@@ -174,12 +174,23 @@ class GovernanceModule {
       await (await govToken.addAgent(govAddr)).wait();
       console.log("   ✅ VanguardGovernance set as agent");
 
-      // Set VanguardGovernance as rule administrator for ComplianceRules
+      // Rule administrators are per token (Task 4.1, G5): governance may
+      // set VSC's and VGT's jurisdiction rules by vote; the deployer keeps
+      // VGT's until the handover removes it, as it does for VSC.
       console.log(
         "\n📝 Step 4: Setting VanguardGovernance as rule administrator...",
       );
-      await (await complianceRules.setRuleAdministrator(govAddr, true)).wait();
-      console.log("   ✅ VanguardGovernance set as rule administrator");
+      const deployerAddr = this.state.signers[0].address;
+      for (const [t, who] of [
+        [tokenAddr, govAddr],
+        [govTokenAddr, govAddr],
+        [govTokenAddr, deployerAddr],
+      ]) {
+        await (await complianceRules.setRuleAdministrator(t, who, true)).wait();
+      }
+      console.log(
+        "   ✅ VanguardGovernance set as rule administrator for VSC and VGT",
+      );
 
       // Configure ComplianceRules with IdentityRegistry for VGT
       console.log("\n📝 Step 5: Configuring ComplianceRules for VGT...");
@@ -202,8 +213,12 @@ class GovernanceModule {
       console.log(
         "\n📝 Step 6: Trusting VanguardGovernance to hold VGT fees...",
       );
-      await (await complianceRules.addTrustedContract(govAddr)).wait();
-      console.log("   ✅ VanguardGovernance added as a trusted contract (D21)");
+      await (
+        await complianceRules.addTrustedContract(govTokenAddr, govAddr)
+      ).wait();
+      console.log(
+        "   ✅ VanguardGovernance trusted on VGT only (D21; per token, G5)",
+      );
       console.log(
         "   ℹ️  It has no identity of its own: it never counts in the quorum",
       );
@@ -1125,7 +1140,9 @@ class GovernanceModule {
 
     console.log("\n🎯 Select compliance parameter to update:");
     console.log("1. Update jurisdiction rules (allowed/blocked countries)");
-    console.log("2. Clear the token's jurisdiction rule (default rule applies)");
+    console.log(
+      "2. Clear the token's jurisdiction rule (default rule applies)",
+    );
     console.log(
       "   (Investor limits are InvestorTypeConfig votes, type 0: Task 4.1)",
     );

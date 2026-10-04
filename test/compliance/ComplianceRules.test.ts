@@ -32,7 +32,12 @@ describe("ComplianceRules", function () {
     );
     await complianceRules.waitForDeployment();
 
-    await complianceRules.setRuleAdministrator(admin.address, true);
+    // Rule administrators are per token (G5): admin may set tokenContract's.
+    await complianceRules.setRuleAdministrator(
+      tokenContract.address,
+      admin.address,
+      true,
+    );
   });
 
   describe("Deployment", function () {
@@ -40,9 +45,16 @@ describe("ComplianceRules", function () {
       expect(await complianceRules.owner()).to.equal(owner.address);
     });
 
-    it("Should set deployer as rule administrator", async function () {
-      expect(await complianceRules.ruleAdministrators(owner.address)).to.be
-        .true;
+    it("grants no rule administrator at construction (G5)", async function () {
+      const fresh = await (
+        await ethers.getContractFactory("ComplianceRules")
+      ).deploy(owner.address, [], []);
+      expect(
+        await fresh.ruleAdministrators(tokenContract.address, owner.address),
+      ).to.be.false;
+      await expect(
+        fresh.setJurisdictionRule(tokenContract.address, [COUNTRY_US], []),
+      ).to.be.revertedWith("ComplianceRules: Only governance can update rules");
     });
 
     it("Should initialize the default jurisdiction rule", async function () {
@@ -80,11 +92,31 @@ describe("ComplianceRules", function () {
 
   describe("Access Control", function () {
     it("Should allow owner to set rule administrators", async function () {
-      await expect(complianceRules.setRuleAdministrator(user.address, true))
+      const t = tokenContract.address;
+      await expect(complianceRules.setRuleAdministrator(t, user.address, true))
         .to.emit(complianceRules, "RuleAdministratorUpdated")
-        .withArgs(user.address, true);
+        .withArgs(t, user.address, true);
 
-      expect(await complianceRules.ruleAdministrators(user.address)).to.be.true;
+      expect(await complianceRules.ruleAdministrators(t, user.address)).to.be
+        .true;
+      expect(
+        await complianceRules.ruleAdministrators(user.address, user.address),
+      ).to.be.false;
+    });
+
+    it("an administrator of one token cannot set another token's rule (G5)", async function () {
+      const other = user.address; // any address names a token
+      await expect(
+        complianceRules
+          .connect(admin)
+          .setJurisdictionRule(other, [COUNTRY_US], []),
+      ).to.be.revertedWith("ComplianceRules: Only governance can update rules");
+      await expect(
+        complianceRules.connect(admin).clearJurisdictionRule(other),
+      ).to.be.revertedWith("ComplianceRules: Only governance can update rules");
+      await complianceRules
+        .connect(admin)
+        .setJurisdictionRule(tokenContract.address, [COUNTRY_US], []);
     });
 
     it("Should reject rule setting by unauthorized users", async function () {
@@ -97,7 +129,9 @@ describe("ComplianceRules", function () {
 
     it("Should reject administrator changes by non-owner", async function () {
       await expect(
-        complianceRules.connect(admin).setRuleAdministrator(user.address, true),
+        complianceRules
+          .connect(admin)
+          .setRuleAdministrator(tokenContract.address, user.address, true),
       ).to.be.revertedWithCustomError(
         complianceRules,
         "OwnableUnauthorizedAccount",
@@ -105,7 +139,11 @@ describe("ComplianceRules", function () {
     });
 
     it("a revoked administrator can no longer set rules", async function () {
-      await complianceRules.setRuleAdministrator(admin.address, false);
+      await complianceRules.setRuleAdministrator(
+        tokenContract.address,
+        admin.address,
+        false,
+      );
       await expect(
         complianceRules
           .connect(admin)
@@ -195,19 +233,28 @@ describe("ComplianceRules", function () {
 
   describe("Edge Cases and Error Handling", function () {
     it("Should reject zero address for token", async function () {
+      // address(0) has no administrator, so the rule setters refuse first.
       await expect(
         complianceRules
           .connect(admin)
           .setJurisdictionRule(ethers.ZeroAddress, [COUNTRY_US], []),
-      ).to.be.revertedWith("ComplianceRules: Invalid token address");
+      ).to.be.revertedWith("ComplianceRules: Only governance can update rules");
       await expect(
-        complianceRules.connect(admin).clearJurisdictionRule(ethers.ZeroAddress),
+        complianceRules.setRuleAdministrator(
+          ethers.ZeroAddress,
+          admin.address,
+          true,
+        ),
       ).to.be.revertedWith("ComplianceRules: Invalid token address");
     });
 
     it("Should reject zero address for administrator", async function () {
       await expect(
-        complianceRules.setRuleAdministrator(ethers.ZeroAddress, true),
+        complianceRules.setRuleAdministrator(
+          tokenContract.address,
+          ethers.ZeroAddress,
+          true,
+        ),
       ).to.be.revertedWith("ComplianceRules: Invalid administrator address");
     });
 
@@ -276,7 +323,11 @@ describe("ComplianceRules", function () {
       rules = await (
         await ethers.getContractFactory("ComplianceRules")
       ).deploy(owner.address, [COUNTRY_US, COUNTRY_UK], [COUNTRY_SANCTIONED]);
-      await rules.setRuleAdministrator(admin.address, true);
+      await rules.setRuleAdministrator(
+        tokenContract.address,
+        admin.address,
+        true,
+      );
 
       idReg = await (
         await ethers.getContractFactory("IdentityRegistry")
@@ -309,7 +360,7 @@ describe("ComplianceRules", function () {
         await ethers.getContractFactory("MockToken")
       ).deploy("Escrow stub", "ESC", 0);
       escrow = await stub.getAddress();
-      await rules.addTrustedContract(escrow);
+      await rules.addTrustedContract(tokenContract.address, escrow);
     });
 
     // canTransfer reads msg.sender as the token.

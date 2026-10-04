@@ -584,9 +584,7 @@ class ContractDeployer {
       if (!this.state.getContract("complianceRules")) {
         console.log("\n📝 Step 1: Deploying ComplianceRules...");
 
-        // Shared defaults — see DEFAULT_ALLOWED_COUNTRIES at the top of this
-        // file. This branch previously used an EMPTY whitelist, which made the
-        // rules here more permissive than deployComplianceRules() produced.
+        // Shared defaults: DEFAULT_ALLOWED_COUNTRIES at the top of this file.
         await this.deployComplianceRulesWithConfig(
           DEFAULT_ALLOWED_COUNTRIES,
           DEFAULT_BLOCKED_COUNTRIES,
@@ -648,7 +646,11 @@ class ContractDeployer {
       const receipt1 = await tx1.wait();
       totalGasUsed += receipt1.gasUsed;
       console.log("   ✅ ComplianceRules linked to IdentityRegistry for VSC");
-      console.log("   ✅ REAL KYC/AML enforcement enabled for VSC transfers");
+      // Per-token rule administrator (Task 4.1, G5) until the handover.
+      const cr = this.state.getContract("complianceRules");
+      const me = this.state.signers[0].address;
+      await (await cr.setRuleAdministrator(tokenAddr, me, true)).wait();
+      console.log("   ✅ Deployer is VSC's rule administrator (to handover)");
 
       // Task 2A.4b: the binding above is the only thing that flips
       // ComplianceRules.isProductionCompliance(tokenAddr) to true (fail
@@ -680,12 +682,8 @@ class ContractDeployer {
         );
       const receipt2 = await tx2.wait();
       totalGasUsed += receipt2.gasUsed;
-      console.log("   ✅ IdentityRegistry linked to ComplianceRules");
       console.log(
-        "   ✅ Jurisdiction rules will be enforced at identity registration",
-      );
-      console.log(
-        "   ✅ Users from blocked countries will be REJECTED during KYC/AML",
+        "   ✅ IdentityRegistry linked: blocked countries refused at registration",
       );
 
       // Task 3.6: the privacy pair option 1 deployed becomes VSC's ZK

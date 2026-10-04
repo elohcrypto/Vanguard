@@ -113,7 +113,9 @@ describe("recoveryAddress", function () {
     // Routing it through registerIdentity's jurisdiction gate would strand the
     // funds of anyone whose country is sanctioned after they joined - exactly
     // the person most likely to need a recovery.
-    await rules.setJurisdictionRule(await token.getAddress(), [840], [643]);
+    const t = await token.getAddress();
+    await rules.setRuleAdministrator(t, await rules.owner(), true);
+    await rules.setJurisdictionRule(t, [840], [643]);
     await idReg.setComplianceRules(
       await rules.getAddress(),
       await token.getAddress(),
@@ -298,7 +300,7 @@ describe("recoveryAddress", function () {
     const stub = await (
       await (await ethers.getContractFactory("MockToken")).deploy("S", "S", 0)
     ).getAddress();
-    await rules.addTrustedContract(stub);
+    await rules.addTrustedContract(await token.getAddress(), stub);
     await token.connect(lost).transfer(stub, E("100"));
     await token.mint(other.address, E("50"));
     await idReg.deleteIdentity(other.address);
@@ -321,7 +323,7 @@ describe("recoveryAddress", function () {
     const stub = await (
       await (await ethers.getContractFactory("MockToken")).deploy("S", "S", 0)
     ).getAddress();
-    await rules.addTrustedContract(stub);
+    await rules.addTrustedContract(await token.getAddress(), stub);
     await expect(
       token.recoveryAddress(lost.address, stub, lostId),
     ).to.be.revertedWith("Token: recovery into trusted contract");

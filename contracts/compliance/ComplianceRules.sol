@@ -25,22 +25,17 @@ contract ComplianceRules is ComplianceRulesAdmin, IComplianceHooks {
     ) ComplianceRulesAdmin(_owner) {
         // Initialize default rules with user-provided countries
         _initializeDefaultRules(initialAllowedCountries, initialBlockedCountries);
-
-        // Set deployer as rule administrator
-        ruleAdministrators[_owner] = true;
+        // No rule administrator yet: the owner grants one per token (G5).
     }
 
     /**
-     * @dev Check if an address is a trusted contract
+     * @dev Whether `contractAddress` is trusted on the calling token
+     *      (msg.sender is the token, as in canTransfer). Off-chain readers
+     *      use isTrustedContract(token, account).
      * @param contractAddress Address to check
      */
-    function isTrustedContract(address contractAddress)
-        external
-        view
-        override(IComplianceRules, IComplianceHooks)
-        returns (bool)
-    {
-        return trustedContracts[contractAddress];
+    function isTrustedContract(address contractAddress) external view override returns (bool) {
+        return trustedContracts[msg.sender][contractAddress];
     }
 
     /**
@@ -192,11 +187,12 @@ contract ComplianceRules is ComplianceRulesAdmin, IComplianceHooks {
         // this is the one path where compliance verifies identity: the
         // non-escrow counterparty must be verified, pass the whitelist, and
         // pass the country rule (no funds to or from a blocked jurisdiction).
-        if (trustedContracts[from] || trustedContracts[to]) {
-            address partyToCheck = trustedContracts[from] ? to : from;
+        mapping(address => bool) storage trusted = trustedContracts[token];
+        if (trusted[from] || trusted[to]) {
+            address partyToCheck = trusted[from] ? to : from;
 
             // Both parties trusted: contract-to-contract move, nothing to check.
-            if (trustedContracts[partyToCheck]) {
+            if (trusted[partyToCheck]) {
                 return true;
             }
 
@@ -233,8 +229,13 @@ contract ComplianceRules is ComplianceRulesAdmin, IComplianceHooks {
      * @notice List gate only (blacklist, then whitelist by mode) for the calling
      *         token on `to`. No identity or jurisdiction: wallet recovery moves
      *         the same holder's balance, so it re-checks the lists alone.
+     *         A contract trusted on ANY token is refused: trust is per token
+     *         (G5), so VSC's own trusted check no longer sees governance, and
+     *         a VSC recovery must still not move a voter's shared identity
+     *         onto it (review M1, 2E).
      */
     function canReceive(address to) external view returns (bool) {
+        if (trustedTokenCount[to] != 0) return false;
         return _oraclesAllow(msg.sender, address(0), to);
     }
 

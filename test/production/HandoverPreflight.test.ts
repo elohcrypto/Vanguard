@@ -28,6 +28,7 @@ describe("Handover preflight and self-healing (plan 2E.2)", function () {
   let c: Record<string, any>;
   let args: Record<string, any>;
   let govAddr: string;
+  let vgtAddr: string; // trust is per token (Task 4.1, G5)
 
   const quiet = () => {};
   const keyOf = (a: string) =>
@@ -55,6 +56,7 @@ describe("Handover preflight and self-healing (plan 2E.2)", function () {
     const f = await handoverFixture();
     ({ deployer, ops, guardian, stranger, proposer, voters, c, args, govAddr } =
       f);
+    vgtAddr = await c.governanceToken.getAddress();
   });
 
   it("completes when governance already owns the registry (option 83b ran)", async function () {
@@ -140,11 +142,11 @@ describe("Handover preflight and self-healing (plan 2E.2)", function () {
       await ethers.getContractFactory("MockToken")
     ).deploy("Stub", "STB", 0);
     const stubAddr = await stub.getAddress();
-    await c.complianceRules.addTrustedContract(stubAddr);
+    await c.complianceRules.addTrustedContract(vgtAddr, stubAddr);
     expect((await check("every trusted contract has code")).ok).to.equal(true);
-    expect((await check("deployer is not a trusted contract")).ok).to.equal(
-      true,
-    );
+    expect(
+      (await check("deployer is not a trusted contract on VSC or VGT")).ok,
+    ).to.equal(true);
     // Residue from a pre-2E.1 chain: a trusted address that has no code.
     await network.provider.send("hardhat_setCode", [stubAddr, "0x"]);
     expect(
@@ -162,7 +164,7 @@ describe("Handover preflight and self-healing (plan 2E.2)", function () {
       await ethers.getContractFactory("MockToken")
     ).deploy("Stub", "STB", 0);
     const stubAddr = await stub.getAddress();
-    await c.complianceRules.addTrustedContract(stubAddr);
+    await c.complianceRules.addTrustedContract(vgtAddr, stubAddr);
     // Code is the 23-byte delegation indicator, not a contract.
     await network.provider.send("hardhat_setCode", [
       stubAddr,
@@ -175,9 +177,9 @@ describe("Handover preflight and self-healing (plan 2E.2)", function () {
   });
 
   it("fails completion when governance is not trusted", async function () {
-    await c.complianceRules.removeTrustedContract(govAddr);
+    await c.complianceRules.removeTrustedContract(vgtAddr, govAddr);
     expect((await assertHandoverComplete(args)).failures).to.include(
-      "governance is a trusted contract",
+      "governance is a trusted contract on VGT",
     );
   });
 
@@ -214,8 +216,10 @@ describe("Handover preflight and self-healing (plan 2E.2)", function () {
   });
 
   it("rejects an untrusted governance (pre-D21 or half-deployed)", async function () {
-    await c.complianceRules.removeTrustedContract(govAddr);
-    await rejectsBeforeAnyTx(/must addTrustedContract\(governance\) first/);
+    await c.complianceRules.removeTrustedContract(vgtAddr, govAddr);
+    await rejectsBeforeAnyTx(
+      /must addTrustedContract\(VGT, governance\) first/,
+    );
   });
 
   it("rejects a governance that still has a registry identity", async function () {
@@ -250,7 +254,7 @@ describe("Handover preflight and self-healing (plan 2E.2)", function () {
       await ethers.getContractFactory("MockToken")
     ).deploy("Stub", "STB", 0);
     const stubAddr = await stub.getAddress();
-    await c.complianceRules.addTrustedContract(stubAddr);
+    await c.complianceRules.addTrustedContract(vgtAddr, stubAddr);
     await network.provider.send("hardhat_mine", ["0x10"]);
     await network.provider.send("hardhat_setCode", [stubAddr, "0x"]);
     args.logChunk = 3;

@@ -85,7 +85,7 @@ describe("Factories are governable by proposal (2F.5)", function () {
     await idReg.addAgent(owner.address);
     await vgt.addAgent(govAddr);
     await rules.setTokenIdentityRegistry(vgtAddr, idRegAddr);
-    await rules.addTrustedContract(govAddr);
+    await rules.addTrustedContract(vgtAddr, govAddr);
     const kycIssuer = await (
       await ethers.getContractFactory("ClaimIssuer")
     ).deploy(owner.address, "KYC Issuer", "Trusted KYC attestations");

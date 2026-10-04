@@ -282,7 +282,7 @@ describe("Handover power set from chain (plan 2F.5)", function () {
         .connect(carol)
         .createEscrowWallet(alice.address, bob.address, ethers.parseEther("1"));
       const w = await e.getWalletAddress(1);
-      await c.complianceRules.addTrustedContract(w);
+      await c.complianceRules.addTrustedContract(await c.token.getAddress(), w);
       return w;
     }
 

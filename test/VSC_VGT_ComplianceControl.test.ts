@@ -225,20 +225,18 @@ describe("🔒 VSC & VGT Compliance Control - Complete Proof", function () {
       console.log("=".repeat(80));
 
       console.log("\n✅ TEST 4.1: ComplianceRules configured for VSC");
-      const vscIdentityRegistry =
-        await complianceRules.tokenIdentityRegistry(
-          await vscToken.getAddress(),
-        );
+      const vscIdentityRegistry = await complianceRules.tokenIdentityRegistry(
+        await vscToken.getAddress(),
+      );
       expect(vscIdentityRegistry).to.equal(await identityRegistry.getAddress());
       console.log(
         "   ✅ PASS: VSC linked to IdentityRegistry via ComplianceRules",
       );
 
       console.log("\n✅ TEST 4.2: ComplianceRules configured for VGT");
-      const vgtIdentityRegistry =
-        await complianceRules.tokenIdentityRegistry(
-          await vgtToken.getAddress(),
-        );
+      const vgtIdentityRegistry = await complianceRules.tokenIdentityRegistry(
+        await vgtToken.getAddress(),
+      );
       expect(vgtIdentityRegistry).to.equal(await identityRegistry.getAddress());
       console.log(
         "   ✅ PASS: VGT linked to IdentityRegistry via ComplianceRules",

@@ -3,7 +3,8 @@
  * from it (plan v2 Task 2F.5 review M-1 to M-3, L-2). Moved out of
  * HandoverPowers.js to keep it under 500 lines: the escrow factory's live
  * role holders, the factories that created trusted escrows, the `fromBlock`
- * sanity check, and escrows that still name the deployer as owner.
+ * sanity check, escrows that still name the deployer as owner, and the
+ * per-token trusted contracts and rule administrators (Task 4.1, G5).
  */
 
 const { ethers } = require("hardhat");
@@ -152,13 +153,12 @@ async function factoryRoleLines(o, govAddr, ops) {
  * Review M-2: the escrow factories named by live trusted escrows
  * (MultiSigEscrowWallet.factory()), each with one escrow that names it. A
  * trusted contract without factory() is skipped; RPC errors are rethrown.
+ * Trust is per token since Task 4.1 (G5): each TrustedContractAdded(token,
+ * account) is checked live on its own token.
  */
 async function escrowFactoriesFromChain(o) {
-  const rules = o.complianceRules;
-  const added = await scanLogs(rules, rules.filters.TrustedContractAdded(), o);
   const out = [];
-  for (const a of uniq(added.map((ev) => ev.args[0]))) {
-    if (!(await rules.isTrustedContract(a))) continue;
+  for (const { account: a } of await liveTrustedContracts(o)) {
     if ((await ethers.provider.getCode(a)) === "0x") continue;
     let f;
     try {
@@ -174,6 +174,29 @@ async function escrowFactoriesFromChain(o) {
     }
     if (same(f, ZERO) || out.some((x) => same(x.factory, f))) continue;
     out.push({ factory: ethers.getAddress(f), escrow: a });
+  }
+  return out;
+}
+
+/**
+ * Every (token, account) pair still trusted in ComplianceRules, from the
+ * token-indexed TrustedContractAdded events (Task 4.1, G5), de-duplicated.
+ */
+async function liveTrustedContracts(o) {
+  const rules = o.complianceRules;
+  const added = await scanLogs(rules, rules.filters.TrustedContractAdded(), o);
+  const out = [];
+  for (const ev of added) {
+    const [token, account] = [ev.args[0], ev.args[1]];
+    if (out.some((x) => same(x.token, token) && same(x.account, account))) {
+      continue;
+    }
+    if (await rules["isTrustedContract(address,address)"](token, account)) {
+      out.push({
+        token: ethers.getAddress(token),
+        account: ethers.getAddress(account),
+      });
+    }
   }
   return out;
 }
@@ -198,28 +221,37 @@ async function deployerEscrows(factory, dAddr, o) {
 }
 
 /**
- * Review B-L2: every live ComplianceRules rule administrator, from
- * RuleAdministratorUpdated events plus the owners the constructor and
- * transfers named (the constructor authorizes its owner without the event)
- * and `extra` (the deployer). A rule administrator can set or clear any
- * token's jurisdiction rule, which also lapses every private jurisdiction
- * record (Task 3.8).
+ * Review B-L2: every live ComplianceRules rule administrator, per token
+ * (Task 4.1, G5), from RuleAdministratorUpdated(token, account, _) events
+ * plus `extra` (the deployer) on every token the events or `o` name.
+ * Returns [{ token, account }]. A rule administrator of a token can set or
+ * clear its jurisdiction rule, which also lapses every private
+ * jurisdiction record (Task 3.8).
  */
 async function liveRuleAdministrators(o, extra = []) {
   const rules = o.complianceRules;
-  const admins = await scanLogs(
+  const events = await scanLogs(
     rules,
     rules.filters.RuleAdministratorUpdated(),
     o,
   );
-  const owners = await scanLogs(rules, rules.filters.OwnershipTransferred(), o);
+  const named = [];
+  for (const c of [o.token, o.governanceToken])
+    if (c) named.push(await addrOf(c));
+  const tokens = uniq([...named, ...events.map((ev) => ev.args[0])]);
+  const pairs = events.map((ev) => [ev.args[0], ev.args[1]]);
+  for (const t of tokens) for (const a of extra) pairs.push([t, a]);
   const live = [];
-  for (const a of uniq([
-    ...admins.map((ev) => ev.args[0]),
-    ...owners.map((ev) => ev.args[1]),
-    ...extra,
-  ])) {
-    if (await rules.ruleAdministrators(a)) live.push(a);
+  for (const [token, account] of pairs) {
+    if (live.some((x) => same(x.token, token) && same(x.account, account))) {
+      continue;
+    }
+    if (await rules.ruleAdministrators(token, account)) {
+      live.push({
+        token: ethers.getAddress(token),
+        account: ethers.getAddress(account),
+      });
+    }
   }
   return live;
 }
@@ -227,6 +259,7 @@ async function liveRuleAdministrators(o, extra = []) {
 module.exports = {
   uniq,
   liveRuleAdministrators,
+  liveTrustedContracts,
   scanLogs,
   checkFromBlock,
   roleHolders,

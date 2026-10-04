@@ -102,7 +102,10 @@ export async function handoverFixture() {
   await governanceToken.addAgent(deployer.address);
   await governanceToken.addAgent(govAddr);
   await complianceRules.setTokenIdentityRegistry(vgtAddr, idRegAddr);
-  await complianceRules.addTrustedContract(govAddr);
+  await complianceRules.addTrustedContract(vgtAddr, govAddr);
+  // As the demo deploys: the deployer administers both tokens' rules (G5).
+  for (const t of [await token.getAddress(), vgtAddr])
+    await complianceRules.setRuleAdministrator(t, deployer.address, true);
   for (const w of [alice, bob, carol]) {
     const id = await deployIdentity(factory, w.address);
     await identityRegistry.registerIdentity(w.address, id, 840);

@@ -136,11 +136,18 @@ async function handoverDeployerPowers(o) {
     async () => same(await o.token.guardian(), guardian),
     `Token guardian: ${guardian}`,
   );
-  await apply(
-    o.complianceRules.connect(d).setRuleAdministrator(govAddr, true),
-    () => o.complianceRules.ruleAdministrators(govAddr),
-    `ComplianceRules rule administrator: governance ${govAddr}`,
-  );
+  // Rule administrators are per token since Task 4.1 (G5).
+  const ruleTokens = [
+    ["VSC", await addrOf(o.token)],
+    ["VGT", await addrOf(o.governanceToken)],
+  ];
+  for (const [label, t] of ruleTokens) {
+    await apply(
+      o.complianceRules.connect(d).setRuleAdministrator(t, govAddr, true),
+      () => o.complianceRules.ruleAdministrators(t, govAddr),
+      `ComplianceRules rule administrator on ${label}: governance ${govAddr}`,
+    );
+  }
   // The manager's writes by vote need governance as its governanceContract.
   const dlm = o.dynamicListManager;
   if (dlm && !same(await dlm.governanceContract(), govAddr)) {
@@ -188,11 +195,13 @@ async function handoverDeployerPowers(o) {
     async () => !(await o.governanceToken.isAgent(dAddr)),
     "deployer removed as GovernanceToken agent",
   );
-  await apply(
-    o.complianceRules.connect(d).setRuleAdministrator(dAddr, false),
-    async () => !(await o.complianceRules.ruleAdministrators(dAddr)),
-    "deployer removed as ComplianceRules rule administrator",
-  );
+  for (const [label, t] of ruleTokens) {
+    await apply(
+      o.complianceRules.connect(d).setRuleAdministrator(t, dAddr, false),
+      async () => !(await o.complianceRules.ruleAdministrators(t, dAddr)),
+      `deployer removed as ComplianceRules rule administrator on ${label}`,
+    );
+  }
   await factorySteps(ctx);
   await privacySteps(ctx);
   for (const step of regSteps.slice(1)) await registryCall(ctx, step);

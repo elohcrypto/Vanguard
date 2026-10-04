@@ -139,9 +139,6 @@ describe("Fair Voting System (1 Person = 1 Vote)", function () {
       await identityRegistry.getAddress(),
     );
 
-    // Set rule administrator
-    await complianceRules.setRuleAdministrator(owner.address, true);
-
     // Hand InvestorTypeRegistry to VanguardGovernance so proposals can
     // execute updateInvestorTypeConfig.
     //
@@ -212,6 +209,7 @@ describe("Fair Voting System (1 Person = 1 Vote)", function () {
 
     // D21: governance holds VGT fees as a trusted contract, not an identity.
     await complianceRules.addTrustedContract(
+      await governanceToken.getAddress(),
       await vanguardGovernance.getAddress(),
     );
 

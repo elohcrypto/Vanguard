@@ -32,6 +32,7 @@ describe("GovernedCalls after the handover (2F.5 L11)", function () {
       vanguardGovernance: c.governance,
       identityRegistry: c.identityRegistry,
       governanceToken: c.governanceToken,
+      digitalToken: c.token,
     };
     state = {
       signers: await ethers.getSigners(),
@@ -52,8 +53,18 @@ describe("GovernedCalls after the handover (2F.5 L11)", function () {
     expect(p.proposalType).to.equal(1n);
     expect(p.proposer).to.equal(f.proposer.address);
     expect(p.target).to.equal(await c.complianceRules.getAddress());
+    // Trust is per token (Task 4.1, G5): the vote trusts it on VSC.
+    expect(p.callData).to.equal(
+      c.complianceRules.interface.encodeFunctionData("addTrustedContract", [
+        await c.token.getAddress(),
+        stranger.address,
+      ]),
+    );
     expect(
-      await c.complianceRules.isTrustedContract(stranger.address),
+      await c.complianceRules["isTrustedContract(address,address)"](
+        await c.token.getAddress(),
+        stranger.address,
+      ),
     ).to.equal(false);
   });
 

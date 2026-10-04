@@ -42,7 +42,7 @@ describe("Governance as a trusted contract (D21)", function () {
       await vgt.getAddress(),
       await idReg.getAddress(),
     );
-    await rules.addTrustedContract(govAddr);
+    await rules.addTrustedContract(await vgt.getAddress(), govAddr);
 
     const kycIssuer = await (
       await ethers.getContractFactory("ClaimIssuer")
@@ -77,14 +77,49 @@ describe("Governance as a trusted contract (D21)", function () {
   }
 
   it("is trusted and unregistered; the denominator counts voters only", async function () {
-    const { idReg, rules, gov, proposer } = await fixture();
+    const { idReg, rules, vgt, gov, proposer } = await fixture();
     const govAddr = await gov.getAddress();
     expect(await idReg.identity(govAddr)).to.equal(ethers.ZeroAddress);
-    expect(await rules.isTrustedContract(govAddr)).to.equal(true);
+    expect(
+      await rules["isTrustedContract(address,address)"](
+        await vgt.getAddress(),
+        govAddr,
+      ),
+    ).to.equal(true);
     expect(await idReg.registeredIdentityCount()).to.equal(5n);
     const id = await propose(gov, proposer);
     const [p] = await gov.getProposal(id);
     expect(p.eligibleVotersAtCreation).to.equal(5n);
+  });
+
+  // Task 4.1, G5: trust is per token. Governance holds VGT fees as a
+  // trusted contract; on VSC it is an ordinary address with no identity.
+  it("trusting governance for VGT does not trust it for VSC", async function () {
+    const { owner, proposer, idReg, rules, vgt, gov } = await fixture();
+    const govAddr = await gov.getAddress();
+    const vsc = await (
+      await ethers.getContractFactory("Token")
+    ).deploy("VSC", "VSC", await idReg.getAddress(), await rules.getAddress());
+    const vscAddr = await vsc.getAddress();
+    await rules.setTokenIdentityRegistry(vscAddr, await idReg.getAddress());
+    expect(
+      await rules["isTrustedContract(address,address)"](vscAddr, govAddr),
+    ).to.equal(false);
+    // The 1-arg view answers for msg.sender: from a wallet, nothing is trusted.
+    expect(await rules["isTrustedContract(address)"](govAddr)).to.equal(false);
+
+    await vsc.mint(proposer.address, 10n);
+    await expect(
+      vsc.connect(proposer).transfer(govAddr, 1n),
+    ).to.be.revertedWith("Recipient not verified");
+    await vgt.connect(owner).transfer(govAddr, 1n); // VGT: trusted, lands
+    expect(await vgt.balanceOf(govAddr)).to.equal(1n);
+
+    // Trusted on VSC too, the same transfer passes; untrusting VGT later
+    // would not touch it.
+    await rules.addTrustedContract(vscAddr, govAddr);
+    await vsc.connect(proposer).transfer(govAddr, 1n);
+    expect(await vsc.balanceOf(govAddr)).to.equal(1n);
   });
 
   it("fees move in, a rejected proposal refunds out", async function () {

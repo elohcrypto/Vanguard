@@ -20,7 +20,6 @@ const {
 } = require("./HandoverChecks");
 const {
   FACTORY_PLAN,
-  uniq,
   scanLogs,
   withDerivedPowers,
   registryAgentsAfter,
@@ -32,6 +31,7 @@ const {
   factoryRoleLines,
   deployerEscrows,
   liveRuleAdministrators,
+  liveTrustedContracts,
 } = require("./HandoverScans");
 const { privacyLines } = require("./HandoverPrivacy");
 
@@ -132,17 +132,22 @@ async function assertHandoverComplete(o) {
     "deployer is not an IdentityRegistry agent",
     !(await o.identityRegistry.isAgent(dAddr)),
   );
+  // Rule administrators are per token since Task 4.1 (G5).
+  const vsc = await addrOf(o.token);
+  const vgt = await addrOf(o.governanceToken);
+  const rules = o.complianceRules;
   add(
-    "deployer is not a ComplianceRules rule administrator",
-    !(await o.complianceRules.ruleAdministrators(dAddr)),
+    "deployer is not a ComplianceRules rule administrator on VSC or VGT",
+    !(await rules.ruleAdministrators(vsc, dAddr)) &&
+      !(await rules.ruleAdministrators(vgt, dAddr)),
   );
-  // Review B-L2: nor any other key the deployer ever authorized.
+  // Review B-L2: nor any other key the deployer ever authorized, on any token.
   const extraAdmins = (await liveRuleAdministrators(o, [dAddr])).filter(
-    (a) => !same(a, govAddr) && !same(a, ops),
+    ({ account: a }) => !same(a, govAddr) && !same(a, ops),
   );
-  for (const a of extraAdmins) {
+  for (const { token, account } of extraAdmins) {
     add(
-      `${a} is still a ComplianceRules rule administrator (neither governance nor ops)`,
+      `${account} is still a ComplianceRules rule administrator on ${token} (neither governance nor ops)`,
       false,
     );
   }
@@ -223,26 +228,26 @@ async function assertHandoverComplete(o) {
     if (lm)
       add(`oracle ${a} listManager is not the deployer`, !same(lm, dAddr));
   }
-  const rules = o.complianceRules;
   add(
-    "deployer is not a trusted contract",
-    !(await rules.isTrustedContract(dAddr)),
+    "deployer is not a trusted contract on VSC or VGT",
+    !(await rules["isTrustedContract(address,address)"](vsc, dAddr)) &&
+      !(await rules["isTrustedContract(address,address)"](vgt, dAddr)),
   );
   // D21: governance holds VGT fees as a trusted contract, never as an
   // identity (a contract identity's claims lapse and ops could delete it).
+  // Trusted on VGT only (G5): on VSC it is an ordinary unverified address.
   add(
-    "governance is a trusted contract",
-    await rules.isTrustedContract(govAddr),
+    "governance is a trusted contract on VGT",
+    await rules["isTrustedContract(address,address)"](vgt, govAddr),
   );
   add(
     "governance has no registry identity",
     same(await o.identityRegistry.identity(govAddr), ZERO),
   );
-  // Residue from runs before 2E.1, when a wallet could be trusted.
-  const added = await scanLogs(rules, rules.filters.TrustedContractAdded(), o);
+  // Residue from runs before 2E.1, when a wallet could be trusted. Every
+  // live (token, account) pair from the token-indexed events (G5).
   let clean = true;
-  for (const a of uniq(added.map((ev) => ev.args[0]))) {
-    if (!(await rules.isTrustedContract(a))) continue;
+  for (const { account: a } of await liveTrustedContracts(o)) {
     const code = await ethers.provider.getCode(a);
     // An EIP-7702 delegation indicator (0xef0100 || address, 23 bytes) is a
     // wallet, not a contract: treat it the same as no code.

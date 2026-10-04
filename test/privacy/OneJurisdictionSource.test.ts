@@ -54,6 +54,7 @@ describe("One jurisdiction source (Task 3.8)", function () {
       );
       const token = await deploy("MockPolicyToken", await rules.getAddress());
       const t = await token.getAddress();
+      await rules.setRuleAdministrator(t, admin.address, true);
       await pm.setPolicyToken(t);
       for (const c of [840, 826, 124, 643, 276]) {
         await pm.registerJurisdictionCode(c);
@@ -114,6 +115,7 @@ describe("One jurisdiction source (Task 3.8)", function () {
       const rules = await deploy("ComplianceRules", admin.address, [], []);
       const t = stranger.address;
       expect(await rules.jurisdictionRuleVersion(t)).to.equal(0n);
+      await rules.setRuleAdministrator(t, admin.address, true); // per token
       await rules.setJurisdictionRule(t, [840], []);
       await rules.setJurisdictionRule(t, [840], []);
       await rules.clearJurisdictionRule(t);

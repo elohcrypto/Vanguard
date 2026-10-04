@@ -482,9 +482,10 @@ class ComplianceModule {
     const ctx = await this._investorTypeContext();
     if (!ctx) return;
     try {
-      const { registry, token } = ctx;
+      const { registry, token, wired } = ctx;
       const configs = await this._typeConfigs(registry);
-      console.log("\n📊 LIMITS PER TYPE (enforced by Token):");
+      const how = wired ? "enforced by Token" : "not wired to VSC";
+      console.log(`\n📊 LIMITS PER TYPE (${how}):`);
       configs.forEach((c, t) => {
         console.log(
           `   ${t} ${TYPE_NAMES[t].padEnd(13)} max transfer ${ethers.formatEther(c.maxTransferAmount)} VSC, max holding ${ethers.formatEther(c.maxHoldingAmount)} VSC`,
@@ -574,7 +575,9 @@ class ComplianceModule {
       console.log("\n👤 Demo wallets:");
       for (const s of this.state.signers.slice(1, 5)) {
         const type = Number(await ctx.registry.getInvestorType(s.address));
-        const tier = Number(await ctx.registry.getRequiredWhitelistTier(s.address));
+        const tier = Number(
+          await ctx.registry.getRequiredWhitelistTier(s.address),
+        );
         console.log(`   ${s.address}: ${TYPE_NAMES[type]}, tier ${tier}+`);
       }
       console.log(
@@ -699,12 +702,18 @@ class ComplianceModule {
       // Test 1: Owner Permissions
       console.log("\n👑 TEST 1: OWNER PERMISSIONS");
       console.log("=".repeat(40));
-      console.log("🧪 Testing owner can set rule administrators...");
+      console.log(
+        "🧪 Testing owner can set a rule administrator for VSC (per token)...",
+      );
 
       try {
         const tx1 = await complianceRules
           .connect(this.state.signers[0])
-          .setRuleAdministrator(this.state.signers[1].address, true);
+          .setRuleAdministrator(
+            tokenAddress,
+            this.state.signers[1].address,
+            true,
+          );
         const receipt1 = await tx1.wait();
         console.log(`✅ SUCCESS: Owner set rule administrator`);
         console.log(`   📍 Administrator: ${this.state.signers[1].address}`);
@@ -777,7 +786,11 @@ class ComplianceModule {
       try {
         await complianceRules
           .connect(this.state.signers[2])
-          .setRuleAdministrator(this.state.signers[3].address, true);
+          .setRuleAdministrator(
+            tokenAddress,
+            this.state.signers[3].address,
+            true,
+          );
         console.log(
           `❌ CRITICAL SECURITY BREACH: Unauthorized user set administrator!`,
         );
@@ -800,7 +813,11 @@ class ComplianceModule {
       try {
         const tx5 = await complianceRules
           .connect(this.state.signers[0])
-          .setRuleAdministrator(this.state.signers[1].address, false);
+          .setRuleAdministrator(
+            tokenAddress,
+            this.state.signers[1].address,
+            false,
+          );
         const receipt5 = await tx5.wait();
         console.log(`✅ SUCCESS: Owner revoked administrator permissions`);
         console.log(

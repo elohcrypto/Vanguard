@@ -215,7 +215,8 @@ async function runHandoverSmoke(state, failures) {
   }
   // No recovery out of or into governance. On VGT the D23 hook refuses
   // both (it checks the lost and the new wallet before anything else); on
-  // VSC, which has no hook, the base check refuses the new wallet (M1).
+  // VSC, where governance is not trusted (G5, Task 4.1), canReceive refuses
+  // an account trusted on any token (M1).
   const voter = s[VOTERS[0]].address;
   const voterId = await c("identityRegistry").identity(voter);
   const hook = /GovernanceToken: trusted contract/;
@@ -238,7 +239,7 @@ async function runHandoverSmoke(state, failures) {
     ],
     [
       "VSC recoveryAddress(voter, governance)",
-      /^Token: recovery into trusted contract$/,
+      /^Recovery blocked by compliance$/,
       () => opsVsc.recoveryAddress.staticCall(voter, govAddr, voterId),
     ],
   ];

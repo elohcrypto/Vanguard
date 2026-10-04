@@ -269,11 +269,19 @@ async function main() {
         "governance has a registry identity — it must hold fees as a trusted contract (D21)",
       );
     }
-    if (!(await rulesForOracle.isTrustedContract(govAddr))) {
+    // Trust is per token (Task 4.1, G5): on VGT, not on VSC.
+    const trusted = (c) =>
+      rulesForOracle["isTrustedContract(address,address)"](
+        state.getContract(c).target,
+        govAddr,
+      );
+    if (!(await trusted("governanceToken"))) {
       failures.push(
-        "governance is not a trusted contract — VGT fee pulls and refunds will revert (D21)",
+        "governance is not a trusted contract on VGT — fee pulls and refunds will revert (D21)",
       );
     }
+    if (await trusted("digitalToken"))
+      failures.push("governance is trusted on VSC — G5 trusts it on VGT only");
 
     await registry.transferOwnership(govAddr);
     if ((await registry.owner()) !== deployerAddr) {

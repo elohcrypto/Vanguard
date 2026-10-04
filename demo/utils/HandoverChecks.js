@@ -281,9 +281,16 @@ async function preflight(o, { acceptOnly = false } = {}) {
   }
   // D21: the acceptance votes pull VGT fees into governance. A pre-D21 or
   // half-deployed governance would revert them after step 1 already ran.
-  if (!(await o.complianceRules.isTrustedContract(govAddr))) {
+  // Trust is per token since Task 4.1 (G5): governance needs it on VGT.
+  const vgt = await addrOf(o.governanceToken);
+  if (
+    !(await o.complianceRules["isTrustedContract(address,address)"](
+      vgt,
+      govAddr,
+    ))
+  ) {
     fail(
-      `governance ${govAddr} is not a trusted contract: the ComplianceRules owner must addTrustedContract(governance) first`,
+      `governance ${govAddr} is not a trusted contract on VGT ${vgt}: the ComplianceRules owner must addTrustedContract(VGT, governance) first`,
     );
   }
   if (!same(await o.identityRegistry.identity(govAddr), ethers.ZeroAddress)) {
@@ -327,11 +334,12 @@ async function preflight(o, { acceptOnly = false } = {}) {
   // again). Required here, not at the top: HandoverScans requires this file.
   const { liveRuleAdministrators } = require("./HandoverScans");
   const stray = (await liveRuleAdministrators(o, [dAddr])).filter(
-    (a) => !same(a, dAddr) && !same(a, ops) && !same(a, govAddr),
+    ({ account: a }) => !same(a, dAddr) && !same(a, ops) && !same(a, govAddr),
   );
   if (stray.length) {
+    const list = stray.map((x) => `${x.account} on ${x.token}`).join(", ");
     fail(
-      `ComplianceRules rule administrator(s) ${stray.join(", ")} besides the deployer, ops and governance: after the handover they could set any token's jurisdiction rule (and lapse every private jurisdiction record); the ComplianceRules owner must setRuleAdministrator(<address>, false) first`,
+      `ComplianceRules rule administrator(s) ${list} besides the deployer, ops and governance: after the handover they could set that token's jurisdiction rule (and lapse every private jurisdiction record); the ComplianceRules owner must setRuleAdministrator(<token>, <address>, false) first`,
     );
   }
   // Issuers the deployer holds go to issuerAdmin, never ops (D25 b).

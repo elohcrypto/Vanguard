@@ -15,6 +15,7 @@ describe("Trusted contracts must be contracts", function () {
     payee: SignerWithAddress,
     wallet: SignerWithAddress;
   let idReg: any, rules: any, token: any, escrow: string, escrow2: string;
+  let tAddr: string; // trust is per token (Task 4.1, G5)
   const E = (n: number) => ethers.parseEther(String(n));
 
   const deployStub = async () => {
@@ -54,10 +55,8 @@ describe("Trusted contracts must be contracts", function () {
       await idReg.getAddress(),
       await rules.getAddress(),
     );
-    await rules.setTokenIdentityRegistry(
-      await token.getAddress(),
-      await idReg.getAddress(),
-    );
+    tAddr = await token.getAddress();
+    await rules.setTokenIdentityRegistry(tAddr, await idReg.getAddress());
     await idReg.addAgent(owner.address);
 
     const kycIssuer = await (
@@ -84,10 +83,12 @@ describe("Trusted contracts must be contracts", function () {
   });
 
   it("refuses a wallet", async function () {
-    await expect(rules.addTrustedContract(wallet.address)).to.be.revertedWith(
-      "ComplianceRules: not a contract",
-    );
-    expect(await rules.isTrustedContract(wallet.address)).to.equal(false);
+    await expect(
+      rules.addTrustedContract(tAddr, wallet.address),
+    ).to.be.revertedWith("ComplianceRules: not a contract");
+    expect(
+      await rules["isTrustedContract(address,address)"](tAddr, wallet.address),
+    ).to.equal(false);
   });
 
   it("refuses a wallet carrying an EIP-7702 delegation", async function () {
@@ -95,48 +96,60 @@ describe("Trusted contracts must be contracts", function () {
     const indicator = "0xef0100" + escrow.slice(2).toLowerCase();
     await network.provider.send("hardhat_setCode", [wallet.address, indicator]);
     expect(await ethers.provider.getCode(wallet.address)).to.equal(indicator);
-    await expect(rules.addTrustedContract(wallet.address)).to.be.revertedWith(
-      "ComplianceRules: delegated wallet",
-    );
-    expect(await rules.isTrustedContract(wallet.address)).to.equal(false);
+    await expect(
+      rules.addTrustedContract(tAddr, wallet.address),
+    ).to.be.revertedWith("ComplianceRules: delegated wallet");
+    expect(
+      await rules["isTrustedContract(address,address)"](tAddr, wallet.address),
+    ).to.equal(false);
     // A real contract still passes.
-    await rules.addTrustedContract(escrow);
-    expect(await rules.isTrustedContract(escrow)).to.equal(true);
+    await rules.addTrustedContract(tAddr, escrow);
+    expect(
+      await rules["isTrustedContract(address,address)"](tAddr, escrow),
+    ).to.equal(true);
   });
 
   it("accepts a deployed contract", async function () {
-    await expect(rules.addTrustedContract(escrow))
+    await expect(rules.addTrustedContract(tAddr, escrow))
       .to.emit(rules, "TrustedContractAdded")
-      .withArgs(escrow);
-    expect(await rules.isTrustedContract(escrow)).to.equal(true);
+      .withArgs(tAddr, escrow);
+    expect(
+      await rules["isTrustedContract(address,address)"](tAddr, escrow),
+    ).to.equal(true);
   });
 
   it("removes a trusted contract", async function () {
-    await rules.addTrustedContract(escrow);
-    await expect(rules.removeTrustedContract(escrow))
+    await rules.addTrustedContract(tAddr, escrow);
+    await expect(rules.removeTrustedContract(tAddr, escrow))
       .to.emit(rules, "TrustedContractRemoved")
-      .withArgs(escrow);
-    expect(await rules.isTrustedContract(escrow)).to.equal(false);
+      .withArgs(tAddr, escrow);
+    expect(
+      await rules["isTrustedContract(address,address)"](tAddr, escrow),
+    ).to.equal(false);
   });
 
   it("the owner (governance after the handover) stays trusted", async function () {
-    await rules.addTrustedContract(escrow2);
-    await rules.addTrustedContract(escrow);
+    await rules.addTrustedContract(tAddr, escrow2);
+    await rules.addTrustedContract(tAddr, escrow);
     await rules.transferOwnership(escrow);
     const asOwner = rules.connect(await asContract(escrow));
     await asOwner.acceptOwnership();
     expect(await rules.owner()).to.equal(escrow);
-    await expect(asOwner.removeTrustedContract(escrow)).to.be.revertedWith(
-      "ComplianceRules: owner stays trusted",
-    );
-    expect(await rules.isTrustedContract(escrow)).to.equal(true);
-    await asOwner.removeTrustedContract(escrow2);
-    expect(await rules.isTrustedContract(escrow2)).to.equal(false);
+    await expect(
+      asOwner.removeTrustedContract(tAddr, escrow),
+    ).to.be.revertedWith("ComplianceRules: owner stays trusted");
+    expect(
+      await rules["isTrustedContract(address,address)"](tAddr, escrow),
+    ).to.equal(true);
+    await asOwner.removeTrustedContract(tAddr, escrow2);
+    expect(
+      await rules["isTrustedContract(address,address)"](tAddr, escrow2),
+    ).to.equal(false);
   });
 
   it("moves tokens between two trusted contracts with no identity", async function () {
-    await rules.addTrustedContract(escrow);
-    await rules.addTrustedContract(escrow2);
+    await rules.addTrustedContract(tAddr, escrow);
+    await rules.addTrustedContract(tAddr, escrow2);
     expect(await idReg.identity(escrow)).to.equal(ethers.ZeroAddress);
     expect(await idReg.identity(escrow2)).to.equal(ethers.ZeroAddress);
 
@@ -146,7 +159,7 @@ describe("Trusted contracts must be contracts", function () {
   });
 
   it("after an escrow settles, an unverified payer cannot pay the payee", async function () {
-    await rules.addTrustedContract(escrow);
+    await rules.addTrustedContract(tAddr, escrow);
 
     // Verified payer funds the escrow; the escrow pays the verified payee.
     await token.connect(payer).transfer(escrow, E(100));
@@ -172,7 +185,7 @@ describe("Trusted contracts must be contracts", function () {
   });
 
   it("a trusted contract cannot pay an unverified payee", async function () {
-    await rules.addTrustedContract(escrow);
+    await rules.addTrustedContract(tAddr, escrow);
     await token.connect(payer).transfer(escrow, E(100));
     expect(await idReg.identity(wallet.address)).to.equal(ethers.ZeroAddress);
     await expect(

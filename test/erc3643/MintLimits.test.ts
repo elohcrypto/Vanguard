@@ -117,6 +117,7 @@ describe("Token.mint investor limits (2E.3)", function () {
 
   it("refuses a recipient in a blocked jurisdiction", async function () {
     const { investor, registry, rules, token, agree } = await deploy();
+    await rules.setRuleAdministrator(token.target, await rules.owner(), true);
     await rules.setJurisdictionRule(token.target, [840], [643]);
     await registry.updateCountry(investor.address, 643);
     await agree(investor.address, 1n, "Compliance check failed");

@@ -36,16 +36,20 @@ async function pickProposer(state) {
 }
 
 /**
- * Trust `wallet` in ComplianceRules (option 63's escrow wallet). Returns
- * { direct: true } after the deployer's call, { proposalId } after a
- * ComplianceRules proposal, or { refused: reason } with nothing sent.
+ * Trust `wallet` on VSC in ComplianceRules (option 63's escrow wallet;
+ * trust is per token since Task 4.1, G5). Returns { direct: true } after
+ * the deployer's call, { proposalId } after a ComplianceRules proposal, or
+ * { refused: reason } with nothing sent.
  */
 async function trustContract(state, wallet, log = console.log) {
   const rules = state.getContract("complianceRules");
+  const vsc = await state.getContract("digitalToken").getAddress();
   const deployer = state.signers[0];
   const owner = await rules.owner();
   if (same(owner, deployer.address)) {
-    await (await rules.connect(deployer).addTrustedContract(wallet)).wait();
+    await (
+      await rules.connect(deployer).addTrustedContract(vsc, wallet)
+    ).wait();
     return { direct: true };
   }
   const gov = state.getContract("vanguardGovernance");
@@ -65,7 +69,7 @@ async function trustContract(state, wallet, log = console.log) {
     proposer,
     COMPLIANCE_RULES_TYPE,
     rules,
-    rules.interface.encodeFunctionData("addTrustedContract", [wallet]),
+    rules.interface.encodeFunctionData("addTrustedContract", [vsc, wallet]),
     `Trust escrow wallet ${wallet}`,
   );
   log(

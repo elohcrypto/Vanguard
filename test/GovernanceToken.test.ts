@@ -154,11 +154,10 @@ describe("Governance Token System", function () {
     // Set VanguardGovernance as agent
     await governanceToken.addAgent(await vanguardGovernance.getAddress());
 
-    // Set VanguardGovernance as rule administrator
-    await complianceRules.setRuleAdministrator(
-      await vanguardGovernance.getAddress(),
-      true,
-    );
+    // Set VanguardGovernance as VGT's rule administrator (per token, 4.1)
+    const govA = await vanguardGovernance.getAddress();
+    const vgtA = governanceToken.target;
+    await complianceRules.setRuleAdministrator(vgtA, govA, true);
 
     // Configure ComplianceRules with IdentityRegistry for GovernanceToken
     await complianceRules.setTokenIdentityRegistry(
@@ -167,9 +166,7 @@ describe("Governance Token System", function () {
     );
 
     // D21: governance holds VGT fees as a trusted contract, not an identity.
-    await complianceRules.addTrustedContract(
-      await vanguardGovernance.getAddress(),
-    );
+    await complianceRules.addTrustedContract(vgtA, govA);
 
     // Setup identities for voters (owner already set up earlier)
     await setupIdentity(voter1);
@@ -459,6 +456,7 @@ describe("Governance Token System", function () {
 
       // Set VanguardGovernance as rule administrator on ComplianceRules
       await complianceRules.setRuleAdministrator(
+        await governanceToken.getAddress(),
         await vanguardGovernance.getAddress(),
         true,
       );

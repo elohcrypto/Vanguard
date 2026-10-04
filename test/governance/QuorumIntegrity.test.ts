@@ -115,9 +115,9 @@ describe("Quorum denominator integrity", function () {
   });
 
   it("batch registration enforces jurisdiction like the single path", async function () {
-    // 643 is on this token's blocked list; the single path rejects it, and the
-    // batch path must not be a way around that check.
-    await rules.setJurisdictionRule(await idReg.getAddress(), [840], [643]);
+    const reg = await idReg.getAddress(); // the batch path must not bypass:
+    await rules.setRuleAdministrator(reg, owner.address, true);
+    await rules.setJurisdictionRule(reg, [840], [643]); // 643 blocked
     await idReg.setComplianceRules(
       await rules.getAddress(),
       await idReg.getAddress(),
@@ -203,7 +203,7 @@ describe("List-update proposals honour the execution delay", function () {
       await vgt.getAddress(),
       await idReg.getAddress(),
     );
-    await rules.addTrustedContract(await gov.getAddress());
+    await rules.addTrustedContract(vgt.target, gov.target);
 
     const kycIssuer = await (
       await ethers.getContractFactory("ClaimIssuer")
@@ -319,7 +319,7 @@ describe("cancelProposal under self-ownership", function () {
       await vgt.getAddress(),
       await idReg.getAddress(),
     );
-    await rules.addTrustedContract(govAddr);
+    await rules.addTrustedContract(vgt.target, govAddr);
 
     const kycIssuer = await (
       await ethers.getContractFactory("ClaimIssuer")
@@ -450,7 +450,7 @@ describe("Expired claims and the electorate (D7)", function () {
     await vgt.addAgent(owner.address);
     await vgt.addAgent(govAddr);
     await rules.setTokenIdentityRegistry(vgtAddr, regAddr);
-    await rules.addTrustedContract(govAddr);
+    await rules.addTrustedContract(vgtAddr, govAddr);
     const kycIssuer = await (
       await ethers.getContractFactory("ClaimIssuer")
     ).deploy(owner.address, "KYC", "d");

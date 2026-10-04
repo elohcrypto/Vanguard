@@ -118,11 +118,9 @@ describe("Governance → ComplianceRules Integration Test", function () {
     // Set VanguardGovernance as agent for GovernanceToken
     await governanceToken.addAgent(await vanguardGovernance.getAddress());
 
-    // Set VanguardGovernance as rule administrator for ComplianceRules
-    await complianceRules.setRuleAdministrator(
-      await vanguardGovernance.getAddress(),
-      true,
-    );
+    // Per token (Task 4.1): governance administers VSC's rules
+    const govA = await vanguardGovernance.getAddress();
+    await complianceRules.setRuleAdministrator(token.target, govA, true);
 
     // Configure ComplianceRules with IdentityRegistry for GovernanceToken
     await complianceRules.setTokenIdentityRegistry(
@@ -131,9 +129,7 @@ describe("Governance → ComplianceRules Integration Test", function () {
     );
 
     // D21: governance holds VGT fees as a trusted contract, not an identity.
-    await complianceRules.addTrustedContract(
-      await vanguardGovernance.getAddress(),
-    );
+    await complianceRules.addTrustedContract(governanceToken.target, govA);
 
     // Setup identities for owner and voters
     await setupIdentity(owner);

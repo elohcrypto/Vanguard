@@ -506,7 +506,6 @@ class EscrowModule {
         }
       }
 
-      // Get amount
       const amountInput = await this.promptUser(
         "\nEnter payment amount (VSC): ",
       );
@@ -761,8 +760,7 @@ class EscrowModule {
         .approve(await escrowFactory.getAddress(), totalAmount);
       await approveTx.wait();
 
-      // ✅ DEBUG: Check compliance before funding
-      console.log("\n🔍 COMPLIANCE CHECK:");
+      console.log("\n🔍 COMPLIANCE CHECK (trust is per token: VSC):");
       console.log(`   Payer: ${payerAddress}`);
       console.log(`   Wallet: ${walletAddress}`);
 
@@ -772,14 +770,14 @@ class EscrowModule {
       const payerVerified = await identityRegistry.isVerified(payerAddress);
       console.log(`   Payer Verified: ${payerVerified}`);
 
-      const walletTrusted =
-        await complianceRules.isTrustedContract(walletAddress);
+      const walletTrusted = await complianceRules[
+        "isTrustedContract(address,address)"
+      ](this.state.getContract("digitalToken").target, walletAddress);
       console.log(`   Wallet Trusted: ${walletTrusted}`);
 
       const payerCountry = await identityRegistry.investorCountry(payerAddress);
       console.log(`   Payer Country: ${payerCountry}`);
 
-      // Check payer's balance
       const payerBalance = await digitalToken.balanceOf(payerAddress);
       console.log(`   Payer Balance: ${ethers.formatEther(payerBalance)} VSC`);
       console.log(`   Required: ${ethers.formatEther(totalAmount)} VSC`);
@@ -1082,7 +1080,6 @@ class EscrowModule {
         selectedWallet.walletAddress || selectedWallet.address;
       const wallet = MultiSigEscrowWallet.attach(walletAddress);
 
-      // ✅ DEBUG: Check trusted contracts before signing
       console.log("\n🔍 PRE-RELEASE COMPLIANCE CHECK:");
       const payee = await wallet.payee();
       const ownerWalletAddr = this.state.signers[1].address;
@@ -1097,8 +1094,9 @@ class EscrowModule {
       const complianceRules = this.state.getContract("complianceRules");
       const identityRegistry = this.state.getContract("identityRegistry");
 
-      const isWalletTrusted =
-        await complianceRules.isTrustedContract(walletAddress);
+      const isWalletTrusted = await complianceRules[
+        "isTrustedContract(address,address)"
+      ](this.state.getContract("digitalToken").target, walletAddress);
       const isPayeeVerified = await identityRegistry.isVerified(payee);
       const isOwnerVerified =
         await identityRegistry.isVerified(ownerWalletAddr);
@@ -1401,7 +1399,9 @@ class EscrowModule {
       // Escrow wallet: trusted contract. Owner wallet: verified human.
       console.log("\n🔍 COMPLIANCE STATUS CHECK:");
       const complianceRules = this.state.getContract("complianceRules");
-      const isTrusted = await complianceRules.isTrustedContract(walletAddress);
+      const isTrusted = await complianceRules[
+        "isTrustedContract(address,address)"
+      ](this.state.getContract("digitalToken").target, walletAddress);
       console.log(
         `   Escrow Wallet (${walletAddress}): ${isTrusted ? "✅ TRUSTED" : "❌ NOT TRUSTED"}`,
       );
@@ -1414,7 +1414,6 @@ class EscrowModule {
         `   Owner Wallet (${ownerWalletAddress}): ${isOwnerVerified ? "✅ VERIFIED" : "❌ NOT VERIFIED"}`,
       );
 
-      // Get all wallet data
       const status = await wallet.getWalletStatus();
       const payer = await wallet.payer();
       const payee = await wallet.payee();
@@ -1424,7 +1423,6 @@ class EscrowModule {
       const owner = await wallet.owner();
       const shipmentProof = await wallet.shipmentProof();
 
-      // Get balances
       const ownerWallet = this.state.signers[1];
       const tokenContract = await ethers.getContractAt("Token", token);
 
@@ -1768,7 +1766,6 @@ class EscrowModule {
         selectedWallet.address || selectedWallet.walletAddress,
       );
 
-      // Get all wallet data
       const statusResult = await wallet.getWalletStatus();
       const status = {
         state: statusResult[0],

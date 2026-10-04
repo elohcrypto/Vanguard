@@ -109,7 +109,7 @@ describe("GovernanceToken is governable by proposal", function () {
     await idReg.addAgent(owner.address);
     await vgt.addAgent(govAddr);
     await rules.setTokenIdentityRegistry(vgtAddr, idRegAddr);
-    await rules.addTrustedContract(govAddr);
+    await rules.addTrustedContract(vgtAddr, govAddr);
 
     const kycIssuer = await (
       await ethers.getContractFactory("ClaimIssuer")

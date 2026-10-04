@@ -143,7 +143,7 @@ describe("ComplianceRules whitelist modes (Task 3.4)", function () {
     await rules.setPrivacyManager(tAddr, await pm.getAddress());
     const escrow = await deploy("MockToken", "T", "T", 0);
     const eAddr = await escrow.getAddress();
-    await rules.addTrustedContract(eAddr);
+    await rules.addTrustedContract(tAddr, eAddr);
     return { rules, token, tAddr, wl, pm, idReg, eAddr };
   }
 

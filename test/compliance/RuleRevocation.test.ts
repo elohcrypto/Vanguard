@@ -24,6 +24,7 @@ describe("Compliance rule revocation", function () {
     rules = await (
       await ethers.getContractFactory("ComplianceRules")
     ).deploy(owner.address, [], []);
+    await rules.setRuleAdministrator(TOKEN, owner.address, true);
   });
 
   describe("jurisdiction", function () {

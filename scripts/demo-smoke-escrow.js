@@ -93,7 +93,7 @@ async function runEscrowSmoke(state, failures) {
       .createEscrowWallet(payer.address, payee.address, e("1000"))
   ).wait();
   const wAddr = await factory.getWalletAddress(1);
-  await (await rules.addTrustedContract(wAddr)).wait();
+  await (await rules.addTrustedContract(token.target, wAddr)).wait();
   // Payer funds come through the real mint, within the Normal cap.
   await (await token.mint(payer.address, e("10000"))).wait();
   await (
@@ -171,7 +171,9 @@ async function runEscrowSmoke(state, failures) {
   if ((await token.balanceOf(wAddr)) !== 0n)
     failures.push("escrow wallet not empty after release");
   for (const s of [payee, investorWallet, ownerWallet])
-    if (await rules.isTrustedContract(s.address))
+    if (
+      await rules["isTrustedContract(address,address)"](token.target, s.address)
+    )
       failures.push(`${s.address} is trusted; only the escrow wallet may be`);
 
   // 3. D26: the human side of a trusted transfer is capped. The fee wallets
@@ -188,7 +190,7 @@ async function runEscrowSmoke(state, failures) {
       .createEscrowWallet(payer.address, payee.address, e("1000"))
   ).wait();
   const w2Addr = await factory.getWalletAddress(2);
-  await (await rules.addTrustedContract(w2Addr)).wait();
+  await (await rules.addTrustedContract(token.target, w2Addr)).wait();
   await (
     await token.connect(payer).approve(await factory.getAddress(), e("1050"))
   ).wait();

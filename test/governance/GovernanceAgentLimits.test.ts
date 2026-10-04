@@ -35,7 +35,7 @@ describe("GovernanceToken agent limits (D23)", function () {
     await vgt.addAgent(govAddr);
     await vgt.addAgent(ops.address);
     await rules.setTokenIdentityRegistry(vgtAddr, idAddr);
-    await rules.addTrustedContract(govAddr);
+    await rules.addTrustedContract(vgtAddr, govAddr);
 
     const kycIssuer = await D("ClaimIssuer", owner.address, "KYC", "KYC");
     await configureKyc(idReg, await kycIssuer.getAddress());
@@ -101,7 +101,7 @@ describe("GovernanceToken agent limits (D23)", function () {
     const { ops, rules, vgt } = await fixture();
     const stub = await (await D("MockToken", "Stub", "STB", 0)).getAddress();
     await vgt.connect(ops).setAddressFrozen(stub, true);
-    await rules.addTrustedContract(stub);
+    await rules.addTrustedContract(await vgt.getAddress(), stub);
     await vgt.connect(ops).setAddressFrozen(stub, false);
     expect(await vgt.isFrozen(stub)).to.equal(false);
     await refused(vgt.connect(ops).setAddressFrozen(stub, true));
@@ -127,7 +127,7 @@ describe("GovernanceToken agent limits (D23)", function () {
     await rules.setTokenIdentityRegistry(await vsc.getAddress(), idAddr);
     await vsc.addAgent(ops.address);
     const stub = await (await D("MockToken", "Stub", "STB", 0)).getAddress();
-    await rules.addTrustedContract(stub);
+    await rules.addTrustedContract(await vsc.getAddress(), stub);
     await vsc.mint(owner.address, 100n);
     await vsc.transfer(stub, 100n);
 
@@ -156,11 +156,15 @@ describe("GovernanceToken agent limits (D23)", function () {
     const vsc = await D("Token", "Vanguard", "VSC", idAddr, rulesAddr);
     await rules.setTokenIdentityRegistry(await vsc.getAddress(), idAddr);
     await vsc.addAgent(ops.address);
+    await idReg.addAgent(await vsc.getAddress()); // as deployed: moveIdentity
     await vsc.mint(v1.address, 100n);
     const v1Id = await idReg.identity(v1.address);
+    // G5: governance is trusted on VGT only, so VSC's own trusted check
+    // passes; ComplianceRules.canReceive refuses an account trusted on any
+    // token, and the whole recovery reverts.
     await expect(
       vsc.connect(ops).recoveryAddress(v1.address, govAddr, v1Id),
-    ).to.be.revertedWith("Token: recovery into trusted contract");
+    ).to.be.revertedWith("Recovery blocked by compliance");
     expect(await idReg.identity(v1.address)).to.equal(v1Id);
     expect(await idReg.identity(govAddr)).to.equal(ethers.ZeroAddress);
     expect(await vsc.balanceOf(v1.address)).to.equal(100n);

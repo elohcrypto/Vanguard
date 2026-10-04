@@ -56,6 +56,7 @@ async function wireJurisdictionSource(pm, codes = [840, 276, 826, 124]) {
     await ethers.getContractFactory("MockPolicyToken")
   ).deploy(await rules.getAddress());
   const token = await policyToken.getAddress();
+  await rules.setRuleAdministrator(token, owner.address, true); // per token (4.1)
   await pm.setPolicyToken(token);
   for (const c of codes) await pm.registerJurisdictionCode(c);
   return { rules, token, policyToken };

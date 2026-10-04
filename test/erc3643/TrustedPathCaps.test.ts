@@ -72,11 +72,12 @@ describe("Investor caps on the trusted path (2F.4)", function () {
   }
 
   // A trusted contract the test can speak for: any deployed contract,
-  // trusted in ComplianceRules, impersonated to send its own balance.
-  async function trusted(rules: any) {
+  // trusted on the token in ComplianceRules, impersonated to send its own
+  // balance. Trust is per token (Task 4.1, G5).
+  async function trusted(rules: any, token: any) {
     const c = await (await ethers.getContractFactory("MockTarget")).deploy();
     const addr = await c.getAddress();
-    await rules.addTrustedContract(addr);
+    await rules.addTrustedContract(token.target, addr);
     await ethers.provider.send("hardhat_setBalance", [
       addr,
       "0xDE0B6B3A7640000",
@@ -87,7 +88,7 @@ describe("Investor caps on the trusted path (2F.4)", function () {
   describe("Token._checkTransfer with a registry and a trusted contract", function () {
     it("human -> trusted: the sender's transfer cap applies", async function () {
       const { treasury, alice, rules, token, agree } = await deploy();
-      const t = await trusted(rules);
+      const t = await trusted(rules, token);
       await token.connect(treasury).transfer(alice.address, e("20000"));
       await agree(
         alice,
@@ -101,7 +102,7 @@ describe("Investor caps on the trusted path (2F.4)", function () {
 
     it("trusted -> human: the recipient's holding cap applies", async function () {
       const { treasury, bob, rules, token, agree } = await deploy();
-      const t = await trusted(rules);
+      const t = await trusted(rules, token);
       await token.connect(treasury).transfer(t.address, e("60000"));
       await token.connect(treasury).transfer(bob.address, e("45000"));
       await agree(t, bob.address, e("6000"), "Holding limit exceeded");
@@ -112,21 +113,24 @@ describe("Investor caps on the trusted path (2F.4)", function () {
 
     it("trusted -> human: a trusted sender is not held to a transfer cap", async function () {
       const { treasury, bob, rules, token, agree } = await deploy();
-      const t = await trusted(rules);
+      const t = await trusted(rules, token);
       await token.connect(treasury).transfer(t.address, e("60000"));
       await agree(t, bob.address, e("20000")); // above the 8,000 Normal cap
     });
 
     it("trusted -> trusted: no caps, no identity", async function () {
       const { treasury, rules, token, agree } = await deploy();
-      const [t1, t2] = [await trusted(rules), await trusted(rules)];
+      const [t1, t2] = [
+        await trusted(rules, token),
+        await trusted(rules, token),
+      ];
       await token.connect(treasury).transfer(t1.address, e("100000"));
       await agree(t1, t2.address, e("100000"));
     });
 
     it("an exempt recipient is allowed past the holding cap", async function () {
       const { treasury, bob, rules, token, types, agree } = await deploy();
-      const t = await trusted(rules);
+      const t = await trusted(rules, token);
       await token.connect(treasury).transfer(t.address, e("60000"));
       await agree(t, bob.address, e("60000"), "Holding limit exceeded");
       await types.setInvestorLimitExempt(bob.address, true);
@@ -135,7 +139,7 @@ describe("Investor caps on the trusted path (2F.4)", function () {
 
     it("an exempt sender is allowed past the transfer cap", async function () {
       const { treasury, alice, rules, token, types, agree } = await deploy();
-      const t = await trusted(rules);
+      const t = await trusted(rules, token);
       await token.connect(treasury).transfer(alice.address, e("20000"));
       await types.setInvestorLimitExempt(alice.address, true);
       await agree(alice, t.address, e("20000"));
@@ -184,7 +188,7 @@ describe("Investor caps on the trusted path (2F.4)", function () {
         .connect(investor)
         .createEscrowWallet(payer.address, payee.address, AMOUNT);
       const walletAddr = await factory.getWalletAddress(1);
-      await rules.connect(owner).addTrustedContract(walletAddr);
+      await rules.connect(owner).addTrustedContract(token.target, walletAddr);
       const wallet = await ethers.getContractAt(
         "MultiSigEscrowWallet",
         walletAddr,

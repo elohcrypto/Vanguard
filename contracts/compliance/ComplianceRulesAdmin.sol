@@ -32,19 +32,31 @@ interface IPrivacyManagerView {
  */
 abstract contract ComplianceRulesAdmin is IComplianceRules, Ownable2Step {
     // ========================================
-    // TRUSTED CONTRACTS (Escrow Wallets, etc.)
+    // TRUSTED CONTRACTS (Escrow Wallets, etc.), per token (G5)
     // ========================================
+    //
+    // Trust is per token: trusting governance for VGT (it holds VGT fees,
+    // D21) does not exempt it on VSC, and an escrow trusted for VSC is not
+    // trusted for VGT. Token and GovernanceToken read the 1-arg
+    // isTrustedContract as "trusted for msg.sender"; off-chain readers use
+    // the 2-arg view and the token-indexed events.
 
-    mapping(address => bool) internal trustedContracts;
+    mapping(address => mapping(address => bool)) internal trustedContracts;
+    /// @dev On how many tokens an account is trusted. canReceive refuses a
+    ///      recovery into an account trusted on ANY token (review M1, 2E).
+    mapping(address => uint256) internal trustedTokenCount;
 
-    event TrustedContractAdded(address indexed contractAddress);
-    event TrustedContractRemoved(address indexed contractAddress);
+    event TrustedContractAdded(address indexed token, address indexed contractAddress);
+    event TrustedContractRemoved(address indexed token, address indexed contractAddress);
 
     /**
-     * @dev Add a trusted contract (e.g., escrow wallet) that can bypass KYC/AML
+     * @dev Trust a contract (e.g., escrow wallet) on `token`: its own identity
+     *      and whitelist checks are skipped there, the counterparty's are not.
+     * @param token The token on which the contract is trusted
      * @param contractAddress Address of the trusted contract
      */
-    function addTrustedContract(address contractAddress) external onlyOwner {
+    function addTrustedContract(address token, address contractAddress) external onlyOwner {
+        require(token != address(0), "ComplianceRules: Invalid token address");
         require(contractAddress != address(0), "Invalid address");
         require(contractAddress.code.length > 0, "ComplianceRules: not a contract");
         // EIP-7702 delegation indicator (0xef0100 || address, 23 bytes): a
@@ -56,23 +68,31 @@ abstract contract ComplianceRulesAdmin is IComplianceRules, Ownable2Step {
                 "ComplianceRules: delegated wallet"
             );
         }
-        require(!trustedContracts[contractAddress], "Already trusted");
-        trustedContracts[contractAddress] = true;
-        emit TrustedContractAdded(contractAddress);
+        require(!trustedContracts[token][contractAddress], "Already trusted");
+        trustedContracts[token][contractAddress] = true;
+        trustedTokenCount[contractAddress]++;
+        emit TrustedContractAdded(token, contractAddress);
     }
 
     /**
-     * @dev Remove a trusted contract
+     * @dev Stop trusting a contract on `token`
+     * @param token The token on which the contract was trusted
      * @param contractAddress Address of the contract to remove
      */
-    function removeTrustedContract(address contractAddress) external onlyOwner {
-        require(trustedContracts[contractAddress], "Not trusted");
+    function removeTrustedContract(address token, address contractAddress) external onlyOwner {
+        require(trustedContracts[token][contractAddress], "Not trusted");
         // After the handover the owner is governance, which holds VGT fees as
         // a trusted contract with no identity (D21). Untrusting it would make
         // every later fee pull revert, so no proposal could ever undo it.
         require(contractAddress != owner(), "ComplianceRules: owner stays trusted");
-        trustedContracts[contractAddress] = false;
-        emit TrustedContractRemoved(contractAddress);
+        trustedContracts[token][contractAddress] = false;
+        trustedTokenCount[contractAddress]--;
+        emit TrustedContractRemoved(token, contractAddress);
+    }
+
+    /// @notice Whether `account` is a trusted contract on `token`.
+    function isTrustedContract(address token, address account) external view returns (bool) {
+        return trustedContracts[token][account];
     }
 
     // ========================================
@@ -225,7 +245,10 @@ abstract contract ComplianceRulesAdmin is IComplianceRules, Ownable2Step {
 
     mapping(address => JurisdictionRule) private jurisdictionRules;
 
-    mapping(address => bool) public ruleAdministrators;
+    /// @notice token => account => may set and clear that token's jurisdiction
+    ///         rule (G5). Granted per token by the owner; nobody holds it at
+    ///         construction.
+    mapping(address => mapping(address => bool)) public ruleAdministrators;
     mapping(address => address) public tokenIdentityRegistry; // Maps token address to its IdentityRegistry
     /// @notice Bumped by every setJurisdictionRule/clearJurisdictionRule for
     ///         the token (never decreases): PrivacyManager folds it into the
@@ -241,12 +264,12 @@ abstract contract ComplianceRulesAdmin is IComplianceRules, Ownable2Step {
 
     event JurisdictionRuleUpdated(address indexed token, uint256[] allowedCountries, uint256[] blockedCountries);
     event JurisdictionRuleCleared(address indexed token);
-    event RuleAdministratorUpdated(address indexed administrator, bool authorized);
+    event RuleAdministratorUpdated(address indexed token, address indexed administrator, bool authorized);
     event TokenIdentityRegistrySet(address indexed token, address indexed identityRegistry);
 
-    modifier onlyGovernance() {
+    modifier onlyGovernance(address token) {
         require(
-            ruleAdministrators[msg.sender],
+            ruleAdministrators[token][msg.sender],
             "ComplianceRules: Only governance can update rules"
         );
         _;
@@ -271,12 +294,13 @@ abstract contract ComplianceRulesAdmin is IComplianceRules, Ownable2Step {
     }
 
     /**
-     * @dev Set rule administrator
+     * @dev Grant or revoke the right to set `token`'s jurisdiction rule
      */
-    function setRuleAdministrator(address administrator, bool authorized) external onlyOwner {
+    function setRuleAdministrator(address token, address administrator, bool authorized) external onlyOwner {
+        require(token != address(0), "ComplianceRules: Invalid token address");
         require(administrator != address(0), "ComplianceRules: Invalid administrator address");
-        ruleAdministrators[administrator] = authorized;
-        emit RuleAdministratorUpdated(administrator, authorized);
+        ruleAdministrators[token][administrator] = authorized;
+        emit RuleAdministratorUpdated(token, administrator, authorized);
     }
 
     /**
@@ -287,8 +311,8 @@ abstract contract ComplianceRulesAdmin is IComplianceRules, Ownable2Step {
         address token,
         uint256[] calldata allowedCountries,
         uint256[] calldata blockedCountries
-    ) external override onlyGovernance {
-        require(token != address(0), "ComplianceRules: Invalid token address");
+    ) external override onlyGovernance(token) {
+        // address(0) cannot hold an administrator: setRuleAdministrator refuses it.
         require(allowedCountries.length <= MAX_COUNTRIES, "ComplianceRules: Too many allowed countries");
         require(blockedCountries.length <= MAX_COUNTRIES, "ComplianceRules: Too many blocked countries");
 
@@ -322,8 +346,7 @@ abstract contract ComplianceRulesAdmin is IComplianceRules, Ownable2Step {
      * @dev Remove a token's own jurisdiction rule so the default rule applies
      *      again. Clears the stored arrays and lookup maps.
      */
-    function clearJurisdictionRule(address token) external onlyGovernance {
-        require(token != address(0), "ComplianceRules: Invalid token address");
+    function clearJurisdictionRule(address token) external onlyGovernance(token) {
         JurisdictionRule storage rule = jurisdictionRules[token];
         _clearMaps(rule);
         delete rule.allowedCountries;

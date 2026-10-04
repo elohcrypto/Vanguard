@@ -170,7 +170,7 @@ describe("Deployer holds no power after handover (plan Task 0.3)", function () {
     await vgt.addAgent(deployer.address);
     await vgt.addAgent(govAddr);
     await complianceRules.setTokenIdentityRegistry(vgtAddr, idRegAddr);
-    await complianceRules.addTrustedContract(govAddr);
+    await complianceRules.addTrustedContract(vgtAddr, govAddr);
     for (const w of [alice, bob, carol]) {
       const id = await deployIdentity(factory, w.address);
       await identityRegistry.registerIdentity(w.address, id, 840);
@@ -217,9 +217,11 @@ describe("Deployer holds no power after handover (plan Task 0.3)", function () {
   it("the deployer is no longer an agent or rule administrator", async function () {
     expect(await token.isAgent(deployer.address)).to.equal(false);
     expect(await identityRegistry.isAgent(deployer.address)).to.equal(false);
-    expect(await complianceRules.ruleAdministrators(deployer.address)).to.equal(
-      false,
-    );
+    const vgtAddr = await governance.governanceToken();
+    for (const t of [await token.getAddress(), vgtAddr])
+      expect(
+        await complianceRules.ruleAdministrators(t, deployer.address),
+      ).to.equal(false);
   });
 
   it("the ops multisig holds the agent roles", async function () {

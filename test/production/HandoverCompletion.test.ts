@@ -219,8 +219,9 @@ describe("Handover completion check (table)", function () {
       ],
       // Task 3.9, review B-L2: any other live rule administrator.
       [
-        `${s} is still a ComplianceRules rule administrator (neither governance nor ops)`,
-        () => c.complianceRules.connect(gov).setRuleAdministrator(s, true),
+        `${s} is still a ComplianceRules rule administrator on ${vgtAddr} (neither governance nor ops)`,
+        () =>
+          c.complianceRules.connect(gov).setRuleAdministrator(vgtAddr, s, true),
       ],
       // Review B-M2: a token moved to another ComplianceRules by its owner.
       [
@@ -247,8 +248,9 @@ describe("Handover completion check (table)", function () {
         () => c.identityRegistry.connect(gov).addAgent(d),
       ],
       [
-        "deployer is not a ComplianceRules rule administrator",
-        () => c.complianceRules.connect(gov).setRuleAdministrator(d, true),
+        "deployer is not a ComplianceRules rule administrator on VSC or VGT",
+        () =>
+          c.complianceRules.connect(gov).setRuleAdministrator(vgtAddr, d, true),
       ],
       [
         "deployer is not an InvestorTypeRegistry governor",
@@ -423,11 +425,12 @@ describe("Handover completion check: deployer-era residue (3.9)", function () {
   // revoke it in one transaction; the completion line is in the table.
   it("refuses a rule administrator the deployer authorized before Step 1", async function () {
     const s = f.stranger.address;
-    await c.complianceRules.setRuleAdministrator(s, true);
+    const vsc = await c.token.getAddress();
+    await c.complianceRules.setRuleAdministrator(vsc, s, true);
     const nonce = await ethers.provider.getTransactionCount(f.deployer.address);
     await expect(handoverDeployerPowers(args)).to.be.rejectedWith(
       new RegExp(
-        `ComplianceRules rule administrator\\(s\\) ${s} besides the deployer, ops and governance: .*setRuleAdministrator\\(<address>, false\\) first`,
+        `ComplianceRules rule administrator\\(s\\) ${s} on ${vsc} besides the deployer, ops and governance: .*setRuleAdministrator\\(<token>, <address>, false\\) first`,
       ),
     );
     expect(
@@ -435,7 +438,7 @@ describe("Handover completion check: deployer-era residue (3.9)", function () {
     ).to.equal(nonce);
     expect(await c.token.isAgent(f.deployer.address)).to.equal(true);
     // Revoked, the same ceremony completes.
-    await c.complianceRules.setRuleAdministrator(s, false);
+    await c.complianceRules.setRuleAdministrator(vsc, s, false);
     await ceremony();
     expect((await assertHandoverComplete(args)).failures).to.deep.equal([]);
   });
