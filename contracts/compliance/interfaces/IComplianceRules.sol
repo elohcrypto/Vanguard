@@ -3,21 +3,14 @@ pragma solidity ^0.8.20;
 
 /**
  * @title IComplianceRules
- * @dev Interface for configurable compliance rule engine
+ * @dev The slice of ComplianceRules other contracts call (plan v2 Task 4.1):
+ *      IdentityRegistry asks validateJurisdiction at registration, and
+ *      PrivacyManager reads both functions through its own inline
+ *      IJurisdictionRuleSource (same selectors and return shapes, which this
+ *      interface pins on the deployed contract). Token and GovernanceToken
+ *      use IComplianceHooks; governance reaches the setters by calldata.
  */
 interface IComplianceRules {
-    /**
-     * @dev Set jurisdiction-based validation rules
-     * @param token Token contract address
-     * @param allowedCountries Array of allowed country codes
-     * @param blockedCountries Array of blocked country codes
-     */
-    function setJurisdictionRule(
-        address token,
-        uint256[] calldata allowedCountries,
-        uint256[] calldata blockedCountries
-    ) external;
-
     /**
      * @dev Validate jurisdiction compliance
      * @param token Token contract address
@@ -29,4 +22,10 @@ interface IComplianceRules {
         address token,
         uint256 countryCode
     ) external view returns (bool isValid, string memory reason);
+
+    /**
+     * @dev Bumped by every write to `token`'s jurisdiction verdict; never
+     *      decreases. PrivacyManager folds it into its policy hash.
+     */
+    function jurisdictionRuleVersion(address token) external view returns (uint256);
 }

@@ -90,6 +90,43 @@ describe("ComplianceRules", function () {
     });
   });
 
+  // PrivacyManager reaches ComplianceRules through Token.compliance() and an
+  // inline interface, so a renamed or reshaped function would break it with
+  // no compile error. Pin the exact fragments on the deployed contract.
+  it("keeps the selectors other contracts and the ceremony read (4.1)", async function () {
+    const iface = complianceRules.interface as unknown as {
+      getFunction(name: string): { format(f: string): string } | null;
+    };
+    for (const [sig, full] of [
+      [
+        "validateJurisdiction(address,uint256)",
+        "function validateJurisdiction(address token, uint256 countryCode) view returns (bool isValid, string reason)",
+      ],
+      [
+        "jurisdictionRuleVersion(address)",
+        "function jurisdictionRuleVersion(address) view returns (uint256)",
+      ],
+      [
+        "whitelistMode(address)",
+        "function whitelistMode(address) view returns (uint8)",
+      ],
+      [
+        "privacyManager(address)",
+        "function privacyManager(address) view returns (address)",
+      ],
+      [
+        "isTrustedContract(address)",
+        "function isTrustedContract(address contractAddress) view returns (bool)",
+      ],
+      [
+        "canReceive(address)",
+        "function canReceive(address to) view returns (bool)",
+      ],
+    ]) {
+      expect(iface.getFunction(sig)?.format("full"), sig).to.equal(full);
+    }
+  });
+
   describe("Access Control", function () {
     it("Should allow owner to set rule administrators", async function () {
       const t = tokenContract.address;

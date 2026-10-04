@@ -254,7 +254,7 @@ abstract contract ComplianceRulesAdmin is IComplianceRules, Ownable2Step {
     ///         the token (never decreases): PrivacyManager folds it into the
     ///         jurisdiction attestation policy so a restored rule (A -> B -> A)
     ///         does not revive an attestation made under the first A.
-    mapping(address => uint256) public jurisdictionRuleVersion;
+    mapping(address => uint256) public override jurisdictionRuleVersion;
 
     /// @dev The default rule: its blocked list applies to every token; the
     ///      whole rule applies to a token with no rule of its own.
@@ -311,7 +311,7 @@ abstract contract ComplianceRulesAdmin is IComplianceRules, Ownable2Step {
         address token,
         uint256[] calldata allowedCountries,
         uint256[] calldata blockedCountries
-    ) external override onlyGovernance(token) {
+    ) external onlyGovernance(token) {
         // address(0) cannot hold an administrator: setRuleAdministrator refuses it.
         require(allowedCountries.length <= MAX_COUNTRIES, "ComplianceRules: Too many allowed countries");
         require(blockedCountries.length <= MAX_COUNTRIES, "ComplianceRules: Too many blocked countries");

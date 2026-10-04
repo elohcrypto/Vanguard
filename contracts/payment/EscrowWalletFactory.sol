@@ -7,7 +7,6 @@ import "@openzeppelin/contracts/access/extensions/AccessControlEnumerable.sol";
 import "@openzeppelin/contracts/access/Ownable2Step.sol";
 import "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
 import "../erc3643/interfaces/IIdentityRegistry.sol";
-import "../compliance/interfaces/IComplianceRules.sol";
 
 /**
  * @title EscrowWalletFactory
@@ -43,7 +42,7 @@ contract EscrowWalletFactory is AccessControlEnumerable, Ownable2Step, Reentranc
     
     IERC20 public immutable vscToken;
     IIdentityRegistry public identityRegistry;  // KYC/AML verification
-    IComplianceRules public complianceRules;    // Compliance rules (for trusted contracts)
+    address public complianceRules;    // Compliance rules (for trusted contracts)
     address public ownerWallet;  // Where owner fees are sent
 
     // Fee rates (basis points: 10000 = 100%)
@@ -124,7 +123,7 @@ contract EscrowWalletFactory is AccessControlEnumerable, Ownable2Step, Reentranc
         vscToken = IERC20(_vscToken);
         ownerWallet = _ownerWallet;
         identityRegistry = IIdentityRegistry(_identityRegistry);
-        complianceRules = IComplianceRules(_complianceRules);
+        complianceRules = _complianceRules;
 
         // DEFAULT_ADMIN_ROLE was granted with ownership (_transferOwnership).
         _grantRole(ADMIN_ROLE, msg.sender);
@@ -149,7 +148,7 @@ contract EscrowWalletFactory is AccessControlEnumerable, Ownable2Step, Reentranc
     function setComplianceRules(address _complianceRules) external onlyOwner {
         require(_complianceRules != address(0), "Invalid compliance rules");
         require(_complianceRules.code.length > 0, "EscrowWalletFactory: Compliance rules is not a contract");
-        complianceRules = IComplianceRules(_complianceRules);
+        complianceRules = _complianceRules;
     }
     
     // ========================================
@@ -294,7 +293,8 @@ contract EscrowWalletFactory is AccessControlEnumerable, Ownable2Step, Reentranc
         //
         // ⚠️ IMPORTANT: The ComplianceRules owner must manually add the wallet
         // to trusted contracts after creation. This is done in the demo script
-        // or by calling: complianceRules.addTrustedContract(walletAddress)
+        // or by calling: complianceRules.addTrustedContract(vscToken, walletAddress)
+        // (trust is per token since Task 4.1)
 
         // Store mappings
         paymentToWallet[paymentId] = walletAddress;

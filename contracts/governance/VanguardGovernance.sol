@@ -5,7 +5,6 @@ import "@openzeppelin/contracts/access/Ownable2Step.sol";
 import "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
 import "./GovernanceToken.sol";
 import "../erc3643/interfaces/IIdentityRegistry.sol";
-import "../compliance/interfaces/IComplianceRules.sol";
 import "../erc3643/interfaces/IInvestorTypeRegistry.sol";
 import "../onchain_id/interfaces/IERC734.sol";
 
