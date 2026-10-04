@@ -382,7 +382,8 @@ contract PrivacyManager is Ownable2Step, ReentrancyGuard {
         if (!_policySet(circuitId, policy)) revert PolicyNotSet(circuitId);
         if (signals[3] != block.chainid) revert WrongChainId(signals[3]);
         if (signals[4] != uint256(uint160(address(this)))) revert WrongVerifierContext(signals[4]);
-        if (block.timestamp >= signals[5]) revert AttestationExpired(signals[5]);
+        // >= 2^64 is never a signed expiry (a +q alias if the wrapper changes).
+        if (signals[5] >= 1 << 64 || block.timestamp >= signals[5]) revert AttestationExpired(signals[5]);
         for (uint256 i = 0; i < policy.length; i++) {
             if (signals[6 + i] != policy[i]) revert StalePolicy(circuitId);
         }

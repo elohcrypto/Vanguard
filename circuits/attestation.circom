@@ -20,8 +20,9 @@ include "circomlib/circuits/eddsaposeidon.circom";
  * signed; the three attestation circuits publish it and PrivacyManager
  * refuses the proof from that time on and caps the record's expiresAt at it
  * (Task 3.10, D32 a): a lapsed attestation cannot be re-proved, and old
- * calldata cannot be resubmitted after it. chainId and verifierContext (the PrivacyManager address as a
- * field element) are public inputs PrivacyManager compares to block.chainid
+ * calldata cannot be resubmitted after it. chainId and verifierContext
+ * (the PrivacyManager address as a field element) are public inputs
+ * PrivacyManager compares to block.chainid
  * and itself (Task 3.8 review M1): an attestation is valid for one chain and
  * one PrivacyManager only, so a second deployment trusting the same key,
  * whose jurisdiction bits may be assigned in another order, cannot accept
@@ -50,8 +51,10 @@ template AttestationSignature(n) {
     signal input R8y;
     signal input S;
 
-    // validUntil is a unix time below 2^64, so the on-chain comparison with
-    // block.timestamp sees the value the issuer meant.
+    // The 64-bit bound fixes the range of the value the issuer signs. It
+    // does not stop a +q alias of the public signal on chain: that is the
+    // wrapper's field check (ZKVerifierIntegrated refuses signals >= q),
+    // and PrivacyManager refuses validUntil >= 2^64 itself.
     component validUntilBits = Num2Bits(64);
     validUntilBits.in <== validUntil;
 

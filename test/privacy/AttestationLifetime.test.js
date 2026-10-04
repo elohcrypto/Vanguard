@@ -4,7 +4,12 @@ const fs = require("fs");
 const os = require("os");
 const path = require("path");
 const { execFile } = require("child_process");
-const { deployAttestationFixture } = require("../helpers/attestationFixture");
+const {
+  Q,
+  deployAttestationFixture,
+  circuitInput,
+  aliasedProof,
+} = require("../helpers/attestationFixture");
 const { signAttestation } = require("../../scripts/zk/attest");
 const { describeProofs } = require("../helpers/zkProofs");
 
@@ -139,6 +144,27 @@ describeProofs("Attestation lifetime (Task 3.10)", function () {
     });
   });
 
+  // Review 3.10 L1: the raw verifier accepts validUntil + q; PrivacyManager
+  // refuses it itself (>= 2^64), whatever wrapper sits in the slot.
+  it("an expired attestation presented with validUntil + q reverts at PrivacyManager, no record", async function () {
+    const w3 = f.wallets[3];
+    const validUntil = (await now()) + DAY;
+    const att = await f.sign({ amount: 250000, validUntil });
+    const input = circuitInput(att, [MIN], w3.address);
+    const a = await aliasedProof(f.paths, input, 5, 8);
+    expect(BigInt(a.signals[5])).to.equal(validUntil + Q);
+    await ethers.provider.send("evm_increaseTime", [Number(2n * DAY)]);
+    await ethers.provider.send("evm_mine", []);
+    await expect(
+      f.pm.connect(w3).submitAttestationProof(f.id, a.proof, a.signals),
+    )
+      .to.be.revertedWithCustomError(f.pm, "AttestationExpired")
+      .withArgs(validUntil + Q);
+    expect(
+      (await f.pm.attestationRecords(w3.address, f.id)).expiresAt,
+    ).to.equal(0n);
+  });
+
   describe("CLIs", function () {
     const identity = "0x5FbDB2315678afecb367f032d93F642f64180aa3";
     const PMX = "0x" + "11".repeat(20);
@@ -176,7 +202,9 @@ describeProofs("Attestation lifetime (Task 3.10)", function () {
           /--valid-until 2020-01-01T00:00:00.000Z is not in the future/,
         ],
         [["--valid-days", "0"], /--valid-days: a whole number of days/],
-        [["--valid-until", "someday"], /not an ISO date/],
+        [["--valid-until", "someday"], /an ISO 8601 UTC date/],
+        [["--valid-until", "2027-01-01T00:00"], /an ISO 8601 UTC date/],
+        [["--valid-until", "Jan 1 2027"], /an ISO 8601 UTC date/],
       ]) {
         const r = await run("attest.js", [...base, ...args], {
           ATTESTOR_KEY: f.key,
