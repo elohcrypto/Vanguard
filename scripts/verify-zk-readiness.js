@@ -8,7 +8,10 @@
  * with their expected public-signal counts), and every constant the PLONK
  * verifier deploys (n, nPublic, k1, k2, w1, Qm, Ql, Qr, Qo, Qc, S1, S2,
  * S3, X2) equal to the verification key's (review 3.9 B-M5: a foreign
- * verifier with the right ABI fails here). A Groth16 key or verifier with
+ * verifier with other constants fails here). Only those constants are
+ * compared, not the verifier body: one with copied constants and an
+ * edited body passes here; CI's diff after setup:zk and the ceremony's
+ * code-hash pins catch that. A Groth16 key or verifier with
  * gamma == delta (no phase-2 contribution, so forgeable) is reported as
  * UNSOUND. It does not compare the vkey with the zkey or re-run setup:zk;
  * CI does that (the verifier diff after setup:zk and the recompile tests).
