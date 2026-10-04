@@ -99,14 +99,16 @@ function toValidUntil(value) {
 /** A unix time (seconds) as an ISO date, for messages. */
 const isoOf = (t) => new Date(Number(t) * 1000).toISOString();
 
+const ISO_UTC = /^\d{4}-\d\d-\d\d(T\d\d:\d\d(:\d\d(\.\d{1,3})?)?Z)?$/;
+
 /**
- * validUntil from the CLI: exactly one of --valid-until <ISO date> and
+ * validUntil from the CLI: exactly one of --valid-until <ISO 8601 UTC date> and
  * --valid-days <n>, and after `now` (unix seconds).
  */
 function validityFromArgs({ validUntil, validDays }, now) {
   if ((validUntil === undefined) === (validDays === undefined)) {
     throw new Error(
-      "the issuer sets the expiry: pass --valid-until <ISO date> or --valid-days <n> (one of them)",
+      "the issuer sets the expiry: pass --valid-until <ISO 8601 UTC date> or --valid-days <n> (one of them)",
     );
   }
   let t;
@@ -116,8 +118,15 @@ function validityFromArgs({ validUntil, validDays }, now) {
     }
     t = BigInt(now) + BigInt(validDays) * 86400n;
   } else {
-    const ms = Date.parse(String(validUntil));
-    if (Number.isNaN(ms)) throw new Error("--valid-until: not an ISO date");
+    // Strict ISO 8601 UTC only (review 3.10 L2): Date.parse reads other
+    // forms in the local timezone.
+    const v = String(validUntil);
+    const ms = ISO_UTC.test(v) ? Date.parse(v) : NaN;
+    if (Number.isNaN(ms)) {
+      throw new Error(
+        "--valid-until: an ISO 8601 UTC date (e.g. 2027-01-01 or 2027-01-01T00:00:00Z)",
+      );
+    }
     t = BigInt(Math.floor(ms / 1000));
   }
   if (t <= BigInt(now)) {

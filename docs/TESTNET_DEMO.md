@@ -491,8 +491,9 @@ one to the other, where the same bit may mean another country; after a
 redeploy, issuers sign again for the new PrivacyManager.
 
 An attestation also expires on a date the issuer sets (Task 3.10, D32 a):
-`attest.js --sign` requires `--valid-days <n>` or `--valid-until <ISO
-date>` and refuses a date not in the future; the issuer signs that
+`attest.js --sign` requires `--valid-days <n>` or `--valid-until <ISO 8601
+UTC date>` (`2027-01-01` or `2027-01-01T00:00:00Z`; other forms are
+refused) and refuses a date not in the future; the issuer signs that
 `validUntil` with the attributes and the proof publishes it. PrivacyManager
 refuses the proof from `validUntil` on (`AttestationExpired`), and a
 record's `expiresAt` is `min(submission + proofValidityPeriod,
@@ -539,7 +540,7 @@ ATTESTOR_KEY=<key> node scripts/zk/attest.js --public-key
 ATTESTOR_KEY=<key> node scripts/zk/attest.js --sign --circuit jurisdiction \
   --identity <onchainID> --country <ISO numeric> --rpc <url> \
   --privacy-manager <addr> --valid-days 365 --out att.json
-#   or --valid-until <ISO date>; the expiry is required
+#   or --valid-until 2027-01-01 (ISO 8601 UTC); the expiry is required
 #   offline: --chain-id <id> --privacy-manager <addr> --mask <its bit>
 #   ... --circuit accreditation --amount <amount>
 #   ... --circuit compliance --scores <kyc,aml,jurisdiction,accreditation>

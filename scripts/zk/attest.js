@@ -15,7 +15,7 @@
  *   ATTESTOR_KEY=0x.. node scripts/zk/attest.js --sign --circuit jurisdiction \
  *        --identity <OnchainID> --country <ISO 3166-1 numeric> \
  *        --rpc <url> --privacy-manager <addr> --valid-days 365 [--out att.json]
- *        (or --valid-until <ISO date>: the expiry is required)
+ *        (or --valid-until <YYYY-MM-DD[THH:MM[:SS]Z]>, UTC: the expiry is required)
  *        (offline: --mask <the code's PrivacyManager.jurisdictionBit>)
  *        ... --circuit accreditation --amount <amount>
  *        ... --circuit compliance --scores <kyc,aml,jurisdiction,accreditation>
@@ -318,7 +318,7 @@ const USAGE = `Usage: node scripts/zk/attest.js --new-key
        node scripts/zk/attest.js --sign --circuit <jurisdiction|accreditation|compliance>
             --identity <id> --privacy-manager <addr> (--rpc <url> | --chain-id <n>)
             (--country <iso> (needs --rpc) | --mask <m> | --amount <a> | --scores <k,a,j,acc>)
-            (--valid-days <n> | --valid-until <ISO date>) [--out <file>]
+            (--valid-days <n> | --valid-until <YYYY-MM-DD[THH:MM[:SS]Z]>, UTC) [--out <file>]
 Key: env ATTESTOR_KEY (0x, 32 bytes).`;
 
 function readKey(env) {
