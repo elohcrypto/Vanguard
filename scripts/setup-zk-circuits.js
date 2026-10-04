@@ -328,7 +328,9 @@ async function generateCircuitInfo() {
     circuitInfo.circuits[circuitName] = {
       protocol: protocolOf(circuitName),
       nPublic: vkey ? vkey.nPublic : null,
-      id: `keccak256("${circuitName.toUpperCase().replace("_", "_")}")`,
+      // The circuit id PrivacyManager and the wrapper use, e.g.
+      // keccak256("WHITELIST_MEMBERSHIP") (informational: no code reads it).
+      id: `keccak256("${circuitName.toUpperCase()}")`,
       name: circuitName,
       description: getCircuitDescription(circuitName),
       verifyingKey: vkey,

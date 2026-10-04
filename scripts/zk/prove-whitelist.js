@@ -4,8 +4,9 @@
  * scripts/zk/build-whitelist-root.js: library for the demo and the tests,
  * and a CLI.
  *
- *   # once: a fresh secret (31 random bytes); keep it offline
- *   node scripts/zk/prove-whitelist.js --new-secret > secret.txt
+ *   # once: a fresh secret (31 random bytes) in a new 0600 file; keep it
+ *   # offline (without --out it goes to stdout, with a warning on stderr)
+ *   node scripts/zk/prove-whitelist.js --new-secret --out secret.txt
  *   # onboarding: the commitment to hand the operator
  *   node scripts/zk/prove-whitelist.js --commitment --identity <id> --secret-file secret.txt
  *   # proving: calldata for PrivacyManager.submitWhitelistProof
@@ -16,7 +17,8 @@
  *
  * The secret comes from --secret-file or env WHITELIST_SECRET, never from
  * argv (other processes can read argv), and is never printed; one below
- * 2^128 is refused. The identity of an onboarded investor is its OnchainID
+ * 2^128 is refused. A --secret-file readable by group or others draws a
+ * warning on stderr (review 3.9 B-L5). The identity of an onboarded investor is its OnchainID
  * address as a field element. Output: { proof: string[24], signals:
  * [nullifier, root, wallet] } on stdout (and --out); progress goes to
  * stderr. The proof is verified locally with the circuit's verification key
@@ -183,10 +185,36 @@ async function submitWhitelistProof({ calldata, privacyManager, signer, rpc }) {
   };
 }
 
-/** The secret from --secret-file or WHITELIST_SECRET; argv is refused. */
-function readSecret(args, env) {
+/**
+ * Write a fresh secret to a new file, mode 0600, refusing an existing one
+ * (review 3.9 B-L5: a shell redirect leaves the mode to the umask).
+ */
+function writeSecretFile(file, secret) {
+  try {
+    fs.writeFileSync(file, secret + "\n", { mode: 0o600, flag: "wx" });
+  } catch (e) {
+    if (e.code === "EEXIST") {
+      throw new Error(`${file} exists: refusing to overwrite a secret file`);
+    }
+    throw e;
+  }
+}
+
+/**
+ * The secret from --secret-file or WHITELIST_SECRET; argv is refused. A
+ * secret file readable by group or others is read, with a warning on
+ * stderr (`warn`).
+ */
+function readSecret(args, env, warn = (m) => process.stderr.write(m + "\n")) {
   if (args["secret-file"]) {
-    return fs.readFileSync(args["secret-file"], "utf8").trim();
+    const file = args["secret-file"];
+    const mode = fs.statSync(file).mode & 0o777;
+    if (process.platform !== "win32" && mode & 0o077) {
+      warn(
+        `warning: secret file ${file} is readable by group or others (mode ${mode.toString(8).padStart(4, "0")}): chmod 600 it`,
+      );
+    }
+    return fs.readFileSync(file, "utf8").trim();
   }
   if (env.WHITELIST_SECRET) return env.WHITELIST_SECRET.trim();
   throw new Error(
@@ -226,7 +254,7 @@ function parseArgs(argv) {
   return args;
 }
 
-const USAGE = `Usage: node scripts/zk/prove-whitelist.js --new-secret
+const USAGE = `Usage: node scripts/zk/prove-whitelist.js --new-secret [--out <secret file>]
        node scripts/zk/prove-whitelist.js --commitment --identity <id>
        node scripts/zk/prove-whitelist.js --root <root.json> --identity <id> --wallet <addr>
             [--out <proof.json>] [--submit --rpc <url> --privacy-manager <addr>]
@@ -239,7 +267,16 @@ async function main(secretBox) {
   const out = (s) => process.stdout.write(s + "\n");
   const args = parseArgs(process.argv.slice(2));
   if (args.help) return out(USAGE);
-  if (args["new-secret"]) return out(newSecret());
+  if (args["new-secret"]) {
+    if (args.out) {
+      writeSecretFile(args.out, newSecret());
+      return out(args.out);
+    }
+    console.error(
+      "warning: the secret goes to stdout; a shell redirect leaves the file mode to the umask (often 0644): prefer --new-secret --out <file> (mode 0600)",
+    );
+    return out(newSecret());
+  }
   if (args.identity === undefined)
     throw new Error(`--identity is required\n${USAGE}`);
   secretBox.value = readSecret(args, process.env);
@@ -318,4 +355,5 @@ module.exports = {
   submitWhitelistProof,
   readSecret,
   newSecret,
+  writeSecretFile,
 };

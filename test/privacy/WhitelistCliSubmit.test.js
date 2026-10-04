@@ -6,11 +6,14 @@ const { execFile } = require("child_process");
 // Task 3.5 review round: the publish and submit library functions the CLIs
 // call (signer injected; the CLI builds a JsonRpcProvider + Wallet), the
 // stale-root refusal (M1), the secret floor (M2) and identity variants.
+const fs = require("fs");
+const os = require("os");
 const {
   hex32,
   computeCommitment,
   buildWhitelistRoot,
   publishRoot,
+  diffRootFiles,
 } = require("../../scripts/zk/build-whitelist-root");
 const {
   proveWhitelist,
@@ -20,11 +23,12 @@ const {
 const { describeProofs } = require("../helpers/zkProofs");
 const ROOT = path.join(__dirname, "../..");
 const PROVER = path.join(ROOT, "scripts/zk/prove-whitelist.js");
-const run = (args, env = {}) =>
+const BUILDER = path.join(ROOT, "scripts/zk/build-whitelist-root.js");
+const run = (args, env = {}, script = PROVER) =>
   new Promise((resolve) =>
     execFile(
       process.execPath,
-      [PROVER, ...args],
+      [script, ...args],
       { cwd: ROOT, env: { ...process.env, ...env } },
       (err, stdout, stderr) =>
         resolve({ code: err ? err.code : 0, stdout, stderr }),
@@ -125,6 +129,71 @@ describeProofs(
         );
         expect(await pm.whitelistVersion()).to.equal(0n);
       });
+
+      // Review 3.9 B-M4: an old root re-admits investors removed since.
+      it("refuses a root published before unless forced; the scan start counts", async function () {
+        await pm.setListOperator(ops.address);
+        const pub = (root, o = {}) =>
+          publishRoot({ root, privacyManager: pmAddr, signer: ops, ...o });
+        await pub(rootFile.root);
+        const after = await ethers.provider.getBlockNumber();
+        const newer = hex32(4242n);
+        await pub(newer);
+        await expect(pub(rootFile.root)).to.be.rejectedWith(
+          new RegExp(
+            `root ${rootFile.root} was published before \\(version 1, block ${after}\\): an old root re-admits every commitment it held, investors removed since included; .*--force`,
+          ),
+        );
+        expect(await pm.whitelistRoot()).to.equal(newer);
+        // A scan that starts after the first publication cannot see it.
+        const hidden = await pub(rootFile.root, {
+          fromBlock: after + 1,
+          logChunk: 100,
+        });
+        expect(hidden.version).to.equal("3");
+        await pub(newer, { force: true });
+        expect(await pm.whitelistVersion()).to.equal(4n);
+        expect(await pm.whitelistRoot()).to.equal(newer);
+      });
+
+      it("counts the commitments a build adds and removes against the current root file", async function () {
+        const c = async (n) =>
+          hex32(await computeCommitment(n, randomSecret()));
+        const [a, b, d] = [await c(21n), await c(22n), await c(23n)];
+        const prev = await buildWhitelistRoot([
+          { identity: "21", commitment: a },
+          { identity: "22", commitment: b },
+        ]);
+        const next = await buildWhitelistRoot([
+          { identity: "21", commitment: a },
+          { identity: "23", commitment: d },
+        ]);
+        expect(diffRootFiles(prev, next)).to.deep.equal({
+          added: 1,
+          removed: 1,
+        });
+        // The CLI prints it before overwriting --out.
+        const dir = fs.mkdtempSync(path.join(os.tmpdir(), "wl-root-"));
+        const entries = path.join(dir, "entries.json");
+        const out = path.join(dir, "root.json");
+        fs.writeFileSync(out, JSON.stringify(prev));
+        fs.writeFileSync(
+          entries,
+          JSON.stringify([
+            { identity: "21", commitment: a },
+            { identity: "23", commitment: d },
+          ]),
+        );
+        const r = await run(["--in", entries, "--out", out], {}, BUILDER);
+        expect(r.code).to.equal(0);
+        expect(r.stderr).to.include(
+          `against the current root file ${out}: 1 commitment(s) added, 1 removed (one per identity)`,
+        );
+        expect(r.stdout.trim()).to.equal(next.root);
+        expect(JSON.parse(fs.readFileSync(out, "utf8")).root).to.equal(
+          next.root,
+        );
+      });
     });
 
     describe("submitWhitelistProof", function () {
@@ -216,12 +285,14 @@ describeProofs(
         ).to.be.rejectedWith(/identity 0 is not an OnchainID/);
       });
 
-      it("--new-secret prints a fresh 31-byte secret and nothing else; a weak one is refused", async function () {
+      it("--new-secret prints a fresh 31-byte secret and a file-mode warning; a weak one is refused", async function () {
         const a = await run(["--new-secret"]);
         const b = await run(["--new-secret"]);
         expect(a.code).to.equal(0);
         expect(a.stdout).to.match(/^0x[0-9a-f]{62}\n$/);
-        expect(a.stderr).to.equal("");
+        expect(a.stderr).to.equal(
+          "warning: the secret goes to stdout; a shell redirect leaves the file mode to the umask (often 0644): prefer --new-secret --out <file> (mode 0600)\n",
+        );
         expect(a.stdout).to.not.equal(b.stdout);
         const weak = await run(["--commitment", "--identity", "1"], {
           WHITELIST_SECRET: "4321",
@@ -232,6 +303,42 @@ describeProofs(
         const pos = await run(["987654321987654321"]);
         expect(pos.stderr).to.match(/unexpected positional argument/);
         expect(pos.stderr).to.not.include("987654321987654321");
+      });
+
+      // Review 3.9 B-L5: the secret file's mode is not left to the shell.
+      it("--new-secret --out writes a new 0600 file and prints only its path; a readable file warns", async function () {
+        const dir = fs.mkdtempSync(path.join(os.tmpdir(), "wl-secret-"));
+        const file = path.join(dir, "secret.txt");
+        const a = await run(["--new-secret", "--out", file]);
+        expect(a.code).to.equal(0);
+        expect(a.stdout).to.equal(file + "\n");
+        expect(a.stderr).to.equal("");
+        expect(fs.statSync(file).mode & 0o777).to.equal(0o600);
+        const secret = fs.readFileSync(file, "utf8");
+        expect(secret).to.match(/^0x[0-9a-f]{62}\n$/);
+        // An existing file is never overwritten.
+        const again = await run(["--new-secret", "--out", file]);
+        expect(again.code).to.equal(1);
+        expect(again.stderr).to.include("exists: refusing to overwrite");
+        expect(fs.readFileSync(file, "utf8")).to.equal(secret);
+        const commit = [
+          "--commitment",
+          "--identity",
+          "7",
+          "--secret-file",
+          file,
+        ];
+        const quiet = await run(commit);
+        expect(quiet.code).to.equal(0);
+        expect(quiet.stderr).to.equal("");
+        fs.chmodSync(file, 0o644);
+        const loud = await run(commit);
+        expect(loud.code).to.equal(0);
+        expect(loud.stdout).to.equal(quiet.stdout);
+        expect(loud.stderr).to.equal(
+          `warning: secret file ${file} is readable by group or others (mode 0644): chmod 600 it\n`,
+        );
+        expect(loud.stderr).to.not.include(secret.trim().slice(2));
       });
     });
   },

@@ -23,7 +23,12 @@
  *
  * Optional, for ops: --publish --rpc <url> --privacy-manager <addr> with the
  * listOperator's key in env WHITELIST_OPS_KEY sends publishWhitelistRoot.
- * Plain node + ethers; no hardhat runtime.
+ * A root PrivacyManager published before (WhitelistRootPublished, read in
+ * chunks from --from-block, default 0) is refused without --force: an old
+ * root re-admits every commitment it held, investors removed since
+ * included (review 3.9 B-M4). When the --out file already exists, the
+ * commitments added and removed against it are printed before anything is
+ * written or published. Plain node + ethers; no hardhat runtime.
  */
 
 const fs = require("fs");
@@ -218,6 +223,7 @@ const PM_ABI = [
   "error WalletBindingMismatch()",
   "error NullifierBoundToOtherWallet(address wallet, uint256 version)",
   "error InvalidWhitelistProof()",
+  "event WhitelistRootPublished(bytes32 indexed root, uint256 indexed version, address indexed publisher)",
 ];
 
 /** PrivacyManager at `address` for `runner` (a signer or a provider). */
@@ -261,17 +267,63 @@ async function publisherOf(pm) {
 }
 
 /**
+ * Every WhitelistRootPublished of `root` on `pm` from `fromBlock` to the
+ * latest block, in chunks of `logChunk` blocks; a block-range refusal from
+ * the RPC halves the chunk (floor 100), anything else is rethrown.
+ * @returns {Promise<{version: string, block: number}[]>}
+ */
+async function pastPublications(pm, root, { fromBlock = 0, logChunk = 10000 }) {
+  const latest = await pm.runner.provider.getBlockNumber();
+  const filter = pm.filters.WhitelistRootPublished(root);
+  const found = [];
+  let chunk = logChunk;
+  for (let b = fromBlock; b <= latest;) {
+    const to = Math.min(b + chunk - 1, latest);
+    try {
+      for (const ev of await pm.queryFilter(filter, b, to)) {
+        found.push({ version: ev.args[1].toString(), block: ev.blockNumber });
+      }
+      b = to + 1;
+    } catch (e) {
+      const range =
+        /block range|range too large|exceeds.*(range|limit)|too many (blocks|results)|query returned more than/i;
+      if (chunk <= 100 || !range.test(e.message)) throw e;
+      chunk = Math.max(100, Math.floor(chunk / 2));
+    }
+  }
+  return found;
+}
+
+/**
  * Publish the root on PrivacyManager as the list operator (or owner).
+ * A root published before is refused unless `force` (review 3.9 B-M4).
  * @param {Object} p
  * @param {string} p.root - 0x 32-byte root
  * @param {string} p.privacyManager - address
  * @param {Object} p.signer - ethers signer of ops (the CLI builds it)
+ * @param {boolean} [p.force] - republish a root published before
+ * @param {number} [p.fromBlock] - start of the history scan (default 0)
+ * @param {number} [p.logChunk] - eth_getLogs block range (default 10000)
  * @returns {Promise<{version: string, txHash: string|null}>}
  */
-async function publishRoot({ root, privacyManager, signer }) {
+async function publishRoot({
+  root,
+  privacyManager,
+  signer,
+  force = false,
+  fromBlock = 0,
+  logChunk = 10000,
+}) {
   const pm = privacyManagerAt(privacyManager, signer);
   if ((await pm.whitelistRoot()) === root) {
     return { version: (await pm.whitelistVersion()).toString(), txHash: null };
+  }
+  const past = await pastPublications(pm, root, { fromBlock, logChunk });
+  if (past.length && !force) {
+    const at = past.map((p) => `version ${p.version}, block ${p.block}`);
+    throw new Error(
+      `root ${root} was published before (${at.join("; ")}): an old root re-admits every commitment it held, investors removed since included; rebuild from the current entries, or pass --force if republishing it is deliberate`,
+    );
   }
   let rx;
   try {
@@ -284,14 +336,31 @@ async function publishRoot({ root, privacyManager, signer }) {
   return { version: (await pm.whitelistVersion()).toString(), txHash: rx.hash };
 }
 
+/**
+ * Commitments added and removed by `next` against the root file `prev`
+ * (one commitment per identity, so these are identity counts).
+ */
+function diffRootFiles(prev, next) {
+  const norm = (l) => toField(l, "leaf").toString();
+  const before = new Set((prev.leaves || []).map(norm));
+  const after = new Set(next.leaves.map(norm));
+  let added = 0;
+  let removed = 0;
+  for (const l of after) if (!before.has(l)) added++;
+  for (const l of before) if (!after.has(l)) removed++;
+  return { added, removed };
+}
+
 function parseArgs(argv) {
   const args = {};
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
     if (!a.startsWith("--")) throw new Error("unexpected positional argument");
     const key = a.slice(2);
-    if (["publish", "help"].includes(key)) args[key] = true;
-    else if (["in", "out", "rpc", "privacy-manager"].includes(key)) {
+    if (["publish", "help", "force"].includes(key)) args[key] = true;
+    else if (
+      ["in", "out", "rpc", "privacy-manager", "from-block"].includes(key)
+    ) {
       if (i + 1 >= argv.length) throw new Error(`${a} needs a value`);
       args[key] = argv[++i];
     } else throw new Error(`unknown option ${a}`);
@@ -300,7 +369,8 @@ function parseArgs(argv) {
 }
 
 const USAGE = `Usage: node scripts/zk/build-whitelist-root.js --in <entries.json> [--out <root.json>]
-         [--publish --rpc <url> --privacy-manager <addr>]   (key: env WHITELIST_OPS_KEY)
+         [--publish --rpc <url> --privacy-manager <addr> [--from-block <n>] [--force]]
+         (key: env WHITELIST_OPS_KEY; --force republishes a root published before)
 entries.json: [{ "identity": "<decimal|0x>", "commitment": "<decimal|0x>" }]`;
 
 async function main() {
@@ -313,6 +383,25 @@ async function main() {
   const file = await buildWhitelistRoot(
     JSON.parse(fs.readFileSync(args.in, "utf8")),
   );
+  const fromBlock =
+    args["from-block"] === undefined ? 0 : Number(args["from-block"]);
+  if (!Number.isSafeInteger(fromBlock) || fromBlock < 0) {
+    throw new Error("--from-block must be a block number");
+  }
+  if (args.out && fs.existsSync(args.out)) {
+    // B-M4: what this build changes against the current root file.
+    let d;
+    try {
+      d = diffRootFiles(JSON.parse(fs.readFileSync(args.out, "utf8")), file);
+    } catch (e) {
+      throw new Error(
+        `${args.out}: not a root file to compare with (${e.message})`,
+      );
+    }
+    console.error(
+      `against the current root file ${args.out}: ${d.added} commitment(s) added, ${d.removed} removed (one per identity)`,
+    );
+  }
   if (args.out) {
     fs.writeFileSync(args.out, JSON.stringify(file, null, 2) + "\n");
     console.error(`root file (${file.count} commitments) -> ${args.out}`);
@@ -331,6 +420,8 @@ async function main() {
     const p = await publishRoot({
       root: file.root,
       privacyManager: args["privacy-manager"],
+      force: Boolean(args.force),
+      fromBlock,
       signer: new ethers.Wallet(
         process.env.WHITELIST_OPS_KEY,
         new ethers.JsonRpcProvider(args.rpc),
@@ -366,6 +457,8 @@ module.exports = {
   buildWhitelistRoot,
   loadRootFile,
   publishRoot,
+  pastPublications,
+  diffRootFiles,
   PM_ABI,
   privacyManagerAt,
   revertReason,

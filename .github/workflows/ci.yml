@@ -180,7 +180,7 @@ jobs:
 
       # R-3R-9: every circuit is sound PLONK since Task 3.7b, so the
       # readiness check exits 0 and gates (exit 2 = an unsound setup).
-      - name: ZK readiness (every circuit sound)
+      - name: ZK readiness (artifacts match the committed verifiers)
         run: npm run verify:zk
 
       - name: Run tests

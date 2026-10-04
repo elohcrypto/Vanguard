@@ -37,6 +37,19 @@ const EXPECTED = [
   "privacyManager",
 ];
 
+/** Run `fn` with console.log captured (restored on throw); the lines. */
+async function captureLog(fn) {
+  const lines = [];
+  const real = console.log;
+  console.log = (...args) => lines.push(args.join(" "));
+  try {
+    await fn();
+  } finally {
+    console.log = real;
+  }
+  return lines;
+}
+
 async function main() {
   const failures = [];
 
@@ -50,14 +63,7 @@ async function main() {
 
   // The production-compliance guard runs before the Token gets its compliance
   // address: its success line is asserted below, a throw fails the run.
-  const deployLog = [];
-  const realDeployLog = console.log;
-  console.log = (...args) => deployLog.push(args.join(" "));
-  try {
-    await deployer.deployDigitalTokenSystem();
-  } finally {
-    console.log = realDeployLog;
-  }
+  const deployLog = await captureLog(() => deployer.deployDigitalTokenSystem());
   if (!deployLog.some((l) => /reports production-ready/.test(l))) {
     failures.push(
       "compliance guard did not run before Token deployment (no 'reports production-ready' line)",
@@ -227,10 +233,7 @@ async function main() {
   const idRegD21 = state.getContract("identityRegistry");
   const idCountBefore = await idRegD21.registeredIdentityCount();
   let idCountAfterDeploy;
-  const captured = [];
-  const realLog = console.log;
-  console.log = (...args) => captured.push(args.join(" "));
-  try {
+  const captured = await captureLog(async () => {
     await gov.deployGovernanceSystem();
     idCountAfterDeploy = await idRegD21.registeredIdentityCount();
     await gov.showDashboard();
@@ -239,9 +242,7 @@ async function main() {
     // driven here because a detector over output only guards code paths that
     // actually run.
     await gov.testComplianceEnforcement();
-  } finally {
-    console.log = realLog;
-  }
+  });
   const output = captured.join("\n");
 
   // 5. Ownership of InvestorTypeRegistry must move to governance ONLY through
@@ -313,14 +314,9 @@ async function main() {
     }
 
     // Drive the real vote-driven handover.
-    const ownershipLog = [];
-    const realLog2 = console.log;
-    console.log = (...args) => ownershipLog.push(args.join(" "));
-    try {
-      await gov.acceptRegistryOwnershipByVote();
-    } finally {
-      console.log = realLog2;
-    }
+    const ownershipLog = await captureLog(() =>
+      gov.acceptRegistryOwnershipByVote(),
+    );
 
     const finalOwner = await registry.owner();
     if (finalOwner !== govAddr) {
@@ -443,14 +439,7 @@ async function main() {
       new EnhancedLogger(),
       async () => "y",
     );
-    const l79 = [];
-    const rl79 = console.log;
-    console.log = (...a) => l79.push(a.join(" "));
-    try {
-      await yesGov.timeTravel9Days();
-    } finally {
-      console.log = rl79;
-    }
+    const l79 = await captureLog(() => yesGov.timeTravel9Days());
     const [pAfter] = await govC.getProposal(pid);
     const nowTs = (await ethers.provider.getBlock("latest")).timestamp;
     if (!(nowTs > Number(pAfter.executionTime))) {

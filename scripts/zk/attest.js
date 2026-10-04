@@ -149,19 +149,15 @@ function parseAttributes(circuit, { mask, amount, scores }) {
   );
 }
 
-/** A canonical identity: the OnchainID address (or any field element), non-zero. */
-function toIdentity(identity) {
-  const v = toField(identity, "identity");
-  if (v === 0n) throw new Error("identity: zero");
+/** A non-zero field element; the error names `label` only. */
+function nonZero(value, label) {
+  const v = toField(value, label);
+  if (v === 0n) throw new Error(`${label}: zero`);
   return v;
 }
-
-/** A non-zero chain id. */
-function toChainId(chainId) {
-  const v = toField(chainId, "chainId");
-  if (v === 0n) throw new Error("chainId: zero");
-  return v;
-}
+/** The identity (the OnchainID address, or any field element); the chain id. */
+const toIdentity = (identity) => nonZero(identity, "identity");
+const toChainId = (chainId) => nonZero(chainId, "chainId");
 
 /** The PrivacyManager an attestation is for, checksummed and non-zero. */
 function toPrivacyManager(address) {
