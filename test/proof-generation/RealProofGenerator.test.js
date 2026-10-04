@@ -219,6 +219,8 @@ describe("RealProofGenerator - All 5 Proof Types", function () {
       } = require("../../scripts/zk/attest");
       const key = newAttestorKey();
       const identity = 0x5fbdb2315678afecb367f032d93f642f64180aa3n;
+      // Task 3.10: the issuer signs an expiry; one year from now.
+      const validUntil = Math.floor(Date.now() / 1000) + 365 * 86400;
       let real;
       const fields = (a) => ({
         identity: a.identity,
@@ -230,6 +232,7 @@ describe("RealProofGenerator - All 5 Proof Types", function () {
         Ay: a.Ay,
         chainId: a.chainId,
         verifierContext: BigInt(a.privacyManager),
+        validUntil: a.validUntil,
         walletBinding: owner.address,
       });
 
@@ -244,6 +247,7 @@ describe("RealProofGenerator - All 5 Proof Types", function () {
           key,
           chainId: 31337,
           privacyManager: "0x" + "11".repeat(20),
+          validUntil,
           circuit: "jurisdiction",
           identity,
           mask: 4,
@@ -253,16 +257,17 @@ describe("RealProofGenerator - All 5 Proof Types", function () {
           mask: a.attributes[0],
           allowedMask: 15n,
         });
-        // [nullifier, Ax, Ay, chainId, verifierContext, allowedMask,
-        // walletBinding]
+        // [nullifier, Ax, Ay, chainId, verifierContext, validUntil,
+        // allowedMask, walletBinding]
         expect(result.proof).to.have.lengthOf(24);
-        expect(result.publicSignals).to.have.lengthOf(7);
+        expect(result.publicSignals).to.have.lengthOf(8);
         expect(result.publicSignals[0]).to.equal(result.inputs.nullifier);
         expect(result.publicSignals.slice(1)).to.deep.equal([
           a.Ax,
           a.Ay,
           "31337",
           BigInt(a.privacyManager).toString(),
+          String(validUntil),
           "15",
           BigInt(owner.address).toString(),
         ]);
@@ -285,6 +290,7 @@ describe("RealProofGenerator - All 5 Proof Types", function () {
           key,
           chainId: 31337,
           privacyManager: "0x" + "11".repeat(20),
+          validUntil,
           circuit: "accreditation",
           identity,
           amount: 250000,
@@ -294,7 +300,7 @@ describe("RealProofGenerator - All 5 Proof Types", function () {
           amount: a.attributes[0],
           minimumAccreditation: 100000n,
         });
-        expect(result.publicSignals).to.have.lengthOf(7);
+        expect(result.publicSignals).to.have.lengthOf(8);
         expect(
           await real.verifyAccreditationProof.staticCall(
             result.proof,
@@ -317,6 +323,7 @@ describe("RealProofGenerator - All 5 Proof Types", function () {
           key,
           chainId: 31337,
           privacyManager: "0x" + "11".repeat(20),
+          validUntil,
           circuit: "compliance",
           identity,
           scores: [88, 88, 88, 88],
@@ -327,10 +334,11 @@ describe("RealProofGenerator - All 5 Proof Types", function () {
           minimum: 50n,
           weights: [30n, 30n, 20n, 20n],
         });
-        // [nullifier, Ax, Ay, chainId, verifierContext, minimum, wK, wA, wJ,
-        // wAcc, walletBinding]: the aggregate (88) is not among them.
-        expect(result.publicSignals).to.have.lengthOf(11);
-        expect(result.publicSignals.slice(5, 10)).to.deep.equal([
+        // [nullifier, Ax, Ay, chainId, verifierContext, validUntil, minimum,
+        // wK, wA, wJ, wAcc, walletBinding]: the aggregate (88) is not among
+        // them.
+        expect(result.publicSignals).to.have.lengthOf(12);
+        expect(result.publicSignals.slice(6, 11)).to.deep.equal([
           "50",
           "30",
           "30",
@@ -359,6 +367,7 @@ describe("RealProofGenerator - All 5 Proof Types", function () {
           key,
           chainId: 31337,
           privacyManager: "0x" + "11".repeat(20),
+          validUntil,
           circuit: "jurisdiction",
           identity,
           mask: 16,
@@ -374,6 +383,7 @@ describe("RealProofGenerator - All 5 Proof Types", function () {
           key,
           chainId: 31337,
           privacyManager: "0x" + "11".repeat(20),
+          validUntil,
           circuit: "compliance",
           identity,
           scores: [50, 50, 50, 50],
@@ -393,6 +403,7 @@ describe("RealProofGenerator - All 5 Proof Types", function () {
           key,
           chainId: 31337,
           privacyManager: "0x" + "11".repeat(20),
+          validUntil,
           circuit: "accreditation",
           identity,
           amount: 5,

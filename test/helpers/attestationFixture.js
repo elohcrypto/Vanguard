@@ -30,6 +30,16 @@ const ROOT = path.join(__dirname, "../..");
 const IN_SIGNATURE =
   /Assert Failed\. Error in template (ForceEqualIfEnabled|EdDSAPoseidonVerifier|BabyCheck)/;
 
+/** Default validity the fixture's issuer signs (Task 3.10): one year. */
+const ONE_YEAR = 365n * 86400n;
+
+/** The chain's latest block time plus `validity` seconds. */
+async function validUntilIn(validity = ONE_YEAR) {
+  return (
+    BigInt((await ethers.provider.getBlock("latest")).timestamp) + validity
+  );
+}
+
 /**
  * Task 3.8: a ComplianceRules (empty default rule: every code allowed)
  * behind a policy token (MockPolicyToken.compliance()) as `pm`'s
@@ -84,13 +94,15 @@ async function deployAttestationFixture(circuit) {
     attestor: attestorId(Ax, Ay),
     gen,
     paths: gen.getCircuitPaths(CIRCUITS[circuit].build),
-    // Task 3.8 M1: signed for this chain and this PrivacyManager.
-    sign: (attrs, k = key, target = pm.target) =>
+    // Task 3.8 M1: signed for this chain and this PrivacyManager; Task
+    // 3.10: valid for one year from the chain's time unless attrs.validUntil.
+    sign: async (attrs, k = key, target = pm.target) =>
       signAttestation({
         key: k,
         circuit,
         chainId: 31337,
         privacyManager: target,
+        validUntil: await validUntilIn(),
         identity: 0xa11ce,
         ...attrs,
       }),
@@ -117,6 +129,7 @@ function circuitInput(att, policy, wallet, overrides = {}) {
     Ay: att.Ay,
     chainId: String(att.chainId),
     verifierContext: BigInt(att.privacyManager).toString(),
+    validUntil: String(att.validUntil),
     walletBinding: BigInt(wallet).toString(),
   };
   const p = policy.map(String);
@@ -263,6 +276,8 @@ async function expectTamperedRefused(zk, route, r) {
 module.exports = {
   Q,
   IN_SIGNATURE,
+  ONE_YEAR,
+  validUntilIn,
   wireJurisdictionSource,
   deployAttestationFixture,
   circuitInput,

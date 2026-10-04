@@ -137,12 +137,13 @@ describeProofs(
 
       for (const [name, i] of [
         ["verifierContext", 4],
-        ["minimum", 5],
-        ["wJ", 8],
+        ["validUntil", 5],
+        ["minimum", 6],
+        ["wJ", 9],
       ]) {
         it(`${name} aliased by + q, which the raw verifier accepts`, async function () {
           const input = circuitInput(att, POLICY, f.wallets[1].address);
-          const a = await aliasedProof(f.paths, input, i, 11);
+          const a = await aliasedProof(f.paths, input, i, 12);
           const raw = await ethers.getContractAt(
             "ComplianceAggregationVerifier",
             await f.zk.complianceVerifier(),
@@ -162,30 +163,31 @@ describeProofs(
     });
 
     describe("D: the PLONK setup property", function () {
-      it("signals are [Poseidon(salt, Poseidon(policy)), Ax, Ay, chainId, verifierContext, policy, walletBinding]", async function () {
+      it("signals are [Poseidon(salt, Poseidon(policy)), Ax, Ay, chainId, verifierContext, validUntil, policy, walletBinding]", async function () {
         expect(r1.signals).to.deep.equal([
           f.gen.hash([BigInt(att.salt), f.gen.hash(POLICY)]).toString(),
           att.Ax,
           att.Ay,
           "31337",
           BigInt(f.pm.target).toString(),
+          att.validUntil,
           ...POLICY.map(String),
           BigInt(f.wallets[1].address).toString(),
         ]);
         expect(r2.signals[0]).to.equal(r1.signals[0]);
       });
 
-      it("the committed verifier is PLONK with nPublic 11", async function () {
+      it("the committed verifier is PLONK with nPublic 12", async function () {
         const artifact = await artifacts.readArtifact(
           "ComplianceAggregationVerifier",
         );
         const fn = artifact.abi.find((x) => x.name === "verifyProof");
         expect(fn.inputs.map((i) => i.type)).to.deep.equal([
           "uint256[24]",
-          "uint256[11]",
+          "uint256[12]",
         ]);
         const vkey = JSON.parse(fs.readFileSync(f.paths.vkey, "utf8"));
-        expect([vkey.protocol, vkey.nPublic]).to.deep.equal(["plonk", 11]);
+        expect([vkey.protocol, vkey.nPublic]).to.deep.equal(["plonk", 12]);
       });
 
       it("the committed verifier is reproduced from the committed circuit", function () {
@@ -219,7 +221,7 @@ describeProofs(
           await pm.validatePrivateCompliance.staticCall(w1.address),
         ).to.equal(false);
         const r3 = await f.prove(att, w2);
-        expect(r3.signals.slice(5, 10)).to.deep.equal([
+        expect(r3.signals.slice(6, 11)).to.deep.equal([
           "60",
           "10",
           "30",

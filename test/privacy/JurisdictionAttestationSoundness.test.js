@@ -3,6 +3,7 @@ const { ethers, artifacts } = require("hardhat");
 const fs = require("fs");
 const {
   IN_SIGNATURE,
+  validUntilIn,
   deployAttestationFixture,
   wireJurisdictionSource,
   circuitInput,
@@ -56,6 +57,8 @@ describeProofs("Jurisdiction attestation soundness (Task 3.7b)", function () {
         { userMask: "2" },
         { identity: "1234" },
         { salt: "7" },
+        // Task 3.10: the expiry is signed; extending it breaks the signature.
+        { validUntil: String(BigInt(att.validUntil) + 86400n) },
       ]) {
         const input = circuitInput(att, [15n], f.wallets[1].address, o);
         await expect(
@@ -70,6 +73,7 @@ describeProofs("Jurisdiction attestation soundness (Task 3.7b)", function () {
         key: f.key,
         chainId: 31337,
         privacyManager: f.pm.target,
+        validUntil: att.validUntil,
         circuit: "accreditation",
         identity: att.identity,
         amount: 1,
@@ -149,6 +153,7 @@ describeProofs("Jurisdiction attestation soundness (Task 3.7b)", function () {
         circuit: "jurisdiction",
         chainId: 1,
         privacyManager: f.pm.target,
+        validUntil: await validUntilIn(),
         identity: 0xa11ce,
         mask: 1,
       });
@@ -178,10 +183,10 @@ describeProofs("Jurisdiction attestation soundness (Task 3.7b)", function () {
       await expect(
         f.pm
           .connect(f.wallets[1])
-          .submitAttestationProof(f.id, r1.proof, r1.signals.slice(0, 6)),
+          .submitAttestationProof(f.id, r1.proof, r1.signals.slice(0, 7)),
       )
         .to.be.revertedWithCustomError(f.pm, "InvalidSignalCount")
-        .withArgs(7n, 6n);
+        .withArgs(8n, 7n);
     });
   });
 
@@ -240,11 +245,12 @@ describeProofs("Jurisdiction attestation soundness (Task 3.7b)", function () {
     for (const [name, i] of [
       ["nullifier", 0],
       ["verifierContext", 4],
-      ["walletBinding", 6],
+      ["validUntil", 5],
+      ["walletBinding", 7],
     ]) {
       it(`${name} aliased by + q, which the raw verifier accepts`, async function () {
         const input = circuitInput(att, [15n], f.wallets[1].address);
-        const a = await aliasedProof(f.paths, input, i, 7);
+        const a = await aliasedProof(f.paths, input, i, 8);
         const raw = await ethers.getContractAt(
           "JurisdictionProofVerifier",
           await f.zk.jurisdictionVerifier(),
@@ -267,7 +273,7 @@ describeProofs("Jurisdiction attestation soundness (Task 3.7b)", function () {
   });
 
   describe("D: the PLONK setup property", function () {
-    it("signals are [Poseidon(salt, allowedMask), Ax, Ay, chainId, verifierContext, allowedMask, walletBinding]", async function () {
+    it("signals are [Poseidon(salt, allowedMask), Ax, Ay, chainId, verifierContext, validUntil, allowedMask, walletBinding]", async function () {
       expect(r1.proof).to.have.lengthOf(24);
       expect(r1.signals).to.deep.equal([
         f.gen.hash([BigInt(att.salt), 15n]).toString(),
@@ -275,6 +281,7 @@ describeProofs("Jurisdiction attestation soundness (Task 3.7b)", function () {
         att.Ay,
         "31337",
         BigInt(f.pm.target).toString(),
+        att.validUntil,
         "15",
         BigInt(f.wallets[1].address).toString(),
       ]);
@@ -284,17 +291,17 @@ describeProofs("Jurisdiction attestation soundness (Task 3.7b)", function () {
       ).to.equal(r1.signals[0]);
     });
 
-    it("the committed verifier is PLONK with nPublic 7", async function () {
+    it("the committed verifier is PLONK with nPublic 8", async function () {
       const artifact = await artifacts.readArtifact(
         "JurisdictionProofVerifier",
       );
       const fn = artifact.abi.find((x) => x.name === "verifyProof");
       expect(fn.inputs.map((i) => i.type)).to.deep.equal([
         "uint256[24]",
-        "uint256[7]",
+        "uint256[8]",
       ]);
       const vkey = JSON.parse(fs.readFileSync(f.paths.vkey, "utf8"));
-      expect([vkey.protocol, vkey.nPublic]).to.deep.equal(["plonk", 7]);
+      expect([vkey.protocol, vkey.nPublic]).to.deep.equal(["plonk", 8]);
     });
 
     it("the committed verifier is reproduced from the committed circuit", function () {
@@ -384,7 +391,7 @@ describeProofs("Jurisdiction attestation soundness (Task 3.7b)", function () {
         false,
       );
       const r3 = await f.prove(att, w2);
-      expect(r3.signals[5]).to.equal("31");
+      expect(r3.signals[6]).to.equal("31");
       expect(r3.signals[0]).to.not.equal(r1.signals[0]);
       await pm.connect(w2).submitAttestationProof(f.id, r3.proof, r3.signals);
       expect(

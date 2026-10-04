@@ -7,15 +7,16 @@ import { ethers } from "hardhat";
 // verified once under whitelist satisfied verifyBlacklistNonMembership on the
 // cache hit — the blacklist verifier was never called. Every circuit is
 // PLONK now (whitelist 3.1, blacklist 3.7, the attestation circuits 3.7b);
-// jurisdiction and accreditation share the 7-signal shape.
+// jurisdiction and accreditation share the 8-signal shape.
 describe("Proof cache is bound to the circuit that verified it", () => {
   // Whitelist is PLONK since Task 3.1: 24 proof words, 3 public signals.
   const P = Array.from({ length: 24 }, (_, i) => i + 1);
   const S: [number, number, number] = [1, 2, 3];
   // Blacklist is PLONK since Task 3.7: 24 proof words, 4 public signals.
   const S4: [number, number, number, number] = [1, 2, 3, 4];
-  // Jurisdiction and accreditation (Task 3.8 M1): 7 signals.
-  const S5 = [1, 2, 3, 4, 5, 6, 7] as [
+  // Jurisdiction and accreditation (Task 3.8 M1, 3.10): 8 signals.
+  const S5 = [1, 2, 3, 4, 5, 6, 7, 8] as [
+    number,
     number,
     number,
     number,
@@ -51,7 +52,7 @@ describe("Proof cache is bound to the circuit that verified it", () => {
     );
   });
 
-  // Same shape (24 words, 7 signals) and preimage length, so only the
+  // Same shape (24 words, 8 signals) and preimage length, so only the
   // circuit tag in the key keeps these entries apart.
   it("a jurisdiction-verified proof does not satisfy accreditation", async () => {
     const zk = await deployReal(["jurisdiction"]);
@@ -126,7 +127,7 @@ describe("Proof cache is bound to the circuit that verified it", () => {
 
   it("the routed and typed attestation paths share one key per circuit", async () => {
     const zk = await deployReal(["compliance"]);
-    const S9 = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11]; // Task 3.8 M1: 11
+    const S9 = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]; // Task 3.10: 12
     const COMP = ethers.id("COMPLIANCE_AGGREGATION");
     await expect(zk.verifyCircuitProof(COMP, P, S9))
       .to.emit(zk, "ProofCached")

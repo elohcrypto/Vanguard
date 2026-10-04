@@ -210,6 +210,7 @@ describe("ZK System Integration Tests", function () {
         key: newAttestorKey(),
         chainId: 31337,
         privacyManager: "0x" + "11".repeat(20),
+        validUntil: Math.floor(Date.now() / 1000) + 365 * 86400, // Task 3.10
         circuit: "jurisdiction",
         identity: 12345n,
         mask: 1,

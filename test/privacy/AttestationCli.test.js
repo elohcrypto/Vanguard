@@ -24,6 +24,7 @@ const {
 } = require("../../scripts/zk/prove-attestation");
 
 const { describeProofs } = require("../helpers/zkProofs");
+const { validUntilIn } = require("../helpers/attestationFixture");
 const ROOT = path.join(__dirname, "../..");
 const run = (script, args, env = {}) =>
   new Promise((resolve) =>
@@ -59,7 +60,9 @@ describeProofs("Attestation CLIs (Task 3.7b)", function () {
   const identity = "0x5FbDB2315678afecb367f032d93F642f64180aa3";
   // Task 3.8 M1: an attestation is for one chain and one PrivacyManager.
   const PMX = "0x" + "11".repeat(20);
-  const TARGET = ["--chain-id", "31337", "--privacy-manager", PMX];
+  // Task 3.10: and until a date the issuer sets.
+  const VALIDITY = ["--valid-days", "365"];
+  const TARGET = ["--chain-id", "31337", "--privacy-manager", PMX, ...VALIDITY];
   let tmp;
 
   before(function () {
@@ -112,6 +115,7 @@ describeProofs("Attestation CLIs (Task 3.7b)", function () {
         "circuit",
         "chainId",
         "privacyManager",
+        "validUntil",
         "identity",
         "attributes",
         "salt",
@@ -127,6 +131,10 @@ describeProofs("Attestation CLIs (Task 3.7b)", function () {
       ]);
       expect(att.identity).to.equal(BigInt(identity).toString());
       expect(att.attributes).to.deep.equal(["4"]);
+      // --valid-days 365 from the clock (offline: no --rpc).
+      const year = Math.floor(Date.now() / 1000) + 365 * 86400;
+      expect(Number(att.validUntil)).to.be.within(year - 60, year + 1);
+      expect(s.stderr).to.match(/attestation expires \d{4}-\d\d-\d\dT/);
       expect(BigInt(att.salt) < 2n ** 248n).to.equal(true);
       await loadAttestation(att); // the signature verifies
     });
@@ -155,6 +163,7 @@ describeProofs("Attestation CLIs (Task 3.7b)", function () {
       expect(JSON.parse(s.stdout)).to.deep.equal({
         out,
         circuit: "jurisdiction",
+        validUntil: new Date(Number(att.validUntil) * 1000).toISOString(),
         Ax: att.Ax,
         Ay: att.Ay,
       });
@@ -177,6 +186,7 @@ describeProofs("Attestation CLIs (Task 3.7b)", function () {
             key,
             chainId: 31337,
             privacyManager: PMX,
+            validUntil: 2n ** 40n,
             circuit: "accreditation",
             identity: i,
             amount: 5,
@@ -236,6 +246,7 @@ describeProofs("Attestation CLIs (Task 3.7b)", function () {
             "accreditation",
             "--amount",
             "5",
+            ...VALIDITY,
             ...args,
           ],
           { ATTESTOR_KEY: key },
@@ -263,6 +274,7 @@ describeProofs("Attestation CLIs (Task 3.7b)", function () {
         key,
         chainId: 31337,
         privacyManager: PMX,
+        validUntil: await validUntilIn(),
         circuit: "compliance",
         identity,
         scores: [90, 80, 70, 60],
@@ -292,6 +304,7 @@ describeProofs("Attestation CLIs (Task 3.7b)", function () {
         att.Ay,
         "31337",
         BigInt(PMX).toString(),
+        att.validUntil,
         "70",
         "25",
         "25",
@@ -373,6 +386,7 @@ describeProofs("Attestation CLIs (Task 3.7b)", function () {
           key,
           chainId,
           privacyManager: pm.target,
+          validUntil: att.validUntil,
           circuit: "compliance",
           identity,
           scores: [90, 80, 70, 60],
