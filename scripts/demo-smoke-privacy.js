@@ -256,8 +256,15 @@ async function attestationSmoke(state, failures) {
     failures.push("3.7b: bob's record is not under the current policy");
     return;
   }
+  // Task 3.10: signed for one year; the record never outlives it.
+  const until = state.attestationExpiry?.[`jurisdiction:${bob.address}`];
+  if (!until || rec.expiresAt > until) {
+    failures.push("3.10: bob's record outlives the attestation's validUntil");
+    return;
+  }
+  const iso = (t) => new Date(Number(t) * 1000).toISOString();
   console.log(
-    `✅ Attestation smoke: jurisdiction record bound for ${bob.address} (nullifier ${rec.nullifier}).`,
+    `✅ Attestation smoke: jurisdiction record bound for ${bob.address} (nullifier ${rec.nullifier}); attestation valid until ${iso(until)}, record expires ${iso(rec.expiresAt)}.`,
   );
 }
 

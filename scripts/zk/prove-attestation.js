@@ -14,9 +14,10 @@
  * is ever printed. Before proving it refuses: a signature that does not
  * verify, an issuer key (Ax, Ay) PrivacyManager does not trust for the
  * circuit, an attestation signed for another chain or PrivacyManager than
- * the target (Task 3.8 M1), a policy given explicitly that differs from the
- * current one, and
- * attributes that do not meet the policy. The proof is verified locally with
+ * the target (Task 3.8 M1), an attestation whose validUntil has passed (the
+ * chain's time with --rpc, else the clock; Task 3.10), a policy given
+ * explicitly that differs from the current one, and attributes that do not
+ * meet the policy. The proof is verified locally with
  * the circuit's verification key before it is printed. --submit (key: env
  * WHITELIST_WALLET_KEY, which must be the --wallet's) sends
  * submitAttestationProof and exits non-zero unless the record reads valid.
@@ -34,6 +35,7 @@ const {
   attestorId,
   loadAttestation,
 } = require("./attest");
+const { isoOf } = require("./attestation-fields");
 
 /** The PrivacyManager surface this CLI uses, custom errors included. */
 const PM_ABI = [
@@ -51,6 +53,7 @@ const PM_ABI = [
   "error WalletBindingMismatch()",
   "error WrongChainId(uint256 signal)",
   "error WrongVerifierContext(uint256 signal)",
+  "error AttestationExpired(uint256 validUntil)",
   "error AttestationNullifierBound(address wallet)",
   "error InvalidAttestationProof()",
 ];
@@ -144,6 +147,17 @@ async function proveAttestation({
   const att = await loadAttestation(attestation);
   const w = walletOf(wallet);
   let p = policy === undefined ? undefined : parsePolicy(att.circuit, policy);
+  const provider = runner && (runner.provider ?? runner);
+  // Task 3.10: PrivacyManager refuses the proof from validUntil on.
+  const now =
+    privacyManager && provider
+      ? (await provider.getBlock("latest")).timestamp
+      : Math.floor(Date.now() / 1000);
+  if (BigInt(now) >= att.validUntil) {
+    throw new Error(
+      `the attestation expired on ${isoOf(att.validUntil)} (validUntil ${att.validUntil}): ask the issuer for a new one`,
+    );
+  }
   if (privacyManager) {
     // Task 3.8 M1: PrivacyManager refuses another deployment's attestation.
     if (ethers.getAddress(privacyManager) !== att.privacyManager) {
@@ -151,7 +165,6 @@ async function proveAttestation({
         `the attestation is for PrivacyManager ${att.privacyManager}, not ${ethers.getAddress(privacyManager)}`,
       );
     }
-    const provider = runner && (runner.provider ?? runner);
     const live = (await provider.getNetwork()).chainId;
     if (live !== att.chainId) {
       throw new Error(
@@ -199,6 +212,7 @@ async function proveAttestation({
     Ay: att.Ay,
     chainId: att.chainId,
     verifierContext: att.verifierContext,
+    validUntil: att.validUntil,
     walletBinding: w,
   };
   let r;
@@ -229,6 +243,7 @@ async function proveAttestation({
     att.Ay,
     att.chainId,
     att.verifierContext,
+    att.validUntil,
     ...p,
     BigInt(w),
   ].map(String);

@@ -95,6 +95,7 @@ async function main() {
     Ay: a.Ay,
     chainId: a.chainId,
     verifierContext: BigInt(a.privacyManager),
+    validUntil: a.validUntil,
     walletBinding: "0x000000000000000000000000000000000000dEaD",
   });
   const attestationCases = [
@@ -105,6 +106,7 @@ async function main() {
           key,
           chainId: 31337,
           privacyManager: "0x" + "11".repeat(20),
+          validUntil,
           circuit: "jurisdiction",
           identity: 12345n,
           mask: 1,
@@ -123,6 +125,7 @@ async function main() {
           key,
           chainId: 31337,
           privacyManager: "0x" + "11".repeat(20),
+          validUntil,
           circuit: "accreditation",
           identity: 12345n,
           amount: 250000,
@@ -141,6 +144,7 @@ async function main() {
           key,
           chainId: 31337,
           privacyManager: "0x" + "11".repeat(20),
+          validUntil,
           circuit: "compliance",
           identity: 12345n,
           scores: [80, 75, 85, 70],

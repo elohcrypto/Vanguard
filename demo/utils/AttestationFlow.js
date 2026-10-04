@@ -10,6 +10,8 @@
  *
  * The demo issuer key lives in DemoState.attestorKey: 32 random bytes made
  * once per session and never printed; only its public key (Ax, Ay) is.
+ * Demo attestations are valid for one year from the chain's time (Task
+ * 3.10): the record never outlives that date; a new attestation renews it.
  */
 
 const crypto = require("crypto");
@@ -23,11 +25,14 @@ const {
   proveAttestation,
   submitAttestationProof,
 } = require("../../scripts/zk/prove-attestation");
+const { isoOf } = require("../../scripts/zk/attestation-fields");
 const { demoIdentity } = require("./WhitelistBinderFlow");
 
 /** Demo policies set at deploy (owner; type 11 votes after the handover). */
 const DEFAULT_MINIMUM_ACCREDITATION = 100000n;
 const DEFAULT_COMPLIANCE = [70n, 25n, 25n, 25n, 25n]; // minimum, wK, wA, wJ, wAcc
+/** Validity the demo issuer signs into each attestation (Task 3.10). */
+const DEMO_VALIDITY = 365n * 86400n;
 
 const NAMES = {
   jurisdiction: "Jurisdiction eligibility",
@@ -202,17 +207,24 @@ async function runAttestationFlow({
 
   // 1. The issuer signs (off chain); the attestation goes to the investor.
   // Task 3.8 M1: signed for this chain and this PrivacyManager only.
-  const { chainId } = await pm.runner.provider.getNetwork();
+  // Task 3.10: and until a date the issuer sets (one year in the demo).
+  const provider = pm.runner.provider;
+  const { chainId } = await provider.getNetwork();
+  const now = BigInt((await provider.getBlock("latest")).timestamp);
+  const validUntil = now + DEMO_VALIDITY;
   const attestation = await signAttestation({
     key: demoAttestorKey(state),
     circuit,
     chainId,
     privacyManager: pm.target,
+    validUntil,
     identity,
     ...attributes,
   });
+  state.attestationExpiry ??= {};
+  state.attestationExpiry[`${circuit}:${user.address}`] = validUntil;
   log(
-    `   🖋️  Issuer signed the ${circuit} attestation (salt and signature stay with the investor)`,
+    `   🖋️  Issuer signed the ${circuit} attestation, valid until ${isoOf(validUntil)} (salt and signature stay with the investor)`,
   );
 
   // 2. The investor proves (refuses an untrusted issuer or a stale policy).
@@ -244,7 +256,9 @@ async function runAttestationFlow({
   if (rx) log(`   💰 Gas Used: ${rx.gasUsed.toLocaleString()}`);
   log(`   🧾 policyHash ${r.policyHash}`);
   log(`   🔢 nullifier  ${r.nullifier}`);
-  log(`   ⏳ expires    ${r.expiresAt}`);
+  log(
+    `   ⏳ expires    ${r.expiresAt} (never after the attestation's ${isoOf(validUntil)})`,
+  );
   log(
     `   ${valid ? "✅" : "❌"} ${VALIDATOR[circuit]}(${user.address}): ${valid}`,
   );
@@ -284,7 +298,12 @@ async function attestationStatus({ state, circuit, log = console.log }) {
             : "lapsed: the issuer key was untrusted and trusted again since (re-trusting revives no record): prove again";
     log(`   ${valid ? "✅" : "❌"} wallet ${i} ${s.address}: ${why}`);
     log(
-      `      🔢 nullifier ${rec.nullifier}, expires ${new Date(Number(rec.expiresAt) * 1000).toISOString()}`,
+      `      🔢 nullifier ${rec.nullifier}, record expires ${isoOf(rec.expiresAt)}`,
+    );
+    // Task 3.10: the record's expiry is capped at the attestation's.
+    const until = state.attestationExpiry?.[`${circuit}:${s.address}`];
+    log(
+      `      🖋️  attestation expires ${until ? isoOf(until) : "(signed outside this session; the record expiry is capped at it)"}`,
     );
     out.push({ wallet: s.address, valid });
   }
@@ -295,6 +314,7 @@ async function attestationStatus({ state, circuit, log = console.log }) {
 module.exports = {
   DEFAULT_MINIMUM_ACCREDITATION,
   DEFAULT_COMPLIANCE,
+  DEMO_VALIDITY,
   demoAttestorKey,
   setupDemoAttestations,
   wireJurisdictionSource,
