@@ -6,12 +6,17 @@
  * OnchainID.authorizeManager(KeyManager) (owner only); after that a
  * MANAGEMENT key of the identity rotates keys behind a timelock (24h, or the
  * identity's own custom timelock) and recovery agents add a new MANAGEMENT
- * key behind a 48h timelock. deauthorizeManager withdraws the opt-in.
+ * key behind a 48h timelock. deauthorizeManager pauses KeyManager for the
+ * identity; it does not cancel: cancelKeyRotation / cancelKeyRecovery stop
+ * an item, and an item not executed within 7 days (EXECUTION_WINDOW) after
+ * its executionTime expires. Before re-authorizing, the flow lists what is
+ * still pending (option 5 and 12b ask first).
  *
- * Every step is resumable from the chain: a pending rotation or recovery
- * candidate is not re-initiated. On a dev node the flow jumps past each
- * timelock with evm_increaseTime; elsewhere it prints when the step becomes
- * executable and the option to come back to.
+ * Resuming works within one demo session (the keys live in memory): a
+ * pending rotation or recovery candidate is not re-initiated. On a dev node
+ * the flow jumps past each timelock with evm_increaseTime; elsewhere it
+ * prints when the step becomes executable and the option to come back to.
+ * The prompted option 5 and 12b paths are in KeyLifecycleOptions.js.
  */
 
 const { ethers } = require("hardhat");
@@ -25,9 +30,27 @@ const {
 
 const MANAGEMENT = 1;
 const ECDSA = 1;
-/** Option 12's defaults: the demo identity of wallet 1, agents 2 and 3. */
+/**
+ * Option 12's defaults: wallet 1's identity; recovery agents 7 and 8, the
+ * investors Bob and Carol, which hold no issuer, ops or guardian role
+ * (docs/TESTNET_DEMO.md "Roles are wallet indices").
+ */
 const DEMO_WALLET = 1;
-const AGENT_WALLETS = [2, 3];
+const AGENT_WALLETS = [7, 8];
+const ROLES = [
+  "deployer",
+  "fee wallet, compliance officer",
+  "KYC issuer",
+  "AML issuer",
+  "risk oracle",
+  "fraud oracle",
+  "investor Alice",
+  "investor Bob",
+  "investor Carol",
+  "issuer admin",
+  "ops",
+  "guardian",
+];
 const PURPOSES = { 1: "MANAGEMENT", 2: "ACTION", 3: "CLAIM", 4: "ENCRYPTION" };
 
 const same = (a, b) => a.toLowerCase() === b.toLowerCase();
@@ -38,6 +61,11 @@ const short = (k) => `${k.slice(0, 10)}…${k.slice(-6)}`;
 const signerFor = (state, addr) =>
   state.signers.find((s) => same(s.address, addr));
 const at = (unix) => new Date(Number(unix) * 1000).toISOString();
+/** "wallet N (role) 0x..", the way every print names a wallet. */
+function who(state, addr) {
+  const i = state.signers.findIndex((s) => same(s.address, addr));
+  return i < 0 ? addr : `wallet ${i} (${ROLES[i] ?? "user"}) ${addr}`;
+}
 
 /**
  * The OnchainID owned by `wallet`: from demo state, the IdentityRegistry
@@ -80,10 +108,70 @@ async function demoIdentity(state, wallet) {
   return (await ethers.getContractAt("OnchainID", addr)).connect(wallet);
 }
 
-/** authorizeManager / deauthorizeManager by the identity owner. */
-async function setAuthorized(identity, owner, km, on) {
+/**
+ * Rotations and recovery candidates of the identity still executable (not
+ * done, not cancelled, inside the window), from KeyManager's events.
+ */
+async function pendingItems(km, idAddr) {
+  const now = BigInt((await ethers.provider.getBlock("latest")).timestamp);
+  const live = async (t) => now <= t + (await km.EXECUTION_WINDOW());
+  const out = [];
+  const seen = new Set();
+  for (const ev of await km.queryFilter(
+    km.filters.KeyRotationInitiated(idAddr),
+  )) {
+    const [, o, n, p] = ev.args;
+    const rid = ethers.solidityPackedKeccak256(
+      ["address", "bytes32", "bytes32", "uint256"],
+      [idAddr, o, n, p],
+    );
+    const r = await km.getKeyRotation(idAddr, rid);
+    if (seen.has(rid) || r.initiatedAt === 0n || r.completed) continue;
+    seen.add(rid);
+    if (await live(r.executionTime))
+      out.push(
+        `rotation ${short(o)} -> ${short(n)}, executable ${at(r.executionTime)}`,
+      );
+  }
+  for (const ev of await km.queryFilter(
+    km.filters.KeyRecoveryInitiated(idAddr),
+  )) {
+    const key = ev.args[1];
+    const c = await km.getRecoveryCandidate(idAddr, key);
+    if (seen.has(key) || c.initiatedAt === 0n) continue;
+    seen.add(key);
+    if (await live(c.executionTime))
+      out.push(
+        `recovery candidate ${short(key)} (${c.approvalCount} approvals), executable ${at(c.executionTime)}`,
+      );
+  }
+  return out;
+}
+
+/**
+ * authorizeManager / deauthorizeManager by the identity owner. Before
+ * re-authorizing it lists what is still pending (withdrawal paused it);
+ * with `confirm` (a prompt) it asks first and returns false on "no".
+ */
+async function setAuthorized(identity, owner, km, on, confirm) {
   const kmAddr = await km.getAddress();
   if ((await identity.authorizedManagers(kmAddr)) === on) return on;
+  if (on) {
+    const pending = await pendingItems(km, await identity.getAddress());
+    if (pending.length) {
+      console.log("   ⚠️  Re-authorizing re-arms these paused items (anyone");
+      console.log("      can execute them inside their 7-day window); cancel");
+      console.log("      them first (cancelKeyRotation / cancelKeyRecovery):");
+      for (const p of pending) console.log(`      - ${p}`);
+      if (confirm) {
+        const a = await confirm("Re-authorize KeyManager anyway? (yes/no): ");
+        if (a.trim().toLowerCase() !== "yes") {
+          console.log("   KeyManager stays withdrawn.");
+          return false;
+        }
+      }
+    }
+  }
   const id = identity.connect(owner);
   await (
     await (on ? id.authorizeManager(kmAddr) : id.deauthorizeManager(kmAddr))
@@ -108,9 +196,18 @@ async function passTimelock(executionTime, label, comeBack) {
     console.log(`   ⏩ ${label}: jumped ${due - now + 1}s (dev node)`);
     return true;
   }
-  console.log(`   ⏳ ${label}: executable from ${at(due)} (chain time).`);
-  console.log(`      Come back then: ${comeBack} resumes from this step.`);
+  console.log(`   ⏳ ${label}: executable from ${at(due)} (chain time),`);
+  console.log("      for 7 days; after that it expires and starts over.");
+  console.log(
+    `      Come back then: ${comeBack} resumes from this step (same session).`,
+  );
   return false;
+}
+
+/** True once `executionTime` + EXECUTION_WINDOW has passed. */
+async function expired(km, executionTime) {
+  const now = BigInt((await ethers.provider.getBlock("latest")).timestamp);
+  return now > executionTime + (await km.EXECUTION_WINDOW());
 }
 
 /**
@@ -126,7 +223,7 @@ async function rotateKey(km, identity, manager, oldKey, newKey, purpose, back) {
   );
   let r = await km.getKeyRotation(idAddr, rotationId);
   if (r.completed) return { executed: true, executionTime: r.executionTime };
-  if (r.initiatedAt === 0n) {
+  if (r.initiatedAt === 0n || (await expired(km, r.executionTime))) {
     await (
       await km
         .connect(manager)
@@ -158,24 +255,34 @@ async function rotateKey(km, identity, manager, oldKey, newKey, purpose, back) {
  * first `threshold` agents approve, then it executes after 48h. A pending
  * candidate for `key` is resumed, not re-opened.
  */
-async function recoverKey(km, identity, manager, agents, threshold, key, back) {
+async function recoverKey(
+  state,
+  km,
+  identity,
+  manager,
+  agents,
+  threshold,
+  key,
+  back,
+) {
   const idAddr = await identity.getAddress();
   if (await identity.keyHasPurpose(key, MANAGEMENT)) {
     return { executed: true };
   }
   let c = await km.getRecoveryCandidate(idAddr, key);
-  if (c.initiatedAt === 0n) {
+  if (c.initiatedAt === 0n || (await expired(km, c.executionTime))) {
     const list = agents.map((a) => a.address);
     await (
       await km.connect(manager).setupKeyRecovery(idAddr, list, threshold)
     ).wait();
     console.log(
-      `   🛡️  setupKeyRecovery: ${threshold}-of-${list.length} agents ${list.join(", ")}`,
+      `   🛡️  setupKeyRecovery by ${who(state, manager.address)}: ${threshold}-of-${list.length} agents`,
     );
+    for (const a of list) console.log(`      agent ${who(state, a)}`);
     await (await km.connect(agents[0]).initiateKeyRecovery(idAddr, key)).wait();
     c = await km.getRecoveryCandidate(idAddr, key);
     console.log(
-      `   🚨 initiateKeyRecovery by agent ${agents[0].address}: new key ${short(key)}`,
+      `   🚨 initiateKeyRecovery by ${who(state, agents[0].address)}: new key ${short(key)}`,
     );
   } else {
     console.log(`   🚨 Recovery already pending since ${at(c.initiatedAt)}`);
@@ -183,7 +290,7 @@ async function recoverKey(km, identity, manager, agents, threshold, key, back) {
   for (const agent of agents.slice(0, threshold)) {
     if (await km.hasApprovedRecovery(idAddr, key, agent.address)) continue;
     await (await km.connect(agent).approveKeyRecovery(idAddr, key)).wait();
-    console.log(`   👍 approveKeyRecovery by agent ${agent.address}`);
+    console.log(`   👍 approveKeyRecovery by ${who(state, agent.address)}`);
   }
   if (!(await passTimelock(c.executionTime, "recovery timelock", back))) {
     return { executed: false, executionTime: c.executionTime };
@@ -226,9 +333,10 @@ function lifecycleContext(state) {
 /**
  * Option 12, no prompts: authorize KeyManager on wallet 1's demo identity,
  * add a fresh MANAGEMENT key through batchAddKeys, rotate it to another
- * fresh key, recover onto a third fresh key with agents 2 and 3 (2-of-2),
- * then review the keys. Re-running after a real-network pause resumes the
- * same keys. Returns what happened, read from the chain.
+ * fresh key, recover onto a third fresh key with agents 7 and 8 (2-of-2),
+ * review the keys, then revoke the two MANAGEMENT keys it created (nobody
+ * holds them; wallet 1 keeps its own). Re-running after a real-network
+ * pause resumes the same keys in the same session. Returns what happened.
  */
 async function runKeyLifecycle(state) {
   displaySection("KEY LIFECYCLE THROUGH KEYMANAGER (OPTION 12)", "🔐");
@@ -237,7 +345,7 @@ async function runKeyLifecycle(state) {
   const { km, owner } = ctx;
   const identity = await demoIdentity(state, owner);
   const idAddr = await identity.getAddress();
-  console.log(`   Identity: ${idAddr} (owner wallet ${DEMO_WALLET})`);
+  console.log(`   Identity: ${idAddr}, owner ${who(state, owner.address)}`);
   let run = state.keyLifecycle;
   if (!run || run.done || !same(run.identity, idAddr)) {
     run = { identity: idAddr, oldKey: freshKey(), newKey: freshKey() };
@@ -269,6 +377,7 @@ async function runKeyLifecycle(state) {
 
   const agents = AGENT_WALLETS.map((i) => state.signers[i]);
   const recovery = await recoverKey(
+    state,
     km,
     identity,
     owner,
@@ -284,6 +393,21 @@ async function runKeyLifecycle(state) {
     [run.newKey]: "(rotated in)",
     [run.recoveryKey]: "(recovered)",
   });
+  // N4: leave no live key nobody holds.
+  await (
+    await km
+      .connect(owner)
+      .batchRemoveKeys(
+        idAddr,
+        [run.newKey, run.recoveryKey],
+        [MANAGEMENT, MANAGEMENT],
+      )
+  ).wait();
+  console.log(
+    "   🧹 batchRemoveKeys: revoked the rotated-in and recovered keys",
+  );
+  console.log("      option 12 created (random, nobody holds them); wallet 1");
+  console.log("      keeps its own MANAGEMENT key.");
   run.done = true;
   displaySuccess("Key rotated and identity recovered through KeyManager");
   return {
@@ -327,137 +451,21 @@ async function toggleAuthorization(state) {
   return identity.authorizedManagers(kmAddr);
 }
 
-/** "wallet index" or a passphrase -> key hash (option 5's input narrative). */
-async function askKey(state, prompt, question) {
-  const answer = (await prompt(question)).trim();
-  if (/^\d+$/.test(answer) && state.signers[Number(answer)]) {
-    const a = state.signers[Number(answer)].address;
-    return { key: keyOf(a), info: `wallet ${answer} (${a})` };
-  }
-  if (!answer) return null;
-  return {
-    key: ethers.id(answer),
-    info: `passphrase (${answer.length} chars)`,
-  };
-}
-
-/** The owner's signer for an option 5 identity record, or null. */
-function ownerOf(state, record) {
-  const owner = signerFor(state, record.owner);
-  if (!owner) displayError(`Owner ${record.owner} is not a demo signer`);
-  return owner;
-}
-
-/**
- * Option 5 -> 2: recovery agents restore access to `record` (a demo
- * identity) on a new MANAGEMENT key, through KeyManager's 48h timelock.
- */
-async function recoverInteractive(state, record, prompt) {
-  const km = state.getContract("keyManager");
-  const owner = ownerOf(state, record);
-  if (!km || !owner) return null;
-  const identity = (
-    await ethers.getContractAt("OnchainID", record.address)
-  ).connect(owner);
-  const agents = state.signers
-    .slice(2, 6)
-    .filter((s) => !same(s.address, owner.address))
-    .slice(0, 2);
-  console.log("\n🚨 RECOVERY THROUGH KEYMANAGER");
-  console.log("   The holder lost a key; two recovery agents restore access.");
-  console.log(`   Agents: ${agents.map((a) => a.address).join(", ")} (2-of-2)`);
-  const k = await askKey(
-    state,
-    prompt,
-    "New key (wallet index or passphrase): ",
-  );
-  if (!k) return displayError("No key given");
-  await setAuthorized(identity, owner, km, true);
-  const r = await recoverKey(
-    km,
-    identity,
-    owner,
-    agents,
-    2,
-    k.key,
-    "option 5 -> 2",
-  );
-  if (r.executed) displaySuccess(`Recovered onto ${k.info}`);
-  await reviewKeys(identity, km, { [k.key]: "(recovered)" });
-  return r;
-}
-
-/**
- * Option 5 -> 3: replace a MANAGEMENT key of `record` through KeyManager's
- * rotation timelock, sent by the owner.
- */
-async function replaceInteractive(state, record, prompt) {
-  const km = state.getContract("keyManager");
-  const owner = ownerOf(state, record);
-  if (!km || !owner) return null;
-  const identity = (
-    await ethers.getContractAt("OnchainID", record.address)
-  ).connect(owner);
-  const keys = await identity.getKeysByPurpose(MANAGEMENT);
-  console.log("\n🔄 REPLACE A MANAGEMENT KEY THROUGH KEYMANAGER");
-  keys.forEach((k, i) => console.log(`   ${i}: ${k}`));
-  const oldKey =
-    keys[Number(await prompt(`Key to replace (0-${keys.length - 1}): `))];
-  if (!oldKey) return displayError("Invalid key selection");
-  if (oldKey === keyOf(owner.address)) {
-    console.log(
-      "   ⚠️  This is the owner's own key; the owner keeps owner() rights.",
-    );
-  }
-  const k = await askKey(
-    state,
-    prompt,
-    "New key (wallet index or passphrase): ",
-  );
-  if (!k) return displayError("No key given");
-  await setAuthorized(identity, owner, km, true);
-  const r = await rotateKey(
-    km,
-    identity,
-    owner,
-    oldKey,
-    k.key,
-    MANAGEMENT,
-    "option 5 -> 3",
-  );
-  if (r.executed) displaySuccess(`Management key replaced by ${k.info}`);
-  await reviewKeys(identity, km, { [oldKey]: "(replaced)", [k.key]: "(new)" });
-  return r;
-}
-
-/** Option 12b: set wallet 1's identity rotation timelock (1h..168h). */
-async function setTimelockInteractive(state, prompt) {
-  displaySection("ROTATION TIMELOCK (OPTION 12b)", "⏱️");
-  const ctx = lifecycleContext(state);
-  if (!ctx) return null;
-  const { km, owner } = ctx;
-  const identity = await demoIdentity(state, owner);
-  const hours = Number(await prompt("Rotation timelock in hours (1-168): "));
-  if (!Number.isInteger(hours) || hours < 1 || hours > 168) {
-    return displayError("Timelock must be 1-168 whole hours");
-  }
-  await setAuthorized(identity, owner, km, true);
-  const idAddr = await identity.getAddress();
-  await (
-    await km.connect(owner).setCustomTimelock(idAddr, hours * 3600)
-  ).wait();
-  displaySuccess(`Rotations of ${idAddr} now wait ${hours}h`);
-  return hours * 3600;
-}
-
 module.exports = {
   DEMO_WALLET,
   AGENT_WALLETS,
+  MANAGEMENT,
+  same,
   keyOf,
+  who,
+  signerFor,
   demoIdentity,
+  pendingItems,
+  setAuthorized,
+  rotateKey,
+  recoverKey,
+  reviewKeys,
+  lifecycleContext,
   runKeyLifecycle,
   toggleAuthorization,
-  recoverInteractive,
-  replaceInteractive,
-  setTimelockInteractive,
 };

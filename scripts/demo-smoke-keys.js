@@ -66,46 +66,60 @@ async function runKeySmoke(state, failures) {
   }
   const id = await ethers.getContractAt("OnchainID", r.identity);
   const has = (k) => id.keyHasPurpose(k, MANAGEMENT);
+  // Was MANAGEMENT, now revoked: option 12 cleans up the keys it made (N4).
+  const wasMgmtNowRevoked = async (k) => {
+    const info = await id.getKey(k);
+    return info.purpose === 1n && info.revokedAt > 0n;
+  };
+  const ts = async (ev) => (await ev.getBlock()).timestamp;
+  const one = async (f) => (await km.queryFilter(f)).at(-1);
+  const rotDone = await one(
+    km.filters.KeyRotationCompleted(r.identity, r.oldKey, r.newKey),
+  );
+  const rotInit = await one(
+    km.filters.KeyRotationInitiated(r.identity, r.oldKey, r.newKey),
+  );
+  const recInit = await one(
+    km.filters.KeyRecoveryInitiated(r.identity, r.recoveryKey),
+  );
+  const recDone = await one(
+    km.filters.KeyRecoveryCompleted(r.identity, r.recoveryKey),
+  );
+  const rec = await km.getKeyRecovery(r.identity);
+  const agents = AGENT_WALLETS.map((i) => state.signers[i].address);
   const facts = [
     [
       "KeyManager is authorized on the demo identity",
       await id.authorizedManagers(kmAddr),
     ],
-    ["the rotated-out key is gone", !(await has(r.oldKey))],
+    ["the rotated-out key is gone", await wasMgmtNowRevoked(r.oldKey)],
     [
-      "the rotated-out key is revoked",
-      (await id.getKey(r.oldKey)).revokedAt > 0n,
+      "the rotation added the rotated-in key (KeyRotationCompleted)",
+      Boolean(rotDone),
     ],
-    ["the rotated-in key is MANAGEMENT", await has(r.newKey)],
-    ["the recovery key is MANAGEMENT", await has(r.recoveryKey)],
+    [
+      "the recovery added the recovery key (KeyRecoveryCompleted)",
+      Boolean(recDone),
+    ],
+    [
+      "the rotation waited its 24h timelock",
+      rotInit && rotDone && (await ts(rotDone)) - (await ts(rotInit)) >= 86400,
+    ],
+    [
+      "the recovery waited its 48h timelock",
+      recInit && recDone && (await ts(recDone)) - (await ts(recInit)) >= 172800,
+    ],
+    [
+      "recovery completed with agents 7 and 8 (no issuer role)",
+      rec.completed && rec.recoveryAgents.join() === agents.join(),
+    ],
+    [
+      "option 12 revoked the rotated-in and recovered keys it created",
+      (await wasMgmtNowRevoked(r.newKey)) &&
+        (await wasMgmtNowRevoked(r.recoveryKey)),
+    ],
     ["wallet 1 keeps its MANAGEMENT key", await has(keyOf(wallet))],
   ];
-  const rec = await km.getKeyRecovery(r.identity);
-  const agents = AGENT_WALLETS.map((i) => state.signers[i].address);
-  facts.push([
-    "recovery completed with agents 2 and 3",
-    rec.completed && rec.recoveryAgents.join() === agents.join(),
-  ]);
-  // Both timelocks really ran: the chain moved past their execution times.
-  const now = (await ethers.provider.getBlock("latest")).timestamp;
-  const rotation = await km.getKeyRotation(
-    r.identity,
-    ethers.solidityPackedKeccak256(
-      ["address", "bytes32", "bytes32", "uint256"],
-      [r.identity, r.oldKey, r.newKey, MANAGEMENT],
-    ),
-  );
-  facts.push([
-    "the rotation waited its 24h timelock",
-    rotation.completed &&
-      rotation.executionTime - rotation.initiatedAt === 86400n &&
-      now >= Number(rotation.executionTime),
-  ]);
-  const cand = await km.getRecoveryCandidate(r.identity, r.recoveryKey);
-  facts.push([
-    "the recovery epoch closed (candidate cleared)",
-    cand.initiatedAt === 0n,
-  ]);
   for (const [label, ok] of facts)
     if (!ok) failures.push(`4.2: ${label} failed`);
   if (facts.every(([, ok]) => ok)) {

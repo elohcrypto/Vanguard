@@ -10,9 +10,11 @@ describe("Key lifecycle flow (demo options 12, 12a, 12b, 5)", function () {
   this.timeout(300_000);
 
   const MGMT = 1;
+  const DAY = 24 * 3600;
   const k = (a: string) => ethers.solidityPackedKeccak256(["address"], [a]);
   let state: any;
   let flow: any;
+  let opts: any;
   let logged: string[];
 
   async function quiet(fn: () => Promise<any>): Promise<any> {
@@ -24,12 +26,17 @@ describe("Key lifecycle flow (demo options 12, 12a, 12b, 5)", function () {
       console.log = orig;
     }
   }
+  const jump = async (s: number) => {
+    await ethers.provider.send("evm_increaseTime", [s]);
+    await ethers.provider.send("evm_mine", []);
+  };
 
   beforeEach(async function () {
     const ContractDeployer = require("../../demo/core/ContractDeployer");
     const DemoState = require("../../demo/core/DemoState");
     const { EnhancedLogger } = require("../../demo/logging");
     flow = require("../../demo/utils/KeyLifecycleFlow");
+    opts = require("../../demo/utils/KeyLifecycleOptions");
     state = new DemoState();
     if (state.initialize) await state.initialize();
     state.signers = await ethers.getSigners();
@@ -38,7 +45,7 @@ describe("Key lifecycle flow (demo options 12, 12a, 12b, 5)", function () {
     await quiet(() => deployer.deployAllContracts());
   });
 
-  it("option 1 deploys KeyManager; option 12 authorizes, rotates and recovers", async function () {
+  it("option 1 deploys KeyManager; option 12 authorizes, rotates, recovers and cleans up", async function () {
     const km = state.getContract("keyManager");
     expect(km, "option 1 registers keyManager").to.not.equal(undefined);
     const kmAddr = await km.getAddress();
@@ -54,25 +61,28 @@ describe("Key lifecycle flow (demo options 12, 12a, 12b, 5)", function () {
 
     expect(await id.authorizedManagers(kmAddr)).to.equal(true);
     expect(r.rotation.executed && r.recovery.executed).to.equal(true);
-    // Rotation: the old key is gone, the new one is MANAGEMENT.
-    expect(await id.keyHasPurpose(r.oldKey, MGMT)).to.equal(false);
-    expect((await id.getKey(r.oldKey)).revokedAt).to.be.greaterThan(0n);
-    expect(await id.keyHasPurpose(r.newKey, MGMT)).to.equal(true);
-    // Recovery: agents 2 and 3 added the recovery key as MANAGEMENT.
-    expect(await id.keyHasPurpose(r.recoveryKey, MGMT)).to.equal(true);
+    // The three fresh keys were MANAGEMENT and are all revoked now (N4).
+    for (const key of [r.oldKey, r.newKey, r.recoveryKey]) {
+      const info = await id.getKey(key);
+      expect(info.purpose).to.equal(1n);
+      expect(info.revokedAt).to.be.greaterThan(0n);
+    }
+    expect(await id.getKeysByPurpose(MGMT)).to.deep.equal([k(s[1].address)]);
+    // Recovery ran with agents 7 and 8 (no issuer role) and completed.
     const rec = await km.getKeyRecovery(r.identity);
-    expect(rec.recoveryAgents).to.deep.equal([s[2].address, s[3].address]);
+    expect(rec.recoveryAgents).to.deep.equal([s[7].address, s[8].address]);
     expect(rec.completed).to.equal(true);
     expect(rec.lastKey).to.equal(r.recoveryKey);
-    // Wallet 1 keeps control of its identity.
-    expect(await id.keyHasPurpose(k(s[1].address), MGMT)).to.equal(true);
+    expect(out).to.contain("wallet 7 (investor Bob)");
+    expect(out).to.contain("wallet 1 (fee wallet, compliance officer)");
     expect(out).to.contain("KeyManager authorized: yes");
+    expect(out).to.contain("🧹 batchRemoveKeys");
 
     // A second run starts over with fresh keys on the same identity.
     const again = await quiet(() => flow.runKeyLifecycle(state));
     expect(again.identity).to.equal(r.identity);
     expect(again.newKey).to.not.equal(r.newKey);
-    expect(await id.keyHasPurpose(again.recoveryKey, MGMT)).to.equal(true);
+    expect(again.done).to.equal(true);
   });
 
   it("option 12a withdraws and restores the authorization; KeyManager obeys it", async function () {
@@ -96,17 +106,47 @@ describe("Key lifecycle flow (demo options 12, 12a, 12b, 5)", function () {
     expect(await id.authorizedManagers(kmAddr)).to.equal(true);
   });
 
+  it("before re-authorizing, pending items are listed; a prompted option asks", async function () {
+    const km = state.getContract("keyManager");
+    const kmAddr = await km.getAddress();
+    const s = state.signers;
+    const id = await flow.demoIdentity(state, s[1]);
+    const idAddr = await id.getAddress();
+    await id.authorizeManager(kmAddr);
+    await km.connect(s[1]).setupKeyRecovery(idAddr, [s[7].address], 1);
+    const key = k(s[6].address);
+    await km.connect(s[7]).initiateKeyRecovery(idAddr, key);
+    await id.deauthorizeManager(kmAddr);
+
+    // 12b with "no": stays withdrawn, nothing set.
+    const answers = ["3", "no"];
+    const set = await quiet(() =>
+      opts.setTimelockInteractive(state, async () => answers.shift()),
+    );
+    expect(set).to.equal(null);
+    expect(await id.authorizedManagers(kmAddr)).to.equal(false);
+    const out = logged.join("\n");
+    expect(out).to.contain("Re-authorizing re-arms these paused items");
+    expect(out).to.contain("recovery candidate");
+    expect(await km.customTimelocks(idAddr)).to.equal(0n);
+    // Option 12 (no prompts) prints the same list and continues.
+    logged = [];
+    const r = await quiet(() => flow.runKeyLifecycle(state));
+    expect(logged.join("\n")).to.contain("recovery candidate");
+    expect(r.done).to.equal(true);
+  });
+
   it("option 12b sets the identity's rotation timelock; option 12 uses it", async function () {
     const km = state.getContract("keyManager");
     const set = await quiet(() =>
-      flow.setTimelockInteractive(state, async () => "2"),
+      opts.setTimelockInteractive(state, async () => "2"),
     );
     expect(set).to.equal(7200);
     const r = await quiet(() => flow.runKeyLifecycle(state));
     expect(await km.customTimelocks(r.identity)).to.equal(7200n);
     expect(logged.join("\n")).to.contain("timelock 2h");
     // A refused value changes nothing.
-    await quiet(() => flow.setTimelockInteractive(state, async () => "200"));
+    await quiet(() => opts.setTimelockInteractive(state, async () => "200"));
     expect(await km.customTimelocks(r.identity)).to.equal(7200n);
   });
 
@@ -117,40 +157,67 @@ describe("Key lifecycle flow (demo options 12, 12a, 12b, 5)", function () {
     const record = state.identities.get(await id.getAddress());
     expect(record.owner).to.equal(owner.address);
 
-    // Recovery onto wallet 7's key, agents 2 and 3.
-    await quiet(() => flow.recoverInteractive(state, record, async () => "7"));
-    expect(await id.keyHasPurpose(k(s[7].address), MGMT)).to.equal(true);
+    // Recovery onto wallet 6's key, agents 7 and 8.
+    await quiet(() => opts.recoverInteractive(state, record, async () => "6"));
+    expect(await id.keyHasPurpose(k(s[6].address), MGMT)).to.equal(true);
+    expect(logged.join("\n")).to.contain("Recovery never restores owner()");
 
-    // Replace wallet 7's key (index 1 after the owner's) by a passphrase.
+    // Replace wallet 6's key by a passphrase (a label, said so).
     const keys = await id.getKeysByPurpose(MGMT);
-    const idx = keys.indexOf(k(s[7].address));
+    const idx = keys.indexOf(k(s[6].address));
     const answers = [String(idx), "a new passphrase"];
     await quiet(() =>
-      flow.replaceInteractive(state, record, async () => answers.shift()),
+      opts.replaceInteractive(state, record, async () => answers.shift()),
     );
-    expect(await id.keyHasPurpose(k(s[7].address), MGMT)).to.equal(false);
+    expect(await id.keyHasPurpose(k(s[6].address), MGMT)).to.equal(false);
     expect(
       await id.keyHasPurpose(ethers.id("a new passphrase"), MGMT),
     ).to.equal(true);
+    expect(logged.join("\n")).to.contain("nobody can sign with it");
     expect(await id.keyHasPurpose(k(owner.address), MGMT)).to.equal(true);
+
+    // The owner's own key: the warning names what stops working.
+    const own = (await id.getKeysByPurpose(MGMT)).indexOf(k(owner.address));
+    const more = [String(own), "8"];
+    await quiet(() =>
+      opts.replaceInteractive(state, record, async () => more.shift()),
+    );
+    expect(logged.join("\n")).to.contain(
+      "options 12, 12b and 5 -> 2/3 will refuse this",
+    );
   });
 
-  it("prints a come-back time instead of jumping where the clock cannot move", async function () {
+  it("where the clock cannot move it prints a come-back time; resume reuses the same keys", async function () {
     const ChainTime = require("../../demo/utils/ChainTime");
     const real = ChainTime.canJumpTime;
     ChainTime.canJumpTime = async () => false;
+    let first: any;
+    let second: any;
     try {
-      const r = await quiet(() => flow.runKeyLifecycle(state));
-      expect(r.done).to.equal(false);
-      expect(r.rotation.executed).to.equal(false);
-      expect(logged.join("\n")).to.contain("option 12 resumes from this step");
+      first = await quiet(() => flow.runKeyLifecycle(state));
+      expect(first.done).to.equal(false);
+      expect(first.rotation.executed).to.equal(false);
+      expect(logged.join("\n")).to.contain(
+        "option 12 resumes from this step (same session)",
+      );
+      // Wait out the rotation by hand: the rotation runs, recovery waits.
+      await jump(DAY + 1);
+      second = await quiet(() => flow.runKeyLifecycle(state));
+      expect(second.rotation.executed).to.equal(true);
+      expect(second.recovery.executed).to.equal(false);
     } finally {
       ChainTime.canJumpTime = real;
     }
-    // Back on a dev node, option 12 resumes the same rotation.
-    const resumed: any = await quiet(() => flow.runKeyLifecycle(state));
-    expect(resumed.done).to.equal(true);
-    const id = await ethers.getContractAt("OnchainID", resumed.identity);
-    expect(await id.keyHasPurpose(resumed.newKey, MGMT)).to.equal(true);
+    for (const key of ["oldKey", "newKey", "recoveryKey"]) {
+      expect(second[key]).to.equal(first[key]);
+    }
+    // Back on a dev node, option 12 finishes the same recovery.
+    const third: any = await quiet(() => flow.runKeyLifecycle(state));
+    expect(third.done).to.equal(true);
+    expect(third.recoveryKey).to.equal(first.recoveryKey);
+    const km = state.getContract("keyManager");
+    expect((await km.getKeyRecovery(third.identity)).lastKey).to.equal(
+      first.recoveryKey,
+    );
   });
 });

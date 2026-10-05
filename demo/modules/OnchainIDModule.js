@@ -22,7 +22,7 @@ const { attestKyc, attestAml, attestAll } = require("../utils/Kyc");
 const {
   recoverInteractive,
   replaceInteractive,
-} = require("../utils/KeyLifecycleFlow");
+} = require("../utils/KeyLifecycleOptions");
 
 /**
  * @class OnchainIDModule
@@ -662,8 +662,8 @@ class OnchainIDModule {
 
       // 2 and 3 run through KeyManager (plan v2 Task 4.2): recovery agents
       // and a 48h timelock, or a rotation behind the identity's timelock.
-      // They used to be instant owner addKey/removeKey calls, which no
-      // holder who lost a key could make.
+      // They used to be instant owner addKey/removeKey calls. The owner
+      // still sets recovery up; the agents and the timelocks are new.
       console.log("\n🚨 KEY RECOVERY OPTIONS:");
       console.log("1. Remove Compromised Key");
       console.log("2. Add Recovery Key (recovery agents, 48h, KeyManager)");

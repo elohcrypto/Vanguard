@@ -11,6 +11,7 @@
 
 const { displaySection } = require("../utils/DisplayHelpers");
 const keyLifecycle = require("../utils/KeyLifecycleFlow");
+const keyOptions = require("../utils/KeyLifecycleOptions");
 
 /**
  * @class MenuSystem
@@ -269,10 +270,7 @@ class MenuSystem {
           await keyLifecycle.toggleAuthorization(this.state);
           break;
         case "12b":
-          await keyLifecycle.setTimelockInteractive(
-            this.state,
-            this.promptUser,
-          );
+          await keyOptions.setTimelockInteractive(this.state, this.promptUser);
           break;
 
         // Compliance (13-20)
