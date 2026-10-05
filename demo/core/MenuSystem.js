@@ -10,6 +10,7 @@
  */
 
 const { displaySection } = require("../utils/DisplayHelpers");
+const keyLifecycle = require("../utils/KeyLifecycleFlow");
 
 /**
  * @class MenuSystem
@@ -43,17 +44,22 @@ class MenuSystem {
       "1a. 🚀 ONE-CLICK: Deploy Everything (core + compliance + token + investor types + governance)",
     );
     console.log("");
-    console.log("🆔 === ONCHAINID MANAGEMENT (Options 2-11) ===");
+    console.log("🆔 === ONCHAINID MANAGEMENT (Options 2-12) ===");
     console.log("2.  Create Management Keys");
     console.log("3.  Create OnchainID for User");
     console.log("4.  Review Identity Keys");
-    console.log("5.  Recover Lost Keys");
+    console.log("5.  Recover Lost Keys (KeyManager recovery / rotation)");
     console.log("6.  Manage KYC Claims");
     console.log("7.  Manage AML Claims");
     console.log("8.  Review Claim Status & History");
     console.log("9.  Create UTXO with KYC/AML Data");
     console.log("10. Verify UTXO Contains Compliance Data");
     console.log("11. Demo: KYC Claim Expiry (Short-Lived Claim)");
+    console.log(
+      "12. Key lifecycle: authorize + rotate + recover (KeyManager, wallet 1)",
+    );
+    console.log("12a. Toggle KeyManager authorization on wallet 1's identity");
+    console.log("12b. Set wallet 1's identity rotation timelock (hours)");
     console.log("");
     console.log("⚖️  === COMPLIANCE RULES ENGINE (Options 13-20) ===");
     console.log("13. Deploy ComplianceRules Contract");
@@ -255,6 +261,18 @@ class MenuSystem {
           break;
         case "11":
           await onchainID.demoClaimExpiry();
+          break;
+        case "12":
+          await keyLifecycle.runKeyLifecycle(this.state);
+          break;
+        case "12a":
+          await keyLifecycle.toggleAuthorization(this.state);
+          break;
+        case "12b":
+          await keyLifecycle.setTimelockInteractive(
+            this.state,
+            this.promptUser,
+          );
           break;
 
         // Compliance (13-20)

@@ -232,6 +232,7 @@ class ContractDeployer {
       if (d.name === "Core contracts") {
         // The privacy pair deploys with the core layer (Task 3.6).
         for (const [label, key] of [
+          ["KeyManager", "keyManager"],
           ["ZKVerifierIntegrated", "zkVerifierIntegrated"],
           ["PrivacyManager", "privacyManager"],
         ]) {
@@ -349,6 +350,16 @@ class ContractDeployer {
       "AML Service",
       "AML screening service",
     ]);
+
+    // KeyManager (plan v2 Task 4.2): no owner, no constructor argument.
+    // Identities opt in with authorizeManager; options 12/12a/5 use it.
+    displayProgress("Deploying KeyManager...");
+    const keyManager = await (
+      await ethers.getContractFactory("KeyManager")
+    ).deploy();
+    await keyManager.waitForDeployment();
+    this.state.setContract("keyManager", keyManager);
+    await this.logger.logContractDeployment("KeyManager", keyManager, []);
   }
 
   /**
