@@ -6,8 +6,11 @@
  * ceremony proves instead: the deployed runtime code is the compiled
  * KeyManager (a pre-4.2 one kept an owner and an allowlist), and the demo
  * identity named by the config authorizes that KeyManager while the
- * deployer is not one of its managers. Both config keys are optional:
- * "keyManager" (an address) and "keyManagerIdentity" (an OnchainID).
+ * deployer is neither its owner, nor an authorized manager, nor a
+ * MANAGEMENT key on it. Both config keys are optional: "keyManager" (an
+ * address) and "keyManagerIdentity" (an OnchainID, only with keyManager).
+ * Nothing in the ceremony changes the identity, so the preflight refuses
+ * a failing identity before Step 1.
  */
 
 const { ethers } = require("hardhat");
@@ -16,7 +19,30 @@ const { codeHash, expectedHash } = require("./HandoverCodeHash");
 
 const MANAGED_ABI = [
   "function authorizedManagers(address) view returns (bool)",
+  "function keyHasPurpose(bytes32,uint256) view returns (bool)",
+  "function owner() view returns (address)",
 ];
+
+/**
+ * The demo identity's facts: { idAddr, authorizes, deployerRoles } where
+ * deployerRoles lists what the deployer still is on it (empty: nothing).
+ */
+async function identityFacts(o, kmAddr, dAddr) {
+  const idAddr = await addrOf(o.keyManagerIdentity);
+  const id = await ethers.getContractAt(MANAGED_ABI, idAddr);
+  const read = (p) => p.catch(() => null);
+  const key = ethers.solidityPackedKeccak256(["address"], [dAddr]);
+  const owner = await read(id.owner());
+  const roles = [];
+  if (owner === null || owner.toLowerCase() === dAddr.toLowerCase())
+    roles.push("owner");
+  if ((await read(id.authorizedManagers(dAddr))) !== false)
+    roles.push("authorized manager");
+  if ((await read(id.keyHasPurpose(key, 1))) !== false)
+    roles.push("MANAGEMENT key");
+  const authorizes = (await read(id.authorizedManagers(kmAddr))) === true;
+  return { idAddr, authorizes, deployerRoles: roles };
+}
 
 /** { addr, hasCode, actual, expected } for o.keyManager, or null. */
 async function keyManagerCode(o) {
@@ -32,6 +58,11 @@ async function keyManagerCode(o) {
 
 /** Read-only, before the first transaction: refuse a KeyManager that is not one. */
 async function preflightKeyManager(o) {
+  if (o.keyManagerIdentity && !o.keyManager) {
+    fail(
+      `keyManagerIdentity is named without keyManager: name the deployed KeyManager too, or leave both out`,
+    );
+  }
   const k = await keyManagerCode(o);
   if (!k) return;
   if (!k.hasCode) {
@@ -49,6 +80,17 @@ async function preflightKeyManager(o) {
     if ((await ethers.provider.getCode(id)) === "0x") {
       fail(`keyManagerIdentity ${id} has no code: name the demo OnchainID`);
     }
+    const f = await identityFacts(o, k.addr, await addrOf(o.deployer));
+    if (!f.authorizes) {
+      fail(
+        `keyManagerIdentity ${f.idAddr} has not authorized KeyManager ${k.addr}: its owner must send authorizeManager(${k.addr}) first`,
+      );
+    }
+    if (f.deployerRoles.length) {
+      fail(
+        `the deployer is still ${f.deployerRoles.join(", ")} on keyManagerIdentity ${f.idAddr}: its owner must remove that before the handover`,
+      );
+    }
   }
 }
 
@@ -63,13 +105,10 @@ async function keyManagerLines(o, dAddr) {
     ],
   ];
   if (o.keyManagerIdentity) {
-    const idAddr = await addrOf(o.keyManagerIdentity);
-    const id = await ethers.getContractAt(MANAGED_ABI, idAddr);
-    const read = (a) => id.authorizedManagers(a).catch(() => null);
-    const [km, deployer] = [await read(k.addr), await read(dAddr)];
+    const f = await identityFacts(o, k.addr, dAddr);
     lines.push([
-      `demo identity ${idAddr} authorizes KeyManager ${k.addr}; the deployer is not its manager`,
-      km === true && deployer === false,
+      `demo identity ${f.idAddr} authorizes KeyManager ${k.addr}; the deployer is not its owner, manager or MANAGEMENT key`,
+      f.authorizes && f.deployerRoles.length === 0,
     ]);
   }
   return lines;

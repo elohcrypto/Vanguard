@@ -23,7 +23,9 @@ describe("Handover: KeyManager (4.2)", function () {
   const kmLine = (a: string) =>
     `KeyManager ${a} code matches the compiled KeyManager: no owner, no allowlist, the deployer holds no KeyManager power`;
   const idLine = (id: string, a: string) =>
-    `demo identity ${id} authorizes KeyManager ${a}; the deployer is not its manager`;
+    `demo identity ${id} authorizes KeyManager ${a}; the deployer is not its owner, manager or MANAGEMENT key`;
+  const dKey = () =>
+    ethers.solidityPackedKeccak256(["address"], [f.deployer.address]);
 
   beforeEach(async function () {
     f = await handoverFixture();
@@ -65,6 +67,18 @@ describe("Handover: KeyManager (4.2)", function () {
     await identity.connect(f.proposer).authorizeManager(f.deployer.address);
     after = await assertHandoverComplete(args);
     expect(after.failures).to.deep.equal([idLine(idAddr, kmAddr)]);
+    // ... or gives the deployer a MANAGEMENT key (review L1) ...
+    await identity.connect(f.proposer).deauthorizeManager(f.deployer.address);
+    await identity.connect(f.proposer).addKey(dKey(), 1, 1);
+    after = await assertHandoverComplete(args);
+    expect(after.failures).to.deep.equal([idLine(idAddr, kmAddr)]);
+    await identity.connect(f.proposer).removeKey(dKey(), 1);
+    expect((await assertHandoverComplete(args)).failures).to.deep.equal([]);
+    // ... or makes the deployer its owner.
+    await identity.connect(f.proposer).transferOwnership(f.deployer.address);
+    await identity.connect(f.deployer).acceptOwnership();
+    after = await assertHandoverComplete(args);
+    expect(after.failures).to.deep.equal([idLine(idAddr, kmAddr)]);
     // A look-alike (another contract) fails the code line.
     const other = await f.c.token.getAddress();
     after = await assertHandoverComplete({ ...args, keyManager: other });
@@ -98,6 +112,47 @@ describe("Handover: KeyManager (4.2)", function () {
     await expect(
       handoverDeployerPowers({ ...args, keyManagerIdentity: eoa }),
     ).to.be.rejectedWith(`keyManagerIdentity ${eoa} has no code`);
+  });
+
+  // Review L1: nothing in the ceremony changes the identity, so a failing
+  // one is refused before Step 1, transaction-free.
+  describe("preflight refuses the demo identity before Step 1", function () {
+    const refuses = async (o: Record<string, any>, msg: RegExp) => {
+      await expect(handoverDeployerPowers(o)).to.be.rejectedWith(msg);
+      expect(await f.c.token.isAgent(f.ops.address)).to.equal(false);
+    };
+
+    it("one that has not authorized the named KeyManager", async function () {
+      await identity.connect(f.proposer).deauthorizeManager(kmAddr);
+      await refuses(args, /has not authorized KeyManager/);
+    });
+
+    it("one where the deployer is an authorized manager", async function () {
+      await identity.connect(f.proposer).authorizeManager(f.deployer.address);
+      await refuses(args, /the deployer is still authorized manager/);
+    });
+
+    it("one where the deployer holds a MANAGEMENT key", async function () {
+      await identity.connect(f.proposer).addKey(dKey(), 1, 1);
+      await refuses(args, /the deployer is still MANAGEMENT key/);
+    });
+
+    it("one the deployer owns", async function () {
+      const mine = await (
+        await ethers.getContractFactory("OnchainID")
+      ).deploy(f.deployer.address);
+      await mine.authorizeManager(kmAddr);
+      await refuses(
+        { ...args, keyManagerIdentity: await mine.getAddress() },
+        /the deployer is still owner, MANAGEMENT key/,
+      );
+    });
+
+    it("keyManagerIdentity named without keyManager", async function () {
+      const o = { ...args };
+      delete o.keyManager;
+      await refuses(o, /keyManagerIdentity is named without keyManager/);
+    });
   });
 
   it("scripts/handover.ts reads keyManager from handover.json", async function () {
