@@ -7,6 +7,7 @@ import {
   ComplianceRules,
 } from "../../typechain-types";
 import { DeploymentHelper } from "../deploy-helpers";
+import { authorizeKeyManagerOnOps, OpsKeyManagerResult } from "./opsKeyManager";
 
 /**
  * Production Deployment Script
@@ -38,6 +39,8 @@ interface DeploymentResult {
   amlIssuer: ClaimIssuer;
   identityRegistry: IdentityRegistry;
   complianceRules: ComplianceRules;
+  /** Task 4.2: KeyManager on the ops identity (OPS_IDENTITY). */
+  opsKeyManager: OpsKeyManagerResult;
   addresses: {
     factory: string;
     keyManager: string;
@@ -351,6 +354,12 @@ async function main(): Promise<DeploymentResult> {
   console.log(
     `   Key rotation timelock: ${keyRotationTimelock} seconds (fixed)`,
   );
+  const opsKeyManager = await authorizeKeyManagerOnOps(
+    keyManagerAddress,
+    deployer,
+    process.env.OPS_IDENTITY,
+    deploymentOptions,
+  );
 
   console.log("\n✅ System Configuration Complete!");
 
@@ -423,6 +432,7 @@ async function main(): Promise<DeploymentResult> {
     amlIssuer,
     identityRegistry,
     complianceRules,
+    opsKeyManager,
     addresses: {
       factory: factoryAddress,
       keyManager: keyManagerAddress,

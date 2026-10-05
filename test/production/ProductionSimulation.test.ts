@@ -787,3 +787,64 @@ describe("🏭 Production Simulation - OnchainID System", function () {
     console.log("💡 All tests passed - System ready for mainnet deployment!");
   });
 });
+
+// Plan v2 Task 4.2: scripts/production/DeployProduction.ts authorizes
+// KeyManager on the ops identity (OPS_IDENTITY) when the deployer owns it,
+// and otherwise prints the exact call the ops key must send.
+describe("🔐 Production deploy: KeyManager on the ops identity (4.2)", function () {
+  it("authorizes a deployer-owned ops identity; prints the call for another owner", async function () {
+    const {
+      deployProduction,
+    } = require("../../scripts/production/DeployProduction");
+    const {
+      authorizeKeyManagerOnOps,
+    } = require("../../scripts/production/opsKeyManager");
+    const signers = await ethers.getSigners();
+    const [deployer, opsKey] = [signers[0], signers[5]];
+    const OID = await ethers.getContractFactory("OnchainID");
+    const ownOps = await OID.deploy(deployer.address);
+    const quiet = console.log;
+    const out: string[] = [];
+    console.log = (...a: unknown[]) => void out.push(a.join(" "));
+    let r: any;
+    try {
+      process.env.OPS_IDENTITY = await ownOps.getAddress();
+      r = await deployProduction();
+    } finally {
+      delete process.env.OPS_IDENTITY;
+      console.log = quiet;
+    }
+    const km = r.addresses.keyManager;
+    expect(r.opsKeyManager).to.deep.equal({
+      opsIdentity: await ownOps.getAddress(),
+      authorized: true,
+      pending: null,
+    });
+    expect(await ownOps.authorizedManagers(km)).to.equal(true);
+
+    // An ops identity the ops key owns: nothing sent, the call is printed.
+    const theirs = await OID.deploy(opsKey.address);
+    const tAddr = await theirs.getAddress();
+    console.log = (...a: unknown[]) => void out.push(a.join(" "));
+    let r2: any;
+    try {
+      r2 = await authorizeKeyManagerOnOps(km, deployer, tAddr);
+    } finally {
+      console.log = quiet;
+    }
+    const pending = `OnchainID(${tAddr}).authorizeManager(${km}) from the identity owner ${opsKey.address}`;
+    expect(r2).to.deep.equal({
+      opsIdentity: tAddr,
+      authorized: false,
+      pending,
+    });
+    expect(out.join("\n")).to.contain(`The ops key must send: ${pending}`);
+    expect(await theirs.authorizedManagers(km)).to.equal(false);
+    // The printed call is the one that works, and only from the owner.
+    await expect(theirs.authorizeManager(km)).to.be.revertedWith(
+      "OnchainID: Only owner can authorize managers",
+    );
+    await theirs.connect(opsKey).authorizeManager(km);
+    expect(await theirs.authorizedManagers(km)).to.equal(true);
+  });
+});
