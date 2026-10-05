@@ -847,4 +847,31 @@ describe("🔐 Production deploy: KeyManager on the ops identity (4.2)", functio
     await theirs.connect(opsKey).authorizeManager(km);
     expect(await theirs.authorizedManagers(km)).to.equal(true);
   });
+
+  it("OPS_IDENTITY unset prints the call; an address with no code is refused", async function () {
+    const {
+      authorizeKeyManagerOnOps,
+    } = require("../../scripts/production/opsKeyManager");
+    const [deployer, stranger] = await ethers.getSigners();
+    const km = await (await ethers.getContractFactory("KeyManager")).deploy();
+    const kmA = await km.getAddress();
+    const quiet = console.log;
+    const out: string[] = [];
+    console.log = (...a: unknown[]) => void out.push(a.join(" "));
+    let r: any;
+    try {
+      r = await authorizeKeyManagerOnOps(kmA, deployer, undefined);
+    } finally {
+      console.log = quiet;
+    }
+    const pending = `OnchainID(<ops identity>).authorizeManager(${kmA}) from the identity owner <ops key>`;
+    expect(r).to.deep.equal({ opsIdentity: null, authorized: false, pending });
+    expect(out.join("\n")).to.contain("OPS_IDENTITY not set");
+    await expect(
+      authorizeKeyManagerOnOps(kmA, deployer, stranger.address),
+    ).to.be.rejectedWith(`OPS_IDENTITY ${stranger.address} has no code`);
+    await expect(
+      authorizeKeyManagerOnOps(kmA, deployer, "not-an-address"),
+    ).to.be.rejectedWith("is not an address");
+  });
 });

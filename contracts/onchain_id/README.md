@@ -7,7 +7,7 @@ This directory contains OnchainID implementation contracts following ERC-734 and
 - `OnchainIDFactory.sol` - Factory for deploying OnchainID contracts
 - `OnchainID.sol` - Core OnchainID contract with key and claim management
 - `ClaimIssuer.sol` - Trusted claim issuer contract
-- `KeyManager.sol` - Advanced key management utilities
+- `KeyManager.sol` - Timelocked key rotation and agent recovery for identities that authorize it (no owner)
 
 ## Interfaces
 

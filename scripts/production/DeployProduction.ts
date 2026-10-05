@@ -352,7 +352,7 @@ async function main(): Promise<DeploymentResult> {
   const keyRotationTimelock = await keyManager.DEFAULT_TIMELOCK();
   console.log(`   Recovery timelock: ${recoveryTimelock} seconds (fixed)`);
   console.log(
-    `   Key rotation timelock: ${keyRotationTimelock} seconds (fixed)`,
+    `   Key rotation timelock: ${keyRotationTimelock} seconds (default; an identity's MANAGEMENT key may set its own)`,
   );
   const opsKeyManager = await authorizeKeyManagerOnOps(
     keyManagerAddress,
