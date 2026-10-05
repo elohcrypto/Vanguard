@@ -35,6 +35,7 @@ const EXPECTED = [
   "consensusOracle",
   "zkVerifierIntegrated",
   "privacyManager",
+  "keyManager",
 ];
 
 /** Run `fn` with console.log captured (restored on throw); the lines. */
@@ -478,6 +479,7 @@ async function main() {
   // 6b. Task 3.6: the ZK allow list on VSC (demo-smoke-privacy.js); 7. Plan
   // 2C.1: the handover ceremony, last because it strips the deployer.
   await require("./demo-smoke-privacy").runPrivacySmoke(state, failures);
+  await require("./demo-smoke-keys").runKeySmoke(state, failures); // 4.2
   await require("./demo-smoke-handover").runHandoverSmoke(state, failures);
 
   if (failures.length) {

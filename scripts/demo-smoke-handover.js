@@ -137,6 +137,9 @@ async function runHandoverSmoke(state, failures) {
     onchainIDFactory: c("onchainIDFactory"),
     privacyManager,
     zkVerifier,
+    // 4.2: KeyManager holds no power; option 12's identity authorizes it.
+    keyManager: c("keyManager"),
+    keyManagerIdentity: state.keyLifecycle?.identity,
     oracles: ["whitelistOracle", "blacklistOracle", "consensusOracle"].map(c),
     issuers: [c("kycIssuer"), c("amlIssuer")],
   };
@@ -317,6 +320,7 @@ async function runHandoverSmoke(state, failures) {
           complianceRules: await addr(c("complianceRules")),
           token: await addr(c("digitalToken")),
           identityRegistry: await addr(c("identityRegistry")),
+          keyManager: await addr(c("keyManager")),
           ops: { index: OPS, wallet: s[OPS].address },
           users,
         },

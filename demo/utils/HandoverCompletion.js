@@ -34,6 +34,7 @@ const {
   liveTrustedContracts,
 } = require("./HandoverScans");
 const { privacyLines } = require("./HandoverPrivacy");
+const { keyManagerLines } = require("./HandoverKeys");
 
 const ZERO = ethers.ZeroAddress;
 const EXEMPT_ABI = [
@@ -97,6 +98,8 @@ async function assertHandoverComplete(o) {
   )) {
     add(label, pass);
   }
+  // Task 4.2: KeyManager holds no power; the demo identity opted in.
+  for (const [label, pass] of await keyManagerLines(o, dAddr)) add(label, pass);
   // Bound in governance, or the creator of a trusted escrow (review M-2),
   // but not named by the config: still checked.
   const d = o.derived;

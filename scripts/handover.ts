@@ -15,6 +15,8 @@
  *     "onchainIDFactory": "0x.." | null,        // required key (2F.5), null = not deployed
  *     "privacyManager": "0x.." | null,          // required key (3.3), null = not deployed
  *     "zkVerifier": "0x.." | null,              // required key (3.3), ZKVerifierIntegrated
+ *     "keyManager": "0x..",                     // optional (4.2), KeyManager
+ *     "keyManagerIdentity": "0x..",             // optional (4.2), the demo OnchainID
  *     "oracles": ["0x..", "0x..", "0x.."],      // optional, one-step Ownable
  *     "issuers": ["0x..", "0x.."],              // optional, ClaimIssuer
  *     "feeWallets": ["0x.."],                   // optional, escrow fee wallets to check
@@ -43,6 +45,10 @@
  * (demo/utils/HandoverCodeHash.js; the refusal names both hashes and is
  * printed unchanged after "❌ Handover failed: "). A "fromBlock" after the
  * IdentityRegistry deploy is refused (the scans would miss earlier agents).
+ * KeyManager (4.2) has no owner, so nothing is handed over: a "keyManager"
+ * with no code, or whose code is not the compiled KeyManager, is refused,
+ * and the completion check proves the deployer holds no KeyManager power
+ * and that "keyManagerIdentity" authorizes it (demo/utils/HandoverKeys.js).
  *
  * Every contract in ACCEPTANCE_PLAN (demo/utils/HandoverChecks.js) given here
  * is nominated and accepted by vote, InvestorTypeRegistry included; a
@@ -177,6 +183,10 @@ export async function runHandover(
     zkVerifier: cfg.zkVerifier
       ? await at("ZKVerifierIntegrated", cfg.zkVerifier)
       : undefined,
+    keyManager: cfg.keyManager
+      ? await at("KeyManager", cfg.keyManager)
+      : undefined,
+    keyManagerIdentity: cfg.keyManagerIdentity,
     // Left out: the ceremony uses the set read from chain.
     oracles: cfg.oracles
       ? await Promise.all(
