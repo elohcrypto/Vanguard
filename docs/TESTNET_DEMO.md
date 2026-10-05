@@ -71,7 +71,8 @@ unchanged, so it cannot propose or vote ("Wallet does not control its
 identity") until it holds a key on that OnchainID: the designed path is
 KeyManager recovery (the holder authorised KeyManager and named recovery
 agents beforehand; the agents initiate and approve the new wallet's key, and
-after the 48-hour timelock anyone executes it).
+after the 48-hour timelock, and within the 7 days after it, anyone executes
+it).
 
 ## Electorate rule (D7)
 
@@ -599,43 +600,72 @@ Option 1 deploys `KeyManager` with the core contracts. It has no owner and
 no allowlist: an identity opts in with `authorizeManager(keyManager)` from
 its owner, and every rotation or recovery then needs a MANAGEMENT key of
 that identity (docs/SYSTEM_WORKFLOW_GUIDE.md, "Identity key lifecycle").
+The wallets the options use: wallet 1 (fee wallet, compliance officer)
+owns the demo identity; wallets 7 and 8 (investors Bob and Carol) are the
+recovery agents, chosen because they hold no issuer, ops or guardian role;
+5 -> 2 falls back to wallet 6 (investor Alice) when the owner is 7 or 8.
+Every print names each wallet's role.
 
 - **12** (no prompts): wallet 1's identity (found in the registry or the
   factory, or created through the factory) authorizes KeyManager, adds a
   fresh MANAGEMENT key with `batchAddKeys`, rotates it to another fresh
   key through the rotation timelock (24 hours unless 12b set another),
-  then wallets 2 and 3, as 2-of-2 recovery agents, recover the identity
-  onto a third fresh key through the 48-hour timelock, and the keys are
-  listed. Wallet 1 keeps its own key. Run it again for a fresh round.
+  then wallets 7 and 8, as 2-of-2 recovery agents, recover the identity
+  onto a third fresh key through the 48-hour timelock, the keys are
+  listed, and the two keys the run created (held by nobody) are revoked
+  with `batchRemoveKeys`. Wallet 1 keeps its own key. Run it again for a
+  fresh round.
 - **12a** (no prompts): withdraws KeyManager's authorization on that
   identity (`deauthorizeManager`) and shows KeyManager refusing a
   rotation; run again to restore it.
 - **12b**: sets that identity's rotation timelock in hours (1 to 168).
-- **5**: picks an identity; 2 recovers it onto a new key (a wallet index
-  or a passphrase) with two recovery agents, 3 replaces one of its
-  MANAGEMENT keys by a timelocked rotation, both through KeyManager; 1
-  removes a key directly, as before.
+- **5**: picks an identity; 2 recovers it onto a new key (a wallet index,
+  or a passphrase, which is only a label nobody can sign with), 3
+  replaces one of its MANAGEMENT keys by a timelocked rotation, both
+  through KeyManager; 1 removes a key directly, as before. In 5 -> 2 the
+  owner authorizes KeyManager and names the agents: that is the holder's
+  step, taken while it still holds its key (at onboarding); a holder who
+  already lost every key cannot take it. In 5 -> 3, replacing the owner's
+  own key leaves `owner()` rights on OnchainID only: KeyManager accepts
+  MANAGEMENT keys, so 12, 12b and 5 -> 2/3 refuse that owner until it
+  holds a MANAGEMENT key again.
+
+Withdrawing the authorization pauses KeyManager for the identity; it does
+not cancel. Agents can then neither open nor approve candidates, and
+nothing executes; `cancelKeyRotation` and `cancelKeyRecovery` (both work
+while withdrawn) stop an item. A rotation or recovery runs only within 7
+days after its execution time (`EXECUTION_WINDOW`); after that it is dead
+and must be re-initiated, so a paused item cannot revive months later.
+Before 12, 12a, 12b or 5 -> 2/3 re-authorize, the flow lists the
+identity's paused items still inside their window; 12b and 5 ask before
+re-authorizing, 12 and 12a print and continue.
 
 On a dev node each timelock is jumped with `evm_increaseTime`. Where the
 clock cannot be moved, the option prints when the step becomes executable
-(chain time); run the same option again after that time and it resumes
-from the chain (a pending rotation or recovery is never re-initiated).
+(chain time); run the same option again after that time, in the same demo
+session, and it resumes from the chain (a pending rotation or recovery is
+never re-initiated while it can still run). The keys live in memory: a
+restarted demo starts over with fresh keys.
 `scripts/demo-smoke.js` (via `scripts/demo-smoke-keys.js`) runs option 12
 and checks on chain that KeyManager answers neither `owner()` nor
 `authorizedManagers()`, is authorized on wallet 1's identity, that the
-rotated-out key is revoked, the rotated-in and recovery keys are
-MANAGEMENT, wallet 1 kept its key, recovery completed with agents 2 and 3,
-and the rotation waited its 24 hours. `DEMO_SMOKE_OUT` records
-`keyManager`.
+rotated-out key is revoked, the rotation and the recovery completed and
+waited 24 and 48 hours (event block times), recovery ran with agents 7
+and 8, option 12 revoked the keys it created, and wallet 1 kept its key.
+`DEMO_SMOKE_OUT` records `keyManager`.
 
 The handover ceremony hands nothing over for KeyManager (it has no
 owner). handover.json may name `"keyManager"` and `"keyManagerIdentity"`
-(the demo OnchainID); the preflight refuses a `keyManager` with no code or
-whose runtime code is not the compiled KeyManager, and a
-`keyManagerIdentity` with no code; 83e adds two lines: the code matches the
-compiled KeyManager (no owner, no allowlist, so the deployer holds no
-KeyManager power), and the identity authorizes KeyManager while the
-deployer is not one of its managers. The smoke's ceremony passes 68 checks.
+(the demo OnchainID). Before Step 1, without a transaction, the preflight
+refuses a `keyManager` with no code or whose runtime code is not the
+compiled KeyManager, a `keyManagerIdentity` with no code, one that has not
+authorized the named KeyManager, one where the deployer is owner,
+authorized manager or a MANAGEMENT key, and a `keyManagerIdentity` named
+without `keyManager`. 83e adds two lines: the code matches the compiled
+KeyManager (no owner, no allowlist, so the deployer holds no KeyManager
+power), and the identity authorizes KeyManager while the deployer is not
+its owner, manager or MANAGEMENT key. The smoke's ceremony passes 68
+checks.
 
 `scripts/production/DeployProduction.ts` deploys KeyManager and authorizes
 it on the ops identity named by `OPS_IDENTITY` when the deploying wallet

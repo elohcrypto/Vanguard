@@ -203,11 +203,19 @@ await claimIssuer.issueClaim(
 `KeyManager` rotates and recovers the keys of an OnchainID behind
 timelocks. It has no owner and no allowlist of its own. An identity opts in
 with `OnchainID.authorizeManager(keyManager)`, which only the identity's
-owner can send (`deauthorizeManager` withdraws it); while it is authorized,
-KeyManager may add and remove the identity's keys. Every KeyManager write
-for an identity needs the caller to hold a MANAGEMENT key on it and the
-identity to have authorized KeyManager ("KeyManager: Identity has not
-authorized KeyManager" otherwise).
+owner can send; while it is authorized, KeyManager may add and remove the
+identity's keys. Every KeyManager write for an identity needs the caller
+to hold a MANAGEMENT key on it (or, for recovery, to be one of its agents)
+and the identity to have authorized KeyManager ("KeyManager: Identity has
+not authorized KeyManager" otherwise).
+
+`deauthorizeManager` pauses KeyManager for the identity; it does not
+cancel. While withdrawn nothing executes and agents can neither open nor
+approve candidates; `cancelKeyRotation` and `cancelKeyRecovery` work while
+withdrawn and are how to stop an item. A rotation or recovery executes
+only within `EXECUTION_WINDOW` (7 days) after its execution time; after
+that it reverts ("execution window passed, re-initiate"), so an item
+paused for longer cannot revive when the identity re-authorizes.
 
 - **Rotation**: a MANAGEMENT key calls `initiateKeyRotation(identity,
   oldKey, newKey, purpose)`; after the timelock anyone calls
@@ -216,15 +224,26 @@ authorized KeyManager" otherwise).
   MANAGEMENT key set another with `setCustomTimelock` (1 hour to 7 days;
   it applies to rotations initiated afterwards). A rotation whose initiator
   lost its MANAGEMENT key before execution does not run; any current
-  MANAGEMENT key can `cancelKeyRotation`, even after the identity withdrew
-  its authorization.
+  MANAGEMENT key can `cancelKeyRotation`. The timelock binds only rotations
+  through KeyManager: any MANAGEMENT key still adds or removes a key at
+  once through `batchAddKeys`/`batchRemoveKeys` or `OnchainID.addKey`/
+  `removeKey`, so the timelock gives the holder visibility, not a control
+  against a compromised MANAGEMENT key (an open design question for Task
+  4.5).
 - **Recovery**: a MANAGEMENT key names up to ten distinct recovery agents
-  and a threshold (`setupKeyRecovery`). An agent opens a candidate key
-  (`initiateKeyRecovery`), agents approve it, and after 48 hours
-  (`RECOVERY_TIMELOCK`) with enough approvals anyone executes it: the key is
-  added as MANAGEMENT and recovery closes until the next setup. Each
-  candidate has its own approvals and timelock; the identity owner, a
-  MANAGEMENT key or the candidate's initiator can cancel it.
+  and a threshold (`setupKeyRecovery`), while the holder still holds its
+  key. An agent opens a candidate key (`initiateKeyRecovery`), agents
+  approve it, and after 48 hours (`RECOVERY_TIMELOCK`) with enough
+  approvals anyone executes it: the key is added as MANAGEMENT and
+  recovery closes until the next setup. Agents at threshold need no
+  further consent from the holder: the owner, a MANAGEMENT key or the
+  candidate's initiator can cancel within those 48 hours, and otherwise
+  the key is added. Recovery restores a MANAGEMENT key only, never
+  `owner()` (ownership and `authorizeManager` stay with the owner
+  address), and a thief holding a MANAGEMENT key can cancel or re-run the
+  setup, so recovery covers a lost key, not a compromised one. Each
+  candidate has its own approvals and timelock; an expired candidate can
+  be re-opened, with its approvals reset.
 - **Batch and multi-signature keys**: `batchAddKeys` and `batchRemoveKeys`
   write several keys in one call; `addMultiSigKey` records an N-of-M
   signer set that `signMultiSigOperation` and `checkMultiSigThreshold`
@@ -234,9 +253,8 @@ authorized KeyManager" otherwise).
 A wallet recovered with `Token.recoveryAddress` votes only once it holds a
 key on its OnchainID; KeyManager recovery is the designed path. The demo
 exercises the lifecycle in options 12, 12a, 12b and 5
-(docs/TESTNET_DEMO.md, "Identity keys through KeyManager").
-
-One identity, one wallet, one vote (plan 2F.1, D25). The IdentityRegistry binds each OnchainID to at most one wallet (a second wallet on the same identity is refused, "Identity already bound"; `moveIdentity` re-points it on recovery) and records when the identity was first bound (`identityRegisteredAt`, kept across recovery (moveIdentity); a delete-and-re-register or an updateIdentity to another OnchainID restarts it). `VanguardGovernance` counts one vote per identity, not per wallet, and excludes the proposer's identity from voting on its own proposal. The voting wallet must control its identity: be the OnchainID owner or hold a MANAGEMENT or ACTION key on it ("Wallet does not control its identity"), so a registry agent cannot vote as an investor by binding a wallet of its own to the investor's identity. Only identities at least `minVoterAge` old when the proposal is created may propose or vote ("Identity too new to vote"): 7 days divided by `TIME_SCALE` (420 s at 1440, 30 min at 336), tunable by a SystemParameters vote within 1 to 30 days (scaled) and never to zero; each proposal freezes its own cutoff. Quorum counts only those identities (`eligibleVotersAtCreation = registeredIdentityCountAt(createdAt - minVoterAge)`), so fresh identities neither vote nor raise the bar, and a deletion lowers the bar only for proposals created `minVoterAge` later. `executeProposal` needs 3,000,000 gas left before it runs a passed proposal's call ("Insufficient gas for execution"). A target call that runs out of gas reverts the execution (`InsufficientExecutionGas`) and leaves the proposal Active, so anyone can retry with more gas; `eth_estimateGas` finds a working limit. A target that can never complete (it burns all the gas it is given) needs a rescue vote that calls `cancelProposal` on it. `createProposal` refuses calldata under 4 bytes and the `transfer`, `approve`, `transferFrom`, `renounceOwnership`, `distributeGovernanceTokens` and `burn(uint256)` selectors on every type (governance is a VGT agent, so the last two would spend the deposits it holds). ListUpdate accepts only the DynamicListManager's four list writes, its owner setters (`setOracles`, `setGovernanceContract`, `setProofExpiryDuration`) and `transferOwnership`/`acceptOwnership` ("Selector not allowed"), and only while the bound manager's `governanceContract` is this governance ("List manager not bound to governance"). The residual risk is collusion of a registry agent with an issuer key: they can still mint fake identities, visibly on chain, but those cannot vote for `minVoterAge`, which is the honest electorate's window to vote the colluding keys out. The handover ceremony makes that collusion need two keys (2F.5, D25 b): claim issuers the deployer held go to a separate `issuerAdmin` (demo wallet 9), never to ops, and the ceremony refuses to start (and its check fails) while any IdentityRegistry agent owns, is the pending owner of, or holds a live MANAGEMENT or CLAIM_SIGNER key on a trusted issuer. Governance can never vote away the last trusted issuer of a required claim topic or the last topic ("Last issuer for required topic", "Last claim topic"): either would leave everyone unverified, and no vote could pass again.
+(docs/TESTNET_DEMO.md, "Identity keys through KeyManager"); its resume
+works within one demo session only.
 
 ### Phase 2: Oracle Whitelist Approval
 

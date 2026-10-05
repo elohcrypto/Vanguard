@@ -47,8 +47,11 @@
  * IdentityRegistry deploy is refused (the scans would miss earlier agents).
  * KeyManager (4.2) has no owner, so nothing is handed over: a "keyManager"
  * with no code, or whose code is not the compiled KeyManager, is refused,
- * and the completion check proves the deployer holds no KeyManager power
- * and that "keyManagerIdentity" authorizes it (demo/utils/HandoverKeys.js).
+ * and so is a "keyManagerIdentity" that has not authorized it, that the
+ * deployer owns, manages or holds a MANAGEMENT key on, or that is named
+ * without "keyManager"; the completion check proves the deployer holds no
+ * KeyManager power and that the identity authorizes it
+ * (demo/utils/HandoverKeys.js).
  *
  * Every contract in ACCEPTANCE_PLAN (demo/utils/HandoverChecks.js) given here
  * is nominated and accepted by vote, InvestorTypeRegistry included; a
