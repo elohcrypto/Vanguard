@@ -723,6 +723,18 @@ describe("🏭 Production Simulation - OnchainID System", function () {
 
       await identity.connect(prodEnv.individualUser).addKey(oldKey, 2, 1);
 
+      // Without the identity's authorization KeyManager refuses outright.
+      await expect(
+        prodEnv.keyManager
+          .connect(prodEnv.individualUser)
+          .initiateKeyRotation(address, oldKey, newKey, 2),
+      ).to.be.revertedWith(
+        "KeyManager: Identity has not authorized KeyManager",
+      );
+      await identity
+        .connect(prodEnv.individualUser)
+        .authorizeManager(await prodEnv.keyManager.getAddress());
+
       // Initiate key rotation
       await prodEnv.keyManager
         .connect(prodEnv.individualUser)

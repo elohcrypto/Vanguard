@@ -133,10 +133,7 @@ export class ProductionEnvironment {
 
     // 2. Deploy KeyManager
     const KeyManagerFactory = await ethers.getContractFactory("KeyManager");
-    this.keyManager = await KeyManagerFactory.deploy(
-      this.admin.address,
-      deployOptions,
-    );
+    this.keyManager = await KeyManagerFactory.deploy(deployOptions);
     await this.keyManager.waitForDeployment();
     console.log(`   KeyManager: ${await this.keyManager.getAddress()}`);
 
@@ -196,7 +193,7 @@ export class ProductionEnvironment {
 
     // Configure key manager (KeyManager uses constants for timelocks)
     // DEFAULT_TIMELOCK = 24 hours and RECOVERY_TIMELOCK = 48 hours are built-in constants
-    // We can set custom timelocks for specific identities if needed using setCustomTimelock
+    // An identity's own MANAGEMENT key may set its timelock (setCustomTimelock)
 
     // Configure IdentityRegistry: require KYC and AML claims from the
     // deployed issuers before any wallet verifies. A registry with no
@@ -419,13 +416,11 @@ export class ProductionEnvironment {
 
     const identity = await ethers.getContractAt("OnchainID", identityAddress);
 
-    // Authorize key manager
+    // The identity owner authorizes KeyManager; KeyManager has no
+    // allowlist of its own, the owner's MANAGEMENT key is the gate.
     await identity
       .connect(owner)
       .authorizeManager(await this.keyManager.getAddress());
-    await this.keyManager
-      .connect(this.admin)
-      .addAuthorizedManager(owner.address);
 
     // Setup 2-of-3 recovery
     await this.keyManager.connect(owner).setupKeyRecovery(

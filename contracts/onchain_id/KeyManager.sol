@@ -1,18 +1,26 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.20;
 
-import "@openzeppelin/contracts/access/Ownable.sol";
 import "@openzeppelin/contracts/utils/cryptography/ECDSA.sol";
 import "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
 import "./interfaces/IOnchainID.sol";
 import "./interfaces/IERC734.sol";
 
+/// @dev The OnchainID surface KeyManager reads beyond IOnchainID.
+interface IManagedIdentity {
+    function authorizedManagers(address manager) external view returns (bool);
+    function owner() external view returns (address);
+}
+
 /**
  * @title KeyManager
- * @dev Utility contract for advanced key management operations on OnchainID contracts
- * @author CMTA UTXO Compliance Team
+ * @dev Key rotation, recovery, multi-sig and batch key operations for
+ *      OnchainID identities. Holds no owner and no allowlist: every write
+ *      is gated per identity, by the caller holding a MANAGEMENT key on it
+ *      and by the identity having authorized this contract
+ *      (`OnchainID.authorizeManager`), which its key writes check anyway.
  */
-contract KeyManager is Ownable, ReentrancyGuard {
+contract KeyManager is ReentrancyGuard {
     using ECDSA for bytes32;
 
     // Events
@@ -98,29 +106,23 @@ contract KeyManager is Ownable, ReentrancyGuard {
     uint256 public constant MAX_RECOVERY_AGENTS = 10;
 
     mapping(address => uint256) public customTimelocks;
-    mapping(address => bool) public authorizedManagers;
 
-    /**
-     * @dev Constructor
-     * @param _owner Initial owner of the KeyManager
-     */
-    constructor(address _owner) Ownable(_owner) {}
+    event CustomTimelockSet(address indexed identity, uint256 timelock);
 
-    /**
-     * @dev Modifier to check if sender is authorized manager
-     */
-    modifier onlyAuthorizedManager() {
-        require(authorizedManagers[msg.sender] || msg.sender == owner(), "KeyManager: Not authorized manager");
+    /// @dev Sender holds a MANAGEMENT key on `_identity`, and `_identity`
+    ///      authorized this contract as its manager.
+    modifier onlyIdentityManager(address _identity) {
+        _checkManager(_identity);
+        require(
+            IManagedIdentity(_identity).authorizedManagers(address(this)),
+            "KeyManager: Identity has not authorized KeyManager"
+        );
         _;
     }
 
-    /**
-     * @dev Modifier to check if sender has management key for identity
-     */
-    modifier onlyIdentityManager(address _identity) {
+    function _checkManager(address _identity) private view {
         bytes32 senderKey = keccak256(abi.encodePacked(msg.sender));
         require(IOnchainID(_identity).keyHasPurpose(senderKey, 1), "KeyManager: Not identity manager");
-        _;
     }
 
     // Key rotation functions
@@ -204,14 +206,11 @@ contract KeyManager is Ownable, ReentrancyGuard {
     }
 
     /**
-     * @dev Cancel a pending rotation. Any current MANAGEMENT key of the identity.
+     * @dev Cancel a pending rotation. Any current MANAGEMENT key of the
+     *      identity, even after it withdrew this contract's authorization.
      */
-    function cancelKeyRotation(
-        address _identity,
-        bytes32 _oldKey,
-        bytes32 _newKey,
-        uint256 _purpose
-    ) external onlyIdentityManager(_identity) {
+    function cancelKeyRotation(address _identity, bytes32 _oldKey, bytes32 _newKey, uint256 _purpose) external {
+        _checkManager(_identity);
         bytes32 rotationId = keccak256(abi.encodePacked(_identity, _oldKey, _newKey, _purpose));
         KeyRotation storage rotation = keyRotations[_identity][rotationId];
         require(rotation.initiatedAt > 0 && !rotation.completed, "KeyManager: No pending rotation");
@@ -379,7 +378,7 @@ contract KeyManager is Ownable, ReentrancyGuard {
         require(
             msg.sender == c.initiator ||
                 IOnchainID(_identity).keyHasPurpose(keccak256(abi.encodePacked(msg.sender)), 1) ||
-                msg.sender == Ownable(_identity).owner(),
+                msg.sender == IManagedIdentity(_identity).owner(),
             "KeyManager: Not allowed to cancel recovery"
         );
         c.initiatedAt = 0;
@@ -467,34 +466,15 @@ contract KeyManager is Ownable, ReentrancyGuard {
         }
     }
 
-    // Admin functions
-
     /**
-     * @dev Add authorized manager
-     * @param _manager The manager address to authorize
+     * @dev Set the rotation timelock of `_identity` (1h..7d). Its own
+     *      MANAGEMENT key only; applies to rotations initiated afterwards.
      */
-    function addAuthorizedManager(address _manager) external onlyOwner {
-        require(_manager != address(0), "KeyManager: Invalid manager");
-        authorizedManagers[_manager] = true;
-    }
-
-    /**
-     * @dev Remove authorized manager
-     * @param _manager The manager address to remove
-     */
-    function removeAuthorizedManager(address _manager) external onlyOwner {
-        authorizedManagers[_manager] = false;
-    }
-
-    /**
-     * @dev Set custom timelock for an identity
-     * @param _identity The OnchainID contract address
-     * @param _timelock The custom timelock duration
-     */
-    function setCustomTimelock(address _identity, uint256 _timelock) external onlyOwner {
+    function setCustomTimelock(address _identity, uint256 _timelock) external onlyIdentityManager(_identity) {
         require(_timelock >= 1 hours, "KeyManager: Timelock too short");
         require(_timelock <= 7 days, "KeyManager: Timelock too long");
         customTimelocks[_identity] = _timelock;
+        emit CustomTimelockSet(_identity, _timelock);
     }
 
     // View functions

@@ -161,10 +161,7 @@ async function main(): Promise<DeploymentResult> {
   // 2. Deploy KeyManager
   console.log("\n🔐 Deploying KeyManager...");
   const KeyManagerFactory = await ethers.getContractFactory("KeyManager");
-  const keyManager = await KeyManagerFactory.deploy(
-    deployer.address,
-    deploymentOptions,
-  );
+  const keyManager = await KeyManagerFactory.deploy(deploymentOptions);
 
   console.log(
     `   Transaction hash: ${keyManager.deploymentTransaction()?.hash}`,

@@ -18,9 +18,7 @@ async function setup() {
     await ethers.getContractFactory("OnchainID")
   ).deploy(holder.address);
   const idA = await id.getAddress();
-  const km = await (
-    await ethers.getContractFactory("KeyManager")
-  ).deploy(holder.address);
+  const km = await (await ethers.getContractFactory("KeyManager")).deploy();
   await id.connect(holder).authorizeManager(await km.getAddress());
   await km
     .connect(holder)
@@ -238,7 +236,7 @@ describe("KeyManager rotation guards (2F.2, M3)", function () {
 describe("Recovered wallet votes after KeyManager recovery (2F.1 + 2F.2)", function () {
   it("refused until the new wallet holds a key on its OnchainID, then accepted", async function () {
     const f = await handoverFixture();
-    const { c, deployer, proposer, voters } = f;
+    const { c, proposer, voters } = f;
     const [bob] = voters;
     const signers = await ethers.getSigners();
     const [agentA, agentB, newBob] = [signers[7], signers[8], signers[9]];
@@ -246,9 +244,7 @@ describe("Recovered wallet votes after KeyManager recovery (2F.1 + 2F.2)", funct
 
     const bobId = await c.identityRegistry.identity(bob.address);
     const id = await ethers.getContractAt("OnchainID", bobId);
-    const km = await (
-      await ethers.getContractFactory("KeyManager")
-    ).deploy(deployer.address);
+    const km = await (await ethers.getContractFactory("KeyManager")).deploy();
     // Bob opted in to recovery before losing his wallet.
     await id.connect(bob).authorizeManager(await km.getAddress());
     await km

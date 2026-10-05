@@ -40,16 +40,13 @@ describe("KeyManager", function () {
 
     // Deploy KeyManager
     const KeyManagerFactory = await ethers.getContractFactory("KeyManager");
-    keyManager = await KeyManagerFactory.deploy(owner.address);
+    keyManager = await KeyManagerFactory.deploy();
     await keyManager.waitForDeployment();
 
     // Deploy OnchainID for testing
     const OnchainIDFactory = await ethers.getContractFactory("OnchainID");
     onchainID = await OnchainIDFactory.deploy(identity.address);
     await onchainID.waitForDeployment();
-
-    // Add manager as authorized manager
-    await keyManager.connect(owner).addAuthorizedManager(manager.address);
 
     // Add manager key to OnchainID for testing
     const managerKey = ethers.keccak256(
@@ -66,8 +63,11 @@ describe("KeyManager", function () {
   });
 
   describe("Deployment", function () {
-    it("Should set the correct owner", async function () {
-      expect(await keyManager.owner()).to.equal(owner.address);
+    it("holds no owner and no allowlist", async function () {
+      const km = keyManager as unknown as Record<string, unknown>;
+      expect(km.owner).to.equal(undefined);
+      expect(km.addAuthorizedManager).to.equal(undefined);
+      expect(km.authorizedManagers).to.equal(undefined);
     });
 
     it("Should have correct default constants", async function () {
@@ -77,59 +77,79 @@ describe("KeyManager", function () {
     });
   });
 
-  describe("Authorization Management", function () {
-    describe("addAuthorizedManager", function () {
-      it("Should allow owner to add authorized manager", async function () {
-        await keyManager
-          .connect(owner)
-          .addAuthorizedManager(unauthorized.address);
-        expect(await keyManager.authorizedManagers(unauthorized.address)).to.be
-          .true;
-      });
+  describe("Per-identity authorization (4.2)", function () {
+    let other: OnchainID;
+    const oldKey = ethers.keccak256(ethers.toUtf8Bytes("auth-old"));
+    const newKey = ethers.keccak256(ethers.toUtf8Bytes("auth-new"));
 
-      it("Should reject adding manager by non-owner", async function () {
-        await expect(
-          keyManager
-            .connect(unauthorized)
-            .addAuthorizedManager(unauthorized.address),
-        ).to.be.revertedWithCustomError(
-          keyManager,
-          "OwnableUnauthorizedAccount",
-        );
-      });
-
-      it("Should reject adding zero address as manager", async function () {
-        await expect(
-          keyManager.connect(owner).addAuthorizedManager(ethers.ZeroAddress),
-        ).to.be.revertedWith("KeyManager: Invalid manager");
-      });
+    beforeEach(async function () {
+      // Same manager key, but this identity never authorized KeyManager.
+      other = await (
+        await ethers.getContractFactory("OnchainID")
+      ).deploy(manager.address);
+      await other.connect(manager).addKey(oldKey, ACTION_KEY, ECDSA_TYPE);
     });
 
-    describe("removeAuthorizedManager", function () {
-      beforeEach(async function () {
-        await keyManager
-          .connect(owner)
-          .addAuthorizedManager(unauthorized.address);
-      });
+    it("an identity that did not authorize it cannot be rotated", async function () {
+      await expect(
+        keyManager
+          .connect(manager)
+          .initiateKeyRotation(
+            await other.getAddress(),
+            oldKey,
+            newKey,
+            ACTION_KEY,
+          ),
+      ).to.be.revertedWith(
+        "KeyManager: Identity has not authorized KeyManager",
+      );
+      await expect(
+        keyManager
+          .connect(manager)
+          .setupKeyRecovery(
+            await other.getAddress(),
+            [recoveryAgent1.address],
+            1,
+          ),
+      ).to.be.revertedWith(
+        "KeyManager: Identity has not authorized KeyManager",
+      );
+    });
 
-      it("Should allow owner to remove authorized manager", async function () {
-        await keyManager
-          .connect(owner)
-          .removeAuthorizedManager(unauthorized.address);
-        expect(await keyManager.authorizedManagers(unauthorized.address)).to.be
-          .false;
-      });
+    it("a non-manager cannot initiate on an authorizing identity", async function () {
+      await onchainID.connect(identity).addKey(oldKey, ACTION_KEY, ECDSA_TYPE);
+      await expect(
+        keyManager
+          .connect(unauthorized)
+          .initiateKeyRotation(
+            await onchainID.getAddress(),
+            oldKey,
+            newKey,
+            ACTION_KEY,
+          ),
+      ).to.be.revertedWith("KeyManager: Not identity manager");
+    });
 
-      it("Should reject removal by non-owner", async function () {
-        await expect(
-          keyManager
-            .connect(unauthorized)
-            .removeAuthorizedManager(unauthorized.address),
-        ).to.be.revertedWithCustomError(
-          keyManager,
-          "OwnableUnauthorizedAccount",
-        );
-      });
+    it("deauthorizing stops execution; cancel still works", async function () {
+      const id = await onchainID.getAddress();
+      await onchainID.connect(identity).addKey(oldKey, ACTION_KEY, ECDSA_TYPE);
+      await keyManager
+        .connect(manager)
+        .initiateKeyRotation(id, oldKey, newKey, ACTION_KEY);
+      await onchainID
+        .connect(identity)
+        .deauthorizeManager(await keyManager.getAddress());
+      await ethers.provider.send("evm_increaseTime", [DEFAULT_TIMELOCK + 1]);
+      await ethers.provider.send("evm_mine", []);
+      await expect(
+        keyManager.executeKeyRotation(id, oldKey, newKey, ACTION_KEY),
+      ).to.be.revertedWith("OnchainID: Sender does not have management key");
+      await expect(
+        keyManager
+          .connect(manager)
+          .cancelKeyRotation(id, oldKey, newKey, ACTION_KEY),
+      ).to.emit(keyManager, "KeyRotationCancelled");
+      expect(await onchainID.keyHasPurpose(oldKey, ACTION_KEY)).to.equal(true);
     });
   });
 
@@ -920,24 +940,51 @@ describe("KeyManager", function () {
     });
   });
 
-  describe("Admin Functions", function () {
+  describe("Custom timelock (per identity)", function () {
     describe("setCustomTimelock", function () {
-      it("Should allow owner to set custom timelock", async function () {
+      it("the identity's manager sets it and rotations use it", async function () {
+        const id = await onchainID.getAddress();
         const customTimelock = 12 * 60 * 60; // 12 hours
-        await keyManager
-          .connect(owner)
-          .setCustomTimelock(await onchainID.getAddress(), customTimelock);
+        await expect(
+          keyManager.connect(manager).setCustomTimelock(id, customTimelock),
+        )
+          .to.emit(keyManager, "CustomTimelockSet")
+          .withArgs(id, customTimelock);
+        expect(await keyManager.customTimelocks(id)).to.equal(customTimelock);
 
-        expect(
-          await keyManager.customTimelocks(await onchainID.getAddress()),
-        ).to.equal(customTimelock);
+        const oldKey = ethers.keccak256(ethers.toUtf8Bytes("tl-old"));
+        const newKey = ethers.keccak256(ethers.toUtf8Bytes("tl-new"));
+        await onchainID
+          .connect(identity)
+          .addKey(oldKey, ACTION_KEY, ECDSA_TYPE);
+        await keyManager
+          .connect(manager)
+          .initiateKeyRotation(id, oldKey, newKey, ACTION_KEY);
+        const rotationId = ethers.keccak256(
+          ethers.solidityPacked(
+            ["address", "bytes32", "bytes32", "uint256"],
+            [id, oldKey, newKey, ACTION_KEY],
+          ),
+        );
+        const r = await keyManager.getKeyRotation(id, rotationId);
+        expect(r.executionTime - r.initiatedAt).to.equal(customTimelock);
+      });
+
+      it("a non-manager (the deployer included) cannot set it", async function () {
+        for (const who of [owner, unauthorized]) {
+          await expect(
+            keyManager
+              .connect(who)
+              .setCustomTimelock(await onchainID.getAddress(), 2 * 3600),
+          ).to.be.revertedWith("KeyManager: Not identity manager");
+        }
       });
 
       it("Should reject timelock that is too short", async function () {
         const tooShort = 30 * 60; // 30 minutes
         await expect(
           keyManager
-            .connect(owner)
+            .connect(manager)
             .setCustomTimelock(await onchainID.getAddress(), tooShort),
         ).to.be.revertedWith("KeyManager: Timelock too short");
       });
@@ -946,7 +993,7 @@ describe("KeyManager", function () {
         const tooLong = 8 * 24 * 60 * 60; // 8 days
         await expect(
           keyManager
-            .connect(owner)
+            .connect(manager)
             .setCustomTimelock(await onchainID.getAddress(), tooLong),
         ).to.be.revertedWith("KeyManager: Timelock too long");
       });

@@ -40,9 +40,7 @@ describe("OnchainID System - Coverage Tests", function () {
       "Test Issuer",
       "Test Description",
     ]);
-    keyManager = await TestHelpers.deployContract("KeyManager", [
-      owner.address,
-    ]);
+    keyManager = await TestHelpers.deployContract("KeyManager", []);
     onchainID = await TestHelpers.deployContract("OnchainID", [
       identity.address,
     ]);
@@ -230,8 +228,6 @@ describe("OnchainID System - Coverage Tests", function () {
       expect(await identity.isCompliant()).to.be.true;
 
       // 6. Set up key recovery
-      await keyManager.connect(owner).addAuthorizedManager(user1.address);
-
       // Authorize KeyManager for the deployed identity
       const deployedIdentity = await ethers.getContractAt(
         "OnchainID",
@@ -339,7 +335,6 @@ describe("OnchainID System - Coverage Tests", function () {
       ];
 
       // Set up multi-sig key
-      await keyManager.connect(owner).addAuthorizedManager(identity.address);
       await keyManager.connect(identity).addMultiSigKey(
         await onchainID.getAddress(),
         keyId,
@@ -399,9 +394,6 @@ describe("OnchainID System - Coverage Tests", function () {
       const purposes = Array(10).fill(2); // ACTION_KEY
       const keyTypes = Array(10).fill(1); // ECDSA_TYPE
 
-      // Add authorized manager for batch operations
-      await keyManager.connect(owner).addAuthorizedManager(identity.address);
-
       const batchTx = await keyManager
         .connect(identity)
         .batchAddKeys(await onchainID.getAddress(), keys, purposes, keyTypes);
@@ -441,10 +433,12 @@ describe("OnchainID System - Coverage Tests", function () {
         claimIssuer.connect(user1).addIssuerKey(testKey, 3, 1),
       ).to.be.revertedWith("ClaimIssuer: Sender does not have management key");
 
-      // Test KeyManager access control
+      // Test KeyManager access control: per identity, no owner
       await expect(
-        keyManager.connect(user1).addAuthorizedManager(user1.address),
-      ).to.be.revertedWithCustomError(keyManager, "OwnableUnauthorizedAccount");
+        keyManager
+          .connect(user1)
+          .setCustomTimelock(await onchainID.getAddress(), 3600),
+      ).to.be.revertedWith("KeyManager: Not identity manager");
     });
 
     it("Should prevent reentrancy attacks", async function () {
@@ -517,7 +511,6 @@ describe("OnchainID System - Coverage Tests", function () {
       const newKey = TestHelpers.generateKey("new-event-key");
 
       await onchainID.connect(identity).addKey(oldKey, 2, 1);
-      await keyManager.connect(owner).addAuthorizedManager(identity.address);
 
       await expect(
         keyManager
