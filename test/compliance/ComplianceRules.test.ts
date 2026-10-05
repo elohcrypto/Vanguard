@@ -96,6 +96,7 @@ describe("ComplianceRules", function () {
   it("keeps the selectors other contracts and the ceremony read (4.1)", async function () {
     const iface = complianceRules.interface as unknown as {
       getFunction(name: string): { format(f: string): string } | null;
+      getEvent(name: string): { format(f: string): string } | null;
     };
     for (const [sig, full] of [
       [
@@ -122,8 +123,34 @@ describe("ComplianceRules", function () {
         "canReceive(address)",
         "function canReceive(address to) view returns (bool)",
       ],
+      // The handover scans and the escrow demo read these (G5).
+      [
+        "isTrustedContract(address,address)",
+        "function isTrustedContract(address token, address account) view returns (bool)",
+      ],
+      [
+        "ruleAdministrators(address,address)",
+        "function ruleAdministrators(address, address) view returns (bool)",
+      ],
+      [
+        "isTrustedOnAnyToken(address)",
+        "function isTrustedOnAnyToken(address account) view returns (bool)",
+      ],
     ]) {
       expect(iface.getFunction(sig)?.format("full"), sig).to.equal(full);
+    }
+    // HandoverScans reads the events' args by position: token first.
+    for (const [sig, full] of [
+      [
+        "TrustedContractAdded(address,address)",
+        "event TrustedContractAdded(address indexed token, address indexed contractAddress)",
+      ],
+      [
+        "RuleAdministratorUpdated(address,address,bool)",
+        "event RuleAdministratorUpdated(address indexed token, address indexed administrator, bool authorized)",
+      ],
+    ]) {
+      expect(iface.getEvent(sig)?.format("full"), sig).to.equal(full);
     }
   });
 

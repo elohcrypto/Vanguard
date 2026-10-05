@@ -10,8 +10,11 @@ pragma solidity ^0.8.20;
 interface IComplianceHooks {
     function canTransfer(address from, address to, uint256 amount) external view returns (bool);
 
-    /// @notice Oracle blacklist/whitelist gate for the calling token on a
-    ///         recipient; no identity or jurisdiction. Used by wallet recovery.
+    /// @notice Wallet-recovery target check for the calling token on `to`:
+    ///         the oracle blacklist/whitelist gate, no identity or jurisdiction.
+    ///         ComplianceRules also refuses any account trusted on ANY token,
+    ///         so a recovery never moves a shared identity onto a contract
+    ///         another token trusts. Token calls it only in recoveryAddress.
     function canReceive(address to) external view returns (bool);
 
     function transferred(address from, address to, uint256 amount) external;
@@ -20,6 +23,8 @@ interface IComplianceHooks {
 
     function destroyed(address from, uint256 amount) external;
 
+    /// @notice Whether `contractAddress` is trusted on the calling token
+    ///         (msg.sender); trust is per token in ComplianceRules.
     function isTrustedContract(address contractAddress) external view returns (bool);
 }
 

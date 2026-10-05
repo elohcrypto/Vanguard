@@ -219,6 +219,16 @@ async function runHandoverSmoke(state, failures) {
   // an account trusted on any token (M1).
   const voter = s[VOTERS[0]].address;
   const voterId = await c("identityRegistry").identity(voter);
+  // Review L2: the VSC refusal below must come from the any-token trust
+  // guard, not from VSC's whitelist gate (which returns the same false).
+  const rules = c("complianceRules");
+  const vscAddr = await c("digitalToken").getAddress();
+  if (!(await rules.isTrustedOnAnyToken(govAddr))) {
+    failures.push("G5: governance is not trusted on any token (D21)");
+  }
+  if (await rules["isTrustedContract(address,address)"](vscAddr, govAddr)) {
+    failures.push("G5: governance is trusted on VSC; trust it on VGT only");
+  }
   const hook = /GovernanceToken: trusted contract/;
   const opsVsc = c("digitalToken").connect(s[OPS]);
   const recoveries = [

@@ -58,6 +58,69 @@ describe("ComplianceRules per-token trust and administrators (G5)", function () 
     expect(await viaVsc.canReceive(g)).to.equal(true);
   });
 
+  // Review L1: the identity registry is shared, so a recovery on one token
+  // must not move a holder's identity onto a contract another token trusts.
+  // Each token's own trusted check sees only its map (G5); canReceive's
+  // any-token refusal closes both directions. VSC into a VGT-only contract
+  // is the governance case (GovernanceAgentLimits P1); here a generic stub.
+  for (const [recoverOn, trustOn] of [
+    ["VGT", "VSC"],
+    ["VSC", "VGT"],
+  ]) {
+    it(`a ${recoverOn} recovery into a contract trusted only on ${trustOn} reverts`, async function () {
+      const { owner, alice, idReg, rules } = await fixture();
+      const D = async (name: string, ...args: any[]) =>
+        (await ethers.getContractFactory(name)).deploy(...args);
+      // VGT is a real GovernanceToken (its D23 hook refuses only VGT-trusted).
+      const vsc: any = await D(
+        "Token",
+        "VSC",
+        "VSC",
+        idReg.target,
+        rules.target,
+      );
+      const vgt: any = await D(
+        "GovernanceToken",
+        "VGT",
+        "VGT",
+        idReg.target,
+        rules.target,
+      );
+      const tok: Record<string, any> = { VSC: vsc, VGT: vgt };
+      const issuer = await D("ClaimIssuer", owner.address, "KYC", "KYC");
+      await configureKyc(idReg, await issuer.getAddress());
+      const id = await D("OnchainID", alice.address);
+      await idReg.registerIdentity(alice.address, id.target, 840);
+      await attest(issuer as any, owner, id.target as string);
+      for (const t of [vsc, vgt]) {
+        await rules.setTokenIdentityRegistry(t.target, idReg.target);
+        await idReg.addAgent(t.target); // recovery calls moveIdentity
+      }
+      const token = tok[recoverOn];
+      await token.mint(alice.address, 100n);
+      const stub = (await D("MockToken", "S", "S", 0)).target as string;
+      await rules.addTrustedContract(tok[trustOn].target, stub);
+      // The cause is the trust elsewhere, not this token's own map or a list.
+      expect(await rules.isTrustedOnAnyToken(stub)).to.equal(true);
+      expect(
+        await rules["isTrustedContract(address,address)"](token.target, stub),
+      ).to.equal(false);
+
+      await expect(
+        token.recoveryAddress(alice.address, stub, id.target),
+      ).to.be.revertedWith("Recovery blocked by compliance");
+      expect(await idReg.identity(alice.address)).to.equal(id.target);
+      expect(await idReg.identity(stub)).to.equal(ethers.ZeroAddress);
+      expect(await token.balanceOf(alice.address)).to.equal(100n);
+
+      // Untrusted there, the same recovery goes through.
+      await rules.removeTrustedContract(tok[trustOn].target, stub);
+      expect(await rules.isTrustedOnAnyToken(stub)).to.equal(false);
+      await token.recoveryAddress(alice.address, stub, id.target);
+      expect(await idReg.identity(stub)).to.equal(id.target);
+    });
+  }
+
   it("trust on one token is not trust on another; events name the token", async function () {
     const { rules, vsc, vgt } = await fixture();
     const [vscAddr, vgtAddr] = [vsc.target, vgt.target];
@@ -165,7 +228,7 @@ describe("ComplianceRules per-token trust and administrators (G5)", function () 
     expect(await liveRuleAdministrators(o, [owner.address])).to.deep.equal([
       { token: vgt.target, account: admin.address },
     ]);
-    // The deployer is checked on VSC and VGT even with no event of its own.
+    // The deployer, passed as `extra`, is checked on VSC and VGT too.
     await rules.setRuleAdministrator(vsc.target, owner.address, true);
     const live = await liveRuleAdministrators(o, [owner.address]);
     expect(live).to.deep.include({ token: vsc.target, account: owner.address });

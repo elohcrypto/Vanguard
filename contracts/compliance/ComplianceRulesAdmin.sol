@@ -95,6 +95,12 @@ abstract contract ComplianceRulesAdmin is IComplianceRules, Ownable2Step {
         return trustedContracts[token][account];
     }
 
+    /// @notice Whether `account` is trusted on any token: canReceive then
+    ///         refuses it as a wallet-recovery target on every token.
+    function isTrustedOnAnyToken(address account) external view returns (bool) {
+        return trustedTokenCount[account] != 0;
+    }
+
     // ========================================
     // ORACLE GATING (per token, opt-in)
     // ========================================
