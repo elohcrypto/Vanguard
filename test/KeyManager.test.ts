@@ -130,7 +130,7 @@ describe("KeyManager", function () {
       ).to.be.revertedWith("KeyManager: Not identity manager");
     });
 
-    it("deauthorizing stops execution; cancel still works", async function () {
+    it("deauthorizing pauses a pending rotation; cancel still works while withdrawn", async function () {
       const id = await onchainID.getAddress();
       await onchainID.connect(identity).addKey(oldKey, ACTION_KEY, ECDSA_TYPE);
       await keyManager
@@ -143,7 +143,9 @@ describe("KeyManager", function () {
       await ethers.provider.send("evm_mine", []);
       await expect(
         keyManager.executeKeyRotation(id, oldKey, newKey, ACTION_KEY),
-      ).to.be.revertedWith("OnchainID: Sender does not have management key");
+      ).to.be.revertedWith(
+        "KeyManager: Identity has not authorized KeyManager",
+      );
       await expect(
         keyManager
           .connect(manager)

@@ -19,6 +19,11 @@ interface IManagedIdentity {
  *      is gated per identity, by the caller holding a MANAGEMENT key on it
  *      and by the identity having authorized this contract
  *      (`OnchainID.authorizeManager`), which its key writes check anyway.
+ *      Withdrawing that authorization (`deauthorizeManager`) pauses
+ *      pending rotations and recoveries; `cancelKeyRotation` and
+ *      `cancelKeyRecovery` (both usable while withdrawn) stop them. An
+ *      item not executed within EXECUTION_WINDOW of its executionTime is
+ *      dead and must be re-initiated, so a paused item cannot revive later.
  */
 contract KeyManager is ReentrancyGuard {
     using ECDSA for bytes32;
@@ -104,6 +109,8 @@ contract KeyManager is ReentrancyGuard {
     uint256 public constant DEFAULT_TIMELOCK = 24 hours;
     uint256 public constant RECOVERY_TIMELOCK = 48 hours;
     uint256 public constant MAX_RECOVERY_AGENTS = 10;
+    /// @dev An item runs only within this window after its executionTime.
+    uint256 public constant EXECUTION_WINDOW = 7 days;
 
     mapping(address => uint256) public customTimelocks;
 
@@ -113,11 +120,24 @@ contract KeyManager is ReentrancyGuard {
     ///      authorized this contract as its manager.
     modifier onlyIdentityManager(address _identity) {
         _checkManager(_identity);
+        _checkAuthorized(_identity);
+        _;
+    }
+
+    function _checkAuthorized(address _identity) private view {
         require(
             IManagedIdentity(_identity).authorizedManagers(address(this)),
             "KeyManager: Identity has not authorized KeyManager"
         );
-        _;
+    }
+
+    /// @dev Refuses an item whose execution window has passed.
+    function _checkWindow(uint256 executionTime) private view {
+        require(block.timestamp >= executionTime, "KeyManager: Timelock not expired");
+        require(
+            block.timestamp <= executionTime + EXECUTION_WINDOW,
+            "KeyManager: execution window passed, re-initiate"
+        );
     }
 
     function _checkManager(address _identity) private view {
@@ -127,13 +147,7 @@ contract KeyManager is ReentrancyGuard {
 
     // Key rotation functions
 
-    /**
-     * @dev Initiate key rotation with timelock
-     * @param _identity The OnchainID contract address
-     * @param _oldKey The key to be replaced
-     * @param _newKey The new key to add
-     * @param _purpose The purpose of the key
-     */
+    /// @dev Queue `_oldKey` -> `_newKey` for `_purpose` behind the timelock.
     function initiateKeyRotation(
         address _identity,
         bytes32 _oldKey,
@@ -169,13 +183,7 @@ contract KeyManager is ReentrancyGuard {
         emit KeyRotationInitiated(_identity, _oldKey, _newKey, _purpose);
     }
 
-    /**
-     * @dev Execute key rotation after timelock
-     * @param _identity The OnchainID contract address
-     * @param _oldKey The key to be replaced
-     * @param _newKey The new key to add
-     * @param _purpose The purpose of the key
-     */
+    /// @dev Run a queued rotation inside its execution window. Anyone may call.
     function executeKeyRotation(
         address _identity,
         bytes32 _oldKey,
@@ -187,7 +195,8 @@ contract KeyManager is ReentrancyGuard {
 
         require(rotation.initiatedAt > 0, "KeyManager: Rotation not initiated");
         require(!rotation.completed, "KeyManager: Rotation already completed");
-        require(block.timestamp >= rotation.executionTime, "KeyManager: Timelock not expired");
+        _checkWindow(rotation.executionTime);
+        _checkAuthorized(_identity);
         // A rotation queued by a key that was revoked since must not run (M3).
         require(
             IOnchainID(_identity).keyHasPurpose(keccak256(abi.encodePacked(rotation.initiator)), 1),
@@ -220,14 +229,7 @@ contract KeyManager is ReentrancyGuard {
 
     // Multi-signature key management
 
-    /**
-     * @dev Add a multi-signature key requirement
-     * @param _identity The OnchainID contract address
-     * @param _keyId Unique identifier for the multi-sig key
-     * @param _signers Array of signer keys
-     * @param _threshold Number of signatures required
-     * @param _purpose The purpose of the key
-     */
+    /// @dev Record an N-of-M signer set (bookkeeping: nothing executes on it).
     function addMultiSigKey(
         address _identity,
         bytes32 _keyId,
@@ -249,11 +251,7 @@ contract KeyManager is ReentrancyGuard {
         emit MultiSigKeyAdded(_identity, _keyId, _purpose, _threshold, _signers);
     }
 
-    /**
-     * @dev Sign a multi-signature operation
-     * @param _identity The OnchainID contract address
-     * @param _keyId The multi-sig key identifier
-     */
+    /// @dev A listed signer signs, once.
     function signMultiSigOperation(address _identity, bytes32 _keyId, bytes32 /* _operation */) external {
         MultiSigKey storage multiSig = multiSigKeys[_identity][_keyId];
         require(multiSig.active, "KeyManager: Multi-sig key not active");
@@ -276,12 +274,7 @@ contract KeyManager is ReentrancyGuard {
         multiSig.signatureCount++;
     }
 
-    /**
-     * @dev Check if multi-sig operation has enough signatures
-     * @param _identity The OnchainID contract address
-     * @param _keyId The multi-sig key identifier
-     * @return hasEnoughSignatures True if threshold is met
-     */
+    /// @dev True once the signer set reached its threshold.
     function checkMultiSigThreshold(
         address _identity,
         bytes32 _keyId
@@ -336,11 +329,17 @@ contract KeyManager is ReentrancyGuard {
         require(recovery.recoveryAgents.length > 0, "KeyManager: Recovery not set up");
         require(!recovery.completed, "KeyManager: Recovery already completed");
         require(_isRecoveryAgent(recovery, msg.sender), "KeyManager: Not a recovery agent");
+        _checkAuthorized(_identity);
         require(_newRecoveryKey != bytes32(0), "KeyManager: Invalid recovery key");
         RecoveryCandidate storage c = _candidates[_identity][recovery.epoch][_newRecoveryKey];
-        require(c.initiatedAt == 0, "KeyManager: Recovery already pending");
+        // A candidate past its execution window is dead and may be re-opened.
+        require(
+            c.initiatedAt == 0 || block.timestamp > c.executionTime + EXECUTION_WINDOW,
+            "KeyManager: Recovery already pending"
+        );
 
         c.round++;
+        c.approvalCount = 0;
         c.initiatedAt = block.timestamp;
         c.executionTime = block.timestamp + RECOVERY_TIMELOCK;
         c.initiator = msg.sender;
@@ -360,6 +359,7 @@ contract KeyManager is ReentrancyGuard {
         RecoveryCandidate storage c = _candidates[_identity][recovery.epoch][_key];
         require(c.initiatedAt > 0, "KeyManager: Recovery not initiated");
         require(_isRecoveryAgent(recovery, msg.sender), "KeyManager: Not a recovery agent");
+        _checkAuthorized(_identity);
         require(c.approvedRound[msg.sender] != c.round, "KeyManager: Already approved");
 
         c.approvedRound[msg.sender] = c.round;
@@ -400,7 +400,8 @@ contract KeyManager is ReentrancyGuard {
         require(!recovery.completed, "KeyManager: Recovery already completed");
         RecoveryCandidate storage c = _candidates[_identity][recovery.epoch][_key];
         require(c.initiatedAt > 0, "KeyManager: Recovery not initiated");
-        require(block.timestamp >= c.executionTime, "KeyManager: Timelock not expired");
+        _checkWindow(c.executionTime);
+        _checkAuthorized(_identity);
         // Exact: agents are distinct and fixed within an epoch.
         require(c.approvalCount >= recovery.threshold, "KeyManager: Insufficient approvals");
 
@@ -422,13 +423,7 @@ contract KeyManager is ReentrancyGuard {
 
     // Utility functions
 
-    /**
-     * @dev Batch add keys to an identity
-     * @param _identity The OnchainID contract address
-     * @param _keys Array of keys to add
-     * @param _purposes Array of key purposes
-     * @param _keyTypes Array of key types
-     */
+    /// @dev Add several keys at once (no timelock).
     function batchAddKeys(
         address _identity,
         bytes32[] calldata _keys,
@@ -448,12 +443,7 @@ contract KeyManager is ReentrancyGuard {
         }
     }
 
-    /**
-     * @dev Batch remove keys from an identity
-     * @param _identity The OnchainID contract address
-     * @param _keys Array of keys to remove
-     * @param _purposes Array of key purposes
-     */
+    /// @dev Remove several keys at once (no timelock).
     function batchRemoveKeys(
         address _identity,
         bytes32[] calldata _keys,
@@ -479,12 +469,7 @@ contract KeyManager is ReentrancyGuard {
 
     // View functions
 
-    /**
-     * @dev Get key rotation details
-     * @param _identity The OnchainID contract address
-     * @param _rotationId The rotation identifier
-     * @return rotation The key rotation details
-     */
+    /// @dev A rotation by id: keccak256(identity, oldKey, newKey, purpose).
     function getKeyRotation(
         address _identity,
         bytes32 _rotationId
@@ -492,16 +477,7 @@ contract KeyManager is ReentrancyGuard {
         return keyRotations[_identity][_rotationId];
     }
 
-    /**
-     * @dev Get multi-sig key details
-     * @param _identity The OnchainID contract address
-     * @param _keyId The multi-sig key identifier
-     * @return signers Array of signer keys
-     * @return threshold Required signature threshold
-     * @return purpose Key purpose
-     * @return active Whether the multi-sig key is active
-     * @return signatureCount Current signature count
-     */
+    /// @dev A multi-sig record.
     function getMultiSigKey(
         address _identity,
         bytes32 _keyId
