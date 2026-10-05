@@ -593,6 +593,57 @@ chain, jumps if the node allows it, and otherwise polls until the deadline
 has passed. The 13-of-14-day escrow demonstration is dev-node only and says
 so on a network that cannot jump.
 
+## Identity keys through KeyManager (Task 4.2)
+
+Option 1 deploys `KeyManager` with the core contracts. It has no owner and
+no allowlist: an identity opts in with `authorizeManager(keyManager)` from
+its owner, and every rotation or recovery then needs a MANAGEMENT key of
+that identity (docs/SYSTEM_WORKFLOW_GUIDE.md, "Identity key lifecycle").
+
+- **12** (no prompts): wallet 1's identity (found in the registry or the
+  factory, or created through the factory) authorizes KeyManager, adds a
+  fresh MANAGEMENT key with `batchAddKeys`, rotates it to another fresh
+  key through the rotation timelock (24 hours unless 12b set another),
+  then wallets 2 and 3, as 2-of-2 recovery agents, recover the identity
+  onto a third fresh key through the 48-hour timelock, and the keys are
+  listed. Wallet 1 keeps its own key. Run it again for a fresh round.
+- **12a** (no prompts): withdraws KeyManager's authorization on that
+  identity (`deauthorizeManager`) and shows KeyManager refusing a
+  rotation; run again to restore it.
+- **12b**: sets that identity's rotation timelock in hours (1 to 168).
+- **5**: picks an identity; 2 recovers it onto a new key (a wallet index
+  or a passphrase) with two recovery agents, 3 replaces one of its
+  MANAGEMENT keys by a timelocked rotation, both through KeyManager; 1
+  removes a key directly, as before.
+
+On a dev node each timelock is jumped with `evm_increaseTime`. Where the
+clock cannot be moved, the option prints when the step becomes executable
+(chain time); run the same option again after that time and it resumes
+from the chain (a pending rotation or recovery is never re-initiated).
+`scripts/demo-smoke.js` (via `scripts/demo-smoke-keys.js`) runs option 12
+and checks on chain that KeyManager answers neither `owner()` nor
+`authorizedManagers()`, is authorized on wallet 1's identity, that the
+rotated-out key is revoked, the rotated-in and recovery keys are
+MANAGEMENT, wallet 1 kept its key, recovery completed with agents 2 and 3,
+and the rotation waited its 24 hours. `DEMO_SMOKE_OUT` records
+`keyManager`.
+
+The handover ceremony hands nothing over for KeyManager (it has no
+owner). handover.json may name `"keyManager"` and `"keyManagerIdentity"`
+(the demo OnchainID); the preflight refuses a `keyManager` with no code or
+whose runtime code is not the compiled KeyManager, and a
+`keyManagerIdentity` with no code; 83e adds two lines: the code matches the
+compiled KeyManager (no owner, no allowlist, so the deployer holds no
+KeyManager power), and the identity authorizes KeyManager while the
+deployer is not one of its managers. The smoke's ceremony passes 68 checks.
+
+`scripts/production/DeployProduction.ts` deploys KeyManager and authorizes
+it on the ops identity named by `OPS_IDENTITY` when the deploying wallet
+owns that identity. When another wallet (the ops key) owns it, or
+`OPS_IDENTITY` is unset, nothing is authorized and the deploy prints the
+exact call the identity owner must send:
+`OnchainID(<ops identity>).authorizeManager(<keyManager>)`.
+
 ## Local rehearsal (do this before Sepolia)
 
 ```bash
@@ -600,7 +651,8 @@ MNEMONIC="<your phrase>" npx hardhat node          # funds the 12 role wallets
 GOV_TIME_SCALE=1440 npm run demo:interactive:proof   # in another terminal
 ```
 
-Then walk: 1 (deploy, privacy pair included), 74 (governance), 75 (distribute VGT to 6-8), 76
+Then walk: 1 (deploy, privacy pair and KeyManager included), 12 (key
+rotation and recovery on wallet 1's identity), 74 (governance), 75 (distribute VGT to 6-8), 76
 (Alice proposes), 77 (Bob and Carol vote), 79 (wait ~8 min), 78 (execute),
 78a (claim on a rejected one). Every action is signed by its role's key.
 Name the treasury wallet and exempt it from investor limits (option 22 or 51,

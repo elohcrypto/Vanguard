@@ -91,8 +91,13 @@ This comprehensive checklist ensures the OnchainID system is production-ready be
 
 - [ ] **Deployment Scripts**: Production deployment tested
   ```bash
-  npx hardhat run scripts/production/DeployProduction.ts --network sepolia
+  OPS_IDENTITY=<ops OnchainID> npx hardhat run scripts/production/DeployProduction.ts --network sepolia
   ```
+  - [ ] KeyManager authorized on the ops identity: the deploy sends
+        `authorizeManager(KeyManager)` itself only when the deploying
+        wallet owns the ops identity; otherwise (or with `OPS_IDENTITY`
+        unset) it prints `OnchainID(<ops identity>).authorizeManager(<keyManager>)`,
+        which the ops identity's owner must send
 
 - [ ] **Contract Verification**: Source code verification ready
   - [ ] Etherscan API key configured

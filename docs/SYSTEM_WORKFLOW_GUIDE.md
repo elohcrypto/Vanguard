@@ -14,7 +14,7 @@ contracts/
 │   ├── OnchainIDFactory.sol      # OnchainID factory contract
 │   ├── OnchainID.sol             # Core OnchainID contract (ERC-734/735)
 │   ├── ClaimIssuer.sol           # Claim issuer contract
-│   ├── KeyManager.sol            # Key management utilities
+│   ├── KeyManager.sol            # Key rotation and recovery (timelocked)
 │   └── interfaces/
 │       ├── IERC734.sol           # ERC-734 interface
 │       ├── IERC735.sol           # ERC-735 interface
@@ -197,6 +197,44 @@ await claimIssuer.issueClaim(
 - Claims verified by trusted issuers through ClaimIssuer contract
 - Country and investor type extracted from OnchainID claims
 - Identity verification status updated in registry
+
+#### Identity key lifecycle (KeyManager)
+
+`KeyManager` rotates and recovers the keys of an OnchainID behind
+timelocks. It has no owner and no allowlist of its own. An identity opts in
+with `OnchainID.authorizeManager(keyManager)`, which only the identity's
+owner can send (`deauthorizeManager` withdraws it); while it is authorized,
+KeyManager may add and remove the identity's keys. Every KeyManager write
+for an identity needs the caller to hold a MANAGEMENT key on it and the
+identity to have authorized KeyManager ("KeyManager: Identity has not
+authorized KeyManager" otherwise).
+
+- **Rotation**: a MANAGEMENT key calls `initiateKeyRotation(identity,
+  oldKey, newKey, purpose)`; after the timelock anyone calls
+  `executeKeyRotation`, which adds the new key and revokes the old one. The
+  timelock is 24 hours (`DEFAULT_TIMELOCK`) unless the identity's own
+  MANAGEMENT key set another with `setCustomTimelock` (1 hour to 7 days;
+  it applies to rotations initiated afterwards). A rotation whose initiator
+  lost its MANAGEMENT key before execution does not run; any current
+  MANAGEMENT key can `cancelKeyRotation`, even after the identity withdrew
+  its authorization.
+- **Recovery**: a MANAGEMENT key names up to ten distinct recovery agents
+  and a threshold (`setupKeyRecovery`). An agent opens a candidate key
+  (`initiateKeyRecovery`), agents approve it, and after 48 hours
+  (`RECOVERY_TIMELOCK`) with enough approvals anyone executes it: the key is
+  added as MANAGEMENT and recovery closes until the next setup. Each
+  candidate has its own approvals and timelock; the identity owner, a
+  MANAGEMENT key or the candidate's initiator can cancel it.
+- **Batch and multi-signature keys**: `batchAddKeys` and `batchRemoveKeys`
+  write several keys in one call; `addMultiSigKey` records an N-of-M
+  signer set that `signMultiSigOperation` and `checkMultiSigThreshold`
+  count. The multi-signature record is bookkeeping: nothing in KeyManager
+  executes on it.
+
+A wallet recovered with `Token.recoveryAddress` votes only once it holds a
+key on its OnchainID; KeyManager recovery is the designed path. The demo
+exercises the lifecycle in options 12, 12a, 12b and 5
+(docs/TESTNET_DEMO.md, "Identity keys through KeyManager").
 
 One identity, one wallet, one vote (plan 2F.1, D25). The IdentityRegistry binds each OnchainID to at most one wallet (a second wallet on the same identity is refused, "Identity already bound"; `moveIdentity` re-points it on recovery) and records when the identity was first bound (`identityRegisteredAt`, kept across recovery (moveIdentity); a delete-and-re-register or an updateIdentity to another OnchainID restarts it). `VanguardGovernance` counts one vote per identity, not per wallet, and excludes the proposer's identity from voting on its own proposal. The voting wallet must control its identity: be the OnchainID owner or hold a MANAGEMENT or ACTION key on it ("Wallet does not control its identity"), so a registry agent cannot vote as an investor by binding a wallet of its own to the investor's identity. Only identities at least `minVoterAge` old when the proposal is created may propose or vote ("Identity too new to vote"): 7 days divided by `TIME_SCALE` (420 s at 1440, 30 min at 336), tunable by a SystemParameters vote within 1 to 30 days (scaled) and never to zero; each proposal freezes its own cutoff. Quorum counts only those identities (`eligibleVotersAtCreation = registeredIdentityCountAt(createdAt - minVoterAge)`), so fresh identities neither vote nor raise the bar, and a deletion lowers the bar only for proposals created `minVoterAge` later. `executeProposal` needs 3,000,000 gas left before it runs a passed proposal's call ("Insufficient gas for execution"). A target call that runs out of gas reverts the execution (`InsufficientExecutionGas`) and leaves the proposal Active, so anyone can retry with more gas; `eth_estimateGas` finds a working limit. A target that can never complete (it burns all the gas it is given) needs a rescue vote that calls `cancelProposal` on it. `createProposal` refuses calldata under 4 bytes and the `transfer`, `approve`, `transferFrom`, `renounceOwnership`, `distributeGovernanceTokens` and `burn(uint256)` selectors on every type (governance is a VGT agent, so the last two would spend the deposits it holds). ListUpdate accepts only the DynamicListManager's four list writes, its owner setters (`setOracles`, `setGovernanceContract`, `setProofExpiryDuration`) and `transferOwnership`/`acceptOwnership` ("Selector not allowed"), and only while the bound manager's `governanceContract` is this governance ("List manager not bound to governance"). The residual risk is collusion of a registry agent with an issuer key: they can still mint fake identities, visibly on chain, but those cannot vote for `minVoterAge`, which is the honest electorate's window to vote the colluding keys out. The handover ceremony makes that collusion need two keys (2F.5, D25 b): claim issuers the deployer held go to a separate `issuerAdmin` (demo wallet 9), never to ops, and the ceremony refuses to start (and its check fails) while any IdentityRegistry agent owns, is the pending owner of, or holds a live MANAGEMENT or CLAIM_SIGNER key on a trusted issuer. Governance can never vote away the last trusted issuer of a required claim topic or the last topic ("Last issuer for required topic", "Last claim topic"): either would leave everyone unverified, and no vote could pass again.
 
