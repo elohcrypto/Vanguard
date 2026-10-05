@@ -249,8 +249,8 @@ npx hardhat coverage
 ### **4. Investor Type Management**
 - ✅ **4 Investor Types**: Normal (0), Retail (1), Accredited (2), Institutional (3)
 - ✅ **Type-Specific Limits**: Transfer limits (8K/50K/500K VSC), Holding limits (50K/500K/5M VSC)
-- ✅ **Whitelist Tiers**: Required tiers per investor type (1/2/3/4)
-- ✅ **Transfer Cooldowns**: Type-specific cooldowns (60/60/30/15 minutes)
+- ⚠️ **Whitelist Tiers**: required tiers per investor type (1/2/3/4) are recorded in InvestorTypeRegistry; Token does not enforce them today (D37)
+- ⚠️ **Transfer Cooldowns**: type-specific cooldowns (60/60/30/15 minutes) are recorded in InvestorTypeRegistry; Token does not enforce them today (D37)
 
 ### **5. Governance System**
 - ✅ **1 Person = 1 Vote**: Equal voting power for all verified users
