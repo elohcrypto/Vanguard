@@ -17,7 +17,7 @@ import "./interfaces/IInvestorTypeRegistry.sol";
  * path. Two-step transfer makes the new owner prove it can act.
  *
  * @custom:security NOTE ON TWO GOVERNANCE LAYERS. This contract has its own
- * proposal system (`proposeInvestorTypeUpdate` / `approveProposal` /
+ * proposal system (`createProposal` / `approveProposal` /
  * `executeProposal`) gated on `_governors` and `requiredApprovals`. But
  * `updateInvestorTypeConfig` is `onlyOwner` and bypasses it entirely. When
  * VanguardGovernance owns this registry it changes config through that
