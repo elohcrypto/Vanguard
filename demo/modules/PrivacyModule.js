@@ -1255,10 +1255,20 @@ class PrivacyModule {
           "   💡 Bind a whitelist proof (42 -> 1) and attestations (42 -> 3, 4, 5)",
         );
       } else if (full > 0) {
-        displaySuccess(`${full} WALLET(S) PASS ALL FOUR PRIVATE CHECKS`);
+        const rules = this.state.getContract("complianceRules");
+        const vsc = this.state.getContract("digitalToken");
+        const mode =
+          rules && vsc
+            ? ["OracleOnly", "ZkOnly", "Either"][
+                Number(await rules.whitelistMode(await vsc.getAddress()))
+              ]
+            : "no VSC";
+        displaySuccess(
+          `${full} WALLET(S) HOLD ALL FOUR PRIVATE RECORDS (validateAllPrivateCompliance); VSC transfers read only the whitelist binding, and only in ZkOnly/Either (now ${mode})`,
+        );
         console.log("   🔒 Identities and attributes remain private");
       } else {
-        displayError("NO WALLET PASSES ALL FOUR PRIVATE CHECKS");
+        displayError("NO WALLET HOLDS ALL FOUR PRIVATE RECORDS");
         console.log("   💡 Complete the missing ones (option 42)");
       }
     } catch (error) {

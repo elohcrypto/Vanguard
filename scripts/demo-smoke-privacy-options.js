@@ -140,6 +140,29 @@ async function option42to6(state, failures) {
   console.log(`   42 -> 6 for carol: four records hold, banner names ${mode}`);
 }
 
+/** Option 46 after 42 -> 6: the M1 sentence, never "PASS ALL FOUR". */
+async function option46(state, failures) {
+  const [, lines] = await captured(() =>
+    privacyModule(state).privacyPreservingValidation(),
+  );
+  const vsc = await state.getContract("digitalToken").getAddress();
+  const mode =
+    MODES[
+      Number(await state.getContract("complianceRules").whitelistMode(vsc))
+    ];
+  if (lines.some((l) => /PASS ALL FOUR|GATING/.test(l)))
+    failures.push('option 46 prints "PASS ALL FOUR" / "GATING"');
+  if (
+    !lines.some(
+      (l) =>
+        l.includes("HOLD ALL FOUR PRIVATE RECORDS") &&
+        l.includes(`(now ${mode})`),
+    )
+  )
+    failures.push(`option 46 banner does not name VSC's mode ${mode}`);
+  console.log(`   option 46: records banner names ${mode}`);
+}
+
 async function option42to1Secure(state, failures) {
   // Security mode 3, default whitelist.
   const [, lines] = await captured(() =>
@@ -159,9 +182,10 @@ async function runPrivacyOptionsSmoke(state, failures) {
   await option49(state, failures, "before 42 -> 6");
   await option42to6(state, failures);
   await option49(state, failures, "after 42 -> 6");
+  await option46(state, failures);
   await option42to1Secure(state, failures);
   if (failures.length === n0)
-    console.log("✅ Privacy options 42 -> 1, 42 -> 6, 49 match the chain.");
+    console.log("✅ Privacy options 42 -> 1, 42 -> 6, 46, 49 match the chain.");
 }
 
 module.exports = { runPrivacyOptionsSmoke };
