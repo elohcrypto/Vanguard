@@ -36,6 +36,8 @@ contract OracleManager is IOracleManager, Ownable2Step, ReentrancyGuard, Pausabl
     /// @notice A node at MIN_REPUTATION (where penalizeOracle parks it) is
     ///         not unpaused; the owner raises its reputation first.
     error ReputationTooLow();
+    /// @notice The owner (governance) paused this node: only it unpauses.
+    error PausedByOwner();
 
     struct OracleInfo {
         address oracleAddress;
@@ -78,6 +80,8 @@ contract OracleManager is IOracleManager, Ownable2Step, ReentrancyGuard, Pausabl
     /// @notice The emergency designation: BlacklistOracle.emergencyBlacklist
     ///         requires it and an active node (R-2F3-3); cleared on removal.
     mapping(address => bool) private _emergencyOracles;
+    /// @notice Paused by the owner, so the operator cannot undo the pause.
+    mapping(address => bool) public pausedByOwner;
 
     event OracleDeregistered(address indexed oracle, string reason);
     event OracleActivated(address indexed oracle);
@@ -168,6 +172,7 @@ contract OracleManager is IOracleManager, Ownable2Step, ReentrancyGuard, Pausabl
         oracles[_oracle].registered = false;
         oracles[_oracle].active = false;
         delete _emergencyOracles[_oracle];
+        delete pausedByOwner[_oracle];
         if (address(consensusEngine) != address(0)) consensusEngine.setOracleWeight(_oracle, 0);
 
         for (uint256 i = 0; i < registeredOraclesList.length; i++) {
@@ -185,13 +190,17 @@ contract OracleManager is IOracleManager, Ownable2Step, ReentrancyGuard, Pausabl
     function pauseOracle(address _oracle) external onlyOwnerOrOperator onlyRegistered(_oracle) {
         require(oracles[_oracle].active, "OracleManager: Oracle already inactive");
         oracles[_oracle].active = false;
+        if (msg.sender == owner()) pausedByOwner[_oracle] = true;
         emit OracleDeactivated(_oracle);
     }
 
-    /// @notice Resume a paused node; owner or operator. Refused at MIN_REPUTATION.
+    /// @notice Resume a paused node; owner or operator. Refused at
+    ///         MIN_REPUTATION, and to the operator when the owner paused it.
     function unpauseOracle(address _oracle) external onlyOwnerOrOperator onlyRegistered(_oracle) {
         require(!oracles[_oracle].active, "OracleManager: Oracle already active");
         if (oracles[_oracle].reputation <= MIN_REPUTATION) revert ReputationTooLow();
+        if (pausedByOwner[_oracle] && msg.sender != owner()) revert PausedByOwner();
+        delete pausedByOwner[_oracle];
         oracles[_oracle].active = true;
         emit OracleActivated(_oracle);
     }

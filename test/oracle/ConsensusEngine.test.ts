@@ -251,6 +251,20 @@ describe("Consensus engine under the gate (4.4)", function () {
       expect(await OM.isActiveOracle(n1.address)).to.equal(true);
     });
 
+    it("the operator cannot undo a pause by the owner (governance)", async function () {
+      await OM.pauseOracle(n2.address);
+      expect(await OM.pausedByOwner(n2.address)).to.equal(true);
+      await expect(
+        OM.connect(ops).unpauseOracle(n2.address),
+      ).to.be.revertedWithCustomError(OM, "PausedByOwner");
+      await OM.unpauseOracle(n2.address);
+      expect(await OM.pausedByOwner(n2.address)).to.equal(false);
+      // A pause by the operator stays the operator's to undo.
+      await OM.connect(ops).pauseOracle(n2.address);
+      expect(await OM.pausedByOwner(n2.address)).to.equal(false);
+      await OM.connect(ops).unpauseOracle(n2.address);
+    });
+
     it("emergencyBlacklist needs the manager's designation and a live node", async function () {
       await expect(
         BO.connect(n1).emergencyBlacklist(subject.address, CRITICAL, "x"),
