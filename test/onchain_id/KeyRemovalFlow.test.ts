@@ -45,6 +45,8 @@ describe("Key removal flow (demo options 5a, 5 -> 1)", function () {
     expect(r.removed, out).to.equal(true);
     expect(r.wrongRefused, out).to.equal(true);
     expect(out).to.include("Method: removeKeyWithProof");
+    expect(out).to.include("(MANAGEMENT key)");
+    expect(out).to.not.include("ACCEPTED");
     const id = await ethers.getContractAt("OnchainID", r.identity);
     expect(await id.owner()).to.equal(state.signers[1].address);
     expect(await id.keyHasPurpose(r.key, ACTION)).to.equal(false);
@@ -75,5 +77,17 @@ describe("Key removal flow (demo options 5a, 5 -> 1)", function () {
     expect(out).to.include("Key removed successfully!");
     expect(await id.keyHasPurpose(k(s[9].address), ACTION)).to.equal(false);
     expect((await id.getKey(k(s[9].address))).revokedAt).to.be.gt(0n);
+  });
+
+  it("option 5a names the sender from chain when the owner lost its key", async function () {
+    const r1 = await quiet(() => flow.runRemovalDemo(state));
+    const id = await ethers.getContractAt("OnchainID", r1.identity);
+    const s1 = state.signers[1];
+    await id.connect(s1).removeKey(k(s1.address), 1);
+    logged = [];
+    const r2 = await quiet(() => flow.runRemovalDemo(state));
+    const out = logged.join("\n");
+    expect(out).to.include("(owner (no MANAGEMENT key))");
+    expect(r2.removed, out).to.equal(true);
   });
 });

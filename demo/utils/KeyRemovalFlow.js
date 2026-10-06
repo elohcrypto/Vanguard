@@ -120,7 +120,12 @@ async function runRemovalDemo(state) {
   const stranger = ethers.Wallet.createRandom();
   const key = keyOf(holder.address);
   console.log(`   Identity: ${idAddr}`);
-  console.log(`   Sent by:  ${who(state, owner.address)} (MANAGEMENT key)`);
+  // From chain: wallet 1 passes as owner even after option 5 -> 1 removed
+  // its MANAGEMENT key.
+  const role = (await identity.keyHasPurpose(keyOf(owner.address), 1))
+    ? "MANAGEMENT key"
+    : "owner (no MANAGEMENT key)";
+  console.log(`   Sent by:  ${who(state, owner.address)} (${role})`);
   console.log(`   Holder:   throwaway wallet ${holder.address}`);
 
   await (await identity.addKey(key, ACTION, ECDSA)).wait();
@@ -129,15 +134,25 @@ async function runRemovalDemo(state) {
 
   const wrong = await signRemoval(identity, stranger, key, ACTION);
   let wrongRefused = false;
+  let other = null;
   try {
     await identity.removeKeyWithProof.staticCall(key, ACTION, wrong.signature);
   } catch (e) {
     wrongRefused = /does not prove ownership/.test(e.message);
+    if (!wrongRefused) other = e.message.split("\n")[0];
   }
-  console.log(
-    `   A stranger's signature: ${wrongRefused ? "refused" : "ACCEPTED"} ` +
-      "(OnchainID: Signature does not prove ownership of key)",
-  );
+  if (wrongRefused) {
+    console.log(
+      "   A stranger's signature: refused " +
+        "(OnchainID: Signature does not prove ownership of key)",
+    );
+  } else if (other) {
+    console.log(
+      `   A stranger's signature: reverted for another reason: ${other}`,
+    );
+  } else {
+    console.log("   A stranger's signature: ACCEPTED by the static call");
+  }
 
   const { signature, digest } = await signRemoval(
     identity,
