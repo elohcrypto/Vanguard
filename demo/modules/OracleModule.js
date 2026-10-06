@@ -13,6 +13,9 @@ const {
   displayError,
 } = require("../utils/DisplayHelpers");
 const { ethers } = require("hardhat");
+const Flow = require("../utils/OracleLifecycleFlow");
+const Consensus = require("../utils/OracleConsensusOptions");
+const { governOracleManager } = require("../utils/GovernedCalls");
 
 /**
  * @class OracleModule
@@ -56,10 +59,14 @@ class OracleModule {
         `   🚫 Blacklist Oracle: ${await blacklistOracle.getAddress()}`,
       );
       console.log(
-        `   🤝 Consensus Oracle: ${await consensusOracle.getAddress()}`,
+        `   🤝 Consensus engine (ConsensusOracle): ${await consensusOracle.getAddress()}`,
       );
-      console.log(`   👥 Registered Oracles: 3`);
-      console.log(`   ⚖️ Consensus Threshold: 2/3`);
+      console.log(
+        `   👥 Registered Oracles: ${await oracleManager.getOracleCount()}`,
+      );
+      console.log(
+        `   ⚖️ Consensus Threshold: ${await oracleManager.getConsensusThreshold()}% of the active weight`,
+      );
     } catch (error) {
       displayError(`Oracle system deployment failed: ${error.message}`);
     }
@@ -125,7 +132,7 @@ class OracleModule {
               oracle.address,
               oracle.name,
               oracle.description,
-              100, // Initial reputation
+              500, // Initial reputation (above MIN_REPUTATION)
             );
             console.log(`✅ ${oracle.name} registered: ${oracle.address}`);
 
@@ -135,7 +142,7 @@ class OracleModule {
               {
                 address: oracle.address,
                 role: oracle.name,
-                reputation: 100,
+                reputation: 500,
               },
             );
           } catch (error) {
@@ -150,17 +157,31 @@ class OracleModule {
       console.log("\n🔐 CONFIGURING ORACLE PERMISSIONS");
       console.log("-".repeat(35));
 
-      // Set emergency oracles for blacklist operations
-      const blacklistOracle = this.state.getContract("blacklistOracle");
-      if (blacklistOracle) {
+      // Task 4.4: one emergency designation, OracleManager's (owner or
+      // operator); BlacklistOracle.emergencyBlacklist reads it.
+      const aml = this.state.signers[2].address;
+      if (await oracleManager.isEmergencyOracle(aml)) {
+        console.log("✅ AML Oracle already designated for emergency listings");
+      } else {
+        const ops = Flow.opsSigner(this.state);
+        const byOps =
+          (await oracleManager.operator()).toLowerCase() ===
+          ops.address.toLowerCase();
         try {
-          // Set AML Oracle as emergency oracle
-          await blacklistOracle.setEmergencyOracle(
-            this.state.signers[2].address,
-            true,
-          );
+          const r = byOps
+            ? await (
+                await oracleManager.connect(ops).setEmergencyOracle(aml, true)
+              ).wait()
+            : await governOracleManager(this.state, "setEmergencyOracle", [
+                aml,
+                true,
+              ]);
           console.log(
-            "✅ AML Oracle set as emergency oracle for blacklist operations",
+            r.proposalId
+              ? `🗳️ AML Oracle designation proposed (#${r.proposalId}); vote with 77/78`
+              : r.refused
+                ? `⚠️ Emergency designation: ${r.refused}`
+                : `✅ AML Oracle designated in OracleManager for emergency listings (by ${byOps ? "ops" : "the owner"})`,
           );
         } catch (error) {
           console.log(`⚠️ Emergency oracle setup: ${error.message}`);
@@ -172,21 +193,26 @@ class OracleModule {
       console.log("-".repeat(35));
 
       try {
-        const currentThreshold = await oracleManager.getConsensusThreshold();
-        console.log(`📊 Current consensus threshold: ${currentThreshold}`);
-
-        // Adjust threshold based on number of oracles
-        const newThreshold = Math.max(
-          2,
-          Math.floor(Number(totalOracles) * 0.6),
-        ); // 60% consensus
-        const currentThresholdNum = Number(currentThreshold);
-
-        if (newThreshold !== currentThresholdNum) {
-          await oracleManager.setConsensusThreshold(newThreshold);
-          console.log(`✅ Consensus threshold updated to: ${newThreshold}`);
+        // A percent of the active weight (Task 4.4): 66 = two of three.
+        const current = Number(await oracleManager.getConsensusThreshold());
+        console.log(`📊 Current consensus threshold: ${current}%`);
+        if (current === Flow.THRESHOLD) {
+          console.log(
+            `✅ Consensus threshold is ${Flow.THRESHOLD}%: two of three equal nodes`,
+          );
         } else {
-          console.log("✅ Consensus threshold is optimal");
+          const r = await governOracleManager(
+            this.state,
+            "setConsensusThreshold",
+            [Flow.THRESHOLD],
+          );
+          console.log(
+            r.direct
+              ? `✅ Consensus threshold updated to: ${await oracleManager.getConsensusThreshold()}%`
+              : r.proposalId
+                ? `🗳️ Threshold ${Flow.THRESHOLD}% proposed (#${r.proposalId}); vote with 77/78`
+                : `⚠️ Threshold configuration: ${r.refused}`,
+          );
         }
       } catch (error) {
         console.log(`⚠️ Threshold configuration: ${error.message}`);
@@ -212,7 +238,7 @@ class OracleModule {
         `   👥 Total Oracles: ${await oracleManager.getOracleCount()}`,
       );
       console.log(
-        `   ⚖️ Consensus Threshold: ${await oracleManager.getConsensusThreshold()}`,
+        `   ⚖️ Consensus Threshold: ${await oracleManager.getConsensusThreshold()}% of the active weight`,
       );
       console.log(`   🔗 Oracle Manager: ${await oracleManager.getAddress()}`);
     } catch (error) {
@@ -970,8 +996,16 @@ class OracleModule {
     const reason = await this.promptUser("Emergency reason: ");
 
     try {
-      // Emergency oracle (Oracle 2 - AML Oracle) performs emergency blacklist
+      // Emergency oracle (Oracle 2 - AML Oracle) performs emergency blacklist;
+      // OracleManager holds the designation (option 32 or 35a sets it).
       const emergencyOracle = this.state.signers[2];
+      const om = this.state.getContract("oracleManager");
+      if (!(await om.isEmergencyOracle(emergencyOracle.address))) {
+        console.log(
+          "❌ AML Oracle is not designated in OracleManager: run option 32 or 35a",
+        );
+        return;
+      }
 
       console.log("🚨 Executing emergency blacklist...");
       const tx = await blacklistOracle
@@ -1255,10 +1289,10 @@ class OracleModule {
     }
 
     console.log("\n🎯 CONSENSUS OPERATIONS:");
-    console.log("1. Create Consensus Query");
-    console.log("2. Submit Oracle Vote");
-    console.log("3. Check Consensus Result");
-    console.log("4. View Active Queries");
+    console.log("1. Raise a Query (OracleManager.submitQuery)");
+    console.log("2. Node Answers (OracleManager.submitResponse)");
+    console.log("3. Check Consensus Result (engine tally)");
+    console.log("4. View Recent Queries");
     console.log("0. Back to Main Menu");
 
     const choice = await this.promptUser("\nSelect action (0-4): ");
@@ -1287,308 +1321,21 @@ class OracleModule {
     }
   }
 
+  // Option 37 sub-options: the real path (Task 4.4), OracleConsensusOptions.js.
   async createConsensusQuery() {
-    console.log("\n📝 CREATE CONSENSUS QUERY");
-    console.log("-".repeat(40));
-
-    const consensusOracle = this.state.getContract("consensusOracle");
-
-    if (!this.state.identities || this.state.identities.size === 0) {
-      console.log("❌ No identities available");
-      console.log("💡 Create identities first (option 3)");
-      return;
-    }
-
-    try {
-      // Select subject
-      console.log("\n👤 Select subject for query:");
-      let index = 0;
-      const identityArray = Array.from(this.state.identities.values());
-      for (const identity of identityArray) {
-        console.log(`   ${index}: ${identity.owner}`);
-        index++;
-      }
-
-      const subjectIndex = await this.promptUser(
-        `\nSelect subject (0-${index - 1}): `,
-      );
-      const subject = identityArray[parseInt(subjectIndex)];
-
-      if (!subject) {
-        console.log("❌ Invalid selection");
-        return;
-      }
-
-      // Select query type
-      console.log("\n📋 Select query type:");
-      console.log("1. Whitelist Approval");
-      console.log("2. Blacklist Decision");
-      console.log("3. Identity Verification");
-      console.log("4. Compliance Check");
-      console.log("5. Reputation Update");
-
-      const queryTypeChoice = await this.promptUser("\nSelect type (1-5): ");
-      const queryType = parseInt(queryTypeChoice) || 1;
-
-      // Get query description
-      const description = await this.promptUser("Enter query description: ");
-      const queryData = ethers.toUtf8Bytes(description);
-
-      console.log("\n🔍 Creating consensus query...");
-      console.log(`   👤 Subject: ${subject.owner}`);
-      console.log(`   📋 Type: ${queryType}`);
-      console.log(`   📝 Description: ${description}`);
-
-      // Create consensus query
-      const tx = await consensusOracle.createConsensusQuery(
-        subject.owner,
-        queryType,
-        queryData,
-      );
-      const receipt = await tx.wait();
-
-      // Extract query ID from event
-      let queryId = null;
-      for (const log of receipt.logs) {
-        try {
-          const parsed = consensusOracle.interface.parseLog(log);
-          if (parsed.name === "ConsensusQueryCreated") {
-            queryId = parsed.args.queryId;
-            break;
-          }
-        } catch (e) {
-          // Skip unparseable logs
-        }
-      }
-
-      console.log("\n✅ CONSENSUS QUERY CREATED!");
-      console.log("=".repeat(70));
-      console.log(`🆔 Query ID: ${queryId}`);
-      console.log("=".repeat(70));
-      console.log(`   👤 Subject: ${subject.owner}`);
-      console.log(`   📋 Type: ${queryType}`);
-      console.log(`   🔗 Transaction: ${receipt.hash}`);
-      console.log(`   🧱 Block: ${receipt.blockNumber}`);
-      console.log("");
-      console.log(
-        "⚠️  IMPORTANT: Copy the Query ID above to vote on this query!",
-      );
-      console.log("💡 Oracles can now vote using Option 37, Sub-option 2");
-      console.log(
-        "💡 You will need to paste the ENTIRE Query ID (not the subject address)",
-      );
-    } catch (error) {
-      console.error("❌ Failed to create consensus query:", error.message);
-    }
+    return Consensus.createQueryInteractive(this.state, this.promptUser);
   }
 
   async submitOracleVote() {
-    console.log("\n🗳️ SUBMIT ORACLE VOTE");
-    console.log("-".repeat(30));
-
-    const consensusOracle = this.state.getContract("consensusOracle");
-
-    try {
-      console.log(
-        "\n⚠️  IMPORTANT: Enter the QUERY ID (long hash), NOT the subject address!",
-      );
-      console.log("💡 Query ID format: 0x followed by 64 characters");
-      console.log(
-        "💡 Example: 0xc6dcc0ba1f4448a3f9b9dbf1d0e815944678b39a1f1f7e20f03246e81529cbd4",
-      );
-      console.log("");
-
-      const queryId = await this.promptUser("Enter query ID (0x...): ");
-
-      // Validate query ID format
-      if (!queryId || !queryId.startsWith("0x")) {
-        console.log("❌ Invalid query ID format");
-        console.log("💡 Query ID should start with 0x");
-        return;
-      }
-
-      // Check if it's a valid 32-byte hash (66 characters including 0x)
-      if (queryId.length !== 66) {
-        console.log("❌ Invalid query ID length");
-        console.log(`   Expected: 66 characters (0x + 64 hex digits)`);
-        console.log(`   Got: ${queryId.length} characters`);
-        console.log("");
-        console.log(
-          "⚠️  Did you enter the subject address instead of the Query ID?",
-        );
-        console.log(
-          "💡 The Query ID is the long hash shown when you created the query",
-        );
-        console.log(
-          "💡 Subject address is only 42 characters (0x + 40 hex digits)",
-        );
-        return;
-      }
-
-      // Select oracle
-      console.log("\n👥 Select oracle to vote:");
-      console.log("   0: KYC Oracle (Signer 1)");
-      console.log("   1: AML Oracle (Signer 2)");
-      console.log("   2: Compliance Oracle (Signer 3)");
-
-      const oracleIndex = await this.promptUser("\nSelect oracle (0-2): ");
-      const oracleSigner = this.state.signers[parseInt(oracleIndex) + 1];
-
-      if (!oracleSigner) {
-        console.log("❌ Invalid oracle selection");
-        return;
-      }
-
-      // Get vote
-      const voteChoice = await this.promptUser(
-        "\nVote (1=APPROVE, 0=REJECT): ",
-      );
-      const vote = voteChoice === "1";
-
-      console.log("\n🔍 Submitting vote...");
-      console.log(`   🆔 Query ID: ${queryId}`);
-      console.log(`   👤 Oracle: ${oracleSigner.address}`);
-      console.log(`   🗳️ Vote: ${vote ? "✅ APPROVE" : "❌ REJECT"}`);
-
-      // Get query details to get the subject
-      const query = await consensusOracle.consensusQueries(queryId);
-      const subject = query.subject;
-
-      // Generate signature for the vote
-      // Message format: keccak256(abi.encodePacked(subject, queryId, vote, chainId))
-      const chainId = (await ethers.provider.getNetwork()).chainId;
-      const messageHash = ethers.solidityPackedKeccak256(
-        ["address", "bytes32", "bool", "uint256"],
-        [subject, queryId, vote, chainId],
-      );
-
-      // Sign the message
-      const signature = await oracleSigner.signMessage(
-        ethers.getBytes(messageHash),
-      );
-
-      console.log("   🔐 Signature generated");
-
-      // Submit vote with signature
-      const tx = await consensusOracle
-        .connect(oracleSigner)
-        .submitVote(queryId, vote, signature);
-      const receipt = await tx.wait();
-
-      console.log("\n✅ VOTE SUBMITTED!");
-      console.log(`   🔗 Transaction: ${receipt.hash}`);
-      console.log(`   🧱 Block: ${receipt.blockNumber}`);
-      console.log("\n💡 Check consensus result (option 37, sub-option 3)");
-    } catch (error) {
-      console.error("❌ Failed to submit vote:", error.message);
-
-      // Provide helpful error messages
-      if (error.message.includes("no matching fragment")) {
-        console.log("");
-        console.log("💡 TROUBLESHOOTING:");
-        console.log("   1. Make sure you entered the QUERY ID (66 characters)");
-        console.log("   2. NOT the subject address (42 characters)");
-        console.log(
-          "   3. Query ID is shown when you create a query (Option 37, Sub-option 1)",
-        );
-      } else if (error.message.includes("Query does not exist")) {
-        console.log("");
-        console.log("💡 TROUBLESHOOTING:");
-        console.log("   1. The query ID might be incorrect");
-        console.log("   2. Create a new query first (Option 37, Sub-option 1)");
-        console.log("   3. Copy the entire Query ID from the creation output");
-      } else if (error.message.includes("already voted")) {
-        console.log("");
-        console.log("💡 This oracle has already voted on this query");
-        console.log("   Try voting with a different oracle");
-      }
-    }
+    return Consensus.voteInteractive(this.state, this.promptUser);
   }
 
   async checkConsensusResult() {
-    console.log("\n📊 CHECK CONSENSUS RESULT");
-    console.log("-".repeat(35));
-
-    const consensusOracle = this.state.getContract("consensusOracle");
-
-    try {
-      const queryId = await this.promptUser("Enter query ID (0x...): ");
-
-      if (!queryId || !queryId.startsWith("0x")) {
-        console.log("❌ Invalid query ID format");
-        return;
-      }
-
-      console.log("\n🔍 Fetching consensus result...");
-
-      // Get query info
-      const query = await consensusOracle.consensusQueries(queryId);
-
-      console.log("\n📊 CONSENSUS QUERY DETAILS");
-      console.log("=".repeat(40));
-      console.log(`🆔 Query ID: ${queryId}`);
-      console.log(`👤 Subject: ${query.subject}`);
-      console.log(`📋 Type: ${query.queryType}`);
-      console.log(
-        `⏰ Created: ${new Date(Number(query.timestamp) * 1000).toLocaleString()}`,
-      );
-      console.log(
-        `⏳ Expires: ${new Date(Number(query.expiryTime) * 1000).toLocaleString()}`,
-      );
-
-      console.log("\n🗳️ VOTING RESULTS:");
-      console.log(`   ✅ Positive Votes: ${query.positiveVotes}`);
-      console.log(`   ❌ Negative Votes: ${query.negativeVotes}`);
-      console.log(`   📊 Total Votes: ${query.totalVotes}`);
-
-      const totalVotes =
-        Number(query.positiveVotes) + Number(query.negativeVotes);
-      if (totalVotes > 0) {
-        const approvalRate = (
-          (Number(query.positiveVotes) / totalVotes) *
-          100
-        ).toFixed(1);
-        console.log(`   📈 Approval Rate: ${approvalRate}%`);
-      }
-
-      console.log("\n🎯 CONSENSUS STATUS:");
-      if (query.isResolved) {
-        console.log(`   ✅ RESOLVED`);
-        console.log(
-          `   🏆 Result: ${query.consensusResult ? "✅ APPROVED" : "❌ REJECTED"}`,
-        );
-      } else {
-        console.log(`   ⏳ PENDING (waiting for more votes)`);
-      }
-    } catch (error) {
-      console.error("❌ Failed to check consensus:", error.message);
-    }
+    return Consensus.resultInteractive(this.state, this.promptUser);
   }
 
   async viewActiveQueries() {
-    console.log("\n📋 ACTIVE CONSENSUS QUERIES");
-    console.log("-".repeat(35));
-
-    console.log(
-      "\n💡 This feature requires tracking query IDs from creation events",
-    );
-    console.log(
-      "   Query IDs are displayed when you create a query (option 37, sub-option 1)",
-    );
-    console.log("   Save the query ID to check its status later");
-    console.log("");
-    console.log("📝 WORKFLOW:");
-    console.log("   1. Create a consensus query (Option 37 → 1)");
-    console.log("   2. Copy the Query ID from the output");
-    console.log("   3. Submit votes from different oracles (Option 37 → 2)");
-    console.log("   4. Check consensus result (Option 37 → 3)");
-    console.log("");
-    console.log("🔍 QUERY TYPES:");
-    console.log("   1. Whitelist Approval - Approve user for whitelist");
-    console.log("   2. Blacklist Decision - Decide on blacklisting");
-    console.log("   3. Identity Verification - Verify user identity");
-    console.log("   4. Compliance Check - Check compliance status");
-    console.log("   5. Reputation Update - Update oracle reputation");
+    return Consensus.listQueries(this.state);
   }
 
   /** Option 38: Integrate Oracles with Token */
@@ -1708,8 +1455,9 @@ class OracleModule {
       console.log(`   Total Oracles: ${totalOracles}`);
       console.log(`   Active Oracles: ${activeOracles.length}`);
       console.log(
-        `   Consensus Threshold: ${consensusThreshold}/${totalOracles}`,
+        `   Consensus Threshold: ${consensusThreshold}% of the active weight`,
       );
+      console.log(`   Operator: ${await oracleManager.operator()}`);
 
       // Individual Oracle Status
       console.log("\n👥 INDIVIDUAL ORACLE STATUS:");
@@ -1719,9 +1467,12 @@ class OracleModule {
           console.log(`\n${key.toUpperCase()} (${config.role}):`);
           console.log(`   📍 Address: ${config.address}`);
           console.log(`   🏆 Reputation: ${oracleInfo.reputation}`);
-          console.log(`   ✅ Correct: ${oracleInfo.correctAttestations}`);
-          console.log(`   ❌ Incorrect: ${oracleInfo.incorrectAttestations}`);
-          console.log(`   🔄 Active: ${oracleInfo.isActive ? "YES" : "NO"}`);
+          console.log(`   ✅ Rewarded: ${oracleInfo.correctAttestations}`);
+          console.log(`   🗳️ Answers: ${oracleInfo.totalAttestations}`);
+          console.log(`   🔄 Active: ${oracleInfo.active ? "YES" : "NO"}`);
+          console.log(
+            `   🚨 Emergency: ${(await oracleManager.isEmergencyOracle(config.address)) ? "YES" : "NO"}`,
+          );
         } catch (error) {
           console.log(`\n${key.toUpperCase()}: ❌ Error retrieving info`);
         }
@@ -1803,30 +1554,21 @@ class OracleModule {
 
       const whitelistOracle = this.state.getContract("whitelistOracle");
       const blacklistOracle = this.state.getContract("blacklistOracle");
-      const consensusOracle = this.state.getContract("consensusOracle");
 
-      // Test 1: Oracle Consensus for Critical Decision
+      // Test 1: a compliance query through the gate, tallied by the engine
       console.log("\n1️⃣ TESTING ORACLE CONSENSUS");
       console.log("-".repeat(30));
-
-      if (this.state.identities && this.state.identities.size > 0) {
-        const testUser = Array.from(this.state.identities.values())[0];
-        const queryData = ethers.toUtf8Bytes(
-          "Should user be approved for high-value transfer?",
-        );
-        const tx1 = await consensusOracle.createConsensusQuery(
-          testUser.owner,
-          4, // QUERY_TYPE_COMPLIANCE
-          queryData,
-        );
-        const receipt1 = await tx1.wait();
-        console.log(
-          "✅ Consensus query created for high-value transfer approval",
-        );
-        console.log(`   🔗 Transaction: ${receipt1.hash}`);
-      } else {
-        console.log("⚠️ No identities available for consensus test");
-      }
+      const t = await Flow.consensusRound(
+        this.state,
+        Flow.QUERY.COMPLIANCE,
+        Flow.throwawaySubject(),
+        "0x",
+      );
+      console.log(
+        t.hasResult
+          ? "✅ Compliance query resolved by two of three nodes"
+          : "❌ Compliance query did not resolve",
+      );
 
       // Test 2: Whitelist Integration with Vanguard StableCoin
       console.log("\n2️⃣ TESTING WHITELIST-DIGITAL TOKEN INTEGRATION");
@@ -1856,18 +1598,23 @@ class OracleModule {
       console.log("\n3️⃣ TESTING EMERGENCY PROTOCOLS");
       console.log("-".repeat(30));
 
-      if (this.state.identities && this.state.identities.size > 1) {
-        const testUser2 = Array.from(this.state.identities.values())[1];
-        const emergencyOracle = this.state.signers[2]; // AML Oracle
-
-        await blacklistOracle.connect(emergencyOracle).emergencyBlacklist(
-          testUser2.owner,
-          3, // Critical
-          "Integration test - emergency protocol",
+      // A throwaway subject: a 7-day CRITICAL listing must not freeze a
+      // demo holder. The designation is OracleManager's (option 32 / 35a).
+      const emergencyOracle = this.state.signers[2]; // AML Oracle
+      if (await oracleManager.isEmergencyOracle(emergencyOracle.address)) {
+        const target = Flow.throwawaySubject();
+        await (
+          await blacklistOracle
+            .connect(emergencyOracle)
+            .emergencyBlacklist(target, 3, "Integration test - emergency")
+        ).wait();
+        console.log(
+          `✅ Emergency blacklist executed: ${target} listed = ${await blacklistOracle.isBlacklisted(target)}`,
         );
-        console.log(`✅ Emergency blacklist executed: ${testUser2.owner}`);
         console.log(`   🚨 Severity: CRITICAL`);
         console.log(`   👮 Emergency Oracle: ${emergencyOracle.address}`);
+      } else {
+        console.log("⚠️ AML Oracle not designated: run option 32 or 35a");
       }
 
       // Test 4: Oracle Reputation Update
@@ -1888,23 +1635,13 @@ class OracleModule {
       // Test Summary
       console.log("\n🎉 COMPLETE INTEGRATION TEST RESULTS");
       console.log("=".repeat(40));
-      console.log("✅ Oracle Consensus: WORKING");
-      console.log("✅ Whitelist Integration: WORKING");
-      console.log("✅ Emergency Protocols: WORKING");
-      console.log("✅ Reputation System: WORKING");
-      console.log("✅ Vanguard StableCoin Integration: READY");
-      console.log("");
-      console.log("🔗 Oracle system is fully integrated with:");
-      console.log("   • ERC-3643 Digital Token System");
-      console.log("   • OnchainID Identity Management");
-      console.log("   • ComplianceRules Engine");
-      console.log("   • KYC/AML Workflow");
-      console.log("");
-      console.log("🛡️ SECURITY FEATURES ACTIVE:");
-      console.log("   • Multi-oracle consensus validation");
-      console.log("   • Emergency blacklist protocols");
-      console.log("   • Real-time compliance monitoring");
-      console.log("   • Reputation-based oracle weighting");
+      console.log(`   ⚖️  Consensus: ${Flow.tallyLine(t)}`);
+      console.log(
+        `   🔗 VSC blacklist gate: ${await this.state.getContract("complianceRules").blacklistOracle(await digitalToken.getAddress())}`,
+      );
+      console.log(
+        "   ℹ️  Engine weights are set per node by the manager owner; they do not follow reputation",
+      );
     } catch (error) {
       console.error("❌ Integration test failed:", error.message);
     }
