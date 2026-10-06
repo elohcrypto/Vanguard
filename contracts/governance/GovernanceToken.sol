@@ -20,6 +20,18 @@ import "../erc3643/Token.sol";
  * Covers delegate, getDelegate, getVotingPower, getTotalVotingPower, canVote
  * and getVotingPowerPercentage; test/governance/DelegationNoEffect.test.ts
  * pins the "today" behaviour that the wiring would change.
+ * Open points for that wiring (review of 4.6, recorded, not changed):
+ * - no undelegate path exists: delegate(address(0)) is refused;
+ * - delegation is not transitive (a delegate's own delegation does not
+ *   forward what it received);
+ * - a delegate need not be verified today; once counted, check it at vote
+ *   time;
+ * - the delegator keeps its own power, so per-account readings count a
+ *   delegated balance twice (getTotalVotingPower stays totalSupply);
+ * - the clamp to 0 in _update's delegated mirror is unreachable today
+ *   (every balance change goes through _update, so a delegate's mirror
+ *   always covers any one delegator's outflow); make it a checked
+ *   subtraction or move to ERC20Votes checkpoints when wired.
  */
 contract GovernanceToken is Token {
     // Voting power tracking
