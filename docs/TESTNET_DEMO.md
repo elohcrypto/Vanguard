@@ -635,18 +635,24 @@ stays trusted after the ceremony until a vote untrusts it.
 
 42 -> 6 runs the flows of 42 -> 1 (proof and binding, without the
 transfer steps), 2, 3, 4 and 5 with their defaults for one wallet and
-prints `validateAllPrivateCompliance(wallet)`; the blacklist step needs
-the oracle system (31). 47 reads the proof cache expiry, the binding
+prints `validateAllPrivateCompliance(wallet)` and VSC's whitelist mode
+(only the whitelist binding gates VSC transfers, and only in ZkOnly or
+Either; 42 -> 6 does not switch the mode); the blacklist step needs the
+oracle system (31). 47 reads the proof cache expiry, the binding
 validity and the preference flags, sets the first two while the deployer
-owns the verifier or PrivacyManager (after the handover it names the
-VerifierParameters or PrivacyParameters vote), lists every nullifier
+owns the verifier or PrivacyManager (after the handover a
+VerifierParameters or PrivacyParameters vote: option 76, type 12 or
+11, proposes it), lists every nullifier
 against `nullifierWallet` / `attestationNullifierWallet`, and lets a
 wallet set its own preference flags. 48 prints the verifier's counters
 (`getVerificationStats`) and wiring, 49 eight checks each true, false or
 not run, 50 wires VSC's ComplianceRules to the PrivacyManager as 41 does
 and reports the whitelist mode and each verified wallet's binding.
-`scripts/demo-smoke-privacy.js` compares option 49's checks with the
-chain. `demo-drive.sh --strict 1 21 31 41 47:1 42:6: 46 47:4 48 49 50`
+`scripts/demo-smoke-privacy-options.js` compares all eight of option
+49's checks with independent chain reads before and after 42 -> 6, and
+checks the 42 -> 6 banner and 42 -> 1's secure mode against the chain.
+Secure mode (42 -> 1, mode 3) proves for wallet 1 and prints its
+IdentityRegistry identity and `isVerified` as read. `demo-drive.sh --strict 1 21 31 41 47:1 42:6: 46 47:4 48 49 50`
 runs them without a terminal.
 
 ## Investor custody (Task 4.3, D13 b)
