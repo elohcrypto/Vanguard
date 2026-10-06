@@ -130,7 +130,9 @@ jobs:
       # error. Its stdout is also truncated under a pipe (process.exit before
       # flush), so the report goes to a file and is counted from there. Any
       # error fails; warnings fail only when they RISE above the baseline.
-      # Baseline 798 (2026-10-06, after Task 4.5 dropped OnchainID's topic
+      # Baseline 793 (2026-10-06, after Task 4.7 deleted the unimported
+      # IMultiSigEscrowWallet and two unused mocks; 798 after Task 4.5
+      # dropped OnchainID's topic
       # store; 802 then 801 during Task 4.4; 885 after 4.3, 887 after 4.2
       # and 889 after 4.1; 976
       # before 3.2, 965 after 3.2,
@@ -142,7 +144,7 @@ jobs:
       # registration into registrar contracts).
       - name: Lint ratchet (no solhint errors, no NEW warnings)
         run: |
-          BASELINE=798
+          BASELINE=793
           npx solhint -f unix 'contracts/**/*.sol' > solhint.log 2>&1 || true
           errors=$(grep -c '\[Error/' solhint.log || true)
           warnings=$(grep -c '\[Warning/' solhint.log || true)
