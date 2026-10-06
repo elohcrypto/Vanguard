@@ -140,7 +140,7 @@ jobs:
       # registration into registrar contracts).
       - name: Lint ratchet (no solhint errors, no NEW warnings)
         run: |
-          BASELINE=802
+          BASELINE=801
           npx solhint -f unix 'contracts/**/*.sol' > solhint.log 2>&1 || true
           errors=$(grep -c '\[Error/' solhint.log || true)
           warnings=$(grep -c '\[Warning/' solhint.log || true)
