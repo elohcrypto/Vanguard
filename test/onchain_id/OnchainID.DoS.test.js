@@ -127,44 +127,6 @@ describe("OnchainID - DoS Protection Tests", function () {
     });
   });
 
-  describe("Add Trusted Issuer - DoS Protection", function () {
-    it("should reject empty topics array", async function () {
-      await expect(
-        onchainID.addTrustedIssuer(issuer.address, []),
-      ).to.be.revertedWith("OnchainID: Empty topics array");
-    });
-
-    it("should reject topics array exceeding MAX_ARRAY_LENGTH (100)", async function () {
-      // Create array with 101 elements (exceeds limit)
-      const oversizedTopics = new Array(101).fill(1);
-
-      await expect(
-        onchainID.addTrustedIssuer(issuer.address, oversizedTopics),
-      ).to.be.revertedWith("OnchainID: Too many topics");
-    });
-
-    it("should accept topics array at MAX_ARRAY_LENGTH (100)", async function () {
-      // Create array with exactly 100 elements (at limit)
-      const maxTopics = new Array(100).fill(1);
-
-      await expect(onchainID.addTrustedIssuer(issuer.address, maxTopics)).to.not
-        .be.reverted;
-    });
-
-    it("should accept small topics arrays", async function () {
-      const topics = [1, 2, 3, 6, 7]; // KYC, AML, etc.
-
-      await expect(onchainID.addTrustedIssuer(issuer.address, topics)).to.not.be
-        .reverted;
-    });
-
-    it("should reject zero address issuer", async function () {
-      await expect(
-        onchainID.addTrustedIssuer(ethers.ZeroAddress, [1, 2, 3]),
-      ).to.be.revertedWith("OnchainID: Invalid issuer");
-    });
-  });
-
   describe("Gas Cost Analysis", function () {
     it("should measure gas cost for different batch sizes", async function () {
       const batchSizes = [1, 10, 25, 50];
@@ -205,11 +167,6 @@ describe("OnchainID - DoS Protection Tests", function () {
       const maxBatchSize = await onchainID.MAX_BATCH_SIZE();
       expect(maxBatchSize).to.equal(50);
     });
-
-    it("should have correct MAX_ARRAY_LENGTH constant", async function () {
-      const maxArrayLength = await onchainID.MAX_ARRAY_LENGTH();
-      expect(maxArrayLength).to.equal(100);
-    });
   });
 
   describe("Security Scenarios", function () {
@@ -236,16 +193,6 @@ describe("OnchainID - DoS Protection Tests", function () {
           uris,
         ),
       ).to.be.revertedWith("OnchainID: Batch size exceeds maximum");
-    });
-
-    it("should prevent DoS attack with massive topics array", async function () {
-      // Attacker tries to add issuer with 500 topics
-      const maliciousTopics = new Array(500).fill(1);
-
-      // Should be rejected before consuming gas
-      await expect(
-        onchainID.addTrustedIssuer(issuer.address, maliciousTopics),
-      ).to.be.revertedWith("OnchainID: Too many topics");
     });
 
     it("should allow legitimate batch operations", async function () {

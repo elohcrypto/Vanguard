@@ -6,7 +6,6 @@ import "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
 import "@openzeppelin/contracts/utils/cryptography/ECDSA.sol";
 import "@openzeppelin/contracts/utils/cryptography/MessageHashUtils.sol";
 import "./interfaces/IOnchainID.sol";
-import "./interfaces/IClaimIssuer.sol";
 
 /**
  * @title OnchainID
@@ -63,38 +62,25 @@ contract OnchainID is IOnchainID, Ownable2Step, ReentrancyGuard {
     // Additional Events (beyond ERC-734/735)
     event IdentityCreated(address indexed identity, address indexed owner, bytes32 managementKey);
     event Approved(uint256 indexed executionId, bool approved);
-    event TrustedIssuerAdded(address indexed issuer, uint256[] topics);
-    event TrustedIssuerRemoved(address indexed issuer);
-    event ClaimTopicAdded(uint256 indexed topic, bool required);
-    event ClaimTopicRemoved(uint256 indexed topic);
 
     // State variables
     mapping(bytes32 => Key) private keys;
     mapping(uint256 => bytes32[]) private keysByPurpose;
     mapping(bytes32 => Claim) private claims;
     mapping(uint256 => bytes32[]) private claimsByTopic;
-    mapping(address => uint256[]) private trustedIssuers;
-    mapping(uint256 => bool) private requiredTopics;
 
-    bytes32[] private allKeys;
-    bytes32[] private allClaims;
-    // Position + 1 of a claim id in claimsByTopic[topic] / allClaims.
+    // Position + 1 of a claim id in claimsByTopic[topic].
     mapping(bytes32 => uint256) private _topicIndex;
-    mapping(bytes32 => uint256) private _allIndex;
-    address[] private trustedIssuersList;
-    uint256[] private requiredTopicsList;
 
     uint256 private executionNonce;
     uint256 private claimRequestNonce;
     uint256 private creationTime;
     bool private initialized;
 
-    // ✅ DoS Protection: Maximum array sizes to prevent gas limit attacks
+    // ✅ DoS Protection: Maximum batch size to prevent gas limit attacks
     uint256 public constant MAX_BATCH_SIZE = 50;
-    uint256 public constant MAX_ARRAY_LENGTH = 100;
 
     mapping(uint256 => ExecutionRequest) private executionRequests;
-    mapping(uint256 => bool) private executionApprovals;
     mapping(address => bool) public authorizedManagers;
 
     struct ExecutionRequest {
@@ -535,213 +521,11 @@ contract OnchainID is IOnchainID, Ownable2Step, ReentrancyGuard {
         // ponytail: O(1) swap-and-pop via stored indices, so an identity
         // bloated by self-named junk claims can still remove any claim.
         _swapPop(claimsByTopic[claim.topic], _topicIndex, _claimId);
-        _swapPop(allClaims, _allIndex, _claimId);
 
         emit ClaimRemoved(_claimId, claim.topic, claim.scheme, claim.issuer, claim.signature, claim.data, claim.uri);
 
         delete claims[_claimId];
         return true;
-    }
-
-    /**
-     * @notice True if `_issuer` (a ClaimIssuer) reports a live claim on
-     *         `_topic` for this identity. Asks the issuer, not this
-     *         identity's claim list, which the owner and anyone naming
-     *         themselves can write (2F.2 review, N1).
-     */
-    function hasValidClaim(uint256 _topic, address _issuer) public view returns (bool exists) {
-        if (_issuer.code.length == 0) return false;
-        (bool ok, bytes memory ret) = _issuer.staticcall(
-            abi.encodeCall(IClaimIssuer.hasValidClaim, (address(this), _topic))
-        );
-        return ok && ret.length >= 32 && abi.decode(ret, (bool));
-    }
-
-    /**
-     * @dev Get all claims
-     */
-    function getAllClaims() external view returns (bytes32[] memory) {
-        return allClaims;
-    }
-
-    /**
-     * @dev Check if has topic
-     */
-    function hasTopic(uint256 _topic) external view returns (bool exists) {
-        return claimsByTopic[_topic].length > 0;
-    }
-
-    // OnchainID specific functions
-
-    /**
-     * @dev Check if trusted issuer
-     */
-    function isTrustedIssuer(address _issuer, uint256 _topic) external view returns (bool trusted) {
-        uint256[] memory topics = trustedIssuers[_issuer];
-        for (uint256 i = 0; i < topics.length; i++) {
-            if (topics[i] == _topic) {
-                return true;
-            }
-        }
-        return false;
-    }
-
-    /**
-     * @dev Add trusted issuer
-     */
-    function addTrustedIssuer(address _issuer, uint256[] calldata _topics) external onlyManagementKey {
-        require(_issuer != address(0), "OnchainID: Invalid issuer");
-        // ✅ DoS Protection: Validate topics array length
-        require(_topics.length > 0, "OnchainID: Empty topics array");
-        require(_topics.length <= MAX_ARRAY_LENGTH, "OnchainID: Too many topics");
-
-        // Add to list if not already present
-        bool exists = false;
-        for (uint256 i = 0; i < trustedIssuersList.length; i++) {
-            if (trustedIssuersList[i] == _issuer) {
-                exists = true;
-                break;
-            }
-        }
-
-        if (!exists) {
-            trustedIssuersList.push(_issuer);
-        }
-
-        trustedIssuers[_issuer] = _topics;
-
-        emit TrustedIssuerAdded(_issuer, _topics);
-    }
-
-    /**
-     * @dev Remove trusted issuer
-     */
-    function removeTrustedIssuer(address _issuer) external onlyManagementKey {
-        delete trustedIssuers[_issuer];
-
-        // Remove from list
-        for (uint256 i = 0; i < trustedIssuersList.length; i++) {
-            if (trustedIssuersList[i] == _issuer) {
-                trustedIssuersList[i] = trustedIssuersList[trustedIssuersList.length - 1];
-                trustedIssuersList.pop();
-                break;
-            }
-        }
-
-        emit TrustedIssuerRemoved(_issuer);
-    }
-
-    /**
-     * @dev Get trusted issuers
-     */
-    function getTrustedIssuers() external view returns (address[] memory) {
-        return trustedIssuersList;
-    }
-
-    /**
-     * @dev Add claim topic
-     */
-    function addClaimTopic(uint256 _topic, bool _required) external onlyManagementKey {
-        if (_required && !requiredTopics[_topic]) {
-            requiredTopics[_topic] = true;
-            requiredTopicsList.push(_topic);
-        }
-
-        emit ClaimTopicAdded(_topic, _required);
-    }
-
-    /**
-     * @dev Remove claim topic
-     */
-    function removeClaimTopic(uint256 _topic) external onlyManagementKey {
-        requiredTopics[_topic] = false;
-
-        // Remove from list
-        for (uint256 i = 0; i < requiredTopicsList.length; i++) {
-            if (requiredTopicsList[i] == _topic) {
-                requiredTopicsList[i] = requiredTopicsList[requiredTopicsList.length - 1];
-                requiredTopicsList.pop();
-                break;
-            }
-        }
-
-        emit ClaimTopicRemoved(_topic);
-    }
-
-    /**
-     * @dev Check if required topic
-     */
-    function isRequiredTopic(uint256 _topic) external view returns (bool required) {
-        return requiredTopics[_topic];
-    }
-
-    /**
-     * @dev Get required topics
-     */
-    function getRequiredTopics() external view returns (uint256[] memory) {
-        return requiredTopicsList;
-    }
-
-    /**
-     * @dev Check compliance
-     */
-    function isCompliant() external view returns (bool valid) {
-        for (uint256 i = 0; i < requiredTopicsList.length; i++) {
-            if (!_hasTrustedClaim(requiredTopicsList[i])) return false;
-        }
-        return true;
-    }
-
-    /// @dev Some issuer this identity trusts for `_topic` attests to it.
-    function _hasTrustedClaim(uint256 _topic) private view returns (bool) {
-        for (uint256 i = 0; i < trustedIssuersList.length; i++) {
-            address issuer = trustedIssuersList[i];
-            uint256[] storage topics = trustedIssuers[issuer];
-            for (uint256 j = 0; j < topics.length; j++) {
-                if (topics[j] == _topic && hasValidClaim(_topic, issuer)) return true;
-            }
-        }
-        return false;
-    }
-
-    /**
-     * @dev Get compliance status
-     */
-    function getComplianceStatus()
-        external
-        view
-        returns (bool valid, uint256[] memory missingTopics, bytes32[] memory expiredClaims)
-    {
-        uint256[] memory missing = new uint256[](requiredTopicsList.length);
-        bytes32[] memory expired = new bytes32[](allClaims.length);
-        uint256 missingCount = 0;
-        uint256 expiredCount = 0;
-
-        // Check for missing required topics
-        for (uint256 i = 0; i < requiredTopicsList.length; i++) {
-            if (!_hasTrustedClaim(requiredTopicsList[i])) missing[missingCount++] = requiredTopicsList[i];
-        }
-
-        // Check for expired claims
-        for (uint256 i = 0; i < allClaims.length; i++) {
-            Claim memory claim = claims[allClaims[i]];
-            if (claim.validTo != 0 && claim.validTo <= block.timestamp) {
-                expired[expiredCount++] = allClaims[i];
-            }
-        }
-
-        // Resize arrays
-        uint256[] memory finalMissing = new uint256[](missingCount);
-        for (uint256 i = 0; i < missingCount; i++) {
-            finalMissing[i] = missing[i];
-        }
-
-        bytes32[] memory finalExpired = new bytes32[](expiredCount);
-        for (uint256 i = 0; i < expiredCount; i++) {
-            finalExpired[i] = expired[i];
-        }
-
-        return (missingCount == 0, finalMissing, finalExpired);
     }
 
     /**
@@ -807,8 +591,6 @@ contract OnchainID is IOnchainID, Ownable2Step, ReentrancyGuard {
         } else {
             claimsByTopic[_topic].push(claimId);
             _topicIndex[claimId] = claimsByTopic[_topic].length;
-            allClaims.push(claimId);
-            _allIndex[claimId] = allClaims.length;
         }
         claims[claimId] = Claim({
             topic: _topic,
@@ -840,17 +622,6 @@ contract OnchainID is IOnchainID, Ownable2Step, ReentrancyGuard {
         return creationTime;
     }
 
-    /**
-     * @dev Get identity statistics
-     */
-    function getIdentityStats()
-        external
-        view
-        returns (uint256 keyCount, uint256 claimCount, uint256 trustedIssuerCount, uint256 requiredTopicCount)
-    {
-        return (allKeys.length, allClaims.length, trustedIssuersList.length, requiredTopicsList.length);
-    }
-
     // Internal functions
 
     /**
@@ -866,7 +637,6 @@ contract OnchainID is IOnchainID, Ownable2Step, ReentrancyGuard {
         keys[_key] = Key({purpose: _purpose, keyType: _keyType, key: _key, revokedAt: 0});
 
         keysByPurpose[_purpose].push(_key);
-        if (!known) allKeys.push(_key);
 
         emit KeyAdded(_key, _purpose, _keyType);
         return true;

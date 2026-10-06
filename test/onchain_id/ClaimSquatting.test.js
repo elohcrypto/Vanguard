@@ -106,9 +106,6 @@ describe("Claim-slot squatting (2F.2, H2)", function () {
     const cid = idSideId(attacker.address, KYC, dup);
     const ids = await id.getClaimIdsByTopic(KYC);
     expect(ids.filter((x) => x === cid).length).to.equal(1);
-    expect((await id.getAllClaims()).filter((x) => x === cid).length).to.equal(
-      1,
-    );
     expect((await id.getClaim(cid)).uri).to.equal("b");
 
     // One removal clears it completely.
@@ -368,25 +365,18 @@ describe("Claim-slot squatting (2F.2, H2)", function () {
     expect(await ir.isVerified(attacker.address)).to.equal(false);
   });
 
-  // N1: the identity's own views ask the issuer too.
-  it("OnchainID.hasValidClaim and isCompliant ask the issuer (N1)", async function () {
-    await id.connect(victim).addTrustedIssuer(kycAddr, [KYC]);
-    await id.connect(victim).addClaimTopic(KYC, true);
+  // N1: an owner-written claim naming a trusted issuer counts for nothing;
+  // the issuer is asked. OnchainID's own views (hasValidClaim, isCompliant)
+  // were a third copy of this and are gone (plan v2 Task 4.5).
+  it("a forged claim naming the trusted issuer does not verify (N1)", async function () {
     // Owner forges a claim naming the trusted issuer.
     await id.connect(victim).addClaim(KYC, 1, kycAddr, "0x", DATA, "");
-    expect(await id.hasValidClaim(KYC, kycAddr)).to.equal(false);
-    expect(await id.isCompliant()).to.equal(false);
-    let st = await id.getComplianceStatus();
-    expect(st.valid).to.equal(false);
-    expect(st.missingTopics.map(Number)).to.deep.equal([KYC]);
-    // A real issuer claim verifies.
+    expect(await kyc.hasValidClaim(idAddr, KYC)).to.equal(false);
+    expect(await ir.isVerified(victim.address)).to.equal(false);
+    // The issuer itself re-issues the same id in place: verified.
     await issue();
-    expect(await id.hasValidClaim(KYC, kycAddr)).to.equal(true);
-    expect(await id.isCompliant()).to.equal(true);
-    st = await id.getComplianceStatus();
-    expect(st.valid).to.equal(true);
-    // No code at the issuer address: false, no revert.
-    expect(await id.hasValidClaim(KYC, attacker.address)).to.equal(false);
+    expect(await kyc.hasValidClaim(idAddr, KYC)).to.equal(true);
+    expect(await ir.isVerified(victim.address)).to.equal(true);
   });
 
   // N2: only the issuer may update its own identity-side copy.
@@ -405,7 +395,7 @@ describe("Claim-slot squatting (2F.2, H2)", function () {
   });
 
   // M22: _swapPop must re-index the element it moves.
-  it("removing a swapped-in claim keeps both lists consistent (M22)", async function () {
+  it("removing a swapped-in claim keeps the topic list consistent (M22)", async function () {
     const ids = [];
     for (let i = 0; i < 4; i++) {
       const d = ethers.toUtf8Bytes("c" + i);
@@ -418,15 +408,13 @@ describe("Claim-slot squatting (2F.2, H2)", function () {
       ids[1],
       ids[2],
     ]);
-    expect([...(await id.getAllClaims())]).to.have.members([ids[1], ids[2]]);
     await id.connect(victim).removeClaim(ids[2]);
     await id.connect(victim).removeClaim(ids[1]);
-    expect((await id.getAllClaims()).length).to.equal(0);
+    expect((await id.getClaimIdsByTopic(5)).length).to.equal(0);
     await id
       .connect(victim)
       .addClaim(5, 1, victim.address, "0x", ethers.toUtf8Bytes("c0"), "");
     await id.connect(victim).removeClaim(ids[0]);
-    expect((await id.getAllClaims()).length).to.equal(0);
     expect((await id.getClaimIdsByTopic(5)).length).to.equal(0);
   });
 });

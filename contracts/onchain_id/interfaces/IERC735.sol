@@ -120,25 +120,4 @@ interface IERC735 {
      * @return success True if the claim was removed successfully
      */
     function removeClaim(bytes32 _claimId) external returns (bool success);
-
-    /**
-     * @dev Check if a claim exists and is valid.
-     * @param _topic The claim topic.
-     * @param _issuer The claim issuer.
-     * @return exists True if a valid claim exists
-     */
-    function hasValidClaim(uint256 _topic, address _issuer) external view returns (bool exists);
-
-    /**
-     * @dev Get all claims for this identity.
-     * @return claimIds Array of all claim IDs
-     */
-    function getAllClaims() external view returns (bytes32[] memory claimIds);
-
-    /**
-     * @dev Check if the identity has a specific claim topic.
-     * @param _topic The topic to check.
-     * @return exists True if the topic exists
-     */
-    function hasTopic(uint256 _topic) external view returns (bool exists);
 }

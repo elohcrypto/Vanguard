@@ -218,14 +218,9 @@ describe("OnchainID System - Coverage Tests", function () {
         0,
       );
 
-      // 4. Set up compliance
-      await identity
-        .connect(user1)
-        .addTrustedIssuer(await claimIssuer.getAddress(), [6]);
-      await identity.connect(user1).addClaimTopic(6, true);
-
-      // 5. Verify compliance
-      expect(await identity.isCompliant()).to.be.true;
+      // 4-5. The issuer attests the claim (IdentityRegistry asks it; the
+      // identity holds no compliance store of its own, Task 4.5)
+      expect(await claimIssuer.hasValidClaim(identityAddress, 6)).to.be.true;
 
       // 6. Set up key recovery
       // Authorize KeyManager for the deployed identity
@@ -523,7 +518,8 @@ describe("OnchainID System - Coverage Tests", function () {
   describe("State Consistency", function () {
     it("Should maintain consistent state across operations", async function () {
       // Test that all state variables are properly updated
-      const initialStats = await onchainID.getIdentityStats();
+      const actionBefore = await onchainID.getKeysByPurpose(2);
+      const claimsBefore = await onchainID.getClaimIdsByTopic(6);
 
       // Add keys and claims
       const testKey = TestHelpers.generateKey("consistency-key");
@@ -534,12 +530,12 @@ describe("OnchainID System - Coverage Tests", function () {
         .connect(identity)
         .addClaim(6, 1, identity.address, "0x", claimData, "");
 
-      const finalStats = await onchainID.getIdentityStats();
-
-      // Verify stats were updated correctly
-      expect(finalStats.keyCount).to.equal(initialStats.keyCount + BigInt(1));
-      expect(finalStats.claimCount).to.equal(
-        initialStats.claimCount + BigInt(1),
+      // Verify the key and claim lists grew by one each
+      const actionAfter = await onchainID.getKeysByPurpose(2);
+      expect(actionAfter.length).to.equal(actionBefore.length + 1);
+      expect(actionAfter).to.include(testKey);
+      expect((await onchainID.getClaimIdsByTopic(6)).length).to.equal(
+        claimsBefore.length + 1,
       );
     });
   });

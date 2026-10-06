@@ -4,9 +4,9 @@ import { SignerWithAddress } from "@nomicfoundation/hardhat-ethers/signers";
 import { OnchainID, OnchainID__factory } from "../typechain-types";
 
 // A real ClaimIssuer owned by `signer` issues `data` on each topic to
-// `identity`. OnchainID.hasValidClaim / isCompliant ask the issuer
-// (2F.2 review, N1), so a claim the owner writes naming an issuer counts
-// for nothing.
+// `identity`. Verification asks the issuer (IdentityRegistry calls
+// ClaimIssuer.hasValidClaim; 2F.2 review, N1), so a claim the owner
+// writes naming an issuer counts for nothing.
 async function issueVia(
   signer: SignerWithAddress,
   identity: string,
@@ -554,8 +554,12 @@ describe("OnchainID", function () {
       });
     });
 
-    describe("hasValidClaim", function () {
+    // Verification asks the issuer (ClaimIssuer.hasValidClaim), never this
+    // identity's lists: IdentityRegistry does, and OnchainID keeps no
+    // pass-through of its own (plan v2 Task 4.5).
+    describe("a claim counts only when its issuer attests it", function () {
       let issuerAddr: string;
+      let iss: any;
 
       beforeEach(async function () {
         issuerAddr = await issueVia(
@@ -564,20 +568,34 @@ describe("OnchainID", function () {
           [KYC_TOPIC],
           claimData,
         );
+        iss = await ethers.getContractAt("ClaimIssuer", issuerAddr);
       });
 
-      it("Should return true for valid claim", async function () {
-        expect(await onchainID.hasValidClaim(KYC_TOPIC, issuerAddr)).to.be.true;
+      it("the issuer attests the claim it issued", async function () {
+        const id = await onchainID.getAddress();
+        expect(await iss.hasValidClaim(id, KYC_TOPIC)).to.be.true;
+        expect(await onchainID.getClaimIdsByTopic(KYC_TOPIC)).to.have.length(1);
       });
 
-      it("Should return false for non-existent claim", async function () {
-        expect(await onchainID.hasValidClaim(AML_TOPIC, issuerAddr)).to.be
-          .false;
+      it("the issuer attests no topic it did not issue", async function () {
+        const id = await onchainID.getAddress();
+        expect(await iss.hasValidClaim(id, AML_TOPIC)).to.be.false;
       });
 
-      it("Should return false for wrong issuer", async function () {
-        expect(await onchainID.hasValidClaim(KYC_TOPIC, user1.address)).to.be
-          .false;
+      it("an owner-written claim naming the issuer counts for nothing", async function () {
+        const id = await onchainID.getAddress();
+        await onchainID
+          .connect(owner)
+          .addClaim(
+            AML_TOPIC,
+            ECDSA_SCHEME,
+            issuerAddr,
+            claimSignature,
+            ethers.toUtf8Bytes("forged"),
+            "",
+          );
+        expect(await onchainID.getClaimIdsByTopic(AML_TOPIC)).to.have.length(1);
+        expect(await iss.hasValidClaim(id, AML_TOPIC)).to.be.false;
       });
     });
 
@@ -600,9 +618,6 @@ describe("OnchainID", function () {
         expect((await onchainID.getClaimIdsByTopic(AML_TOPIC)).length).to.equal(
           1,
         );
-        // Stored, but the named issuer attests nothing (N1).
-        expect(await onchainID.hasValidClaim(KYC_TOPIC, claimIssuer.address)).to
-          .be.false;
       });
 
       it("Should reject batch with mismatched array lengths", async function () {
@@ -618,248 +633,43 @@ describe("OnchainID", function () {
     });
   });
 
-  describe("Trusted Issuer Management", function () {
-    describe("addTrustedIssuer", function () {
-      it("Should allow owner to add trusted issuer", async function () {
-        const topics = [KYC_TOPIC, AML_TOPIC];
-        await expect(
-          onchainID
-            .connect(owner)
-            .addTrustedIssuer(claimIssuer.address, topics),
-        )
-          .to.emit(onchainID, "TrustedIssuerAdded")
-          .withArgs(claimIssuer.address, topics);
-
-        expect(await onchainID.isTrustedIssuer(claimIssuer.address, KYC_TOPIC))
-          .to.be.true;
-        expect(await onchainID.isTrustedIssuer(claimIssuer.address, AML_TOPIC))
-          .to.be.true;
-      });
-
-      it("Should reject adding zero address as trusted issuer", async function () {
-        await expect(
-          onchainID
-            .connect(owner)
-            .addTrustedIssuer(ethers.ZeroAddress, [KYC_TOPIC]),
-        ).to.be.revertedWith("OnchainID: Invalid issuer");
-      });
-
-      it("Should reject adding trusted issuer by unauthorized user", async function () {
-        await expect(
-          onchainID
-            .connect(unauthorized)
-            .addTrustedIssuer(claimIssuer.address, [KYC_TOPIC]),
-        ).to.be.revertedWith("OnchainID: Sender does not have management key");
-      });
-    });
-
-    describe("removeTrustedIssuer", function () {
-      beforeEach(async function () {
-        await onchainID
-          .connect(owner)
-          .addTrustedIssuer(claimIssuer.address, [KYC_TOPIC, AML_TOPIC]);
-      });
-
-      it("Should allow owner to remove trusted issuer", async function () {
-        await expect(
-          onchainID.connect(owner).removeTrustedIssuer(claimIssuer.address),
-        )
-          .to.emit(onchainID, "TrustedIssuerRemoved")
-          .withArgs(claimIssuer.address);
-
-        expect(await onchainID.isTrustedIssuer(claimIssuer.address, KYC_TOPIC))
-          .to.be.false;
-      });
-
-      it("Should reject removal by unauthorized user", async function () {
-        await expect(
-          onchainID
-            .connect(unauthorized)
-            .removeTrustedIssuer(claimIssuer.address),
-        ).to.be.revertedWith("OnchainID: Sender does not have management key");
-      });
-    });
-
-    describe("getTrustedIssuers", function () {
-      it("Should return list of trusted issuers", async function () {
-        await onchainID
-          .connect(owner)
-          .addTrustedIssuer(claimIssuer.address, [KYC_TOPIC]);
-        await onchainID
-          .connect(owner)
-          .addTrustedIssuer(user1.address, [AML_TOPIC]);
-
-        const trustedIssuers = await onchainID.getTrustedIssuers();
-        expect(trustedIssuers).to.include(claimIssuer.address);
-        expect(trustedIssuers).to.include(user1.address);
-        expect(trustedIssuers.length).to.equal(2);
-      });
+  // Plan v2 Task 4.5: the identity-level trusted-issuer, required-topic
+  // and compliance store was a third copy of what IdentityRegistry holds
+  // and nothing read it; authorizeContract duplicated authorizeManager.
+  describe("Removed surface (plan v2 Task 4.5)", function () {
+    it("answers none of the removed selectors", async function () {
+      const to = await onchainID.getAddress();
+      for (const sig of [
+        "authorizeContract(address)",
+        "addTrustedIssuer(address,uint256[])",
+        "removeTrustedIssuer(address)",
+        "isTrustedIssuer(address,uint256)",
+        "getTrustedIssuers()",
+        "addClaimTopic(uint256,bool)",
+        "removeClaimTopic(uint256)",
+        "isRequiredTopic(uint256)",
+        "getRequiredTopics()",
+        "isCompliant()",
+        "getComplianceStatus()",
+        "getIdentityStats()",
+        "getAllClaims()",
+        "hasTopic(uint256)",
+        "hasValidClaim(uint256,address)",
+        "MAX_ARRAY_LENGTH()",
+      ]) {
+        const data = ethers.id(sig).slice(0, 10).padEnd(138, "0");
+        let answered = true;
+        try {
+          await ethers.provider.call({ to, data });
+        } catch {
+          answered = false;
+        }
+        expect(answered, sig).to.equal(false);
+      }
     });
   });
 
-  describe("Compliance Management", function () {
-    let claimData: string;
-    let claimSignature: string;
-    let issuerAddr: string;
-
-    beforeEach(async function () {
-      claimData = ethers.solidityPacked(["string"], ["KYC verified"]);
-      claimSignature = ethers.solidityPacked(["string"], ["mock-signature"]);
-
-      // Set up trusted issuer and required topics. The issuer is a real
-      // ClaimIssuer; claims are issued in the tests that need them.
-      issuerAddr = await issueVia(
-        claimIssuer,
-        await onchainID.getAddress(),
-        [],
-        claimData,
-      );
-      await onchainID
-        .connect(owner)
-        .addTrustedIssuer(issuerAddr, [KYC_TOPIC, AML_TOPIC]);
-      await onchainID.connect(owner).addClaimTopic(KYC_TOPIC, true);
-      await onchainID.connect(owner).addClaimTopic(AML_TOPIC, true);
-    });
-
-    describe("isCompliant", function () {
-      it("Should return false when missing required claims", async function () {
-        expect(await onchainID.isCompliant()).to.be.false;
-      });
-
-      it("Should return true when all required claims are present", async function () {
-        // An owner-written claim naming the issuer does not count (N1).
-        await onchainID
-          .connect(owner)
-          .addClaim(
-            KYC_TOPIC,
-            ECDSA_SCHEME,
-            issuerAddr,
-            claimSignature,
-            ethers.toUtf8Bytes("forged"),
-            "",
-          );
-        expect(await onchainID.isCompliant()).to.be.false;
-        // The issuer attests both topics.
-        const iss = await ethers.getContractAt("ClaimIssuer", issuerAddr);
-        for (const topic of [KYC_TOPIC, AML_TOPIC]) {
-          const sig = await claimIssuer.signMessage(
-            ethers.getBytes(
-              ethers.solidityPackedKeccak256(
-                ["address", "uint256", "bytes"],
-                [await onchainID.getAddress(), topic, claimData],
-              ),
-            ),
-          );
-          await iss
-            .connect(claimIssuer)
-            .issueClaim(
-              await onchainID.getAddress(),
-              topic,
-              ECDSA_SCHEME,
-              claimData,
-              "",
-              0,
-              sig,
-            );
-        }
-
-        expect(await onchainID.isCompliant()).to.be.true;
-      });
-    });
-
-    describe("getComplianceStatus", function () {
-      it("Should return missing topics when not compliant", async function () {
-        const [valid, missingTopics, expiredClaims] =
-          await onchainID.getComplianceStatus();
-        expect(valid).to.be.false;
-        expect(missingTopics.map((t) => Number(t))).to.include(KYC_TOPIC);
-        expect(missingTopics.map((t) => Number(t))).to.include(AML_TOPIC);
-        expect(expiredClaims.length).to.equal(0);
-      });
-
-      it("Should return valid status when compliant", async function () {
-        // An owner-written claim naming the issuer does not count (N1).
-        await onchainID
-          .connect(owner)
-          .addClaim(
-            KYC_TOPIC,
-            ECDSA_SCHEME,
-            issuerAddr,
-            claimSignature,
-            ethers.toUtf8Bytes("forged"),
-            "",
-          );
-        expect(await onchainID.isCompliant()).to.be.false;
-        // The issuer attests both topics.
-        const iss = await ethers.getContractAt("ClaimIssuer", issuerAddr);
-        for (const topic of [KYC_TOPIC, AML_TOPIC]) {
-          const sig = await claimIssuer.signMessage(
-            ethers.getBytes(
-              ethers.solidityPackedKeccak256(
-                ["address", "uint256", "bytes"],
-                [await onchainID.getAddress(), topic, claimData],
-              ),
-            ),
-          );
-          await iss
-            .connect(claimIssuer)
-            .issueClaim(
-              await onchainID.getAddress(),
-              topic,
-              ECDSA_SCHEME,
-              claimData,
-              "",
-              0,
-              sig,
-            );
-        }
-
-        const [valid, missingTopics, expiredClaims] =
-          await onchainID.getComplianceStatus();
-        expect(valid).to.be.true;
-        expect(missingTopics.length).to.equal(0);
-        expect(expiredClaims.length).to.equal(0);
-      });
-    });
-  });
-
-  describe("Statistics and Utilities", function () {
-    it("Should return correct identity statistics", async function () {
-      const claimData = ethers.solidityPacked(["string"], ["KYC verified"]);
-      const claimSignature = ethers.solidityPacked(
-        ["string"],
-        ["mock-signature"],
-      );
-
-      // Add some keys and claims
-      const testKey = ethers.keccak256(
-        ethers.solidityPacked(["string"], ["test-key"]),
-      );
-      await onchainID.connect(owner).addKey(testKey, ACTION_KEY, ECDSA_TYPE);
-      await onchainID
-        .connect(owner)
-        .addTrustedIssuer(claimIssuer.address, [KYC_TOPIC]);
-      await onchainID.connect(owner).addClaimTopic(KYC_TOPIC, true);
-      await onchainID
-        .connect(owner)
-        .addClaim(
-          KYC_TOPIC,
-          ECDSA_SCHEME,
-          claimIssuer.address,
-          claimSignature,
-          claimData,
-          "",
-        );
-
-      const [keyCount, claimCount, trustedIssuerCount, requiredTopicCount] =
-        await onchainID.getIdentityStats();
-
-      expect(keyCount).to.equal(2); // Owner key + test key
-      expect(claimCount).to.equal(1);
-      expect(trustedIssuerCount).to.equal(1);
-      expect(requiredTopicCount).to.equal(1);
-    });
-
+  describe("Utilities", function () {
     it("Should return creation time", async function () {
       const creationTime = await onchainID.getCreationTime();
       expect(creationTime).to.be.gt(0);

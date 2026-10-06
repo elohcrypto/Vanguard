@@ -110,51 +110,29 @@ describe("🏭 Production Simulation - OnchainID System", function () {
       await prodEnv.issueAMLClaim(corporateAddress);
       console.log("✅ AML compliance verified");
 
-      // Step 6: Configure compliance framework
-      console.log("⚖️ Step 6: Setting up regulatory compliance framework...");
-
-      await corporateIdentity
-        .connect(prodEnv.corporateUser)
-        .addTrustedIssuer(await prodEnv.kycIssuer.getAddress(), [
+      // Step 6: Verify compliance where it is decided. Each trusted issuer
+      // attests its topic for the identity (IdentityRegistry asks them; the
+      // identity holds no compliance store of its own, plan v2 Task 4.5).
+      console.log("✅ Step 6: Verifying enterprise claims at their issuers...");
+      expect(
+        await prodEnv.kycIssuer.hasValidClaim(
+          corporateAddress,
           prodEnv.config.kycTopic,
-        ]);
-      await corporateIdentity
-        .connect(prodEnv.corporateUser)
-        .addTrustedIssuer(await prodEnv.amlIssuer.getAddress(), [
+        ),
+      ).to.be.true;
+      expect(
+        await prodEnv.amlIssuer.hasValidClaim(
+          corporateAddress,
           prodEnv.config.amlTopic,
-        ]);
-
-      await corporateIdentity
-        .connect(prodEnv.corporateUser)
-        .addClaimTopic(prodEnv.config.kycTopic, true);
-      await corporateIdentity
-        .connect(prodEnv.corporateUser)
-        .addClaimTopic(prodEnv.config.amlTopic, true);
-
-      console.log("✅ Regulatory compliance framework configured");
-
-      // Step 7: Verify full compliance
-      console.log("✅ Step 7: Verifying enterprise compliance status...");
-
-      const isCompliant = await corporateIdentity.isCompliant();
-      expect(isCompliant).to.be.true;
-
-      const [valid, missingTopics, expiredClaims] =
-        await corporateIdentity.getComplianceStatus();
-      expect(valid).to.be.true;
-      expect(missingTopics.length).to.equal(0);
-      expect(expiredClaims.length).to.equal(0);
+        ),
+      ).to.be.true;
 
       console.log("🎉 Enterprise onboarding completed successfully!");
 
-      // Display comprehensive stats
-      const [keyCount, claimCount, trustedIssuerCount, requiredTopicCount] =
-        await corporateIdentity.getIdentityStats();
-      console.log(`📊 Enterprise Identity Stats:`);
-      console.log(`   - Management Keys: ${keyCount}`);
-      console.log(`   - Compliance Claims: ${claimCount}`);
-      console.log(`   - Trusted Issuers: ${trustedIssuerCount}`);
-      console.log(`   - Required Topics: ${requiredTopicCount}`);
+      console.log(`📊 Enterprise Identity:`);
+      console.log(
+        `   - Management Keys: ${(await corporateIdentity.getKeysByPurpose(1)).length}`,
+      );
     });
   });
 
@@ -284,17 +262,12 @@ describe("🏭 Production Simulation - OnchainID System", function () {
       // Step 6: Final compliance verification
       console.log("✅ Step 6: Final compliance verification...");
 
-      await userIdentity
-        .connect(prodEnv.individualUser)
-        .addTrustedIssuer(await prodEnv.kycIssuer.getAddress(), [
+      expect(
+        await prodEnv.kycIssuer.hasValidClaim(
+          userAddress,
           prodEnv.config.kycTopic,
-        ]);
-      await userIdentity
-        .connect(prodEnv.individualUser)
-        .addClaimTopic(prodEnv.config.kycTopic, true);
-
-      const isCompliant = await userIdentity.isCompliant();
-      expect(isCompliant).to.be.true;
+        ),
+      ).to.be.true;
 
       console.log("🎉 Individual user onboarding completed successfully!");
     });
@@ -361,44 +334,17 @@ describe("🏭 Production Simulation - OnchainID System", function () {
       );
       console.log("✅ Institutional recovery system configured");
 
-      // Step 4: Configure comprehensive compliance framework
-      console.log(
-        "📋 Step 4: Configuring comprehensive compliance framework...",
-      );
-
-      await institutionalIdentity
-        .connect(prodEnv.institutionalUser)
-        .addTrustedIssuer(await prodEnv.kycIssuer.getAddress(), [
-          prodEnv.config.kycTopic,
-        ]);
-      await institutionalIdentity
-        .connect(prodEnv.institutionalUser)
-        .addTrustedIssuer(await prodEnv.amlIssuer.getAddress(), [
-          prodEnv.config.amlTopic,
-        ]);
-      await institutionalIdentity
-        .connect(prodEnv.institutionalUser)
-        .addTrustedIssuer(await prodEnv.complianceIssuer.getAddress(), [
-          prodEnv.config.accreditationTopic,
-        ]);
-
-      await institutionalIdentity
-        .connect(prodEnv.institutionalUser)
-        .addClaimTopic(prodEnv.config.kycTopic, true);
-      await institutionalIdentity
-        .connect(prodEnv.institutionalUser)
-        .addClaimTopic(prodEnv.config.amlTopic, true);
-      await institutionalIdentity
-        .connect(prodEnv.institutionalUser)
-        .addClaimTopic(prodEnv.config.accreditationTopic, true);
-
-      console.log("✅ Comprehensive compliance framework configured");
-
-      // Step 5: Verify institutional compliance
-      console.log("✅ Step 5: Verifying institutional compliance...");
-
-      const isCompliant = await institutionalIdentity.isCompliant();
-      expect(isCompliant).to.be.true;
+      // Step 4-5: Verify institutional claims at their issuers (plan v2
+      // Task 4.5: verification is the issuers', asked by IdentityRegistry)
+      console.log("✅ Step 4-5: Verifying institutional claims at their issuers...");
+      for (const [issuer, topic] of [
+        [prodEnv.kycIssuer, prodEnv.config.kycTopic],
+        [prodEnv.amlIssuer, prodEnv.config.amlTopic],
+        [prodEnv.complianceIssuer, prodEnv.config.accreditationTopic],
+      ] as const) {
+        expect(await issuer.hasValidClaim(institutionalAddress, topic)).to.be
+          .true;
+      }
 
       console.log(
         "🎉 Institutional investor onboarding completed successfully!",
