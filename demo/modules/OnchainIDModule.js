@@ -62,7 +62,7 @@ class OnchainIDModule {
   }
 
   /**
-   * Option 2: Create OnchainID for a user
+   * Option 3: Create OnchainID for a user
    *
    * @returns {Promise<void>}
    *

@@ -239,7 +239,7 @@ class PrivacyModule {
     }
   }
 
-  /** Option 42a: Manage Jurisdiction Lists */
+  /** Option 42 -> 7: Manage Jurisdiction Lists */
   async manageJurisdictionLists() {
     displaySection("MANAGE JURISDICTION LISTS", "🌍");
 
@@ -1627,7 +1627,7 @@ class PrivacyModule {
         console.log(
           pick
             ? `   👤 Prover: ${pick.address}, the first listed wallet that is KYC/AML verified`
-            : `   ⚠️  No listed wallet is KYC/AML verified: ${proofUser.address} proves and binds, but VSC refuses it until it is onboarded (options 23/24, 3, 4), or use security mode 3`,
+            : `   ⚠️  No listed wallet is KYC/AML verified: ${proofUser.address} proves and binds, but VSC refuses it until it is onboarded (options 23/24, or 3, 6 and 7), or use security mode 3`,
         );
       }
 

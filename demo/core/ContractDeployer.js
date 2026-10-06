@@ -249,7 +249,9 @@ class ContractDeployer {
     if (reached === steps.length) {
       console.log("\n💡 Next steps:");
       console.log("   • Option 23 or 24 — onboard users (creates OnchainIDs)");
-      console.log("   • Options 3 and 4 — issue KYC/AML claims to them");
+      console.log(
+        "   • Options 6 and 7 — KYC/AML claims for any still unverified",
+      );
       console.log("   • Option 75 — distribute VGT so they can pay vote fees");
       console.log(
         "   • Option 83b — governance accepts registry ownership by vote",

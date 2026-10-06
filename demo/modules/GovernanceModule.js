@@ -357,7 +357,7 @@ class GovernanceModule {
           "Recipient must be KYC/AML verified to receive VGT tokens",
         );
         console.log(
-          "\n💡 TIP: Use Option 3 (Issue KYC) and Option 4 (Issue AML) first",
+          "\n💡 TIP: Use Option 6 (KYC claim) and Option 7 (AML claim) first",
         );
         return;
       }
@@ -862,8 +862,8 @@ class GovernanceModule {
       if (!isVerified) {
         displayError("You must be KYC/AML verified to create proposals");
         console.log("\n💡 SOLUTION:");
-        console.log("   1. Use Option 3 to issue KYC to yourself (signer 0)");
-        console.log("   2. Use Option 4 to issue AML to yourself (signer 0)");
+        console.log("   1. Use Option 6 to issue KYC to yourself (signer 0)");
+        console.log("   2. Use Option 7 to issue AML to yourself (signer 0)");
         console.log("   3. Try creating proposal again");
         return;
       }
@@ -969,7 +969,7 @@ class GovernanceModule {
           "\n💡 TIP: Use Option 75c to approve Governance contract to spend VGT",
         );
       } else if (error.message.includes("Must be KYC/AML verified")) {
-        console.log("\n💡 TIP: Use Options 3 & 4 to issue KYC/AML to yourself");
+        console.log("\n💡 TIP: Use Options 6 & 7 to issue KYC/AML to yourself");
       } else if (error.message.includes("Identity too new to vote")) {
         console.log(
           "\n💡 TIP: identities propose and vote only once minVoterAge old (7 days / TIME_SCALE); wait, or jump time on a dev node",

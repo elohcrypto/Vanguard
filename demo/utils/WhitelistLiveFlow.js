@@ -135,7 +135,7 @@ async function runLiveWhitelistFlow({
   const bound = async (s) => pm.hasValidWhitelistProof(s.address);
   if (!(await verified(sender))) {
     log(
-      `   ℹ️  ${sender.address} is not KYC/AML verified: onboard it (options 23/24, 3, 4) to use it on VSC`,
+      `   ℹ️  ${sender.address} is not KYC/AML verified: onboard it (options 23/24, or 3, 6 and 7) to use it on VSC`,
     );
     return null;
   }

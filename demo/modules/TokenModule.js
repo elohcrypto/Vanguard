@@ -516,7 +516,7 @@ class TokenModule {
       console.log(`✅ AML: ISSUED`);
       console.log(`📊 Status: COMPLIANT`);
       console.log(
-        `⬆️  Can Upgrade: YES (use Option 2 to request investor status)`,
+        `⬆️  Can Upgrade: YES (use option 23 -> 2 to request investor status)`,
       );
       console.log(`⛽ Total Gas Used: ${totalGasUsed.toLocaleString()}`);
     } catch (error) {
@@ -629,10 +629,10 @@ class TokenModule {
     console.log(`📊 Status: ${request.status.toUpperCase()}`);
     console.log("");
     console.log("🎯 NEXT STEPS:");
-    console.log("   1. Bank transfers tokens to user (Option 3)");
-    console.log("   2. Bank creates multi-sig wallet (Option 4)");
-    console.log("   3. User locks tokens (Option 5)");
-    console.log("   4. Bank approves request (Option 6)");
+    console.log("   1. Bank transfers tokens to user (23 -> 3)");
+    console.log("   2. Bank creates multi-sig wallet (23 -> 4)");
+    console.log("   3. User locks tokens (23 -> 5)");
+    console.log("   4. Bank approves request (23 -> 6)");
 
     // Store request
     selectedUser.investorRequest = {
@@ -707,7 +707,7 @@ class TokenModule {
 
     if (usersWithRequests.length === 0) {
       console.log("❌ No users with pending requests needing tokens!");
-      console.log("💡 Users must request investor status first (Option 2)");
+      console.log("💡 Users must request investor status first (23 -> 2)");
       return;
     }
 
@@ -763,9 +763,9 @@ class TokenModule {
       console.log(`📝 Transaction Hash: ${receipt.hash}`);
       console.log("");
       console.log("🎯 NEXT STEPS:");
-      console.log("   1. Bank creates multi-sig wallet (Option 4)");
-      console.log("   2. User locks tokens (Option 5)");
-      console.log("   3. Bank approves request (Option 6)");
+      console.log("   1. Bank creates multi-sig wallet (23 -> 4)");
+      console.log("   2. User locks tokens (23 -> 5)");
+      console.log("   3. Bank approves request (23 -> 6)");
     } catch (error) {
       console.error("❌ Token transfer failed:", error.message);
       if (error.message.includes("insufficient balance")) {
@@ -791,7 +791,7 @@ class TokenModule {
         u.investorRequest.status === "PENDING" &&
         !u.multiSigWallet,
       "USERS WITH PENDING REQUESTS",
-      "💡 Users must request investor status first (Option 2)",
+      "💡 Users must request investor status first (23 -> 2)",
     );
     if (!selectedUser) return;
 
@@ -799,7 +799,7 @@ class TokenModule {
       console.log(`\n🔐 Creating 2-of-2 Multi-Sig Wallet...`);
       await Custody.createWallet(this.state, selectedUser);
       console.log(`\n✅ MULTI-SIG WALLET CREATED!`);
-      console.log("🎯 NEXT STEP: User locks tokens (Option 5)");
+      console.log("🎯 NEXT STEP: User locks tokens (23 -> 5)");
     } catch (error) {
       displayError(`Wallet creation failed: ${error.message}`);
     }
@@ -846,7 +846,7 @@ class TokenModule {
     const selectedUser = await this._pickInvestor(
       (u) => u.multiSigWallet && u.multiSigWallet.tokensLocked === 0,
       "USERS READY TO LOCK TOKENS",
-      "💡 Bank must create multi-sig wallet first (Option 4)",
+      "💡 Bank must create multi-sig wallet first (23 -> 4)",
     );
     if (!selectedUser) return;
 
@@ -864,7 +864,7 @@ class TokenModule {
     console.log(
       `                        user ${selectedUser.multiSigWallet.user}`,
     );
-    console.log(`🎯 NEXT STEP: Bank approves request (Option 6)`);
+    console.log(`🎯 NEXT STEP: Bank approves request (23 -> 6)`);
   }
 
   /**
@@ -884,7 +884,7 @@ class TokenModule {
         u.investorRequest.tokensLocked &&
         u.investorRequest.status === "PENDING",
       "REQUESTS READY FOR APPROVAL",
-      "💡 Users must lock tokens first (Option 5)",
+      "💡 Users must lock tokens first (23 -> 5)",
     );
     if (!selectedUser) return;
 
@@ -933,7 +933,7 @@ class TokenModule {
       console.log(
         `💰 Released by bank + user: ${ethers.formatEther(released)} VSC`,
       );
-      console.log("✅ User can request investor status again (Option 2)");
+      console.log("✅ User can request investor status again (23 -> 2)");
     } catch (error) {
       console.error("❌ Downgrade failed:", error.message);
     }
