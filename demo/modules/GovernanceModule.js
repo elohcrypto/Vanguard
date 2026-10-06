@@ -843,7 +843,7 @@ class GovernanceModule {
 
   /** Option 76: Create Proposal */
   async createProposal() {
-    displaySection("CREATE GOVERNANCE PROPOSAL (TOKEN-WEIGHTED)", "🗳️");
+    displaySection("CREATE GOVERNANCE PROPOSAL", "🗳️");
 
     const vanguardGovernance = this.state.getContract("vanguardGovernance");
     const governanceToken = this.state.getContract("governanceToken");
