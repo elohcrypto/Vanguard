@@ -6,7 +6,6 @@ import "@openzeppelin/contracts/utils/cryptography/ECDSA.sol";
 import "@openzeppelin/contracts/utils/cryptography/MessageHashUtils.sol";
 import "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
 import "./interfaces/IOnchainID.sol";
-import "./interfaces/IERC735.sol";
 import "./interfaces/IClaimIssuer.sol";
 
 /**
