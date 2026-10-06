@@ -5,9 +5,21 @@ import "../erc3643/Token.sol";
 
 /**
  * @title GovernanceToken
- * @dev ERC-3643 compliant governance token with voting power based on token ownership
+ * @dev ERC-3643 compliant governance token (VGT). Governance spends it as the
+ * proposal and vote fee; it is not a vote weight.
  * @notice Only approved addresses (verified through IdentityRegistry) can hold this token
- * @notice Voting power is proportional to token balance
+ * @notice Voting power is recorded here (own balance plus balance delegated
+ * in), but votes are one per verified identity: VanguardGovernance never
+ * reads voting power.
+ *
+ * TODO(D12, 2026-10-06): recorded, not counted. Governance counts one vote
+ * per verified identity (VanguardGovernance.castVote, votesFor += 1) and
+ * never reads voting power; delegation is bookkeeping for a future proposal:
+ * wire into castVote after the external audit (a delegate votes for its
+ * delegators, checkpointed per proposal), see plan v2 Task 4.6 / D12.
+ * Covers delegate, getDelegate, getVotingPower, getTotalVotingPower, canVote
+ * and getVotingPowerPercentage; test/governance/DelegationNoEffect.test.ts
+ * pins the "today" behaviour that the wiring would change.
  */
 contract GovernanceToken is Token {
     // Voting power tracking
@@ -44,6 +56,7 @@ contract GovernanceToken is Token {
      * @dev Get voting power of an account
      * @param account Address to check
      * @return Voting power (token balance + delegated power)
+     * TODO(D12, 2026-10-06): recorded, not counted; see the contract NatSpec.
      */
     function getVotingPower(address account) public view returns (uint256) {
         // Own balance plus power delegated in. A private mirror of balanceOf
@@ -64,6 +77,7 @@ contract GovernanceToken is Token {
     /**
      * @dev Delegate voting power to another address
      * @param delegatee Address to delegate to
+     * TODO(D12, 2026-10-06): recorded, not counted; see the contract NatSpec.
      */
     function delegate(address delegatee) external {
         require(delegatee != address(0), "Cannot delegate to zero address");
@@ -94,6 +108,7 @@ contract GovernanceToken is Token {
      * @dev Get current delegate of an account
      * @param account Address to check
      * @return Current delegate address
+     * TODO(D12, 2026-10-06): recorded, not counted; see the contract NatSpec.
      */
     function getDelegate(address account) external view returns (address) {
         return _delegates[account];
@@ -158,6 +173,7 @@ contract GovernanceToken is Token {
     /**
      * @dev Get total voting power in circulation
      * @return Total voting power
+     * TODO(D12, 2026-10-06): recorded, not counted; see the contract NatSpec.
      */
     function getTotalVotingPower() external view returns (uint256) {
         return totalSupply();
@@ -190,6 +206,7 @@ contract GovernanceToken is Token {
      * @dev Check if an address can vote (has voting power and is verified)
      * @param account Address to check
      * @return True if can vote
+     * TODO(D12, 2026-10-06): recorded, not counted; see the contract NatSpec.
      */
     function canVote(address account) external view returns (bool) {
         return getVotingPower(account) > 0 && balanceOf(account) > 0;
@@ -199,6 +216,7 @@ contract GovernanceToken is Token {
      * @dev Get voting power percentage of total supply
      * @param account Address to check
      * @return Percentage (in basis points, 10000 = 100%)
+     * TODO(D12, 2026-10-06): recorded, not counted; see the contract NatSpec.
      */
     function getVotingPowerPercentage(address account) external view returns (uint256) {
         uint256 total = totalSupply();
