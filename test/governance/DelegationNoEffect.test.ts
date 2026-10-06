@@ -117,12 +117,7 @@ describe("VGT delegation is recorded, not counted (D12 b)", function () {
       await gov.connect(bob).castVote(id, true, "");
       await gov.connect(carol).castVote(id, false, "");
       const p = await settle(id);
-      return [
-        p.votesFor,
-        p.votesAgainst,
-        p.eligibleVotersAtCreation,
-        p.status,
-      ];
+      return [p.votesFor, p.votesAgainst, p.eligibleVotersAtCreation, p.status];
     };
     const plain = await run(false);
     expect(plain).to.deep.equal([1n, 1n, 3n, REJECTED]);
@@ -137,12 +132,7 @@ describe("VGT delegation is recorded, not counted (D12 b)", function () {
       await gov.connect(carol).castVote(id, true, "");
       await gov.connect(bob).castVote(id, true, "");
       const p = await settle(id);
-      return [
-        p.votesFor,
-        p.votesAgainst,
-        p.eligibleVotersAtCreation,
-        p.status,
-      ];
+      return [p.votesFor, p.votesAgainst, p.eligibleVotersAtCreation, p.status];
     };
     const plain = await run(false);
     expect(plain).to.deep.equal([2n, 0n, 3n, EXECUTED]);
