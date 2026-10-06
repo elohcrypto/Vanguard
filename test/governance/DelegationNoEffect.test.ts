@@ -201,3 +201,31 @@ describe("VGT delegation is recorded, not counted (D12 b)", function () {
     await expectMirror(vgt, accounts);
   });
 });
+
+describe("GovernanceToken.canVote checks verification", function () {
+  it("true for a verified holder, false once the identity is gone", async function () {
+    const { vgt, ir, bob } = await setup();
+    expect(await vgt.canVote(bob.address)).to.equal(true);
+    await ir.deleteIdentity(bob.address);
+    expect(await vgt.balanceOf(bob.address)).to.equal(E("1000"));
+    // Before Task 4.6 this returned true: it only checked the balance.
+    expect(await vgt.canVote(bob.address)).to.equal(false);
+  });
+
+  it("false for a verified wallet without VGT", async function () {
+    const { vgt, ir, deployer, factory, kycIssuer } = await setup();
+    const w = ethers.Wallet.createRandom();
+    const id = await deployIdentity(factory, w.address);
+    await ir.registerIdentity(w.address, id, 840);
+    await attest(kycIssuer, deployer, id);
+    expect(await ir.isVerified(w.address)).to.equal(true);
+    expect(await vgt.canVote(w.address)).to.equal(false);
+  });
+
+  it("delegated-in power alone does not make an account eligible", async function () {
+    const { vgt, bob, stranger } = await setup();
+    await vgt.connect(bob).delegate(stranger.address);
+    expect(await vgt.getVotingPower(stranger.address)).to.equal(E("1000"));
+    expect(await vgt.canVote(stranger.address)).to.equal(false);
+  });
+});

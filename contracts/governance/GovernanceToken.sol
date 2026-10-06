@@ -203,13 +203,20 @@ contract GovernanceToken is Token {
     }
 
     /**
-     * @dev Check if an address can vote (has voting power and is verified)
+     * @dev Token-side eligibility: the account is verified in this token's
+     * identity registry and holds VGT. Governance adds its own checks on top
+     * (the wallet holds a key on its identity, minimum identity age, vote
+     * cost and allowance, one vote per identity, the proposer's identity
+     * excluded), so true here does not mean castVote succeeds. Delegated-in
+     * power alone does not make an account eligible.
      * @param account Address to check
-     * @return True if can vote
+     * @return True if verified and holding VGT
      * TODO(D12, 2026-10-06): recorded, not counted; see the contract NatSpec.
      */
     function canVote(address account) external view returns (bool) {
-        return getVotingPower(account) > 0 && balanceOf(account) > 0;
+        return
+            IIdentityRegistry(this.identityRegistry()).isVerified(account) &&
+            balanceOf(account) > 0;
     }
     
     /**
