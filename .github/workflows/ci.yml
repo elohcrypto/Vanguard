@@ -130,8 +130,8 @@ jobs:
       # error. Its stdout is also truncated under a pipe (process.exit before
       # flush), so the report goes to a file and is counted from there. Any
       # error fails; warnings fail only when they RISE above the baseline.
-      # Baseline 793 (2026-10-06, after Task 4.7 deleted the unimported
-      # IMultiSigEscrowWallet and two unused mocks; 798 after Task 4.5
+      # Baseline 793 (2026-10-06, after Task 4.7 deleted an unimported
+      # payment interface and two unused mocks; 798 after Task 4.5
       # dropped OnchainID's topic
       # store; 802 then 801 during Task 4.4; 885 after 4.3, 887 after 4.2
       # and 889 after 4.1; 976
