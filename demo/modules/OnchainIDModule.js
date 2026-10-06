@@ -1602,17 +1602,10 @@ class OnchainIDModule {
       return;
     }
 
-    // Owner signs confirmation
-    const confirmMessage = `Approve key removal from OnchainID: ${await onchainID.getAddress()}`;
-    const ownerSignature = await ownerSigner.signMessage(confirmMessage);
-    const recoveredOwner = ethers.verifyMessage(confirmMessage, ownerSignature);
-
-    if (recoveredOwner.toLowerCase() !== ownerAddress.toLowerCase()) {
-      displayError("Owner signature verification failed");
-      return;
-    }
-
-    console.log("   ✅ Owner approval verified");
+    // The owner's consent is the removal transaction it sends below; the
+    // chain checks the key holder's signature (review of 4.5, N-5: an
+    // off-chain owner signature nothing verified was removed).
+    console.log("   ✅ The owner will send the removal transaction");
 
     // ========== STEP 2: SELECT KEY TO REMOVE ==========
     const keyPurposes = [
