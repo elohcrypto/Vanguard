@@ -17,8 +17,6 @@ describe("🔒 VSC & VGT Compliance Control - Complete Proof", function () {
   let onchainIDFactory: any;
   let kycIssuer: any;
   let amlIssuer: any;
-  let vanguardGovernance: any;
-  let paymentProtocol: any;
 
   let owner: SignerWithAddress;
   let verifiedUser1: SignerWithAddress;
