@@ -13,6 +13,7 @@
  */
 
 const { ethers } = require("hardhat");
+const { runAccessControlChecks } = require("../utils/AccessControlChecks");
 const {
   displaySection,
   displaySuccess,
@@ -666,216 +667,16 @@ class ComplianceModule {
   }
 
   /**
-   * Option 19: Test access control
-   *
-   * @returns {Promise<void>}
+   * Option 19: ComplianceRules access control on VSC, counted from chain
+   * (demo/utils/AccessControlChecks.js).
    */
   async testAccessControl() {
     console.log("\n🔐 COMPREHENSIVE ACCESS CONTROL TESTING");
     console.log("=".repeat(60));
-
-    const complianceRules = this.state.getContract("complianceRules");
-    if (!complianceRules) {
-      console.log("❌ ComplianceRules contract not deployed!");
-      console.log("💡 Please deploy ComplianceRules first using option 13");
-      return;
-    }
-
     try {
-      const token = this.state.getContract("digitalToken");
-      if (!token) {
-        console.log("❌ Token not deployed!");
-        return;
-      }
-      const tokenAddress = await token.getAddress();
-      const complianceAddress = await complianceRules.getAddress();
-
-      console.log("\n📋 TEST ENVIRONMENT SETUP");
-      console.log("-".repeat(40));
-      console.log(`🏗️  ComplianceRules Contract: ${complianceAddress}`);
-      console.log(`🪙 ERC-3643 Digital Token: ${tokenAddress}`);
-      console.log(`👑 Contract Owner: ${this.state.signers[0].address}`);
-      console.log(`👨‍💼 Test Administrator: ${this.state.signers[1].address}`);
-      console.log(`👤 Regular User 1: ${this.state.signers[2].address}`);
-      console.log(`👤 Regular User 2: ${this.state.signers[3].address}`);
-
-      // Test 1: Owner Permissions
-      console.log("\n👑 TEST 1: OWNER PERMISSIONS");
-      console.log("=".repeat(40));
-      console.log(
-        "🧪 Testing owner can set a rule administrator for VSC (per token)...",
-      );
-
-      try {
-        const tx1 = await complianceRules
-          .connect(this.state.signers[0])
-          .setRuleAdministrator(
-            tokenAddress,
-            this.state.signers[1].address,
-            true,
-          );
-        const receipt1 = await tx1.wait();
-        console.log(`✅ SUCCESS: Owner set rule administrator`);
-        console.log(`   📍 Administrator: ${this.state.signers[1].address}`);
-        console.log(`   🔗 Transaction: ${receipt1.hash}`);
-        console.log(`   🧱 Block: ${receipt1.blockNumber}`);
-        console.log(`   ⛽ Gas Used: ${receipt1.gasUsed.toLocaleString()}`);
-      } catch (error) {
-        console.log(`❌ FAILED: Owner could not set rule administrator`);
-        console.log(`   🚨 Error: ${error.message}`);
-      }
-
-      // Test 2: Administrator Permissions
-      console.log("\n👨‍💼 TEST 2: ADMINISTRATOR PERMISSIONS");
-      console.log("=".repeat(40));
-      console.log("🧪 Testing administrator can set jurisdiction rules...");
-
-      try {
-        const tx3 = await complianceRules
-          .connect(this.state.signers[1])
-          .setJurisdictionRule(
-            tokenAddress,
-            [840, 276, 826], // USA, Germany, UK
-            [643, 156], // Russia, China
-          );
-        const receipt3 = await tx3.wait();
-        console.log(`✅ SUCCESS: Administrator set jurisdiction rules`);
-        console.log(
-          `   🌍 Allowed Countries: [840, 276, 826] (USA, Germany, UK)`,
-        );
-        console.log(`   🚫 Blocked Countries: [643, 156] (Russia, China)`);
-        console.log(`   🔗 Transaction: ${receipt3.hash}`);
-        console.log(`   🧱 Block: ${receipt3.blockNumber}`);
-        console.log(`   ⛽ Gas Used: ${receipt3.gasUsed.toLocaleString()}`);
-      } catch (error) {
-        console.log(
-          `❌ FAILED: Administrator could not set jurisdiction rules`,
-        );
-        console.log(`   🚨 Error: ${error.message}`);
-      }
-
-      // Test 3: Regular User Restrictions
-      console.log("\n👤 TEST 3: REGULAR USER ACCESS RESTRICTIONS");
-      console.log("=".repeat(50));
-      console.log("🧪 Testing regular user CANNOT set jurisdiction rules...");
-
-      try {
-        await complianceRules
-          .connect(this.state.signers[2])
-          .setJurisdictionRule(
-            tokenAddress,
-            [392], // Japan
-            [],
-          );
-        console.log(`❌ SECURITY BREACH: Regular user was able to set rules!`);
-        console.log(`   🚨 This should NOT have succeeded!`);
-      } catch (error) {
-        console.log(
-          `✅ SUCCESS: Regular user correctly blocked from setting rules`,
-        );
-        console.log(`   👤 Blocked User: ${this.state.signers[2].address}`);
-        console.log(`   🛡️  Security Message: ${error.message.split("(")[0]}`);
-        console.log(`   🔒 Access Control: WORKING`);
-      }
-
-      // Test 4: Unauthorized Administrative Actions
-      console.log("\n🚫 TEST 4: UNAUTHORIZED ADMINISTRATIVE ACTIONS");
-      console.log("=".repeat(50));
-      console.log("🧪 Testing unauthorized user CANNOT set administrators...");
-
-      try {
-        await complianceRules
-          .connect(this.state.signers[2])
-          .setRuleAdministrator(
-            tokenAddress,
-            this.state.signers[3].address,
-            true,
-          );
-        console.log(
-          `❌ CRITICAL SECURITY BREACH: Unauthorized user set administrator!`,
-        );
-        console.log(`   🚨 This is a MAJOR security vulnerability!`);
-      } catch (error) {
-        console.log(
-          `✅ SUCCESS: Unauthorized user correctly blocked from setting administrators`,
-        );
-        console.log(`   👤 Blocked User: ${this.state.signers[2].address}`);
-        console.log(`   🎯 Attempted Target: ${this.state.signers[3].address}`);
-        console.log(`   🛡️  Security Message: ${error.message.split("(")[0]}`);
-        console.log(`   🔒 Owner-Only Protection: WORKING`);
-      }
-
-      // Test 5: Permission Revocation
-      console.log("\n🔄 TEST 5: PERMISSION REVOCATION");
-      console.log("=".repeat(40));
-      console.log("🧪 Testing owner can revoke administrator permissions...");
-
-      try {
-        const tx5 = await complianceRules
-          .connect(this.state.signers[0])
-          .setRuleAdministrator(
-            tokenAddress,
-            this.state.signers[1].address,
-            false,
-          );
-        const receipt5 = await tx5.wait();
-        console.log(`✅ SUCCESS: Owner revoked administrator permissions`);
-        console.log(
-          `   👨‍💼 Revoked Administrator: ${this.state.signers[1].address}`,
-        );
-        console.log(`   🔗 Transaction: ${receipt5.hash}`);
-        console.log(`   🧱 Block: ${receipt5.blockNumber}`);
-        console.log(`   ⛽ Gas Used: ${receipt5.gasUsed.toLocaleString()}`);
-      } catch (error) {
-        console.log(
-          `❌ FAILED: Owner could not revoke administrator permissions`,
-        );
-        console.log(`   🚨 Error: ${error.message}`);
-      }
-
-      console.log("\n🧪 Testing revoked administrator CANNOT set rules...");
-      try {
-        await complianceRules
-          .connect(this.state.signers[1])
-          .setJurisdictionRule(
-            tokenAddress,
-            [124], // Canada
-            [],
-          );
-        console.log(
-          `❌ SECURITY ISSUE: Revoked administrator still has access!`,
-        );
-      } catch (error) {
-        console.log(`✅ SUCCESS: Revoked administrator correctly blocked`);
-        console.log(
-          `   👨‍💼 Blocked Ex-Administrator: ${this.state.signers[1].address}`,
-        );
-        console.log(`   🛡️  Security Message: ${error.message.split("(")[0]}`);
-        console.log(`   🔒 Permission Revocation: WORKING`);
-      }
-
-      // Test Summary
-      console.log("\n🎉 ACCESS CONTROL TEST SUMMARY");
-      console.log("=".repeat(50));
-      console.log("✅ Owner Permissions: WORKING");
-      console.log("   • Can set rule administrators ✅");
-      console.log("   • Can revoke permissions ✅");
-      console.log("");
-      console.log("✅ Administrator Permissions: WORKING");
-      console.log("   • Can set jurisdiction rules ✅");
-      console.log("   • Cannot perform owner actions ✅");
-      console.log("");
-      console.log("✅ Access Restrictions: WORKING");
-      console.log("   • Regular users blocked from rule setting ✅");
-      console.log("   • Unauthorized users blocked from admin actions ✅");
-      console.log("   • Permission revocation works correctly ✅");
-      console.log("");
-      console.log("🔒 SECURITY STATUS: ALL TESTS PASSED");
-      console.log("🛡️  ComplianceRules access control is SECURE");
+      return await runAccessControlChecks(this.state);
     } catch (error) {
       console.error("❌ Access control tests failed:", error.message);
-      console.error("🚨 CRITICAL: Security testing encountered an error");
-      console.error("📋 Please review the contract security implementation");
     }
   }
 
