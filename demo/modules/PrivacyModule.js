@@ -1367,7 +1367,7 @@ class PrivacyModule {
       console.log("1. Demo mode (simplified - lists demo wallets 0-2)");
       console.log("2. Custom input mode (choose the listed wallets)");
       console.log(
-        "3. Secure mode (4-layer security: Registry + Signature + KYC + Nullifier) ⭐ RECOMMENDED",
+        "3. Secure mode (prover wallet 1; its identity and KYC/AML read from chain)",
       );
       const securityChoice = await this.promptUser("Select option (1-3): ");
 
@@ -1396,50 +1396,31 @@ class PrivacyModule {
       let listed = signers.slice(0, 3);
 
       if (securityChoice === "3") {
-        // 🛡️ SECURE MODE: 4-Layer Security
-        console.log("\n🛡️  SECURE MODE ACTIVATED");
+        // Secure mode: the checks below are chain reads, printed as read.
+        console.log("\n🛡️  SECURE MODE: identity and KYC/AML read from chain");
         console.log("=".repeat(60));
-        console.log("Implementing 4-Layer Security:");
-        console.log("  1️⃣  On-Chain Identity Registry Check");
-        console.log("  2️⃣  Cryptographic Signature Verification");
-        console.log("  3️⃣  KYC/AML Status Verification");
-        console.log("  4️⃣  Nullifier Tracking (automatic)");
-        console.log("=".repeat(60));
-        console.log("");
-
-        // LAYER 1: Check On-Chain Identity Registry
-        console.log("🔍 LAYER 1: Checking On-Chain Identity Registry...");
         proofUser = signers[1] || signers[0];
-        console.log(`   📍 User Address: ${proofUser.address}`);
+        console.log(`   📍 Prover: ${proofUser.address} (wallet 1)`);
         const { identity, onchainID } = await demoIdentity(
           this.state,
           proofUser.address,
         );
-        if (onchainID) {
-          console.log(`   ✅ OnchainID Found: ${onchainID}`);
-        } else {
-          console.log(
-            "   ⚠️  No identity registered. Using the wallet address as a simulated identity...",
-          );
-        }
-        console.log(`   🔢 Identity (field element): ${identity}`);
-
-        // LAYER 2: Platform Owner Signature
-        console.log("\n🔏 LAYER 2: Platform Owner Signature Verification...");
         console.log(
-          "   🔒 SECURITY: Whitelist proofs REQUIRE platform owner authorization",
+          onchainID
+            ? `   ✅ 1. IdentityRegistry.identity: OnchainID ${onchainID}`
+            : "   ⚠️  1. IdentityRegistry.identity: none; the wallet address is a simulated identity",
         );
-        console.log("   ✅ Layer 2 ready (signature verification)");
-
-        // LAYER 3: KYC/AML Verification
-        console.log("\n🎫 LAYER 3: KYC/AML Status Verification...");
-        console.log("   ℹ️  Checking KYC/AML claims...");
-        console.log("   ✅ Layer 3 ready");
-
-        // LAYER 4: Nullifier Tracking
-        console.log("\n🔐 LAYER 4: Nullifier Tracking...");
-        console.log("   ℹ️  Nullifier will be automatically tracked on-chain");
-        console.log("   ✅ Layer 4 ready (handled by smart contract)");
+        console.log(`      🔢 Identity (field element): ${identity}`);
+        const idReg = this.state.getContract("identityRegistry");
+        const verified = idReg
+          ? await idReg.isVerified(proofUser.address)
+          : false;
+        console.log(
+          `   ${verified ? "✅" : "⚠️ "} 2. IdentityRegistry.isVerified: ${verified}${verified ? "" : " (VSC refuses this wallet whatever its binding)"}`,
+        );
+        console.log(
+          "   ℹ️  3. Nullifier: PrivacyManager.nullifierWallet records it at submission (printed below)",
+        );
 
         // Setup whitelist
         console.log("\n📋 Setting up whitelist...");
@@ -1458,8 +1439,11 @@ class PrivacyModule {
           listed.push(proofUser);
         }
 
-        console.log("\n✅ ALL 4 SECURITY LAYERS PASSED!");
-        console.log("   Proceeding to ZK proof generation...\n");
+        console.log(
+          onchainID && verified
+            ? "\n✅ Identity and KYC/AML hold on chain for the prover"
+            : "\n⚠️  Not every check holds: the proof still binds, VSC refuses an unverified wallet",
+        );
       } else if (securityChoice === "2") {
         // Custom input mode
         console.log("\n📋 CUSTOM INPUT MODE");
