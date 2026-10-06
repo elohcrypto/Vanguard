@@ -256,6 +256,7 @@ abstract contract OnchainIDKeys is IOnchainID, Ownable2Step, ReentrancyGuard {
     function removeKey(bytes32 _key, uint256 _purpose) external override onlyManagementKey returns (bool success) {
         require(keys[_key].key != bytes32(0), "OnchainID: Key does not exist");
         require(keys[_key].purpose == _purpose, "OnchainID: Purpose mismatch");
+        require(keys[_key].revokedAt == 0, "OnchainID: Key already revoked");
         _removeKey(_key, _purpose);
         return true;
     }
@@ -295,6 +296,7 @@ abstract contract OnchainIDKeys is IOnchainID, Ownable2Step, ReentrancyGuard {
     ) external onlyManagementKey returns (bool success) {
         require(keys[_key].key != bytes32(0), "OnchainID: Key does not exist");
         require(keys[_key].purpose == _purpose, "OnchainID: Purpose mismatch");
+        require(keys[_key].revokedAt == 0, "OnchainID: Key already revoked");
         require(keys[_key].keyType == ECDSA_TYPE, "OnchainID: Only ECDSA keys support proof");
 
         // Construct the message that should have been signed

@@ -193,4 +193,25 @@ describe("OnchainID key removal (plan v2 Task 4.5)", function () {
     expect(await id.owner()).to.equal(holder.address);
     expect(await id.authorizedManagers(kmAddr)).to.equal(true);
   });
+
+  // N-1 (review of 4.5): a revoked key is not removed twice, so its
+  // revokedAt is not re-stamped and KeyRemoved is not emitted again.
+  it("a revoked key cannot be removed again by either path", async function () {
+    const { holder, id } = await setup();
+    const w = ethers.Wallet.createRandom();
+    const key = k(w.address);
+    await id.connect(holder).addKey(key, ACTION, ECDSA);
+    await id.connect(holder).removeKey(key, ACTION);
+    const at = (await id.getKey(key)).revokedAt;
+    await expect(id.connect(holder).removeKey(key, ACTION)).to.be.revertedWith(
+      "OnchainID: Key already revoked",
+    );
+    const sig = await w.signMessage(
+      ethers.getBytes(await inner(id, key, ACTION)),
+    );
+    await expect(
+      id.connect(holder).removeKeyWithProof(key, ACTION, sig),
+    ).to.be.revertedWith("OnchainID: Key already revoked");
+    expect((await id.getKey(key)).revokedAt).to.equal(at);
+  });
 });
