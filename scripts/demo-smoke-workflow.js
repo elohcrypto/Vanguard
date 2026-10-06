@@ -93,9 +93,15 @@ async function runWorkflowSmoke(state, failures) {
     );
   }
   const rule = await rules.getJurisdictionRule(vscAddr);
+  const want = res.target;
+  const covers = (xs, need) =>
+    need.every((n) => xs.map(String).includes(String(n)));
   if (
-    list(rule.allowedCountries) !== list(RULE.allowed) ||
-    list(rule.blockedCountries) !== list(RULE.blocked)
+    !want ||
+    list(rule.allowedCountries) !== list(want.allowed) ||
+    list(rule.blockedCountries) !== list(want.blocked) ||
+    !covers(rule.allowedCountries, RULE.allowed) ||
+    !covers(rule.blockedCountries, RULE.blocked)
   ) {
     failures.push(
       `option 82: VSC rule is allowed [${list(rule.allowedCountries)}] blocked [${list(rule.blockedCountries)}], not the proposal's`,

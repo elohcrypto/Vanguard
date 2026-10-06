@@ -36,8 +36,32 @@ const STATUS = [
   "Executed",
   "Cancelled",
 ];
-/** The rule the proposal sets for VSC: US, UK, Canada allowed; Russia blocked. */
+/** What the proposal adds to VSC's rule: US, UK, Canada allowed; Russia blocked. */
 const RULE = { allowed: [840n, 826n, 124n], blocked: [643n] };
+
+/**
+ * VSC's current rule with RULE added: RULE.allowed joins the allowed list
+ * and leaves the blocked one, RULE.blocked the other way round, so no
+ * country loses its standing except by RULE.
+ */
+function withRule(current) {
+  const keep = (xs, drop) =>
+    xs.filter((x) => !drop.some((d) => d === x)).map((x) => BigInt(x));
+  const add = (xs, extra) => [
+    ...xs,
+    ...extra.filter((e) => !xs.some((x) => x === e)),
+  ];
+  return {
+    allowed: add(
+      keep([...current.allowedCountries], RULE.blocked),
+      RULE.allowed,
+    ),
+    blocked: add(
+      keep([...current.blockedCountries], RULE.allowed),
+      RULE.blocked,
+    ),
+  };
+}
 const ACTORS = 4; // one proposer, three voters
 
 const fmt = (v) => ethers.formatEther(v);
@@ -143,7 +167,7 @@ async function runCompleteWorkflow({ state, promptUser, log = console.log }) {
   log("\nOne ComplianceRules proposal from creation to execution:");
   log("1. one proposer and three voters, verified, holding the fees");
   log(
-    `2. propose VSC's jurisdiction rule: allowed ${list(RULE.allowed)}, blocked ${list(RULE.blocked)}`,
+    `2. propose VSC's jurisdiction rule plus allowed ${list(RULE.allowed)} and blocked ${list(RULE.blocked)}`,
   );
   log("3. vote: 1 person = 1 vote; VGT is the fee, not the weight");
   log("4. execute after the voting period and delay, read the rule back");
@@ -171,8 +195,15 @@ async function runCompleteWorkflow({ state, promptUser, log = console.log }) {
   const vscAddr = await vsc.getAddress();
   const before = await rules.getJurisdictionRule(vscAddr);
   log(`   Proposer: ${pick.proposer.address} (does not vote)`);
+  const target = withRule(before);
   log(
     `   VSC rule now: allowed ${list(before.allowedCountries)}, blocked ${list(before.blockedCountries)}`,
+  );
+  log(
+    `   Proposed:     allowed ${list(target.allowed)}, blocked ${list(target.blocked)}`,
+  );
+  log(
+    "   (a rule change for VSC lapses the private jurisdiction records: 42 -> 3 again)",
   );
 
   log("\nSTEP 2: CREATE THE PROPOSAL");
@@ -185,8 +216,8 @@ async function runCompleteWorkflow({ state, promptUser, log = console.log }) {
       rules,
       rules.interface.encodeFunctionData("setJurisdictionRule", [
         vscAddr,
-        RULE.allowed,
-        RULE.blocked,
+        target.allowed,
+        target.blocked,
       ]),
       "Update Jurisdiction Rules",
       "demo option 82",
@@ -226,14 +257,14 @@ async function runCompleteWorkflow({ state, promptUser, log = console.log }) {
         `   Voting ends ${new Date(Number(p.votingEnds) * 1000).toISOString()}, executable from ${new Date(Number(p.executionTime) * 1000).toISOString()}`,
       );
       log(`   💡 Execute proposal #${id} with option 78 after that time`);
-      return { proposalId: id, status: STATUS[Number(p.status)] };
+      return { proposalId: id, status: STATUS[Number(p.status)], target };
     }
     await settleProposal(gov, id, `proposal #${id}`);
     const [after] = await gov.getProposal(id);
     const rule = await rules.getJurisdictionRule(vscAddr);
     const ok =
-      list(rule.allowedCountries) === list(RULE.allowed) &&
-      list(rule.blockedCountries) === list(RULE.blocked);
+      list(rule.allowedCountries) === list(target.allowed) &&
+      list(rule.blockedCountries) === list(target.blocked);
     log(`   Status: ${STATUS[Number(after.status)]}`);
     log(
       `   VSC rule read back: allowed ${list(rule.allowedCountries)}, blocked ${list(rule.blockedCountries)} ${ok ? "✅" : "❌ not what the proposal set"}`,
@@ -243,7 +274,7 @@ async function runCompleteWorkflow({ state, promptUser, log = console.log }) {
         `PROPOSAL #${id} EXECUTED: VSC'S JURISDICTION RULE CHANGED BY VOTE`,
       );
     else displayError(`Proposal #${id} executed but the rule differs`);
-    return { proposalId: id, status: STATUS[Number(after.status)] };
+    return { proposalId: id, status: STATUS[Number(after.status)], target };
   } catch (error) {
     displayError(
       `Workflow stopped after creating proposal #${id}: ${error.message.split("\n")[0]}`,
@@ -252,8 +283,8 @@ async function runCompleteWorkflow({ state, promptUser, log = console.log }) {
       `   💡 Continue proposal #${id} with options 77 (vote) and 78 (execute)`,
     );
     const [p] = await gov.getProposal(id);
-    return { proposalId: id, status: STATUS[Number(p.status)] };
+    return { proposalId: id, status: STATUS[Number(p.status)], target };
   }
 }
 
-module.exports = { runCompleteWorkflow, RULE };
+module.exports = { runCompleteWorkflow, RULE, withRule };
