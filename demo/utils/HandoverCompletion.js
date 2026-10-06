@@ -35,6 +35,7 @@ const {
 } = require("./HandoverScans");
 const { privacyLines } = require("./HandoverPrivacy");
 const { keyManagerLines } = require("./HandoverKeys");
+const { registrarLines } = require("./HandoverRegistrars");
 
 const ZERO = ethers.ZeroAddress;
 const EXEMPT_ABI = [
@@ -100,6 +101,8 @@ async function assertHandoverComplete(o) {
   }
   // Task 4.2: KeyManager holds no power; the demo identity opted in.
   for (const [label, pass] of await keyManagerLines(o, dAddr)) add(label, pass);
+  // Task 4.3: every trusted-contract registrar names compiled wallet code.
+  for (const [label, pass] of await registrarLines(o)) add(label, pass);
   // Bound in governance, or the creator of a trusted escrow (review M-2),
   // but not named by the config: still checked.
   const d = o.derived;
@@ -347,6 +350,14 @@ async function residueWarnings(o, dAddr, govAddr, warnings) {
   for (const [w, why] of fee) {
     if (done.some((x) => same(x, w))) continue;
     done.push(w);
+    // A trusted fee wallet (the MultiSigWallet, Task 4.3) has no cap.
+    if (
+      await o.complianceRules["isTrustedContract(address,address)"](
+        await addrOf(o.token),
+        w,
+      )
+    )
+      continue;
     if (!(await exempt(w))) {
       warnings.push(
         `escrow fee wallet ${w} (${why}) is not investorLimitExempt on the registry the Token enforces: releases revert once it nears its cap (R-2F4-2)`,

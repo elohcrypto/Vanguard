@@ -44,6 +44,7 @@ const {
 const { assertHandoverComplete } = require("./HandoverCompletion");
 const { preflightPrivacy, privacySteps } = require("./HandoverPrivacy");
 const { preflightKeyManager } = require("./HandoverKeys");
+const { preflightRegistrars } = require("./HandoverRegistrars");
 
 const STATUS = [
   "Pending",
@@ -96,6 +97,7 @@ async function handoverDeployerPowers(o) {
   await preflightPowers(o, { governanceOwned });
   await preflightPrivacy(o);
   await preflightKeyManager(o);
+  await preflightRegistrars(o); // Task 4.3
   const ctx = { o, d, dAddr, govAddr, report, ok, log };
   // Send, read back, assert, print.
   const apply = async (tx, readBack, msg) => {

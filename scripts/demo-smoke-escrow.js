@@ -245,4 +245,10 @@ async function runEscrowSmoke(state, failures) {
     failures.push("refund after a refused release did not return 1,050 VSC");
 }
 
-module.exports = { runEscrowSmoke };
+module.exports = {
+  // Task 4.3: the custody leg (demo-smoke-custody.js) runs after this one.
+  runEscrowSmoke: async (state, failures) => {
+    await runEscrowSmoke(state, failures);
+    await require("./demo-smoke-custody").runCustodySmoke(state, failures);
+  },
+};

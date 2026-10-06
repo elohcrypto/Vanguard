@@ -204,10 +204,8 @@ async function main() {
   await registry.waitForDeployment();
   state.setContract("investorTypeRegistry", registry);
 
-  // Task 2A.2: this script deploys InvestorTypeRegistry directly rather than
-  // via InvestorTypeModule.deployInvestorTypeSystem (option 51), so wire it
-  // to the token here the same way that module now does at the end of its
-  // deploy call.
+  // Task 2A.2: this script deploys InvestorTypeRegistry directly, not via
+  // option 51, so it wires the token and (4.3) deploys custody as 51 does.
   if (token) {
     const registryAddr = await registry.getAddress();
     await (await token.setInvestorTypeRegistry(registryAddr)).wait();
@@ -221,6 +219,7 @@ async function main() {
         `token.investorTypeRegistry() = ${wiredRegistry}, expected ${registryAddr}`,
       );
     }
+    await deployer.deployInvestorCustody(); // custody smoke: demo-smoke-escrow
   }
 
   // D22 (a): the treasury (signer 0) and, for D26, demo-smoke-escrow.js's
