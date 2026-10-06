@@ -1718,11 +1718,11 @@ class GovernanceModule {
       console.log(`   Symbol: VGT`);
       console.log(`   Total Supply: ${ethers.formatEther(totalSupply)} VGT`);
       console.log(`   Owner Balance: ${ethers.formatEther(ownerBalance)} VGT`);
-      // GovernanceToken.getVotingPower() returns a TOKEN BALANCE, left
-      // over from an earlier token-weighted design. No contract reads it
-      // for any decision — votes are counted 1 per verified person. It
-      // is not shown here because it contradicts the per-signer
-      // "1 vote (equal)" line below.
+      // GovernanceToken.getVotingPower() returns a TOKEN BALANCE plus VGT
+      // delegated in. No contract reads it for any decision; votes are
+      // counted 1 per verified person. Delegation is recorded, not counted
+      // (D12 b, wiring after the external audit): each signer below shows
+      // its delegate and delegated-in VGT, labelled as such.
 
       // Get governance parameters
       const proposalCost = await vanguardGovernance.proposalCreationCost();
@@ -1806,6 +1806,13 @@ class GovernanceModule {
 
         console.log(`\nSigner ${i}${role}:`);
         console.log(`   VGT Balance: ${ethers.formatEther(balance)} VGT`);
+        // D12 (b): delegation is recorded on VGT, never counted by castVote.
+        const addr = this.state.signers[i].address;
+        const del = await governanceToken.getDelegate(addr);
+        const delIn = (await governanceToken.getVotingPower(addr)) - balance;
+        console.log(
+          `   delegate: ${del === ethers.ZeroAddress ? "none" : del}, delegated-in: ${ethers.formatEther(delIn)} VGT (recorded, not counted: D12)`,
+        );
         console.log(
           `   Voting Power: ${isVerified ? "1 vote (equal)" : "0 votes (not verified)"}`,
         );
