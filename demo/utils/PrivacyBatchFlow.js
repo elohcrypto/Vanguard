@@ -19,6 +19,7 @@ const {
 const { runBlacklistProofFlow } = require("./BlacklistProofFlow");
 const { runAttestationFlow } = require("./AttestationFlow");
 
+const MODES = ["OracleOnly", "ZkOnly", "Either"];
 const DEFAULT_CODE = 840n; // 42 -> 3's default (US)
 const DEFAULT_AMOUNT = 250000n; // 42 -> 4's default (Accredited)
 const DEFAULT_SCORES = ["95", "90", "100", "85"]; // 42 -> 5's default
@@ -133,9 +134,18 @@ async function runAllProofs({ state, generator, user, log = console.log }) {
     `   validateAllPrivateCompliance(${user.address}): whitelist ${w}, jurisdiction ${j}, accreditation ${a}, compliance ${c}`,
   );
   if (w && j && a && c) {
-    displaySuccess("ALL FOUR GATING PRIVATE CHECKS HOLD FOR THE WALLET");
+    // Only the whitelist binding gates VSC, and only in ZkOnly/Either.
+    const rules = state.getContract("complianceRules");
+    const vsc = state.getContract("digitalToken");
+    const mode =
+      rules && vsc
+        ? MODES[Number(await rules.whitelistMode(await vsc.getAddress()))]
+        : "no VSC";
+    displaySuccess(
+      `ALL FOUR PRIVATE RECORDS HOLD (validateAllPrivateCompliance); VSC transfers read only the whitelist binding, and only in ZkOnly/Either (now ${mode})`,
+    );
   } else {
-    displayError("NOT EVERY PRIVATE CHECK HOLDS FOR THE WALLET (see above)");
+    displayError("NOT EVERY PRIVATE RECORD HOLDS FOR THE WALLET (see above)");
   }
   return { steps: results, chain: [w, j, a, c] };
 }
