@@ -8,10 +8,8 @@
 
 const {
   displaySection,
-  displayInfo,
   displaySuccess,
   displayError,
-  displayProgress,
 } = require("../utils/DisplayHelpers");
 const { ageOrVoterAgeRefusal } = require("../utils/ChainTime");
 const {
@@ -27,6 +25,13 @@ const {
   attestationStatus,
 } = require("../utils/AttestationFlow");
 const ContractDeployer = require("../core/ContractDeployer");
+const {
+  showVerifierStats,
+  runIntegrationChecks,
+  showTokenIntegration,
+} = require("../utils/PrivacyChainViews");
+const settings = require("../utils/PrivacySettingsFlow");
+const { runAllProofs } = require("../utils/PrivacyBatchFlow");
 const { ethers } = require("hardhat");
 
 /**
@@ -1261,209 +1266,70 @@ class PrivacyModule {
     }
   }
 
-  /** Option 47: Manage Privacy Settings */
+  /** Option 47: privacy settings, read and set on chain (PrivacySettingsFlow.js) */
   async managePrivacySettings() {
     displaySection("MANAGE PRIVACY SETTINGS", "⚙️");
 
     console.log("\n🔐 PRIVACY SETTINGS OPTIONS:");
     console.log("1. View Current Privacy Settings");
-    console.log("2. Enable/Disable Proof Caching");
-    console.log("3. Set Proof Expiry Time");
-    console.log("4. Manage Nullifier Tracking");
-    console.log("5. Configure Privacy Levels");
+    console.log("2. Set Proof Cache Expiry (verifier owner)");
+    console.log("3. Set Binding Validity Period (PrivacyManager owner)");
+    console.log("4. View Nullifier Records");
+    console.log("5. Set a Wallet's Privacy Preferences (the wallet signs)");
     console.log("0. Back to Main Menu");
 
     const choice = await this.promptUser("Select option (0-5): ");
-
-    switch (choice) {
-      case "1":
-        await this.viewPrivacySettings();
-        break;
-      case "2":
-        await this.toggleProofCaching();
-        break;
-      case "3":
-        await this.setProofExpiry();
-        break;
-      case "4":
-        await this.manageNullifierTracking();
-        break;
-      case "5":
-        await this.configurePrivacyLevels();
-        break;
-      case "0":
-        return;
-      default:
-        displayError("Invalid choice");
+    const ask = this.promptUser;
+    try {
+      switch (choice) {
+        case "1":
+          return await settings.viewSettings(this.state);
+        case "2":
+          return await settings.setCacheExpiry(this.state, ask);
+        case "3":
+          return await settings.setValidity(this.state, ask);
+        case "4":
+          return await settings.showNullifiers(this.state);
+        case "5":
+          return await settings.setPreferences(this.state, ask);
+        case "0":
+          return;
+        default:
+          displayError("Invalid choice");
+      }
+    } catch (error) {
+      displayError(`Privacy settings failed: ${error.message}`);
     }
   }
 
-  /** Option 48: ZK Statistics & Analytics Dashboard */
+  /** Option 48: verifier counters and wiring, read from chain */
   async showStatistics() {
     displaySection("ZK STATISTICS & ANALYTICS DASHBOARD", "📊");
-
-    const zkVerifier = this.state.getContract("zkVerifier");
-    if (!zkVerifier) {
-      displayError("No ZK verifier: run option 1 (or 41)");
-      return;
-    }
-
     try {
-      console.log("📈 ZK PROOF SYSTEM STATISTICS");
-      console.log("=".repeat(60));
-
-      // Mode information
-      console.log("\n🔐 Proofs: REAL (PLONK, all five circuits)");
-
-      // Proof generation statistics
-      if (this.state.proofGenerationTimes.size > 0) {
-        console.log("\n⏱️  PROOF GENERATION TIMES:");
-        for (const [
-          proofType,
-          time,
-        ] of this.state.proofGenerationTimes.entries()) {
-          console.log(`   • ${proofType}: ${time}ms`);
-        }
-      } else {
-        console.log("\n⏱️  No proof generation data yet");
-      }
-
-      // Gas usage statistics
-      if (this.state.gasTracker.size > 0) {
-        console.log("\n💰 GAS USAGE STATISTICS:");
-        let totalGas = 0n;
-        for (const [proofType, gas] of this.state.gasTracker.entries()) {
-          console.log(`   • ${proofType}: ${gas.toLocaleString()} gas`);
-          totalGas += gas;
-        }
-        console.log(`   • Total Gas Used: ${totalGas.toLocaleString()} gas`);
-      } else {
-        console.log("\n💰 No gas usage data yet");
-      }
-
-      // System health
-      console.log("\n🏥 SYSTEM HEALTH:");
-      console.log("   ✅ ZK Verifier: Operational");
-      console.log("   ✅ Proof Validators: Ready");
-      console.log("   ✅ Privacy Manager: Active");
-
-      console.log("\n💡 Tip: Submit proofs (option 42) to generate statistics");
+      await showVerifierStats(this.state);
     } catch (error) {
       displayError(`Failed to fetch ZK statistics: ${error.message}`);
     }
   }
 
-  /** Option 49: Test Complete Privacy Integration */
+  /** Option 49: eight privacy integration checks read from chain */
   async testIntegration() {
     displaySection("TEST COMPLETE PRIVACY INTEGRATION", "🧪");
-
-    const zkVerifier = this.state.getContract("zkVerifier");
-    if (!zkVerifier) {
-      displayError("No ZK verifier: run option 1 (or 41)");
-      return;
-    }
-
     try {
-      console.log("🔬 Running comprehensive privacy integration tests...");
-      console.log("");
-
-      const tests = [
-        { name: "ZK Verifier Deployment", status: "pending" },
-        { name: "Privacy Manager Integration", status: "pending" },
-        { name: "Whitelist Proof Verification", status: "pending" },
-        { name: "Jurisdiction Proof Verification", status: "pending" },
-        { name: "Accreditation Proof Verification", status: "pending" },
-        { name: "Compliance Aggregation", status: "pending" },
-        { name: "Proof Caching Mechanism", status: "pending" },
-        { name: "Nullifier Tracking", status: "pending" },
-      ];
-
-      for (let i = 0; i < tests.length; i++) {
-        console.log(`\n${i + 1}/${tests.length} Testing: ${tests[i].name}...`);
-
-        // Simulate test execution
-        await new Promise((resolve) => setTimeout(resolve, 500));
-
-        tests[i].status = "passed";
-        console.log(`   ✅ ${tests[i].name}: PASSED`);
-      }
-
-      console.log("\n📊 TEST SUMMARY:");
-      console.log("=".repeat(60));
-      const passed = tests.filter((t) => t.status === "passed").length;
-      const total = tests.length;
-      console.log(
-        `   Tests Passed: ${passed}/${total} (${((passed / total) * 100).toFixed(0)}%)`,
-      );
-      console.log("");
-
-      if (passed === total) {
-        displaySuccess("ALL PRIVACY INTEGRATION TESTS PASSED!");
-        console.log("   🎉 Privacy system is fully operational");
-        console.log("   🔒 Ready for production use");
-      } else {
-        displayError("SOME TESTS FAILED");
-        console.log("   ⚠️  Review failed tests and retry");
-      }
+      return await runIntegrationChecks(this.state);
     } catch (error) {
       displayError(`Privacy integration test failed: ${error.message}`);
     }
   }
 
-  /** Option 50: Integrate Privacy with Vanguard StableCoin */
+  /** Option 50: wire VSC's ComplianceRules to PrivacyManager; report it */
   async integrateWithToken() {
     displaySection("INTEGRATE PRIVACY WITH VANGUARD STABLECOIN", "🔗");
-
-    const digitalToken = this.state.getContract("digitalToken");
-    const zkVerifier = this.state.getContract("zkVerifier");
-
-    if (!digitalToken) {
-      displayError("Please deploy Vanguard StableCoin first (option 21)");
-      return;
-    }
-
-    if (!zkVerifier) {
-      displayError("No ZK verifier: run option 1 (or 41)");
-      return;
-    }
-
     try {
-      console.log("🪙 Digital Token: " + (await digitalToken.getAddress()));
-      console.log("🔐 ZK Verifier: " + (await zkVerifier.getAddress()));
-      console.log("🔗 Integrating Privacy System with Vanguard StableCoin...");
-      console.log("");
-
-      console.log("📋 Integration Scenarios:");
-      console.log("1. 🔍 Privacy-Preserving Transfer Validation");
-      console.log("2. 📊 Anonymous Compliance Monitoring");
-      console.log("3. 🚫 Private Blacklist Checking");
-      console.log("4. 📈 Confidential Accreditation Verification");
-      console.log("");
-
-      console.log("🔍 PRIVACY-PRESERVING TRANSFER VALIDATION:");
-      console.log("   • Whitelist check without revealing identity");
-      console.log("   • Blacklist verification with zero-knowledge");
-      console.log("   • Real-time compliance without data exposure");
-      console.log("");
-
-      console.log("🧪 TESTING PRIVACY INTEGRATION:");
-      const testUser = this.state.identities?.values().next().value;
-      if (testUser) {
-        console.log(`   Testing user: ${testUser.owner}`);
-        console.log(
-          `   💡 Submit whitelist proof (option 42) to enable transfers`,
-        );
-      } else {
-        console.log("   ⚠️  No users found. Create users first (option 24)");
-      }
-
-      console.log("");
-      displaySuccess("PRIVACY-DIGITAL TOKEN INTEGRATION COMPLETE!");
-      console.log(
-        "🔗 Privacy system is now monitoring Vanguard StableCoin transactions",
+      return await showTokenIntegration(
+        this.state,
+        new ContractDeployer(this.state, this.logger),
       );
-      console.log("📊 Real-time compliance validation active");
-      console.log("🛡️ Enhanced security through zero-knowledge proofs");
     } catch (error) {
       displayError(`Privacy integration failed: ${error.message}`);
     }
@@ -1884,70 +1750,21 @@ class PrivacyModule {
     return this.attest("compliance", user, { scores }, "COMPLIANCE");
   }
 
+  /** Option 42 -> 6: all five real proofs for one wallet (PrivacyBatchFlow.js) */
   async submitAllPrivateProofs() {
     console.log("\n🎯 SUBMIT ALL PRIVATE PROOFS (BATCH)");
     console.log("=".repeat(50));
-    console.log(`🔐 Generating all proof types with real proofs...`);
-    console.log("");
-
+    console.log(
+      "🔐 The five real flows of 42 -> 1 to 5, with their defaults, for one wallet",
+    );
+    const user = await this.pickAttestationUser();
+    if (!user) return;
     try {
-      const proofs = [];
-      const proofTypes = [
-        "Whitelist Membership",
-        "Blacklist Non-Membership",
-        "Jurisdiction Eligibility",
-        "Accreditation Status",
-        "Compliance Aggregation",
-      ];
-
-      for (let i = 0; i < proofTypes.length; i++) {
-        console.log(
-          `${i + 1}/${proofTypes.length} Generating ${proofTypes[i]} proof...`,
-        );
-
-        // Simulate proof generation
-        await new Promise((resolve) => setTimeout(resolve, 300));
-
-        console.log(`   ✅ ${proofTypes[i]}: Generated`);
-        proofs.push({ type: proofTypes[i], status: "generated" });
-      }
-
-      console.log("");
-      displaySuccess("ALL PROOFS GENERATED SUCCESSFULLY!");
-      console.log(`   📊 Total proofs: ${proofs.length}`);
-      console.log(`   🔒 Proof mode: REAL`);
-      console.log(`   ✅ Ready for submission`);
+      const generator = await this.realGenerator();
+      return await runAllProofs({ state: this.state, generator, user });
     } catch (error) {
-      displayError(`Batch proof generation failed: ${error.message}`);
+      displayError(`Batch proof submission failed: ${error.message}`);
     }
-  }
-
-  async viewPrivacySettings() {
-    console.log("\n📋 CURRENT PRIVACY SETTINGS:");
-    console.log("   ZK Proofs: REAL (no mock mode)");
-    console.log(`   Proof Caching: Enabled (24 hours)`);
-    console.log(`   Nullifier Tracking: Active`);
-    console.log(`   Privacy Level: Maximum`);
-  }
-
-  async toggleProofCaching() {
-    displayInfo("Proof caching toggle - feature available in production");
-  }
-
-  async setProofExpiry() {
-    displayInfo("Proof expiry configuration - feature available in production");
-  }
-
-  async manageNullifierTracking() {
-    displayInfo(
-      "Nullifier tracking management - feature available in production",
-    );
-  }
-
-  async configurePrivacyLevels() {
-    displayInfo(
-      "Privacy level configuration - feature available in production",
-    );
   }
 }
 
