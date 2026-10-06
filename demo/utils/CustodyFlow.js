@@ -82,6 +82,10 @@ async function deployCustody(state, log = console.log) {
   log(
     `   ✅ Lock requirements ${locks.map(([, a]) => fmt(a)).join(" / ")} VSC (Retail / Accredited / Institutional): a Normal holder moves at most ${fmt(cap)} VSC per transfer`,
   );
+  // Review L1: ops owns the manager BEFORE it gains any power (officer,
+  // registrar), so a failure below never leaves a deployer-owned officer.
+  await (await m.transferOwnership(bank.address)).wait();
+  log("   ✅ Manager owned by ops: the deployer keeps no custody power");
 
   if (same(await types.owner(), deployer.address)) {
     await (await types.setComplianceOfficer(mAddr, true)).wait();
@@ -103,8 +107,6 @@ async function deployCustody(state, log = console.log) {
   } else {
     log(`   ⚠️  Manager is not a registrar: ${reg.refused}`);
   }
-  await (await m.transferOwnership(bank.address)).wait();
-  log("   ✅ Manager owned by ops: the deployer keeps no custody power");
   state.setContract("investorRequestManager", m);
   return m;
 }
@@ -302,12 +304,37 @@ async function downgrade(state, user, log = console.log) {
 }
 
 /**
- * Option 62, the 2E.1 interim undone: an investor whose fee wallet in the
- * escrow factory is a keyless placeholder (no code, from a pre-4.3 run) is
- * re-registered with its MultiSigWallet, and the placeholder's registry
- * identity is deleted by a registry agent (the deployer before the
- * handover, ops after), so it no longer counts in the electorate.
- * Returns true when the investor was re-registered.
+ * Whether `addr` is provably a keyless placeholder (review M1): no code,
+ * not any demo signer (deployer, ops, issuers, users: every key the demo
+ * holds), and its registry OnchainID, if any, gives no demo signer a
+ * MANAGEMENT key. A pre-4.3 run derived the placeholder from a hash, so
+ * no key exists for it; a real person's wallet fails one of these.
+ */
+async function isKeylessPlaceholder(state, addr) {
+  if ((await ethers.provider.getCode(addr)) !== "0x") return false;
+  if (state.signers.some((s) => same(s.address, addr))) return false;
+  const id = await state.getContract("identityRegistry").identity(addr);
+  if (id === ethers.ZeroAddress) return true;
+  const oid = await ethers.getContractAt(
+    ["function keyHasPurpose(bytes32,uint256) view returns (bool)"],
+    id,
+  );
+  for (const s of state.signers) {
+    const key = ethers.solidityPackedKeccak256(["address"], [s.address]);
+    const managed = await oid.keyHasPurpose(key, 1).catch(() => true);
+    if (managed) return false;
+  }
+  return true;
+}
+
+/**
+ * Option 62, the 2E.1 interim undone: an investor registered in the escrow
+ * factory with a fee wallet that is not a contract gets deactivated so
+ * option 62 can re-register it with its MultiSigWallet. The old fee
+ * wallet's registry identity is deleted (by a registry agent: the deployer
+ * before the handover, ops after) ONLY when it is provably a keyless
+ * placeholder (isKeylessPlaceholder); a keyed wallet keeps its identity
+ * and its vote. Returns true when the investor was deactivated.
  */
 async function retirePlaceholder(
   state,
@@ -321,7 +348,12 @@ async function retirePlaceholder(
   if (!p.isActive || same(p.walletAddress, wallet)) return false;
   if ((await ethers.provider.getCode(p.walletAddress)) !== "0x") return false;
   const idReg = state.getContract("identityRegistry");
-  if ((await idReg.identity(p.walletAddress)) !== ethers.ZeroAddress) {
+  const keyless = await isKeylessPlaceholder(state, p.walletAddress);
+  if (!keyless) {
+    log(
+      `   ℹ️  Old fee wallet ${p.walletAddress} is a keyed wallet: its identity is kept`,
+    );
+  } else if ((await idReg.identity(p.walletAddress)) !== ethers.ZeroAddress) {
     const agents = [state.signers[0], bankSigner(state)];
     let done = false;
     for (const a of agents) {
@@ -339,9 +371,7 @@ async function retirePlaceholder(
       );
   }
   await (await factory.connect(admin).deactivateInvestor(investor)).wait();
-  log(
-    `   ↩️  Investor deactivated to replace placeholder fee wallet ${p.walletAddress}`,
-  );
+  log(`   ↩️  Investor deactivated to replace fee wallet ${p.walletAddress}`);
   return true;
 }
 
@@ -357,4 +387,5 @@ module.exports = {
   unlock,
   downgrade,
   retirePlaceholder,
+  isKeylessPlaceholder,
 };

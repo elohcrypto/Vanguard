@@ -108,9 +108,10 @@ describe("CustodyFlow: option 23 on the MultiSigWallet (Task 4.3)", function () 
     const idReg = f.c.identityRegistry;
     // The pre-4.3 interim: a keyless address onboarded as an identity.
     const placeholder = ethers.Wallet.createRandom().address;
+    // Its OnchainID is managed by the keyless address itself.
     const id = await (
       await ethers.getContractFactory("OnchainID")
-    ).deploy(deployer.address);
+    ).deploy(placeholder);
     await idReg.registerIdentity(placeholder, await id.getAddress(), 840);
     await factory.registerInvestor(carol.address, placeholder);
     const count = await idReg.registeredIdentityCount();
@@ -142,5 +143,50 @@ describe("CustodyFlow: option 23 on the MultiSigWallet (Task 4.3)", function () 
         quiet,
       ),
     ).to.equal(false);
+  });
+
+  // Review M1: option 62 run before option 23 registered a keyed fee
+  // wallet; replacing it with the MultiSigWallet deletes no identity.
+  it("option 62 after option 23 for a real investor deletes nothing", async function () {
+    const { deployer, voters } = f;
+    const [bob, carol] = voters;
+    const factory = f.c.escrowWalletFactory;
+    const idReg = f.c.identityRegistry;
+    // bob, a verified voter, was carol's fee wallet (as signer 3 or ops is).
+    await factory.registerInvestor(carol.address, bob.address);
+    const bobId = await idReg.identity(bob.address);
+    const count = await idReg.registeredIdentityCount();
+    const real = await (await ethers.getContractFactory("MockTarget")).deploy();
+    expect(await Custody.isKeylessPlaceholder(state, bob.address)).to.equal(
+      false,
+    );
+    expect(
+      await Custody.retirePlaceholder(
+        state,
+        factory,
+        deployer,
+        carol.address,
+        await real.getAddress(),
+        quiet,
+      ),
+    ).to.equal(true);
+    expect(await idReg.identity(bob.address)).to.equal(bobId);
+    expect(await idReg.registeredIdentityCount()).to.equal(count);
+    expect(await factory.isInvestor(carol.address)).to.equal(false);
+
+    // Not a demo signer, but its OnchainID gives the deployer a MANAGEMENT
+    // key: a keyed identity, also kept.
+    const other = ethers.Wallet.createRandom().address;
+    const id = await (
+      await ethers.getContractFactory("OnchainID")
+    ).deploy(deployer.address);
+    await idReg.registerIdentity(other, await id.getAddress(), 840);
+    expect(await Custody.isKeylessPlaceholder(state, other)).to.equal(false);
+    expect(
+      await Custody.isKeylessPlaceholder(
+        state,
+        ethers.Wallet.createRandom().address,
+      ),
+    ).to.equal(true);
   });
 });
