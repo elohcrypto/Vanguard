@@ -12,6 +12,7 @@
 const { displaySection } = require("../utils/DisplayHelpers");
 const keyLifecycle = require("../utils/KeyLifecycleFlow");
 const keyOptions = require("../utils/KeyLifecycleOptions");
+const keyRemoval = require("../utils/KeyRemovalFlow");
 const oracleFlow = require("../utils/OracleLifecycleFlow");
 
 /**
@@ -51,6 +52,9 @@ class MenuSystem {
     console.log("3.  Create OnchainID for User");
     console.log("4.  Review Identity Keys");
     console.log("5.  Recover Lost Keys (KeyManager recovery / rotation)");
+    console.log(
+      "5a. Remove a key with its holder's signature (removeKeyWithProof)",
+    );
     console.log("6.  Manage KYC Claims");
     console.log("7.  Manage AML Claims");
     console.log("8.  Review Claim Status & History");
@@ -248,6 +252,9 @@ class MenuSystem {
           break;
         case "5":
           await onchainID.recoverLostKeys();
+          break;
+        case "5a":
+          await keyRemoval.runRemovalDemo(this.state);
           break;
         case "6":
           await onchainID.manageKYCClaims();
