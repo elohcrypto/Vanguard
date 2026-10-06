@@ -155,10 +155,12 @@ async function runIntegrationChecks(state, log = console.log) {
       live.push(signer.address);
   add(
     "A whitelist binding is valid",
-    live.length ? true : null,
+    live.length ? true : bound.length ? false : null,
     live.length
       ? `${live.length} wallet(s), e.g. ${live[0]}`
-      : "no binding: option 42 -> 1 or 42 -> 6",
+      : bound.length
+        ? `${bound.length} binding(s) exist, none live (expired or lapsed by a new root): option 42 -> 1 again`
+        : "no binding: option 42 -> 1 or 42 -> 6",
   );
 
   const valid = { j: 0, a: 0, c: 0 };
