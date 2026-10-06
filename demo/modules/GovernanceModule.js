@@ -19,6 +19,7 @@ const {
   walletControlRefusal,
 } = require("../utils/ChainTime");
 const { ethers } = require("hardhat");
+const { createOracleParametersProposal } = require("../utils/OracleProposal");
 
 /**
  * Proposal type names in ProposalType enum order.
@@ -918,7 +919,9 @@ class GovernanceModule {
       console.log("📋 PROPOSAL TYPES:");
       console.log("0. InvestorTypeConfig - Update investor type limits");
       console.log("1. ComplianceRules - Update compliance parameters");
-      console.log("2. OracleParameters - Update oracle settings");
+      console.log(
+        "2. OracleParameters - Pause/unpause/remove a node, emergency designation, threshold, operator",
+      );
       console.log("3. TokenParameters - Update token settings");
       console.log("4. SystemParameters - Update system settings");
       console.log("5. EmergencyAction - Emergency actions");
@@ -951,9 +954,12 @@ class GovernanceModule {
         await this._createInvestorTypeConfigProposal();
       } else if (proposalType === 1) {
         await this._createComplianceRulesProposal();
+      } else if (proposalType === 2) {
+        // Task 4.4: node lifecycle and engine parameters (OracleProposal.js).
+        await createOracleParametersProposal(this.state, this.promptUser);
       } else {
         console.log(
-          "⚠️  Other proposal types coming soon. Use type 0 or 1 for now.",
+          "⚠️  Other proposal types coming soon. Use type 0, 1 or 2 for now.",
         );
       }
     } catch (error) {
