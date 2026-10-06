@@ -130,15 +130,17 @@ jobs:
       # error. Its stdout is also truncated under a pipe (process.exit before
       # flush), so the report goes to a file and is counted from there. Any
       # error fails; warnings fail only when they RISE above the baseline.
-      # Baseline 887 (2026-10-05, was 889; 976 before 3.2, 965 after 3.2,
+      # Baseline 885 (2026-10-06, was 887 after 4.2 and 889 after 4.1; 976
+      # before 3.2, 965 after 3.2,
       # 944 after the Task 3.3 PrivacyManager rewrite, 933 after Task 3.7b,
       # 917 after Task 3.8 dropped PrivacyManager's own jurisdiction
       # registry, 889 after Task 4.1 dropped ComplianceRules' inert rule
       # store and split the contract, 887 after Task 4.2 dropped
-      # KeyManager's owner and allowlist).
+      # KeyManager's owner and allowlist, 885 after Task 4.3 moved trust
+      # registration into registrar contracts).
       - name: Lint ratchet (no solhint errors, no NEW warnings)
         run: |
-          BASELINE=887
+          BASELINE=885
           npx solhint -f unix 'contracts/**/*.sol' > solhint.log 2>&1 || true
           errors=$(grep -c '\[Error/' solhint.log || true)
           warnings=$(grep -c '\[Warning/' solhint.log || true)
