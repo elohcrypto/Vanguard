@@ -47,6 +47,9 @@ const {
 // Logging
 const { EnhancedLogger } = require("./logging");
 
+/** Prefix of every question in a driven run (scripts/demo-drive.sh). */
+const PROMPT_MARK = "[[?]] ";
+
 /**
  * @class InteractiveDemo
  * @description Main demo orchestrator that manages all modules and the interactive loop.
@@ -252,8 +255,14 @@ class InteractiveDemo {
    * @private
    */
   async promptUser(question) {
+    // scripts/demo-drive.sh sets DEMO_PROMPT_MARK=1: every question then
+    // carries PROMPT_MARK (after any leading newlines), which the driver
+    // counts to answer sub-prompts as well as the menu.
+    const q = process.env.DEMO_PROMPT_MARK
+      ? question.replace(/^(\n*)/, `$1${PROMPT_MARK}`)
+      : question;
     return new Promise((resolve) => {
-      this.rl.question(question, (answer) => {
+      this.rl.question(q, (answer) => {
         resolve(answer.trim());
       });
     });

@@ -641,9 +641,11 @@ registrar (`setTrustedRegistrar(token, registrar, 0)`) stops new trust
 only: the wallets it already trusted stay trusted until the owner removes
 each with `removeTrustedContract`.
 
-Options 23 and 62 to 69 ask sub-prompts, so `demo-drive.sh` cannot drive
-them (it answers the main menu only); `scripts/demo-smoke-custody.js`
-runs the custody flow on the live node in the smoke.
+Options 23 and 62 to 69 ask sub-prompts; `demo-drive.sh` answers them
+when the argument carries the answers (`23:<sub-option>:...`, see
+"Driving the demo without a terminal"), and
+`scripts/demo-smoke-custody.js` runs the custody flow on the live node
+in the smoke.
 
 ## Oracle nodes and consensus (Task 4.4, D11 a)
 
@@ -691,9 +693,10 @@ Option 76, type 2
 (OracleParameters), proposes pause, unpause, removeOracle,
 setEmergencyOracle, setConsensusThreshold or setOperator for governance
 to vote (77, 78), from the first wallet among 0-8 that may propose. `demo-drive.sh --strict 1 21 31 32 33a 34a 35a 39 40`
-runs with no error; 33, 34, 35 and 37 ask sub-prompts and are not
-drivable. `DEMO_RPC_URL=http://127.0.0.1:<port>` points the drive at a
-node on another port (network `devnode`).
+runs with no error; 33, 34, 35 and 37 ask sub-prompts, which a drive
+answers only when the argument carries them (`37:<sub-option>:...`).
+`DEMO_RPC_URL=http://127.0.0.1:<port>` points the drive at a node on
+another port (network `devnode`).
 
 `scripts/demo-smoke-oracles.js`, a leg of `scripts/demo-smoke.js`,
 asserts from chain: the engine is bound both ways and its code is the
@@ -834,6 +837,21 @@ owns that identity. When another wallet (the ops key) owns it, or
 `OPS_IDENTITY` is unset, nothing is authorized and the deploy prints the
 exact call the identity owner must send:
 `OnchainID(<ops identity>).authorizeManager(<keyManager>)`.
+
+## Driving the demo without a terminal
+
+`npm run demo:drive -- <choices>` (`scripts/demo-drive.sh`) runs the menu
+under a pseudo-terminal and sends each choice when the demo asks. It sets
+`DEMO_PROMPT_MARK=1`, under which `demo/index.js` prefixes every question
+(the menu's and every option's) with `[[?]] `; the driver counts those
+lines, so it answers sub-prompts too. A choice carries the answers to its
+option's prompts after colons, in order: `82:yes`, `42:6:` (6, then Enter
+for the default wallet), `47:1`. An empty field is Enter. Answers may
+contain commas (`0,1,2`), not colons. A menu choice goes only to the menu
+and a sub-answer only to another prompt: when an option asks a prompt the
+argument does not answer, or returns to the menu with answers left, the
+drive stops with exit 1 and names the prompt. `--strict` also fails on
+any line starting with "❌".
 
 ## Local rehearsal (do this before Sepolia)
 

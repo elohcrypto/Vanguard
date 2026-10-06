@@ -21,10 +21,12 @@
 #     }
 #
 # So "Select an option: " is printed exactly once per iteration, immediately
-# before the process blocks on input. That string is a DETERMINISTIC READY
-# SIGNAL. This driver waits for it rather than sleeping a guessed number of
-# seconds — option 1 takes ~40s and option 74 ~30s on a cold node, and any
-# fixed sleep is either flaky or needlessly slow.
+# before the process blocks on input; every other question also goes
+# through promptUser (demo/index.js) and blocks the same way. In a driven
+# run each question carries a marker (SUB-PROMPTS below): a DETERMINISTIC
+# READY SIGNAL. This driver waits for it rather than sleeping a guessed
+# number of seconds — option 1 takes ~40s and option 74 ~30s on a cold
+# node, and any fixed sleep is either flaky or needlessly slow.
 #
 # Two mechanics make it work:
 #   1. script(1) allocates a pseudo-terminal, so readline stays open.
@@ -37,6 +39,19 @@
 #   scripts/demo-drive.sh 1 21 51 74 83b 0
 #   scripts/demo-drive.sh --log /tmp/run.log 1 21 51 74 0
 #   scripts/demo-drive.sh --timeout 600 1 21 0
+#   scripts/demo-drive.sh 1 21 74 82:yes 0        # 82, then "yes" to its prompt
+#
+# SUB-PROMPTS
+#   An argument may carry the answers to the prompts its option asks after
+#   the menu choice, separated by ':' (answers may contain commas, e.g.
+#   wallet lists "0,1,2"). An empty answer (Enter, the prompt's default) is
+#   an empty field: `42:6::` answers "6", then Enter twice. demo/index.js
+#   prefixes every question with "[[?]] " when DEMO_PROMPT_MARK=1, which
+#   this driver sets, so it counts every prompt, not only the menu's. A menu
+#   choice is sent only when the menu asks and a sub-answer only when
+#   something else asks: an option that asks a prompt the arguments do not
+#   answer, or fewer prompts than given, stops the run (exit 1) with the
+#   prompt named.
 #
 # Requires a node on 127.0.0.1:8545 (npx hardhat node), or set
 # DEMO_RPC_URL=http://127.0.0.1:<port> to drive a node on another port
@@ -47,8 +62,9 @@
 #                    "Deploy ERC-3643 system first (option 21)"
 #   83b (ownership by vote) requires 51 + 74, AND at least two KYC/AML
 #                    verified signers holding VGT. A bare deploy registers
-#                    only VanguardGovernance itself, so 83b will correctly
-#                    refuse until identities exist (options 23/24 + 3/4).
+#                    no voter (governance is a trusted contract, not an
+#                    identity: D21), so 83b will correctly refuse until
+#                    identities exist (options 23/24, or 3 + 6 + 7).
 #   Working order: 1 -> 21 -> 51 -> 74 -> 83b -> 0
 #
 # Exit codes: 0 ok | 1 demo error detected | 2 timeout | 3 bad usage/preconditions
@@ -58,10 +74,11 @@ set -uo pipefail
 LOG=""
 TIMEOUT_S=900
 STRICT=0
-READY_RE='Select an option: '
+MARK='[[?]] '
+MENU_Q='Select an option: '
 
 usage() {
-  sed -n '2,50p' "$0" | sed 's/^# \{0,1\}//'
+  sed -n '2,70p' "$0" | sed 's/^# \{0,1\}//'
   exit 3
 }
 
@@ -87,6 +104,21 @@ fi
 if [[ "${CHOICES[-1]}" != "0" ]]; then
   CHOICES+=("0")
 fi
+
+# Flatten "42:6::" into answers, each a menu choice (m) or a sub-answer (s).
+ANS=()
+KIND=()
+for arg in "${CHOICES[@]}"; do
+  rest="$arg"
+  kind=m
+  while :; do
+    ANS+=("${rest%%:*}")
+    KIND+=("$kind")
+    kind=s
+    [[ "$rest" == *:* ]] || break
+    rest="${rest#*:}"
+  done
+done
 
 command -v script >/dev/null || { echo "error: script(1) not found (util-linux)" >&2; exit 3; }
 
@@ -131,7 +163,7 @@ trap cleanup EXIT
 exec 9<>"$FIFO"
 HOLD_PID=""
 
-script -q -f -c "npx hardhat run demo/index.js --network $NETWORK" "$RAW" < "$FIFO" > /dev/null 2>&1 &
+script -q -f -c "DEMO_PROMPT_MARK=1 npx hardhat run demo/index.js --network $NETWORK" "$RAW" < "$FIFO" > /dev/null 2>&1 &
 DEMO_PID=$!
 
 # script -f flushes after each write, so the log grows as the demo speaks.
@@ -140,7 +172,7 @@ deadline=$(( $(date +%s) + TIMEOUT_S ))
 
 echo "▶ driving demo with: ${CHOICES[*]}"
 
-while [[ $answered -lt ${#CHOICES[@]} ]]; do
+while [[ $answered -lt ${#ANS[@]} ]]; do
   if [[ $(date +%s) -ge $deadline ]]; then
     echo "✗ timeout after ${TIMEOUT_S}s waiting for prompt #$((answered + 1))" >&2
     cp "$RAW" "$LOG" 2>/dev/null
@@ -149,22 +181,42 @@ while [[ $answered -lt ${#CHOICES[@]} ]]; do
   fi
 
   if ! kill -0 "$DEMO_PID" 2>/dev/null; then
-    echo "✗ demo exited before consuming all choices (answered $answered/${#CHOICES[@]})" >&2
+    echo "✗ demo exited before consuming all answers (answered $answered/${#ANS[@]})" >&2
     cp "$RAW" "$LOG" 2>/dev/null
     echo "  log: $LOG" >&2
     exit 1
   fi
 
-  # Count how many times the demo has asked for a menu choice. It asks once
-  # per loop iteration, so "asked > answered" means it is waiting on us.
+  # Count the questions the demo has asked: one marked line each (lines,
+  # not occurrences: readline may redraw a prompt on its own line). So
+  # "asked > answered" means it is waiting on us.
   # grep -c prints 0 and exits 1 when there are no matches; the `|| echo 0`
   # idiom would then emit TWO lines ("0\n0") and break the arithmetic below.
-  asked=$(grep -c "$READY_RE" "$RAW" 2>/dev/null | head -1)
+  asked=$(grep -a -c -F "$MARK" "$RAW" 2>/dev/null | head -1)
   asked=${asked:-0}
 
   if [[ "$asked" -gt "$answered" ]]; then
-    choice="${CHOICES[$answered]}"
-    echo "  → [$((answered + 1))/${#CHOICES[@]}] $choice"
+    # The question now waiting: the text after the last marker.
+    q=$(grep -a -F "$MARK" "$RAW" | tail -1 | tr -d '\r' | sed 's/\x1b\[[0-9;]*[A-Za-z]//g')
+    q="${q##*"$MARK"}"
+    is_menu=0
+    [[ "$q" == "$MENU_Q"* ]] && is_menu=1
+    choice="${ANS[$answered]}"
+    if [[ "${KIND[$answered]}" == m && $is_menu -eq 0 ]]; then
+      echo "✗ prompt \"$q\" has no answer in the arguments (next: menu choice \"$choice\"); give it as <option>:<answer>" >&2
+      cp "$RAW" "$LOG" 2>/dev/null
+      echo "  log: $LOG" >&2
+      exit 1
+    fi
+    if [[ "${KIND[$answered]}" == s && $is_menu -eq 1 ]]; then
+      echo "✗ sub-answer \"$choice\" given, but the option returned to the menu" >&2
+      cp "$RAW" "$LOG" 2>/dev/null
+      echo "  log: $LOG" >&2
+      exit 1
+    fi
+    label="$choice"
+    [[ "${KIND[$answered]}" == s ]] && label="  ↳ \"$choice\""
+    echo "  → [$((answered + 1))/${#ANS[@]}] $label"
     printf '%s\n' "$choice" >&9
     answered=$((answered + 1))
     # Let the demo consume it and start work before we re-count.
@@ -204,7 +256,7 @@ errs=${errs:-0}
 
 echo
 echo "── summary ──"
-echo "  choices sent : $answered/${#CHOICES[@]}"
+echo "  answers sent : $answered/${#ANS[@]}"
 echo "  demo exit    : $demo_rc"
 echo "  ❌ lines      : $errs"
 echo "  log          : $LOG"
