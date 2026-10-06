@@ -308,7 +308,11 @@ async function registryCall(ctx, step) {
 const vgtOf = async (g) =>
   ethers.getContractAt("GovernanceToken", await g.governanceToken());
 
-/** Create a proposal; returns its id. Approves the creation fee first. */
+/**
+ * Create a proposal; returns its id. Approves the creation fee first. The
+ * description is `${title} (${source})`: callers outside the ceremony name
+ * themselves in `source`.
+ */
 async function proposeCall(
   governance,
   proposer,
@@ -316,6 +320,7 @@ async function proposeCall(
   target,
   callData,
   title,
+  source = "handover ceremony",
 ) {
   const vgt = await vgtOf(governance);
   const govAddr = await governance.getAddress();
@@ -331,7 +336,7 @@ async function proposeCall(
       .createProposal(
         proposalType,
         title,
-        `${title} (handover ceremony)`,
+        `${title} (${source})`,
         await addrOf(target),
         callData,
       ),

@@ -62,6 +62,13 @@ describe("GovernedCalls after the handover (2F.5 L11)", function () {
     expect(p.proposalType).to.equal(1n);
     expect(p.proposer).to.equal(f.proposer.address);
     expect(p.target).to.equal(await c.complianceRules.getAddress());
+    // Task 4.7 E: the description names the demo helper, not the ceremony
+    // (proposal 1, an acceptance, keeps "(handover ceremony)").
+    expect(p.description).to.equal(
+      `Registrar ${reg} for MultiSigWallet (demo: GovernedCalls.registerRegistrar)`,
+    );
+    const [first] = await c.governance.getProposal(1);
+    expect(first.description).to.match(/ \(handover ceremony\)$/);
     // Registrars are per token (Task 4.1 G5, 4.3): the vote names it on VSC.
     const hash = await walletCodeHash("MultiSigWallet");
     expect(p.callData).to.equal(

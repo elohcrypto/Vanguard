@@ -95,6 +95,7 @@ async function registerRegistrar(
       hash,
     ]),
     `Registrar ${registrar} for ${walletName}`,
+    "demo: GovernedCalls.registerRegistrar",
   );
   log(
     `   🗳️  Proposal #${proposalId} (ComplianceRules) by ${proposer.address}`,
@@ -137,6 +138,7 @@ async function governOracleManager(state, fn, args, log = console.log) {
     om,
     om.interface.encodeFunctionData(fn, args),
     `OracleManager.${fn}(${args.join(", ")})`,
+    "demo: GovernedCalls.governOracleManager",
   );
   log(
     `   🗳️  Proposal #${proposalId} (OracleParameters) by ${proposer.address}`,
