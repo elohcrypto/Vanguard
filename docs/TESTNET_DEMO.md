@@ -248,7 +248,11 @@ trusted-contract registrar (from the token-indexed `TrustedRegistrarSet`
 events) gets a line naming its token and code hash; it passes only when the
 registrar has code and the hash is the compiled `MultiSigWallet` or
 `MultiSigEscrowWallet`, and the preflight refuses either failure before
-step 1 (clear it with `setTrustedRegistrar(token, registrar, 0)`). It also fails on any live
+step 1 (clear it with `setTrustedRegistrar(token, registrar, 0)`). A
+further line fails when any registrar, or any InvestorTypeRegistry
+compliance officer that is a contract, is not owned by ops or governance
+(a deployer-owned InvestorRequestManager could still assign investor
+types). It also fails on any live
 ComplianceRules rule administrator other than governance and ops, on any
 token (found from the token-indexed `RuleAdministratorUpdated` events, plus
 the deployer on VSC and VGT; the constructor authorizes nobody): a rule
@@ -615,7 +619,10 @@ handover) may trust an arbitrary contract or remove trust. A registrar is
 a contract the owner named per token with one code hash; it may trust
 only accounts with that code. Ops and rule administrators have no trust
 power. `InvestorRequestManager` and `EscrowWalletFactory` are the two
-registrars; the handover ceremony lists both (see 83e).
+registrars; the handover ceremony lists both (see 83e). Revoking a
+registrar (`setTrustedRegistrar(token, registrar, 0)`) stops new trust
+only: the wallets it already trusted stay trusted until the owner removes
+each with `removeTrustedContract`.
 
 Options 23 and 62 to 69 ask sub-prompts, so `demo-drive.sh` cannot drive
 them (it answers the main menu only); `scripts/demo-smoke-custody.js`
