@@ -161,4 +161,36 @@ describe("OnchainID key removal (plan v2 Task 4.5)", function () {
     expect(await id.keyHasPurpose(fourth, MGMT)).to.equal(true);
     expect(await id.keyHasPurpose(third, MGMT)).to.equal(false);
   });
+
+  // M-1 (review of 4.5): recovery is no defence against a rogue MANAGEMENT
+  // key (it can cancel or re-seat recovery); the owner is.
+  it("the owner evicts a rogue MANAGEMENT key; the rogue cannot take control", async function () {
+    const { holder, mgr: rogue, stranger, id } = await setup();
+    const km = await (await ethers.getContractFactory("KeyManager")).deploy();
+    const kmAddr = await km.getAddress();
+    await id.connect(holder).authorizeManager(kmAddr);
+    await id.connect(holder).addKey(k(rogue.address), MGMT, ECDSA);
+
+    await expect(
+      id.connect(rogue).transferOwnership(rogue.address),
+    ).to.be.revertedWithCustomError(id, "OwnableUnauthorizedAccount");
+    await expect(
+      id.connect(rogue).deauthorizeManager(kmAddr),
+    ).to.be.revertedWith("OnchainID: Only owner can deauthorize managers");
+    await expect(
+      id.connect(rogue).authorizeManager(stranger.address),
+    ).to.be.revertedWith("OnchainID: Only owner can authorize managers");
+    // Even with the owner's own MANAGEMENT key removed by the rogue, the
+    // owner still passes onlyManagementKey and evicts the rogue.
+    await id.connect(rogue).removeKey(k(holder.address), MGMT);
+    expect(await id.keyHasPurpose(k(holder.address), MGMT)).to.equal(false);
+    await id.connect(holder).removeKey(k(rogue.address), MGMT);
+    expect(await id.keyHasPurpose(k(rogue.address), MGMT)).to.equal(false);
+    await expect(
+      id.connect(rogue).addKey(k(rogue.address), MGMT, ECDSA),
+    ).to.be.revertedWith("OnchainID: Sender does not have management key");
+    await id.connect(holder).addKey(k(holder.address), MGMT, ECDSA);
+    expect(await id.owner()).to.equal(holder.address);
+    expect(await id.authorizedManagers(kmAddr)).to.equal(true);
+  });
 });
