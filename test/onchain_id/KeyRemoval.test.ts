@@ -251,4 +251,34 @@ describe("OnchainID key removal (plan v2 Task 4.5)", function () {
     expect(await id.keyHasPurpose(key, ACTION)).to.equal(false);
     expect(await id.removalNonces(key)).to.equal(2n);
   });
+
+  // L-2 (review of 4.5): an ACTION or CLAIM_SIGNER key is not a manager.
+  it("ACTION and CLAIM_SIGNER keys cannot manage keys or the threshold", async function () {
+    const [holder, actor, claimer] = await ethers.getSigners();
+    const id = await (
+      await ethers.getContractFactory("OnchainID")
+    ).deploy(holder.address);
+    await id.connect(holder).addKey(k(actor.address), ACTION, ECDSA);
+    await id.connect(holder).addKey(k(claimer.address), 3, ECDSA);
+    const w = ethers.Wallet.createRandom();
+    const key = k(w.address);
+    await id.connect(holder).addKey(key, ACTION, ECDSA);
+    const sig = await w.signMessage(
+      ethers.getBytes(await inner(id, key, ACTION)),
+    );
+    const refusal = "OnchainID: Sender does not have management key";
+    for (const s of [actor, claimer]) {
+      const c = id.connect(s);
+      await expect(
+        c.addKey(k(ethers.Wallet.createRandom().address), MGMT, ECDSA),
+      ).to.be.revertedWith(refusal);
+      await expect(c.removeKey(key, ACTION)).to.be.revertedWith(refusal);
+      await expect(c.removeKeyWithProof(key, ACTION, sig)).to.be.revertedWith(
+        refusal,
+      );
+      await expect(c.setExecutionThreshold(3)).to.be.revertedWith(refusal);
+    }
+    expect(await id.keyHasPurpose(key, ACTION)).to.equal(true);
+    expect(await id.executionThreshold()).to.equal(2n);
+  });
 });
