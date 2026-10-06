@@ -773,6 +773,40 @@ describe("Enhanced Escrow System", function () {
         .reverted; // only a wallet the factory created
     });
 
+    // Review L3: the ledger accepts only the wallet the factory recorded
+    // for that paymentId: an EOA and a look-alike escrow are refused.
+    it("refuses a stranger in updateInvestorFeesEarned", async function () {
+      await expect(
+        factory.connect(payer).updateInvestorFeesEarned(investor.address, 1n),
+      ).to.be.reverted; // an EOA has no paymentId()
+      const W = await ethers.getContractFactory("MultiSigEscrowWallet");
+      const fake = await W.deploy(
+        1, // the id of the factory's real escrow
+        payer.address,
+        payee.address,
+        investor.address,
+        await vscToken.getAddress(),
+        PAYMENT_AMOUNT,
+        0,
+        0,
+        owner.address,
+        investorWallet.address,
+        ownerWallet.address,
+      );
+      const fAddr = await fake.getAddress();
+      await ethers.provider.send("hardhat_setBalance", [
+        fAddr,
+        "0xDE0B6B3A7640000",
+      ]);
+      const asFake = await ethers.getImpersonatedSigner(fAddr);
+      await expect(
+        factory.connect(asFake).updateInvestorFeesEarned(investor.address, 1n),
+      ).to.be.revertedWith("Only escrow wallet");
+      expect(
+        (await factory.getInvestorProfile(investor.address)).totalFeesEarned,
+      ).to.equal(0);
+    });
+
     // Task 4.3: the fee lands in the investor's 2-of-2 MultiSigWallet and
     // leaves it only with both signatures.
     it("routes the investor fee to a MultiSigWallet, released 2-of-2", async function () {
