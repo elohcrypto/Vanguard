@@ -159,6 +159,24 @@ The handover ceremony votes, so its proposer and voters must be registered
 before any transaction and computes quorum over aged identities only; the
 demo (83b, 83d) and the smoke advance past it with `ChainTime.advancePastVoterAge`,
 which jumps on a dev node and waits on Sepolia.
+Option 82 (Task 4.7, `demo/utils/GovernanceWorkflow.js`) runs one
+ComplianceRules proposal end to end: the voter picker the ceremony votes
+use (`demo/utils/VoterPicker.js`) chooses a proposer and at least three
+voters among the verified wallets 0-9 (never 9, 10, 11; the proposer
+never votes); an actor short of the two fees is minted the difference by
+the VGT agent (the deployer before the ceremony, ops after it), else the
+option stops with the 75a hint; the proposer approves exactly
+`proposalCreationCost` and proposes VSC's current jurisdiction rule with
+840, 826 and 124 allowed and 643 blocked (no other country changes; the
+change lapses the private jurisdiction records, so 42 -> 3 again), each
+voter approves exactly `votingCost` and votes; on a dev node it then
+executes and reads the rule back, on a real network it prints the voting
+period and delay read from chain and points to 78. A failure after the
+proposal exists prints its id and "continue with 77/78".
+`scripts/demo-smoke-workflow.js` runs it after the smoke's ceremony and
+asserts Executed, the proposer's absent vote, the ops top-up and the
+rule; `demo-drive.sh --strict 1 21 51 74 24:1:Alice 24:1:Bob 24:1:Carol
+24:1:Dave 82:yes` drives it before the ceremony (the deployer tops up).
 
 ## Handover ceremony
 
@@ -612,6 +630,24 @@ next to its attestation's. The handover completion lists the
 trusted attestors per circuit and warns when one has none, the jurisdiction
 source and policy token, and the number of jurisdiction bits; the demo key
 stays trusted after the ceremony until a vote untrusts it.
+
+### Privacy options read from chain (Task 4.7)
+
+42 -> 6 runs the flows of 42 -> 1 (proof and binding, without the
+transfer steps), 2, 3, 4 and 5 with their defaults for one wallet and
+prints `validateAllPrivateCompliance(wallet)`; the blacklist step needs
+the oracle system (31). 47 reads the proof cache expiry, the binding
+validity and the preference flags, sets the first two while the deployer
+owns the verifier or PrivacyManager (after the handover it names the
+VerifierParameters or PrivacyParameters vote), lists every nullifier
+against `nullifierWallet` / `attestationNullifierWallet`, and lets a
+wallet set its own preference flags. 48 prints the verifier's counters
+(`getVerificationStats`) and wiring, 49 eight checks each true, false or
+not run, 50 wires VSC's ComplianceRules to the PrivacyManager as 41 does
+and reports the whitelist mode and each verified wallet's binding.
+`scripts/demo-smoke-privacy.js` compares option 49's checks with the
+chain. `demo-drive.sh --strict 1 21 31 41 47:1 42:6: 46 47:4 48 49 50`
+runs them without a terminal.
 
 ## Investor custody (Task 4.3, D13 b)
 
