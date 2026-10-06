@@ -45,7 +45,9 @@ async function setup() {
 
 /** Power delegated in to `a`: what getVotingPower adds to the balance. */
 async function delegatedIn(vgt: any, a: string): Promise<bigint> {
-  return (await vgt.getVotingPower(a)) - (await vgt.balanceOf(a));
+  const power: bigint = await vgt.getVotingPower(a);
+  const balance: bigint = await vgt.balanceOf(a);
+  return power - balance;
 }
 
 /** Sum of delegated-in power equals the sum of delegators' balances. */
