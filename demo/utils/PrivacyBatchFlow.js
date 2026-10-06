@@ -75,7 +75,9 @@ async function runAllProofs({ state, generator, user, log = console.log }) {
   await step(results, "jurisdiction", log, async () => {
     const [codes] = await pm.getActiveJurisdictions();
     if (codes.length === 0) {
-      log("   ⏭️  no allowed jurisdiction code on PrivacyManager: run option 21");
+      log(
+        "   ⏭️  no allowed jurisdiction code on PrivacyManager: run option 21",
+      );
       return null;
     }
     const code = codes.includes(DEFAULT_CODE) ? DEFAULT_CODE : codes[0];
