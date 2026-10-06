@@ -9,6 +9,23 @@
 
 const { ethers } = require("hardhat");
 const { RULE } = require("../demo/utils/GovernanceWorkflow");
+
+/**
+ * The rule option 82 must leave, computed here and not by the module
+ * (review L2): the current lists, RULE.allowed moved into the allowed
+ * list and RULE.blocked into the blocked one, nothing else changed.
+ */
+function expectRule(cur) {
+  const a = [...cur.allowedCountries].map(String);
+  const b = [...cur.blockedCountries].map(String);
+  const add = RULE.allowed.map(String);
+  const block = RULE.blocked.map(String);
+  const allowed = a.filter((x) => !block.includes(x));
+  for (const x of add) if (!allowed.includes(x)) allowed.push(x);
+  const blocked = b.filter((x) => !add.includes(x));
+  for (const x of block) if (!blocked.includes(x)) blocked.push(x);
+  return { allowed, blocked };
+}
 const { verifiedHumans } = require("../demo/utils/VoterPicker");
 
 const EXECUTED = 4n; // ProposalStatus.Executed
@@ -31,6 +48,7 @@ async function runWorkflowSmoke(state, failures) {
     await (await vgt.connect(first).transfer(second.address, bal)).wait();
   const fromBlock = await ethers.provider.getBlockNumber();
   const version0 = await rules.jurisdictionRuleVersion(vscAddr);
+  const want = expectRule(await rules.getJurisdictionRule(vscAddr));
 
   const lines = [];
   const real = console.log;
@@ -85,12 +103,11 @@ async function runWorkflowSmoke(state, failures) {
     vgt.filters.Transfer(ethers.ZeroAddress, first.address),
     fromBlock,
   );
-  const opsLine = lines.some((l) =>
-    /ops \(wallet 10, VGT agent\) minted/.test(l),
-  );
-  if (mints.length !== 1 || !opsLine) {
+  const ops = state.signers[10].address;
+  const by = mints.length ? (await mints[0].getTransaction()).from : null;
+  if (mints.length !== 1 || !by || by.toLowerCase() !== ops.toLowerCase()) {
     failures.push(
-      `option 82: ${mints.length} VGT mint(s) to the emptied actor ${first.address}, ops line ${opsLine}; expected one top-up by ops`,
+      `option 82: ${mints.length} VGT mint(s) to the emptied actor ${first.address}, sent by ${by}; expected one top-up by ops ${ops}`,
     );
   }
   const version1 = await rules.jurisdictionRuleVersion(vscAddr);
@@ -100,11 +117,9 @@ async function runWorkflowSmoke(state, failures) {
     );
   }
   const rule = await rules.getJurisdictionRule(vscAddr);
-  const want = res.target;
   const covers = (xs, need) =>
     need.every((n) => xs.map(String).includes(String(n)));
   if (
-    !want ||
     list(rule.allowedCountries) !== list(want.allowed) ||
     list(rule.blockedCountries) !== list(want.blocked) ||
     !covers(rule.allowedCountries, RULE.allowed) ||
