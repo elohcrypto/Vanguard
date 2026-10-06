@@ -23,6 +23,11 @@ const {
   recoverInteractive,
   replaceInteractive,
 } = require("../utils/KeyLifecycleOptions");
+const {
+  signRemoval,
+  removeWithProof,
+  removeWithoutProof,
+} = require("../utils/KeyRemovalFlow");
 
 /**
  * @class OnchainIDModule
@@ -1711,15 +1716,17 @@ class OnchainIDModule {
         return;
       }
 
-      // Sign message to prove ownership
-      const message = `Remove key from OnchainID: ${await onchainID.getAddress()}`;
-      keyOwnerSignature = await keySigner.signMessage(message);
-
-      const recoveredAddress = ethers.verifyMessage(message, keyOwnerSignature);
-      if (recoveredAddress.toLowerCase() !== keyAddress.toLowerCase()) {
-        displayError(
-          "Signature verification failed - you do not own this key!",
-        );
+      // The holder signs the digest the chain recovers from
+      // (getRemoveKeyMessage), checked before and after signing.
+      try {
+        ({ signature: keyOwnerSignature } = await signRemoval(
+          onchainID,
+          keySigner,
+          keyToRemove,
+          selectedPurpose.id,
+        ));
+      } catch (e) {
+        displayError(`Signature check failed: ${e.message}`);
         return;
       }
 
@@ -1748,33 +1755,29 @@ class OnchainIDModule {
     }
 
     // ========== STEP 4: REMOVE KEY WITH APPROPRIATE METHOD ==========
+    // Prints the method called and reads the key back (KeyRemovalFlow).
     console.log("\n🗑️  Removing key...");
-
-    let tx;
-    if (useSecureRemoval) {
-      // Use secure removeKeyWithProof for address-based keys
-      console.log("   ℹ️  Using secure removeKeyWithProof() function");
-      tx = await onchainID
-        .connect(ownerSigner)
-        .removeKeyWithProof(keyToRemove, selectedPurpose.id, keyOwnerSignature);
-    } else {
-      // Use removeKey for string-based keys (no on-chain proof possible)
-      console.log(
-        "   ⚠️  Using removeKey() for string-based key (passphrase verified)",
-      );
-      tx = await onchainID
-        .connect(ownerSigner)
-        .removeKey(keyToRemove, selectedPurpose.id);
+    const after = useSecureRemoval
+      ? await removeWithProof(
+          onchainID,
+          ownerSigner,
+          keyToRemove,
+          selectedPurpose.id,
+          keyOwnerSignature,
+        )
+      : await removeWithoutProof(
+          onchainID,
+          ownerSigner,
+          keyToRemove,
+          selectedPurpose.id,
+        );
+    if (after.active || after.revokedAt === 0) {
+      displayError("The key still reads as active on chain");
+      return;
     }
-
-    await tx.wait();
-
     displaySuccess("Key removed successfully!");
     console.log(`   Key: ${keyToRemove}`);
     console.log(`   Purpose: ${selectedPurpose.name}`);
-    console.log(
-      `   Method: ${useSecureRemoval ? "removeKeyWithProof (secure)" : "removeKey (passphrase verified)"}`,
-    );
   }
 }
 
