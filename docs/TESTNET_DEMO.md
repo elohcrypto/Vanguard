@@ -647,7 +647,8 @@ with `provideAttestation` on the Whitelist or Blacklist oracle.
 
 Who does what: the operator (ops, wallet 10) pauses and unpauses nodes
 and sets or clears the emergency designation; unpause refuses a node at
-the reputation floor (100), where `penalizeOracle` parks it. The owner
+the reputation floor (100), where `penalizeOracle` parks it, and ops
+cannot unpause a node the owner (governance) paused. The owner
 (the deployer, governance after the handover) registers and removes
 nodes, sets the threshold, weights, expiry and the operator, and may
 `emergencyOverride` a query. `BlacklistOracle.emergencyBlacklist` needs

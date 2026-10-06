@@ -324,7 +324,7 @@ handover (OracleParameters, type 2): `setConsensusThreshold(percent)`,
 | Action | Who | Effect |
 |---|---|---|
 | `registerOracle(node, name, description, reputation)` | owner | active node, reputation 100-1000 |
-| `pauseOracle(node)` / `unpauseOracle(node)` | owner or operator | stops / resumes answering and attesting; unpause refuses a node at `MIN_REPUTATION` (100), where `penalizeOracle` parks it |
+| `pauseOracle(node)` / `unpauseOracle(node)` | owner or operator | stops / resumes answering and attesting; unpause refuses a node at `MIN_REPUTATION` (100), where `penalizeOracle` parks it, and refuses the operator a node the owner paused (`pausedByOwner`) |
 | `setEmergencyOracle(node, flag)` | owner or operator | the one emergency designation: `BlacklistOracle.emergencyBlacklist` requires it and an active node |
 | `removeOracle(node, reason)` | owner | offboards the node, clears its designation, resets its engine weight |
 | `setOperator(account)` | owner | the operator role (ops after the handover) |
