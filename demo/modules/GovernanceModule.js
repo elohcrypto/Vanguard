@@ -1952,14 +1952,10 @@ class GovernanceModule {
       // Voting eligibility is NOT a token balance. castVote requires:
       //   identityRegistry.isVerified(msg.sender)         — the real gate
       //   balanceOf(msg.sender) >= votingCost             — the fee
-      // Each verified voter then counts as exactly 1 vote.
-      //
-      // These lines previously read GovernanceToken.getVotingPower(), a
-      // leftover from a token-weighted design. That made TEST 3.2 unable to
-      // fail for the right reason: the unverified user has 0 VGT only because
-      // TEST 2.2 blocked the transfer, so the check re-observed that result
-      // instead of testing verification at all — it would still "pass" if
-      // isVerified were removed from castVote entirely.
+      // Each verified voter then counts as exactly 1 vote. TEST 3.2 reads
+      // isVerified, not a balance: the unverified user also holds 0 VGT
+      // (TEST 2.2 blocked the transfer), and a balance check would pass for
+      // that reason alone even if castVote stopped checking isVerified.
       const governanceForVoting = this.state.getContract("vanguardGovernance");
       const votingFee = governanceForVoting
         ? await governanceForVoting.votingCost()
