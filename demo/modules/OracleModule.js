@@ -65,7 +65,7 @@ class OracleModule {
         `   👥 Registered Oracles: ${await oracleManager.getOracleCount()}`,
       );
       console.log(
-        `   ⚖️ Consensus Threshold: ${await oracleManager.getConsensusThreshold()}% of the active weight`,
+        `   ⚖️ Consensus Threshold: ${await oracleManager.getConsensusThreshold()}% of the registered weight`,
       );
     } catch (error) {
       displayError(`Oracle system deployment failed: ${error.message}`);
@@ -193,7 +193,7 @@ class OracleModule {
       console.log("-".repeat(35));
 
       try {
-        // A percent of the active weight (Task 4.4): 66 = two of three.
+        // A percent of the registered weight (Task 4.4): 66 = two of three.
         const current = Number(await oracleManager.getConsensusThreshold());
         console.log(`📊 Current consensus threshold: ${current}%`);
         if (current === Flow.THRESHOLD) {
@@ -238,7 +238,7 @@ class OracleModule {
         `   👥 Total Oracles: ${await oracleManager.getOracleCount()}`,
       );
       console.log(
-        `   ⚖️ Consensus Threshold: ${await oracleManager.getConsensusThreshold()}% of the active weight`,
+        `   ⚖️ Consensus Threshold: ${await oracleManager.getConsensusThreshold()}% of the registered weight`,
       );
       console.log(`   🔗 Oracle Manager: ${await oracleManager.getAddress()}`);
     } catch (error) {
@@ -1455,7 +1455,7 @@ class OracleModule {
       console.log(`   Total Oracles: ${totalOracles}`);
       console.log(`   Active Oracles: ${activeOracles.length}`);
       console.log(
-        `   Consensus Threshold: ${consensusThreshold}% of the active weight`,
+        `   Consensus Threshold: ${consensusThreshold}% of the registered weight`,
       );
       console.log(`   Operator: ${await oracleManager.operator()}`);
 
@@ -1564,9 +1564,10 @@ class OracleModule {
         Flow.throwawaySubject(),
         "0x",
       );
+      const nodes = (await oracleManager.getRegisteredOracles()).length;
       console.log(
         t.hasResult
-          ? "✅ Compliance query resolved by two of three nodes"
+          ? `✅ Compliance query resolved by ${t.voters.length} of ${nodes} registered nodes`
           : "❌ Compliance query did not resolve",
       );
 
@@ -1574,24 +1575,27 @@ class OracleModule {
       console.log("\n2️⃣ TESTING WHITELIST-DIGITAL TOKEN INTEGRATION");
       console.log("-".repeat(45));
 
-      if (this.state.identities && this.state.identities.size > 0) {
-        const testUser = Array.from(this.state.identities.values())[0];
-
-        // Add user to whitelist
-        await whitelistOracle.addToWhitelist(
-          testUser.owner,
-          5, // Highest tier
-          0, // Permanent
-          "Integration test - approved for Vanguard StableCoin",
+      // A throwaway address for 30 days, written by the whitelist oracle's
+      // owner (the deployer, ops after the handover): no demo holder changes.
+      const wlOwner = await whitelistOracle.owner();
+      const writer = [this.state.signers[0], Flow.opsSigner(this.state)].find(
+        (w) => w.address.toLowerCase() === wlOwner.toLowerCase(),
+      );
+      if (writer) {
+        const who = Flow.throwawaySubject();
+        await (
+          await whitelistOracle
+            .connect(writer)
+            .addToWhitelist(who, 5, 30 * 86400, "Integration test (30 days)")
+        ).wait();
+        const info = await whitelistOracle.getWhitelistInfo(who);
+        console.log(
+          `✅ ${who} whitelisted by ${writer.address}: tier ${info.tier}, until ${info.expiryTime}`,
         );
-        console.log(`✅ User added to whitelist: ${testUser.owner}`);
-
-        // Verify whitelist status
-        const whitelistInfo = await whitelistOracle.getWhitelistInfo(
-          testUser.owner,
+      } else {
+        console.log(
+          `ℹ️  Skipped: the whitelist oracle is owned by ${wlOwner}, neither the deployer nor ops`,
         );
-        console.log(`   🏆 Tier: ${whitelistInfo.tier}`);
-        console.log(`   📝 Reason: ${whitelistInfo.reason}`);
       }
 
       // Test 3: Emergency Protocol
@@ -1622,15 +1626,26 @@ class OracleModule {
       console.log("-".repeat(35));
 
       const oracle1 = this.state.signers[1];
-      await oracleManager.rewardOracle(
-        oracle1.address,
-        50,
-        "Integration test reward",
-      );
-      console.log(`✅ Oracle rewarded: ${oracle1.address} (+50 reputation)`);
-
-      const updatedInfo = await oracleManager.getOracleInfo(oracle1.address);
-      console.log(`   🏆 New Reputation: ${updatedInfo.reputation}`);
+      const omOwner = await oracleManager.owner();
+      if (
+        omOwner.toLowerCase() === this.state.signers[0].address.toLowerCase()
+      ) {
+        await (
+          await oracleManager.rewardOracle(
+            oracle1.address,
+            50,
+            "Integration test",
+          )
+        ).wait();
+        const info = await oracleManager.getOracleInfo(oracle1.address);
+        console.log(
+          `✅ Oracle rewarded: ${oracle1.address} (+50), reputation ${info.reputation}`,
+        );
+      } else {
+        console.log(
+          `ℹ️  Skipped: rewardOracle is the owner's (${omOwner}, governance after the handover)`,
+        );
+      }
 
       // Test Summary
       console.log("\n🎉 COMPLETE INTEGRATION TEST RESULTS");
