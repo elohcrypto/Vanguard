@@ -84,12 +84,12 @@ describe("Oracle Integration with OnchainID and ERC-3643", function () {
 
     const ConsensusOracleFactory =
       await ethers.getContractFactory("ConsensusOracle");
+    // Task 4.4: the manager's consensus engine, bound both ways.
     consensusOracle = await ConsensusOracleFactory.deploy(
       await oracleManager.getAddress(),
-      "Consensus Oracle",
-      "Oracle for M-of-N consensus mechanism",
     );
     await consensusOracle.waitForDeployment();
+    await oracleManager.setConsensusEngine(await consensusOracle.getAddress());
 
     // Deploy OnchainID System
     const OnchainIDFactoryContract =
@@ -139,33 +139,51 @@ describe("Oracle Integration with OnchainID and ERC-3643", function () {
     await token.waitForDeployment();
 
     // Setup Oracle Network
-    await oracleManager["registerOracle(address,string,string,uint256)"](
+    await oracleManager.registerOracle(
       oracle1.address,
       "Oracle 1",
       "KYC/AML Oracle 1",
       500,
     );
-    await oracleManager["registerOracle(address,string,string,uint256)"](
+    await oracleManager.registerOracle(
       oracle2.address,
       "Oracle 2",
       "KYC/AML Oracle 2",
       500,
     );
-    await oracleManager["registerOracle(address,string,string,uint256)"](
+    await oracleManager.registerOracle(
       oracle3.address,
       "Oracle 3",
       "KYC/AML Oracle 3",
       500,
     );
 
-    // Setup consensus weights
-    await consensusOracle.setOracleWeight(oracle1.address, 100);
-    await consensusOracle.setOracleWeight(oracle2.address, 100);
-    await consensusOracle.setOracleWeight(oracle3.address, 100);
+    // Setup consensus weights (engine, through the manager)
+    for (const o of [oracle1, oracle2, oracle3]) {
+      await oracleManager.setOracleWeight(o.address, 100);
+    }
 
-    // Setup emergency oracle for blacklist
-    await blacklistOracle.setEmergencyOracle(oracle1.address, true);
+    // Setup emergency oracle for blacklist (the manager's designation)
+    await oracleManager.setEmergencyOracle(oracle1.address, true);
   });
+
+  // Raise a query through the manager; its id from the engine's event.
+  async function raise(subject: string, type: number, data: string) {
+    const rc = await (
+      await oracleManager.submitQuery(subject, type, data)
+    ).wait();
+    return rc!.logs
+      .map((l: any) => consensusOracle.interface.parseLog(l))
+      .find((e: any) => e?.name === "ConsensusQueryCreated")!.args[0];
+  }
+
+  // Nodes answer through the manager until the engine resolves the query.
+  async function vote(q: string, votes: [SignerWithAddress, boolean][]) {
+    for (const [o, v] of votes) {
+      if ((await oracleManager.getQueryResolution(q))[0]) break;
+      await oracleManager.connect(o).submitResponse(q, v);
+    }
+  }
 
   describe("📋 KYC/AML Claim Integration with Oracle Whitelist", function () {
     it("📋 Issue KYC Claim (Success) - Should add to oracle whitelist", async function () {
@@ -215,71 +233,14 @@ describe("Oracle Integration with OnchainID and ERC-3643", function () {
         [onchainIDAddress, KYC_CLAIM_TOPIC, "KYC_APPROVED"],
       );
 
-      const txQuery1 = await consensusOracle.createConsensusQuery(
-        investor1.address,
-        1, // QUERY_TYPE_WHITELIST
-        queryData,
-      );
-      const receiptQuery1 = await txQuery1.wait();
+      const queryId = await raise(investor1.address, 1, queryData);
 
-      // Get queryId from the transaction logs
-      const queryCreatedEvent1 = receiptQuery1?.logs.find((log) => {
-        try {
-          return (
-            consensusOracle.interface.parseLog(log)?.name ===
-            "ConsensusQueryCreated"
-          );
-        } catch {
-          return false;
-        }
-      });
-
-      if (!queryCreatedEvent1)
-        throw new Error("ConsensusQueryCreated event not found");
-      const queryId =
-        consensusOracle.interface.parseLog(queryCreatedEvent1)?.args[0];
-
-      // Step 4: Oracles vote for approval
-      // Create proper signatures for each oracle
-      const chainId = await ethers.provider.getNetwork().then((n) => n.chainId);
-
-      // Create message hash for oracle1 (voting true)
-      const messageHash1 = ethers.solidityPackedKeccak256(
-        ["address", "bytes32", "bool", "uint256"],
-        [investor1.address, queryId, true, chainId],
-      );
-      const signature1 = await oracle1.signMessage(
-        ethers.getBytes(messageHash1),
-      );
-
-      // Create message hash for oracle2 (voting true)
-      const messageHash2 = ethers.solidityPackedKeccak256(
-        ["address", "bytes32", "bool", "uint256"],
-        [investor1.address, queryId, true, chainId],
-      );
-      const signature2 = await oracle2.signMessage(
-        ethers.getBytes(messageHash2),
-      );
-
-      // Create message hash for oracle3 (voting true)
-      const messageHash3 = ethers.solidityPackedKeccak256(
-        ["address", "bytes32", "bool", "uint256"],
-        [investor1.address, queryId, true, chainId],
-      );
-      const signature3 = await oracle3.signMessage(
-        ethers.getBytes(messageHash3),
-      );
-
-      // Simulate oracle votes (in real implementation, oracles would verify KYC data)
-      await consensusOracle
-        .connect(oracle1)
-        .submitVote(queryId, true, signature1);
-      await consensusOracle
-        .connect(oracle2)
-        .submitVote(queryId, true, signature2);
-      await consensusOracle
-        .connect(oracle3)
-        .submitVote(queryId, true, signature3);
+      // Nodes answer through the manager (66%: two of three resolve)
+      await vote(queryId, [
+        [oracle1, true],
+        [oracle2, true],
+        [oracle3, true],
+      ]);
 
       // Step 5: Add to whitelist based on consensus
       await whitelistOracle.addToWhitelist(
@@ -365,58 +326,13 @@ describe("Oracle Integration with OnchainID and ERC-3643", function () {
         [onchainIDAddress, AML_CLAIM_TOPIC, "AML_CLEAR"],
       );
 
-      const tx2 = await consensusOracle.createConsensusQuery(
-        investor1.address,
-        1, // QUERY_TYPE_WHITELIST
-        queryData,
-      );
-      const receipt2 = await tx2.wait();
+      const queryId = await raise(investor1.address, 1, queryData);
 
-      // Get queryId from the transaction logs
-      const queryCreatedEvent2 = receipt2?.logs.find((log) => {
-        try {
-          return (
-            consensusOracle.interface.parseLog(log)?.name ===
-            "ConsensusQueryCreated"
-          );
-        } catch {
-          return false;
-        }
-      });
-
-      if (!queryCreatedEvent2)
-        throw new Error("ConsensusQueryCreated event not found");
-      const queryId =
-        consensusOracle.interface.parseLog(queryCreatedEvent2)?.args[0];
-
-      // Create proper signatures for AML approval
-      const chainId2 = await ethers.provider
-        .getNetwork()
-        .then((n) => n.chainId);
-
-      const messageHashAML1 = ethers.solidityPackedKeccak256(
-        ["address", "bytes32", "bool", "uint256"],
-        [investor1.address, queryId, true, chainId2],
-      );
-      const signatureAML1 = await oracle1.signMessage(
-        ethers.getBytes(messageHashAML1),
-      );
-
-      const messageHashAML2 = ethers.solidityPackedKeccak256(
-        ["address", "bytes32", "bool", "uint256"],
-        [investor1.address, queryId, true, chainId2],
-      );
-      const signatureAML2 = await oracle2.signMessage(
-        ethers.getBytes(messageHashAML2),
-      );
-
-      // Oracles vote for AML approval
-      await consensusOracle
-        .connect(oracle1)
-        .submitVote(queryId, true, signatureAML1);
-      await consensusOracle
-        .connect(oracle2)
-        .submitVote(queryId, true, signatureAML2);
+      // Nodes answer through the manager (66%: two of three resolve)
+      await vote(queryId, [
+        [oracle1, true],
+        [oracle2, true],
+      ]);
 
       // Step 3: Upgrade whitelist tier due to AML clearance
       await whitelistOracle.addToWhitelist(
@@ -478,58 +394,15 @@ describe("Oracle Integration with OnchainID and ERC-3643", function () {
         [onchainIDAddress, KYC_CLAIM_TOPIC, "KYC_REJECTED"],
       );
 
-      const txQuery2 = await consensusOracle.createConsensusQuery(
-        investor2.address,
-        2, // QUERY_TYPE_BLACKLIST
-        queryData,
-      );
-      const receiptQuery2 = await txQuery2.wait();
+      // A blacklist query's data is its severity: empty = MEDIUM (2F.3);
+      // the rejection reason above stays off chain.
+      const queryId = await raise(investor2.address, 2, "0x");
 
-      // Get queryId from the transaction logs
-      const queryCreatedEvent = receiptQuery2?.logs.find((log) => {
-        try {
-          return (
-            consensusOracle.interface.parseLog(log)?.name ===
-            "ConsensusQueryCreated"
-          );
-        } catch {
-          return false;
-        }
-      });
-
-      if (!queryCreatedEvent)
-        throw new Error("ConsensusQueryCreated event not found");
-      const queryId =
-        consensusOracle.interface.parseLog(queryCreatedEvent)?.args[0];
-
-      // Create proper signatures for blacklisting
-      const chainId3 = await ethers.provider
-        .getNetwork()
-        .then((n) => n.chainId);
-
-      const messageHashBL1 = ethers.solidityPackedKeccak256(
-        ["address", "bytes32", "bool", "uint256"],
-        [investor2.address, queryId, true, chainId3],
-      );
-      const signatureBL1 = await oracle1.signMessage(
-        ethers.getBytes(messageHashBL1),
-      );
-
-      const messageHashBL2 = ethers.solidityPackedKeccak256(
-        ["address", "bytes32", "bool", "uint256"],
-        [investor2.address, queryId, true, chainId3],
-      );
-      const signatureBL2 = await oracle2.signMessage(
-        ethers.getBytes(messageHashBL2),
-      );
-
-      // Oracles vote for blacklisting
-      await consensusOracle
-        .connect(oracle1)
-        .submitVote(queryId, true, signatureBL1);
-      await consensusOracle
-        .connect(oracle2)
-        .submitVote(queryId, true, signatureBL2);
+      // Nodes answer through the manager (66%: two of three resolve)
+      await vote(queryId, [
+        [oracle1, true],
+        [oracle2, true],
+      ]);
 
       // Step 4: Add to blacklist due to KYC failure
       await blacklistOracle.addToBlacklist(
@@ -828,68 +701,14 @@ describe("Oracle Integration with OnchainID and ERC-3643", function () {
       );
 
       // Create the query and get queryId from event
-      const txQuery3 = await consensusOracle.createConsensusQuery(
-        investor1.address,
-        1, // WHITELIST
-        queryData,
-      );
-      const receiptQuery3 = await txQuery3.wait();
+      const queryId = await raise(investor1.address, 1, queryData);
 
-      // Get queryId from the transaction logs
-      const queryCreatedEvent = receiptQuery3?.logs.find((log) => {
-        try {
-          return (
-            consensusOracle.interface.parseLog(log)?.name ===
-            "ConsensusQueryCreated"
-          );
-        } catch {
-          return false;
-        }
-      });
-
-      if (!queryCreatedEvent)
-        throw new Error("ConsensusQueryCreated event not found");
-      const queryId =
-        consensusOracle.interface.parseLog(queryCreatedEvent)?.args[0];
-
-      // Submit votes from oracles
-      const chainId4 = await ethers.provider
-        .getNetwork()
-        .then((n) => n.chainId);
-
-      const messageHashCons1 = ethers.solidityPackedKeccak256(
-        ["address", "bytes32", "bool", "uint256"],
-        [investor1.address, queryId, true, chainId4],
-      );
-      const signatureCons1 = await oracle1.signMessage(
-        ethers.getBytes(messageHashCons1),
-      );
-
-      const messageHashCons2 = ethers.solidityPackedKeccak256(
-        ["address", "bytes32", "bool", "uint256"],
-        [investor1.address, queryId, true, chainId4],
-      );
-      const signatureCons2 = await oracle2.signMessage(
-        ethers.getBytes(messageHashCons2),
-      );
-
-      const messageHashCons3 = ethers.solidityPackedKeccak256(
-        ["address", "bytes32", "bool", "uint256"],
-        [investor1.address, queryId, false, chainId4],
-      );
-      const signatureCons3 = await oracle3.signMessage(
-        ethers.getBytes(messageHashCons3),
-      );
-
-      await consensusOracle
-        .connect(oracle1)
-        .submitVote(queryId, true, signatureCons1);
-      await consensusOracle
-        .connect(oracle2)
-        .submitVote(queryId, true, signatureCons2);
-      await consensusOracle
-        .connect(oracle3)
-        .submitVote(queryId, false, signatureCons3);
+      // Nodes answer through the manager (66%: two of three resolve)
+      await vote(queryId, [
+        [oracle1, true],
+        [oracle2, true],
+        [oracle3, false],
+      ]);
 
       // Check consensus result
       const result = await consensusOracle.getConsensusResult(queryId);
@@ -939,9 +758,9 @@ describe("Oracle Integration with OnchainID and ERC-3643", function () {
       console.log("✅ Oracle reputation system working correctly");
     });
 
-    it("Should handle oracle deactivation and failover", async function () {
-      // Deactivate oracle
-      await oracleManager.deactivateOracle(oracle1.address);
+    it("Should handle oracle pause and failover", async function () {
+      // Pause oracle
+      await oracleManager.pauseOracle(oracle1.address);
       expect(await oracleManager.isActiveOracle(oracle1.address)).to.be.false;
 
       // System should still work with remaining oracles

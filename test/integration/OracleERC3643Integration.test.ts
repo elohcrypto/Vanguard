@@ -85,10 +85,9 @@ describe("Oracle-ERC3643 Integration Tests", function () {
       await ethers.getContractFactory("ConsensusOracle");
     consensusOracle = await ConsensusOracleFactory.deploy(
       await oracleManager.getAddress(),
-      "Compliance Consensus Oracle",
-      "Oracle for compliance consensus decisions",
     );
     await consensusOracle.waitForDeployment();
+    await oracleManager.setConsensusEngine(await consensusOracle.getAddress());
 
     // Deploy OnchainID contracts
     const OnchainIDFactoryContract =
@@ -136,35 +135,36 @@ describe("Oracle-ERC3643 Integration Tests", function () {
 
   async function setupInitialConfiguration() {
     // Register oracles
-    await oracleManager["registerOracle(address,string,string,uint256)"](
+    await oracleManager.registerOracle(
       oracle1.address,
       "KYC Oracle 1",
       "Primary KYC verification oracle",
       800,
     );
-    await oracleManager["registerOracle(address,string,string,uint256)"](
+    await oracleManager.registerOracle(
       oracle2.address,
       "AML Oracle 2",
       "AML compliance oracle",
       750,
     );
-    await oracleManager["registerOracle(address,string,string,uint256)"](
+    await oracleManager.registerOracle(
       oracle3.address,
       "Compliance Oracle 3",
       "General compliance oracle",
       700,
     );
 
-    // Set consensus threshold
-    await oracleManager.setConsensusThreshold(2); // 2 out of 3 oracles needed
+    // Set consensus threshold: 66% of the weight, 2 out of 3 oracles
+    await oracleManager.setConsensusThreshold(66);
 
-    // Setup oracle weights in consensus oracle
-    await consensusOracle.setOracleWeight(oracle1.address, 100);
-    await consensusOracle.setOracleWeight(oracle2.address, 100);
-    await consensusOracle.setOracleWeight(oracle3.address, 100);
+    // Setup oracle weights in the engine, through the manager
+    await oracleManager.batchSetOracleWeights(
+      [oracle1.address, oracle2.address, oracle3.address],
+      [100, 100, 100],
+    );
 
-    // Set emergency oracle for blacklist
-    await blacklistOracle.setEmergencyOracle(oracle2.address, true);
+    // Set emergency oracle for blacklist (the manager's designation)
+    await oracleManager.setEmergencyOracle(oracle2.address, true);
 
     // Set token agent
     await token.addAgent(tokenAgent.address);
@@ -580,24 +580,24 @@ describe("Oracle-ERC3643 Integration Tests", function () {
         [investor1.address, "Enhanced due diligence required", Date.now()],
       );
 
-      const tx = await consensusOracle.createConsensusQuery(
-        investor1.address,
-        1, // WHITELIST query type
-        queryData,
-      );
+      const tx = oracleManager.submitQuery(investor1.address, 1, queryData);
+      const receipt = await (await tx).wait();
+      const queryId = receipt!.logs
+        .map((l: any) => consensusOracle.interface.parseLog(l))
+        .find((e: any) => e?.name === "ConsensusQueryCreated")!.args[0];
+      console.log("✅ Consensus query created; two of three nodes answer");
 
-      const receipt = await tx.wait();
-      console.log("✅ Consensus query created");
+      await oracleManager.connect(oracle1).submitResponse(queryId, true);
+      await oracleManager.connect(oracle3).submitResponse(queryId, true);
 
-      // Step 2: Simulate oracle votes (in a real scenario, oracles would vote independently)
-      // For testing, we'll verify the consensus mechanism structure is in place
-
-      const queryResult = await consensusOracle.getConsensusResult(
-        ethers.keccak256(ethers.toUtf8Bytes("test-query-id")),
-      );
-
-      // Verify query structure exists
-      expect(queryResult).to.not.be.undefined;
+      const r = await consensusOracle.getConsensusResult(queryId);
+      expect([r.isResolved, r.positiveVotes, r.snapshotWeight]).to.deep.equal([
+        true,
+        200n,
+        300n,
+      ]);
+      const [has, res] = await oracleManager.getQueryResolution(queryId);
+      expect([has, res]).to.deep.equal([true, true]);
 
       console.log("✅ Oracle consensus mechanism verified");
     });

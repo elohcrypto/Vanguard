@@ -54,18 +54,18 @@ describe("Oracle Management System", function () {
     // Deploy ConsensusOracle
     const ConsensusOracleFactory =
       await ethers.getContractFactory("ConsensusOracle");
+    // Task 4.4: the engine is bound to the manager, the manager to it.
     consensusOracle = await ConsensusOracleFactory.deploy(
       await oracleManager.getAddress(),
-      "Consensus Oracle",
-      "Oracle for M-of-N consensus mechanism",
     );
     await consensusOracle.waitForDeployment();
+    await oracleManager.setConsensusEngine(await consensusOracle.getAddress());
   });
 
   describe("OracleManager", function () {
     it("Should register oracles correctly", async function () {
       await expect(
-        oracleManager["registerOracle(address,string,string,uint256)"](
+        oracleManager.registerOracle(
           oracle1.address,
           "Oracle 1",
           "First test oracle",
@@ -81,7 +81,7 @@ describe("Oracle Management System", function () {
     });
 
     it("Should not allow duplicate oracle registration", async function () {
-      await oracleManager["registerOracle(address,string,string,uint256)"](
+      await oracleManager.registerOracle(
         oracle1.address,
         "Oracle 1",
         "First test oracle",
@@ -89,7 +89,7 @@ describe("Oracle Management System", function () {
       );
 
       await expect(
-        oracleManager["registerOracle(address,string,string,uint256)"](
+        oracleManager.registerOracle(
           oracle1.address,
           "Oracle 1 Duplicate",
           "Duplicate oracle",
@@ -98,8 +98,8 @@ describe("Oracle Management System", function () {
       ).to.be.revertedWith("OracleManager: Oracle already registered");
     });
 
-    it("Should deregister oracles correctly", async function () {
-      await oracleManager["registerOracle(address,string,string,uint256)"](
+    it("Should remove oracles correctly", async function () {
+      await oracleManager.registerOracle(
         oracle1.address,
         "Oracle 1",
         "First test oracle",
@@ -107,7 +107,7 @@ describe("Oracle Management System", function () {
       );
 
       await expect(
-        oracleManager.deregisterOracle(oracle1.address, "Test deregistration"),
+        oracleManager.removeOracle(oracle1.address, "Test deregistration"),
       )
         .to.emit(oracleManager, "OracleDeregistered")
         .withArgs(oracle1.address, "Test deregistration");
@@ -117,21 +117,21 @@ describe("Oracle Management System", function () {
       expect(await oracleManager.isActiveOracle(oracle1.address)).to.be.false;
     });
 
-    it("Should manage oracle activation/deactivation", async function () {
-      await oracleManager["registerOracle(address,string,string,uint256)"](
+    it("Should pause and unpause oracles", async function () {
+      await oracleManager.registerOracle(
         oracle1.address,
         "Oracle 1",
         "First test oracle",
         500,
       );
 
-      await expect(oracleManager.deactivateOracle(oracle1.address))
+      await expect(oracleManager.pauseOracle(oracle1.address))
         .to.emit(oracleManager, "OracleDeactivated")
         .withArgs(oracle1.address);
 
       expect(await oracleManager.isActiveOracle(oracle1.address)).to.be.false;
 
-      await expect(oracleManager.activateOracle(oracle1.address))
+      await expect(oracleManager.unpauseOracle(oracle1.address))
         .to.emit(oracleManager, "OracleActivated")
         .withArgs(oracle1.address);
 
@@ -140,45 +140,48 @@ describe("Oracle Management System", function () {
 
     it("Should set consensus threshold correctly", async function () {
       // Register enough oracles to support the threshold
-      await oracleManager["registerOracle(address,string,string,uint256)"](
+      await oracleManager.registerOracle(
         oracle1.address,
         "Oracle 1",
         "First test oracle",
         500,
       );
-      await oracleManager["registerOracle(address,string,string,uint256)"](
+      await oracleManager.registerOracle(
         oracle2.address,
         "Oracle 2",
         "Second test oracle",
         500,
       );
-      await oracleManager["registerOracle(address,string,string,uint256)"](
+      await oracleManager.registerOracle(
         oracle3.address,
         "Oracle 3",
         "Third test oracle",
         500,
       );
-      await oracleManager["registerOracle(address,string,string,uint256)"](
+      await oracleManager.registerOracle(
         user.address,
         "Oracle 4",
         "Fourth test oracle",
         500,
       );
-      await oracleManager["registerOracle(address,string,string,uint256)"](
+      await oracleManager.registerOracle(
         subject.address,
         "Oracle 5",
         "Fifth test oracle",
         500,
       );
 
-      await expect(oracleManager.setConsensusThreshold(5))
-        .to.emit(oracleManager, "ConsensusThresholdUpdated")
-        .withArgs(3, 5);
+      // A percent of the active weight (Task 4.4): 5 of 5 nodes is 100.
+      await expect(oracleManager.setConsensusThreshold(100))
+        .to.emit(consensusOracle, "ConsensusThresholdUpdated")
+        .withArgs(66, 100);
 
-      expect(await oracleManager.getConsensusThreshold()).to.equal(5);
+      expect(await oracleManager.getConsensusThreshold()).to.equal(100);
     });
 
     it("Should submit and track queries", async function () {
+      // The engine snapshots the active weight: a query needs a node.
+      await oracleManager.registerOracle(oracle1.address, "O1", "", 500);
       const queryData = ethers.AbiCoder.defaultAbiCoder().encode(
         ["string"],
         ["test query"],
@@ -192,7 +195,7 @@ describe("Oracle Management System", function () {
     });
 
     it("Should handle emergency override", async function () {
-      await oracleManager["registerOracle(address,string,string,uint256)"](
+      await oracleManager.registerOracle(
         oracle1.address,
         "Oracle 1",
         "First test oracle",
@@ -218,7 +221,7 @@ describe("Oracle Management System", function () {
     });
 
     it("Should update oracle reputation", async function () {
-      await oracleManager["registerOracle(address,string,string,uint256)"](
+      await oracleManager.registerOracle(
         oracle1.address,
         "Oracle 1",
         "First test oracle",
@@ -232,7 +235,7 @@ describe("Oracle Management System", function () {
     });
 
     it("Should penalize and reward oracles", async function () {
-      await oracleManager["registerOracle(address,string,string,uint256)"](
+      await oracleManager.registerOracle(
         oracle1.address,
         "Oracle 1",
         "First test oracle",
@@ -252,19 +255,19 @@ describe("Oracle Management System", function () {
   describe("WhitelistOracle", function () {
     beforeEach(async function () {
       // Register oracles in the manager
-      await oracleManager["registerOracle(address,string,string,uint256)"](
+      await oracleManager.registerOracle(
         oracle1.address,
         "Oracle 1",
         "First test oracle",
         500,
       );
-      await oracleManager["registerOracle(address,string,string,uint256)"](
+      await oracleManager.registerOracle(
         oracle2.address,
         "Oracle 2",
         "Second test oracle",
         500,
       );
-      await oracleManager["registerOracle(address,string,string,uint256)"](
+      await oracleManager.registerOracle(
         oracle3.address,
         "Oracle 3",
         "Third test oracle",
@@ -355,19 +358,19 @@ describe("Oracle Management System", function () {
 
   describe("BlacklistOracle", function () {
     beforeEach(async function () {
-      await oracleManager["registerOracle(address,string,string,uint256)"](
+      await oracleManager.registerOracle(
         oracle1.address,
         "Oracle 1",
         "First test oracle",
         500,
       );
-      await oracleManager["registerOracle(address,string,string,uint256)"](
+      await oracleManager.registerOracle(
         oracle2.address,
         "Oracle 2",
         "Second test oracle",
         500,
       );
-      await oracleManager["registerOracle(address,string,string,uint256)"](
+      await oracleManager.registerOracle(
         oracle3.address,
         "Oracle 3",
         "Third test oracle",
@@ -389,7 +392,7 @@ describe("Oracle Management System", function () {
     });
 
     it("Should handle emergency blacklisting", async function () {
-      await blacklistOracle.setEmergencyOracle(oracle1.address, true);
+      await oracleManager.setEmergencyOracle(oracle1.address, true);
 
       await expect(
         blacklistOracle.connect(oracle1).emergencyBlacklist(
@@ -453,28 +456,28 @@ describe("Oracle Management System", function () {
       expect(info.reason).to.equal("Test with expiry");
     });
 
-    it("Should set emergency oracle status", async function () {
-      await expect(blacklistOracle.setEmergencyOracle(oracle1.address, true))
-        .to.emit(blacklistOracle, "EmergencyOracleUpdated")
+    it("Should set emergency oracle status (the manager's, Task 4.4)", async function () {
+      await expect(oracleManager.setEmergencyOracle(oracle1.address, true))
+        .to.emit(oracleManager, "EmergencyOracleSet")
         .withArgs(oracle1.address, true);
     });
   });
 
   describe("ConsensusOracle", function () {
     beforeEach(async function () {
-      await oracleManager["registerOracle(address,string,string,uint256)"](
+      await oracleManager.registerOracle(
         oracle1.address,
         "Oracle 1",
         "First test oracle",
         500,
       );
-      await oracleManager["registerOracle(address,string,string,uint256)"](
+      await oracleManager.registerOracle(
         oracle2.address,
         "Oracle 2",
         "Second test oracle",
         500,
       );
-      await oracleManager["registerOracle(address,string,string,uint256)"](
+      await oracleManager.registerOracle(
         oracle3.address,
         "Oracle 3",
         "Third test oracle",
@@ -488,13 +491,14 @@ describe("Oracle Management System", function () {
         ["test query"],
       );
 
-      await expect(
-        consensusOracle.createConsensusQuery(subject.address, 1, data),
-      ).to.emit(consensusOracle, "ConsensusQueryCreated");
+      await expect(oracleManager.submitQuery(subject.address, 1, data)).to.emit(
+        consensusOracle,
+        "ConsensusQueryCreated",
+      );
     });
 
     it("Should set oracle weights", async function () {
-      await expect(consensusOracle.setOracleWeight(oracle1.address, 150))
+      await expect(oracleManager.setOracleWeight(oracle1.address, 150))
         .to.emit(consensusOracle, "OracleWeightUpdated")
         .withArgs(oracle1.address, 0, 150);
 
@@ -507,7 +511,7 @@ describe("Oracle Management System", function () {
       const oracles = [oracle1.address, oracle2.address];
       const weights = [150, 200];
 
-      await consensusOracle.batchSetOracleWeights(oracles, weights);
+      await oracleManager.batchSetOracleWeights(oracles, weights);
 
       expect(await consensusOracle.getOracleWeight(oracle1.address)).to.equal(
         150,
@@ -518,59 +522,42 @@ describe("Oracle Management System", function () {
     });
 
     it("Should set consensus threshold", async function () {
-      await expect(consensusOracle.setConsensusThreshold(75))
+      await expect(oracleManager.setConsensusThreshold(75))
         .to.emit(consensusOracle, "ConsensusThresholdUpdated")
         .withArgs(66, 75);
     });
 
     it("Should handle query expiry", async function () {
-      await consensusOracle.setQueryExpiryTime(3600); // 1 hour
-
-      const data = ethers.AbiCoder.defaultAbiCoder().encode(
-        ["string"],
-        ["test query"],
-      );
-      const tx = await consensusOracle.createConsensusQuery(
-        subject.address,
-        1,
-        data,
-      );
-
-      // Test that query expiry time is set correctly
-      expect(tx).to.not.be.null;
+      await oracleManager.setQueryExpiryTime(3600); // 1 hour
+      expect(await consensusOracle.queryExpiryTime()).to.equal(3600);
     });
 
-    it("Should provide oracle information", async function () {
-      const [
-        oracleAddress,
-        name,
-        description,
-        reputation,
-        oracleActive,
-        totalAttestationsCount,
-      ] = await consensusOracle.getOracleInfo();
-      expect(name).to.equal("Consensus Oracle");
-      expect(description).to.equal("Oracle for M-of-N consensus mechanism");
-      expect(oracleActive).to.be.true;
+    it("Should be bound to this manager only", async function () {
+      expect(await consensusOracle.oracleManager()).to.equal(
+        await oracleManager.getAddress(),
+      );
+      expect(await oracleManager.consensusEngine()).to.equal(
+        await consensusOracle.getAddress(),
+      );
     });
   });
 
   describe("Integration Tests", function () {
     beforeEach(async function () {
       // Register oracles
-      await oracleManager["registerOracle(address,string,string,uint256)"](
+      await oracleManager.registerOracle(
         oracle1.address,
         "Oracle 1",
         "First test oracle",
         500,
       );
-      await oracleManager["registerOracle(address,string,string,uint256)"](
+      await oracleManager.registerOracle(
         oracle2.address,
         "Oracle 2",
         "Second test oracle",
         500,
       );
-      await oracleManager["registerOracle(address,string,string,uint256)"](
+      await oracleManager.registerOracle(
         oracle3.address,
         "Oracle 3",
         "Third test oracle",
@@ -579,30 +566,30 @@ describe("Oracle Management System", function () {
     });
 
     it("Should handle complete whitelist consensus workflow", async function () {
-      // Set up consensus oracle weights
-      await consensusOracle.setOracleWeight(oracle1.address, 100);
-      await consensusOracle.setOracleWeight(oracle2.address, 100);
-      await consensusOracle.setOracleWeight(oracle3.address, 100);
-
-      // Create consensus query
+      for (const o of [oracle1, oracle2, oracle3]) {
+        await oracleManager.setOracleWeight(o.address, 100);
+      }
       const data = ethers.AbiCoder.defaultAbiCoder().encode(
         ["string"],
         ["whitelist consensus test"],
       );
-      const tx = await consensusOracle.createConsensusQuery(
-        subject.address,
-        1,
-        data,
-      );
-      const receipt = await tx.wait();
-
-      // In a real implementation, we would extract the queryId and submit votes
-      expect(receipt).to.not.be.null;
+      const rc = await (
+        await oracleManager.submitQuery(subject.address, 1, data)
+      ).wait();
+      const q = rc!.logs
+        .map((l: any) => consensusOracle.interface.parseLog(l))
+        .find((e: any) => e?.name === "ConsensusQueryCreated")!.args[0];
+      await oracleManager.connect(oracle1).submitResponse(q, true);
+      await expect(oracleManager.connect(oracle2).submitResponse(q, true))
+        .to.emit(consensusOracle, "ConsensusReached")
+        .withArgs(q, true, 200, 0, 300, anyValue);
+      const [has, res] = await oracleManager.getQueryResolution(q);
+      expect([has, res]).to.deep.equal([true, true]);
     });
 
     it("Should handle oracle reputation updates across contracts", async function () {
       // Register oracle first (use subject to avoid conflicts with other tests)
-      await oracleManager["registerOracle(address,string,string,uint256)"](
+      await oracleManager.registerOracle(
         subject.address,
         "Oracle Subject",
         "Subject test oracle",
@@ -612,16 +599,15 @@ describe("Oracle Management System", function () {
       // Update reputation in manager
       await oracleManager.updateOracleReputation(subject.address, 750);
 
-      // The ConsensusOracle's updateReputation should be called by the oracle manager
-      // Let's just verify the manager's reputation update worked
+      // Reputation lives in the manager only (Task 4.4).
       expect(await oracleManager.getOracleReputation(subject.address)).to.equal(
         750,
       );
     });
 
     it("Should handle emergency scenarios", async function () {
-      // Set emergency oracle
-      await blacklistOracle.setEmergencyOracle(oracle1.address, true);
+      // Set emergency oracle (the manager's designation)
+      await oracleManager.setEmergencyOracle(oracle1.address, true);
 
       // Emergency blacklist
       await blacklistOracle.connect(oracle1).emergencyBlacklist(

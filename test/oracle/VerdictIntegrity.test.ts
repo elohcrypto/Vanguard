@@ -1,6 +1,7 @@
 import { expect } from "chai";
 import { ethers, network } from "hardhat";
 import { SignerWithAddress } from "@nomicfoundation/hardhat-ethers/signers";
+import { bindEngine } from "../helpers/oracles";
 
 // Plan 2F.3 (review H3, L4). A resolved OracleManager verdict is applied by
 // BlacklistOracle / WhitelistOracle at most once, only while fresh, never
@@ -36,14 +37,10 @@ describe("Oracle verdict integrity (2F.3)", function () {
     [owner, n1, n2, n3, n4, victim, sanctioned, stranger] =
       await ethers.getSigners();
     OM = await (await ethers.getContractFactory("OracleManager")).deploy();
+    await bindEngine(OM);
     const om = await OM.getAddress();
     for (const n of [n1, n2, n3, n4]) {
-      await OM["registerOracle(address,string,string,uint256)"](
-        n.address,
-        "node",
-        "",
-        500,
-      );
+      await OM.registerOracle(n.address, "node", "", 500);
     }
     BO = await (
       await ethers.getContractFactory("BlacklistOracle")
@@ -203,7 +200,7 @@ describe("Oracle verdict integrity (2F.3)", function () {
     });
 
     it("an emergency listing is never undone by an older clear verdict", async function () {
-      await BO.setEmergencyOracle(n4.address, true);
+      await OM.setEmergencyOracle(n4.address, true);
       const q = await query(victim.address, BLACKLIST, false);
       await inc(60);
       await BO.connect(n4).emergencyBlacklist(victim.address, CRITICAL, "e");
@@ -419,7 +416,7 @@ describe("Oracle verdict integrity (2F.3)", function () {
       ).to.be.revertedWithCustomError(OM, "UnauthorizedQueryCreator");
       await OM.connect(owner).submitQuery(victim.address, BLACKLIST, "0x");
       await OM.connect(n2).submitQuery(victim.address, WHITELIST, "0x99");
-      await OM.deactivateOracle(n2.address);
+      await OM.pauseOracle(n2.address);
       await expect(
         OM.connect(n2).submitQuery(victim.address, BLACKLIST, "0x"),
       ).to.be.revertedWithCustomError(OM, "UnauthorizedQueryCreator");
@@ -481,7 +478,8 @@ describe("Oracle verdict integrity (2F.3)", function () {
       await expect(
         OM.connect(n4).submitResponse(q, false),
       ).to.be.revertedWithCustomError(OM, "QueryAlreadyResolved");
-      expect((await OM.checkConsensus(q)).toString()).to.equal("true,true");
+      const [has, res] = await OM.getQueryResolution(q);
+      expect([has, res]).to.deep.equal([true, true]);
     });
   });
 });

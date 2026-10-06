@@ -407,8 +407,9 @@ describe("DynamicListManager writes the oracles", function () {
         "OracleManager",
         await f.bl.oracleManager(),
       );
-      await om["registerOracle(address,string)"](f.stranger.address, "e");
-      await f.bl.setEmergencyOracle(f.stranger.address, true);
+      await om.registerOracle(f.stranger.address, "e", "", 100);
+      // Task 4.4: the emergency designation is the manager's.
+      await om.setEmergencyOracle(f.stranger.address, true);
       return f;
     }
     const CRITICAL = 3;

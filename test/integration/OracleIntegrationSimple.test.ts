@@ -102,8 +102,8 @@ describe("Oracle Integration - Core Functionality Test", function () {
       500,
     );
 
-    // Setup emergency oracle for blacklist
-    await blacklistOracle.setEmergencyOracle(oracle1.address, true);
+    // Setup emergency oracle for blacklist (the manager's designation, 4.4)
+    await oracleManager.setEmergencyOracle(oracle1.address, true);
   });
 
   describe("📋 KYC Claim Success - Whitelist Integration", function () {
@@ -398,15 +398,15 @@ describe("Oracle Integration - Core Functionality Test", function () {
       expect(oracleCount).to.equal(3);
       console.log("   ✅ Oracle count tracking working");
 
-      // Test oracle deactivation
-      await oracleManager.deactivateOracle(oracle1.address);
+      // Test oracle pause
+      await oracleManager.pauseOracle(oracle1.address);
       expect(await oracleManager.isActiveOracle(oracle1.address)).to.be.false;
-      console.log("   ✅ Oracle deactivation working");
+      console.log("   ✅ Oracle pause working");
 
-      // Test oracle reactivation
-      await oracleManager.activateOracle(oracle1.address);
+      // Test oracle unpause
+      await oracleManager.unpauseOracle(oracle1.address);
       expect(await oracleManager.isActiveOracle(oracle1.address)).to.be.true;
-      console.log("   ✅ Oracle reactivation working");
+      console.log("   ✅ Oracle unpause working");
 
       // Test reputation management
       await oracleManager.updateOracleReputation(oracle1.address, 750);

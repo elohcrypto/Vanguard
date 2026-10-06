@@ -51,27 +51,27 @@ describe("Oracle Basic Functionality Tests", function () {
 
     const ConsensusOracleFactory =
       await ethers.getContractFactory("ConsensusOracle");
+    // Task 4.4: the engine is bound to the manager, the manager to it.
     consensusOracle = await ConsensusOracleFactory.deploy(
       await oracleManager.getAddress(),
-      "Test Consensus Oracle",
-      "Oracle for testing consensus functionality",
     );
     await consensusOracle.waitForDeployment();
+    await oracleManager.setConsensusEngine(await consensusOracle.getAddress());
 
     // Register oracles
-    await oracleManager["registerOracle(address,string,string,uint256)"](
+    await oracleManager.registerOracle(
       oracle1.address,
       "Oracle 1",
       "Test oracle 1",
       500,
     );
-    await oracleManager["registerOracle(address,string,string,uint256)"](
+    await oracleManager.registerOracle(
       oracle2.address,
       "Oracle 2",
       "Test oracle 2",
       500,
     );
-    await oracleManager["registerOracle(address,string,string,uint256)"](
+    await oracleManager.registerOracle(
       oracle3.address,
       "Oracle 3",
       "Test oracle 3",
@@ -95,32 +95,33 @@ describe("Oracle Basic Functionality Tests", function () {
       console.log("✅ Oracle registration working correctly");
     });
 
-    it("Should handle oracle activation/deactivation", async function () {
-      console.log("🔄 Testing Oracle Activation/Deactivation...");
+    it("Should handle oracle pause/unpause", async function () {
+      console.log("🔄 Testing Oracle Pause/Unpause...");
 
-      await expect(oracleManager.deactivateOracle(oracle1.address))
+      await expect(oracleManager.pauseOracle(oracle1.address))
         .to.emit(oracleManager, "OracleDeactivated")
         .withArgs(oracle1.address);
 
       expect(await oracleManager.isActiveOracle(oracle1.address)).to.be.false;
 
-      await expect(oracleManager.activateOracle(oracle1.address))
+      await expect(oracleManager.unpauseOracle(oracle1.address))
         .to.emit(oracleManager, "OracleActivated")
         .withArgs(oracle1.address);
 
       expect(await oracleManager.isActiveOracle(oracle1.address)).to.be.true;
 
-      console.log("✅ Oracle activation/deactivation working correctly");
+      console.log("✅ Oracle pause/unpause working correctly");
     });
 
     it("Should manage consensus threshold", async function () {
       console.log("⚖️ Testing Consensus Threshold Management...");
 
-      await expect(oracleManager.setConsensusThreshold(2))
-        .to.emit(oracleManager, "ConsensusThresholdUpdated")
-        .withArgs(3, 2);
+      // A percent of the active weight, set on the engine through the manager.
+      await expect(oracleManager.setConsensusThreshold(75))
+        .to.emit(consensusOracle, "ConsensusThresholdUpdated")
+        .withArgs(66, 75);
 
-      expect(await oracleManager.getConsensusThreshold()).to.equal(2);
+      expect(await oracleManager.getConsensusThreshold()).to.equal(75);
 
       console.log("✅ Consensus threshold management working correctly");
     });
@@ -265,8 +266,8 @@ describe("Oracle Basic Functionality Tests", function () {
     it("Should handle emergency blacklisting", async function () {
       console.log("🚨 Testing Emergency Blacklisting...");
 
-      // Set emergency oracle
-      await blacklistOracle.setEmergencyOracle(oracle2.address, true);
+      // Set emergency oracle (the manager's designation, Task 4.4)
+      await oracleManager.setEmergencyOracle(oracle2.address, true);
 
       await expect(
         blacklistOracle.connect(oracle2).emergencyBlacklist(
@@ -320,8 +321,9 @@ describe("Oracle Basic Functionality Tests", function () {
         ["Test consensus query", Date.now()],
       );
 
+      // Queries open through the manager; the engine snapshots the weight.
       await expect(
-        consensusOracle.createConsensusQuery(user1.address, 1, queryData),
+        oracleManager.submitQuery(user1.address, 1, queryData),
       ).to.emit(consensusOracle, "ConsensusQueryCreated");
 
       console.log("✅ Consensus query creation working correctly");
@@ -330,7 +332,7 @@ describe("Oracle Basic Functionality Tests", function () {
     it("Should manage oracle weights", async function () {
       console.log("⚖️ Testing Oracle Weight Management...");
 
-      await expect(consensusOracle.setOracleWeight(oracle1.address, 150))
+      await expect(oracleManager.setOracleWeight(oracle1.address, 150))
         .to.emit(consensusOracle, "OracleWeightUpdated")
         .withArgs(oracle1.address, 0, 150);
 
@@ -347,7 +349,7 @@ describe("Oracle Basic Functionality Tests", function () {
       const oracles = [oracle1.address, oracle2.address, oracle3.address];
       const weights = [120, 130, 140];
 
-      await consensusOracle.batchSetOracleWeights(oracles, weights);
+      await oracleManager.batchSetOracleWeights(oracles, weights);
 
       expect(await consensusOracle.getOracleWeight(oracle1.address)).to.equal(
         120,
@@ -439,8 +441,8 @@ describe("Oracle Basic Functionality Tests", function () {
     it("Should handle oracle consensus for critical decisions", async function () {
       console.log("🤝 Testing Oracle Consensus for Critical Decisions...");
 
-      // Set up consensus requirements
-      await oracleManager.setConsensusThreshold(2); // Need 2 out of 3 oracles
+      // Set up consensus requirements: 66% of the weight, 2 of 3 nodes
+      await oracleManager.setConsensusThreshold(66);
 
       // Create a critical decision query
       const queryData = ethers.AbiCoder.defaultAbiCoder().encode(
@@ -448,11 +450,7 @@ describe("Oracle Basic Functionality Tests", function () {
         ["Critical compliance decision", user1.address, Date.now()],
       );
 
-      const tx = await consensusOracle.createConsensusQuery(
-        user1.address,
-        4,
-        queryData,
-      );
+      const tx = await oracleManager.submitQuery(user1.address, 4, queryData);
       await tx.wait();
 
       console.log("✅ Critical decision query created");

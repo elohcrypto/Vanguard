@@ -6,9 +6,10 @@ import {
   WhitelistOracle,
   BlacklistOracle,
 } from "../../typechain-types";
+import { bindEngine } from "../helpers/oracles";
 
 // A resolved consensus in OracleManager is keyed by queryId only. Both oracle
-// contracts read checkConsensus(queryId) and apply the verdict to whatever
+// contracts read getQueryResolution(queryId) and apply the verdict to whatever
 // `subject` the caller names, never checking the queryId was raised FOR that
 // subject, nor that it asked the question this oracle answers (query type). One active oracle can therefore self-sign an attestation that
 // points a benign, already-resolved query at any victim address.
@@ -33,6 +34,7 @@ describe("Oracle consensus is bound to the query subject", function () {
       await ethers.getContractFactory("OracleManager")
     ).deploy();
     await oracleManager.waitForDeployment();
+    await bindEngine(oracleManager);
     whitelistOracle = await (
       await ethers.getContractFactory("WhitelistOracle")
     ).deploy(await oracleManager.getAddress(), "Whitelist Oracle", "d");
@@ -43,13 +45,10 @@ describe("Oracle consensus is bound to the query subject", function () {
     await blacklistOracle.waitForDeployment();
 
     for (const o of [oracle1, oracle2, oracle3]) {
-      await oracleManager["registerOracle(address,string,string,uint256)"](
-        o.address,
-        "o",
-        "d",
-        500,
-      );
+      await oracleManager.registerOracle(o.address, "o", "d", 500);
     }
+    // All three must agree, as before the engine (Task 4.4).
+    await oracleManager.setConsensusThreshold(100);
   });
 
   // Raise a query for `subject`, drive it to positive consensus with 3 oracles,
@@ -76,7 +75,7 @@ describe("Oracle consensus is bound to the query subject", function () {
     for (const o of [oracle1, oracle2, oracle3]) {
       await oracleManager.connect(o).submitResponse(queryId, result);
     }
-    const [has, res] = await oracleManager.checkConsensus(queryId);
+    const [has, res] = await oracleManager.getQueryResolution(queryId);
     expect(has).to.equal(true);
     expect(res).to.equal(result);
     return queryId;
