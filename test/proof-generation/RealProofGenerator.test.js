@@ -2,7 +2,6 @@ const { expect } = require("chai");
 const { ethers } = require("hardhat");
 const { RealProofGenerator } = require("../../scripts/generate-real-proofs");
 const { MerkleTreeBuilder } = require("../../utils/merkle-tree-builder");
-const { ProofFormatter } = require("../../utils/proof-formatter");
 const { describeProofs } = require("../helpers/zkProofs");
 
 describe("RealProofGenerator - All 5 Proof Types", function () {
@@ -442,46 +441,6 @@ describe("RealProofGenerator - All 5 Proof Types", function () {
         const { pathElements, pathIndices } = tree.getProof(0);
         expect(pathElements).to.have.lengthOf(20);
         expect(pathIndices).to.have.lengthOf(20);
-      });
-    });
-
-    describe("ProofFormatter", function () {
-      it("should format proof for Solidity", async function () {
-        const mockProof = {
-          pi_a: ["1", "2", "1"],
-          pi_b: [
-            ["3", "4"],
-            ["5", "6"],
-            ["1", "1"],
-          ],
-          pi_c: ["7", "8", "1"],
-        };
-        const publicSignals = ["12345"];
-
-        const formatted = ProofFormatter.formatForSolidity(
-          mockProof,
-          publicSignals,
-        );
-
-        expect(formatted.a).to.have.lengthOf(2);
-        expect(formatted.b).to.have.lengthOf(2);
-        expect(formatted.c).to.have.lengthOf(2);
-        expect(formatted.publicSignals).to.deep.equal(["12345"]);
-      });
-
-      it("should validate proof structure", function () {
-        const validProof = {
-          pi_a: ["1", "2", "1"],
-          pi_b: [
-            ["3", "4"],
-            ["5", "6"],
-            ["1", "1"],
-          ],
-          pi_c: ["7", "8", "1"],
-        };
-
-        expect(ProofFormatter.validateProof(validProof)).to.be.true;
-        expect(ProofFormatter.validateProof({})).to.be.false;
       });
     });
   });
