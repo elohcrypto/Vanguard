@@ -123,7 +123,7 @@ contract OracleManager is IOracleManager, Ownable2Step, ReentrancyGuard, Pausabl
         operator = _operator;
     }
 
-    function _engine() internal view returns (ConsensusOracle e) {
+    function _boundEngine() internal view returns (ConsensusOracle e) {
         e = consensusEngine;
         if (address(e) == address(0)) revert NoConsensusEngine();
     }
@@ -250,7 +250,7 @@ contract OracleManager is IOracleManager, Ownable2Step, ReentrancyGuard, Pausabl
 
     /// @notice Percent of the active weight one side needs, in (50, 100].
     function setConsensusThreshold(uint256 _percent) external onlyOwner {
-        _engine().setConsensusThreshold(_percent);
+        _boundEngine().setConsensusThreshold(_percent);
     }
 
     /// @notice 0 when no engine is bound.
@@ -260,7 +260,7 @@ contract OracleManager is IOracleManager, Ownable2Step, ReentrancyGuard, Pausabl
 
     function setOracleWeight(address _oracle, uint256 _weight) public onlyOwner onlyRegistered(_oracle) {
         require(_weight > 0, "OracleManager: Invalid weight");
-        _engine().setOracleWeight(_oracle, _weight);
+        _boundEngine().setOracleWeight(_oracle, _weight);
     }
 
     function batchSetOracleWeights(address[] calldata _oracles, uint256[] calldata _weights) external onlyOwner {
@@ -269,7 +269,7 @@ contract OracleManager is IOracleManager, Ownable2Step, ReentrancyGuard, Pausabl
     }
 
     function setQueryExpiryTime(uint256 _expiry) external onlyOwner {
-        _engine().setQueryExpiryTime(_expiry);
+        _boundEngine().setQueryExpiryTime(_expiry);
     }
 
     /**
@@ -295,7 +295,7 @@ contract OracleManager is IOracleManager, Ownable2Step, ReentrancyGuard, Pausabl
         }
 
         queryId = keccak256(abi.encodePacked(_subject, _queryType, _data, block.timestamp, msg.sender));
-        _engine().openQuery(queryId);
+        _boundEngine().openQuery(queryId);
 
         Query storage query = queries[queryId];
         query.subject = _subject;
@@ -317,7 +317,7 @@ contract OracleManager is IOracleManager, Ownable2Step, ReentrancyGuard, Pausabl
         // A settled verdict is final: a later group must not flip it (review L4).
         if (query.hasResult) revert QueryAlreadyResolved();
 
-        (bool resolved, bool result) = _engine().recordVote(_queryId, msg.sender, _result);
+        (bool resolved, bool result) = _boundEngine().recordVote(_queryId, msg.sender, _result);
         oracles[msg.sender].totalAttestations++;
 
         if (resolved) {

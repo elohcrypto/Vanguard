@@ -53,8 +53,10 @@ contract ConsensusOracle {
     uint256 public constant MIN_EXPIRY = 10 minutes;
     uint256 public constant MAX_EXPIRY = 24 hours;
 
-    /// @notice The manager this engine serves; fixed at construction.
-    IOracleManager public immutable oracleManager;
+    /// @notice The manager this engine serves; set once at construction.
+    ///         Storage, not immutable: the runtime code then equals the
+    ///         compiled artifact, so the handover pins it by code hash.
+    IOracleManager public oracleManager;
 
     /// @notice Percent of the snapshot weight one side needs, in (50, 100].
     ///         66 makes two of three equal nodes a verdict (200/300 = 66.7%);
