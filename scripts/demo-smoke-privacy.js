@@ -224,72 +224,10 @@ async function privacyFlow(state, failures) {
     `✅ Privacy smoke: VSC in Either, bound transfer, unbound refused, sender removed and refused, re-proof transfer (root version ${await pm.whitelistVersion()}).`,
   );
   await attestationSmoke(state, failures);
-  await integrationChecksSmoke(state, failures);
-}
-
-/**
- * Option 49 (Task 4.7): every check it prints agrees with an independent
- * chain read, and the "ALL EIGHT" line appears only when all eight hold.
- */
-async function integrationChecksSmoke(state, failures) {
-  const PrivacyModule = require("../demo/modules/PrivacyModule");
-  const zk = state.getContract("zkVerifierIntegrated");
-  const pm = state.getContract("privacyManager");
-  const vsc = await state.getContract("digitalToken").getAddress();
-  const n0 = failures.length;
-  const lines = [];
-  const real = console.log;
-  console.log = (...a) => lines.push(a.join(" "));
-  let checks;
-  try {
-    checks = await new PrivacyModule(
-      state,
-      null,
-      async () => "",
-    ).testIntegration();
-  } finally {
-    console.log = real;
-  }
-  if (!checks || checks.length !== 8) {
-    failures.push(
-      `option 49 returned ${checks ? checks.length : 0} checks, expected 8`,
-    );
-    return;
-  }
-  let bound = false;
-  for (const s of state.signers)
-    if (await pm.hasValidWhitelistProof(s.address)) bound = true;
-  const v = await zk.getVerifierAddresses();
-  let fiveWired = true;
-  for (const a of [...v, await zk.blacklistVerifier()])
-    if ((await ethers.provider.getCode(a)) === "0x") fiveWired = false;
-  const expected = [
-    !(await zk.testingMode()),
-    fiveWired,
-    same(await pm.zkVerifier(), await zk.getAddress()),
-    same(
-      await state.getContract("complianceRules").privacyManager(vsc),
-      await pm.getAddress(),
-    ),
-    bound ? true : null,
-  ];
-  expected.forEach((want, i) => {
-    if (want !== null && checks[i].ok !== want)
-      failures.push(
-        `option 49 check ${i + 1} (${checks[i].name}) = ${checks[i].ok}, chain says ${want}`,
-      );
-  });
-  const all = checks.every((c) => c.ok === true);
-  if (all !== lines.some((l) => /ALL EIGHT PRIVACY CHECKS HOLD/.test(l)))
-    failures.push(
-      `option 49 success line disagrees with its checks (all hold: ${all})`,
-    );
-  if (lines.some((l) => /PASSED|production/i.test(l)))
-    failures.push("option 49 still prints PASSED / production");
-  if (failures.length === n0)
-    console.log(
-      `✅ Option 49: ${checks.filter((c) => c.ok === true).length} of 8 checks hold, each matching the chain.`,
-    );
+  await require("./demo-smoke-privacy-options").runPrivacyOptionsSmoke(
+    state,
+    failures,
+  );
 }
 
 /** Option 42 -> 3 for bob: the demo issuer attests US, bob proves and binds. */
