@@ -52,11 +52,15 @@ Vanguard/
 │   ├── utils/                   # Demo helper utilities
 │   └── index.js                 # Main demo entry point
 ├── scripts/                     # Deployment & Utility Scripts
-│   ├── production/              # Production deployment scripts
-│   ├── deploy-*.ts              # Contract deployment scripts
-│   ├── test-*.js                # Testing and validation scripts
-│   ├── generate-*.js            # ZK proof generation scripts
-│   └── setup-*.js               # Setup and configuration scripts
+│   ├── production/              # Production deploy (DeployProduction.ts)
+│   ├── zk/                      # Whitelist root, proof and attestation CLIs
+│   ├── demo-smoke*.js           # Demo smoke test (CI) and its legs
+│   ├── demo-drive.sh            # Drives the interactive demo (npm run demo:drive)
+│   ├── handover.ts              # Handover ceremony CLI
+│   ├── deploy-helpers.ts        # DeploymentHelper (compliance guards)
+│   ├── generate-real-proofs.js  # ZK proof generation
+│   ├── setup-zk-circuits.js     # Circuit build (npm run setup:zk)
+│   └── verify-zk-readiness.js   # Circuit and verifier check (npm run verify:zk)
 ├── test/                        # Comprehensive Test Suite
 │   ├── circuits/                # ZK circuit tests
 │   ├── compliance/              # Compliance system tests
@@ -74,11 +78,12 @@ Vanguard/
 │   ├── INVESTOR_TYPE_SYSTEM.md                 # Investor type documentation
 │   ├── SYSTEM_WORKFLOW_GUIDE.md                # User workflows and interactions
 │   ├── TECHNICAL_DEEP_DIVE.md                  # In-depth technical analysis
+│   ├── TESTNET_DEMO.md                         # Roles, ceremony, demo runbook
 │   ├── VANGUARD_RWA_TOKEN_ECOSYSTEM_GUIDE.md   # Complete ecosystem guide
 │   ├── VOTING_SYSTEM_DIAGRAM.md                # Voting system visualization
 │   ├── WORKFLOW_IMPLEMENTATION_SUMMARY.md      # Implementation workflow summary
-│   ├── WORKING_DEMOS.md                        # Verified working demos guide
-│   └── ZK_CIRCUIT_BUILD_GUIDE.md               # Zero-knowledge circuit build guide
+│   ├── ZK_CIRCUIT_BUILD_GUIDE.md               # Zero-knowledge circuit build guide
+│   └── ZK_CIRCUITS_READINESS.md                # Circuit soundness status
 ├── utils/                       # Utility Functions
 │   ├── merkle-tree-builder.js   # Merkle tree construction
 │   └── proof-formatter.js       # ZK proof formatting
@@ -125,7 +130,6 @@ Vanguard/
 - [Testnet Demo](/docs/TESTNET_DEMO.md) - Role wallets from one mnemonic, governance time scale, local rehearsal before Sepolia
 - [Vanguard RWA StableCoin Ecosystem Guide](/docs/VANGUARD_RWA_TOKEN_ECOSYSTEM_GUIDE.md) - Complete ecosystem overview
 - [Technical Deep Dive](/docs/TECHNICAL_DEEP_DIVE.md) - In-depth technical analysis
-- [Working Demos](/docs/WORKING_DEMOS.md) - Verified working demos guide
 
 ### **Governance & Voting System**
 - [New Fair Voting System](/docs/NEW_FAIR_VOTING_SYSTEM.md) - Fair voting implementation (1 Person = 1 Vote)
@@ -373,7 +377,7 @@ npx hardhat node
 npm run demo:interactive:proof
 
 
-**See [Complete Demo Workflow](/docs/COMPLETE_DEMO_WORKFLOW.md) for detailed step-by-step guide.**
+**See the [System Workflow Guide](/docs/SYSTEM_WORKFLOW_GUIDE.md) and [Testnet Demo](/docs/TESTNET_DEMO.md) for the step-by-step guide.**
 
 ## 📈 Performance & Scalability
 
@@ -418,14 +422,13 @@ npm run demo:interactive:proof
 
 ## 📄 License
 
-MIT License - See LICENSE file for details
+MIT License (the `license` field of package.json; the repository has no LICENSE file)
 
 ## 🆘 Support & Resources
 
 ### **Documentation**
 - [System Overview](/docs/SYSTEM_OVERVIEW.md) - Start here for system architecture
-- [Vanguard RWA StableCoin Ecosystem Guide](/docs/VANGUARD_STABLECOIN_ECOSYSTEM_GUIDE.md) - Complete ecosystem overview
-- [Working Demos](/docs/WORKING_DEMOS.md) - Verified working demos guide
+- [Vanguard RWA StableCoin Ecosystem Guide](/docs/VANGUARD_RWA_TOKEN_ECOSYSTEM_GUIDE.md) - Complete ecosystem overview
 - [System Workflow Guide](/docs/SYSTEM_WORKFLOW_GUIDE.md) - User workflows and interactions
 
 ### **Getting Help**
