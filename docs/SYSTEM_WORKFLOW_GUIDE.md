@@ -236,8 +236,12 @@ paused for longer cannot revive when the identity re-authorizes.
   against a compromised MANAGEMENT key. This is by design (Task 4.5,
   R-45-1): `executeKeyRotation` and `executeKeyRecovery` themselves call
   `addKey`, so a timelock inside `addKey` would either block them or tie
-  the identity to one manager. The holder's defence against a rogue
-  MANAGEMENT key is recovery (below).
+  the identity to one manager. A MANAGEMENT key can also cancel or re-seat
+  KeyManager recovery. The defence against a rogue MANAGEMENT key is the
+  owner: `owner()` always passes `onlyManagementKey`, so it can
+  `removeKey` the rogue key, and it alone controls `authorizeManager`,
+  `deauthorizeManager` and `transferOwnership`. Recovery restores a lost
+  key; it does not evict a key that is still active.
 - **Removal with the holder's consent**: `removeKey` is the management
   action (no consent; KeyManager batches and rotations use it, and it is
   the only path for a non-ECDSA key). `OnchainID.removeKeyWithProof(key,

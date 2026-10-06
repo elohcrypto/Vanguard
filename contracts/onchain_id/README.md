@@ -21,9 +21,14 @@ This directory contains OnchainID implementation contracts following ERC-734 and
 - A MANAGEMENT key (or the owner, or an authorized manager such as
   KeyManager) adds and removes any key at once with `addKey` and
   `removeKey`, a MANAGEMENT key included and without the holder's consent
-  (ERC-734). KeyManager's timelocks bind only the rotations and recoveries
-  sent through it; the holder's defence against a rogue MANAGEMENT key is
-  recovery (plan v2 Task 4.5, R-45-1).
+  (ERC-734), and can cancel or re-seat KeyManager recovery
+  (`cancelKeyRecovery`, `setupKeyRecovery`). KeyManager's timelocks bind
+  only the rotations and recoveries sent through it (plan v2 Task 4.5,
+  R-45-1). The defence against a rogue MANAGEMENT key is the owner:
+  `owner()` always passes `onlyManagementKey`, so it can `removeKey` the
+  rogue key, and it alone controls `authorizeManager`,
+  `deauthorizeManager` and `transferOwnership`. Recovery restores a lost
+  key; it does not evict a key that is still active.
 - `removeKey` is the management action: KeyManager rotations and batches
   use it, and it is the only path for a key nobody can sign for (an
   RSA-type or passphrase key).

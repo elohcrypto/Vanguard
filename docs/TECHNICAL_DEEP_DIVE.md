@@ -66,9 +66,13 @@ struct Key {
   digest prefixes twice and is refused. Demo options 5 -> 1 and 5a.
 - KeyManager's timelocks bind only the rotations and recoveries sent
   through it (`executeKeyRotation` / `executeKeyRecovery` call `addKey`
-  themselves); the holder's defence against a rogue MANAGEMENT key is
-  KeyManager recovery (docs/SYSTEM_WORKFLOW_GUIDE.md, "Identity key
-  lifecycle").
+  themselves). A MANAGEMENT key can cancel or re-seat KeyManager
+  recovery. The defence against a rogue MANAGEMENT key is the owner:
+  `owner()` always passes `onlyManagementKey` (it can `removeKey` the
+  rogue key) and alone controls `authorizeManager`, `deauthorizeManager`
+  and `transferOwnership`. Recovery restores a lost key; it does not
+  evict a key that is still active (docs/SYSTEM_WORKFLOW_GUIDE.md,
+  "Identity key lifecycle").
 - `authorizeManager` / `deauthorizeManager` (owner only) are the one way
   to let a contract such as KeyManager manage keys.
 - Ownership is two-step (`transferOwnership`, then `acceptOwnership` by

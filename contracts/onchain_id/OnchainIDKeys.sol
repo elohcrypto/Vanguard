@@ -14,10 +14,13 @@ import "./interfaces/IOnchainID.sol";
  *      ERC-735 claims; one contract is deployed (plan v2 Task 4.5, split
  *      by inheritance as ComplianceRules was in 4.1).
  *
- *      A MANAGEMENT key adds and removes keys at once (ERC-734). KeyManager
- *      timelocks bind only the rotations and recoveries sent through it;
- *      the holder's defence against a rogue MANAGEMENT key is recovery
- *      (R-45-1).
+ *      A MANAGEMENT key adds and removes any key at once (ERC-734) and can
+ *      cancel or re-seat KeyManager recovery; KeyManager timelocks bind
+ *      only what is sent through it (R-45-1). The defence against a rogue
+ *      MANAGEMENT key is the owner: owner() always passes
+ *      onlyManagementKey and alone controls authorizeManager,
+ *      deauthorizeManager and transferOwnership. Recovery restores a lost
+ *      key; it does not evict a key that is still active.
  */
 abstract contract OnchainIDKeys is IOnchainID, Ownable2Step, ReentrancyGuard {
     using ECDSA for bytes32;

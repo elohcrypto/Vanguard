@@ -766,8 +766,13 @@ MANAGEMENT key adds and removes keys at once (ERC-734), with
 nothing stops it. That stands by design (Task 4.5, R-45-1):
 `executeKeyRotation` and `executeKeyRecovery` call `addKey` themselves,
 so a timelock in `addKey` would block them or tie the identity to one
-manager. The timelock is visibility for the holder; the holder's defence
-against a rogue MANAGEMENT key is recovery.
+manager. The timelock is visibility for the holder. A MANAGEMENT key can
+also cancel or re-seat KeyManager recovery, so recovery is no defence
+against a rogue one: the owner is. `owner()` always passes
+`onlyManagementKey`, so it can `removeKey` the rogue key, and it alone
+controls `authorizeManager`, `deauthorizeManager` and
+`transferOwnership`. Recovery restores a lost key; it does not evict a
+key that is still active.
 
 Withdrawing the authorization pauses KeyManager for the identity; it does
 not cancel. Agents can then neither open nor approve candidates, and
