@@ -376,26 +376,26 @@ function burn(uint256 amount) external onlyAgent {
 ```bash
 npm run demo:interactive:proof
 
-Option 79: Deploy Governance Token (VGT)
+Option 74: Deploy Governance System (VGT and VanguardGovernance)
 → Deploys with new fair voting system
 ```
 
 ### **Step 2: Distribute Tokens**
 ```bash
-Option 80: Distribute Governance Tokens
+Option 75: Distribute Governance Tokens
 → Users need tokens to pay for proposals/voting
 ```
 
 ### **Step 3: Create Proposal (Costs 10 VGT)**
 ```bash
-Option 81: Create Governance Proposal
+Option 76: Create Proposal
 → User pays 10 VGT (locked)
 → Proposal created
 ```
 
 ### **Step 4: Vote (Costs 10 VGT per vote)**
 ```bash
-Option 82: Vote on Proposal
+Option 77: Vote on Proposal
 → Each user pays 10 VGT (locked)
 → Each user gets 1 vote (equal weight)
 ```

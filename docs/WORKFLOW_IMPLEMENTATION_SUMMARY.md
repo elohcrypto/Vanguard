@@ -16,7 +16,7 @@ All 6 core Vanguard StableCoin workflows are implemented and tested (not audited
 | **Token Minting** | 22-25 | ✅ COMPLETED | ✅ Menu-driven | Tested, not audited |
 | **Token Transfer** | 26-27 | ✅ COMPLETED | ✅ Menu-driven | Tested, not audited |
 | **Oracle Access Control** | 31-40 | ✅ COMPLETED | ✅ Menu-driven | Tested, not audited |
-| **Privacy & ZK Proofs** | 41-50 | ✅ COMPLETED | ✅ Menu-driven | Tested, not audited; options 42 -> 6 and 47-50 still simulate (Task 4.7) |
+| **Privacy & ZK Proofs** | 41-50 | ✅ COMPLETED | ✅ Menu-driven | Tested, not audited; options 42 -> 6 and 47-50 read the chain since Task 4.7 |
 | **Token Burning** | 51-58 | ✅ COMPLETED | ✅ Menu-driven | Tested, not audited |
 
 ## Implemented Workflows
