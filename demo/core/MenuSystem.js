@@ -348,7 +348,7 @@ class MenuSystem {
           await token.userToUserTransfer();
           break;
         case "28":
-          await token.demonstrateTransferRestrictions();
+          await token.restrictedTransferScenarios();
           break;
         case "29":
           await token.showDashboard();

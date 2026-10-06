@@ -3226,8 +3226,8 @@ class TokenModule {
     }
   }
 
-  /** Option 28: Demonstrate Transfer Restrictions */
-  async demonstrateTransferRestrictions() {
+  /** Option 28: transfer restriction scenarios on VSC (sub-menu 1-3) */
+  async restrictedTransferScenarios() {
     console.log("\n🚫 DEMONSTRATE TRANSFER RESTRICTIONS");
     console.log("=".repeat(50));
 
