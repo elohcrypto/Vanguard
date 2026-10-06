@@ -155,8 +155,9 @@ OracleManager, InvestorTypeRegistry (when deployed), the EscrowWalletFactory
 and OnchainIDFactory (when deployed), PrivacyManager and ZKVerifierIntegrated
 (option 1 deploys them) and itself; ops (wallet 10) holds the
 agent roles, the compliance-officer role, the escrow factory's ADMIN_ROLE,
-PrivacyManager's `listOperator` (it publishes the whitelist root) and the
-oracles the deployer owned; the issuer admin (wallet 9) owns the
+PrivacyManager's `listOperator` (it publishes the whitelist root), the
+oracles the deployer owned and OracleManager's operator role (pause,
+unpause and emergency designation of nodes, Task 4.4); the issuer admin (wallet 9) owns the
 claim issuers the deployer held; the guardian (wallet 11) can pause the
 token but not unpause it. Issuer ownership moves by nominate and accept:
 the deployer's `transferOwnership` only nominates the issuer admin, so on
@@ -235,7 +236,8 @@ Two hazards are fixed rather than only reported: step 1 clears any VGT
 guardian ("VGT guardian cleared: no guardian may pause the vote token; a VGT
 pause blocks every vote until ops or a pre-voted unpause releases it"), and
 step 2 moves an oracle's `listManager` off the
-deployer to the DynamicListManager, or to zero when there is none.
+deployer to the DynamicListManager, or to zero when there is none, and
+makes ops OracleManager's operator.
 83e also checks: GovernanceToken has no guardian, no oracle's `listManager`
 is the deployer, the deployer is not an InvestorTypeRegistry governor nor a
 trusted contract on VSC or VGT, governance is a trusted contract on VGT and
@@ -314,8 +316,9 @@ emergency listing, an owner write or a removal; for an applied verdict,
 even one that changed nothing, its resolution time), and a verdict that
 resolved at or before it is refused (`VerdictSuperseded`). So an older
 verdict applied late never undoes a newer one, and a newer one still
-applies after it. The demo menu raises no OracleManager queries (it does
-raise ConsensusOracle queries).
+applies after it. Options 33a, 34a, 35a, 37 and 40 raise OracleManager
+queries; ConsensusOracle is the manager's engine and keeps no queries of
+its own (Task 4.4, "Oracle nodes and consensus" below).
 
 Outside the demo, `HANDOVER_CONFIG=<path.json> npx hardhat run
 scripts/handover.ts --network <net>` runs the same ceremony and exits
@@ -369,8 +372,9 @@ acceptances and registry proposals still pending, then verifies.
   clearing" on permanent entries. The emergency-oracle key and the
   oracle-owner key (ops) must be held by parties able to re-list within
   hours. Node operators' runbook: clearing a governance sanction is visible
-  on chain and accountable, and governance can deregister a node by an
-  OracleParameters vote.
+  on chain and accountable; ops, the OracleManager operator, can pause a
+  node at once, and governance removes it (`removeOracle`) by an
+  OracleParameters vote (option 76, type 2).
 - Before step 1, cancel every open InvestorTypeRegistry proposal and remove
   every registry governor but the deployer; the ceremony refuses otherwise.
 - Never give one key both an IdentityRegistry agent role and an issuer
@@ -628,6 +632,64 @@ Options 23 and 62 to 69 ask sub-prompts, so `demo-drive.sh` cannot drive
 them (it answers the main menu only); `scripts/demo-smoke-custody.js`
 runs the custody flow on the live node in the smoke.
 
+## Oracle nodes and consensus (Task 4.4, D11 a)
+
+OracleManager is the gate and ConsensusOracle its engine. A query opens in
+OracleManager (`submitQuery`, by the owner or an active node), nodes
+answer there (`submitResponse`, the one vote entry), and the engine
+resolves a side once it holds `consensusThreshold` percent of the active
+weight it snapshotted when the query opened: 66% by default, two of the
+three equal nodes option 31 registers (wallets 1, 2 and 3, reputation
+500). A node paused after the query opened still counts in its snapshot
+but cannot answer. A query expires after `queryExpiryTime` (1 hour)
+without a verdict; raise a new one. One node then applies the verdict
+with `provideAttestation` on the Whitelist or Blacklist oracle.
+
+Who does what: the operator (ops, wallet 10) pauses and unpauses nodes
+and sets or clears the emergency designation; unpause refuses a node at
+the reputation floor (100), where `penalizeOracle` parks it. The owner
+(the deployer, governance after the handover) registers and removes
+nodes, sets the threshold, weights, expiry and the operator, and may
+`emergencyOverride` a query. `BlacklistOracle.emergencyBlacklist` needs
+OracleManager's designation and an active node, so pausing or removing
+a node ends its emergency power at once.
+
+Options: 31 deploys the manager, both oracles and the engine and binds
+it; 32 designates node 2 (AML) and checks the 66% threshold (through
+the manager, a proposal after the handover); 33a and 34a run a
+whitelist and a HIGH blacklist round on a throwaway address (raise, two
+YES answers, the verdict applied); 35a is the lifecycle: ops becomes the
+operator, pauses node 3 (its answer is refused, nodes 1 and 2 resolve a
+snapshot of 200 without it), unpauses it, designates node 2, which lists
+a throwaway address CRITICAL for 7 days, clears the designation (a
+second listing is refused), restores it, and the owner registers and
+removes a fourth node (skipped once governance owns the manager); 37
+asks sub-prompts for the same steps by hand; 40 runs a compliance round
+and an emergency listing on throwaway addresses. Option 76, type 2
+(OracleParameters), proposes pause, unpause, removeOracle,
+setEmergencyOracle, setConsensusThreshold or setOperator for governance
+to vote (77, 78). `demo-drive.sh --strict 1 21 31 32 33a 34a 35a 39 40`
+runs with no error; 33, 34, 35 and 37 ask sub-prompts and are not
+drivable. `DEMO_RPC_URL=http://127.0.0.1:<port>` points the drive at a
+node on another port (network `devnode`).
+
+`scripts/demo-smoke-oracles.js`, a leg of `scripts/demo-smoke.js`,
+asserts from chain: the engine is bound both ways and its code is the
+compiled ConsensusOracle, the threshold is 66%, the 33a and 34a rounds
+resolve two of three (`ConsensusReached`, 200 of 300) and their verdicts
+apply, 35a's paused node is refused and absent from the snapshot, unpause
+restores it, the designation gates `emergencyBlacklist`, and an expired
+query refuses answers and has no verdict.
+
+The handover ceremony hands nothing over for the engine (it has no
+owner). Before Step 1, without a transaction, the preflight refuses an
+OracleManager with no engine, an engine with no code, whose runtime code
+is not the compiled ConsensusOracle or that serves another manager, and
+an operator other than ops once the deployer no longer owns the manager.
+Step 2 makes ops the operator. 83e adds three lines: the engine is the
+compiled ConsensusOracle and serves the manager, the operator is ops,
+and the deployer is not an OracleManager node.
+
 ## Waiting instead of jumping
 
 The four demo paths that used to call `evm_increaseTime` (governance option
@@ -707,8 +769,8 @@ authorized manager or a MANAGEMENT key, and a `keyManagerIdentity` named
 without `keyManager`. 83e adds two lines: the code matches the compiled
 KeyManager (no owner, no allowlist, so the deployer holds no KeyManager
 power), and the identity authorizes KeyManager while the deployer is not
-its owner, manager or MANAGEMENT key. The smoke's ceremony passes 68
-checks.
+its owner, manager or MANAGEMENT key. The smoke's ceremony passes 73
+checks (Task 4.4 adds the three oracle lines below).
 
 `scripts/production/DeployProduction.ts` deploys KeyManager and authorizes
 it on the ops identity named by `OPS_IDENTITY` when the deploying wallet

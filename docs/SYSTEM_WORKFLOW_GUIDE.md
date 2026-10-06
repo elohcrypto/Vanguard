@@ -35,7 +35,7 @@ contracts/
 │   ├── OracleManager.sol         # Oracle management contract
 │   ├── WhitelistOracle.sol       # Whitelist oracle contract
 │   ├── BlacklistOracle.sol       # Blacklist oracle contract
-│   ├── ConsensusOracle.sol       # Oracle consensus contract
+│   ├── ConsensusOracle.sol       # OracleManager's weighted consensus engine (no owner)
 │   └── interfaces/
 │       ├── IOracle.sol           # Oracle interface
 │       └── IOracleManager.sol    # Oracle manager interface
@@ -261,28 +261,31 @@ works within one demo session only.
 
 ```mermaid
 sequenceDiagram
-    participant User as Investor
-    participant Oracle1 as Oracle 1
-    participant Oracle2 as Oracle 2
-    participant Oracle3 as Oracle 3
-    participant Consensus as Oracle Consensus
-    participant Whitelist as Whitelist Manager
+    participant Node1 as Node 1 (wallet 1)
+    participant Node2 as Node 2 (wallet 2)
+    participant Manager as OracleManager (the gate)
+    participant Engine as ConsensusOracle (engine)
+    participant Whitelist as WhitelistOracle
 
-    User->>Oracle1: Request whitelist approval
-    User->>Oracle2: Request whitelist approval
-    User->>Oracle3: Request whitelist approval
-    
-    Oracle1->>Oracle1: Verify compliance
-    Oracle2->>Oracle2: Verify compliance
-    Oracle3->>Oracle3: Verify compliance
-    
-    Oracle1->>Consensus: Vote: Approve (Tier 7)
-    Oracle2->>Consensus: Vote: Approve (Tier 8)
-    Oracle3->>Consensus: Vote: Approve (Tier 7)
-    
-    Consensus->>Whitelist: Add to whitelist (Tier 7)
-    Whitelist->>User: Whitelist approved
+    Node1->>Manager: submitQuery(investor, WHITELIST)
+    Manager->>Engine: openQuery: snapshot the active weight (300)
+    Node1->>Manager: submitResponse(query, YES)
+    Manager->>Engine: recordVote (100 of 300)
+    Node2->>Manager: submitResponse(query, YES)
+    Manager->>Engine: recordVote (200 of 300 meets 66%)
+    Engine-->>Manager: resolved YES; the manager stamps resolvedAt
+    Node1->>Whitelist: provideAttestation(investor, query, YES, signature)
+    Whitelist->>Manager: getQueryBinding, getQueryResolution
+    Whitelist->>Whitelist: add the investor (tier 3, the consensus default)
 ```
+
+Plan v2 Task 4.4 (D11 a): OracleManager is the only vote entry and
+ConsensusOracle the engine it delegates the weighted tally to. A paused
+node cannot answer or attest; the operator (ops) pauses, unpauses and
+emergency-designates nodes; governance removes them and sets the
+threshold by an OracleParameters vote. Demo options 33a, 34a and 35a run
+this path without prompts (docs/TESTNET_DEMO.md, "Oracle nodes and
+consensus").
 
 #### Whitelist Tiers
 - **Tier 1-3**: Retail investors (limited access)

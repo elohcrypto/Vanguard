@@ -249,131 +249,86 @@ function recoveryAddress(
 
 ## 🔮 Oracle Consensus Mechanism
 
-### Weighted Consensus Algorithm
+### One gate, one engine (plan v2 Task 4.4, D11 = a)
 
-**Oracle Weight Calculation:**
+`OracleManager` is the gate. It holds the node registry and lifecycle,
+the query registry, and the one vote entry, `submitResponse`. The
+Whitelist and Blacklist oracles read only `isActiveOracle`,
+`isRegisteredOracle`, `getQueryBinding`, `getQueryData` and
+`getQueryResolution` from it. `ConsensusOracle` is the manager's
+weighted engine: it is built for one manager (`constructor(address
+manager)`), every write is manager-only, it has no owner, no pause and no
+query store of its own. The manager binds it with the owner-only
+`setConsensusEngine`, which refuses an address without code or an engine
+built for another manager. A manager with no engine opens no query.
+
+**The rule.** When a query opens, the engine snapshots the total weight of
+the manager's active nodes (`DEFAULT_ORACLE_WEIGHT`, 100, for a node
+without a weight). A vote counts the voter's weight at cast time. YES
+resolves when `yesWeight * 100 >= snapshotWeight * consensusThreshold`, NO
+symmetrically; the threshold is a percent in (50, 100]. The default, 66,
+makes two of three equal nodes a verdict (200 of 300 is 66.7%); a 1-1
+split resolves nothing. A query expires `queryExpiryTime` after it opened
+(1 hour; 10 minutes to 24 hours): later votes are refused and it closes
+without a verdict, so a new query must be raised.
+
+**Opening a query** (`OracleManager.submitQuery`, owner or an active
+node; the blacklist severity rules of R-2F3-2 apply first):
 ```solidity
-function getOracleWeight(address oracle) public view returns (uint256) {
-    if (!oracleManager.isActiveOracle(oracle)) {
-        return 0;
-    }
-    
-    uint256 reputation = oracleManager.getOracleReputation(oracle);
-    
-    // Weight = reputation / 10 (reputation is 0-100)
-    // Min weight = 1, Max weight = 10
-    uint256 weight = reputation / 10;
-    return weight > 0 ? weight : 1;
+queryId = keccak256(abi.encodePacked(_subject, _queryType, _data, block.timestamp, msg.sender));
+_boundEngine().openQuery(queryId); // snapshot; refuses an existing id or no active weight
+```
+
+**Answering** (`OracleManager.submitResponse`, an active node):
+```solidity
+if (query.hasResult) revert QueryAlreadyResolved();
+(bool resolved, bool result) = _boundEngine().recordVote(_queryId, msg.sender, _result);
+oracles[msg.sender].totalAttestations++;
+if (resolved) {
+    query.hasResult = true;
+    query.result = result;
+    query.resolvedAt = block.timestamp; // set once (R-2F3-1)
 }
 ```
 
-**Consensus Checking:**
+**The tally** (`ConsensusOracle.recordVote`, manager only):
 ```solidity
-function checkConsensus(bytes32 _queryId) 
-    public 
-    view 
-    returns (bool hasConsensus, bool result) 
-{
-    ConsensusData storage data = consensusData[_queryId];
-    
-    // Calculate total weight of all active oracles
-    uint256 totalWeight = getTotalOracleWeight();
-    
-    // Calculate required weight (e.g., 66% for 2/3 consensus)
-    uint256 requiredWeight = (totalWeight * consensusThreshold) / 100;
-    
-    // Check if YES votes reached consensus
-    if (data.yesWeight >= requiredWeight) {
-        return (true, true);
-    }
-    
-    // Check if NO votes reached consensus
-    if (data.noWeight >= requiredWeight) {
-        return (true, false);
-    }
-    
-    // No consensus yet
-    return (false, false);
-}
+if (block.timestamp >= q.expiresAt) revert QueryExpired();
+if (q.hasVoted[voter]) revert AlreadyVoted();
+uint256 weight = weightOf(voter);
+// ... record the vote, add the weight to its side ...
+uint256 bar = q.snapshotWeight * consensusThreshold;
+if (q.yesWeight * 100 >= bar) { q.resolved = true; q.result = true; }
+else if (q.noWeight * 100 >= bar) { q.resolved = true; }
 ```
 
-**Attestation Submission:**
-```solidity
-function provideAttestation(
-    address _subject,
-    bytes32 _queryId,
-    bool _result,
-    bytes calldata _signature,
-    bytes calldata _data
-) external override onlyWhenActive nonReentrant {
-    // Validate oracle
-    require(oracleManager.isActiveOracle(msg.sender), "Not an active oracle");
-    
-    // Verify signature
-    require(verifySignature(_subject, _queryId, _result, _signature), "Invalid signature");
-    
-    // Get oracle weight
-    uint256 weight = getOracleWeight(msg.sender);
-    
-    // Record attestation
-    ConsensusData storage data = consensusData[_queryId];
-    
-    // Prevent double voting
-    require(!data.hasVoted[msg.sender], "Oracle already voted");
-    data.hasVoted[msg.sender] = true;
-    
-    // Add weight to appropriate side
-    if (_result) {
-        data.yesWeight += weight;
-        data.yesVotes++;
-    } else {
-        data.noWeight += weight;
-        data.noVotes++;
-    }
-    
-    data.totalVotes++;
-    
-    emit AttestationProvided(msg.sender, _subject, _queryId, _result, block.timestamp, _signature);
-    
-    // Check if consensus reached
-    (bool hasConsensus, bool consensusResult) = checkConsensus(_queryId);
-    if (hasConsensus) {
-        emit ConsensusReached(_queryId, consensusResult, data.totalVotes);
-    }
-}
-```
+**Applying a verdict.** A node attests to the Whitelist or Blacklist
+oracle (`provideAttestation`, its own signature over subject, queryId,
+result and chain id). The oracle binds the queryId to its subject and
+type, then applies the manager's resolution once, while fresh and only if
+it resolved after the subject's last write (R-2F3-1). A paused node can
+neither answer nor attest. `emergencyOverride` (owner) can still stamp a
+verdict on an existing query.
 
-**Reputation Management:**
-```solidity
-function updateOracleReputation(address oracle, bool correct) external onlyOwner {
-    OracleInfo storage info = oracles[oracle];
-    
-    info.totalAttestations++;
-    if (correct) {
-        info.correctAttestations++;
-    }
-    
-    // Calculate reputation (0-100)
-    // reputation = (correctAttestations / totalAttestations) * 100
-    uint256 accuracy = (info.correctAttestations * 100) / info.totalAttestations;
-    
-    // Apply reputation formula with decay
-    // New reputation = 0.8 * old + 0.2 * accuracy
-    info.reputation = (info.reputation * 80 + accuracy * 20) / 100;
-    
-    // Enforce bounds
-    if (info.reputation < MIN_REPUTATION) {
-        info.reputation = MIN_REPUTATION;
-    }
-    if (info.reputation > MAX_REPUTATION) {
-        info.reputation = MAX_REPUTATION;
-    }
-    
-    emit OracleReputationUpdated(oracle, info.reputation);
-}
-```
+**Signature sets.** `validateOracleConsensus(oracles, signatures, hash)`
+adds the engine weights of distinct, active signers whose EIP-191
+signature recovers to them and compares the sum with the same threshold
+of the live active weight.
 
----
+**Parameters** go through the manager, so governance sets them after the
+handover (OracleParameters, type 2): `setConsensusThreshold(percent)`,
+`setOracleWeight`, `batchSetOracleWeights`, `setQueryExpiryTime`.
+
+### Node lifecycle
+
+| Action | Who | Effect |
+|---|---|---|
+| `registerOracle(node, name, description, reputation)` | owner | active node, reputation 100-1000 |
+| `pauseOracle(node)` / `unpauseOracle(node)` | owner or operator | stops / resumes answering and attesting; unpause refuses a node at `MIN_REPUTATION` (100), where `penalizeOracle` parks it |
+| `setEmergencyOracle(node, flag)` | owner or operator | the one emergency designation: `BlacklistOracle.emergencyBlacklist` requires it and an active node |
+| `removeOracle(node, reason)` | owner | offboards the node, clears its designation, resets its engine weight |
+| `setOperator(account)` | owner | the operator role (ops after the handover) |
+| `rewardOracle` / `penalizeOracle` / `updateOracleReputation` | owner | reputation, emitted as `OracleReputationUpdated`; engine weights do not follow it |
 
 ## 🔒 Compliance Rules Engine
 
