@@ -52,6 +52,21 @@ const config: HardhatUserConfig = {
         ? { accounts: { mnemonic: process.env.MNEMONIC, count: 12 } }
         : {}),
     },
+    // A second local dev node at DEMO_RPC_URL (scripts/demo-drive.sh), so a
+    // drive can run beside a node already on 8545. Absent unless set.
+    ...(process.env.DEMO_RPC_URL
+      ? {
+          devnode: {
+            url: process.env.DEMO_RPC_URL,
+            chainId: 31337,
+            gas: 12000000,
+            blockGasLimit: 12000000,
+            ...(process.env.MNEMONIC
+              ? { accounts: { mnemonic: process.env.MNEMONIC, count: 12 } }
+              : {}),
+          },
+        }
+      : {}),
     sepolia: {
       url:
         process.env.SEPOLIA_RPC_URL ||

@@ -38,7 +38,9 @@
 #   scripts/demo-drive.sh --log /tmp/run.log 1 21 51 74 0
 #   scripts/demo-drive.sh --timeout 600 1 21 0
 #
-# Requires a node on 127.0.0.1:8545 (npx hardhat node).
+# Requires a node on 127.0.0.1:8545 (npx hardhat node), or set
+# DEMO_RPC_URL=http://127.0.0.1:<port> to drive a node on another port
+# (hardhat network "devnode", hardhat.config.ts).
 #
 # MENU PREREQUISITES (found by running it, not by reading the menu):
 #   74 (governance)  requires 21 (ERC-3643 system) — otherwise it prints
@@ -88,9 +90,20 @@ fi
 
 command -v script >/dev/null || { echo "error: script(1) not found (util-linux)" >&2; exit 3; }
 
-# Precondition: the demo needs --network localhost.
-if ! (exec 3<>/dev/tcp/127.0.0.1/8545) 2>/dev/null; then
-  echo "error: no JSON-RPC node on 127.0.0.1:8545 — start one with 'npx hardhat node'" >&2
+# Precondition: a node on 127.0.0.1:8545 (--network localhost), or the one
+# DEMO_RPC_URL names (--network devnode).
+NETWORK=localhost
+RPC_HOST=127.0.0.1
+RPC_PORT=8545
+if [[ -n "${DEMO_RPC_URL:-}" ]]; then
+  NETWORK=devnode
+  hostport="${DEMO_RPC_URL#*://}"
+  hostport="${hostport%%/*}"
+  RPC_HOST="${hostport%%:*}"
+  RPC_PORT="${hostport##*:}"
+fi
+if ! (exec 3<>"/dev/tcp/$RPC_HOST/$RPC_PORT") 2>/dev/null; then
+  echo "error: no JSON-RPC node on $RPC_HOST:$RPC_PORT — start one with 'npx hardhat node'" >&2
   exit 3
 fi
 
@@ -118,7 +131,7 @@ trap cleanup EXIT
 exec 9<>"$FIFO"
 HOLD_PID=""
 
-script -q -f -c "npx hardhat run demo/index.js --network localhost" "$RAW" < "$FIFO" > /dev/null 2>&1 &
+script -q -f -c "npx hardhat run demo/index.js --network $NETWORK" "$RAW" < "$FIFO" > /dev/null 2>&1 &
 DEMO_PID=$!
 
 # script -f flushes after each write, so the log grows as the demo speaks.
