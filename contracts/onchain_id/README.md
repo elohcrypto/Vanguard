@@ -85,8 +85,11 @@ survive an ownership transfer; the new owner audits them
 the identity's `authorizeManager` transactions) and removes any it does
 not want. `renounceOwnership` reverts and `initialize` runs once, so an
 identity always has a controller. `authorizeManager` and
-`deauthorizeManager` (owner only) are the one way to let a contract manage
-keys.
+`deauthorizeManager` (owner only) are the one way KeyManager accepts
+(its `_checkAuthorized`). Any contract can also be added as a MANAGEMENT
+key with `addKey(keccak256(abi.encodePacked(contract)), 1, 1)`; it then
+passes `onlyManagementKey`, but KeyManager does not treat that as an
+authorization.
 
 ## Claims
 

@@ -76,7 +76,10 @@ struct Key {
   evict a key that is still active (docs/SYSTEM_WORKFLOW_GUIDE.md,
   "Identity key lifecycle").
 - `authorizeManager` / `deauthorizeManager` (owner only) are the one way
-  to let a contract such as KeyManager manage keys.
+  KeyManager accepts. Any contract can also be added as a MANAGEMENT key
+  with `addKey(keccak256(abi.encodePacked(contract)), 1, 1)` and then
+  passes `onlyManagementKey`, which KeyManager does not count as an
+  authorization.
 - Ownership is two-step (`transferOwnership`, then `acceptOwnership` by
   the new owner). On acceptance the old owner's MANAGEMENT key is revoked
   and the new owner ends with one; other keys and `authorizedManagers`
