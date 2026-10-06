@@ -233,15 +233,6 @@ contract OnchainID is IOnchainID, Ownable2Step, ReentrancyGuard {
     }
 
     /**
-     * @dev Allow authorized contracts to manage keys
-     * @param _contract The contract address to authorize
-     */
-    function authorizeContract(address _contract) external onlyOwner {
-        bytes32 contractKey = keccak256(abi.encodePacked(_contract));
-        _addKey(contractKey, MANAGEMENT_KEY, ECDSA_TYPE);
-    }
-
-    /**
      * @dev Initialize function (for factory pattern)
      */
     function initialize(address _owner, bytes32 _managementKey) external {
