@@ -70,6 +70,12 @@ describe("Handover: oracle engine and operator (Task 4.4)", function () {
     expect(labels).to.include(
       `OracleManager operator (pause, unpause, emergency designation) is ops ${f.ops.address}, not the deployer`,
     );
+    expect(labels).to.include(
+      "consensus threshold is 66% of the registered weight (expiry 3600s)",
+    );
+    expect(labels).to.include(
+      "every registered node carries the default engine weight",
+    );
     // After the handover only ops (and governance) pause; the deployer cannot.
     const node = f.stranger.address;
     await expect(
@@ -113,6 +119,20 @@ describe("Handover: oracle engine and operator (Task 4.4)", function () {
       ethers.zeroPadValue(f.stranger.address, 32),
     ]);
     await refused(/does not serve OracleManager/);
+  });
+
+  // Review L-4: deployer-era engine parameters do not pass as "no power".
+  it("refuses a threshold other than 66% and a node off the default weight", async function () {
+    await om.setConsensusThreshold(51);
+    await refused(/threshold is 51%, not 66%/);
+    await om.setConsensusThreshold(66);
+    await om.registerOracle(f.stranger.address, "heavy", "", 500);
+    await om.setOracleWeight(f.stranger.address, 1000);
+    await refused(
+      new RegExp(
+        `weights nodes off the default: ${f.stranger.address} \\(1000\\)`,
+      ),
+    );
   });
 
   it("refuses an operator other than ops once the deployer no longer owns the manager", async function () {

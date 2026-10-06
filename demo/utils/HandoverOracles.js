@@ -9,7 +9,11 @@
  * serves this manager. The operator (pause, unpause, emergency
  * designation) goes to ops: the deployer step sets it while the deployer
  * still owns the manager; once governance owns it, an operator other than
- * ops is refused (only an OracleParameters vote can change it).
+ * ops is refused (only an OracleParameters vote can change it). Review
+ * L-4: the engine parameters the deployer could have set are checked too,
+ * so a deployer-era threshold or node weight cannot pass as "no power":
+ * the threshold must be 66% and every registered node at the default
+ * weight.
  */
 
 const { ethers } = require("hardhat");
@@ -17,6 +21,23 @@ const { addrOf, same, fail } = require("./HandoverChecks");
 const { codeHash, expectedHash } = require("./HandoverCodeHash");
 
 const ENGINE_ABI = ["function oracleManager() view returns (address)"];
+const THRESHOLD = 66n; // the demo and deploy default: two of three
+
+/** { threshold, expiry, heavy } read from a code-matched engine. */
+async function engineParams(o, engineAddr) {
+  const e = await ethers.getContractAt("ConsensusOracle", engineAddr);
+  const def = await e.DEFAULT_ORACLE_WEIGHT();
+  const heavy = [];
+  for (const n of await o.oracleManager.getRegisteredOracles()) {
+    const w = await e.weightOf(n);
+    if (w !== def) heavy.push(`${n} (${w})`);
+  }
+  return {
+    threshold: await e.consensusThreshold(),
+    expiry: await e.queryExpiryTime(),
+    heavy,
+  };
+}
 
 /** { om, engine, hasCode, actual, expected, bound, operator, owner } */
 async function oracleFacts(o) {
@@ -67,6 +88,17 @@ async function preflightOracles(o) {
       `consensus engine ${f.engine} does not serve OracleManager ${f.om}: deploy a ConsensusOracle for this manager and bind it`,
     );
   }
+  const p = await engineParams(o, f.engine);
+  if (p.threshold !== THRESHOLD) {
+    fail(
+      `consensus engine ${f.engine} threshold is ${p.threshold}%, not ${THRESHOLD}%: its owner must setConsensusThreshold(${THRESHOLD}) before the handover`,
+    );
+  }
+  if (p.heavy.length) {
+    fail(
+      `consensus engine ${f.engine} weights nodes off the default: ${p.heavy.join(", ")}; reset them (setOracleWeight to the default) before the handover`,
+    );
+  }
   if (same(f.operator, ops) || same(f.owner, dAddr)) return;
   fail(
     same(f.operator, dAddr)
@@ -93,10 +125,22 @@ async function oracleSteps(ctx) {
 /** Completion lines: [label, pass][]. */
 async function oracleLines(o, dAddr, ops) {
   const f = await oracleFacts(o);
+  const pinned = f.hasCode && f.actual === f.expected && f.bound;
+  const p = pinned ? await engineParams(o, f.engine) : null;
   return [
     [
       `OracleManager ${f.om} consensus engine ${f.engine} is the compiled ConsensusOracle and serves this manager`,
-      f.hasCode && f.actual === f.expected && f.bound,
+      pinned,
+    ],
+    [
+      `consensus threshold is ${THRESHOLD}% of the registered weight (expiry ${p ? p.expiry : "?"}s)`,
+      Boolean(p) && p.threshold === THRESHOLD,
+    ],
+    [
+      p && p.heavy.length
+        ? `nodes off the default engine weight: ${p.heavy.join(", ")}`
+        : "every registered node carries the default engine weight",
+      Boolean(p) && p.heavy.length === 0,
     ],
     [
       `OracleManager operator (pause, unpause, emergency designation) is ops ${ops}, not the deployer`,
