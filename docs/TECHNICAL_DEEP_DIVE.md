@@ -559,7 +559,7 @@ repo (a `Succeeded` status, an `executionWindow`, `ParameterChange` and
 `UpgradeContract` types, `forVotes++`); it is replaced here with the shape
 that is actually deployed.
 
-**1 Person = 1 Vote Mechanism:**
+**1 Person = 1 Vote Mechanism (one vote per identity, plan 2F.1 / D25):**
 ```solidity
 function castVote(uint256 proposalId, bool support, string calldata reason)
     external nonReentrant
@@ -567,24 +567,36 @@ function castVote(uint256 proposalId, bool support, string calldata reason)
     Proposal storage proposal = _proposals[proposalId];
     require(proposal.status == ProposalStatus.Active, "Proposal not active");
     require(block.timestamp <= proposal.votingEnds, "Voting period ended");
-    require(!_hasVoted[proposalId][msg.sender], "Already voted");
-    require(msg.sender != proposal.proposer, "Proposer cannot vote on own proposal");
-    require(identityRegistry.isVerified(msg.sender), "Must be KYC/AML verified");
+    // The vote is keyed by the wallet's OnchainID, not the wallet.
+    address id = identityRegistry.identity(msg.sender);
+    require(id != address(0), "Must be KYC/AML verified");
+    require(!_hasVoted[proposalId][id], "Already voted");
+    require(id != proposal.proposerIdentity, "Proposer cannot vote on own proposal");
+    // isVerified, wallet holds a key on id, id registered by voterAgeCutoff
+    _requireEligible(msg.sender, id, proposal.voterAgeCutoff);
+
     require(governanceToken.balanceOf(msg.sender) >= votingCost, "Insufficient tokens for voting");
     require(governanceToken.transferFrom(msg.sender, address(this), votingCost), "Token transfer failed");
 
-    _hasVoted[proposalId][msg.sender] = true;
+    _hasVoted[proposalId][id] = true;
+    _voteChoice[proposalId][id] = support;
     _proposalVoters[proposalId].push(msg.sender);        // for the refund ledger
     _lockedTokens[proposalId] += votingCost;
-    _voterLockedTokens[proposalId][msg.sender] = votingCost;
+    _voterLockedTokens[proposalId][msg.sender] += votingCost;
 
     if (support) proposal.votesFor += 1; else proposal.votesAgainst += 1;   // 1 person = 1 vote
     emit VoteCast(proposalId, msg.sender, support, 1, reason);
 }
 ```
 
-Eligibility is checked when the vote is cast. There is no snapshot: a
-voter verified and funded after the proposal was created may vote.
+Eligibility is checked when the vote is cast, against a cutoff frozen at
+creation: `createProposal` stores `voterAgeCutoff = createdAt -
+minVoterAge` and `eligibleVotersAtCreation =
+registeredIdentityCountAt(voterAgeCutoff)`. Only an identity registered by
+the cutoff may vote (`"Identity too new to vote"`), and the quorum
+denominator counts only those identities. Balance and verification are read
+live: a voter whose aged identity is verified and funded after creation may
+vote.
 
 VGT delegation (`GovernanceToken.delegate`, `getVotingPower` and the other
 voting-power views) is recorded on the token and not counted: `castVote`
