@@ -336,7 +336,9 @@ describe("🏭 Production Simulation - OnchainID System", function () {
 
       // Step 4-5: Verify institutional claims at their issuers (plan v2
       // Task 4.5: verification is the issuers', asked by IdentityRegistry)
-      console.log("✅ Step 4-5: Verifying institutional claims at their issuers...");
+      console.log(
+        "✅ Step 4-5: Verifying institutional claims at their issuers...",
+      );
       for (const [issuer, topic] of [
         [prodEnv.kycIssuer, prodEnv.config.kycTopic],
         [prodEnv.amlIssuer, prodEnv.config.amlTopic],
