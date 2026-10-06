@@ -19,6 +19,7 @@ const {
 } = require("../utils/ChainTime");
 const { ethers } = require("hardhat");
 const { createOracleParametersProposal } = require("../utils/OracleProposal");
+const { createPrivacyProposal } = require("../utils/PrivacyProposal");
 const { runCompleteWorkflow } = require("../utils/GovernanceWorkflow");
 
 /**
@@ -854,7 +855,64 @@ class GovernanceModule {
     }
 
     try {
-      // Pre-flight checks
+      console.log("📋 PROPOSAL TYPES:");
+      console.log("0. InvestorTypeConfig - Update investor type limits");
+      console.log("1. ComplianceRules - Update compliance parameters");
+      console.log(
+        "2. OracleParameters - Pause/unpause/remove a node, emergency designation, threshold, operator",
+      );
+      console.log("3. TokenParameters - Update token settings");
+      console.log("4. SystemParameters - Update system settings");
+      console.log("5. EmergencyAction - Emergency actions");
+      console.log(
+        "6. ListUpdate - Whitelist/blacklist a member via DynamicListManager",
+      );
+      console.log(
+        "7. IdentityRegistryParameters - Update KYC/AML registry (topics, issuers, agents)",
+      );
+      console.log(
+        "8. GovernanceTokenParameters - Pause/unpause or manage agents of the vote token",
+      );
+      console.log(
+        "9. EscrowFactoryParameters - Escrow factory fee wallet, registry, rules (after the handover)",
+      );
+      console.log(
+        "10. IdentityFactoryParameters - OnchainID factory fees, pause, withdraw (after the handover)",
+      );
+      console.log(
+        "11. PrivacyParameters - PrivacyManager binding validity (demo builder; root, operator, verifier by calldata)",
+      );
+      console.log(
+        "12. VerifierParameters - ZKVerifierIntegrated proof cache expiry (demo builder; verifiers by calldata)",
+      );
+
+      const typeChoice = await this.promptUser("Select proposal type (0-12): ");
+      const proposalType = parseInt(typeChoice);
+
+      // Types 2, 11 and 12 pick their proposer among the verified wallets
+      // (OracleProposal.js, PrivacyProposal.js); 0 and 1 propose as signer 0.
+      if (proposalType === 2) {
+        // Task 4.4: node lifecycle and engine parameters (OracleProposal.js).
+        return await createOracleParametersProposal(
+          this.state,
+          this.promptUser,
+        );
+      }
+      if (proposalType === 11 || proposalType === 12) {
+        return await createPrivacyProposal(
+          this.state,
+          this.promptUser,
+          proposalType,
+        );
+      }
+      if (proposalType !== 0 && proposalType !== 1) {
+        console.log(
+          "⚠️  The demo builds types 0, 1, 2, 11 and 12; other types are proposed by calldata (createProposal) directly.",
+        );
+        return;
+      }
+
+      // Pre-flight checks (types 0 and 1 propose as signer 0)
       const owner = this.state.signers[0];
       const identityRegistry = this.state.getContract("identityRegistry");
       const isVerified = await identityRegistry.isVerified(owner.address);
@@ -916,51 +974,10 @@ class GovernanceModule {
 
       console.log("   ✅ All checks passed!\n");
 
-      console.log("📋 PROPOSAL TYPES:");
-      console.log("0. InvestorTypeConfig - Update investor type limits");
-      console.log("1. ComplianceRules - Update compliance parameters");
-      console.log(
-        "2. OracleParameters - Pause/unpause/remove a node, emergency designation, threshold, operator",
-      );
-      console.log("3. TokenParameters - Update token settings");
-      console.log("4. SystemParameters - Update system settings");
-      console.log("5. EmergencyAction - Emergency actions");
-      console.log(
-        "6. ListUpdate - Whitelist/blacklist a member via DynamicListManager",
-      );
-      console.log(
-        "7. IdentityRegistryParameters - Update KYC/AML registry (topics, issuers, agents)",
-      );
-      console.log(
-        "8. GovernanceTokenParameters - Pause/unpause or manage agents of the vote token",
-      );
-      console.log(
-        "9. EscrowFactoryParameters - Escrow factory fee wallet, registry, rules (after the handover)",
-      );
-      console.log(
-        "10. IdentityFactoryParameters - OnchainID factory fees, pause, withdraw (after the handover)",
-      );
-      console.log(
-        "11. PrivacyParameters - PrivacyManager whitelist root, list operator, validity, verifier (after the handover)",
-      );
-      console.log(
-        "12. VerifierParameters - ZKVerifierIntegrated verifier contracts, cache expiry (after the handover)",
-      );
-
-      const typeChoice = await this.promptUser("Select proposal type (0-12): ");
-      const proposalType = parseInt(typeChoice);
-
       if (proposalType === 0) {
         await this._createInvestorTypeConfigProposal();
-      } else if (proposalType === 1) {
-        await this._createComplianceRulesProposal();
-      } else if (proposalType === 2) {
-        // Task 4.4: node lifecycle and engine parameters (OracleProposal.js).
-        await createOracleParametersProposal(this.state, this.promptUser);
       } else {
-        console.log(
-          "⚠️  Other proposal types coming soon. Use type 0, 1 or 2 for now.",
-        );
+        await this._createComplianceRulesProposal();
       }
     } catch (error) {
       displayError(`Proposal creation failed: ${error.message}`);

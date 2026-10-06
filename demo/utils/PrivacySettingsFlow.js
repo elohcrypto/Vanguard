@@ -77,7 +77,7 @@ async function ownerSet(state, target, label, voteType, send, log) {
   const owner = await target.owner();
   if (!same(owner, state.signers[0].address)) {
     log(
-      `   ℹ️  ${label} is owned by ${owner} (governance after the handover): a ${voteType} vote sets it (option 76)`,
+      `   ℹ️  ${label} is owned by ${owner} (governance after the handover): a ${voteType} vote sets it (option 76, that type)`,
     );
     return false;
   }
