@@ -97,11 +97,10 @@ contract GovernanceToken is Token {
             emit DelegateVotesChanged(currentDelegate, oldDelegatedPower, _delegatedVotingPower[currentDelegate]);
         }
         
-        if (delegatee != address(0)) {
-            uint256 oldDelegatedPower = _delegatedVotingPower[delegatee];
-            _delegatedVotingPower[delegatee] += delegatorBalance;
-            emit DelegateVotesChanged(delegatee, oldDelegatedPower, _delegatedVotingPower[delegatee]);
-        }
+        // delegatee is never zero (required above), so no branch here.
+        uint256 oldDelegateePower = _delegatedVotingPower[delegatee];
+        _delegatedVotingPower[delegatee] += delegatorBalance;
+        emit DelegateVotesChanged(delegatee, oldDelegateePower, _delegatedVotingPower[delegatee]);
     }
     
     /**
