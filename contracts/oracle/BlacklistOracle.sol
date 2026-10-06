@@ -95,8 +95,8 @@ contract BlacklistOracle is IOracle, Ownable, ReentrancyGuard, Pausable {
     uint256 public constant NO_EXPIRY = type(uint256).max;
     uint8 public minimumConsensusOracles = 2; // Lower threshold for blacklisting
 
-    // Emergency blacklisting - allows single oracle for critical threats
-    mapping(address => bool) public emergencyOracles;
+    // Emergency blacklisting - one designated node for critical threats; the
+    // designation is OracleManager.isEmergencyOracle (Task 4.4).
     uint256 public emergencyBlacklistCount;
 
     // Events
@@ -125,8 +125,6 @@ contract BlacklistOracle is IOracle, Ownable, ReentrancyGuard, Pausable {
         string reason
     );
 
-    event EmergencyOracleUpdated(address indexed oracle, bool isEmergencyOracle);
-
     modifier onlyOracleManager() {
         require(msg.sender == address(oracleManager), "BlacklistOracle: Only oracle manager");
         _;
@@ -152,11 +150,12 @@ contract BlacklistOracle is IOracle, Ownable, ReentrancyGuard, Pausable {
         _;
     }
 
-    /// @dev Review LOW-2: the role also needs a live OracleManager node, so
-    ///      an offboarded key loses it without a separate revoke here.
+    /// @dev Task 4.4: one designation, OracleManager's (its owner or
+    ///      operator sets it), plus a live node (review LOW-2), so a paused
+    ///      or offboarded key loses the power without a revoke here.
     modifier onlyEmergencyOracle() {
         require(
-            emergencyOracles[msg.sender] && oracleManager.isActiveOracle(msg.sender),
+            oracleManager.isEmergencyOracle(msg.sender) && oracleManager.isActiveOracle(msg.sender),
             "BlacklistOracle: Not an emergency oracle"
         );
         _;
@@ -523,17 +522,6 @@ contract BlacklistOracle is IOracle, Ownable, ReentrancyGuard, Pausable {
             // CRITICAL
             return 365 days;
         }
-    }
-
-    /**
-     * @dev Set emergency oracle status
-     */
-    function setEmergencyOracle(address _oracle, bool _isEmergencyOracle) external onlyOwner {
-        require(_oracle != address(0), "BlacklistOracle: Invalid oracle");
-        require(oracleManager.isRegisteredOracle(_oracle), "BlacklistOracle: Oracle not registered");
-
-        emergencyOracles[_oracle] = _isEmergencyOracle;
-        emit EmergencyOracleUpdated(_oracle, _isEmergencyOracle);
     }
 
     /**

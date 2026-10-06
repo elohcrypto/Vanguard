@@ -9,14 +9,16 @@ pragma solidity ^0.8.20;
 interface IOracleManager {
     // Events
     event OracleRegistered(address indexed oracle, string name);
-    event OracleRemoved(address indexed oracle);
     event EmergencyOracleSet(address indexed oracle, bool isEmergency);
     event OracleReputationUpdated(address indexed oracle, uint256 newReputation);
 
-    // Oracle Management Functions
-    function registerOracle(address oracle, string memory name) external;
+    // Oracle lifecycle (plan v2 Task 4.4): pause, unpause and the emergency
+    // designation are owner-or-operator actions; removal is the owner's.
+    function removeOracle(address oracle, string calldata reason) external;
 
-    function removeOracle(address oracle) external;
+    function pauseOracle(address oracle) external;
+
+    function unpauseOracle(address oracle) external;
 
     function setEmergencyOracle(address oracle, bool isEmergency) external;
 
@@ -25,6 +27,8 @@ interface IOracleManager {
 
     function isActiveOracle(address oracle) external view returns (bool);
 
+    /// @notice The single emergency designation BlacklistOracle.emergencyBlacklist
+    ///         checks (together with isActiveOracle).
     function isEmergencyOracle(address oracle) external view returns (bool);
 
     function getOracleName(address oracle) external view returns (string memory);
@@ -32,24 +36,21 @@ interface IOracleManager {
     function getOracleReputation(address oracle) external view returns (uint256);
 
     // Oracle Query Functions
-    function getAllOracles() external view returns (address[] memory);
+    function getRegisteredOracles() external view returns (address[] memory);
 
     function getActiveOracles() external view returns (address[] memory);
 
     function getOracleCount() external view returns (uint256);
 
+    /// @notice The engine's threshold, a percent of the active weight.
     function getConsensusThreshold() external view returns (uint256);
 
     // Consensus Functions
-    function updateConsensusThreshold(uint256 newThreshold) external;
-
     function validateOracleConsensus(
         address[] memory oracles,
         bytes[] memory signatures,
         bytes32 messageHash
     ) external view returns (bool);
-
-    function checkConsensus(bytes32 queryId) external view returns (bool hasConsensus, bool result);
 
     /// @notice Subject and type an existing query was raised for; (address(0), 0)
     ///         if unknown. Consumers bind a resolved consensus to the address AND

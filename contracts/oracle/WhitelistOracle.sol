@@ -384,7 +384,7 @@ contract WhitelistOracle is IOracle, Ownable, ReentrancyGuard, Pausable {
         // Bind the resolved consensus to the address it was raised for. Without
         // this, a single active oracle self-signs an attestation naming any
         // victim and replays a benign, already-resolved queryId to whitelist
-        // them: checkConsensus keys on queryId alone.
+        // them: a resolution keys on queryId alone.
         // Bind to the subject AND the query type. Subject alone still let a
         // resolved query of another kind (identity, compliance, blacklist)
         // for this very subject be replayed as a whitelist verdict.

@@ -7,11 +7,17 @@ import "@openzeppelin/contracts/utils/Pausable.sol";
 import "@openzeppelin/contracts/utils/cryptography/ECDSA.sol";
 import "@openzeppelin/contracts/utils/cryptography/MessageHashUtils.sol";
 import "./interfaces/IOracleManager.sol";
-import "./interfaces/IOracle.sol";
+import "./ConsensusOracle.sol";
 
 /**
  * @title OracleManager
- * @dev Manages oracle registration, consensus mechanisms, and reputation system
+ * @notice The oracle gate (plan v2 Task 4.4, D11 = a): node registry and
+ *         lifecycle, the query registry the Whitelist and Blacklist oracles
+ *         read, and the one vote entry, `submitResponse`. The weighted tally
+ *         is the bound ConsensusOracle engine's; this contract stamps the
+ *         verdict it returns. Owner: governance after the handover
+ *         (OracleParameters proposals). The operator (ops after the
+ *         handover) may pause, unpause and emergency-designate nodes.
  */
 contract OracleManager is IOracleManager, Ownable2Step, ReentrancyGuard, Pausable {
     /// @notice A response arrived after the query resolved: a settled verdict is final.
@@ -22,6 +28,14 @@ contract OracleManager is IOracleManager, Ownable2Step, ReentrancyGuard, Pausabl
     error InvalidSeverity();
     /// @notice A CRITICAL (365-day) blacklist query is raised by the owner only.
     error SeverityRequiresOwner();
+    /// @notice No engine bound: no query may open, fail closed.
+    error NoConsensusEngine();
+    /// @notice The engine has no code or serves another manager.
+    error InvalidConsensusEngine();
+    error NotOwnerOrOperator();
+    /// @notice A node at MIN_REPUTATION (where penalizeOracle parks it) is
+    ///         not unpaused; the owner raises its reputation first.
+    error ReputationTooLow();
 
     struct OracleInfo {
         address oracleAddress;
@@ -42,11 +56,7 @@ contract OracleManager is IOracleManager, Ownable2Step, ReentrancyGuard, Pausabl
         uint256 timestamp;
         bool hasResult;
         bool result;
-        uint256 consensusCount;
-        uint256 totalResponses;
         uint256 resolvedAt; // block time hasResult first became true; never moves
-        mapping(address => bool) responses;
-        mapping(address => bool) hasResponded;
     }
 
     // State variables
@@ -54,26 +64,27 @@ contract OracleManager is IOracleManager, Ownable2Step, ReentrancyGuard, Pausabl
     address[] public registeredOraclesList;
     mapping(bytes32 => Query) public queries;
 
-    uint256 public consensusThreshold = 3; // Minimum oracles needed for consensus
+    /// @notice The weighted tally (ConsensusOracle bound to this manager).
+    ConsensusOracle public consensusEngine;
+    /// @notice May pause, unpause and emergency-designate nodes (ops).
+    address public operator;
+
     uint256 public constant MAX_ORACLES = 100;
     uint256 public constant MIN_REPUTATION = 100;
     uint256 public constant MAX_REPUTATION = 1000;
     /// @notice Highest BlacklistOracle.SeverityLevel (CRITICAL)
     uint256 private constant MAX_SEVERITY = 3;
 
-    /// @notice Manager-level emergency flag (IOracleManager), informational
-    ///         only: it neither grants nor revokes the BlacklistOracle role.
-    ///         `BlacklistOracle.emergencyBlacklist` is gated by that oracle's
-    ///         own `emergencyOracles` (set by its owner) plus an active node
-    ///         here. This flag is cleared when an oracle leaves.
+    /// @notice The emergency designation: BlacklistOracle.emergencyBlacklist
+    ///         requires it and an active node (R-2F3-3); cleared on removal.
     mapping(address => bool) private _emergencyOracles;
 
-    // Additional events not in interface
     event OracleDeregistered(address indexed oracle, string reason);
     event OracleActivated(address indexed oracle);
     event OracleDeactivated(address indexed oracle);
-    event ConsensusThresholdUpdated(uint256 oldThreshold, uint256 newThreshold);
     event EmergencyOverrideExecuted(address indexed oracle, bytes32 indexed queryId, string reason);
+    event ConsensusEngineSet(address indexed engine);
+    event OperatorUpdated(address indexed previous, address indexed current);
 
     // Query types
     uint8 public constant QUERY_TYPE_WHITELIST = 1;
@@ -81,17 +92,41 @@ contract OracleManager is IOracleManager, Ownable2Step, ReentrancyGuard, Pausabl
     uint8 public constant QUERY_TYPE_IDENTITY = 3;
     uint8 public constant QUERY_TYPE_COMPLIANCE = 4;
 
-    modifier onlyRegisteredOracle() {
-        require(oracles[msg.sender].registered, "OracleManager: Not a registered oracle");
-        _;
-    }
-
     modifier onlyActiveOracle() {
         require(oracles[msg.sender].active, "OracleManager: Oracle not active");
         _;
     }
 
+    modifier onlyOwnerOrOperator() {
+        if (msg.sender != owner() && (operator == address(0) || msg.sender != operator)) revert NotOwnerOrOperator();
+        _;
+    }
+
+    modifier onlyRegistered(address _oracle) {
+        require(oracles[_oracle].registered, "OracleManager: Oracle not registered");
+        _;
+    }
+
     constructor() Ownable(msg.sender) {}
+
+    /// @notice Bind the engine; it must be a contract built for this manager.
+    function setConsensusEngine(address _engine) external onlyOwner {
+        if (_engine.code.length == 0) revert InvalidConsensusEngine();
+        if (address(ConsensusOracle(_engine).oracleManager()) != address(this)) revert InvalidConsensusEngine();
+        consensusEngine = ConsensusOracle(_engine);
+        emit ConsensusEngineSet(_engine);
+    }
+
+    /// @notice Grant (or clear, with address(0)) the operator role.
+    function setOperator(address _operator) external onlyOwner {
+        emit OperatorUpdated(operator, _operator);
+        operator = _operator;
+    }
+
+    function _engine() internal view returns (ConsensusOracle e) {
+        e = consensusEngine;
+        if (address(e) == address(0)) revert NoConsensusEngine();
+    }
 
     /**
      * @dev Register a new oracle
@@ -127,17 +162,14 @@ contract OracleManager is IOracleManager, Ownable2Step, ReentrancyGuard, Pausabl
         emit OracleRegistered(_oracle, _name);
     }
 
-    /**
-     * @dev Deregister an oracle
-     */
-    function deregisterOracle(address _oracle, string calldata _reason) external onlyOwner {
-        require(oracles[_oracle].registered, "OracleManager: Oracle not registered");
-
+    /// @notice Offboard a node: it stops voting, attesting and holding the
+    ///         emergency designation at once; its engine weight resets.
+    function removeOracle(address _oracle, string calldata _reason) external onlyOwner onlyRegistered(_oracle) {
         oracles[_oracle].registered = false;
         oracles[_oracle].active = false;
         delete _emergencyOracles[_oracle];
+        if (address(consensusEngine) != address(0)) consensusEngine.setOracleWeight(_oracle, 0);
 
-        // Remove from registered list
         for (uint256 i = 0; i < registeredOraclesList.length; i++) {
             if (registeredOraclesList[i] == _oracle) {
                 registeredOraclesList[i] = registeredOraclesList[registeredOraclesList.length - 1];
@@ -149,101 +181,95 @@ contract OracleManager is IOracleManager, Ownable2Step, ReentrancyGuard, Pausabl
         emit OracleDeregistered(_oracle, _reason);
     }
 
-    /**
-     * @dev Activate an oracle
-     */
-    function activateOracle(address _oracle) external onlyOwner {
-        require(oracles[_oracle].registered, "OracleManager: Oracle not registered");
-        require(!oracles[_oracle].active, "OracleManager: Oracle already active");
-
-        oracles[_oracle].active = true;
-        emit OracleActivated(_oracle);
-    }
-
-    /**
-     * @dev Deactivate an oracle
-     */
-    function deactivateOracle(address _oracle) external onlyOwner {
-        require(oracles[_oracle].registered, "OracleManager: Oracle not registered");
+    /// @notice Stop a node voting and attesting; owner or operator.
+    function pauseOracle(address _oracle) external onlyOwnerOrOperator onlyRegistered(_oracle) {
         require(oracles[_oracle].active, "OracleManager: Oracle already inactive");
-
         oracles[_oracle].active = false;
         emit OracleDeactivated(_oracle);
     }
 
-    /**
-     * @dev Get all registered oracles
-     */
+    /// @notice Resume a paused node; owner or operator. Refused at MIN_REPUTATION.
+    function unpauseOracle(address _oracle) external onlyOwnerOrOperator onlyRegistered(_oracle) {
+        require(!oracles[_oracle].active, "OracleManager: Oracle already active");
+        if (oracles[_oracle].reputation <= MIN_REPUTATION) revert ReputationTooLow();
+        oracles[_oracle].active = true;
+        emit OracleActivated(_oracle);
+    }
+
+    /// @notice Set or clear the emergency designation; owner or operator.
+    function setEmergencyOracle(
+        address _oracle,
+        bool _isEmergency
+    ) external override onlyOwnerOrOperator onlyRegistered(_oracle) {
+        _emergencyOracles[_oracle] = _isEmergency;
+        emit EmergencyOracleSet(_oracle, _isEmergency);
+    }
+
     function getRegisteredOracles() external view returns (address[] memory) {
         return registeredOraclesList;
     }
 
-    /**
-     * @dev Get all active oracles
-     */
     function getActiveOracles() external view returns (address[] memory) {
         uint256 activeCount = 0;
-
-        // Count active oracles
         for (uint256 i = 0; i < registeredOraclesList.length; i++) {
-            if (oracles[registeredOraclesList[i]].active) {
-                activeCount++;
-            }
+            if (oracles[registeredOraclesList[i]].active) activeCount++;
         }
-
-        // Create array of active oracles
         address[] memory activeOracles = new address[](activeCount);
         uint256 index = 0;
-
         for (uint256 i = 0; i < registeredOraclesList.length; i++) {
-            if (oracles[registeredOraclesList[i]].active) {
-                activeOracles[index] = registeredOraclesList[i];
-                index++;
-            }
+            if (oracles[registeredOraclesList[i]].active) activeOracles[index++] = registeredOraclesList[i];
         }
-
         return activeOracles;
     }
 
-    /**
-     * @dev Check if oracle is registered
-     */
     function isRegisteredOracle(address _oracle) external view returns (bool) {
         return oracles[_oracle].registered;
     }
 
-    /**
-     * @dev Check if oracle is active
-     */
     function isActiveOracle(address _oracle) external view returns (bool) {
         return oracles[_oracle].active;
     }
 
-    /**
-     * @dev Get oracle count
-     */
+    function isEmergencyOracle(address oracle) external view override returns (bool) {
+        return _emergencyOracles[oracle];
+    }
+
     function getOracleCount() external view returns (uint256) {
         return registeredOraclesList.length;
     }
 
-    /**
-     * @dev Set consensus threshold
-     */
-    function setConsensusThreshold(uint256 _threshold) external onlyOwner {
-        require(_threshold > 0, "OracleManager: Threshold must be greater than 0");
-        require(_threshold <= registeredOraclesList.length, "OracleManager: Threshold too high");
-
-        uint256 oldThreshold = consensusThreshold;
-        consensusThreshold = _threshold;
-
-        emit ConsensusThresholdUpdated(oldThreshold, _threshold);
+    function getOracleName(address oracle) external view override returns (string memory) {
+        return oracles[oracle].name;
     }
 
-    /**
-     * @dev Get consensus threshold
-     */
+    function getOracleReputation(address oracle) external view override returns (uint256) {
+        return oracles[oracle].reputation;
+    }
+
+    // Engine parameters, set through the manager (governance after the handover).
+
+    /// @notice Percent of the active weight one side needs, in (50, 100].
+    function setConsensusThreshold(uint256 _percent) external onlyOwner {
+        _engine().setConsensusThreshold(_percent);
+    }
+
+    /// @notice 0 when no engine is bound.
     function getConsensusThreshold() external view returns (uint256) {
-        return consensusThreshold;
+        return address(consensusEngine) == address(0) ? 0 : consensusEngine.consensusThreshold();
+    }
+
+    function setOracleWeight(address _oracle, uint256 _weight) public onlyOwner onlyRegistered(_oracle) {
+        require(_weight > 0, "OracleManager: Invalid weight");
+        _engine().setOracleWeight(_oracle, _weight);
+    }
+
+    function batchSetOracleWeights(address[] calldata _oracles, uint256[] calldata _weights) external onlyOwner {
+        require(_oracles.length == _weights.length, "OracleManager: Array length mismatch");
+        for (uint256 i = 0; i < _oracles.length; i++) setOracleWeight(_oracles[i], _weights[i]);
+    }
+
+    function setQueryExpiryTime(uint256 _expiry) external onlyOwner {
+        _engine().setQueryExpiryTime(_expiry);
     }
 
     /**
@@ -254,10 +280,9 @@ contract OracleManager is IOracleManager, Ownable2Step, ReentrancyGuard, Pausabl
      *      blacklist oracle reads the severity from here, never from the relayer.
      *      Responders vote a bare bool, so answering yes accepts the raiser's
      *      severity: an active oracle may raise at most HIGH, only the owner
-     *      CRITICAL (review LOW-1). Review N-8 (recorded): an existing queryId
-     *      is not refused, but the id hashes the raiser and block time, so
-     *      only the same raiser, in the same block, with identical arguments
-     *      can reset a query: self-griefing only.
+     *      CRITICAL (review LOW-1). The id hashes the raiser and block time;
+     *      an existing id is refused by the engine (Task 4.4, was review N-8's
+     *      self-griefing reset). The engine snapshots the active weight now.
      */
     function submitQuery(address _subject, uint8 _queryType, bytes calldata _data) external returns (bytes32 queryId) {
         if (!oracles[msg.sender].active && msg.sender != owner()) revert UnauthorizedQueryCreator();
@@ -270,61 +295,36 @@ contract OracleManager is IOracleManager, Ownable2Step, ReentrancyGuard, Pausabl
         }
 
         queryId = keccak256(abi.encodePacked(_subject, _queryType, _data, block.timestamp, msg.sender));
+        _engine().openQuery(queryId);
 
         Query storage query = queries[queryId];
         query.subject = _subject;
         query.queryType = _queryType;
         query.data = _data;
         query.timestamp = block.timestamp;
-        query.hasResult = false;
-        query.result = false;
-        query.consensusCount = 0;
-        query.totalResponses = 0;
-
         return queryId;
     }
 
     /**
-     * @dev Submit oracle response to a query
+     * @notice The one vote entry: an active node answers `_queryId`. The
+     *         engine records the vote with the node's weight and returns the
+     *         verdict once a side reaches the threshold; it refuses a second
+     *         vote and any vote after the query expired.
      */
-    function submitResponse(
-        bytes32 _queryId,
-        bool _result
-    ) external onlyRegisteredOracle onlyActiveOracle nonReentrant {
+    function submitResponse(bytes32 _queryId, bool _result) external onlyActiveOracle nonReentrant {
         Query storage query = queries[_queryId];
         require(query.timestamp > 0, "OracleManager: Query does not exist");
-        // A settled verdict is final: a later threshold-size group must not flip it (review L4).
+        // A settled verdict is final: a later group must not flip it (review L4).
         if (query.hasResult) revert QueryAlreadyResolved();
-        require(!query.hasResponded[msg.sender], "OracleManager: Oracle already responded");
 
-        query.hasResponded[msg.sender] = true;
-        query.responses[msg.sender] = _result;
-        query.totalResponses++;
-
-        if (_result) {
-            query.consensusCount++;
-        }
-
+        (bool resolved, bool result) = _engine().recordVote(_queryId, msg.sender, _result);
         oracles[msg.sender].totalAttestations++;
 
-        // Check if consensus is reached
-        if (query.consensusCount >= consensusThreshold) {
+        if (resolved) {
             query.hasResult = true;
-            query.result = true;
-            query.resolvedAt = block.timestamp;
-        } else if (query.totalResponses - query.consensusCount >= consensusThreshold) {
-            query.hasResult = true;
-            query.result = false;
+            query.result = result;
             query.resolvedAt = block.timestamp;
         }
-    }
-
-    /**
-     * @dev Check consensus for a query
-     */
-    function checkConsensus(bytes32 _queryId) external view returns (bool hasConsensus, bool result) {
-        Query storage query = queries[_queryId];
-        return (query.hasResult, query.result);
     }
 
     /**
@@ -351,20 +351,6 @@ contract OracleManager is IOracleManager, Ownable2Step, ReentrancyGuard, Pausabl
     }
 
     /**
-     * @dev Get query result
-     */
-    function getQueryResult(
-        bytes32 _queryId
-    )
-        external
-        view
-        returns (bool hasResult, bool result, uint256 consensusCount, uint256 totalResponses, uint256 timestamp)
-    {
-        Query storage query = queries[_queryId];
-        return (query.hasResult, query.result, query.consensusCount, query.totalResponses, query.timestamp);
-    }
-
-    /**
      * @dev Emergency override for critical situations
      */
     function emergencyOverride(
@@ -372,9 +358,7 @@ contract OracleManager is IOracleManager, Ownable2Step, ReentrancyGuard, Pausabl
         bytes32 _queryId,
         bool _result,
         string calldata _reason
-    ) external onlyOwner {
-        require(oracles[_oracle].registered, "OracleManager: Oracle not registered");
-
+    ) external onlyOwner onlyRegistered(_oracle) {
         Query storage query = queries[_queryId];
         require(query.timestamp > 0, "OracleManager: Query does not exist");
 
@@ -386,48 +370,28 @@ contract OracleManager is IOracleManager, Ownable2Step, ReentrancyGuard, Pausabl
     }
 
     /**
-     * @dev Pause an oracle
-     */
-    function pauseOracle(address _oracle) external onlyOwner {
-        require(oracles[_oracle].registered, "OracleManager: Oracle not registered");
-        oracles[_oracle].active = false;
-        emit OracleDeactivated(_oracle);
-    }
-
-    /**
-     * @dev Unpause an oracle
-     */
-    function unpauseOracle(address _oracle) external onlyOwner {
-        require(oracles[_oracle].registered, "OracleManager: Oracle not registered");
-        oracles[_oracle].active = true;
-        emit OracleActivated(_oracle);
-    }
-
-    /**
      * @dev Update oracle reputation
      */
-    function updateOracleReputation(address _oracle, uint256 _reputation) external onlyOwner {
-        require(oracles[_oracle].registered, "OracleManager: Oracle not registered");
+    function updateOracleReputation(address _oracle, uint256 _reputation) external onlyOwner onlyRegistered(_oracle) {
         require(_reputation >= MIN_REPUTATION && _reputation <= MAX_REPUTATION, "OracleManager: Invalid reputation");
-
         oracles[_oracle].reputation = _reputation;
+        emit OracleReputationUpdated(_oracle, _reputation);
     }
 
     /**
-     * @dev Penalize oracle
+     * @dev Penalize oracle; at MIN_REPUTATION it is deactivated (parked).
      */
-    function penalizeOracle(address _oracle, uint256 _penalty, string calldata /* _reason */) external onlyOwner {
-        require(oracles[_oracle].registered, "OracleManager: Oracle not registered");
+    function penalizeOracle(
+        address _oracle,
+        uint256 _penalty,
+        string calldata /* _reason */
+    ) external onlyOwner onlyRegistered(_oracle) {
+        OracleInfo storage info = oracles[_oracle];
+        info.reputation = info.reputation > _penalty ? info.reputation - _penalty : MIN_REPUTATION;
+        emit OracleReputationUpdated(_oracle, info.reputation);
 
-        if (oracles[_oracle].reputation > _penalty) {
-            oracles[_oracle].reputation -= _penalty;
-        } else {
-            oracles[_oracle].reputation = MIN_REPUTATION;
-        }
-
-        // Deactivate oracle if reputation falls too low
-        if (oracles[_oracle].reputation <= MIN_REPUTATION) {
-            oracles[_oracle].active = false;
+        if (info.reputation <= MIN_REPUTATION && info.active) {
+            info.active = false;
             emit OracleDeactivated(_oracle);
         }
     }
@@ -435,16 +399,15 @@ contract OracleManager is IOracleManager, Ownable2Step, ReentrancyGuard, Pausabl
     /**
      * @dev Reward oracle
      */
-    function rewardOracle(address _oracle, uint256 _reward, string calldata /* _reason */) external onlyOwner {
-        require(oracles[_oracle].registered, "OracleManager: Oracle not registered");
-
-        if (oracles[_oracle].reputation + _reward <= MAX_REPUTATION) {
-            oracles[_oracle].reputation += _reward;
-        } else {
-            oracles[_oracle].reputation = MAX_REPUTATION;
-        }
-
-        oracles[_oracle].correctAttestations++;
+    function rewardOracle(
+        address _oracle,
+        uint256 _reward,
+        string calldata /* _reason */
+    ) external onlyOwner onlyRegistered(_oracle) {
+        OracleInfo storage info = oracles[_oracle];
+        info.reputation = info.reputation + _reward <= MAX_REPUTATION ? info.reputation + _reward : MAX_REPUTATION;
+        info.correctAttestations++;
+        emit OracleReputationUpdated(_oracle, info.reputation);
     }
 
     /**
@@ -479,95 +442,20 @@ contract OracleManager is IOracleManager, Ownable2Step, ReentrancyGuard, Pausabl
         );
     }
 
-    // Missing interface implementations
-    function registerOracle(address oracle, string memory name) external override onlyOwner {
-        require(oracle != address(0), "Invalid oracle address");
-        require(!oracles[oracle].registered, "Oracle already registered");
-        require(registeredOraclesList.length < MAX_ORACLES, "Maximum oracles reached");
-
-        oracles[oracle] = OracleInfo({
-            oracleAddress: oracle,
-            name: name,
-            description: "",
-            reputation: MIN_REPUTATION,
-            registered: true,
-            active: true,
-            registrationTime: block.timestamp,
-            totalAttestations: 0,
-            correctAttestations: 0
-        });
-
-        registeredOraclesList.push(oracle);
-        emit OracleRegistered(oracle, name);
-    }
-
-    function removeOracle(address oracle) external override onlyOwner {
-        require(oracles[oracle].registered, "Oracle not registered");
-        oracles[oracle].registered = false;
-        oracles[oracle].active = false;
-        delete _emergencyOracles[oracle];
-
-        // Remove from list
-        for (uint256 i = 0; i < registeredOraclesList.length; i++) {
-            if (registeredOraclesList[i] == oracle) {
-                registeredOraclesList[i] = registeredOraclesList[registeredOraclesList.length - 1];
-                registeredOraclesList.pop();
-                break;
-            }
-        }
-
-        emit OracleDeregistered(oracle, "Removed by admin");
-    }
-
-    /// @notice Record (or clear) an oracle's manager-level emergency flag.
-    ///         Gating of emergency listings stays with each BlacklistOracle's
-    ///         own `setEmergencyOracle` (its owner); this is the registry
-    ///         record, cleared when the oracle is removed.
-    function setEmergencyOracle(address oracle, bool isEmergency) external override onlyOwner {
-        require(oracles[oracle].registered, "Oracle not registered");
-        _emergencyOracles[oracle] = isEmergency;
-        emit EmergencyOracleSet(oracle, isEmergency);
-    }
-
-    function isEmergencyOracle(address oracle) external view override returns (bool) {
-        return _emergencyOracles[oracle];
-    }
-
-    function getOracleName(address oracle) external view override returns (string memory) {
-        return oracles[oracle].name;
-    }
-
-    function getOracleReputation(address oracle) external view override returns (uint256) {
-        return oracles[oracle].reputation;
-    }
-
-    function getAllOracles() external view override returns (address[] memory) {
-        return registeredOraclesList;
-    }
-
-    function updateConsensusThreshold(uint256 newThreshold) external override onlyOwner {
-        require(newThreshold > 0, "Threshold must be greater than 0");
-        require(newThreshold <= registeredOraclesList.length, "Threshold too high");
-
-        uint256 oldThreshold = consensusThreshold;
-        consensusThreshold = newThreshold;
-
-        emit ConsensusThresholdUpdated(oldThreshold, newThreshold);
-    }
-
-    /// @notice True when at least `consensusThreshold` distinct, currently
-    ///         active oracles each signed `messageHash` (EIP-191 personal sign);
-    ///         `signatures[i]` must recover to `oracles[i]`. A duplicate,
-    ///         inactive, mismatched or malformed entry does not count; a length
-    ///         mismatch is false. (It always returned true before plan 2F.3.)
+    /// @notice True when distinct, currently active oracles that each signed
+    ///         `messageHash` (EIP-191 personal sign; `signatures[i]` recovers
+    ///         to `oracles[i]`) hold the engine's threshold of the live active
+    ///         weight. A duplicate, inactive, mismatched or malformed entry
+    ///         does not count; a length mismatch or no engine is false.
     function validateOracleConsensus(
         address[] memory _oracles,
         bytes[] memory _signatures,
         bytes32 _messageHash
     ) external view override returns (bool) {
-        if (_oracles.length != _signatures.length) return false;
+        ConsensusOracle engine = consensusEngine;
+        if (address(engine) == address(0) || _oracles.length != _signatures.length) return false;
         bytes32 digest = MessageHashUtils.toEthSignedMessageHash(_messageHash);
-        uint256 valid = 0;
+        uint256 weight = 0;
         for (uint256 i = 0; i < _oracles.length; i++) {
             if (!oracles[_oracles[i]].active) continue;
             bool duplicate = false;
@@ -579,8 +467,8 @@ contract OracleManager is IOracleManager, Ownable2Step, ReentrancyGuard, Pausabl
             }
             if (duplicate) continue;
             (address signer, ECDSA.RecoverError err, ) = ECDSA.tryRecover(digest, _signatures[i]);
-            if (err == ECDSA.RecoverError.NoError && signer == _oracles[i]) valid++;
+            if (err == ECDSA.RecoverError.NoError && signer == _oracles[i]) weight += engine.weightOf(signer);
         }
-        return valid >= consensusThreshold;
+        return engine.meetsThreshold(weight);
     }
 }
