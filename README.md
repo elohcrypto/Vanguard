@@ -11,6 +11,7 @@ This project implements a **Vanguard RWA StableCoin (VSC)** system, under develo
 - ✅ **Investor type differentiation** (4 types: Normal, Retail, Accredited, Institutional)
 - ✅ **Democratic governance** (1 Person = 1 Vote with VGT voting fees)
 - ✅ **Enhanced escrow system** (2-of-3 multisig with dispute resolution)
+- ✅ **Investor custody** (the investor lock moves into an on-chain 2-of-2 `MultiSigWallet`; bank and user both sign to release)
 - ✅ **Payment protocol** with multi-type refunds
 - ✅ **89 interactive demo options** for complete system testing
 
@@ -104,6 +105,7 @@ Vanguard/
 7. ✅ Transfer Limits - Type-specific transfer and holding limits
 8. ✅ Whitelist Tiers - Required tiers per investor type
 9. ✅ Large Transfer Detection - Compliance officer notifications
+10. ✅ Investor Custody - `InvestorRequestManager` deploys a 2-of-2 `MultiSigWallet` per request; the lock is a token transfer into it, released only by bank + user
 
 ### **Governance & Escrow**
 14. ✅ VanguardGovernance - 1 Person = 1 Vote governance
@@ -264,7 +266,8 @@ npx hardhat coverage
 - ✅ **One-Time-Use Wallets**: Unique escrow wallet per payment, funded once through the factory (`EscrowAlreadyFunded` on a second attempt)
 - ✅ **Verified Shipment Proof**: Signed by the payee and bound to the escrow address and chain id, so it cannot be replayed; opens the 14-day dispute window
 - ✅ **Dispute Resolution**: Payer may dispute within the window; the investor refunds or reopens with all signatures cleared
-- ✅ **Fee Distribution**: Fixed at creation (3% investor, 2% owner), paid on release
+- ✅ **Fee Distribution**: Fixed at creation (3% investor, 2% owner), paid on release and recorded per investor in the factory (`getInvestorProfile().totalFeesEarned`); the investor fee can be routed to the investor's 2-of-2 `MultiSigWallet`
+- ✅ **Trust by Registrar**: the factory is a ComplianceRules registrar on VSC and trusts each escrow it deploys; a registrar may trust only accounts with the compiled `MultiSigEscrowWallet` (or, for `InvestorRequestManager`, `MultiSigWallet`) code hash
 - ✅ **Sweep**: Tokens sent to a settled escrow outside the factory are returned by `sweepExcess()` (demo option 70a)
 - 📖 Step by step, with the demo option for each step: [Escrow Payment Workflow](/docs/SYSTEM_WORKFLOW_GUIDE.md#escrow-payment-workflow)
 

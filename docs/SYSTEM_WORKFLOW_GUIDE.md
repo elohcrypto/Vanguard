@@ -89,10 +89,11 @@ The system supports the following core workflows, each with comprehensive compli
 3. [Token Transfer Workflow](#token-transfer-workflow)
 4. [Privacy & ZK Verification Workflow](#privacy--zk-verification-workflow)
 5. [Token Payment Workflow](#token-payment-workflow)
-6. [Escrow Payment Workflow](#escrow-payment-workflow)
-7. [Token Burning Workflow](#token-burning-workflow)
-8. [Compliance Monitoring](#compliance-monitoring)
-9. [Error Handling](#error-handling)
+6. [Investor custody (2-of-2 MultiSigWallet)](#investor-custody-2-of-2-multisigwallet)
+7. [Escrow Payment Workflow](#escrow-payment-workflow)
+8. [Token Burning Workflow](#token-burning-workflow)
+9. [Compliance Monitoring](#compliance-monitoring)
+10. [Error Handling](#error-handling)
 
 ---
 
@@ -608,6 +609,20 @@ async fn process_payment(request: PaymentRequest) -> Result<PaymentResult> {
 
 ---
 
+## Investor custody (2-of-2 MultiSigWallet)
+
+Plan v2 Task 4.3 (owner decision D13 = b). An investor-status request locks VSC in a contract custody wallet, not as a freeze in the user's own wallet.
+
+| Step (demo option 23) | Who signs | On chain |
+|---|---|---|
+| 2. Request | User | `InvestorRequestManager.requestInvestorStatus(type)`: needs a verified, Normal holder; the lock amount comes from `lockRequirements` |
+| 4. Create wallet | Bank (ops, wallet 10) | `createMultiSigWallet(user)` deploys `MultiSigWallet(bank, user, VSC)`; the manager, a ComplianceRules registrar for the `MultiSigWallet` code hash, trusts it on VSC in the same call; the address is read back from `requests(user)` |
+| 5. Lock | User | `approve(wallet, amount)`, `MultiSigWallet.lockTokens(amount)` (the tokens move into the wallet), `confirmTokensLocked()` |
+| 6. Approve | Bank | `approveRequest(user)`: the manager, a compliance officer, assigns the type while the lock is held |
+| 8. Downgrade | User, then bank | `proposeUnlock(amount, recipient, reason)`, `signUnlock` by both; the second signature pays out. Then a compliance officer sets the type back to Normal |
+
+Neither signer can move the tokens alone, and every payout passes the token's gate on the recipient (identity, country, caps). The wallet may also hold escrow investor fees routed to it (option 62); an unlock pays from that free balance first, then from the lock. The demo sets the lock requirements within the Normal type's one-transfer cap (2,000 / 4,000 / 8,000 VSC for Retail / Accredited / Institutional), because the user is still Normal when locking; the contract defaults (10,000 / 100,000 / 1,000,000) exceed the default Normal caps. A platform contract holds client tokens here: the bank alone cannot move them, but it is contract custody.
+
 ## Escrow Payment Workflow
 
 A conditional VSC payment between a **payer** and a **payee**, mediated by a registered **investor**. Each payment gets its own `MultiSigEscrowWallet`, deployed by `EscrowWalletFactory` and used exactly once. Demo options 61 to 73b.
@@ -623,7 +638,7 @@ A conditional VSC payment between a **payer** and a **payee**, mediated by a reg
 
 The escrow holds **amount + 3% investor fee + 2% owner fee**, all fixed at creation. A 1000 VSC payment is funded with 1050 VSC. On release the payee gets 1000, the investor fee wallet 30, the platform fee wallet 20. On refund the payer gets the full 1050 back.
 
-The escrow wallet is added to ComplianceRules as a trusted contract on VSC when it is created (`addTrustedContract(VSC, wallet)`; the demo does this; on your own deployment the ComplianceRules owner must). Trust is per token since Task 4.1: an escrow trusted on VSC is not trusted on VGT, and governance, trusted on VGT to hold proposal fees, is not trusted on VSC. That is what lets VSC move in and out of a contract that has no identity of its own. Only addresses with code can be trusted: never a wallet, and never a wallet carrying an EIP-7702 delegation (the setter rejects the `0xef0100` indicator). The payer and payee are verified investors, and the other party to every transfer is still checked.
+The escrow wallet becomes a trusted contract on VSC in the same transaction that creates it: `EscrowWalletFactory` is a ComplianceRules **registrar** on VSC (Task 4.3) and calls `addTrustedContract(VSC, wallet)` itself. The ComplianceRules owner (governance after the handover) names registrars with `setTrustedRegistrar(token, registrar, walletCodeHash)`; a registrar may trust only an account whose runtime code hash equals the registered one (the compiled `MultiSigEscrowWallet`, which keeps its parameters in storage so every escrow has that hash), and only the owner may remove trust. Ops and rule administrators have no trust power. A factory that is not a registrar cannot create escrows: the demo names it at option 61 (a ComplianceRules vote after the handover). Trust is per token since Task 4.1: an escrow trusted on VSC is not trusted on VGT, and governance, trusted on VGT to hold proposal fees, is not trusted on VSC. That is what lets VSC move in and out of a contract that has no identity of its own. Only addresses with code can be trusted: never a wallet, and never a wallet carrying an EIP-7702 delegation (the setter rejects the `0xef0100` indicator). The payer and payee are verified investors, and the other party to every transfer is still checked.
 
 ### Lifecycle
 
@@ -647,7 +662,7 @@ stateDiagram-v2
 
 **1. Deploy the factory (61).** Needs the ERC-3643 token (21). The demo also onboards the platform fee wallet as a verified investor here.
 
-**2. Register the investor (62).** The investor's fee wallet is set at registration and never changes. In the demo, option 23 (steps 1 to 6) records a placeholder fee address until Task 4.3; no key controls it, so fees sent to it are stranded. A user created through option 24 has none; the demo falls back to a reserved signer. Either way option 62 registers the fee address as a verified identity (only contracts can be trusted), and that identity counts in the governance electorate.
+**2. Register the investor (62).** The investor's fee wallet is set at registration. An investor onboarded through option 23 has a `MultiSigWallet` (see [Investor custody](#investor-custody-2-of-2-multisigwallet)); option 62 uses it as the fee wallet. It is a trusted contract on VSC, not an identity, so it neither counts in the governance electorate nor needs a cap exemption, and fees paid to it leave only with the bank's and the user's signatures. A user created through option 24 has no wallet; the demo falls back to a reserved signer, onboarded as a verified identity. A keyless placeholder fee address left by a pre-4.3 run is retired: a registry agent deletes its identity and the investor is re-registered with the real wallet. Each release adds the investor fee to the factory's `totalFeesEarned` for that investor (option 69 prints it).
 
 **3. Create the escrow (63).** The investor names the payer (or "Unknown" for a marketplace escrow), the payee, and the amount. The factory checks both known parties are verified, deploys the wallet, and emits `EscrowWalletCreated` with the payment id and wallet address.
 

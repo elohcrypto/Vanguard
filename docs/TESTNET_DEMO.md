@@ -243,7 +243,12 @@ has no registry identity (D21), and every (token, address) pair still
 trusted on ComplianceRules (found from the token-indexed
 `TrustedContractAdded` events) is a deployed contract, not a wallet or
 delegated wallet; a wallet trusted before 2E.1 must be removed by the owner
-before the handover counts as complete. It also fails on any live
+before the handover counts as complete. Each live ComplianceRules
+trusted-contract registrar (from the token-indexed `TrustedRegistrarSet`
+events) gets a line naming its token and code hash; it passes only when the
+registrar has code and the hash is the compiled `MultiSigWallet` or
+`MultiSigEscrowWallet`, and the preflight refuses either failure before
+step 1 (clear it with `setTrustedRegistrar(token, registrar, 0)`). It also fails on any live
 ComplianceRules rule administrator other than governance and ops, on any
 token (found from the token-indexed `RuleAdministratorUpdated` events, plus
 the deployer on VSC and VGT; the constructor authorizes nobody): a rule
@@ -367,9 +372,11 @@ acceptances and registry proposals still pending, then verifies.
 - Never give one key both an IdentityRegistry agent role and an issuer
   owner or signer role (D25 b), and never vote away the last trusted issuer
   of a required topic or the last topic (the registry refuses both).
-- Option 63 after the handover creates a ComplianceRules proposal to trust
-  the new escrow wallet on VSC (`addTrustedContract(VSC, wallet)`; vote with
-  77, execute with 78); the wallet cannot be funded until it passes.
+- Option 61 after the handover creates a ComplianceRules proposal naming
+  the new escrow factory a trusted-contract registrar on VSC
+  (`setTrustedRegistrar(VSC, factory, MultiSigEscrowWallet code hash)`;
+  vote with 77, execute with 78); no escrow can be created until it passes.
+  Option 63 needs no vote: the factory trusts each escrow it deploys.
 - Revoking a whitelist binding is root rotation: publish a root without
   the commitment (ops, or a PrivacyParameters vote). Expiry alone does not
   revoke, since a holder may resubmit the same proof under the same root
@@ -584,6 +591,35 @@ next to its attestation's. The handover completion lists the
 trusted attestors per circuit and warns when one has none, the jurisdiction
 source and policy token, and the number of jurisdiction bits; the demo key
 stays trusted after the ceremony until a vote untrusts it.
+
+## Investor custody (Task 4.3, D13 b)
+
+The "2-of-2 multisig" of option 23 is the on-chain `MultiSigWallet`.
+Options 21 and 51 (whichever runs second) deploy `InvestorRequestManager`
+for VSC with the bank = ops (wallet 10), make it an InvestorTypeRegistry
+compliance officer and a ComplianceRules registrar on VSC for the
+compiled `MultiSigWallet` code hash, set the lock requirements within the
+Normal one-transfer cap (2,000 / 4,000 / 8,000 VSC), and hand its
+ownership to ops, so the deployer keeps no custody power.
+
+Who signs what in option 23: the user requests (2); the bank creates the
+wallet (4), which the manager trusts on VSC in the same transaction; the
+user approves the wallet, locks (the tokens move into it, the user's
+balance falls) and confirms (5); the bank approves (6); a downgrade (8) is
+a 2-of-2 unlock, proposed and signed by the user, signed by the bank, of
+everything the wallet holds, then Normal again. There is no unfreeze path.
+Option 62 uses the wallet as the investor's escrow fee wallet.
+
+The registrar model: only the ComplianceRules owner (governance after the
+handover) may trust an arbitrary contract or remove trust. A registrar is
+a contract the owner named per token with one code hash; it may trust
+only accounts with that code. Ops and rule administrators have no trust
+power. `InvestorRequestManager` and `EscrowWalletFactory` are the two
+registrars; the handover ceremony lists both (see 83e).
+
+Options 23 and 62 to 69 ask sub-prompts, so `demo-drive.sh` cannot drive
+them (it answers the main menu only); `scripts/demo-smoke-custody.js`
+runs the custody flow on the live node in the smoke.
 
 ## Waiting instead of jumping
 
