@@ -102,4 +102,51 @@ async function registerRegistrar(
   return { proposalId };
 }
 
-module.exports = { registerRegistrar, walletCodeHash, pickProposer };
+const ORACLE_PARAMETERS_TYPE = 2; // ProposalType.OracleParameters
+
+/**
+ * An owner-only OracleManager call (plan v2 Task 4.4): the deployer calls
+ * directly while it owns the manager; once governance owns it the call
+ * becomes an OracleParameters proposal (voted with options 77/78).
+ * Returns { direct: true }, { proposalId } or { refused: reason }.
+ */
+async function governOracleManager(state, fn, args, log = console.log) {
+  const om = state.getContract("oracleManager");
+  const deployer = state.signers[0];
+  const owner = await om.owner();
+  if (same(owner, deployer.address)) {
+    await (await om.connect(deployer)[fn](...args)).wait();
+    return { direct: true };
+  }
+  const gov = state.getContract("vanguardGovernance");
+  if (!gov || !same(owner, await gov.getAddress())) {
+    return {
+      refused: `OracleManager is owned by ${owner}, neither the deployer nor governance`,
+    };
+  }
+  const proposer = await pickProposer(state);
+  if (!proposer) {
+    return {
+      refused: `governance owns OracleManager; no wallet among 0-8 can propose (verified, ${ethers.formatEther(await gov.proposalCreationCost())} VGT, identity old enough)`,
+    };
+  }
+  const proposalId = await proposeCall(
+    gov,
+    proposer,
+    ORACLE_PARAMETERS_TYPE,
+    om,
+    om.interface.encodeFunctionData(fn, args),
+    `OracleManager.${fn}(${args.join(", ")})`,
+  );
+  log(
+    `   🗳️  Proposal #${proposalId} (OracleParameters) by ${proposer.address}`,
+  );
+  return { proposalId };
+}
+
+module.exports = {
+  registerRegistrar,
+  governOracleManager,
+  walletCodeHash,
+  pickProposer,
+};

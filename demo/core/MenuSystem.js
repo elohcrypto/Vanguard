@@ -12,6 +12,7 @@
 const { displaySection } = require("../utils/DisplayHelpers");
 const keyLifecycle = require("../utils/KeyLifecycleFlow");
 const keyOptions = require("../utils/KeyLifecycleOptions");
+const oracleFlow = require("../utils/OracleLifecycleFlow");
 
 /**
  * @class MenuSystem
@@ -93,8 +94,11 @@ class MenuSystem {
     console.log("31. Deploy Oracle Management System");
     console.log("32. Register & Configure Oracles");
     console.log("33. Manage Oracle Whitelist (Access Approval)");
+    console.log("33a. Whitelist by consensus: query, 2 of 3 nodes, verdict");
     console.log("34. Manage Oracle Blacklist (Access Restriction)");
+    console.log("34a. Blacklist by consensus: HIGH query, 2 of 3, verdict");
     console.log("35. Emergency Oracle Actions");
+    console.log("35a. Oracle lifecycle: ops pauses, unpauses, designates");
     console.log("36. Oracle Reputation Management");
     console.log("37. Oracle Consensus Operations");
     console.log("38. Integrate Oracles with Vanguard StableCoin");
@@ -356,11 +360,20 @@ class MenuSystem {
         case "33":
           await oracle.manageWhitelist();
           break;
+        case "33a":
+          await oracleFlow.runWhitelistRound(this.state);
+          break;
         case "34":
           await oracle.manageBlacklist();
           break;
+        case "34a":
+          await oracleFlow.runBlacklistRound(this.state);
+          break;
         case "35":
           await oracle.emergencyActions();
+          break;
+        case "35a":
+          await oracleFlow.runLifecycle(this.state);
           break;
         case "36":
           await oracle.manageReputation();
