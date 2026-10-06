@@ -1,5 +1,5 @@
 import { expect } from "chai";
-import { ethers, network } from "hardhat";
+import { ethers } from "hardhat";
 import { SignerWithAddress } from "@nomicfoundation/hardhat-ethers/signers";
 import { bindEngine } from "../helpers/oracles";
 
@@ -38,27 +38,6 @@ describe("Consensus engine guards (2F.3 B)", function () {
         ),
       ),
     );
-
-  async function createQuery(): Promise<string> {
-    const tx = await CO.connect(owner).createConsensusQuery(
-      subject.address,
-      BLACKLIST,
-      "0x",
-    );
-    const blk = await ethers.provider.getBlock((await tx.wait()).blockNumber);
-    return ethers.solidityPackedKeccak256(
-      ["address", "uint8", "bytes", "uint256", "address"],
-      [subject.address, BLACKLIST, "0x", blk!.timestamp, owner.address],
-    );
-  }
-
-  const vote = async (w: SignerWithAddress, q: string, v: boolean) =>
-    CO.connect(w).submitVote(q, v, await voteSig(w, q, v));
-
-  async function expire() {
-    await network.provider.send("evm_increaseTime", [3601]);
-    await network.provider.send("evm_mine");
-  }
 
   describe("OracleManager.validateOracleConsensus", function () {
     const h = ethers.id("message");
