@@ -3,7 +3,6 @@ pragma solidity ^0.8.19;
 
 import "@openzeppelin/contracts/access/Ownable2Step.sol";
 import "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
-import "@openzeppelin/contracts/utils/Pausable.sol";
 import "@openzeppelin/contracts/utils/cryptography/ECDSA.sol";
 import "@openzeppelin/contracts/utils/cryptography/MessageHashUtils.sol";
 import "./interfaces/IOracleManager.sol";
@@ -19,7 +18,7 @@ import "./ConsensusOracle.sol";
  *         (OracleParameters proposals). The operator (ops after the
  *         handover) may pause, unpause and emergency-designate nodes.
  */
-contract OracleManager is IOracleManager, Ownable2Step, ReentrancyGuard, Pausable {
+contract OracleManager is IOracleManager, Ownable2Step, ReentrancyGuard {
     /// @notice A response arrived after the query resolved: a settled verdict is final.
     error QueryAlreadyResolved();
     /// @notice Only the owner or an active oracle may raise a query.
@@ -89,6 +88,8 @@ contract OracleManager is IOracleManager, Ownable2Step, ReentrancyGuard, Pausabl
     event EmergencyOverrideExecuted(address indexed oracle, bytes32 indexed queryId, string reason);
     event ConsensusEngineSet(address indexed engine);
     event OperatorUpdated(address indexed previous, address indexed current);
+    /// @notice The owner adopted a pause already in place (pausedByOwner).
+    event OwnerPauseAdopted(address indexed oracle);
 
     // Query types
     uint8 public constant QUERY_TYPE_WHITELIST = 1;
@@ -114,6 +115,10 @@ contract OracleManager is IOracleManager, Ownable2Step, ReentrancyGuard, Pausabl
     constructor() Ownable(msg.sender) {}
 
     /// @notice Bind the engine; it must be a contract built for this manager.
+    ///         Re-binding strands queries open in the old engine (their votes
+    ///         revert UnknownQuery: raise them again). Only the handover
+    ///         ceremony pins the engine's code hash; this checks code and
+    ///         binding only.
     function setConsensusEngine(address _engine) external onlyOwner {
         if (_engine.code.length == 0) revert InvalidConsensusEngine();
         if (address(ConsensusOracle(_engine).oracleManager()) != address(this)) revert InvalidConsensusEngine();
@@ -186,11 +191,19 @@ contract OracleManager is IOracleManager, Ownable2Step, ReentrancyGuard, Pausabl
         emit OracleDeregistered(_oracle, _reason);
     }
 
-    /// @notice Stop a node voting and attesting; owner or operator.
+    /// @notice Stop a node voting and attesting; owner or operator. The owner
+    ///         may also adopt an existing pause (an operator's or a parked
+    ///         node's), so the operator cannot undo it later.
     function pauseOracle(address _oracle) external onlyOwnerOrOperator onlyRegistered(_oracle) {
-        require(oracles[_oracle].active, "OracleManager: Oracle already inactive");
+        bool byOwner = msg.sender == owner();
+        if (!oracles[_oracle].active) {
+            require(byOwner, "OracleManager: Oracle already inactive");
+            pausedByOwner[_oracle] = true;
+            emit OwnerPauseAdopted(_oracle);
+            return;
+        }
         oracles[_oracle].active = false;
-        if (msg.sender == owner()) pausedByOwner[_oracle] = true;
+        if (byOwner) pausedByOwner[_oracle] = true;
         emit OracleDeactivated(_oracle);
     }
 
@@ -453,8 +466,8 @@ contract OracleManager is IOracleManager, Ownable2Step, ReentrancyGuard, Pausabl
 
     /// @notice True when distinct, currently active oracles that each signed
     ///         `messageHash` (EIP-191 personal sign; `signatures[i]` recovers
-    ///         to `oracles[i]`) hold the engine's threshold of the live active
-    ///         weight. A duplicate, inactive, mismatched or malformed entry
+    ///         to `oracles[i]`) hold the engine's threshold of the live
+    ///         REGISTERED weight (pausing nodes never lowers it). A duplicate, inactive, mismatched or malformed entry
     ///         does not count; a length mismatch or no engine is false.
     function validateOracleConsensus(
         address[] memory _oracles,

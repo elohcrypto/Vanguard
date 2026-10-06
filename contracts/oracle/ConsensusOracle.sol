@@ -12,14 +12,20 @@ import "./interfaces/IOracleManager.sol";
  *         the manager). The name is kept from before 4.4, when this was a
  *         second, standalone weighted-vote oracle that nothing read.
  *
- * The one rule: when a query opens the engine snapshots the total weight of
- * the manager's ACTIVE nodes (a node without a weight counts
- * DEFAULT_ORACLE_WEIGHT). Each vote counts the voter's weight at cast time.
- * YES resolves when yesWeight * 100 >= snapshotWeight * consensusThreshold,
- * NO symmetrically; the threshold is a percent in (50, 100], so both sides
- * can never resolve and a 1-1 split of three equal nodes resolves nothing.
+ * The one rule: when a query opens the engine snapshots every REGISTERED
+ * node of the manager, active or paused, with its weight then (a node
+ * without a weight counts DEFAULT_ORACLE_WEIGHT), and the bar,
+ * snapshotWeight * consensusThreshold. Pausing therefore never lowers a bar:
+ * it can only stop a query resolving. Only snapshot members vote (a node
+ * registered later is refused, NotInSnapshot), each with its weight at
+ * open; the manager decides whether a member may vote now (active), so a
+ * node paused at open and unpaused later votes with its snapshot weight.
+ * YES resolves when yesWeight * 100 >= bar, NO symmetrically; the threshold
+ * is a percent in (50, 100], so a 1-1 split of three equal nodes resolves
+ * nothing. Weight, threshold or expiry changes apply to later queries only.
  * A query expires `queryExpiryTime` after it opened: later votes are
  * refused and it closes without a verdict (a new query must be raised).
+ * Removal (owner only) is the only thing that shrinks a later denominator.
  */
 contract ConsensusOracle {
     /// @notice Every write comes from the bound OracleManager.
@@ -29,8 +35,10 @@ contract ConsensusOracle {
     error QueryResolved();
     error QueryExpired();
     error AlreadyVoted();
-    /// @notice No active node, so no weight to snapshot: fail closed.
-    error NoActiveWeight();
+    /// @notice No registered node, so no weight to snapshot: fail closed.
+    error NoRegisteredWeight();
+    /// @notice The voter was not a registered node when the query opened.
+    error NotInSnapshot();
     error InvalidThreshold();
     error InvalidWeight();
     error InvalidExpiry();
@@ -39,10 +47,12 @@ contract ConsensusOracle {
         uint256 openedAt;
         uint256 expiresAt;
         uint256 snapshotWeight;
+        uint256 bar; // snapshotWeight * consensusThreshold, frozen at open
         uint256 yesWeight;
         uint256 noWeight;
         bool resolved;
         bool result;
+        mapping(address => uint256) weightAt; // 0: not in the snapshot
         mapping(address => bool) hasVoted;
         mapping(address => bool) votes;
         address[] voters;
@@ -92,21 +102,30 @@ contract ConsensusOracle {
         oracleManager = IOracleManager(_oracleManager);
     }
 
-    /// @notice Open `queryId` and snapshot the active weight (manager only).
+    /// @notice Open `queryId`: snapshot every registered node's weight and
+    ///         freeze the bar (manager only). Bounded by MAX_ORACLES (100).
     function openQuery(bytes32 queryId) external onlyOracleManager {
         ConsensusQuery storage q = _queries[queryId];
         if (q.openedAt != 0) revert QueryExists();
-        uint256 snapshot = activeWeight();
-        if (snapshot == 0) revert NoActiveWeight();
+        address[] memory nodes = oracleManager.getRegisteredOracles();
+        uint256 snapshot = 0;
+        for (uint256 i = 0; i < nodes.length; i++) {
+            uint256 w = weightOf(nodes[i]);
+            q.weightAt[nodes[i]] = w;
+            snapshot += w;
+        }
+        if (snapshot == 0) revert NoRegisteredWeight();
         q.openedAt = block.timestamp;
         q.expiresAt = block.timestamp + queryExpiryTime;
         q.snapshotWeight = snapshot;
+        q.bar = snapshot * consensusThreshold;
         emit ConsensusQueryCreated(queryId, snapshot, q.expiresAt);
     }
 
     /**
-     * @notice Record `voter`'s vote (manager only; the manager has checked the
-     *         voter is an active node). Returns the verdict once it resolves.
+     * @notice Record `voter`'s vote with its snapshot weight (manager only;
+     *         the manager has checked the voter is active now). Returns the
+     *         verdict once a side reaches the bar frozen at open.
      */
     function recordVote(
         bytes32 queryId,
@@ -118,8 +137,9 @@ contract ConsensusOracle {
         if (q.resolved) revert QueryResolved();
         if (block.timestamp >= q.expiresAt) revert QueryExpired();
         if (q.hasVoted[voter]) revert AlreadyVoted();
+        uint256 weight = q.weightAt[voter];
+        if (weight == 0) revert NotInSnapshot();
 
-        uint256 weight = weightOf(voter);
         q.hasVoted[voter] = true;
         q.votes[voter] = vote;
         q.voters.push(voter);
@@ -127,11 +147,10 @@ contract ConsensusOracle {
         else q.noWeight += weight;
         emit ConsensusVoteSubmitted(queryId, voter, vote, weight);
 
-        uint256 bar = q.snapshotWeight * consensusThreshold;
-        if (q.yesWeight * 100 >= bar) {
+        if (q.yesWeight * 100 >= q.bar) {
             q.resolved = true;
             q.result = true;
-        } else if (q.noWeight * 100 >= bar) {
+        } else if (q.noWeight * 100 >= q.bar) {
             q.resolved = true;
         }
         if (q.resolved) {
@@ -170,17 +189,26 @@ contract ConsensusOracle {
         return oracleManager.isActiveOracle(oracle) ? weightOf(oracle) : 0;
     }
 
-    /// @notice Total weight of the manager's active nodes now.
-    function activeWeight() public view returns (uint256 total) {
-        address[] memory active = oracleManager.getActiveOracles();
-        for (uint256 i = 0; i < active.length; i++) total += weightOf(active[i]);
+    /// @notice Total weight of the manager's registered nodes now, active or
+    ///         paused: the denominator a query opened now would snapshot.
+    function registeredWeight() public view returns (uint256 total) {
+        address[] memory nodes = oracleManager.getRegisteredOracles();
+        for (uint256 i = 0; i < nodes.length; i++) total += weightOf(nodes[i]);
     }
 
-    /// @notice True when `weight` meets the threshold against the live active
-    ///         total (OracleManager.validateOracleConsensus); false with none.
+    /// @notice True when `weight` meets the threshold against the live
+    ///         registered total (OracleManager.validateOracleConsensus), so
+    ///         pausing nodes never lowers it; false with no node.
     function meetsThreshold(uint256 weight) external view returns (bool) {
-        uint256 total = activeWeight();
+        uint256 total = registeredWeight();
         return total > 0 && weight * 100 >= total * consensusThreshold;
+    }
+
+    /// @notice `oracle`'s weight in `queryId`'s snapshot (0: not a member)
+    ///         and the query's bar (snapshotWeight * threshold, at open).
+    function snapshotOf(bytes32 queryId, address oracle) external view returns (uint256 weight, uint256 bar) {
+        ConsensusQuery storage q = _queries[queryId];
+        return (q.weightAt[oracle], q.bar);
     }
 
     /**
