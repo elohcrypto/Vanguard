@@ -14,12 +14,12 @@ const {
 } = require("../utils/DisplayHelpers");
 const {
   advancePast,
-  ageOrVoterAgeRefusal,
   voterAgeRefusal,
   walletControlRefusal,
 } = require("../utils/ChainTime");
 const { ethers } = require("hardhat");
 const { createOracleParametersProposal } = require("../utils/OracleProposal");
+const { runCompleteWorkflow } = require("../utils/GovernanceWorkflow");
 
 /**
  * Proposal type names in ProposalType enum order.
@@ -2009,193 +2009,15 @@ class GovernanceModule {
     }
   }
 
-  /** Option 82: Demo Complete Governance Workflow */
+  /**
+   * Option 82: Demo Complete Governance Workflow (demo/utils/
+   * GovernanceWorkflow.js). Returns { proposalId, status } or null.
+   */
   async demoCompleteWorkflow() {
-    displaySection("DEMO COMPLETE GOVERNANCE WORKFLOW", "🧪");
-
-    const vanguardGovernance = this.state.getContract("vanguardGovernance");
-    if (!vanguardGovernance) {
-      displayError("Deploy Governance Token system first (option 74)");
-      return;
-    }
-
-    try {
-      console.log("\n📊 COMPLETE GOVERNANCE WORKFLOW DEMONSTRATION");
-      console.log("This will demonstrate the full governance process:");
-      console.log("1. Distribute governance tokens to verified users");
-      console.log("2. Create a proposal to update ComplianceRules");
-      console.log(
-        "3. Cast votes (1 person = 1 vote; VGT is a fee, not weight)",
-      );
-      console.log("4. Execute the proposal after approval");
-      console.log("");
-
-      const proceed = await this.promptUser("Proceed with demo? (yes/no): ");
-      if (proceed.toLowerCase() !== "yes") {
-        console.log("Demo cancelled");
-        return;
-      }
-
-      const governanceToken = this.state.getContract("governanceToken");
-      const digitalToken = this.state.getContract("digitalToken");
-      const complianceRules = this.state.getContract("complianceRules");
-
-      // Step 1: Distribute tokens
-      console.log("\n" + "=".repeat(70));
-      console.log("STEP 1: DISTRIBUTE GOVERNANCE TOKENS");
-      console.log("=".repeat(70));
-
-      const voter1 = this.state.signers[1];
-      const voter2 = this.state.signers[2];
-      const voter3 = this.state.signers[3];
-
-      console.log("\n📊 Distributing VGT to 3 voters...");
-      const tx1 = await governanceToken.distributeGovernanceTokens(
-        [voter1.address, voter2.address, voter3.address],
-        [
-          ethers.parseEther("300000"),
-          ethers.parseEther("400000"),
-          ethers.parseEther("300000"),
-        ],
-      );
-      await tx1.wait();
-      console.log("   ✅ Distributed 300,000 VGT to Voter 1");
-      console.log("   ✅ Distributed 400,000 VGT to Voter 2");
-      console.log("   ✅ Distributed 300,000 VGT to Voter 3");
-
-      // Step 2: Create proposal
-      console.log("\n" + "=".repeat(70));
-      console.log("STEP 2: CREATE GOVERNANCE PROPOSAL");
-      console.log("=".repeat(70));
-
-      // D25: identities propose and vote only once minVoterAge old.
-      const tooNew = await ageOrVoterAgeRefusal(
-        vanguardGovernance,
-        this.state.getContract("identityRegistry"),
-        [voter1, voter2, voter3],
-      );
-      if (tooNew) {
-        displayError(tooNew);
-        return;
-      }
-
-      console.log("\n🗳️  Creating proposal to update jurisdiction rules...");
-      const tokenAddr = await digitalToken.getAddress();
-      const callData = complianceRules.interface.encodeFunctionData(
-        "setJurisdictionRule",
-        [tokenAddr, [840, 826, 124], [643]], // US, UK, Canada allowed; Russia blocked
-      );
-
-      const tx2 = await vanguardGovernance.connect(voter1).createProposal(
-        1, // ComplianceRules type
-        "Update Jurisdiction Rules",
-        "Add US, UK, Canada to allowed countries and block Russia",
-        await complianceRules.getAddress(),
-        callData,
-      );
-      await tx2.wait();
-      console.log("   ✅ Proposal created: Update Jurisdiction Rules");
-
-      // Step 3: Cast votes
-      console.log("\n" + "=".repeat(70));
-      console.log("STEP 3: CAST VOTES");
-      console.log("=".repeat(70));
-
-      console.log("\n✅ Casting votes...");
-      // Each vote counts as exactly 1, regardless of VGT balance. The
-      // VGT amounts below are the voting FEE, not voting weight.
-      const votingCostForDemo = await vanguardGovernance.votingCost();
-      const feeLabel = `${ethers.formatEther(votingCostForDemo)} VGT fee`;
-
-      const tx3 = await vanguardGovernance
-        .connect(voter1)
-        .castVote(1, true, "Support");
-      await tx3.wait();
-      console.log(`   ✅ Voter 1 voted FOR — 1 vote (${feeLabel})`);
-
-      const tx4 = await vanguardGovernance
-        .connect(voter2)
-        .castVote(1, true, "Support");
-      await tx4.wait();
-      console.log(`   ✅ Voter 2 voted FOR — 1 vote (${feeLabel})`);
-
-      const tx5 = await vanguardGovernance
-        .connect(voter3)
-        .castVote(1, false, "Against");
-      await tx5.wait();
-      console.log(`   ✅ Voter 3 voted AGAINST — 1 vote (${feeLabel})`);
-
-      // Check proposal status.
-      //
-      // Read every number from the chain. These lines previously printed
-      // the literals "(70%)", "(30%)" and "Participation: 100%", which
-      // were the same regardless of how anyone voted, and formatted the
-      // vote COUNTS with formatEther — so 2 votes displayed as
-      // "0.000000000000000002 VGT".
-      const proposalResult = await vanguardGovernance.getProposal(1);
-      const proposal = proposalResult[0];
-      const totalVotes = proposalResult[1];
-      const participationBps = proposalResult[2];
-      const canExecute = proposalResult[3];
-
-      const forPct =
-        totalVotes > 0n
-          ? ((Number(proposal.votesFor) * 100) / Number(totalVotes)).toFixed(1)
-          : "0.0";
-      const againstPct =
-        totalVotes > 0n
-          ? (
-              (Number(proposal.votesAgainst) * 100) /
-              Number(totalVotes)
-            ).toFixed(1)
-          : "0.0";
-
-      const thresholds = await vanguardGovernance.proposalThresholds(1); // ComplianceRules
-      const quorumPct = Number(thresholds.quorumPercentage) / 100;
-      const approvalPct = Number(thresholds.approvalPercentage) / 100;
-
-      console.log("\n📊 Proposal Status:");
-      console.log(`   Votes FOR: ${proposal.votesFor} (${forPct}%)`);
-      console.log(
-        `   Votes AGAINST: ${proposal.votesAgainst} (${againstPct}%)`,
-      );
-      console.log(
-        `   Turnout: ${Number(participationBps) / 100}% of eligible voters`,
-      );
-      console.log(
-        `   Required for this type: ${quorumPct}% quorum, ${approvalPct}% approval`,
-      );
-      console.log(
-        `   Can execute: ${canExecute ? "YES" : "NO — thresholds not met"}`,
-      );
-
-      console.log("\n⏰ Waiting for voting period to end...");
-      console.log(
-        "   (In production, this would be 7 days + 2 days execution delay)",
-      );
-      console.log(
-        "   (For demo, you can manually execute after the time period)",
-      );
-
-      console.log("\n" + "=".repeat(70));
-      displaySuccess("GOVERNANCE WORKFLOW DEMONSTRATION COMPLETE!");
-      console.log("=".repeat(70));
-      console.log("\n✅ DEMONSTRATED:");
-      console.log("   1. ✅ Token distribution to verified users");
-      console.log("   2. ✅ Proposal creation with encoded function call");
-      console.log(
-        `   3. ✅ 1-person-1-vote tallying (${forPct}% FOR, ${againstPct}% AGAINST)`,
-      );
-      console.log(
-        `   4. ${canExecute ? "✅ Quorum and approval thresholds met" : "❌ Thresholds NOT met — this proposal cannot execute"}`,
-      );
-      console.log("   5. ⏰ Ready for execution after time-lock period");
-      console.log(
-        "\n💡 Next: Use option 78 to execute the proposal after waiting period",
-      );
-    } catch (error) {
-      displayError(`Workflow demo failed: ${error.message}`);
-    }
+    return runCompleteWorkflow({
+      state: this.state,
+      promptUser: this.promptUser,
+    });
   }
 
   /**
