@@ -12,7 +12,6 @@ This project implements a **Vanguard RWA StableCoin (VSC)** system, under develo
 - ✅ **Democratic governance** (1 Person = 1 Vote with VGT voting fees)
 - ✅ **Enhanced escrow system** (2-of-3 multisig with dispute resolution)
 - ✅ **Investor custody** (the investor lock moves into an on-chain 2-of-2 `MultiSigWallet`; bank and user both sign to release)
-- ✅ **Payment protocol** with multi-type refunds
 - ✅ **89 interactive demo options** for complete system testing
 
 **Current Status**: under development. The contracts, the interactive demo, the tests and CI run end to end on a local Hardhat node; the remaining remediation phases and a third-party security audit come before any production or mainnet use.
@@ -37,7 +36,7 @@ Vanguard/
 │   ├── privacy/                 # ZK verification contracts
 │   ├── investor/                # Investor type management
 │   ├── governance/              # Governance system (1 Person = 1 Vote)
-│   ├── payment/                 # Payment protocol with refunds
+│   ├── payment/                 # Escrow factory + one-time 2-of-3 escrow wallets
 │   └── test/                    # Test contracts and helpers
 ├── circuits/                    # Zero-Knowledge Circuits 
 │   ├── whitelist_membership.circom          # Whitelist membership proof
@@ -73,7 +72,6 @@ Vanguard/
 │   ├── SYSTEM_OVERVIEW.md                      # System architecture overview
 │   ├── NEW_FAIR_VOTING_SYSTEM.md               # Fair voting implementation
 │   ├── INVESTOR_TYPE_SYSTEM.md                 # Investor type documentation
-│   ├── PAYMENT_PROTOCOL_DESIGN.md              # Payment protocol docs
 │   ├── SYSTEM_WORKFLOW_GUIDE.md                # User workflows and interactions
 │   ├── TECHNICAL_DEEP_DIVE.md                  # In-depth technical analysis
 │   ├── VANGUARD_RWA_TOKEN_ECOSYSTEM_GUIDE.md   # Complete ecosystem guide
@@ -135,7 +133,6 @@ Vanguard/
 
 ### **Investor & Payment Systems**
 - [Investor Type System](/docs/INVESTOR_TYPE_SYSTEM.md) - 4 investor types with limits
-- [Payment Protocol Design](/docs/PAYMENT_PROTOCOL_DESIGN.md) - Payment protocol architecture
 
 ### **Workflow & Implementation Guides**
 - [System Workflow Guide](/docs/SYSTEM_WORKFLOW_GUIDE.md) - User workflows and interactions
@@ -207,7 +204,6 @@ npm run demo:interactive:proof
 - Token burning with quotas
 - Investor type management
 - Enhanced escrow with dispute resolution
-- Payment protocol with refunds
 - Governance (1 Person = 1 Vote)
 - Dynamic governance cost management (NEW!)
 - Complete system integration

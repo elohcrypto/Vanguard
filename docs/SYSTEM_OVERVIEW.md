@@ -169,7 +169,6 @@ We have implemented a **Vanguard StableCoin system** with compliance, privacy, a
    ├── Peer-to-peer transfers (investor type-specific limits: 8K/50K/500K VSC)
    ├── Token issuer burning (supply management with quotas)
    ├── Governance participation (1 Person = 1 Vote with VGT voting fees)
-   ├── Payment protocol (escrow-based payments with refunds)
    └── Enhanced escrow (2-of-3 multisig with dispute resolution)
 
 4. Audit and Reporting
@@ -209,7 +208,6 @@ We have implemented a **Vanguard StableCoin system** with compliance, privacy, a
 - ✅ 1 Person = 1 Vote governance (equal voting power for all)
 - ✅ VGT token-based voting fees (10 VGT proposal, 10 VGT vote)
 - ✅ 2-of-3 multisig escrow with investor-mediated dispute resolution
-- ✅ Payment protocol with multi-type refunds (Automatic/Manual/Dispute/Emergency)
 
 ### **System Integration**
 - ✅ All components working together seamlessly
