@@ -268,7 +268,7 @@ sequenceDiagram
     participant Whitelist as WhitelistOracle
 
     Node1->>Manager: submitQuery(investor, WHITELIST)
-    Manager->>Engine: openQuery: snapshot the active weight (300)
+    Manager->>Engine: openQuery: snapshot every registered node (300)
     Node1->>Manager: submitResponse(query, YES)
     Manager->>Engine: recordVote (100 of 300)
     Node2->>Manager: submitResponse(query, YES)
@@ -281,7 +281,8 @@ sequenceDiagram
 
 Plan v2 Task 4.4 (D11 a): OracleManager is the only vote entry and
 ConsensusOracle the engine it delegates the weighted tally to. A paused
-node cannot answer or attest; the operator (ops) pauses, unpauses and
+node cannot answer or attest but stays in the denominator, so pausing
+never lowers the bar; the operator (ops) pauses, unpauses and
 emergency-designates nodes; governance removes them and sets the
 threshold by an OracleParameters vote. Demo options 33a, 34a and 35a run
 this path without prompts (docs/TESTNET_DEMO.md, "Oracle nodes and

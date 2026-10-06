@@ -637,11 +637,13 @@ runs the custody flow on the live node in the smoke.
 OracleManager is the gate and ConsensusOracle its engine. A query opens in
 OracleManager (`submitQuery`, by the owner or an active node), nodes
 answer there (`submitResponse`, the one vote entry), and the engine
-resolves a side once it holds `consensusThreshold` percent of the active
-weight it snapshotted when the query opened: 66% by default, two of the
-three equal nodes option 31 registers (wallets 1, 2 and 3, reputation
-500). A node paused after the query opened still counts in its snapshot
-but cannot answer. A query expires after `queryExpiryTime` (1 hour)
+resolves a side once it holds `consensusThreshold` percent of the weight
+of every node registered when the query opened, active or paused: 66% by
+default, two of the three equal nodes option 31 registers (wallets 1, 2
+and 3, reputation 500). A paused node stays in the denominator but cannot
+answer, so pausing never lowers the bar: with two nodes paused the third
+cannot resolve alone. A node registered after the query opened cannot
+answer it, and weight or threshold changes apply to later queries only. A query expires after `queryExpiryTime` (1 hour)
 without a verdict; raise a new one. One node then applies the verdict
 with `provideAttestation` on the Whitelist or Blacklist oracle.
 
@@ -660,16 +662,22 @@ it; 32 designates node 2 (AML) and checks the 66% threshold (through
 the manager, a proposal after the handover); 33a and 34a run a
 whitelist and a HIGH blacklist round on a throwaway address (raise, two
 YES answers, the verdict applied); 35a is the lifecycle: ops becomes the
-operator, pauses node 3 (its answer is refused, nodes 1 and 2 resolve a
-snapshot of 200 without it), unpauses it, designates node 2, which lists
+operator, pauses node 3 (its answer is refused, nodes 1 and 2 still
+resolve 200 of 300), pauses node 2 too (node 1 alone stays at 100 of 300,
+unresolved), unpauses both (also after a failed step), designates node 2,
+which lists
 a throwaway address CRITICAL for 7 days, clears the designation (a
 second listing is refused), restores it, and the owner registers and
-removes a fourth node (skipped once governance owns the manager); 37
-asks sub-prompts for the same steps by hand; 40 runs a compliance round
-and an emergency listing on throwaway addresses. Option 76, type 2
+removes a fourth node (skipped once governance owns the manager); 35a
+refuses to start when ops could not undo its pauses (node 2 or 3 paused
+by the owner or at the reputation floor); 37
+asks sub-prompts for the same steps by hand; 40 runs a compliance round,
+a 30-day whitelist entry and an emergency listing on throwaway
+addresses, and says which owner-only steps it skips after the handover.
+Option 76, type 2
 (OracleParameters), proposes pause, unpause, removeOracle,
 setEmergencyOracle, setConsensusThreshold or setOperator for governance
-to vote (77, 78). `demo-drive.sh --strict 1 21 31 32 33a 34a 35a 39 40`
+to vote (77, 78), from the first wallet among 0-8 that may propose. `demo-drive.sh --strict 1 21 31 32 33a 34a 35a 39 40`
 runs with no error; 33, 34, 35 and 37 ask sub-prompts and are not
 drivable. `DEMO_RPC_URL=http://127.0.0.1:<port>` points the drive at a
 node on another port (network `devnode`).
@@ -678,18 +686,25 @@ node on another port (network `devnode`).
 asserts from chain: the engine is bound both ways and its code is the
 compiled ConsensusOracle, the threshold is 66%, the 33a and 34a rounds
 resolve two of three (`ConsensusReached`, 200 of 300) and their verdicts
-apply, 35a's paused node is refused and absent from the snapshot, unpause
-restores it, the designation gates `emergencyBlacklist`, and an expired
-query refuses answers and has no verdict.
+apply, 35a's paused node is refused as not active while two of three
+still resolve 200 of 300, with two paused the third cannot resolve alone,
+unpause restores both, the designation gates `emergencyBlacklist`, and an
+expired query refuses answers and has no verdict.
 
 The handover ceremony hands nothing over for the engine (it has no
 owner). Before Step 1, without a transaction, the preflight refuses an
 OracleManager with no engine, an engine with no code, whose runtime code
 is not the compiled ConsensusOracle or that serves another manager, and
-an operator other than ops once the deployer no longer owns the manager.
-Step 2 makes ops the operator. 83e adds three lines: the engine is the
-compiled ConsensusOracle and serves the manager, the operator is ops,
-and the deployer is not an OracleManager node.
+an operator other than ops once the deployer no longer owns the manager,
+a threshold other than 66% and any registered node off the default
+weight (review L-4: a deployer-era weight or threshold must not pass).
+Step 2 makes ops the operator. 83e adds five lines: the engine is the
+compiled ConsensusOracle and serves the manager, the threshold is 66%
+(with the query expiry), every node carries the default weight, the
+operator is ops, and the deployer is not an OracleManager node.
+Re-binding the engine (owner only) strands queries open in the old one
+(their answers revert `UnknownQuery`); only the ceremony pins the engine's
+code hash, `setConsensusEngine` checks code and binding only.
 
 ## Waiting instead of jumping
 
@@ -770,8 +785,8 @@ authorized manager or a MANAGEMENT key, and a `keyManagerIdentity` named
 without `keyManager`. 83e adds two lines: the code matches the compiled
 KeyManager (no owner, no allowlist, so the deployer holds no KeyManager
 power), and the identity authorizes KeyManager while the deployer is not
-its owner, manager or MANAGEMENT key. The smoke's ceremony passes 73
-checks (Task 4.4 adds the three oracle lines below).
+its owner, manager or MANAGEMENT key. The smoke's ceremony passes 75
+checks (Task 4.4 adds the five oracle lines below).
 
 `scripts/production/DeployProduction.ts` deploys KeyManager and authorizes
 it on the ops identity named by `OPS_IDENTITY` when the deploying wallet

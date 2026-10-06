@@ -67,7 +67,7 @@ We have implemented a **Vanguard StableCoin system** with compliance, privacy, a
 - **Features**:
   - Whitelist management with 5-tier access levels
   - Blacklist management with 4 severity levels (Low/Medium/High/Critical)
-  - 2/3 oracle consensus threshold with emergency override
+  - Oracle consensus at 66% of the registered node weight (two of three equal nodes), with emergency override
   - Real-time integration with Vanguard StableCoin transfers
 - **Demo Options**: 31-40
 - **Status**: ✅ Implemented and tested (not audited)
@@ -157,7 +157,7 @@ We have implemented a **Vanguard StableCoin system** with compliance, privacy, a
    ├── Oracle Access Control validation
    │   ├── Whitelist status check (5-tier system)
    │   ├── Blacklist status check (4-severity system)
-   │   └── Oracle consensus validation (2/3 threshold)
+   │   └── Oracle consensus validation (66% of the registered weight)
    └── Privacy-Preserving validation (optional)
        ├── ZK whitelist membership proof
        ├── ZK jurisdiction compliance proof

@@ -5,7 +5,7 @@
 This project implements a **Vanguard RWA StableCoin (VSC)** system, under development and not yet audited, with comprehensive compliance management integrated with **ERC-3643** standard and **OnchainID (ERC-734/ERC-735)**. The system provides:
 
 - ✅ **Real-time compliance validation** through oracle networks
-- ✅ **Dynamic whitelist/blacklist management** with 2/3 consensus
+- ✅ **Dynamic whitelist/blacklist management** with oracle consensus (66% of the registered node weight: two of three equal nodes)
 - ✅ **Zero-knowledge privacy features** (5 Circom circuits)
 - ✅ **Complete token lifecycle management** with audit trails
 - ✅ **Investor type differentiation** (4 types: Normal, Retail, Accredited, Institutional)
@@ -237,7 +237,7 @@ npx hardhat coverage
 - ✅ **ComplianceRules**: per-token jurisdiction rules, blacklist and whitelist gates (oracle or ZK binding), and per-token trusted contracts; investor-type transfer and holding caps live in `InvestorTypeRegistry`, which the token enforces
 
 ### **2. Oracle Access Control**
-- ✅ **Dynamic Whitelist**: 5-tier whitelist with oracle consensus (2/3 threshold)
+- ✅ **Dynamic Whitelist**: 5-tier whitelist with oracle consensus (66% of the registered node weight)
 - ✅ **Real-time Blacklist**: 4-severity blacklist with emergency override
 - ✅ **Oracle Consensus**: M-of-N consensus mechanism with reputation scoring
 - ✅ **Fallback Mechanisms**: Graceful degradation on oracle failures
@@ -286,7 +286,7 @@ npx hardhat coverage
 - ✅ **Safe Math**: Built-in overflow protection (Solidity 0.8+)
 
 ### **Oracle Security**
-- ✅ **M-of-N Consensus**: 2/3 oracle consensus required for list updates
+- ✅ **Weighted Consensus**: an oracle verdict needs 66% of the registered node weight (two of three equal nodes); governance list updates go through DynamicListManager instead
 - ✅ **Reputation Management**: Oracle scoring and reputation tracking
 - ✅ **Emergency Override**: Emergency blacklist for immediate threat response
 - ✅ **Fallback Mechanisms**: Graceful degradation on oracle failures

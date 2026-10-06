@@ -261,22 +261,35 @@ manager)`), every write is manager-only, it has no owner, no pause and no
 query store of its own. The manager binds it with the owner-only
 `setConsensusEngine`, which refuses an address without code or an engine
 built for another manager. A manager with no engine opens no query.
+Re-binding strands queries open in the old engine (their votes revert
+`UnknownQuery`; raise them again), and only the handover ceremony pins
+the engine's code hash.
 
-**The rule.** When a query opens, the engine snapshots the total weight of
-the manager's active nodes (`DEFAULT_ORACLE_WEIGHT`, 100, for a node
-without a weight). A vote counts the voter's weight at cast time. YES
-resolves when `yesWeight * 100 >= snapshotWeight * consensusThreshold`, NO
-symmetrically; the threshold is a percent in (50, 100]. The default, 66,
-makes two of three equal nodes a verdict (200 of 300 is 66.7%); a 1-1
-split resolves nothing. A query expires `queryExpiryTime` after it opened
-(1 hour; 10 minutes to 24 hours): later votes are refused and it closes
-without a verdict, so a new query must be raised.
+**The rule.** When a query opens, the engine snapshots every REGISTERED
+node of the manager, active or paused, with its weight then
+(`DEFAULT_ORACLE_WEIGHT`, 100, for a node without a weight), and freezes
+the bar, `snapshotWeight * consensusThreshold`. Pausing or parking nodes
+therefore never lowers a bar: it can only stop a query resolving (review
+M-1; the first 4.4 cut snapshotted the active weight, so pausing two of
+three nodes let the third resolve alone). Only snapshot members vote (a
+node registered later is refused, `NotInSnapshot`), each with its weight
+at open; the manager decides who may vote now (active), so a node paused
+at open and unpaused later votes with its snapshot weight. YES resolves
+when `yesWeight * 100 >= bar`, NO symmetrically; the threshold is a
+percent in (50, 100]. The default, 66, makes two of three equal nodes a
+verdict (200 of 300 is 66.7%); a 1-1 split resolves nothing. Weight,
+threshold and expiry changes apply to later queries only. Removal (owner
+only) is the only thing that shrinks a later denominator. A query expires
+`queryExpiryTime` after it opened (1 hour; 10 minutes to 24 hours): later
+votes are refused and it closes without a verdict, so a new query must be
+raised. Opening costs about 263k gas with 3 nodes and 2.9M with 100
+(`MAX_ORACLES`), one storage write per node.
 
 **Opening a query** (`OracleManager.submitQuery`, owner or an active
 node; the blacklist severity rules of R-2F3-2 apply first):
 ```solidity
 queryId = keccak256(abi.encodePacked(_subject, _queryType, _data, block.timestamp, msg.sender));
-_boundEngine().openQuery(queryId); // snapshot; refuses an existing id or no active weight
+_boundEngine().openQuery(queryId); // snapshot; refuses an existing id or no registered weight
 ```
 
 **Answering** (`OracleManager.submitResponse`, an active node):
@@ -295,11 +308,11 @@ if (resolved) {
 ```solidity
 if (block.timestamp >= q.expiresAt) revert QueryExpired();
 if (q.hasVoted[voter]) revert AlreadyVoted();
-uint256 weight = weightOf(voter);
+uint256 weight = q.weightAt[voter]; // frozen at open
+if (weight == 0) revert NotInSnapshot();
 // ... record the vote, add the weight to its side ...
-uint256 bar = q.snapshotWeight * consensusThreshold;
-if (q.yesWeight * 100 >= bar) { q.resolved = true; q.result = true; }
-else if (q.noWeight * 100 >= bar) { q.resolved = true; }
+if (q.yesWeight * 100 >= q.bar) { q.resolved = true; q.result = true; }
+else if (q.noWeight * 100 >= q.bar) { q.resolved = true; }
 ```
 
 **Applying a verdict.** A node attests to the Whitelist or Blacklist
@@ -313,7 +326,7 @@ verdict on an existing query.
 **Signature sets.** `validateOracleConsensus(oracles, signatures, hash)`
 adds the engine weights of distinct, active signers whose EIP-191
 signature recovers to them and compares the sum with the same threshold
-of the live active weight.
+of the live registered weight (pausing nodes never lowers it).
 
 **Parameters** go through the manager, so governance sets them after the
 handover (OracleParameters, type 2): `setConsensusThreshold(percent)`,
@@ -324,7 +337,7 @@ handover (OracleParameters, type 2): `setConsensusThreshold(percent)`,
 | Action | Who | Effect |
 |---|---|---|
 | `registerOracle(node, name, description, reputation)` | owner | active node, reputation 100-1000 |
-| `pauseOracle(node)` / `unpauseOracle(node)` | owner or operator | stops / resumes answering and attesting; unpause refuses a node at `MIN_REPUTATION` (100), where `penalizeOracle` parks it, and refuses the operator a node the owner paused (`pausedByOwner`) |
+| `pauseOracle(node)` / `unpauseOracle(node)` | owner or operator | stops / resumes answering and attesting (the node stays in every snapshot's denominator); the owner pausing an already inactive node adopts the pause; unpause refuses a node at `MIN_REPUTATION` (100), where `penalizeOracle` parks it, and refuses the operator a node the owner paused (`pausedByOwner`) |
 | `setEmergencyOracle(node, flag)` | owner or operator | the one emergency designation: `BlacklistOracle.emergencyBlacklist` requires it and an active node |
 | `removeOracle(node, reason)` | owner | offboards the node, clears its designation, resets its engine weight |
 | `setOperator(account)` | owner | the operator role (ops after the handover) |
