@@ -12,7 +12,8 @@ The system is built on a comprehensive smart contract architecture located in th
 contracts/
 ├── onchain_id/
 │   ├── OnchainIDFactory.sol      # OnchainID factory contract
-│   ├── OnchainID.sol             # Core OnchainID contract (ERC-734/735)
+│   ├── OnchainID.sol             # Core OnchainID contract (ERC-735 claims)
+│   ├── OnchainIDKeys.sol         # Its ERC-734 keys (abstract base)
 │   ├── ClaimIssuer.sol           # Claim issuer contract
 │   ├── KeyManager.sol            # Key rotation and recovery (timelocked)
 │   └── interfaces/
@@ -190,8 +191,11 @@ await claimIssuer.issueClaim(
   - `INVESTOR_TYPE_CLAIM` (Topic 8): Investor classification
 - **Claim Verification**:
   - Each claim cryptographically signed by trusted issuer
-  - Claims stored in OnchainID contract with signature verification
-  - Claim topics registered in ClaimTopicsRegistry
+  - Each ClaimIssuer keeps its claim and writes a copy to the OnchainID;
+    the copy is a record, the identity checks no signatures
+  - Required topics and trusted issuers are held by IdentityRegistry,
+    whose `isVerified` asks each trusted issuer (`hasValidClaim`); the
+    identity keeps no topic or issuer list of its own
 
 #### Step 3: Identity Registry Registration
 - OnchainID address registered in ERC-3643 Identity Registry
@@ -226,11 +230,22 @@ paused for longer cannot revive when the identity re-authorizes.
   it applies to rotations initiated afterwards). A rotation whose initiator
   lost its MANAGEMENT key before execution does not run; any current
   MANAGEMENT key can `cancelKeyRotation`. The timelock binds only rotations
-  through KeyManager: any MANAGEMENT key still adds or removes a key at
-  once through `batchAddKeys`/`batchRemoveKeys` or `OnchainID.addKey`/
+  through KeyManager: a MANAGEMENT key adds and removes keys at once
+  (ERC-734), through `batchAddKeys`/`batchRemoveKeys` or `OnchainID.addKey`/
   `removeKey`, so the timelock gives the holder visibility, not a control
-  against a compromised MANAGEMENT key (an open design question for Task
-  4.5).
+  against a compromised MANAGEMENT key. This is by design (Task 4.5,
+  R-45-1): `executeKeyRotation` and `executeKeyRecovery` themselves call
+  `addKey`, so a timelock inside `addKey` would either block them or tie
+  the identity to one manager. The holder's defence against a rogue
+  MANAGEMENT key is recovery (below).
+- **Removal with the holder's consent**: `removeKey` is the management
+  action (no consent; KeyManager batches and rotations use it, and it is
+  the only path for a non-ECDSA key). `OnchainID.removeKeyWithProof(key,
+  purpose, signature)` is still sent by a MANAGEMENT key but also needs
+  the key's own address to have signed `getRemoveKeyMessage(key,
+  purpose)` (identity, key, purpose and chain id; the returned digest is
+  already EIP-191 prefixed, so the holder signs the inner keccak256 with
+  `signMessage`). Demo options 5 -> 1 and 5a.
 - **Recovery**: a MANAGEMENT key names up to ten distinct recovery agents
   and a threshold (`setupKeyRecovery`), while the holder still holds its
   key. An agent opens a candidate key (`initiateKeyRecovery`), agents
@@ -253,7 +268,7 @@ paused for longer cannot revive when the identity re-authorizes.
 
 A wallet recovered with `Token.recoveryAddress` votes only once it holds a
 key on its OnchainID; KeyManager recovery is the designed path. The demo
-exercises the lifecycle in options 12, 12a, 12b and 5
+exercises the lifecycle in options 12, 12a, 12b, 5 and 5a
 (docs/TESTNET_DEMO.md, "Identity keys through KeyManager"); its resume
 works within one demo session only.
 

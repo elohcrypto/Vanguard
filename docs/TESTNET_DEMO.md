@@ -740,16 +740,34 @@ Every print names each wallet's role.
   identity (`deauthorizeManager`) and shows KeyManager refusing a
   rotation; run again to restore it.
 - **12b**: sets that identity's rotation timelock in hours (1 to 168).
+- **5a** (no prompts, Task 4.5): on wallet 1's identity adds an ACTION
+  key for a throwaway wallet, shows a stranger's signature refused, removes
+  the key with the throwaway wallet's signature through
+  `removeKeyWithProof` and reads `keyHasPurpose` and `getKey` back.
 - **5**: picks an identity; 2 recovers it onto a new key (a wallet index,
   or a passphrase, which is only a label nobody can sign with), 3
   replaces one of its MANAGEMENT keys by a timelocked rotation, both
-  through KeyManager; 1 removes a key directly, as before. In 5 -> 2 the
+  through KeyManager; 1 removes a key at once, sent by the owner (a
+  MANAGEMENT key): an address key through `removeKeyWithProof` with the
+  key's own wallet signing the chain's `getRemoveKeyMessage` digest (the
+  key's wallet must be a demo signer), a passphrase key through
+  `removeKey`; it prints the method it called and reads the key back
+  (`keyHasPurpose`, `getKey` revokedAt). In 5 -> 2 the
   owner authorizes KeyManager and names the agents: that is the holder's
   step, taken while it still holds its key (at onboarding); a holder who
   already lost every key cannot take it. In 5 -> 3, replacing the owner's
   own key leaves `owner()` rights on OnchainID only: KeyManager accepts
   MANAGEMENT keys, so 12, 12b and 5 -> 2/3 refuse that owner until it
   holds a MANAGEMENT key again.
+
+The rotation timelock binds only rotations sent through KeyManager: a
+MANAGEMENT key adds and removes keys at once (ERC-734), with
+`batchAddKeys`/`batchRemoveKeys` or `OnchainID.addKey`/`removeKey`, and
+nothing stops it. That stands by design (Task 4.5, R-45-1):
+`executeKeyRotation` and `executeKeyRecovery` call `addKey` themselves,
+so a timelock in `addKey` would block them or tie the identity to one
+manager. The timelock is visibility for the holder; the holder's defence
+against a rogue MANAGEMENT key is recovery.
 
 Withdrawing the authorization pauses KeyManager for the identity; it does
 not cancel. Agents can then neither open nor approve candidates, and
@@ -772,7 +790,10 @@ and checks on chain that KeyManager answers neither `owner()` nor
 `authorizedManagers()`, is authorized on wallet 1's identity, that the
 rotated-out key is revoked, the rotation and the recovery completed and
 waited 24 and 48 hours (event block times), recovery ran with agents 7
-and 8, option 12 revoked the keys it created, and wallet 1 kept its key.
+and 8, option 12 revoked the keys it created, and wallet 1 kept its key;
+then it runs option 5a and checks that the key removed with its proof is
+gone (keyHasPurpose false, revokedAt set), KeyRemoved was emitted, and a
+stranger's signature is refused (12 checks).
 `DEMO_SMOKE_OUT` records `keyManager`.
 
 The handover ceremony hands nothing over for KeyManager (it has no

@@ -30,119 +30,87 @@ graph TB
 
 ## 🔐 OnchainID Implementation Analysis
 
+`OnchainID` is one deployed contract built from two files (plan v2 Task
+4.5): `OnchainIDKeys.sol` (abstract, ERC-734 keys, execution requests,
+manager authorization, ownership) and `OnchainID.sol` (ERC-735 claims).
+`OnchainIDFactory` deploys it with CREATE2.
+
 ### Key Management System
 
-**Multi-Purpose Key Architecture:**
 ```solidity
-// OnchainID.sol - Key purposes
-uint256 public constant MANAGEMENT_KEY = 1;    // Can add/remove keys
-uint256 public constant ACTION_KEY = 2;        // Can execute actions
-uint256 public constant CLAIM_SIGNER_KEY = 3;  // Can sign claims
-uint256 public constant ENCRYPTION_KEY = 4;    // For encrypted data
+uint256 public constant MANAGEMENT_KEY = 1;    // adds and removes keys
+uint256 public constant ACTION_KEY = 2;        // proposes executions
+uint256 public constant CLAIM_SIGNER_KEY = 3;  // may add claims
+uint256 public constant ENCRYPTION_KEY = 4;
 
 struct Key {
-    uint256 purpose;      // Key purpose (1-4)
-    uint256 keyType;      // ECDSA (1) or RSA (2)
-    bytes32 key;          // Key hash
-    uint256 revokedAt;    // Revocation timestamp (0 if active)
+    uint256 purpose;
+    uint256 keyType;      // ECDSA_TYPE (1) or RSA_TYPE (2)
+    bytes32 key;          // keccak256(abi.encodePacked(address)) for an address key
+    uint256 revokedAt;    // 0 while active
 }
 ```
 
-**Key Addition Flow:**
-```solidity
-function addKey(bytes32 _key, uint256 _purpose, uint256 _keyType) 
-    external 
-    override 
-    onlyManagementKeyOrSelf 
-    returns (bool success) 
-{
-    // Prevent duplicate keys
-    require(keys[_key].key != _key, "OnchainID: Key already exists");
-    
-    // Validate purpose and type
-    require(_purpose >= 1 && _purpose <= 4, "OnchainID: Invalid purpose");
-    require(_keyType >= 1 && _keyType <= 2, "OnchainID: Invalid key type");
-    
-    // Store key
-    keys[_key] = Key({
-        purpose: _purpose,
-        keyType: _keyType,
-        key: _key,
-        revokedAt: 0
-    });
-    
-    // Index by purpose
-    keysByPurpose[_purpose].push(_key);
-    allKeys.push(_key);
-    
-    emit KeyAdded(_key, _purpose, _keyType);
-    return true;
-}
-```
-
-**Security Features:**
-- ✅ Only management keys can add/remove keys
-- ✅ Revocation tracking (soft delete)
-- ✅ Purpose-based indexing for efficient lookup
-- ✅ Event emission for transparency
+- `addKey` / `removeKey` need a MANAGEMENT key, the owner or an
+  authorized manager (`onlyManagementKey`). They act at once (ERC-734):
+  a MANAGEMENT key adds or removes any key, a MANAGEMENT key included,
+  without the holder's consent. `addKey` re-activates a revoked key and
+  refuses an active one.
+- `removeKeyWithProof(key, purpose, signature)` is the holder-consented
+  removal: still sent by a MANAGEMENT key, it recovers the signer from
+  `getRemoveKeyMessage(key, purpose)`, the EIP-191 digest of
+  `keccak256(abi.encodePacked("Remove key from OnchainID", identity, key,
+  purpose, chainid))`, and requires `keccak256(abi.encodePacked(signer))
+  == key`. ECDSA keys only. The digest is already prefixed: the holder
+  signs the inner keccak256 with `signMessage`; a `personal_sign` of the
+  digest prefixes twice and is refused. Demo options 5 -> 1 and 5a.
+- KeyManager's timelocks bind only the rotations and recoveries sent
+  through it (`executeKeyRotation` / `executeKeyRecovery` call `addKey`
+  themselves); the holder's defence against a rogue MANAGEMENT key is
+  KeyManager recovery (docs/SYSTEM_WORKFLOW_GUIDE.md, "Identity key
+  lifecycle").
+- `authorizeManager` / `deauthorizeManager` (owner only) are the one way
+  to let a contract such as KeyManager manage keys.
+- Ownership is two-step (`transferOwnership`, then `acceptOwnership` by
+  the new owner). On acceptance the old owner's MANAGEMENT key is revoked
+  and the new owner ends with one; other keys and `authorizedManagers`
+  survive, and the new owner audits them (`getKeysByPurpose`;
+  `authorizedManagers` has no list or event, so read the identity's
+  `authorizeManager` transactions). `renounceOwnership` reverts and
+  `initialize` runs once, so an identity always has a controller.
+- `execute` from a MANAGEMENT key (or the owner) runs at once; from an
+  ACTION key it waits for `executionThreshold` (at least 2) approvals
+  from distinct keys other than the requester.
 
 ### Claim Management System
 
-**Claim Structure:**
 ```solidity
 struct Claim {
-    uint256 topic;        // Claim type (KYC=6, AML=7, etc.)
-    uint256 scheme;       // Signature scheme (ECDSA=1, RSA=2, Contract=3)
-    address issuer;       // Trusted issuer address
-    bytes signature;      // Issuer's signature
-    bytes data;           // Claim data (encrypted or public)
-    string uri;           // External claim URI
-    uint256 validTo;      // Expiration timestamp
-    uint256 validFrom;    // Activation timestamp
+    uint256 topic;        // KYC=6, AML=7, ...
+    uint256 scheme;
+    address issuer;
+    bytes signature;
+    bytes data;
+    string uri;
+    uint256 validTo;      // stored as 0; expiry lives at the ClaimIssuer
+    uint256 validFrom;
 }
 ```
 
-**Claim Verification:**
-```solidity
-function getClaim(bytes32 _claimId) 
-    external 
-    view 
-    override 
-    returns (
-        uint256 topic,
-        uint256 scheme,
-        address issuer,
-        bytes memory signature,
-        bytes memory data,
-        string memory uri
-    ) 
-{
-    Claim storage claim = claims[_claimId];
-    
-    // Check claim exists
-    require(claim.issuer != address(0), "OnchainID: Claim does not exist");
-    
-    // Check not expired
-    require(block.timestamp <= claim.validTo, "OnchainID: Claim expired");
-    require(block.timestamp >= claim.validFrom, "OnchainID: Claim not yet valid");
-    
-    return (
-        claim.topic,
-        claim.scheme,
-        claim.issuer,
-        claim.signature,
-        claim.data,
-        claim.uri
-    );
-}
-```
-
-**Claim Validation Features:**
-- ✅ Expiration checking
-- ✅ Activation time support
-- ✅ Trusted issuer verification
-- ✅ Signature validation
-- ✅ Topic-based indexing
+- The claim id is `keccak256(abi.encodePacked(issuer, topic, data))`.
+  `addClaim` accepts the owner, a MANAGEMENT or CLAIM_SIGNER key, or a
+  caller naming itself as issuer (how `ClaimIssuer.issueClaim` writes its
+  copy); only the issuer updates an existing id. `removeClaim` accepts
+  the issuer, a MANAGEMENT key, the owner or an authorized manager.
+  Lists are indexed per topic (`getClaimIdsByTopic`) with O(1) removal.
+- These lists are a record, not the verification. `IdentityRegistry`
+  holds the required topics and trusted issuers and `isVerified` asks
+  each trusted issuer (`ClaimIssuer.hasValidClaim(identity, topic)`,
+  which checks expiry and revocation); it never reads the identity's
+  lists, so a claim the owner or a stranger writes naming an issuer
+  counts for nothing. The identity keeps no trusted-issuer list,
+  required topics or `isCompliant` of its own (removed in Task 4.5 as a
+  third copy).
 
 ---
 
