@@ -318,6 +318,9 @@ async function runHandoverSmoke(state, failures) {
     }
   }
 
+  // 4.7: option 82 end to end after the ceremony (ops is the VGT agent).
+  await require("./demo-smoke-workflow").runWorkflowSmoke(state, failures);
+
   // 3.5: the CI step "Whitelist root + proof CLI" runs scripts/zk/ against
   // this node; it needs the addresses and the verified wallets' OnchainIDs.
   if (process.env.DEMO_SMOKE_OUT) {
