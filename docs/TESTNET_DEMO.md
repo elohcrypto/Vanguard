@@ -797,8 +797,9 @@ rotated-out key is revoked, the rotation and the recovery completed and
 waited 24 and 48 hours (event block times), recovery ran with agents 7
 and 8, option 12 revoked the keys it created, and wallet 1 kept its key;
 then it runs option 5a and checks that the key removed with its proof is
-gone (keyHasPurpose false, revokedAt set), KeyRemoved was emitted, and a
-stranger's signature is refused (12 checks).
+gone (keyHasPurpose false, revokedAt set), KeyRemoved was emitted, a
+stranger's signature is refused on a live key, and the removed key is not
+removed again (13 checks).
 `DEMO_SMOKE_OUT` records `keyManager`.
 
 The handover ceremony hands nothing over for KeyManager (it has no

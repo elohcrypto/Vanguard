@@ -7,7 +7,8 @@
  * the dev node, and the key set is read back from chain. Records the
  * identity in state.keyLifecycle for the handover ceremony's check.
  * Then option 5a (demo/utils/KeyRemovalFlow.js, Task 4.5): a key removed
- * with its holder's signature is gone, a stranger's signature is refused.
+ * with its holder's signature is gone, a stranger's signature is refused,
+ * and a removed key is not removed again.
  */
 
 const { ethers } = require("hardhat");
@@ -39,20 +40,29 @@ async function removalFacts(state, failures) {
     console.log = real;
   }
   if (!r) return [["option 5a ran", false]];
-  const id = await ethers.getContractAt("OnchainID", r.identity);
-  const removed = await id.queryFilter(id.filters.KeyRemoved(r.key, ACTION));
-  const stranger = ethers.Wallet.createRandom();
-  const sig = await stranger.signMessage(
-    ethers.getBytes(await innerMessage(id, r.key, ACTION)),
+  const owner = state.signers[DEMO_WALLET];
+  const id = (await ethers.getContractAt("OnchainID", r.identity)).connect(
+    owner,
   );
-  let refused = false;
-  try {
-    await id
-      .connect(state.signers[DEMO_WALLET])
-      .removeKeyWithProof.staticCall(r.key, ACTION, sig);
-  } catch (e) {
-    refused = /does not prove ownership/.test(e.message);
-  }
+  const removed = await id.queryFilter(id.filters.KeyRemoved(r.key, ACTION));
+  // The revert reason of a static removeKeyWithProof, or "" if accepted.
+  const reason = async (key, signer) => {
+    const sig = await signer.signMessage(
+      ethers.getBytes(await innerMessage(id, key, ACTION)),
+    );
+    try {
+      await id.removeKeyWithProof.staticCall(key, ACTION, sig);
+      return "";
+    } catch (e) {
+      return e.message;
+    }
+  };
+  // A stranger against a live key: a fresh one, removed again after.
+  const live = ethers.Wallet.createRandom();
+  const liveKey = keyOf(live.address);
+  await (await id.addKey(liveKey, ACTION, 1)).wait();
+  const stranger = await reason(liveKey, ethers.Wallet.createRandom());
+  await (await id.removeKey(liveKey, ACTION)).wait();
   const info = await id.getKey(r.key);
   return [
     [
@@ -60,7 +70,14 @@ async function removalFacts(state, failures) {
       !(await id.keyHasPurpose(r.key, ACTION)) && info.revokedAt > 0n,
     ],
     ["5a: KeyRemoved was emitted for it", removed.length === 1],
-    ["5a: a stranger's signature is refused", refused],
+    [
+      "5a: a stranger's signature is refused",
+      /does not prove ownership/.test(stranger),
+    ],
+    [
+      "5a: the removed key is not removed again",
+      /Key already revoked/.test(await reason(r.key, live)),
+    ],
   ];
 }
 
