@@ -927,15 +927,20 @@ class ContractDeployer {
       this.state.blacklistOracle = blacklistOracle;
       this.state.setContract("blacklistOracle", blacklistOracle);
 
-      displayProgress("Deploying ConsensusOracle...");
+      // Task 4.4 (D11 = a): ConsensusOracle is the manager's weighted
+      // engine, bound to it at construction; the manager binds it back.
+      displayProgress("Deploying ConsensusOracle (the manager's engine)...");
       const ConsensusOracle =
         await ethers.getContractFactory("ConsensusOracle");
       const consensusOracle = await ConsensusOracle.deploy(
         await oracleManager.getAddress(),
-        "Consensus Oracle",
-        "Oracle for multi-oracle consensus verification",
       );
       await consensusOracle.waitForDeployment();
+      await (
+        await oracleManager.setConsensusEngine(
+          await consensusOracle.getAddress(),
+        )
+      ).wait();
       this.state.consensusOracle = consensusOracle;
       this.state.setContract("consensusOracle", consensusOracle);
 
@@ -944,45 +949,40 @@ class ContractDeployer {
       // this.state.oracleConfig; both used to exist only in the menu-only
       // OracleModule.deployOracleSystem, which never bound the blacklist
       // oracle into ComplianceRules. Folded here so there is one deploy path.
+      // Reputation 500: above MIN_REPUTATION, so ops may unpause (4.4).
       displayProgress("Registering oracles in manager...");
-      await oracleManager.registerOracle(
-        this.state.signers[1].address,
-        "KYC_ORACLE",
-        "KYC verification oracle for identity validation",
-        100, // Initial reputation
-      );
-      await oracleManager.registerOracle(
-        this.state.signers[2].address,
-        "AML_ORACLE",
-        "AML screening oracle for anti-money laundering checks",
-        100, // Initial reputation
-      );
-      await oracleManager.registerOracle(
-        this.state.signers[3].address,
-        "COMPLIANCE_ORACLE",
-        "Compliance validation oracle for regulatory checks",
-        100, // Initial reputation
-      );
+      for (const [key, i, role, about] of [
+        [
+          "kyc",
+          1,
+          "KYC_ORACLE",
+          "KYC verification oracle for identity validation",
+        ],
+        [
+          "aml",
+          2,
+          "AML_ORACLE",
+          "AML screening oracle for anti-money laundering checks",
+        ],
+        [
+          "compliance",
+          3,
+          "COMPLIANCE_ORACLE",
+          "Compliance validation oracle for regulatory checks",
+        ],
+      ]) {
+        const address = this.state.signers[i].address;
+        await (
+          await oracleManager.registerOracle(address, role, about, 500)
+        ).wait();
+        this.state.oracleConfig.set(key, { address, role, reputation: 500 });
+      }
       console.log("   ✅ KYC/AML/Compliance oracles registered (3)");
 
-      this.state.oracleConfig.set("kyc", {
-        address: this.state.signers[1].address,
-        role: "KYC_ORACLE",
-        reputation: 100,
-      });
-      this.state.oracleConfig.set("aml", {
-        address: this.state.signers[2].address,
-        role: "AML_ORACLE",
-        reputation: 100,
-      });
-      this.state.oracleConfig.set("compliance", {
-        address: this.state.signers[3].address,
-        role: "COMPLIANCE_ORACLE",
-        reputation: 100,
-      });
-
-      await oracleManager.setConsensusThreshold(2); // 2 out of 3 oracles
-      console.log("   ✅ Consensus threshold set to 2/3");
+      const pct = await oracleManager.getConsensusThreshold();
+      console.log(
+        `   ✅ Consensus threshold: ${pct}% of the active weight (two of three equal nodes)`,
+      );
 
       // Wire the BLACKLIST gate into the token's compliance, when both exist.
       //
