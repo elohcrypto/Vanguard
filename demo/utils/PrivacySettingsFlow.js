@@ -44,7 +44,12 @@ async function viewSettings(state, log = console.log) {
   if (!c) return;
   const { zk, pm } = c;
   log("\n📋 PRIVACY SETTINGS (read from chain):");
-  log(`   ZK proofs: real (testingMode ${await zk.testingMode()})`);
+  const testing = await zk.testingMode();
+  log(
+    testing
+      ? "   ZK proofs: NOT verified (testingMode true: the wrapper accepts shaped signals)"
+      : "   ZK proofs: real (testingMode false)",
+  );
   log(
     `   Proof cache: ${await zk.proofCacheExpiry()} s (ZKVerifierIntegrated; no off switch, 1 hour to 7 days)`,
   );
