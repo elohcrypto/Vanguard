@@ -1137,32 +1137,6 @@ class OnchainIDModule {
     }
   }
 
-  /**
-   * Option 12: Show complete proof
-   *
-   * @returns {Promise<void>}
-   */
-  async showCompleteProof() {
-    displaySection("SHOW COMPLETE PROOF", "🔐");
-    console.log("⚠️  This feature displays complete compliance proofs");
-    console.log(
-      "💡 Use the comprehensive privacy system for full implementation",
-    );
-  }
-
-  /**
-   * Option 13: Run automated full test
-   *
-   * @returns {Promise<void>}
-   */
-  async runAutomatedTest() {
-    displaySection("RUN AUTOMATED FULL TEST", "🧪");
-    console.log("⚠️  This feature runs automated compliance tests");
-    console.log(
-      "💡 Use the comprehensive testing system for full implementation",
-    );
-  }
-
   // ========== KYC CLAIM HELPER METHODS ==========
 
   /**
