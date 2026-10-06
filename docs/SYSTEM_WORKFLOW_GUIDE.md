@@ -2,208 +2,81 @@
 
 ## Overview
 
-This document explains the complete system workflow for users to interact with the Vanguard StableCoin (VSC) system. The system provides 11 core workflows: **User Onboarding**, **Token Minting**, **Token Transfer**, **Oracle Access Control**, **Privacy & ZK Verification**, **Token Burning**, **Investor Type Management**, **Governance**, **Enhanced Escrow**, **Payment Protocol**, and **Complete System Integration**, all with comprehensive compliance validation through the interactive demo system (83 menu options).
+How the contracts in `contracts/` are used, workflow by workflow, with the
+interactive demo option that runs each step (`npm run
+demo:interactive:proof`; the menu is `demo/core/MenuSystem.js`). Every
+contract, function and option named here exists in this tree. The
+governance votes and the handover ceremony are in `docs/TESTNET_DEMO.md`;
+investor types in `docs/INVESTOR_TYPE_SYSTEM.md`.
 
-## System Architecture
-
-The system is built on a comprehensive smart contract architecture located in the `contracts/` directory:
+## Contracts
 
 ```
 contracts/
-├── onchain_id/
-│   ├── OnchainIDFactory.sol      # OnchainID factory contract
-│   ├── OnchainID.sol             # Core OnchainID contract (ERC-735 claims)
-│   ├── OnchainIDKeys.sol         # Its ERC-734 keys (abstract base)
-│   ├── ClaimIssuer.sol           # Claim issuer contract
-│   ├── KeyManager.sol            # Key rotation and recovery (timelocked)
-│   └── interfaces/
-│       ├── IERC734.sol           # ERC-734 interface
-│       ├── IERC735.sol           # ERC-735 interface
-│       └── IOnchainID.sol        # OnchainID interface
-├── erc3643/
-│   ├── Token.sol                 # Vanguard StableCoin token contract
-│   ├── TokenMinting.sol          # Token minting system with limits
-│   ├── TokenBurning.sol          # Token burning system
-│   ├── IdentityRegistry.sol      # Identity registry contract
-│   ├── ComplianceRegistry.sol    # Compliance registry contract
-│   ├── TrustedIssuersRegistry.sol # Trusted issuers registry
-│   ├── ClaimTopicsRegistry.sol   # Claim topics registry
-│   └── interfaces/
-│       ├── IERC3643.sol          # ERC-3643 interface
-│       ├── IIdentityRegistry.sol # Identity registry interface
-│       └── ICompliance.sol       # Compliance interface
-├── oracle/
-│   ├── OracleManager.sol         # Oracle management contract
-│   ├── WhitelistOracle.sol       # Whitelist oracle contract
-│   ├── BlacklistOracle.sol       # Blacklist oracle contract
-│   ├── ConsensusOracle.sol       # OracleManager's weighted consensus engine (no owner)
-│   └── interfaces/
-│       ├── IOracle.sol           # Oracle interface
-│       └── IOracleManager.sol    # Oracle manager interface
-├── privacy/
-│   ├── PrivacyManager.sol        # Privacy management contract
-│   └── interfaces/
-│       └── IZKVerifier.sol       # ZK verifier interface
-├── test/
-│   ├── mocks/
-│   │   ├── MockOnchainID.sol     # Mock OnchainID for testing
-│   │   ├── MockOracle.sol        # Mock oracle for testing
-│   │   └── MockERC3643.sol       # Mock ERC-3643 for testing
-│   └── helpers/
-│       ├── TestHelpers.sol       # Test helper functions
-│       └── DeploymentHelpers.sol # Deployment helper functions
-├── hardhat.config.js
-├── package.json
-└── README.md
+├── onchain_id/       OnchainID (ERC-735 claims) on OnchainIDKeys (ERC-734
+│                     keys), OnchainIDFactory, ClaimIssuer, KeyManager
+├── erc3643/          Token (VSC), IdentityRegistry, InvestorTypeRegistry
+├── compliance/       ComplianceRules on ComplianceRulesAdmin and
+│                     ComplianceRulesTrust (one deployed contract)
+├── oracle/           OracleManager (the gate), ConsensusOracle (its
+│                     engine), WhitelistOracle, BlacklistOracle
+├── privacy/          PrivacyManager, ZKVerifierIntegrated, DynamicListManager,
+│                     verifiers/ (five snarkjs PLONK verifiers)
+├── investor/         InvestorRequestManager, MultiSigWallet (custody)
+├── payment/          EscrowWalletFactory, MultiSigEscrowWallet
+├── governance/       GovernanceToken (VGT), VanguardGovernance
+└── test/             MockTarget and mocks/ (tests only)
 ```
 
-All user workflows interact with these smart contracts through the Rust backend, which provides additional validation, caching, and off-chain compliance management.
+Each folder has its interfaces in `interfaces/`; `contracts/README.md`
+and the folder READMEs describe the contracts.
 
-### Architecture Overview
+## Workflows
 
-For the complete system architecture and high-level workflow diagrams, see the [Design Document](.kiro/specs/cmta-utxo-poc/design.md) which provides:
+| Workflow | Contracts | Demo options |
+|---|---|---|
+| User onboarding | OnchainIDFactory, ClaimIssuer, IdentityRegistry | 1, 3, 6, 7, 23, 24 |
+| Identity keys | OnchainID, KeyManager | 2, 4, 5, 5a, 12, 12a, 12b |
+| Oracle whitelist and blacklist | OracleManager, ConsensusOracle, WhitelistOracle, BlacklistOracle | 31-40, 33a-35a |
+| Minting | Token, ComplianceRules, InvestorTypeRegistry | 22, 25 |
+| Transfers | Token, ComplianceRules, InvestorTypeRegistry | 26, 27, 27.5, 28 |
+| Privacy and ZK verification | ZKVerifierIntegrated, PrivacyManager, ComplianceRules | 41-50 |
+| Investor custody | InvestorRequestManager, MultiSigWallet | 23, 51 |
+| Escrow payment | EscrowWalletFactory, MultiSigEscrowWallet | 61-73b |
+| Burning | Token | (agent call, below) |
+| Governance | GovernanceToken, VanguardGovernance | 74-83e |
 
-- **High-Level System Workflow**: Overall transaction validation flow
-- **Component Architecture**: Detailed system component interactions
-- **Integration Patterns**: OnchainID and ERC-3643 integration architecture
-- **Oracle Network Design**: Oracle consensus and list management
-- **Privacy Layer Design**: Zero-knowledge proof integration
+## User Onboarding
 
-## Supported Workflows
+An investor needs an OnchainID, a registry entry and one valid claim per
+required topic from a trusted issuer.
 
-The system supports the following core workflows, each with comprehensive compliance validation:
+1. **Identity.** `OnchainIDFactory.deployOnchainID(owner, salt)` deploys
+   an OnchainID (CREATE2; `computeOnchainIDAddress` predicts it) whose
+   owner and first MANAGEMENT key is the investor's wallet.
+2. **Registration.** A registry agent calls
+   `IdentityRegistry.registerIdentity(wallet, identity, country)`
+   (ISO 3166-1 numeric). With a jurisdiction source set, a country the
+   token's ComplianceRules rule refuses reverts ("Country not allowed:
+   ...", event `IdentityRegistrationRejected`). One identity binds one
+   wallet.
+3. **Claims.** A trusted issuer's key signs the claim data and the issuer
+   calls `ClaimIssuer.issueClaim(identity, topic, scheme, data, uri,
+   validTo, signature)`. The ClaimIssuer keeps the claim; a copy written to
+   the OnchainID is a record only (`demo/utils/Kyc.js`).
+4. **Verification.** `IdentityRegistry.isVerified(wallet)` is true when
+   every topic in `getClaimTopics()` (6 KYC and 7 AML in the demo) has a
+   trusted issuer (`addTrustedIssuer`) whose `hasValidClaim(identity,
+   topic)` answers true for its latest claim on that topic
+   (`latestClaimId`): not revoked (`revokeClaim`) and not past `validTo`
+   (0 = no expiry). No topics verifies nobody, and the last topic cannot
+   be removed.
 
-| Workflow | Description | Key Components |
-|----------|-------------|----------------|
-| **User Onboarding** | KYC/AML verification and OnchainID creation | OnchainID Factory, Claims Issuer, Identity Registry |
-| **Token Minting** | Authorized token creation with compliance validation | ERC-3643 Token, Compliance Validator, Oracle Network |
-| **Token Transfer** | Peer-to-peer transfers with UTXO compliance | UTXO Compliance, Transfer Restrictions, Oracle Consensus |
-| **Privacy & ZK Verification** | A ZK allow list on VSC: a wallet binds itself with a whitelist proof, ComplianceRules reads the binding | ZKVerifierIntegrated, PrivacyManager, ComplianceRules (whitelist mode) |
-| **Token Payment** | Payment processing with atomic transfers | Payment Processor, Compliance Validator, Event Reporter |
-| **Escrow Payment** | Conditional payment held in a one-time escrow, settled 2-of-3 with an explicit direction | EscrowWalletFactory, MultiSigEscrowWallet, ComplianceRules (trusted contracts) |
-| **Token Burning** | Authorized token destruction and compliance tracking | Token Contract, UTXO Store, Regulatory Reporter |
+Demo: option 3 creates the OnchainID, 6 and 7 issue the KYC and AML
+claims, 8 reviews them, 11 shows a short-lived claim expiring; options 23
+and 24 onboard users in one step.
 
-## Table of Contents
-
-1. [User Onboarding Process](#user-onboarding-process)
-2. [Token Minting Workflow](#token-minting-workflow)
-3. [Token Transfer Workflow](#token-transfer-workflow)
-4. [Privacy & ZK Verification Workflow](#privacy--zk-verification-workflow)
-5. [Token Payment Workflow](#token-payment-workflow)
-6. [Investor custody (2-of-2 MultiSigWallet)](#investor-custody-2-of-2-multisigwallet)
-7. [Escrow Payment Workflow](#escrow-payment-workflow)
-8. [Token Burning Workflow](#token-burning-workflow)
-9. [Compliance Monitoring](#compliance-monitoring)
-10. [Error Handling](#error-handling)
-
----
-
-## User Onboarding Process
-
-### Phase 1: Identity Verification
-
-```mermaid
-sequenceDiagram
-    participant User as Investor
-    participant KYC as KYC Provider
-    participant OnchainID as OnchainID Registry
-    participant Claims as Claims Issuer
-    participant Identity as Identity Registry
-
-    User->>KYC: Submit identity documents
-    KYC->>KYC: Verify identity, residence, accreditation
-    KYC->>Claims: Issue verified claims
-    Claims->>OnchainID: Create OnchainID with claims
-    OnchainID->>Identity: Register identity
-    Identity->>User: Identity verification complete
-```
-
-#### Step 1: KYC/AML Verification
-- **Required Documents**: 
-  - Government-issued ID (passport, driver's license)
-  - Proof of address (utility bill, bank statement)
-  - Accreditation documents (for accredited investors)
-  - Source of funds documentation
-- **Verification Process**: 
-  - Identity verification (name, date of birth, address)
-  - AML screening against sanctions lists
-  - Accreditation status verification
-  - Country eligibility check
-
-#### Step 2: OnchainID Creation and Smart Contract Registration
-```javascript
-// Smart contract interaction for OnchainID creation
-const onchainIDFactory = await ethers.getContractAt("OnchainIDFactory", FACTORY_ADDRESS);
-
-// Create OnchainID for user
-const tx = await onchainIDFactory.createIdentity(
-    userAddress,
-    ethers.utils.keccak256(ethers.utils.toUtf8Bytes("unique_salt"))
-);
-const receipt = await tx.wait();
-const onchainIDAddress = receipt.events[0].args.identity;
-
-// Register identity in ERC-3643 Identity Registry
-const identityRegistry = await ethers.getContractAt("IdentityRegistry", IDENTITY_REGISTRY_ADDRESS);
-await identityRegistry.registerIdentity(
-    userAddress,
-    onchainIDAddress,
-    countryCode // e.g., 840 for US
-);
-```
-
-#### Step 3: Claims Issuance
-```javascript
-// Issue KYC claim
-const claimIssuer = await ethers.getContractAt("ClaimIssuer", CLAIM_ISSUER_ADDRESS);
-const kycClaimTopic = 1;
-const kycClaimData = ethers.utils.toUtf8Bytes("KYC_VERIFIED");
-
-await claimIssuer.issueClaim(
-    onchainIDAddress,
-    kycClaimTopic,
-    kycClaimData
-);
-
-// Issue accreditation claim (if applicable)
-const accreditationClaimTopic = 5;
-const accreditationData = ethers.utils.toUtf8Bytes("ACCREDITED_INVESTOR");
-
-await claimIssuer.issueClaim(
-    onchainIDAddress,
-    accreditationClaimTopic,
-    accreditationData
-);
-```
-
-#### Step 2: OnchainID Creation
-- **OnchainID Deployment**: 
-  - KYC provider calls OnchainIDFactory to deploy new OnchainID contract
-  - OnchainID implements ERC-734 (Key Management) and ERC-735 (Claim Holder)
-  - User's wallet address added as management key
-  - Deterministic address generation using CREATE2
-- **Claims Issued**:
-  - `IDENTITY_CLAIM` (Topic 1): Verified identity information
-  - `RESIDENCE_CLAIM` (Topic 3): Country of residence
-  - `ACCREDITATION_CLAIM` (Topic 5): Investor type and accreditation status
-  - `KYC_CLAIM` (Topic 6): KYC verification status
-  - `AML_CLAIM` (Topic 7): AML screening results
-  - `INVESTOR_TYPE_CLAIM` (Topic 8): Investor classification
-- **Claim Verification**:
-  - Each claim cryptographically signed by trusted issuer
-  - Each ClaimIssuer keeps its claim and writes a copy to the OnchainID;
-    the copy is a record, the identity checks no signatures
-  - Required topics and trusted issuers are held by IdentityRegistry,
-    whose `isVerified` asks each trusted issuer (`hasValidClaim`); the
-    identity keeps no topic or issuer list of its own
-
-#### Step 3: Identity Registry Registration
-- OnchainID address registered in ERC-3643 Identity Registry
-- Claims verified by trusted issuers through ClaimIssuer contract
-- Country and investor type extracted from OnchainID claims
-- Identity verification status updated in registry
-
-#### Identity key lifecycle (KeyManager)
+### Identity key lifecycle (KeyManager)
 
 `KeyManager` rotates and recovers the keys of an OnchainID behind
 timelocks. It has no owner and no allowlist of its own. An identity opts in
@@ -277,7 +150,7 @@ exercises the lifecycle in options 12, 12a, 12b, 5 and 5a
 (docs/TESTNET_DEMO.md, "Identity keys through KeyManager"); its resume
 works within one demo session only.
 
-### Phase 2: Oracle Whitelist Approval
+## Oracle Whitelist and Blacklist
 
 ```mermaid
 sequenceDiagram
@@ -308,192 +181,54 @@ threshold by an OracleParameters vote. Demo options 33a, 34a and 35a run
 this path without prompts (docs/TESTNET_DEMO.md, "Oracle nodes and
 consensus").
 
-#### Whitelist Tiers
-- **Tier 1-3**: Retail investors (limited access)
-- **Tier 4-6**: Professional investors
-- **Tier 7-8**: Accredited investors
-- **Tier 9-10**: Institutional investors
+WhitelistOracle tiers run 1 to 5 (higher is better); a consensus verdict
+adds the subject at tier 3. Nothing compares a whitelist tier with
+InvestorTypeRegistry's `requiredWhitelistTier` today (D37). The
+whitelist oracle gates VSC only when bound to it in ComplianceRules
+(`setWhitelistOracle`), by the token's whitelist mode (below); the
+blacklist oracle bound with `setBlacklistOracle` gates every path.
 
----
+## Minting
 
-## Token Minting Workflow
+`Token.mint(to, amount)` is agent only (the deployer before the handover,
+ops after it) and runs the same check as `canTransfer(address(0), to,
+amount)`, reverting with the first failure: `Recipient frozen`,
+`Identity not verified`, `Compliance check failed`, `Holding limit
+exceeded` (a paused token reverts before it, `EnforcedPause`). For a mint, `ComplianceRules.canTransfer` applies the
+list gates to the recipient (the blacklist, and the whitelist by mode) and,
+with an identity registry bound for the token, its country rule. The
+investor type's holding cap comes from InvestorTypeRegistry. Demo: option
+25 mints to the central bank and distributes; 22 creates the issuer.
 
-### Authorized Minting Process
+## Transfers
 
-```mermaid
-sequenceDiagram
-    participant Issuer as Token Issuer
-    participant Validator as ERC-3643 Validator
-    participant Oracle as Oracle Network
-    participant Recipient as Investor
-    participant UTXO as UTXO Manager
+`transfer` and `transferFrom` run `Token._checkTransfer(from, to,
+amount)` and revert with its reason:
 
-    Issuer->>Validator: Request mint (recipient, amount)
-    Validator->>Oracle: Verify recipient eligibility
-    Oracle->>Validator: Recipient approved (Tier 8)
-    Validator->>Validator: Check investor limits
-    Validator->>UTXO: Create compliance UTXO
-    UTXO->>Recipient: Tokens minted
-    Validator->>Issuer: Mint successful
-```
+1. A paused token reverts `EnforcedPause` and a frozen sender `Address
+   is frozen` before the check; inside it, `Recipient frozen`.
+2. Unless one side is a trusted contract on this token: `Sender not
+   verified`, `Recipient not verified` (`IdentityRegistry.isVerified`).
+3. `Insufficient balance` (the free balance: balance minus partially
+   frozen tokens).
+4. `Compliance check failed` when `ComplianceRules.canTransfer` is false:
+   the blacklist oracle refuses either party (on every path, the trusted
+   one included); no identity registry is bound for the token (fail
+   closed); on the trusted path the non-trusted counterparty is not
+   verified, not allowed by the whitelist or not allowed by the country
+   rule; otherwise either party fails the whitelist (by `whitelistMode`:
+   OracleOnly, ZkOnly, Either) or the country rule
+   (`setJurisdictionRule(token, allowed, blocked)`; the default blocked
+   list always applies).
+5. With an InvestorTypeRegistry bound: `Transfer amount limit exceeded`
+   (the sender's per-transfer cap) and `Holding limit exceeded` (the
+   recipient's holding cap); a trusted contract's own side skips its cap
+   (D26).
 
-### Minting Requirements
-
-#### For the Issuer:
-- Must have `MINTER_ROLE` in the token contract
-- Must specify valid recipient address
-- Must not exceed total supply limits
-
-#### For the Recipient:
-- Must be KYC/AML verified
-- Must be whitelisted by oracles
-- Must be registered in identity registry
-- Must not exceed investor count limits
-- Country must be in allowed jurisdictions
-
-### Minting Process Steps
-
-1. **Issuer Initiates Mint**
-   ```solidity
-   function mint(address to, uint256 amount) external onlyRole(MINTER_ROLE) {
-       require(canReceive(to, amount), "Recipient not compliant");
-       _mint(to, amount);
-   }
-   ```
-
-2. **Compliance Validation**
-   - Verify recipient's OnchainID exists
-   - Check required claims are present and valid
-   - Verify oracle whitelist status
-   - Check blacklist status
-   - Validate country restrictions
-   - Check investor count limits
-
-3. **UTXO Creation**
-   ```rust
-   let compliance_utxo = ERC3643ComplianceUTXO {
-       value: amount,
-       token_address: token_contract,
-       onchain_id: recipient_identity,
-       whitelist_tier: 8,
-       country_code: 840, // US
-       investor_type: InvestorType::AccreditedInvestor,
-       oracle_whitelist_status: OracleWhitelistStatus::Approved,
-       // ... other fields
-   };
-   ```
-
-4. **Event Emission**
-   ```solidity
-   emit Transfer(address(0), to, amount);
-   emit ComplianceMint(to, amount, whitelistTier);
-   ```
-
----
-
-## Token Transfer Workflow
-
-### Standard Transfer Process
-
-```mermaid
-sequenceDiagram
-    participant Sender as Token Sender
-    participant Wallet as Compliance Wallet
-    participant Validator as ERC-3643 Validator
-    participant Oracle as Oracle Network
-    participant Recipient as Token Recipient
-    participant UTXO as UTXO Manager
-
-    Sender->>Wallet: Initiate transfer
-    Wallet->>Validator: Submit transaction
-    
-    Validator->>Oracle: Check sender compliance
-    Oracle->>Validator: Sender approved
-    
-    Validator->>Oracle: Check recipient compliance
-    Oracle->>Validator: Recipient approved
-    
-    Validator->>Validator: Validate transfer rules
-    Validator->>UTXO: Update UTXOs
-    
-    UTXO->>Sender: Deduct tokens
-    UTXO->>Recipient: Add tokens
-    
-    Validator->>Wallet: Transfer confirmed
-    Wallet->>Sender: Transaction complete
-```
-
-### Transfer Validation Checklist
-
-#### Sender Validation:
-- ✅ Identity verified and active
-- ✅ Whitelisted by oracles
-- ✅ Not blacklisted
-- ✅ Sufficient token balance
-- ✅ Within its investor-type transfer cap (InvestorTypeRegistry; there is no holding-period rule)
-- ✅ Country allowed by the token's jurisdiction rule
-- ✅ Claims still valid
-
-#### Recipient Validation:
-- ✅ Identity verified and active
-- ✅ Whitelisted by oracles
-- ✅ Not blacklisted
-- ✅ Country allowed
-- ✅ Within its investor-type holding cap (InvestorTypeRegistry)
-- ✅ Investor count not exceeded
-
-#### Transfer Rules:
-- ✅ Transfer amount within limits
-- ✅ No transfer restrictions active
-- ✅ Transfer agent approval (if required)
-
-### Transfer Process Steps
-
-1. **User Interface**
-   ```
-   ┌─────────────────────────────────────┐
-   │ Send CMTA Tokens                    │
-   ├─────────────────────────────────────┤
-   │ To Address: 0x742d35Cc6634C0532... │
-   │ Amount: 1,000 CMTA                  │
-   │ ⚠️  Validating compliance...        │
-   │                                     │
-   │ Sender Status: ✅ Verified          │
-   │ Recipient Status: ⏳ Checking...    │
-   └─────────────────────────────────────┘
-   ```
-
-2. **Real-time Validation**
-   ```rust
-   async fn validate_transfer(
-       from: &Address,
-       to: &Address,
-       amount: u64,
-   ) -> Result<ValidationResult> {
-       // Check sender compliance
-       let sender_status = oracle_network.verify_compliance(from).await?;
-       if !sender_status.is_compliant() {
-           return Err(ValidationError::SenderNotCompliant);
-       }
-       
-       // Check recipient compliance
-       let recipient_status = oracle_network.verify_compliance(to).await?;
-       if !recipient_status.is_compliant() {
-           return Err(ValidationError::RecipientNotCompliant);
-       }
-       
-       // Validate transfer rules
-       validate_transfer_rules(from, to, amount).await
-   }
-   ```
-
-3. **UTXO Updates**
-   - Spend sender's UTXOs
-   - Create new UTXOs for recipient
-   - Update compliance metadata
-   - Record transaction in audit trail
-
----
+`canTransfer(from, to, amount)` answers the same question without
+reverting. Demo: options 26, 27 and 27.5 transfer between investors and
+users; 28 shows a refused over-cap transfer and a non-compliant
+recipient; 18 tests the compliance validations.
 
 ## Privacy & ZK Verification Workflow
 
@@ -559,79 +294,6 @@ publishes `validUntil`, PrivacyManager refuses the proof from that date on
 record never outlives its attestation. Re-attestation renews: the issuer
 signs a new attestation and the investor proves again. The demo signs for
 one year.
-
----
-
-## Token Payment Workflow
-
-### Payment Processing
-
-```mermaid
-sequenceDiagram
-    participant Payer as Token Payer
-    participant Merchant as Payment Recipient
-    participant Gateway as Payment Gateway
-    participant Validator as ERC-3643 Validator
-    participant Oracle as Oracle Network
-    participant Settlement as Settlement System
-
-    Payer->>Gateway: Initiate payment
-    Gateway->>Validator: Validate payment compliance
-    Validator->>Oracle: Check payer/merchant status
-    Oracle->>Validator: Both parties compliant
-    Validator->>Settlement: Process payment
-    Settlement->>Merchant: Tokens received
-    Settlement->>Payer: Payment confirmed
-```
-
-### Payment Types
-
-#### 1. Direct Token Payment
-- **Use Case**: Direct transfer for goods/services
-- **Process**: Standard transfer with payment metadata
-- **Compliance**: Both parties must be compliant
-
-#### 2. Escrow Payment
-- **Use Case**: Conditional payments with release conditions
-- **Process**: Tokens held in a one-time `MultiSigEscrowWallet`; see [Escrow Payment Workflow](#escrow-payment-workflow)
-- **Compliance**: Escrow contract must be a trusted contract on VSC in ComplianceRules (trust is per token)
-
-#### 3. Recurring Payment
-- **Use Case**: Subscription or installment payments
-- **Process**: Pre-authorized recurring transfers
-- **Compliance**: Ongoing compliance monitoring required
-
-### Payment Validation
-
-```rust
-pub struct PaymentRequest {
-    pub payer: Address,
-    pub recipient: Address,
-    pub amount: u64,
-    pub payment_type: PaymentType,
-    pub metadata: PaymentMetadata,
-}
-
-pub enum PaymentType {
-    Direct,
-    Escrow { release_conditions: Vec<Condition> },
-    Recurring { frequency: Duration, total_payments: u32 },
-}
-
-async fn process_payment(request: PaymentRequest) -> Result<PaymentResult> {
-    // Validate both parties
-    validate_payment_compliance(&request.payer, &request.recipient).await?;
-    
-    // Check payment-specific rules
-    match request.payment_type {
-        PaymentType::Direct => process_direct_payment(request).await,
-        PaymentType::Escrow { .. } => process_escrow_payment(request).await,
-        PaymentType::Recurring { .. } => process_recurring_payment(request).await,
-    }
-}
-```
-
----
 
 ## Investor custody (2-of-2 MultiSigWallet)
 
@@ -731,7 +393,7 @@ On a local node, this order works from a fresh start:
 ```
 1 → 21 → 51 → 22 → 25/1/1          deploy, mint to the central bank
 24/1 Alice, 24/1 Bob               payer and payee
-23/1 Ivan, then 23/2 … 23/6 for Ivan   investor with a placeholder fee address (Task 4.3)
+23/1 Ivan, then 23/2 … 23/6 for Ivan   investor with a 2-of-2 MultiSigWallet (Task 4.3)
 61 → 62 (Ivan) → 63 (Ivan, Alice → Bob, 1000)
 64                                  fund: escrow holds 1050
    (send another 1050 straight to the escrow address, outside the factory)
@@ -743,222 +405,42 @@ On a local node, this order works from a fresh start:
 
 Option 71 shows the on-chain state and every party's balance; 71a shows all balances at once.
 
----
+## Burning
 
-## Token Burning Workflow
+`Token.burn(from, amount)` is agent only. It needs `amount` of free
+balance ("Insufficient balance", "Insufficient free balance") and is
+never gated by ComplianceRules: burning is how an operator claws tokens
+back. GovernanceToken (VGT) has `burn(amount)` for an agent's own
+balance; VGT refuses agent levers (burn, freeze, recovery) on a trusted
+contract such as governance (D23). Demo: option 75b burns VGT.
 
-### Authorized Burning Process
+## Governance
 
-```mermaid
-sequenceDiagram
-    participant Holder as Token Holder
-    participant Validator as ERC-3643 Validator
-    participant Oracle as Oracle Network
-    participant UTXO as UTXO Manager
-    participant Registry as Token Registry
+One verified identity, one vote; VGT pays the proposal and voting fees
+(`proposalCreationCost`, `votingCost`) and is not the vote weight. A
+proposal is bound to its type's target contract, passes on the type's
+quorum and approval (`proposalThresholds`), and executes its call after
+the voting period and the execution delay (`executeProposal`). VGT
+delegation is recorded, not counted (D12). Demo: 74 deploys, 75-75c
+fund, 76 proposes, 77 votes, 78 executes, 78a refunds, 79 waits, 80 is
+the dashboard, 82 runs one ComplianceRules proposal from creation to
+execution, 83b-83e are the handover ceremony. Rules and the ceremony:
+`docs/TESTNET_DEMO.md`.
 
-    Holder->>Validator: Request burn (amount)
-    Validator->>Oracle: Verify holder compliance
-    Oracle->>Validator: Holder approved
-    Validator->>UTXO: Validate UTXOs
-    UTXO->>UTXO: Destroy UTXOs
-    Validator->>Registry: Update total supply
-    Registry->>Holder: Burn confirmed
-```
+## Errors a user sees
 
-### Burning Requirements
+The strings below are the contracts' own.
 
-#### For Token Holders:
-- Must own sufficient tokens
-- Must be compliant (not blacklisted)
-- Must satisfy any lock-up periods
-- May require transfer agent approval
+| Where | Revert | Meaning |
+|---|---|---|
+| Token | `Sender not verified` / `Recipient not verified` | no identity, or a required claim is missing, revoked or expired |
+| Token | `Compliance check failed` | blacklist, whitelist mode, country rule or an unbound registry (above) |
+| Token | `Transfer amount limit exceeded` / `Holding limit exceeded` | investor type caps |
+| Token | `Address is frozen` (sender) / `Recipient frozen` / `EnforcedPause()` | agent freeze or guardian pause |
+| IdentityRegistry | `Country not allowed: <reason>` | registration in a refused country |
+| IdentityRegistry | `Identity already registered` / `Identity already bound` | one wallet, one identity |
+| VanguardGovernance | `Proposer cannot vote on own proposal` | the proposer's identity never votes on its proposal |
+| MultiSigEscrowWallet | `PayeeHasNotSigned` / `PayerHasNotSigned` | the stated direction lacks its counterparty's signature |
 
-#### For the System:
-- Must update total supply
-- Must destroy corresponding UTXOs
-- Must maintain audit trail
-- Must check for any restrictions
-
-### Burning Process Steps
-
-1. **Burn Request**
-   ```solidity
-   function burn(uint256 amount) external {
-       require(balanceOf(msg.sender) >= amount, "Insufficient balance");
-       require(canBurn(msg.sender, amount), "Burn not allowed");
-       _burn(msg.sender, amount);
-   }
-   ```
-
-2. **Compliance Validation**
-   ```rust
-   async fn validate_burn(
-       holder: &Address,
-       amount: u64,
-   ) -> Result<BurnValidation> {
-       // Check holder is not blacklisted
-       let blacklist_status = oracle_network.check_blacklist(holder).await?;
-       if blacklist_status.is_blacklisted() {
-           return Err(BurnError::HolderBlacklisted);
-       }
-       
-       // Check lock-up periods
-       let lockup_status = check_lockup_periods(holder, amount).await?;
-       if !lockup_status.can_burn() {
-           return Err(BurnError::TokensLocked);
-       }
-       
-       Ok(BurnValidation::Approved)
-   }
-   ```
-
-3. **UTXO Destruction**
-   - Select UTXOs to burn
-   - Validate UTXO ownership
-   - Destroy selected UTXOs
-   - Update holder's balance
-
----
-
-## Compliance Monitoring
-
-### Continuous Monitoring System
-
-```mermaid
-graph TB
-    subgraph "Monitoring Components"
-        Monitor[Compliance Monitor]
-        Oracle[Oracle Network]
-        Alerts[Alert System]
-        Reports[Reporting Engine]
-    end
-    
-    subgraph "Monitored Events"
-        Transfers[Token Transfers]
-        Claims[Claim Updates]
-        Lists[Whitelist/Blacklist Changes]
-        Violations[Compliance Violations]
-    end
-    
-    Monitor --> Oracle
-    Monitor --> Alerts
-    Monitor --> Reports
-    
-    Transfers --> Monitor
-    Claims --> Monitor
-    Lists --> Monitor
-    Violations --> Monitor
-```
-
-### Monitoring Activities
-
-#### 1. Real-time Compliance Checks
-- **Identity Status**: Monitor OnchainID validity
-- **Claims Expiry**: Track claim expiration dates
-- **Oracle Lists**: Monitor whitelist/blacklist changes
-- **Regulatory Updates**: Track regulatory requirement changes
-
-#### 2. Automated Alerts
-- **Compliance Violations**: Immediate alerts for violations
-- **Claim Expiry**: Warnings before claims expire
-- **Suspicious Activity**: Unusual transaction patterns
-- **Regulatory Changes**: Updates to compliance requirements
-
-#### 3. Periodic Reviews
-- **Quarterly Reviews**: Comprehensive compliance assessment
-- **Annual Audits**: Full system compliance audit
-- **Regulatory Reporting**: Automated regulatory reports
-- **Performance Metrics**: System performance analysis
-
----
-
-## Error Handling
-
-### Common Error Scenarios
-
-#### 1. Identity Verification Errors
-```
-❌ Identity Verification Failed
-Error Code: ID_001
-Reason: OnchainID not found in registry
-Resolution: Complete identity verification process
-Estimated Time: 2-5 business days
-```
-
-#### 2. Compliance Validation Errors
-```
-❌ Transfer Rejected
-Error Code: COMP_003
-Reason: Recipient not whitelisted
-Details: 
-- Recipient address: 0x742d35Cc...
-- Required whitelist tier: 5
-- Current status: Not whitelisted
-Resolution: Recipient must complete oracle whitelist approval
-```
-
-#### 3. Oracle Consensus Errors
-```
-❌ Oracle Consensus Failed
-Error Code: ORC_002
-Reason: Insufficient oracle responses
-Details:
-- Required consensus: 3 of 5 oracles
-- Received responses: 2 of 5 oracles
-- Failed oracles: Oracle-3, Oracle-5
-Resolution: Retry transaction or wait for oracle recovery
-```
-
-#### 4. Regulatory Compliance Errors
-```
-❌ Regulatory Violation
-Error Code: REG_005
-Reason: Country restriction violation
-Details:
-- Sender country: United States
-- Recipient country: Restricted Territory
-- Applicable regulation: OFAC Sanctions
-Resolution: Transfer not permitted under current regulations
-```
-
-### Error Recovery Process
-
-1. **Automatic Retry**: System automatically retries failed operations
-2. **Fallback Mechanisms**: Use cached data when oracles unavailable
-3. **Manual Review**: Complex cases escalated to compliance team
-4. **User Notification**: Clear error messages with resolution steps
-
----
-
-## System Status Dashboard
-
-### User Dashboard Example
-```
-┌─────────────────────────────────────────────────────────┐
-│ CMTA Token Compliance Dashboard                         │
-├─────────────────────────────────────────────────────────┤
-│ Account Status: ✅ Fully Compliant                     │
-│ Whitelist Tier: 8 (Accredited Investor)                │
-│ Token Balance: 25,000 CMTA                             │
-│ Available for Transfer: 25,000 CMTA                    │
-├─────────────────────────────────────────────────────────┤
-│ Compliance Status:                                      │
-│ • Identity Verified: ✅ Valid until 2025-12-31        │
-│ • KYC Status: ✅ Current                               │
-│ • AML Screening: ✅ Clear                              │
-│ • Accreditation: ✅ Valid until 2025-06-30            │
-│ • Oracle Whitelist: ✅ Tier 8                         │
-│ • Blacklist Status: ✅ Clear                          │
-├─────────────────────────────────────────────────────────┤
-│ Recent Activity:                                        │
-│ • 2024-01-15: Received 5,000 CMTA from 0x123...       │
-│ • 2024-01-10: Sent 2,000 CMTA to 0x456...             │
-│ • 2024-01-05: Compliance review completed              │
-├─────────────────────────────────────────────────────────┤
-│ Actions:                                                │
-│ [Send Tokens] [Request Payment] [View History]         │
-└─────────────────────────────────────────────────────────┘
-```
-
-This comprehensive workflow ensures that all token operations (mint, burn, transfer, payment) maintain full regulatory compliance while providing a smooth user experience for qualified investors.
+Demo dashboards: options 20 (rules), 29 (token), 39 (oracles), 60
+(investor types), 72 (escrow), 80 (governance).
