@@ -586,6 +586,13 @@ function castVote(uint256 proposalId, bool support, string calldata reason)
 Eligibility is checked when the vote is cast. There is no snapshot: a
 voter verified and funded after the proposal was created may vote.
 
+VGT delegation (`GovernanceToken.delegate`, `getVotingPower` and the other
+voting-power views) is recorded on the token and not counted: `castVote`
+adds 1 per verified identity and never reads voting power, so a delegate
+casts one vote and its delegator still casts its own
+(`test/governance/DelegationNoEffect.test.ts`). Wiring delegation into
+`castVote` is scheduled after the external audit (D12, plan v2 Task 4.6).
+
 **Proposal Execution (settles every outcome, reverts only on invalid calls):**
 ```solidity
 function executeProposal(uint256 proposalId) external nonReentrant {

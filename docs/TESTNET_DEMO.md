@@ -141,6 +141,18 @@ risk is collusion of a registry agent with an issuer key: they can still
 mint fake identities, visibly on chain, but those cannot vote for
 `minVoterAge`, which is the honest electorate's window to vote the colluding
 keys out.
+VGT delegation is recorded on the token and not counted by governance (D12,
+plan v2 Task 4.6). `GovernanceToken.delegate` moves a holder's balance into
+its delegate's `getVotingPower` (and `getTotalVotingPower`,
+`getVotingPowerPercentage` report it), but `castVote` adds exactly 1 per
+verified identity and no governance path reads voting power: a delegate
+still casts one vote and a delegator still casts its own
+(`test/governance/DelegationNoEffect.test.ts`). VGT pays the proposal and
+vote fees; it is not a vote weight. `canVote` is the token-side check
+(verified and holding VGT); governance adds key control, `minVoterAge`, the
+fee and its allowance. Wiring delegation into `castVote` (a delegate votes
+for its delegators, checkpointed per proposal) is scheduled after the
+external audit.
 The handover ceremony votes, so its proposer and voters must be registered
 `minVoterAge` before step 1: `scripts/handover.ts` refuses a younger identity
 before any transaction and computes quorum over aged identities only; the
