@@ -259,7 +259,7 @@ We have implemented a **Vanguard StableCoin system** with compliance, privacy, a
 ### **Phase 3: Advanced Features** ❌ FUTURE
 - **Oracle-Enhanced KYC Management**: Connect oracle network to KYC claim updates
 - **Oracle-Enhanced AML Management**: Real-time AML rating updates by oracles
-- **Advanced Governance**: Multi-proposal types, delegation, reputation-based voting
+- **Advanced Governance**: one verified identity, one vote; VGT delegation recorded, not counted (D12), wired into castVote only after the external audit
 - **Rust Backend**: Off-chain processing and performance optimization
 
 ## 🎯 **Conclusion**
