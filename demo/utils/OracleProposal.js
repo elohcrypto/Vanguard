@@ -3,12 +3,14 @@
  * governance, OracleManager's owner after the handover, votes the node
  * lifecycle and the engine parameters. Same shape as the type-1 helper
  * (GovernanceModule._createComplianceRulesProposal): prompt, encode the
- * OracleManager call, createProposal(2, ...) from wallet 0, then 77/78.
+ * OracleManager call, createProposal(2, ...) from the first wallet that
+ * may propose (GovernedCalls.pickProposer), then 77/78.
  */
 
 const { ethers } = require("hardhat");
 const { displayError, displaySuccess } = require("./DisplayHelpers");
 const { nodeSigners, opsSigner } = require("./OracleLifecycleFlow");
+const { pickProposer } = require("./GovernedCalls");
 
 const ORACLE_PARAMETERS = 2; // ProposalType.OracleParameters
 
@@ -91,17 +93,32 @@ async function createOracleParametersProposal(state, prompt) {
   const [label, fn, kind] = pick;
   const args = await askArgs(state, prompt, kind);
   if (!args) return null;
+  const proposer = await pickProposer(state);
+  if (!proposer) {
+    displayError(
+      `No wallet among 0-8 can propose (verified, ${ethers.formatEther(await gov.proposalCreationCost())} VGT, identity old enough)`,
+    );
+    return null;
+  }
   const title = `OracleManager.${fn}(${args.join(", ")})`;
+  const vgt = state.getContract("governanceToken");
+  const cost = await gov.proposalCreationCost();
+  await (
+    await vgt.connect(proposer).approve(await gov.getAddress(), cost)
+  ).wait();
   const receipt = await (
-    await gov.createProposal(
-      ORACLE_PARAMETERS,
-      title,
-      label,
-      await om.getAddress(),
-      om.interface.encodeFunctionData(fn, args),
-    )
+    await gov
+      .connect(proposer)
+      .createProposal(
+        ORACLE_PARAMETERS,
+        title,
+        label,
+        await om.getAddress(),
+        om.interface.encodeFunctionData(fn, args),
+      )
   ).wait();
   const id = await gov.proposalCount();
+  console.log(`   Proposer: ${proposer.address}`);
   displaySuccess("ORACLEPARAMETERS PROPOSAL CREATED!");
   console.log(`   Proposal: #${id}`);
   console.log(`   Transaction: ${receipt.hash}`);
