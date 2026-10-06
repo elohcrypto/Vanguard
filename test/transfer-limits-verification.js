@@ -229,7 +229,7 @@ describe("Transfer Limits Verification - 8,000 Yuan Max", function () {
   });
 
   describe("Multiple Transfer Scenarios", function () {
-    it("Should allow multiple transfers under limit but reject when cumulative exceeds daily limit", async function () {
+    it("Should allow two transfers that each stay under the per-transfer cap", async function () {
       // First transfer of 4,000
       await expect(
         token
@@ -244,8 +244,8 @@ describe("Transfer Limits Verification - 8,000 Yuan Max", function () {
           .transfer(investor2.address, ethers.parseEther("4000")),
       ).to.not.be.reverted;
 
-      // Third transfer of 1 (total 8,001 - should fail if daily limits are enforced)
-      // Note: This depends on if daily limits are configured in TransferRestrictions
+      // No daily total exists: InvestorTypeRegistry.canTransferAmount caps
+      // each transfer on its own, so the two 4,000 transfers both pass.
     });
 
     it("Should enforce limits for different investor types", async function () {
