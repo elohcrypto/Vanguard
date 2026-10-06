@@ -72,16 +72,20 @@ describe("Consensus engine under the gate (4.4)", function () {
           "0x",
         ),
       ).to.be.revertedWith("WhitelistOracle: Not an active oracle");
-      // The snapshot holds the three active nodes only: two of them resolve.
-      expect((await CO.getConsensusResult(q)).snapshotWeight).to.equal(300);
+      // The paused node stays in the denominator (400): the three active
+      // nodes resolve, from their own answers only (bar 400 * 66).
+      expect((await CO.getConsensusResult(q)).snapshotWeight).to.equal(400);
       await answer(n1, q, true);
-      await expect(answer(n2, q, true))
+      await answer(n2, q, true);
+      expect(await resolution(q)).to.deep.equal([false, false]);
+      await expect(answer(n3, q, true))
         .to.emit(CO, "ConsensusReached")
-        .withArgs(q, true, 200, 0, 300, (t: bigint) => t > 0n);
+        .withArgs(q, true, 300, 0, 400, (t: bigint) => t > 0n);
       expect(await resolution(q)).to.deep.equal([true, true]);
       expect(await CO.getQueryVoters(q)).to.deep.equal([
         n1.address,
         n2.address,
+        n3.address,
       ]);
     });
 
@@ -94,22 +98,7 @@ describe("Consensus engine under the gate (4.4)", function () {
       expect(await resolution(q)).to.deep.equal([true, false]);
     });
 
-    it("the snapshot is taken when the query opens", async function () {
-      const before = await raise();
-      await OM.pauseOracle(n3.address);
-      const after = await raise(n1);
-      expect((await CO.getConsensusResult(before)).snapshotWeight).to.equal(
-        300,
-      );
-      expect((await CO.getConsensusResult(after)).snapshotWeight).to.equal(200);
-      // After the pause: one yes of the live 200 is 50%, two are 100%.
-      await answer(n1, after, true);
-      expect(await resolution(after)).to.deep.equal([false, false]);
-      await answer(n2, after, true);
-      expect(await resolution(after)).to.deep.equal([true, true]);
-    });
-
-    it("weights count at cast time; removal resets a node's weight", async function () {
+    it("weights count from the snapshot; removal resets a node's weight", async function () {
       await OM.setOracleWeight(n1.address, 400);
       const q = await raise(); // 400 + 100 + 100
       await expect(answer(n1, q, true))
@@ -144,7 +133,7 @@ describe("Consensus engine under the gate (4.4)", function () {
       expect(await WO.isWhitelisted(subject.address)).to.equal(false);
     });
 
-    it("refuses a second vote, a vote after resolution and a query with no active node", async function () {
+    it("refuses a second vote, a vote after resolution; all paused opens but cannot resolve", async function () {
       const q = await raise();
       await answer(n1, q, true);
       await expect(answer(n1, q, true)).to.be.revertedWithCustomError(
@@ -157,7 +146,11 @@ describe("Consensus engine under the gate (4.4)", function () {
         "QueryAlreadyResolved",
       );
       for (const n of [n1, n2, n3]) await OM.pauseOracle(n.address);
-      await expect(raise()).to.be.revertedWithCustomError(CO, "NoActiveWeight");
+      const q2 = await raise(); // opens (snapshot 300), nobody may answer
+      expect((await CO.getConsensusResult(q2)).snapshotWeight).to.equal(300);
+      await expect(answer(n1, q2, true)).to.be.revertedWith(
+        "OracleManager: Oracle not active",
+      );
     });
 
     it("validateOracleConsensus tallies signer weight against the live total", async function () {
@@ -175,6 +168,13 @@ describe("Consensus engine under the gate (4.4)", function () {
         ),
       ).to.be.false;
       await OM.setConsensusThreshold(70);
+      expect(await OM.validateOracleConsensus([n1.address], [await s(n1)], h))
+        .to.be.false;
+      // Against the registered total: pausing n2 and n3 does not lower it.
+      await OM.setConsensusThreshold(66);
+      await OM.setOracleWeight(n1.address, 100);
+      await OM.connect(ops).pauseOracle(n2.address);
+      await OM.connect(ops).pauseOracle(n3.address);
       expect(await OM.validateOracleConsensus([n1.address], [await s(n1)], h))
         .to.be.false;
     });
@@ -210,6 +210,12 @@ describe("Consensus engine under the gate (4.4)", function () {
         OM.connect(ops).setOracleWeight(n1.address, 200),
         OM.connect(ops).setQueryExpiryTime(3600),
         OM.connect(ops).setConsensusEngine(await CO.getAddress()),
+        OM.connect(ops).emergencyOverride(
+          n1.address,
+          ethers.id("q"),
+          true,
+          "x",
+        ),
       ];
       for (const call of ownerOnly) {
         await expect(call).to.be.revertedWithCustomError(
@@ -240,7 +246,7 @@ describe("Consensus engine under the gate (4.4)", function () {
       );
       await OM.penalizeOracle(n1.address, 1000, "bad answers");
       expect(await OM.isActiveOracle(n1.address)).to.equal(false);
-      await expect(OM.pauseOracle(n1.address)).to.be.revertedWith(
+      await expect(OM.connect(ops).pauseOracle(n1.address)).to.be.revertedWith(
         "OracleManager: Oracle already inactive",
       );
       await expect(
@@ -259,10 +265,18 @@ describe("Consensus engine under the gate (4.4)", function () {
       ).to.be.revertedWithCustomError(OM, "PausedByOwner");
       await OM.unpauseOracle(n2.address);
       expect(await OM.pausedByOwner(n2.address)).to.equal(false);
-      // A pause by the operator stays the operator's to undo.
+      // A pause by the operator stays the operator's to undo...
       await OM.connect(ops).pauseOracle(n2.address);
       expect(await OM.pausedByOwner(n2.address)).to.equal(false);
-      await OM.connect(ops).unpauseOracle(n2.address);
+      // ...until the owner adopts it (L-2): no revert, recorded, evented.
+      await expect(OM.pauseOracle(n2.address))
+        .to.emit(OM, "OwnerPauseAdopted")
+        .withArgs(n2.address);
+      expect(await OM.pausedByOwner(n2.address)).to.equal(true);
+      await expect(
+        OM.connect(ops).unpauseOracle(n2.address),
+      ).to.be.revertedWithCustomError(OM, "PausedByOwner");
+      await OM.unpauseOracle(n2.address);
     });
 
     it("emergencyBlacklist needs the manager's designation and a live node", async function () {
