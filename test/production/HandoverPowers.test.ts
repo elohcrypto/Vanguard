@@ -281,9 +281,8 @@ describe("Handover power set from chain (plan 2F.5)", function () {
       await e
         .connect(carol)
         .createEscrowWallet(alice.address, bob.address, ethers.parseEther("1"));
-      const w = await e.getWalletAddress(1);
-      await c.complianceRules.addTrustedContract(await c.token.getAddress(), w);
-      return w;
+      // The factory is VSC's registrar: creation trusts it (Task 4.3).
+      return e.getWalletAddress(1);
     }
 
     it("M-1: refuses a second escrow-factory role admin before any transaction", async function () {

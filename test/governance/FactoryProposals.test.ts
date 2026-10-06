@@ -1,4 +1,5 @@
 import { expect } from "chai";
+import { addRegistrar } from "../helpers/registrars";
 import { ethers } from "hardhat";
 import { ageVoters } from "../helpers/governanceFixture";
 import { SignerWithAddress } from "@nomicfoundation/hardhat-ethers/signers";
@@ -104,6 +105,7 @@ describe("Factories are governable by proposal (2F.5)", function () {
       await ethers.getContractFactory("EscrowWalletFactory")
     ).deploy(await vsc.getAddress(), fees.address, idRegAddr, rulesAddr);
     escrowAddr = await escrowF.getAddress();
+    await addRegistrar(rules, vsc, escrowF, "MultiSigEscrowWallet");
     idF = await (
       await ethers.getContractFactory("OnchainIDFactory")
     ).deploy(owner.address);

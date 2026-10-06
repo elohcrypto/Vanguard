@@ -5,7 +5,7 @@
  * type bound to that target, voted with options 77/78.
  */
 
-const { ethers } = require("hardhat");
+const { ethers, artifacts } = require("hardhat");
 const { proposeCall } = require("./Handover");
 const { voterAgeRefusal, walletControlRefusal } = require("./ChainTime");
 
@@ -36,19 +36,39 @@ async function pickProposer(state) {
 }
 
 /**
- * Trust `wallet` on VSC in ComplianceRules (option 63's escrow wallet;
- * trust is per token since Task 4.1, G5). Returns { direct: true } after
- * the deployer's call, { proposalId } after a ComplianceRules proposal, or
- * { refused: reason } with nothing sent.
+ * keccak256 of the compiled runtime code of `name`: the code hash a
+ * ComplianceRules registrar may trust (plan v2 Task 4.3).
  */
-async function trustContract(state, wallet, log = console.log) {
+async function walletCodeHash(name) {
+  return ethers.keccak256(
+    (await artifacts.readArtifact(name)).deployedBytecode,
+  );
+}
+
+/**
+ * Name `registrar` (InvestorRequestManager or EscrowWalletFactory) a
+ * ComplianceRules registrar on VSC for the `walletName` code hash, so it
+ * trusts each wallet it creates (plan v2 Task 4.3). Returns { direct: true }
+ * after the deployer's call (or when already set), { proposalId } after a
+ * ComplianceRules proposal, or { refused: reason } with nothing sent.
+ */
+async function registerRegistrar(
+  state,
+  registrar,
+  walletName,
+  log = console.log,
+) {
   const rules = state.getContract("complianceRules");
   const vsc = await state.getContract("digitalToken").getAddress();
+  const hash = await walletCodeHash(walletName);
+  if ((await rules.trustedRegistrars(vsc, registrar)) === hash) {
+    return { direct: true };
+  }
   const deployer = state.signers[0];
   const owner = await rules.owner();
   if (same(owner, deployer.address)) {
     await (
-      await rules.connect(deployer).addTrustedContract(vsc, wallet)
+      await rules.connect(deployer).setTrustedRegistrar(vsc, registrar, hash)
     ).wait();
     return { direct: true };
   }
@@ -69,8 +89,12 @@ async function trustContract(state, wallet, log = console.log) {
     proposer,
     COMPLIANCE_RULES_TYPE,
     rules,
-    rules.interface.encodeFunctionData("addTrustedContract", [vsc, wallet]),
-    `Trust escrow wallet ${wallet}`,
+    rules.interface.encodeFunctionData("setTrustedRegistrar", [
+      vsc,
+      registrar,
+      hash,
+    ]),
+    `Registrar ${registrar} for ${walletName}`,
   );
   log(
     `   🗳️  Proposal #${proposalId} (ComplianceRules) by ${proposer.address}`,
@@ -78,4 +102,4 @@ async function trustContract(state, wallet, log = console.log) {
   return { proposalId };
 }
 
-module.exports = { trustContract, pickProposer };
+module.exports = { registerRegistrar, walletCodeHash, pickProposer };

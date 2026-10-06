@@ -10,6 +10,7 @@
 const { ethers } = require("hardhat");
 const { signShipmentProof } = require("../demo/utils/ShipmentProof");
 const { attestAll } = require("../demo/utils/Kyc");
+const { walletCodeHash } = require("../demo/utils/GovernedCalls");
 const EscrowModule = require("../demo/modules/EscrowModule");
 const { EnhancedLogger } = require("../demo/logging");
 
@@ -84,6 +85,14 @@ async function runEscrowSmoke(state, failures) {
     await idReg.getAddress(),
     await rules.getAddress(),
   );
+  // Task 4.3: the factory is VSC's registrar and trusts each escrow itself.
+  await (
+    await rules.setTrustedRegistrar(
+      token.target,
+      factory.target,
+      await walletCodeHash("MultiSigEscrowWallet"),
+    )
+  ).wait();
   await (
     await factory.registerInvestor(investor.address, investorWallet.address)
   ).wait();
@@ -93,7 +102,8 @@ async function runEscrowSmoke(state, failures) {
       .createEscrowWallet(payer.address, payee.address, e("1000"))
   ).wait();
   const wAddr = await factory.getWalletAddress(1);
-  await (await rules.addTrustedContract(token.target, wAddr)).wait();
+  if (!(await rules["isTrustedContract(address,address)"](token.target, wAddr)))
+    failures.push("escrow 1 not trusted by its factory at creation (4.3)");
   // Payer funds come through the real mint, within the Normal cap.
   await (await token.mint(payer.address, e("10000"))).wait();
   await (
@@ -190,7 +200,6 @@ async function runEscrowSmoke(state, failures) {
       .createEscrowWallet(payer.address, payee.address, e("1000"))
   ).wait();
   const w2Addr = await factory.getWalletAddress(2);
-  await (await rules.addTrustedContract(token.target, w2Addr)).wait();
   await (
     await token.connect(payer).approve(await factory.getAddress(), e("1050"))
   ).wait();

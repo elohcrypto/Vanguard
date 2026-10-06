@@ -5,6 +5,8 @@ import "@openzeppelin/contracts/access/Ownable.sol";
 import "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
 import "../erc3643/interfaces/IInvestorTypeRegistry.sol";
 import "../erc3643/interfaces/IIdentityRegistry.sol";
+import "../erc3643/interfaces/IERC3643.sol";
+import "../compliance/interfaces/ITrustedContracts.sol";
 import "./MultiSigWallet.sol";
 
 /**
@@ -184,6 +186,14 @@ contract InvestorRequestManager is Ownable, ReentrancyGuard {
         request.status = RequestStatus.WalletCreated;
         
         emit MultiSigWalletCreated(user, address(wallet), block.timestamp);
+
+        // The wallet has no identity: tokens move in and out of it only as a
+        // trusted contract on the token (the human counterparty is still
+        // checked). This manager is a registrar of the token's ComplianceRules
+        // for the MultiSigWallet code hash (plan v2 Task 4.3), so it trusts
+        // exactly the wallet it just deployed; a manager that is not a
+        // registrar cannot create wallets.
+        ITrustedContracts(IERC3643(token).compliance()).addTrustedContract(token, address(wallet));
     }
     
     /**

@@ -7,6 +7,7 @@ import {
   InvestorTypeRegistry,
   IdentityRegistry,
   Token,
+  ComplianceRules,
   OnchainID,
   ClaimIssuer,
 } from "../../typechain-types";
@@ -17,6 +18,7 @@ import {
   AML_TOPIC as REGISTRY_AML_TOPIC,
   issueSigned,
 } from "../helpers/kyc";
+import { addRegistrar } from "../helpers/registrars";
 
 describe("Investor Onboarding System", function () {
   let multiSigWallet: MultiSigWallet;
@@ -24,6 +26,7 @@ describe("Investor Onboarding System", function () {
   let investorTypeRegistry: InvestorTypeRegistry;
   let identityRegistry: IdentityRegistry;
   let token: Token;
+  let rules: ComplianceRules;
   let onchainID: OnchainID;
   let kycIssuer: ClaimIssuer;
   let amlIssuer: ClaimIssuer;
@@ -81,11 +84,12 @@ describe("Investor Onboarding System", function () {
     investorTypeRegistry = await InvestorTypeRegistryFactory.deploy();
     await investorTypeRegistry.waitForDeployment();
 
-    // Deploy mock compliance
-    const ComplianceRegistryFactory =
-      await ethers.getContractFactory("ComplianceRegistry");
-    const compliance = await ComplianceRegistryFactory.deploy();
-    await compliance.waitForDeployment();
+    // Real ComplianceRules (Task 4.3): the MultiSigWallet holds tokens as a
+    // contract trusted on this token, registered by the manager at creation.
+    rules = await (
+      await ethers.getContractFactory("ComplianceRules")
+    ).deploy(owner.address, [], []);
+    await rules.waitForDeployment();
 
     // Deploy Token
     const TokenFactory = await ethers.getContractFactory("Token");
@@ -93,9 +97,13 @@ describe("Investor Onboarding System", function () {
       "Test Token",
       "TEST",
       await identityRegistry.getAddress(),
-      await compliance.getAddress(),
+      await rules.getAddress(),
     );
     await token.waitForDeployment();
+    await rules.setTokenIdentityRegistry(
+      await token.getAddress(),
+      await identityRegistry.getAddress(),
+    );
 
     // Set InvestorTypeRegistry on token
     await token.setInvestorTypeRegistry(
@@ -154,6 +162,8 @@ describe("Investor Onboarding System", function () {
       await identityRegistry.getAddress(),
     );
     await investorRequestManager.waitForDeployment();
+    // The manager trusts each MultiSigWallet it creates on this token.
+    await addRegistrar(rules, token, investorRequestManager, "MultiSigWallet");
 
     // Authorize InvestorRequestManager as compliance officer
     await investorTypeRegistry.setComplianceOfficer(
@@ -200,31 +210,6 @@ describe("Investor Onboarding System", function () {
     await token.mint(user.address, ethers.parseEther("2000000"));
   });
 
-  // Helper function to register MultiSigWallet in IdentityRegistry
-  async function registerMultiSigWallet(walletAddress: string) {
-    const OnchainIDFactory = await ethers.getContractFactory("OnchainID");
-    const walletIdentity = await OnchainIDFactory.deploy(walletAddress);
-    await walletIdentity.waitForDeployment();
-
-    await identityRegistry.registerIdentity(
-      walletAddress,
-      await walletIdentity.getAddress(),
-      840, // US
-    );
-    await attest(
-      kycIssuer,
-      owner,
-      await walletIdentity.getAddress(),
-      REGISTRY_KYC_TOPIC,
-    );
-    await attest(
-      amlIssuer,
-      owner,
-      await walletIdentity.getAddress(),
-      REGISTRY_AML_TOPIC,
-    );
-  }
-
   describe("MultiSigWallet", function () {
     beforeEach(async function () {
       const MultiSigWalletFactory =
@@ -236,29 +221,10 @@ describe("Investor Onboarding System", function () {
       );
       await multiSigWallet.waitForDeployment();
 
-      // Register MultiSigWallet in IdentityRegistry so it can receive tokens
-      const walletOnchainID = await ethers.getContractFactory("OnchainID");
-      const walletIdentity = await walletOnchainID.deploy(
+      // A wallet deployed outside the manager: the owner trusts it.
+      await rules.addTrustedContract(
+        await token.getAddress(),
         await multiSigWallet.getAddress(),
-      );
-      await walletIdentity.waitForDeployment();
-
-      await identityRegistry.registerIdentity(
-        await multiSigWallet.getAddress(),
-        await walletIdentity.getAddress(),
-        840, // US
-      );
-      await attest(
-        kycIssuer,
-        owner,
-        await walletIdentity.getAddress(),
-        REGISTRY_KYC_TOPIC,
-      );
-      await attest(
-        amlIssuer,
-        owner,
-        await walletIdentity.getAddress(),
-        REGISTRY_AML_TOPIC,
       );
     });
 
@@ -411,9 +377,6 @@ describe("Investor Onboarding System", function () {
       const request = await investorRequestManager.getRequest(user.address);
       const walletAddress = request.multiSigWallet;
 
-      // Register MultiSigWallet in IdentityRegistry
-      await registerMultiSigWallet(walletAddress);
-
       // Lock tokens
       await token.connect(user).approve(walletAddress, RETAIL_LOCK);
       const MultiSigWalletFactory =
@@ -440,9 +403,6 @@ describe("Investor Onboarding System", function () {
 
       const request = await investorRequestManager.getRequest(user.address);
       const walletAddress = request.multiSigWallet;
-
-      // Register MultiSigWallet in IdentityRegistry
-      await registerMultiSigWallet(walletAddress);
 
       // Lock tokens
       await token.connect(user).approve(walletAddress, ACCREDITED_LOCK);
@@ -487,9 +447,8 @@ describe("Investor Onboarding System", function () {
       request = await investorRequestManager.getRequest(user.address);
       expect(request.status).to.equal(2); // WalletCreated
 
-      // Step 3: Register MultiSigWallet and lock tokens
+      // Step 3: Lock tokens (the wallet is already trusted)
       const walletAddress = request.multiSigWallet;
-      await registerMultiSigWallet(walletAddress);
 
       await token.connect(user).approve(walletAddress, RETAIL_LOCK);
 
@@ -531,9 +490,6 @@ describe("Investor Onboarding System", function () {
 
       const request = await investorRequestManager.getRequest(user.address);
       const walletAddress = request.multiSigWallet;
-
-      // Register MultiSigWallet in IdentityRegistry
-      await registerMultiSigWallet(walletAddress);
 
       await token.connect(user).approve(walletAddress, RETAIL_LOCK);
       const MultiSigWalletFactory =
@@ -586,6 +542,212 @@ describe("Investor Onboarding System", function () {
       expect(await investorTypeRegistry.getInvestorType(user.address)).to.equal(
         0,
       ); // Normal
+    });
+  });
+
+  // Plan v2 Task 4.3 (D13 b): custody is the on-chain 2-of-2 wallet.
+  describe("Custody: tokens move into the MultiSigWallet (Task 4.3)", function () {
+    /** Request, wallet by the bank, lock by the user; returns the wallet. */
+    async function lockedWallet(amount = RETAIL_LOCK) {
+      await investorRequestManager.connect(user).requestInvestorStatus(1);
+      await investorRequestManager
+        .connect(bank)
+        .createMultiSigWallet(user.address);
+      const addr = (await investorRequestManager.requests(user.address))
+        .multiSigWallet;
+      const wallet = (await ethers.getContractAt(
+        "MultiSigWallet",
+        addr,
+      )) as unknown as MultiSigWallet;
+      await token.connect(user).approve(addr, amount);
+      await wallet.connect(user).lockTokens(amount);
+      return wallet;
+    }
+
+    /** Proposal id from the proposeUnlock receipt. */
+    async function proposalId(wallet: MultiSigWallet, tx: any) {
+      const receipt = await (await tx).wait();
+      for (const log of receipt.logs) {
+        const parsed = wallet.interface.parseLog(log);
+        if (parsed?.name === "UnlockProposalCreated") return parsed.args[0];
+      }
+      throw new Error("no UnlockProposalCreated");
+    }
+
+    /** otherUser becomes a verified identity (a lawful recipient). */
+    async function verifyOtherUser() {
+      const id = await (
+        await ethers.getContractFactory("OnchainID")
+      ).deploy(otherUser.address);
+      await identityRegistry.registerIdentity(
+        otherUser.address,
+        await id.getAddress(),
+        840,
+      );
+      for (const issuer of [kycIssuer, amlIssuer]) {
+        const topic =
+          issuer === kycIssuer ? REGISTRY_KYC_TOPIC : REGISTRY_AML_TOPIC;
+        await attest(issuer, owner, await id.getAddress(), topic);
+      }
+    }
+
+    it("the registrar trusts the wallet on the token at creation", async function () {
+      await investorRequestManager.connect(user).requestInvestorStatus(1);
+      const tokenAddr = await token.getAddress();
+      const tx = investorRequestManager
+        .connect(bank)
+        .createMultiSigWallet(user.address);
+      await expect(tx).to.emit(rules, "TrustedContractAdded");
+      const w = (await investorRequestManager.requests(user.address))
+        .multiSigWallet;
+      expect(
+        await rules["isTrustedContract(address,address)"](tokenAddr, w),
+      ).to.equal(true);
+      expect(await rules.isTrustedOnAnyToken(w)).to.equal(true);
+      // No identity: trust, not a registry entry, lets it hold tokens.
+      expect(await identityRegistry.identity(w)).to.equal(ethers.ZeroAddress);
+    });
+
+    it("a manager that is not a registrar cannot create a wallet", async function () {
+      await rules.setTrustedRegistrar(
+        await token.getAddress(),
+        await investorRequestManager.getAddress(),
+        ethers.ZeroHash,
+      );
+      await investorRequestManager.connect(user).requestInvestorStatus(1);
+      await expect(
+        investorRequestManager.connect(bank).createMultiSigWallet(user.address),
+      ).to.be.revertedWith("ComplianceRules: not owner or registrar");
+    });
+
+    it("the lock moves tokens from the user into the wallet", async function () {
+      const before = await token.balanceOf(user.address);
+      const wallet = await lockedWallet();
+      const w = await wallet.getAddress();
+      expect(await token.balanceOf(w)).to.equal(RETAIL_LOCK);
+      expect(await token.balanceOf(user.address)).to.equal(
+        before - RETAIL_LOCK,
+      );
+      expect(await token.frozenTokens(user.address)).to.equal(0);
+      await investorRequestManager.connect(user).confirmTokensLocked();
+      expect(
+        (await investorRequestManager.requests(user.address)).status,
+      ).to.equal(3); // TokensLocked
+    });
+
+    it("the bank alone cannot unlock", async function () {
+      const wallet = await lockedWallet();
+      const w = await wallet.getAddress();
+      const id = await proposalId(
+        wallet,
+        wallet
+          .connect(bank)
+          .proposeUnlock(RETAIL_LOCK, bank.address, "bank alone"),
+      );
+      await wallet.connect(bank).signUnlock(id);
+      await expect(wallet.connect(bank).signUnlock(id)).to.be.revertedWith(
+        "Bank already signed",
+      );
+      expect(await token.balanceOf(w)).to.equal(RETAIL_LOCK);
+      expect(await wallet.lockedAmount()).to.equal(RETAIL_LOCK);
+      expect(await wallet.isFullySigned(id)).to.equal(false);
+      await expect(wallet.connect(otherUser).signUnlock(id)).to.be.revertedWith(
+        "Not authorized",
+      );
+    });
+
+    it("both signatures release to a verified recipient", async function () {
+      await verifyOtherUser();
+      const wallet = await lockedWallet();
+      const id = await proposalId(
+        wallet,
+        wallet
+          .connect(user)
+          .proposeUnlock(RETAIL_LOCK, otherUser.address, "release"),
+      );
+      await wallet.connect(user).signUnlock(id);
+      await expect(wallet.connect(bank).signUnlock(id))
+        .to.emit(wallet, "TokensUnlocked")
+        .withArgs(id, otherUser.address, RETAIL_LOCK);
+      expect(await token.balanceOf(otherUser.address)).to.equal(RETAIL_LOCK);
+      expect(await token.balanceOf(await wallet.getAddress())).to.equal(0);
+      expect(await wallet.lockedAmount()).to.equal(0);
+    });
+
+    it("an unverified recipient is refused by the token's gate", async function () {
+      const wallet = await lockedWallet();
+      const id = await proposalId(
+        wallet,
+        wallet
+          .connect(user)
+          .proposeUnlock(RETAIL_LOCK, otherUser.address, "to a stranger"),
+      );
+      await wallet.connect(user).signUnlock(id);
+      expect(
+        await token.canTransfer(
+          await wallet.getAddress(),
+          otherUser.address,
+          RETAIL_LOCK,
+        ),
+      ).to.equal(false);
+      // Trusted path: ComplianceRules checks the human counterparty.
+      await expect(wallet.connect(bank).signUnlock(id)).to.be.revertedWith(
+        "Compliance check failed",
+      );
+      expect(await token.balanceOf(await wallet.getAddress())).to.equal(
+        RETAIL_LOCK,
+      );
+      expect(await wallet.lockedAmount()).to.equal(RETAIL_LOCK);
+    });
+
+    it("fees routed to the wallet are paid out before the lock", async function () {
+      const wallet = await lockedWallet();
+      const w = await wallet.getAddress();
+      const fee = ethers.parseEther("30");
+      // As an escrow release pays the fee wallet: a transfer in.
+      await token.connect(user).transfer(w, fee);
+      expect(await token.balanceOf(w)).to.equal(RETAIL_LOCK + fee);
+      // The fee alone: the lock stays whole.
+      let id = await proposalId(
+        wallet,
+        wallet.connect(user).proposeUnlock(fee, user.address, "fees"),
+      );
+      await wallet.connect(user).signUnlock(id);
+      await wallet.connect(bank).signUnlock(id);
+      expect(await wallet.lockedAmount()).to.equal(RETAIL_LOCK);
+      // More than the wallet holds is refused at proposal.
+      await expect(
+        wallet
+          .connect(user)
+          .proposeUnlock(RETAIL_LOCK + 1n, user.address, "too much"),
+      ).to.be.revertedWith("Invalid amount");
+      // A second fee plus part of the lock: the lock shrinks by the rest.
+      await token.connect(user).transfer(w, fee);
+      const part = ethers.parseEther("1000");
+      id = await proposalId(
+        wallet,
+        wallet.connect(bank).proposeUnlock(fee + part, user.address, "mix"),
+      );
+      await wallet.connect(bank).signUnlock(id);
+      await wallet.connect(user).signUnlock(id);
+      expect(await wallet.lockedAmount()).to.equal(RETAIL_LOCK - part);
+      expect(await token.balanceOf(w)).to.equal(RETAIL_LOCK - part);
+    });
+
+    it("a lock reduced below the holdings by an agent burn still pays out", async function () {
+      const wallet = await lockedWallet();
+      const w = await wallet.getAddress();
+      const burnt = ethers.parseEther("4000");
+      await token.burn(w, burnt);
+      const left = RETAIL_LOCK - burnt;
+      const id = await proposalId(
+        wallet,
+        wallet.connect(user).proposeUnlock(left, user.address, "rest"),
+      );
+      await wallet.connect(user).signUnlock(id);
+      await wallet.connect(bank).signUnlock(id);
+      expect(await wallet.lockedAmount()).to.equal(burnt);
+      expect(await token.balanceOf(w)).to.equal(0);
     });
   });
 });

@@ -7,6 +7,7 @@ import "@openzeppelin/contracts/access/extensions/AccessControlEnumerable.sol";
 import "@openzeppelin/contracts/access/Ownable2Step.sol";
 import "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
 import "../erc3643/interfaces/IIdentityRegistry.sol";
+import "../compliance/interfaces/ITrustedContracts.sol";
 
 /**
  * @title EscrowWalletFactory
@@ -273,29 +274,6 @@ contract EscrowWalletFactory is AccessControlEnumerable, Ownable2Step, Reentranc
 
         walletAddress = address(wallet);
 
-        // ✅ SECURITY MODEL: Trusted Contracts
-        //
-        // The escrow wallet needs to be added to ComplianceRules.trustedContracts
-        // to allow ERC-3643 token transfers WITHOUT bypassing KYC/AML verification.
-        //
-        // Security Model:
-        // 1. Escrow wallet is added to trusted contracts list (by owner)
-        // 2. Transfers to/from escrow still require the OTHER party to be KYC/AML verified
-        // 3. Escrow wallet enforces its own multi-sig rules (2-of-3)
-        // 4. Only verified investors can create escrow wallets
-        // 5. Only ComplianceRules owner can add/remove trusted contracts
-        //
-        // This is SECURE because:
-        // - Escrow wallets are created by verified investors
-        // - Payer and Payee must still be KYC/AML verified
-        // - Escrow wallets enforce multi-sig release conditions
-        // - No direct identity registration bypass
-        //
-        // ⚠️ IMPORTANT: The ComplianceRules owner must manually add the wallet
-        // to trusted contracts after creation. This is done in the demo script
-        // or by calling: complianceRules.addTrustedContract(vscToken, walletAddress)
-        // (trust is per token since Task 4.1)
-
         // Store mappings
         paymentToWallet[paymentId] = walletAddress;
         payerPayments[payer].push(paymentId);
@@ -304,6 +282,15 @@ contract EscrowWalletFactory is AccessControlEnumerable, Ownable2Step, Reentranc
         
         // Update investor stats
         investors[msg.sender].totalEscrowsCreated++;
+
+        // The wallet holds VSC with no identity, so it must be a trusted
+        // contract on VSC; transfers in and out still check the human
+        // counterparty (identity, whitelist, country, caps). This factory is
+        // a ComplianceRules registrar for VSC with the MultiSigEscrowWallet
+        // code hash (plan v2 Task 4.3), so it can trust exactly the wallets
+        // it deploys and nothing else; a factory that is not a registrar
+        // cannot create escrows.
+        ITrustedContracts(complianceRules).addTrustedContract(address(vscToken), walletAddress);
         
         emit EscrowWalletCreated(
             paymentId,

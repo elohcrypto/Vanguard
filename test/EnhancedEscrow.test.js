@@ -2,6 +2,7 @@ const { expect } = require("chai");
 const { ethers } = require("hardhat");
 const { time } = require("@nomicfoundation/hardhat-network-helpers");
 const { attest, configureKyc } = require("./helpers/kyc");
+const { addRegistrar } = require("./helpers/registrars");
 
 describe("Enhanced Escrow System", function () {
   let vscToken;
@@ -106,6 +107,13 @@ describe("Enhanced Escrow System", function () {
       await complianceRules.getAddress(),
     );
     await factory.waitForDeployment();
+    // The factory trusts each escrow it creates on VSC (Task 4.3).
+    await addRegistrar(
+      complianceRules,
+      vscToken,
+      factory,
+      "MultiSigEscrowWallet",
+    );
 
     // Transfer tokens to payer
     await vscToken.transfer(payer.address, ethers.parseEther("10000"));

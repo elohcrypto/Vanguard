@@ -18,21 +18,25 @@ contract MultiSigEscrowWallet is ReentrancyGuard {
     // WALLET DETAILS
     // ========================================
 
-    uint256 public immutable paymentId;
+    // No immutables (plan v2 Task 4.3): an immutable is spliced into the
+    // runtime code, so every escrow would have its own code hash, and the
+    // factory may trust (as a ComplianceRules registrar) only accounts whose
+    // code hash is the compiled MultiSigEscrowWallet's.
+    uint256 public paymentId;
     address public payer;                      // Mutable: set on first funding if unknown
     bool public payerSet;                      // True after payer is locked
-    address public immutable payee;
-    address public immutable investor;
-    address public immutable factory;          // Factory that created this wallet
-    IERC20 public immutable vscToken;
+    address public payee;
+    address public investor;
+    address public factory;          // Factory that created this wallet
+    IERC20 public vscToken;
 
-    uint256 public immutable amount;           // Payment amount to payee
-    uint256 public immutable investorFee;      // 3% fee to investor
-    uint256 public immutable ownerFee;         // 2% fee to owner
+    uint256 public amount;           // Payment amount to payee
+    uint256 public investorFee;      // 3% fee to investor
+    uint256 public ownerFee;         // 2% fee to owner
 
-    address public immutable owner;            // Platform owner
-    address public immutable investorWallet;   // Investor's wallet for fee
-    address public immutable ownerWallet;      // Owner's wallet for fee
+    address public owner;            // Platform owner
+    address public investorWallet;   // Investor's wallet for fee
+    address public ownerWallet;      // Owner's wallet for fee
     
     // ========================================
     // SHIPMENT PROOF

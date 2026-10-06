@@ -12,12 +12,17 @@ import "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
  * @author Vanguard StableCoin Team
  */
 contract MultiSigWallet is Ownable, ReentrancyGuard {
-    // Wallet participants
-    address public immutable bank;
-    address public immutable user;
-    address public immutable token;
+    // Wallet participants. Storage, not immutable (plan v2 Task 4.3): an
+    // immutable is spliced into the runtime code, so every wallet would have
+    // its own code hash. ComplianceRules lets a registrar trust only accounts
+    // whose code hash is the compiled MultiSigWallet's, the same for all.
+    address public bank;
+    address public user;
+    address public token;
     
-    // Locked token amount
+    // Locked token amount (the investor's lock). The wallet can hold more:
+    // escrow investor fees are routed here (Task 4.3), and an unlock pays
+    // from that free balance first, then from the lock.
     uint256 public lockedAmount;
     
     // Unlock proposal structure
@@ -96,7 +101,7 @@ contract MultiSigWallet is Ownable, ReentrancyGuard {
         string calldata reason
     ) external returns (bytes32 proposalId) {
         require(msg.sender == user || msg.sender == bank, "Not authorized");
-        require(amount > 0 && amount <= lockedAmount, "Invalid amount");
+        require(amount > 0 && amount <= IERC20(token).balanceOf(address(this)), "Invalid amount");
         require(recipient != address(0), "Invalid recipient");
         require(bytes(reason).length > 0, "Reason required");
         
@@ -167,13 +172,18 @@ contract MultiSigWallet is Ownable, ReentrancyGuard {
         require(proposal.bankSigned, "Bank signature missing");
         require(proposal.userSigned, "User signature missing");
         require(!proposal.executed, "Already executed");
-        require(proposal.amount <= lockedAmount, "Insufficient locked balance");
+        uint256 held = IERC20(token).balanceOf(address(this));
+        require(proposal.amount <= held, "Insufficient wallet balance");
         
         // Mark as executed
         proposal.executed = true;
         
-        // Update locked amount
-        lockedAmount -= proposal.amount;
+        // Pay from the free balance (fees) first, then from the lock.
+        uint256 free = held > lockedAmount ? held - lockedAmount : 0;
+        if (proposal.amount > free) {
+            uint256 fromLock = proposal.amount - free;
+            lockedAmount = fromLock >= lockedAmount ? 0 : lockedAmount - fromLock;
+        }
         
         // Transfer tokens to recipient
         require(

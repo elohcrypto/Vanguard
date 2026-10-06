@@ -12,7 +12,7 @@ const {
   displayError,
   displayWarning,
 } = require("../utils/DisplayHelpers");
-const { trustContract } = require("../utils/GovernedCalls");
+const { registerRegistrar } = require("../utils/GovernedCalls");
 const { advancePast, canJumpTime } = require("../utils/ChainTime");
 const { signShipmentProof } = require("../utils/ShipmentProof");
 const { attestAll } = require("../utils/Kyc");
@@ -53,7 +53,6 @@ class EscrowModule {
       }
 
       const signers = this.state.signers;
-      const owner = signers[0];
       const ownerWallet = signers[1]; // Owner's wallet for receiving fees
 
       // The owner fee wallet is a human party: escrow wallets pay it fees,
@@ -92,14 +91,27 @@ class EscrowModule {
         `✅ EscrowWalletFactory: ${await escrowFactory.getAddress()}`,
       );
 
-      // The factory cannot register trusted contracts itself: the
-      // ComplianceRules owner (signers[0] until the handover) registers each
-      // escrow wallet contract when option 63 creates it.
+      // Task 4.3: the factory is a ComplianceRules registrar on VSC for the
+      // MultiSigEscrowWallet code hash, so createEscrowWallet trusts each
+      // escrow it deploys. Naming a registrar is the ComplianceRules
+      // owner's: the deployer until the handover, a vote after it.
       console.log("");
-      console.log(
-        "   ℹ️  Escrow wallet contracts are registered as trusted by the ComplianceRules owner at creation (option 63)",
+      const reg = await registerRegistrar(
+        this.state,
+        await escrowFactory.getAddress(),
+        "MultiSigEscrowWallet",
       );
-      console.log("   ℹ️  ComplianceRules owner: " + owner.address);
+      if (reg.direct) {
+        console.log(
+          "   ✅ Factory is a ComplianceRules registrar on VSC: it trusts only the escrows it deploys (MultiSigEscrowWallet code hash)",
+        );
+      } else if (reg.proposalId) {
+        console.log(
+          `   ⏳ Escrows cannot be created until proposal #${reg.proposalId} names the factory a registrar: vote with option 77, execute with option 78`,
+        );
+      } else {
+        displayWarning(`Factory is not a registrar: ${reg.refused}`);
+      }
 
       console.log("");
       displaySuccess("ENHANCED ESCROW SYSTEM DEPLOYED SUCCESSFULLY!");
@@ -119,21 +131,13 @@ class EscrowModule {
       console.log("   ✅ Payer must have valid OnchainID + KYC/AML");
       console.log("   ✅ Payee must have valid OnchainID + KYC/AML");
       console.log(
-        "   ✅ Escrow wallets added to trusted contracts (owner-only)",
+        "   ✅ Escrow wallets trusted at creation by the factory (registrar, code-hash bound)",
       );
       console.log(
         "   ✅ Owner and investor fee wallets are verified investors, not trusted",
       );
       console.log("   ✅ Jurisdiction rules enforced for all parties");
       console.log("   ✅ No KYC/AML bypass - secure compliance!");
-      console.log("");
-      console.log("⚠️  IMPORTANT:");
-      console.log(
-        "   Each escrow wallet will be automatically added to trusted contracts",
-      );
-      console.log(
-        "   when created. This requires ComplianceRules owner permission.",
-      );
       console.log("");
       console.log("💡 NEXT STEPS:");
       console.log("   1. Register investors (Option 62)");
@@ -552,19 +556,16 @@ class EscrowModule {
         const paymentId = parsedEvent.args.paymentId;
         const walletAddress = parsedEvent.args.walletAddress;
 
-        // Trust the wallet: the deployer while it owns ComplianceRules, a
-        // ComplianceRules proposal once governance does (2F.5, L11).
-        console.log("\n🔐 Adding wallet to trusted contracts...");
-        const trust = await trustContract(this.state, walletAddress);
-        if (trust.direct) {
-          console.log("   ✅ Wallet added to trusted contracts");
-        } else if (trust.proposalId) {
-          console.log(
-            `   ⏳ Untrusted until proposal #${trust.proposalId} passes: vote with option 77, execute with option 78`,
-          );
-        } else {
-          console.log(`   ⚠️  Wallet left untrusted: ${trust.refused}`);
-        }
+        // The factory trusted it in the same transaction (registrar, 4.3).
+        const rules = this.state.getContract("complianceRules");
+        const vsc = await this.state.getContract("digitalToken").getAddress();
+        const trusted = await rules["isTrustedContract(address,address)"](
+          vsc,
+          walletAddress,
+        );
+        console.log(
+          `   ${trusted ? "✅" : "❌"} Wallet trusted on VSC by the factory at creation`,
+        );
 
         this.state.enhancedEscrowWallets.set(paymentId.toString(), {
           paymentId: paymentId.toString(),

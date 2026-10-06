@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.20;
 
-import "@openzeppelin/contracts/access/Ownable2Step.sol";
+import "./ComplianceRulesTrust.sol";
 import "./interfaces/IComplianceRules.sol";
 
 /// @dev Read-only slice of BlacklistOracle. Declared here rather than imported
@@ -25,82 +25,13 @@ interface IPrivacyManagerView {
  * @dev Configuration half of ComplianceRules (plan v2 Task 4.1, split by
  *      inheritance: one deployed contract, one address, one governance
  *      type). Holds every setting canTransfer reads and the functions that
- *      write them: trusted contracts, rule administrators, the per-token
+ *      write them: trusted contracts and their registrars (inherited from
+ *      ComplianceRulesTrust, Task 4.3), rule administrators, the per-token
  *      oracles, identity registry, whitelist mode and PrivacyManager, and
  *      the jurisdiction rules with their version counter. The evaluation
  *      half is ComplianceRules.
  */
-abstract contract ComplianceRulesAdmin is IComplianceRules, Ownable2Step {
-    // ========================================
-    // TRUSTED CONTRACTS (Escrow Wallets, etc.), per token (G5)
-    // ========================================
-    //
-    // Trust is per token: trusting governance for VGT (it holds VGT fees,
-    // D21) does not exempt it on VSC, and an escrow trusted for VSC is not
-    // trusted for VGT. Token and GovernanceToken read the 1-arg
-    // isTrustedContract as "trusted for msg.sender"; off-chain readers use
-    // the 2-arg view and the token-indexed events.
-
-    mapping(address => mapping(address => bool)) internal trustedContracts;
-    /// @dev On how many tokens an account is trusted. canReceive refuses a
-    ///      recovery into an account trusted on ANY token (review M1, 2E).
-    mapping(address => uint256) internal trustedTokenCount;
-
-    event TrustedContractAdded(address indexed token, address indexed contractAddress);
-    event TrustedContractRemoved(address indexed token, address indexed contractAddress);
-
-    /**
-     * @dev Trust a contract (e.g., escrow wallet) on `token`: its own identity
-     *      and whitelist checks are skipped there, the counterparty's are not.
-     * @param token The token on which the contract is trusted
-     * @param contractAddress Address of the trusted contract
-     */
-    function addTrustedContract(address token, address contractAddress) external onlyOwner {
-        require(token != address(0), "ComplianceRules: Invalid token address");
-        require(contractAddress != address(0), "Invalid address");
-        require(contractAddress.code.length > 0, "ComplianceRules: not a contract");
-        // EIP-7702 delegation indicator (0xef0100 || address, 23 bytes): a
-        // delegated EOA is still a wallet, so it must never be trusted.
-        if (contractAddress.code.length == 23) {
-            bytes memory code = contractAddress.code;
-            require(
-                !(code[0] == 0xef && code[1] == 0x01 && code[2] == 0x00),
-                "ComplianceRules: delegated wallet"
-            );
-        }
-        require(!trustedContracts[token][contractAddress], "Already trusted");
-        trustedContracts[token][contractAddress] = true;
-        trustedTokenCount[contractAddress]++;
-        emit TrustedContractAdded(token, contractAddress);
-    }
-
-    /**
-     * @dev Stop trusting a contract on `token`
-     * @param token The token on which the contract was trusted
-     * @param contractAddress Address of the contract to remove
-     */
-    function removeTrustedContract(address token, address contractAddress) external onlyOwner {
-        require(trustedContracts[token][contractAddress], "Not trusted");
-        // After the handover the owner is governance, which holds VGT fees as
-        // a trusted contract with no identity (D21). Untrusting it would make
-        // every later fee pull revert, so no proposal could ever undo it.
-        require(contractAddress != owner(), "ComplianceRules: owner stays trusted");
-        trustedContracts[token][contractAddress] = false;
-        trustedTokenCount[contractAddress]--;
-        emit TrustedContractRemoved(token, contractAddress);
-    }
-
-    /// @notice Whether `account` is a trusted contract on `token`.
-    function isTrustedContract(address token, address account) external view returns (bool) {
-        return trustedContracts[token][account];
-    }
-
-    /// @notice Whether `account` is trusted on any token: canReceive then
-    ///         refuses it as a wallet-recovery target on every token.
-    function isTrustedOnAnyToken(address account) external view returns (bool) {
-        return trustedTokenCount[account] != 0;
-    }
-
+abstract contract ComplianceRulesAdmin is IComplianceRules, ComplianceRulesTrust {
     // ========================================
     // ORACLE GATING (per token, opt-in)
     // ========================================

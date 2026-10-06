@@ -1,6 +1,7 @@
 import { expect } from "chai";
 import { ethers, network } from "hardhat";
 import { attest, configureKyc } from "../helpers/kyc";
+import { addRegistrar } from "../helpers/registrars";
 
 const {
   escrowFactoriesFromChain,
@@ -198,14 +199,14 @@ describe("ComplianceRules per-token trust and administrators (G5)", function () 
       await ethers.getContractFactory("EscrowWalletFactory")
     ).deploy(vsc.target, owner.address, idReg.target, rules.target);
     await factory.registerInvestor(carol.address, carol.address);
+    const o = { complianceRules: rules, token: vsc, governanceToken: vgt };
+    // The factory is VSC's registrar: it trusts each escrow it creates.
+    await addRegistrar(rules, vsc, factory, "MultiSigEscrowWallet");
+    expect(await escrowFactoriesFromChain(o)).to.deep.equal([]);
     await factory
       .connect(carol)
       .createEscrowWallet(alice.address, bob.address, ethers.parseEther("1"));
     const w = await factory.getWalletAddress(1);
-    const o = { complianceRules: rules, token: vsc, governanceToken: vgt };
-    expect(await escrowFactoriesFromChain(o)).to.deep.equal([]);
-
-    await rules.addTrustedContract(vsc.target, w);
     const fAddr = await factory.getAddress();
     expect(await escrowFactoriesFromChain(o)).to.deep.equal([
       { factory: fAddr, escrow: w },

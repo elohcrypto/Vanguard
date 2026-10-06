@@ -1,4 +1,5 @@
 import { expect } from "chai";
+import { addRegistrar } from "../helpers/registrars";
 import { ethers } from "hardhat";
 import { time } from "@nomicfoundation/hardhat-network-helpers";
 import { SignerWithAddress } from "@nomicfoundation/hardhat-ethers/signers";
@@ -180,6 +181,7 @@ describe("Investor caps on the trusted path (2F.4)", function () {
         f.registry.target,
         rules.target,
       );
+      await addRegistrar(rules, token, factory, "MultiSigEscrowWallet");
       await factory.registerInvestor(investor.address, investorWallet.address);
       await types.setInvestorLimitExempt(investorWallet.address, true);
       await types.setInvestorLimitExempt(ownerWallet.address, true);
@@ -188,7 +190,6 @@ describe("Investor caps on the trusted path (2F.4)", function () {
         .connect(investor)
         .createEscrowWallet(payer.address, payee.address, AMOUNT);
       const walletAddr = await factory.getWalletAddress(1);
-      await rules.connect(owner).addTrustedContract(token.target, walletAddr);
       const wallet = await ethers.getContractAt(
         "MultiSigEscrowWallet",
         walletAddr,

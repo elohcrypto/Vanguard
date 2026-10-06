@@ -1,4 +1,5 @@
 import { ethers } from "hardhat";
+import { addRegistrar } from "./registrars";
 import { time } from "@nomicfoundation/hardhat-network-helpers";
 import { attest, configureKyc, deployIdentity } from "./kyc";
 
@@ -103,6 +104,13 @@ export async function handoverFixture() {
   await governanceToken.addAgent(govAddr);
   await complianceRules.setTokenIdentityRegistry(vgtAddr, idRegAddr);
   await complianceRules.addTrustedContract(vgtAddr, govAddr);
+  // As the demo deploys: the escrow factory trusts its escrows (Task 4.3).
+  await addRegistrar(
+    complianceRules,
+    token,
+    escrowWalletFactory,
+    "MultiSigEscrowWallet",
+  );
   // As the demo deploys: the deployer administers both tokens' rules (G5).
   for (const t of [await token.getAddress(), vgtAddr])
     await complianceRules.setRuleAdministrator(t, deployer.address, true);
