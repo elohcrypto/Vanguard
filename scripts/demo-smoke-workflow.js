@@ -30,6 +30,7 @@ async function runWorkflowSmoke(state, failures) {
   if (bal > 0n)
     await (await vgt.connect(first).transfer(second.address, bal)).wait();
   const fromBlock = await ethers.provider.getBlockNumber();
+  const version0 = await rules.jurisdictionRuleVersion(vscAddr);
 
   const lines = [];
   const real = console.log;
@@ -90,6 +91,12 @@ async function runWorkflowSmoke(state, failures) {
   if (mints.length !== 1 || !opsLine) {
     failures.push(
       `option 82: ${mints.length} VGT mint(s) to the emptied actor ${first.address}, ops line ${opsLine}; expected one top-up by ops`,
+    );
+  }
+  const version1 = await rules.jurisdictionRuleVersion(vscAddr);
+  if (version1 !== version0 + 1n) {
+    failures.push(
+      `option 82: jurisdictionRuleVersion(VSC) ${version0} -> ${version1}, expected one setJurisdictionRule`,
     );
   }
   const rule = await rules.getJurisdictionRule(vscAddr);

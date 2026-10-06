@@ -196,6 +196,7 @@ async function runCompleteWorkflow({ state, promptUser, log = console.log }) {
   const before = await rules.getJurisdictionRule(vscAddr);
   log(`   Proposer: ${pick.proposer.address} (does not vote)`);
   const target = withRule(before);
+  const version0 = await rules.jurisdictionRuleVersion(vscAddr);
   log(
     `   VSC rule now: allowed ${list(before.allowedCountries)}, blocked ${list(before.blockedCountries)}`,
   );
@@ -265,13 +266,18 @@ async function runCompleteWorkflow({ state, promptUser, log = console.log }) {
     const ok =
       list(rule.allowedCountries) === list(target.allowed) &&
       list(rule.blockedCountries) === list(target.blocked);
+    const version1 = await rules.jurisdictionRuleVersion(vscAddr);
+    const same0 =
+      list(before.allowedCountries) === list(target.allowed) &&
+      list(before.blockedCountries) === list(target.blocked);
     log(`   Status: ${STATUS[Number(after.status)]}`);
+    log(`   jurisdictionRuleVersion(VSC): ${version0} -> ${version1}`);
     log(
       `   VSC rule read back: allowed ${list(rule.allowedCountries)}, blocked ${list(rule.blockedCountries)} ${ok ? "✅" : "❌ not what the proposal set"}`,
     );
     if (ok)
       displaySuccess(
-        `PROPOSAL #${id} EXECUTED: VSC'S JURISDICTION RULE CHANGED BY VOTE`,
+        `PROPOSAL #${id} EXECUTED: VSC'S JURISDICTION RULE ${same0 ? "SET BY VOTE (it already held the four codes)" : "CHANGED BY VOTE"}`,
       );
     else displayError(`Proposal #${id} executed but the rule differs`);
     return { proposalId: id, status: STATUS[Number(after.status)], target };
