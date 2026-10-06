@@ -272,8 +272,11 @@ contract OnchainID is IOnchainID, Ownable2Step, ReentrancyGuard {
     }
 
     /**
-     * @dev Remove key (legacy - no ownership proof required)
-     * @notice DEPRECATED: Use removeKeyWithProof for better security
+     * @dev Remove a key: the management action. Any MANAGEMENT key (or the
+     *      owner, or an authorized manager such as KeyManager) removes any
+     *      key, with no consent from its holder; KeyManager rotations and
+     *      batches use this path, and it is the only one for a non-ECDSA
+     *      key. For the holder-consented removal see removeKeyWithProof.
      */
     function removeKey(bytes32 _key, uint256 _purpose) external override onlyManagementKey returns (bool success) {
         require(keys[_key].key != bytes32(0), "OnchainID: Key does not exist");
@@ -299,17 +302,16 @@ contract OnchainID is IOnchainID, Ownable2Step, ReentrancyGuard {
     }
 
     /**
-     * @dev Remove key with ownership proof (RECOMMENDED)
+     * @dev Remove a key with its holder's consent.
      * @param _key The key hash to remove
      * @param _purpose The purpose of the key
-     * @param _signature Signature proving ownership of the key being removed
+     * @param _signature Signature by the key's address over the message
+     *        getRemoveKeyMessage describes
      * @return success True if the key was removed successfully
      *
-     * @notice This function requires cryptographic proof that the caller owns the key being removed.
-     * For address-based keys: Sign the message with the private key of the address
-     * For string-based keys: This function cannot be used (use removeKey with caution)
-     *
-     * Security: Prevents unauthorized key removal by requiring signature verification
+     * @notice Still sent by a MANAGEMENT key; the signature proves the
+     * holder of `_key` agreed. Only ECDSA (address) keys can sign; any other
+     * key is removed with removeKey.
      */
     function removeKeyWithProof(
         bytes32 _key,
@@ -344,18 +346,17 @@ contract OnchainID is IOnchainID, Ownable2Step, ReentrancyGuard {
     }
 
     /**
-     * @dev Get the message hash that needs to be signed for removeKeyWithProof
+     * @dev The digest removeKeyWithProof recovers the signer from.
      * @param _key The key hash to remove
      * @param _purpose The purpose of the key
-     * @return messageHash The hash that should be signed
+     * @return messageHash toEthSignedMessageHash(keccak256(abi.encodePacked(
+     *         "Remove key from OnchainID", address(this), _key, _purpose,
+     *         block.chainid)))
      *
-     * @notice Helper function to generate the correct message for signing.
-     * Users should sign this message with the private key of the address being removed.
-     *
-     * Example usage:
-     * 1. Call getRemoveKeyMessage(keyHash, purpose)
-     * 2. Sign the returned hash with your wallet
-     * 3. Call removeKeyWithProof(keyHash, purpose, signature)
+     * @notice Already EIP-191 prefixed: it is the digest to check, not the
+     * bytes to pass to personal_sign (that would prefix twice). Sign the
+     * inner keccak256 with signMessage(getBytes(inner)); the result
+     * recovers against this digest.
      */
     function getRemoveKeyMessage(
         bytes32 _key,
@@ -624,9 +625,6 @@ contract OnchainID is IOnchainID, Ownable2Step, ReentrancyGuard {
 
     // Internal functions
 
-    /**
-     * @dev Internal add key function
-     */
     /// @dev Adds `_key`, or re-activates it if it was revoked (2F.2 review,
     ///      F4); only an active key is refused.
     function _addKey(bytes32 _key, uint256 _purpose, uint256 _keyType) internal returns (bool) {
