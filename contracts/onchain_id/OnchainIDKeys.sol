@@ -2,7 +2,6 @@
 pragma solidity ^0.8.20;
 
 import "@openzeppelin/contracts/access/Ownable2Step.sol";
-import "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
 import "@openzeppelin/contracts/utils/cryptography/ECDSA.sol";
 import "@openzeppelin/contracts/utils/cryptography/MessageHashUtils.sol";
 import "./interfaces/IOnchainID.sol";
@@ -22,7 +21,7 @@ import "./interfaces/IOnchainID.sol";
  *      deauthorizeManager and transferOwnership. Recovery restores a lost
  *      key; it does not evict a key that is still active.
  */
-abstract contract OnchainIDKeys is IOnchainID, Ownable2Step, ReentrancyGuard {
+abstract contract OnchainIDKeys is IOnchainID, Ownable2Step {
     using ECDSA for bytes32;
 
     // Key purposes
@@ -453,6 +452,10 @@ abstract contract OnchainIDKeys is IOnchainID, Ownable2Step, ReentrancyGuard {
         ExecutionRequest storage request = executionRequests[_executionId];
         require(!request.executed, "OnchainID: Already executed");
 
+        // Marked executed before the external call: a re-entrant approve()
+        // cannot run the same request twice ("Already executed"). This is
+        // the reentrancy defence; the inherited ReentrancyGuard was never
+        // used and is gone (review of 4.5, N-3).
         request.executed = true;
 
         (bool success, ) = request.to.call{value: request.value}(request.data);
