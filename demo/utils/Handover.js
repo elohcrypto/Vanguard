@@ -45,6 +45,7 @@ const { assertHandoverComplete } = require("./HandoverCompletion");
 const { preflightPrivacy, privacySteps } = require("./HandoverPrivacy");
 const { preflightKeyManager } = require("./HandoverKeys");
 const { preflightRegistrars } = require("./HandoverRegistrars");
+const { preflightOracles, oracleSteps } = require("./HandoverOracles");
 
 const STATUS = [
   "Pending",
@@ -98,6 +99,7 @@ async function handoverDeployerPowers(o) {
   await preflightPrivacy(o);
   await preflightKeyManager(o);
   await preflightRegistrars(o); // Task 4.3
+  await preflightOracles(o); // Task 4.4
   const ctx = { o, d, dAddr, govAddr, report, ok, log };
   // Send, read back, assert, print.
   const apply = async (tx, readBack, msg) => {
@@ -182,6 +184,7 @@ async function handoverDeployerPowers(o) {
     check(same(await oracle.owner(), ops), `oracle ${a} owner is not ops`);
     ok(`oracle ${a} owner: ops`);
   }
+  await oracleSteps(ctx); // Task 4.4: ops is OracleManager's operator
 
   log("\n📝 Step 5: deployer removes its own roles");
   await apply(

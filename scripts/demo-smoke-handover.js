@@ -140,7 +140,8 @@ async function runHandoverSmoke(state, failures) {
     // 4.2: KeyManager holds no power; option 12's identity authorizes it.
     keyManager: c("keyManager"),
     keyManagerIdentity: state.keyLifecycle?.identity,
-    oracles: ["whitelistOracle", "blacklistOracle", "consensusOracle"].map(c),
+    // 4.4: ConsensusOracle is the manager's ownerless engine, not handed over.
+    oracles: ["whitelistOracle", "blacklistOracle"].map(c),
     issuers: [c("kycIssuer"), c("amlIssuer")],
   };
 
@@ -169,6 +170,24 @@ async function runHandoverSmoke(state, failures) {
 
   const result = await assertHandoverComplete(args);
   for (const f of result.failures) failures.push(`handover: ${f}`);
+
+  // 4.4: ops (the operator) may pause a node; the deployer no longer may.
+  const node = s[1].address;
+  await oracleManager
+    .connect(s[OPS])
+    .pauseOracle.staticCall(node)
+    .catch((e) =>
+      failures.push(
+        `4.4: ops cannot pause a node: ${e.message.split("\n")[0]}`,
+      ),
+    );
+  if (
+    await oracleManager.pauseOracle.staticCall(node).then(
+      () => true,
+      () => false,
+    )
+  )
+    failures.push("4.4: the deployer still pauses oracle nodes");
 
   // 3.3: after the ceremony the deployer can no longer publish a root; ops can.
   try {

@@ -35,7 +35,8 @@ const KEY_NAME = {
   [MANAGEMENT_KEY]: "MANAGEMENT",
   [CLAIM_SIGNER_KEY]: "CLAIM_SIGNER",
 };
-// Whitelist/Blacklist oracles have listManager(); ConsensusOracle does not.
+// Whitelist/Blacklist oracles have listManager() (ConsensusOracle is the
+// manager's ownerless engine since 4.4 and is no oracle here).
 const ORACLE_ABI = [
   "function owner() view returns (address)",
   "function transferOwnership(address)",

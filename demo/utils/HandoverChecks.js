@@ -117,7 +117,7 @@ function fail(msg) {
 
 /**
  * An oracle's list-manager writer, or null when it has none: no listManager
- * in its ABI, or the call reverts (ConsensusOracle behind an inline ABI).
+ * in its ABI, or the call reverts (an oracle without the role).
  * Anything else (an RPC failure) is rethrown, never read as "no role".
  */
 async function listManagerOf(oracle) {

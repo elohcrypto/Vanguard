@@ -17,7 +17,7 @@
  *     "zkVerifier": "0x.." | null,              // required key (3.3), ZKVerifierIntegrated
  *     "keyManager": "0x..",                     // optional (4.2), KeyManager
  *     "keyManagerIdentity": "0x..",             // optional (4.2), the demo OnchainID
- *     "oracles": ["0x..", "0x..", "0x.."],      // optional, one-step Ownable
+ *     "oracles": ["0x..", "0x.."],              // optional, one-step Ownable
  *     "issuers": ["0x..", "0x.."],              // optional, ClaimIssuer
  *     "feeWallets": ["0x.."],                   // optional, escrow fee wallets to check
  *     "fromBlock": 1234567,                     // optional, <= the IdentityRegistry deploy block
@@ -51,7 +51,11 @@
  * deployer owns, manages or holds a MANAGEMENT key on, or that is named
  * without "keyManager"; the completion check proves the deployer holds no
  * KeyManager power and that the identity authorizes it
- * (demo/utils/HandoverKeys.js).
+ * (demo/utils/HandoverKeys.js). OracleManager (4.4) must bind a consensus
+ * engine whose code is the compiled ConsensusOracle and that serves it
+ * (the engine has no owner, so it is not handed over); the deployer step
+ * makes ops the manager's operator, and an operator other than ops is
+ * refused once governance owns the manager (demo/utils/HandoverOracles.js).
  *
  * Every contract in ACCEPTANCE_PLAN (demo/utils/HandoverChecks.js) given here
  * is nominated and accepted by vote, InvestorTypeRegistry included; a
@@ -69,8 +73,8 @@
 import { ethers } from "hardhat";
 import * as fs from "fs";
 
-// Whitelist/Blacklist oracles have listManager(); ConsensusOracle does not,
-// and the ceremony treats its revert as "no writer role".
+// Whitelist/Blacklist oracles have listManager(); an oracle without it
+// reverts, which the ceremony treats as "no writer role".
 const ORACLE_ABI = [
   "function owner() view returns (address)",
   "function transferOwnership(address)",

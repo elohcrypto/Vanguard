@@ -1,6 +1,7 @@
 import { expect } from "chai";
 import { ethers } from "hardhat";
 import { ageVoters } from "../helpers/governanceFixture";
+import { bindEngine } from "../helpers/oracles";
 import { SignerWithAddress } from "@nomicfoundation/hardhat-ethers/signers";
 import {
   KYC_DATA,
@@ -117,6 +118,7 @@ describe("Deployer holds no power after handover (plan Task 0.3)", function () {
     oracleManager = await (
       await ethers.getContractFactory("OracleManager")
     ).deploy();
+    await bindEngine(oracleManager); // Task 4.4
 
     // KYC issuer owned by the deployer, trusted by the registry for topic 6,
     // plus one registered investor identity with no claim yet.

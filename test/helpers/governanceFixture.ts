@@ -2,6 +2,7 @@ import { ethers } from "hardhat";
 import { addRegistrar } from "./registrars";
 import { time } from "@nomicfoundation/hardhat-network-helpers";
 import { attest, configureKyc, deployIdentity } from "./kyc";
+import { bindEngine } from "./oracles";
 
 /**
  * Advance the chain past `governance.minVoterAge()` so every identity
@@ -46,6 +47,7 @@ export async function handoverFixture() {
   const rulesAddr = await complianceRules.getAddress();
   const token = await deploy("Token", "VSC", "VSC", idRegAddr, rulesAddr);
   const oracleManager = await deploy("OracleManager");
+  await bindEngine(oracleManager); // Task 4.4: the ceremony refuses none
   const kycIssuer = await deploy(
     "ClaimIssuer",
     deployer.address,

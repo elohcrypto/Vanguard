@@ -117,7 +117,8 @@ class HandoverModule {
       // a testingMode verifier is refused by the preflight.
       privacyManager: s.getContract("privacyManager") || undefined,
       zkVerifier: s.getContract("zkVerifierIntegrated") || undefined,
-      oracles: pick(["whitelistOracle", "blacklistOracle", "consensusOracle"]),
+      // ConsensusOracle is the manager's ownerless engine (4.4), not here.
+      oracles: pick(["whitelistOracle", "blacklistOracle"]),
       issuers: pick(["kycIssuer", "amlIssuer"]),
     };
   }
