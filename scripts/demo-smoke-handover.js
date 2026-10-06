@@ -357,4 +357,32 @@ async function runHandoverSmoke(state, failures) {
   }
 }
 
-module.exports = { runHandoverSmoke };
+/**
+ * D12 (b), plan v2 Task 4.6: option 80 prints each listed signer's VGT
+ * delegation, labelled "recorded, not counted". Nothing in the smoke
+ * delegates, so every line must say "none" and 0, matching the chain.
+ * Called from demo-smoke.js with the captured governance output (lives
+ * here only to keep demo-smoke.js under 500 lines).
+ */
+async function checkDelegationLines(state, output, failures) {
+  const vgt = state.getContract("governanceToken");
+  const lines = output.match(/delegate: .*\(recorded, not counted: D12\)/g);
+  if (!vgt || !lines || lines.length !== 5) {
+    failures.push(
+      `option 80 printed ${lines ? lines.length : 0} D12 delegation lines, expected 5`,
+    );
+    return;
+  }
+  for (let i = 0; i < 5; i++) {
+    const a = state.signers[i].address;
+    const delIn = (await vgt.getVotingPower(a)) - (await vgt.balanceOf(a));
+    if ((await vgt.getDelegate(a)) !== ethers.ZeroAddress || delIn !== 0n)
+      failures.push(`signer ${i} has a VGT delegation the smoke never made`);
+    else if (!/delegate: none, delegated-in: 0\.0 VGT/.test(lines[i]))
+      failures.push(
+        `option 80 D12 line ${i} disagrees with chain: ${lines[i]}`,
+      );
+  }
+}
+
+module.exports = { runHandoverSmoke, checkDelegationLines };

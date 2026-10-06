@@ -376,11 +376,11 @@ async function main() {
     );
   }
 
-  // Voting weight must never be shown as a VGT amount. Every verified voter
-  // is worth exactly 1 vote; GovernanceToken.getVotingPower() returns a token
-  // balance from an abandoned token-weighted design. (The snapshot API that
-  // once sat beside it has been removed; the second check below stays as a
-  // regression guard against the wording coming back.)
+  // Voting weight is never a VGT amount: 1 vote per verified voter; VGT
+  // delegation is recorded, not counted (D12). The snapshot check guards
+  // against removed wording coming back.
+  const { checkDelegationLines } = require("./demo-smoke-handover");
+  await checkDelegationLines(state, output, failures);
   if (/Voting Power[^\n]*VGT/.test(output)) {
     failures.push(
       "governance output shows voting weight as a VGT amount — votes are 1 per verified person, not token-weighted",
