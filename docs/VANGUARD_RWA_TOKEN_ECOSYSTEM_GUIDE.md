@@ -240,9 +240,7 @@ For each bank:
 #### Banking Institution Management
 ```javascript
 this.bankingInstitutions = new Map(); // Bank registry
-this.tokenBalances = new Map();       // Real-time balances
 this.transferHistory = [];            // Transaction audit trail
-this.lockedTokens = 1000000;         // Reserved tokens
 this.maxTransferAmount = 8000;       // Jurisdiction limit
 ```
 

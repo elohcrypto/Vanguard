@@ -59,18 +59,6 @@ class DemoState {
     this.normalUsers = new Map();
 
     /**
-     * @property {Object|null} tokenSystem - ERC-3643 token system reference
-     * @type {Object|null}
-     */
-    this.tokenSystem = null;
-
-    /**
-     * @property {Map} tokenBalances - Token balances (address => balance)
-     * @type {Map<string, number>}
-     */
-    this.tokenBalances = new Map();
-
-    /**
      * @property {Array} transferHistory - Transfer transaction history
      * @type {Array<Object>}
      */
@@ -91,12 +79,6 @@ class DemoState {
     this.bankingInstitutions = new Map();
 
     /**
-     * @property {number} lockedTokens - Total locked tokens
-     * @type {number}
-     */
-    this.lockedTokens = 1000000;
-
-    /**
      * @property {number} maxTransferAmount - Maximum transfer amount
      * @type {number}
      */
@@ -113,18 +95,6 @@ class DemoState {
     this.complianceRulesDeployBlock = undefined;
     /** Block IdentityRegistry was deployed in: the handover's fromBlock. */
     this.identityRegistryDeployBlock = undefined;
-
-    /**
-     * @property {Map} complianceRulesConfig - Compliance configuration
-     * @type {Map<string, any>}
-     */
-    this.complianceRulesConfig = new Map();
-
-    /**
-     * @property {Map} testTokens - Test token instances
-     * @type {Map<string, Object>}
-     */
-    this.testTokens = new Map();
 
     // ========== ORACLE MANAGEMENT SYSTEM ==========
 
@@ -179,18 +149,6 @@ class DemoState {
     this.privacyManager = null;
 
     /**
-     * @property {Map} privacyConfig - Privacy configuration settings
-     * @type {Map<string, any>}
-     */
-    this.privacyConfig = new Map();
-
-    /**
-     * @property {Map} userPrivacyProofs - User privacy proofs
-     * @type {Map<string, Object>}
-     */
-    this.userPrivacyProofs = new Map();
-
-    /**
      * @property {Map} zkSecrets - Whitelist secret per user address (D30):
      *   leaf = Poseidon(identity, secret); never leaves the user's side
      * @type {Map<string, bigint>}
@@ -234,45 +192,7 @@ class DemoState {
      */
     this.proofGenerationTimes = new Map();
 
-    // ========== PAYMENT PROTOCOL SYSTEM (OLD) ==========
-
-    /**
-     * @property {Object|null} paymentProtocol - Payment protocol contract
-     * @type {Object|null}
-     */
-    this.paymentProtocol = null;
-
-    /**
-     * @property {Object|null} paymentEscrow - Payment escrow contract
-     * @type {Object|null}
-     */
-    this.paymentEscrow = null;
-
-    /**
-     * @property {number} lastPaymentId - Last payment ID
-     * @type {number}
-     */
-    this.lastPaymentId = 0;
-
-    /**
-     * @property {Object|null} refundManager - Refund manager contract
-     * @type {Object|null}
-     */
-    this.refundManager = null;
-
-    /**
-     * @property {Map} paymentHistory - Payment transaction history
-     * @type {Map<number, Object>}
-     */
-    this.paymentHistory = new Map();
-
-    /**
-     * @property {number} paymentCounter - Payment counter
-     * @type {number}
-     */
-    this.paymentCounter = 0;
-
-    // ========== ENHANCED ESCROW SYSTEM (NEW) ==========
+    // ========== ENHANCED ESCROW SYSTEM ==========
 
     /**
      * @property {Object|null} escrowFactory - Escrow wallet factory contract
