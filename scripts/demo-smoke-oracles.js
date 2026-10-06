@@ -7,8 +7,10 @@
  * ConsensusOracle; the threshold is 66%; a whitelist and a blacklist
  * query resolve two of three through the engine (ConsensusReached) and
  * the verdicts apply; ops (the operator) pauses a node whose answer is
- * then refused and whose weight a later snapshot excludes, unpauses it,
- * and the manager's emergency designation gates emergencyBlacklist; an
+ * then refused while two of three still resolve (it stays in the
+ * denominator), pauses a second one and the third cannot resolve alone,
+ * unpauses both, and the manager's emergency designation gates
+ * emergencyBlacklist; an
  * expired query closes without a verdict. Failures are pushed, never
  * thrown.
  */
@@ -51,7 +53,7 @@ async function runOracleSmoke(state, failures) {
     (await codeHash(engAddr)) === (await expectedHash("ConsensusOracle")),
   );
   check(
-    `threshold is ${Flow.THRESHOLD}% of the active weight`,
+    `threshold is ${Flow.THRESHOLD}% of the registered weight`,
     Number(await om.getConsensusThreshold()) === Flow.THRESHOLD,
   );
 
@@ -91,11 +93,14 @@ async function runOracleSmoke(state, failures) {
       "35a: the operator is ops",
       same(await om.operator(), Flow.opsSigner(state).address),
     );
-    check("35a: the paused node's answer was refused", l && l.pausedRefusal);
+    check(
+      `35a: the paused node's answer was refused as not active [${l && l.pausedRefusal}]`,
+      l && /Oracle not active/.test(l.pausedRefusal || ""),
+    );
     const lt = l && l.tally;
     check(
-      "35a: a snapshot after the pause excludes the paused node (200)",
-      lt && lt.snapshot === 200n,
+      "35a: with one node paused it stays in the denominator (300)",
+      lt && lt.snapshot === 300n,
     );
     const lev = lt && (await reached(lt.q));
     check(
@@ -104,7 +109,13 @@ async function runOracleSmoke(state, failures) {
         lev.args.yesWeight === 200n &&
         !lt.voters.some((v) => same(v, n3.address)),
     );
+    const la = l && l.aloneTally;
+    check(
+      "35a: with two nodes paused the third cannot resolve alone (100 of 300)",
+      la && la.snapshot === 300n && la.yes === 100n && !la.hasResult,
+    );
     check("35a: unpause restored node 3", await om.isActiveOracle(n3.address));
+    check("35a: unpause restored node 2", await om.isActiveOracle(n2.address));
     check(
       "35a: the designated node listed (emergencyBlacklist)",
       l && l.emergencyListed,
