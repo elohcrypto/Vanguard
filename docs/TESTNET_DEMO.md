@@ -143,8 +143,9 @@ mint fake identities, visibly on chain, but those cannot vote for
 keys out.
 VGT delegation is recorded on the token and not counted by governance (D12,
 plan v2 Task 4.6). `GovernanceToken.delegate` moves a holder's balance into
-its delegate's `getVotingPower` (and `getTotalVotingPower`,
-`getVotingPowerPercentage` report it), but `castVote` adds exactly 1 per
+its delegate's `getVotingPower` and `getVotingPowerPercentage`; the
+delegator keeps its own, so the readings count that balance twice;
+`getTotalVotingPower` stays `totalSupply`. `castVote` adds exactly 1 per
 verified identity and no governance path reads voting power: a delegate
 still casts one vote and a delegator still casts its own
 (`test/governance/DelegationNoEffect.test.ts`). VGT pays the proposal and
