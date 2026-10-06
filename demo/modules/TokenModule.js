@@ -20,6 +20,7 @@ const {
 } = require("../utils/DisplayHelpers");
 const { attestAll, signClaim } = require("../utils/Kyc");
 const { whitelistHints } = require("../utils/WhitelistLiveFlow");
+const Custody = require("../utils/CustodyFlow");
 const { ethers } = require("hardhat");
 
 /**
@@ -581,15 +582,25 @@ class TokenModule {
       return;
     }
 
-    console.log("\n📋 SELECT INVESTOR TYPE:");
-    console.log("1. RETAIL (Lock: 10,000 VSC, Max Transfer: 8,000 VSC)");
-    console.log("2. ACCREDITED (Lock: 100,000 VSC, Max Transfer: 50,000 VSC)");
+    // Lock requirements are read from InvestorRequestManager (Task 4.3).
+    let manager;
+    try {
+      manager = await Custody.deployCustody(this.state);
+    } catch (error) {
+      displayError(`Custody not available: ${error.message}`);
+      return;
+    }
+    if (!manager) return;
+    const typeMap = { 1: "RETAIL", 2: "ACCREDITED", 3: "INSTITUTIONAL" };
     console.log(
-      "3. INSTITUTIONAL (Lock: 1,000,000 VSC, Max Transfer: 500,000 VSC)",
+      "\n📋 SELECT INVESTOR TYPE (lock held 2-of-2 in a MultiSigWallet):",
     );
+    for (const [k, name] of Object.entries(typeMap)) {
+      const lock = await manager.lockRequirements(Custody.TYPES[name]);
+      console.log(`${k}. ${name} (Lock: ${ethers.formatEther(lock)} VSC)`);
+    }
 
     const typeChoice = await this.promptUser("Select type (1-3): ");
-    const typeMap = { 1: "RETAIL", 2: "ACCREDITED", 3: "INSTITUTIONAL" };
     const investorType = typeMap[typeChoice];
 
     if (!investorType) {
@@ -597,18 +608,25 @@ class TokenModule {
       return;
     }
 
-    const lockRequirements = {
-      RETAIL: "10,000",
-      ACCREDITED: "100,000",
-      INSTITUTIONAL: "1,000,000",
-    };
+    let request;
+    try {
+      request = await Custody.requestStatus(
+        this.state,
+        selectedUser,
+        investorType,
+      );
+    } catch (error) {
+      displayError(`Request refused on chain: ${error.message}`);
+      return;
+    }
+    const lockRequired = ethers.formatEther(request.lock);
 
     console.log(`\n✅ REQUEST CREATED!`);
     console.log("=".repeat(60));
     console.log(`👤 User: ${selectedUser.name}`);
     console.log(`📋 Requested Type: ${investorType}`);
-    console.log(`💰 Required Lock: ${lockRequirements[investorType]} VSC`);
-    console.log(`📊 Status: PENDING`);
+    console.log(`💰 Required Lock: ${lockRequired} VSC`);
+    console.log(`📊 Status: ${request.status.toUpperCase()}`);
     console.log("");
     console.log("🎯 NEXT STEPS:");
     console.log("   1. Bank transfers tokens to user (Option 3)");
@@ -620,7 +638,7 @@ class TokenModule {
     selectedUser.investorRequest = {
       requestedType: investorType,
       status: "PENDING",
-      lockRequired: lockRequirements[investorType],
+      lockRequired,
       createdAt: new Date().toISOString(),
     };
 
@@ -757,7 +775,8 @@ class TokenModule {
   }
 
   /**
-   * Create multi-sig wallet for investor
+   * Option 23 -> 4: the bank (ops) creates the user's 2-of-2 MultiSigWallet
+   * through InvestorRequestManager (Task 4.3); the address is read back.
    * @private
    */
   async createMultiSigWalletForInvestor() {
@@ -766,284 +785,91 @@ class TokenModule {
     console.log("Phase 2: Multi-Sig Wallet Creation");
     console.log("");
 
-    if (!this.state.investors || this.state.investors.size === 0) {
-      console.log("❌ No investors found!");
-      console.log(
-        "💡 Create normal users and request investor status first (Options 1-2)",
-      );
-      return;
+    const selectedUser = await this._pickInvestor(
+      (u) =>
+        u.investorRequest &&
+        u.investorRequest.status === "PENDING" &&
+        !u.multiSigWallet,
+      "USERS WITH PENDING REQUESTS",
+      "💡 Users must request investor status first (Option 2)",
+    );
+    if (!selectedUser) return;
+
+    try {
+      console.log(`\n🔐 Creating 2-of-2 Multi-Sig Wallet...`);
+      await Custody.createWallet(this.state, selectedUser);
+      console.log(`\n✅ MULTI-SIG WALLET CREATED!`);
+      console.log("🎯 NEXT STEP: User locks tokens (Option 5)");
+    } catch (error) {
+      displayError(`Wallet creation failed: ${error.message}`);
     }
-
-    const usersWithRequests = Array.from(this.state.investors.values()).filter(
-      (u) => u.investorRequest && u.investorRequest.status === "PENDING",
-    );
-
-    if (usersWithRequests.length === 0) {
-      console.log("❌ No pending investor requests!");
-      console.log("💡 Users must request investor status first (Option 2)");
-      return;
-    }
-
-    console.log("\n👥 USERS WITH PENDING REQUESTS:");
-    usersWithRequests.forEach((user, index) => {
-      console.log(
-        `${index + 1}. ${user.name} - ${user.investorRequest.requestedType} (Lock: ${user.investorRequest.lockRequired} VSC)`,
-      );
-    });
-
-    const userChoice = await this.promptUser(
-      `\nSelect user (1-${usersWithRequests.length}): `,
-    );
-    const selectedUser = usersWithRequests[parseInt(userChoice) - 1];
-
-    if (!selectedUser) {
-      console.log("❌ Invalid selection");
-      return;
-    }
-
-    console.log(`\n🔐 Creating 2-of-2 Multi-Sig Wallet...`);
-    console.log(
-      `   Bank: ${this.state.signers[0].address.substring(0, 10)}...`,
-    );
-    console.log(`   User: ${selectedUser.address.substring(0, 10)}...`);
-
-    // Generate a valid Ethereum address for the multi-sig wallet
-    // Create a deterministic address based on user and bank addresses
-    const combinedData = ethers.solidityPacked(
-      ["address", "address", "uint256"],
-      [this.state.signers[0].address, selectedUser.address, Date.now()],
-    );
-    const hash = ethers.keccak256(combinedData);
-    // Take first 20 bytes (40 hex chars) and add 0x prefix to create valid address
-    const walletAddress = "0x" + hash.substring(2, 42);
-
-    selectedUser.multiSigWallet = {
-      address: walletAddress,
-      bank: this.state.signers[0].address,
-      user: selectedUser.address,
-      createdAt: new Date().toISOString(),
-      tokensLocked: 0,
-    };
-
-    // Not trusted: only contracts may be; the real MultiSigWallet is registered in Task 4.3.
-
-    console.log(`\n✅ MULTI-SIG WALLET CREATED!`);
-    console.log("=".repeat(60));
-    console.log(`🔐 Wallet Address: ${walletAddress}`);
-    console.log(
-      `🏦 Bank Signer: ${this.state.signers[0].address.substring(0, 10)}...`,
-    );
-    console.log(`👤 User Signer: ${selectedUser.address.substring(0, 10)}...`);
-    console.log(`📊 Status: READY FOR TOKEN LOCK`);
-    console.log(
-      `💡 Note: This is a deterministic address derived from Bank + User addresses`,
-    );
-    console.log("");
-    console.log("🎯 NEXT STEP: User locks tokens (Option 5)");
   }
 
   /**
-   * Lock tokens in multi-sig wallet
+   * Pick a tracked investor matching `filter`; null (reason printed) when
+   * there is none or the choice is invalid.
+   * @private
+   */
+  async _pickInvestor(filter, title, hint) {
+    const users = this.state.investors
+      ? Array.from(this.state.investors.values()).filter(filter)
+      : [];
+    if (users.length === 0) {
+      console.log(`❌ No users found for this step!`);
+      console.log(hint);
+      return null;
+    }
+    console.log(`\n👥 ${title}:`);
+    users.forEach((u, i) => {
+      const r = u.investorRequest;
+      console.log(
+        `${i + 1}. ${u.name} - ${r ? r.requestedType : u.type}${r ? ` (Lock: ${r.lockRequired} VSC)` : ""}`,
+      );
+    });
+    const choice = await this.promptUser(`\nSelect user (1-${users.length}): `);
+    const picked = users[parseInt(choice) - 1];
+    if (!picked) console.log("❌ Invalid selection");
+    return picked || null;
+  }
+
+  /**
+   * Option 23 -> 5: the user approves the wallet and locks the required
+   * amount; the tokens move into the MultiSigWallet (Task 4.3, D13 b).
    * @private
    */
   async lockTokensInMultiSig() {
     console.log("\n💰 LOCK TOKENS IN MULTI-SIG WALLET");
     console.log("=".repeat(60));
-    console.log("Phase 2: Token Locking");
+    console.log("Phase 2: Token Locking (the tokens move into the wallet)");
     console.log("");
 
-    if (!this.state.investors || this.state.investors.size === 0) {
-      console.log("❌ No investors found!");
-      console.log(
-        "💡 Create normal users and request investor status first (Options 1-2)",
-      );
-      return;
-    }
-
-    const usersWithWallets = Array.from(this.state.investors.values()).filter(
+    const selectedUser = await this._pickInvestor(
       (u) => u.multiSigWallet && u.multiSigWallet.tokensLocked === 0,
+      "USERS READY TO LOCK TOKENS",
+      "💡 Bank must create multi-sig wallet first (Option 4)",
     );
-
-    if (usersWithWallets.length === 0) {
-      console.log("❌ No users with multi-sig wallets ready for locking!");
-      console.log("💡 Bank must create multi-sig wallet first (Option 4)");
-      return;
-    }
-
-    console.log("\n👥 USERS READY TO LOCK TOKENS:");
-    usersWithWallets.forEach((user, index) => {
-      console.log(
-        `${index + 1}. ${user.name} - ${user.investorRequest.requestedType} (Required: ${user.investorRequest.lockRequired} VSC)`,
-      );
-    });
-
-    const userChoice = await this.promptUser(
-      `\nSelect user (1-${usersWithWallets.length}): `,
-    );
-    const selectedUser = usersWithWallets[parseInt(userChoice) - 1];
-
-    if (!selectedUser) {
-      console.log("❌ Invalid selection");
-      return;
-    }
-
-    const lockAmount = selectedUser.investorRequest.lockRequired.replace(
-      /,/g,
-      "",
-    );
-
-    console.log(`\n💰 INITIATING TOKEN LOCK PROCESS...`);
-    console.log("=".repeat(60));
-    console.log(`👤 User: ${selectedUser.name}`);
-    console.log(
-      `📋 Investor Type: ${selectedUser.investorRequest.requestedType}`,
-    );
-    console.log(`💰 Lock Amount: ${lockAmount} VSC`);
-    console.log("");
-
-    // Show user's current balance
-    console.log(`📊 PRE-LOCK STATUS:`);
-    console.log(`   User Address: ${selectedUser.address}`);
-    console.log(`   User Balance: ${selectedUser.tokenBalance} VSC`);
-    console.log(`   Multi-Sig Wallet: ${selectedUser.multiSigWallet.address}`);
-    console.log(
-      `   Current Locked: ${selectedUser.multiSigWallet.tokensLocked} VSC`,
-    );
-    console.log("");
-
-    // FREEZE TOKENS ON-CHAIN using ERC-3643 freezePartialTokens
-    console.log(`🔐 STEP 1: Freezing tokens on-chain...`);
-    console.log(`   👤 User Address: ${selectedUser.address}`);
-    console.log(`   💰 Amount to Freeze: ${lockAmount} VSC`);
-    console.log("");
-
-    // Declare variable outside try block so it's accessible later
-    let userBalanceVSC = 0;
+    if (!selectedUser) return;
 
     try {
-      // Get user's current on-chain balance
-      const digitalToken = this.state.getContract("digitalToken");
-      const userBalance = await digitalToken.balanceOf(selectedUser.address);
-      userBalanceVSC = parseFloat(ethers.formatEther(userBalance));
-
-      console.log(
-        `   📊 Current Balance: ${userBalanceVSC.toLocaleString()} VSC`,
-      );
-
-      // Check if user has enough tokens
-      if (userBalanceVSC < parseInt(lockAmount)) {
-        console.log(`\n❌ ERROR: Insufficient balance!`);
-        console.log(`   Required: ${lockAmount} VSC`);
-        console.log(`   Available: ${userBalanceVSC.toLocaleString()} VSC`);
-        return;
-      }
-
-      // Freeze the tokens on-chain
-      const freezeAmountWei = ethers.parseEther(lockAmount);
-      const tx = await digitalToken.freezePartialTokens(
-        selectedUser.address,
-        freezeAmountWei,
-      );
-      await tx.wait();
-
-      console.log(`   ✅ Tokens frozen on-chain!`);
-      console.log(`   📝 Transaction Hash: ${tx.hash}`);
-      console.log("");
-
-      // Get updated balances
-      const frozenTokens = await digitalToken.frozenTokens(
-        selectedUser.address,
-      );
-      const freeBalance = await digitalToken.getFreeBalance(
-        selectedUser.address,
-      );
-
-      console.log(`🔐 STEP 2: Verifying frozen tokens...`);
-      console.log(`   🔒 Wallet Type: 2-of-2 Multi-Signature`);
-      console.log(
-        `   🏦 Signer 1: ${selectedUser.multiSigWallet.bank.substring(0, 10)}... (Bank)`,
-      );
-      console.log(
-        `   👤 Signer 2: ${selectedUser.multiSigWallet.user.substring(0, 10)}... (User)`,
-      );
-      console.log(`   ⚠️  Unlock Requirement: Both signatures required`);
-      console.log("");
-      console.log(
-        `   📊 Total Balance: ${userBalanceVSC.toLocaleString()} VSC`,
-      );
-      console.log(
-        `   🔒 Frozen Tokens: ${parseFloat(ethers.formatEther(frozenTokens)).toLocaleString()} VSC`,
-      );
-      console.log(
-        `   💰 Free Balance: ${parseFloat(ethers.formatEther(freeBalance)).toLocaleString()} VSC`,
-      );
-      console.log("");
-
-      // Update JavaScript state
-      selectedUser.tokenBalance = parseFloat(ethers.formatEther(freeBalance));
-      selectedUser.multiSigWallet.tokensLocked = parseInt(lockAmount);
-      selectedUser.investorRequest.tokensLocked = true;
+      await Custody.lock(this.state, selectedUser);
     } catch (error) {
-      console.log(`\n❌ ERROR: Failed to freeze tokens on-chain!`);
-      console.log(`   ${error.message}`);
+      displayError(`Lock failed: ${error.message}`);
       return;
     }
-
-    console.log(`✅ STEP 3: Lock complete!`);
-    console.log("");
-
-    console.log(`\n✅ TOKENS LOCKED SUCCESSFULLY ON-CHAIN!`);
-    console.log("=".repeat(60));
-
-    console.log(`\n📊 POST-LOCK STATUS:`);
+    console.log(`\n✅ TOKENS LOCKED IN THE MULTI-SIG WALLET`);
+    console.log(`   🔐 Wallet: ${selectedUser.multiSigWallet.address}`);
     console.log(
-      `   Total Balance: ${userBalanceVSC.toLocaleString()} VSC (unchanged)`,
+      `   👥 Unlock needs BOTH: bank ${selectedUser.multiSigWallet.bank}`,
     );
     console.log(
-      `   🔒 Frozen (Locked): ${selectedUser.multiSigWallet.tokensLocked.toLocaleString()} VSC`,
+      `                        user ${selectedUser.multiSigWallet.user}`,
     );
-    console.log(
-      `   💰 Free (Available): ${selectedUser.tokenBalance.toLocaleString()} VSC`,
-    );
-    console.log(`   ⚠️  Locked tokens CANNOT be transferred!`);
-    console.log("");
-
-    console.log(`🔐 MULTI-SIG WALLET DETAILS:`);
-    console.log(`   Wallet Address: ${selectedUser.multiSigWallet.address}`);
-    console.log(`   Locked Amount: ${lockAmount} VSC`);
-    console.log(`   Lock Type: 2-of-2 Multi-Signature`);
-    console.log(
-      `   Created: ${new Date(selectedUser.multiSigWallet.createdAt).toLocaleString()}`,
-    );
-    console.log(`   Status: LOCKED ✅`);
-    console.log("");
-
-    console.log(`👥 REQUIRED SIGNERS FOR UNLOCK:`);
-    console.log(`   1. 🏦 Bank: ${selectedUser.multiSigWallet.bank}`);
-    console.log(`   2. 👤 User: ${selectedUser.multiSigWallet.user}`);
-    console.log("");
-
-    console.log(`📋 INVESTOR REQUEST STATUS:`);
-    console.log(`   User: ${selectedUser.name}`);
-    console.log(
-      `   Requested Type: ${selectedUser.investorRequest.requestedType}`,
-    );
-    console.log(
-      `   Lock Required: ${selectedUser.investorRequest.lockRequired} VSC`,
-    );
-    console.log(`   Tokens Received: ✅ YES`);
-    console.log(`   Tokens Locked: ✅ YES`);
-    console.log(`   Request Status: PENDING APPROVAL`);
-    console.log("");
-
     console.log(`🎯 NEXT STEP: Bank approves request (Option 6)`);
-    console.log(
-      `   Once approved, user will become ${selectedUser.investorRequest.requestedType} investor`,
-    );
   }
 
   /**
-   * Approve investor request
+   * Option 23 -> 6: the bank approves through InvestorRequestManager,
+   * which checks the lock is still held and assigns the type.
    * @private
    */
   async approveInvestorRequest() {
@@ -1052,83 +878,26 @@ class TokenModule {
     console.log("Phase 2: Request Approval");
     console.log("");
 
-    if (!this.state.investors || this.state.investors.size === 0) {
-      console.log("❌ No investors found!");
-      console.log(
-        "💡 Create normal users and request investor status first (Options 1-2)",
-      );
-      return;
-    }
-
-    const usersReadyForApproval = Array.from(
-      this.state.investors.values(),
-    ).filter(
+    const selectedUser = await this._pickInvestor(
       (u) =>
         u.investorRequest &&
         u.investorRequest.tokensLocked &&
         u.investorRequest.status === "PENDING",
+      "REQUESTS READY FOR APPROVAL",
+      "💡 Users must lock tokens first (Option 5)",
     );
-
-    if (usersReadyForApproval.length === 0) {
-      console.log("❌ No requests ready for approval!");
-      console.log("💡 Users must lock tokens first (Option 5)");
-      return;
-    }
-
-    console.log("\n👥 REQUESTS READY FOR APPROVAL:");
-    usersReadyForApproval.forEach((user, index) => {
-      console.log(
-        `${index + 1}. ${user.name} - ${user.investorRequest.requestedType} (Locked: ${user.investorRequest.lockRequired} VSC)`,
-      );
-    });
-
-    const userChoice = await this.promptUser(
-      `\nSelect request (1-${usersReadyForApproval.length}): `,
-    );
-    const selectedUser = usersReadyForApproval[parseInt(userChoice) - 1];
-
-    if (!selectedUser) {
-      console.log("❌ Invalid selection");
-      return;
-    }
+    if (!selectedUser) return;
 
     try {
-      console.log(`\n✅ Approving investor request...`);
-
-      // Update investor type on-chain
-      const typeMap = { RETAIL: 1, ACCREDITED: 2, INSTITUTIONAL: 3 };
-      const investorTypeEnum =
-        typeMap[selectedUser.investorRequest.requestedType];
-
-      const investorTypeRegistry = this.state.getContract(
-        "investorTypeRegistry",
-      );
-      const tx = await investorTypeRegistry.assignInvestorType(
-        selectedUser.address,
-        investorTypeEnum,
-      );
-      const receipt = await tx.wait();
-
-      // Update user record
+      await Custody.approve(this.state, selectedUser);
       selectedUser.type = selectedUser.investorRequest.requestedType;
       selectedUser.investorRequest.status = "APPROVED";
       selectedUser.investorRequest.approvedAt = new Date().toISOString();
-
       console.log(`\n✅ INVESTOR REQUEST APPROVED!`);
-      console.log("=".repeat(60));
       console.log(`👤 User: ${selectedUser.name}`);
       console.log(`📋 New Type: ${selectedUser.type}`);
       console.log(
-        `💰 Tokens Locked: ${selectedUser.investorRequest.lockRequired} VSC`,
-      );
-      console.log(
         `🔐 Multi-Sig Wallet: ${selectedUser.multiSigWallet.address}`,
-      );
-      console.log(`📊 Status: ACTIVE INVESTOR`);
-      console.log(`⛽ Gas Used: ${receipt.gasUsed.toLocaleString()}`);
-      console.log("");
-      console.log(
-        "🎉 User is now an active investor with enhanced privileges!",
       );
     } catch (error) {
       console.error("❌ Approval failed:", error.message);
@@ -1136,317 +905,38 @@ class TokenModule {
   }
 
   /**
-   * Downgrade investor to normal user
+   * Option 23 -> 8: the user proposes and signs, the bank signs: the
+   * MultiSigWallet pays everything it holds back to the user (2-of-2,
+   * never a bare unfreeze); then the type returns to Normal.
    * @private
    */
   async downgradeToNormalUser() {
     console.log("\n🔓 DOWNGRADE TO NORMAL USER");
     console.log("=".repeat(60));
-    console.log("Phase 4: Downgrade Process (2-of-2 Signature Unlock)");
+    console.log("Phase 4: Downgrade Process (2-of-2 on-chain unlock)");
     console.log("");
 
-    if (!this.state.investors || this.state.investors.size === 0) {
-      console.log("❌ No investors found!");
-      console.log("💡 Create and approve investors first (Options 1-6)");
-      return;
-    }
-
-    const investors = Array.from(this.state.investors.values()).filter(
+    const selectedUser = await this._pickInvestor(
       (u) =>
         u.type !== "NORMAL" && u.type !== "NORMAL_USER" && u.multiSigWallet,
+      "ACTIVE INVESTORS",
+      "💡 Create and approve investors first (Options 1-6)",
     );
-
-    if (investors.length === 0) {
-      console.log("❌ No active investors found!");
-      return;
-    }
-
-    console.log("\n👥 ACTIVE INVESTORS:");
-    investors.forEach((user, index) => {
-      console.log(
-        `${index + 1}. ${user.name} - ${user.type} (Locked: ${user.multiSigWallet.tokensLocked} VSC)`,
-      );
-    });
-
-    const userChoice = await this.promptUser(
-      `\nSelect investor (1-${investors.length}): `,
-    );
-    const selectedUser = investors[parseInt(userChoice) - 1];
-
-    if (!selectedUser) {
-      console.log("❌ Invalid selection");
-      return;
-    }
+    if (!selectedUser) return;
 
     try {
-      console.log(`\n🔓 Initiating downgrade process...`);
-      console.log(`   Requires 2-of-2 signatures (Bank + User)`);
+      const { released } = await Custody.downgrade(this.state, selectedUser);
+      selectedUser.type = "NORMAL";
+      selectedUser.investorRequest = null;
+      console.log(`\n✅ DOWNGRADE COMPLETE!`);
+      console.log(`👤 User: ${selectedUser.name}`);
       console.log(
-        `   Multi-Sig Wallet: ${selectedUser.multiSigWallet.address}`,
+        `💰 Released by bank + user: ${ethers.formatEther(released)} VSC`,
       );
-
-      // Get signers
-      const bankSigner = this.state.signers[0]; // Central Bank
-      const userSigner = selectedUser.signer;
-
-      // Step 1: Create unlock proposal with real data
-      console.log(`\n📝 Step 1: Creating unlock proposal...`);
-      const proposalData = {
-        wallet: selectedUser.multiSigWallet.address,
-        user: selectedUser.address,
-        amount: selectedUser.multiSigWallet.tokensLocked,
-        timestamp: Date.now(),
-        nonce: Math.floor(Math.random() * 1000000),
-      };
-
-      // Create proposal hash
-      const proposalMessage = ethers.solidityPacked(
-        ["address", "address", "uint256", "uint256", "uint256"],
-        [
-          proposalData.wallet,
-          proposalData.user,
-          proposalData.amount,
-          proposalData.timestamp,
-          proposalData.nonce,
-        ],
-      );
-      const proposalHash = ethers.keccak256(proposalMessage);
-
-      console.log(`   ✅ Proposal created`);
-      console.log(
-        `   📋 Proposal ID: ${proposalHash.substring(0, 10)}...${proposalHash.substring(proposalHash.length - 8)}`,
-      );
-      console.log(`   💰 Unlock Amount: ${proposalData.amount} VSC`);
-      console.log(
-        `   ⏰ Timestamp: ${new Date(proposalData.timestamp).toLocaleString()}`,
-      );
-      console.log(`   🔢 Nonce: ${proposalData.nonce}`);
-
-      // Step 2: User signature (REAL CRYPTOGRAPHIC SIGNATURE)
-      console.log(`\n✍️  Step 2: User signature...`);
-      console.log(`   👤 Signer: ${userSigner.address}`);
-      console.log(
-        `   📝 Signing proposal hash: ${proposalHash.substring(0, 20)}...`,
-      );
-
-      const userSignature = await userSigner.signMessage(
-        ethers.getBytes(proposalHash),
-      );
-
-      console.log(`   ✅ User signed (1/2)`);
-      console.log(
-        `   🔐 Signature: ${userSignature.substring(0, 20)}...${userSignature.substring(userSignature.length - 20)}`,
-      );
-      console.log(`   📏 Signature Length: ${userSignature.length} characters`);
-      console.log(
-        `   🔑 Signature Type: ECDSA (Elliptic Curve Digital Signature Algorithm)`,
-      );
-
-      // Verify user signature
-      const recoveredUserAddress = ethers.verifyMessage(
-        ethers.getBytes(proposalHash),
-        userSignature,
-      );
-      console.log(
-        `   ✅ Signature Verified: ${recoveredUserAddress === userSigner.address ? "VALID" : "INVALID"}`,
-      );
-      console.log(`   🔍 Recovered Address: ${recoveredUserAddress}`);
-
-      // Step 3: Bank signature (REAL CRYPTOGRAPHIC SIGNATURE)
-      console.log(`\n✍️  Step 3: Bank signature...`);
-      console.log(`   🏦 Signer: ${bankSigner.address}`);
-      console.log(
-        `   📝 Signing proposal hash: ${proposalHash.substring(0, 20)}...`,
-      );
-
-      const bankSignature = await bankSigner.signMessage(
-        ethers.getBytes(proposalHash),
-      );
-
-      console.log(`   ✅ Bank signed (2/2)`);
-      console.log(
-        `   🔐 Signature: ${bankSignature.substring(0, 20)}...${bankSignature.substring(bankSignature.length - 20)}`,
-      );
-      console.log(`   📏 Signature Length: ${bankSignature.length} characters`);
-      console.log(
-        `   🔑 Signature Type: ECDSA (Elliptic Curve Digital Signature Algorithm)`,
-      );
-
-      // Verify bank signature
-      const recoveredBankAddress = ethers.verifyMessage(
-        ethers.getBytes(proposalHash),
-        bankSignature,
-      );
-      console.log(
-        `   ✅ Signature Verified: ${recoveredBankAddress === bankSigner.address ? "VALID" : "INVALID"}`,
-      );
-      console.log(`   🔍 Recovered Address: ${recoveredBankAddress}`);
-
-      // Step 4: Verify 2-of-2 signatures
-      console.log(`\n🔐 Step 4: Verifying 2-of-2 signatures...`);
-      const userValid = recoveredUserAddress === userSigner.address;
-      const bankValid = recoveredBankAddress === bankSigner.address;
-      const allValid = userValid && bankValid;
-
-      console.log(
-        `   👤 User Signature: ${userValid ? "✅ VALID" : "❌ INVALID"}`,
-      );
-      console.log(
-        `   🏦 Bank Signature: ${bankValid ? "✅ VALID" : "❌ INVALID"}`,
-      );
-      console.log(
-        `   🔐 2-of-2 Requirement: ${allValid ? "✅ MET" : "❌ NOT MET"}`,
-      );
-
-      if (!allValid) {
-        console.log("\n❌ Signature verification failed! Aborting unlock.");
-        return;
-      }
-
-      // Continue in next part due to 150-line limit...
-      await this.completeDowngrade(
-        selectedUser,
-        proposalHash,
-        userSignature,
-        bankSignature,
-      );
+      console.log("✅ User can request investor status again (Option 2)");
     } catch (error) {
       console.error("❌ Downgrade failed:", error.message);
     }
-  }
-
-  /**
-   * Complete the downgrade process (part 2)
-   * @private
-   */
-  async completeDowngrade(
-    selectedUser,
-    proposalHash,
-    userSignature,
-    bankSignature,
-  ) {
-    // Step 5: Unlock and unfreeze tokens on-chain
-    console.log(`\n🔓 Step 5: Unlocking and unfreezing tokens on-chain...`);
-    const unlockedAmount = selectedUser.multiSigWallet.tokensLocked;
-
-    if (unlockedAmount > 0) {
-      try {
-        const digitalToken = this.state.getContract("digitalToken");
-
-        // Get balances before unfreezing
-        const totalBalance = await digitalToken.balanceOf(selectedUser.address);
-        const frozenTokens = await digitalToken.frozenTokens(
-          selectedUser.address,
-        );
-        const freeBalance = await digitalToken.getFreeBalance(
-          selectedUser.address,
-        );
-
-        console.log(`   📊 Current Status:`);
-        console.log(
-          `      Total Balance: ${parseFloat(ethers.formatEther(totalBalance)).toLocaleString()} VSC`,
-        );
-        console.log(
-          `      🔒 Frozen: ${parseFloat(ethers.formatEther(frozenTokens)).toLocaleString()} VSC`,
-        );
-        console.log(
-          `      💰 Free: ${parseFloat(ethers.formatEther(freeBalance)).toLocaleString()} VSC`,
-        );
-        console.log("");
-
-        // Unfreeze the tokens on-chain
-        console.log(`   🔓 Unfreezing ${unlockedAmount} VSC on-chain...`);
-        const unfreezeAmountWei = ethers.parseEther(unlockedAmount.toString());
-        const tx = await digitalToken.unfreezePartialTokens(
-          selectedUser.address,
-          unfreezeAmountWei,
-        );
-        const receipt = await tx.wait();
-
-        console.log(`   ✅ Tokens unfrozen on-chain!`);
-        console.log(`   📝 Transaction Hash: ${tx.hash}`);
-        console.log(`   ⛽ Gas Used: ${receipt.gasUsed.toLocaleString()}`);
-        console.log("");
-
-        // Get updated balances after unfreezing
-        const newFrozenTokens = await digitalToken.frozenTokens(
-          selectedUser.address,
-        );
-        const newFreeBalance = await digitalToken.getFreeBalance(
-          selectedUser.address,
-        );
-
-        console.log(`   📊 Updated Status:`);
-        console.log(
-          `      Total Balance: ${parseFloat(ethers.formatEther(totalBalance)).toLocaleString()} VSC (unchanged)`,
-        );
-        console.log(
-          `      🔒 Frozen: ${parseFloat(ethers.formatEther(newFrozenTokens)).toLocaleString()} VSC`,
-        );
-        console.log(
-          `      💰 Free: ${parseFloat(ethers.formatEther(newFreeBalance)).toLocaleString()} VSC`,
-        );
-        console.log("");
-
-        // Update JavaScript state
-        selectedUser.tokenBalance = parseFloat(
-          ethers.formatEther(newFreeBalance),
-        );
-
-        console.log(
-          `   ✅ ${unlockedAmount} VSC unlocked and now available for transfer`,
-        );
-        console.log(
-          `   💰 User's free balance: ${parseFloat(ethers.formatEther(freeBalance)).toLocaleString()} VSC → ${selectedUser.tokenBalance.toLocaleString()} VSC`,
-        );
-      } catch (error) {
-        console.log(`\n❌ ERROR: Failed to unfreeze tokens on-chain!`);
-        console.log(`   ${error.message}`);
-        return;
-      }
-    }
-
-    selectedUser.multiSigWallet.tokensLocked = 0;
-    console.log(`   🔓 Multi-sig wallet unlocked`);
-
-    // Step 6: Downgrade to NORMAL on-chain
-    console.log(`\n📝 Step 6: Downgrading to NORMAL on blockchain...`);
-    const investorTypeRegistry = this.state.getContract("investorTypeRegistry");
-    const tx = await investorTypeRegistry.assignInvestorType(
-      selectedUser.address,
-      0,
-    ); // 0 = NORMAL
-    const receipt = await tx.wait();
-
-    selectedUser.type = "NORMAL";
-    selectedUser.investorRequest = null;
-
-    console.log(`\n✅ DOWNGRADE COMPLETE!`);
-    console.log("=".repeat(60));
-    console.log(`👤 User: ${selectedUser.name}`);
-    console.log(`📋 New Type: NORMAL`);
-    console.log(`💰 Tokens Unlocked (Unfrozen): ${unlockedAmount} VSC`);
-    console.log(`💳 Current Free Balance: ${selectedUser.tokenBalance} VSC`);
-    console.log(`📊 Status: NORMAL USER`);
-    console.log(`⛽ Gas Used (Downgrade): ${receipt.gasUsed.toLocaleString()}`);
-    console.log("");
-    console.log("🔐 CRYPTOGRAPHIC PROOF (2-of-2 Multi-Sig):");
-    console.log(`   Proposal Hash: ${proposalHash}`);
-    console.log(`   User Signature: ${userSignature}`);
-    console.log(`   Bank Signature: ${bankSignature}`);
-    console.log(`   Both signatures verified: ✅ VALID`);
-    console.log("");
-    console.log("💡 ON-CHAIN TOKEN STATUS:");
-    console.log(`   🔒 Frozen tokens BEFORE unlock: ${unlockedAmount} VSC`);
-    console.log(`   🔓 Frozen tokens AFTER unlock: 0 VSC`);
-    console.log(
-      `   💰 Free balance AFTER unlock: ${selectedUser.tokenBalance} VSC`,
-    );
-    console.log(`   ✅ Tokens unfrozen on-chain and now transferable`);
-    console.log("");
-    console.log(
-      "✅ User can request investor status again if needed (Option 2)",
-    );
   }
 
   /**
@@ -4152,21 +3642,23 @@ class TokenModule {
           `      💰 Total Balance: ${totalBalanceFormatted.toLocaleString()} VSC`,
         );
 
-        // Show breakdown if tokens are frozen
+        // Show breakdown if an agent froze tokens
         if (frozenBalanceFormatted > 0) {
           console.log(
-            `         🔒 Locked: ${frozenBalanceFormatted.toLocaleString()} VSC`,
+            `         🧊 Frozen: ${frozenBalanceFormatted.toLocaleString()} VSC`,
           );
           console.log(
             `         💵 Available: ${freeBalanceFormatted.toLocaleString()} VSC`,
           );
-
-          // Show multi-sig wallet info if exists
-          if (investor.multiSigWallet) {
-            console.log(
-              `         🔐 Multi-Sig: ${investor.multiSigWallet.address.substring(0, 10)}...`,
-            );
-          }
+        }
+        // The lock lives in the 2-of-2 MultiSigWallet (Task 4.3).
+        if (investor.multiSigWallet) {
+          const held = await digitalToken.balanceOf(
+            investor.multiSigWallet.address,
+          );
+          console.log(
+            `         🔐 Multi-Sig ${investor.multiSigWallet.address.substring(0, 10)}... holds ${parseFloat(ethers.formatEther(held)).toLocaleString()} VSC (bank + user to release)`,
+          );
         }
 
         console.log(`      📊 Max Transfer: ${maxTransfer} VSC`);

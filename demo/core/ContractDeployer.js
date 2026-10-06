@@ -17,6 +17,7 @@ const {
   setupDemoAttestations,
   wireJurisdictionSource,
 } = require("../utils/AttestationFlow");
+const { deployCustody } = require("../utils/CustodyFlow");
 const {
   displaySection,
   displaySuccess,
@@ -761,6 +762,12 @@ class ContractDeployer {
         );
         console.log(`   💼 Accredited Investor: 50,000 VSC`);
         console.log(`   🏛️ Institutional Investor: 500,000 VSC`);
+
+        // Task 4.3: investor custody (option 23) on this token + registry.
+        console.log(
+          "\n📝 Step 5: Investor custody (InvestorRequestManager)...",
+        );
+        await this.deployInvestorCustody();
       }
 
       // Display compliance components.
@@ -864,6 +871,17 @@ class ContractDeployer {
       console.error("💡 Stack trace:", error.stack);
       throw error;
     }
+  }
+
+  /**
+   * Plan v2 Task 4.3: deploy InvestorRequestManager for VSC (bank = ops,
+   * wallet 10) and record it as `investorRequestManager`; it is named a
+   * ComplianceRules registrar for the MultiSigWallet code hash. Options 21
+   * and 51 call this once both VSC and the investor type registry exist.
+   * @returns {Promise<Object|null>} the manager, or null when not deployable
+   */
+  async deployInvestorCustody() {
+    return deployCustody(this.state);
   }
 
   /**

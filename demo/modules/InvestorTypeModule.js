@@ -13,6 +13,7 @@ const {
   displayError,
 } = require("../utils/DisplayHelpers");
 const { ethers } = require("hardhat");
+const { deployCustody } = require("../utils/CustodyFlow");
 
 /**
  * @class InvestorTypeModule
@@ -148,6 +149,11 @@ class InvestorTypeModule {
               `   ⚠️  Readback (${wired}) does not match deployed registry (${registryAddress})`,
             );
           }
+          // Task 4.3: investor custody (option 23) needs this registry.
+          console.log(
+            "\n🔐 Deploying investor custody (InvestorRequestManager)...",
+          );
+          await deployCustody(this.state);
         } catch (error) {
           console.log(
             `⚠️ Failed to connect InvestorTypeRegistry to token: ${error.message}`,

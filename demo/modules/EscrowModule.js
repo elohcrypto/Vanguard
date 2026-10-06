@@ -13,6 +13,7 @@ const {
   displayWarning,
 } = require("../utils/DisplayHelpers");
 const { registerRegistrar } = require("../utils/GovernedCalls");
+const { retirePlaceholder } = require("../utils/CustodyFlow");
 const { advancePast, canJumpTime } = require("../utils/ChainTime");
 const { signShipmentProof } = require("../utils/ShipmentProof");
 const { attestAll } = require("../utils/Kyc");
@@ -237,6 +238,9 @@ class EscrowModule {
   async _ensureFeeExempt(address, label) {
     const registry = this.state.getContract("investorTypeRegistry");
     if (!registry || (await registry.investorLimitExempt(address))) return;
+    // A contract fee wallet (the MultiSigWallet, Task 4.3) is trusted on
+    // VSC: no investor cap applies to it, so there is nothing to exempt.
+    if ((await ethers.provider.getCode(address)) !== "0x") return;
     if ((await registry.owner()) !== (await registry.runner.getAddress())) {
       displayWarning(
         `${label} ${address} is not exempt from investor limits: after the handover only an InvestorTypeConfig vote can exempt it (option 76, type 0, choice 2)`,
@@ -341,20 +345,38 @@ class EscrowModule {
       const admin = await this._investorAdmin(escrowFactory);
       if (!admin) return;
 
-      // Escrow wallets pay the investor fee wallet: it must be verified.
-      const walletHasKey = this.state.signers.some(
-        (s) => s.address.toLowerCase() === investorWallet.toLowerCase(),
-      );
-      if (
-        !walletHasKey &&
-        (await ethers.provider.getCode(investorWallet)) === "0x"
-      ) {
-        displayWarning(
-          "Fee wallet is a keyless placeholder until Task 4.3 deploys the real MultiSigWallet: fees sent to it are stranded, and its identity counts in the governance electorate.",
+      // A MultiSigWallet fee wallet (Task 4.3) is a contract trusted on VSC
+      // by InvestorRequestManager: no identity, fees released 2-of-2. Any
+      // other fee wallet is a human party and must be a verified investor.
+      if ((await ethers.provider.getCode(investorWallet)) !== "0x") {
+        const rules = this.state.getContract("complianceRules");
+        const vsc = await this.state.getContract("digitalToken").getAddress();
+        if (
+          !(await rules["isTrustedContract(address,address)"](
+            vsc,
+            investorWallet,
+          ))
+        ) {
+          displayError(
+            `Fee wallet ${investorWallet} is a contract not trusted on VSC: escrow releases to it would revert`,
+          );
+          return;
+        }
+        console.log(
+          "   ✅ Fee wallet is the investor's MultiSigWallet: trusted on VSC, fees released by bank + user",
         );
+        // 2E.1 interim undone: replace a keyless placeholder fee wallet.
+        await retirePlaceholder(
+          this.state,
+          escrowFactory,
+          admin,
+          investorAddress,
+          investorWallet,
+        );
+      } else {
+        await this._ensureVerified(investorWallet, "investor fee wallet");
+        await this._ensureFeeExempt(investorWallet, "investor fee wallet");
       }
-      await this._ensureVerified(investorWallet, "investor fee wallet");
-      await this._ensureFeeExempt(investorWallet, "investor fee wallet");
 
       console.log(`\n📝 Registering investor...`);
       console.log(`   Investor Address: ${investorAddress}`);
@@ -1110,8 +1132,12 @@ class EscrowModule {
       console.log(
         `   Payee (${payee.substring(0, 10)}...): ${isPayeeVerified ? "✅ VERIFIED" : "❌ NOT VERIFIED"}`,
       );
+      // A MultiSigWallet fee wallet (Task 4.3) is trusted, not verified.
+      const feeWalletTrusted = await complianceRules[
+        "isTrustedContract(address,address)"
+      ](this.state.getContract("digitalToken").target, investorWallet);
       console.log(
-        `   Investor Fee Wallet (${investorWallet.substring(0, 10)}...): ${isInvestorWalletVerified ? "✅ VERIFIED" : "❌ NOT VERIFIED"}`,
+        `   Investor Fee Wallet (${investorWallet.substring(0, 10)}...): ${feeWalletTrusted ? "✅ TRUSTED (MultiSigWallet, 2-of-2)" : isInvestorWalletVerified ? "✅ VERIFIED" : "❌ NOT VERIFIED"}`,
       );
       console.log(
         `   Owner Wallet (${ownerWalletAddr.substring(0, 10)}...): ${isOwnerVerified ? "✅ VERIFIED" : "❌ NOT VERIFIED"}`,
