@@ -6,6 +6,8 @@
  * identity, one rotation and one recovery run through their timelocks on
  * the dev node, and the key set is read back from chain. Records the
  * identity in state.keyLifecycle for the handover ceremony's check.
+ * Then option 5a (demo/utils/KeyRemovalFlow.js, Task 4.5): a key removed
+ * with its holder's signature is gone, a stranger's signature is refused.
  */
 
 const { ethers } = require("hardhat");
@@ -15,8 +17,52 @@ const {
   keyOf,
   runKeyLifecycle,
 } = require("../demo/utils/KeyLifecycleFlow");
+const {
+  innerMessage,
+  runRemovalDemo,
+} = require("../demo/utils/KeyRemovalFlow");
 
 const MANAGEMENT = 1;
+const ACTION = 2;
+
+/** Option 5a, then its facts read from chain (not from the flow's return). */
+async function removalFacts(state, failures) {
+  const real = console.log;
+  console.log = () => {};
+  let r;
+  try {
+    r = await runRemovalDemo(state);
+  } catch (e) {
+    failures.push(`4.5: option 5a threw: ${e.message.split("\n")[0]}`);
+    return [];
+  } finally {
+    console.log = real;
+  }
+  if (!r) return [["option 5a ran", false]];
+  const id = await ethers.getContractAt("OnchainID", r.identity);
+  const removed = await id.queryFilter(id.filters.KeyRemoved(r.key, ACTION));
+  const stranger = ethers.Wallet.createRandom();
+  const sig = await stranger.signMessage(
+    ethers.getBytes(await innerMessage(id, r.key, ACTION)),
+  );
+  let refused = false;
+  try {
+    await id
+      .connect(state.signers[DEMO_WALLET])
+      .removeKeyWithProof.staticCall(r.key, ACTION, sig);
+  } catch (e) {
+    refused = /does not prove ownership/.test(e.message);
+  }
+  const info = await id.getKey(r.key);
+  return [
+    [
+      "5a: the key removed with proof is gone (keyHasPurpose false, revokedAt set)",
+      !(await id.keyHasPurpose(r.key, ACTION)) && info.revokedAt > 0n,
+    ],
+    ["5a: KeyRemoved was emitted for it", removed.length === 1],
+    ["5a: a stranger's signature is refused", refused],
+  ];
+}
 
 async function runKeySmoke(state, failures) {
   const km = state.getContract("keyManager");
@@ -119,12 +165,13 @@ async function runKeySmoke(state, failures) {
         (await wasMgmtNowRevoked(r.recoveryKey)),
     ],
     ["wallet 1 keeps its MANAGEMENT key", await has(keyOf(wallet))],
+    ...(await removalFacts(state, failures)),
   ];
   for (const [label, ok] of facts)
-    if (!ok) failures.push(`4.2: ${label} failed`);
+    if (!ok) failures.push(`4.2/4.5: ${label} failed`);
   if (facts.every(([, ok]) => ok)) {
     console.log(
-      `✅ Key lifecycle: ${facts.length} chain checks pass (rotation and recovery through KeyManager).`,
+      `✅ Key lifecycle: ${facts.length} chain checks pass (rotation and recovery through KeyManager, removal with proof).`,
     );
   }
 }
