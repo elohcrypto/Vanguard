@@ -60,8 +60,10 @@ struct Key {
   removal: still sent by a MANAGEMENT key, it recovers the signer from
   `getRemoveKeyMessage(key, purpose)`, the EIP-191 digest of
   `keccak256(abi.encodePacked("Remove key from OnchainID", identity, key,
-  purpose, chainid))`, and requires `keccak256(abi.encodePacked(signer))
-  == key`. ECDSA keys only. The digest is already prefixed: the holder
+  purpose, removalNonces[key], chainid))`, and requires
+  `keccak256(abi.encodePacked(signer)) == key`. Every removal raises the
+  key's nonce, so a signature removes the key once and is stale after a
+  re-add. ECDSA keys only; a revoked key is not removed again. The digest is already prefixed: the holder
   signs the inner keccak256 with `signMessage`; a `personal_sign` of the
   digest prefixes twice and is refused. Demo options 5 -> 1 and 5a.
 - KeyManager's timelocks bind only the rotations and recoveries sent

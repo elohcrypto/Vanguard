@@ -56,6 +56,11 @@ abstract contract OnchainIDKeys is IOnchainID, Ownable2Step, ReentrancyGuard {
     bool private initialized;
 
     mapping(uint256 => ExecutionRequest) private executionRequests;
+    /// @notice How many times each key has been removed. Part of the
+    ///         removeKeyWithProof message, so a holder's signature removes
+    ///         the key once: after it is re-added the old signature is
+    ///         stale (review of 4.5, L-1).
+    mapping(bytes32 => uint256) public removalNonces;
     mapping(address => bool) public authorizedManagers;
 
     struct ExecutionRequest {
@@ -264,6 +269,7 @@ abstract contract OnchainIDKeys is IOnchainID, Ownable2Step, ReentrancyGuard {
     /// @dev Revoke `_key` and drop it from keysByPurpose[_purpose].
     function _removeKey(bytes32 _key, uint256 _purpose) private {
         keys[_key].revokedAt = block.timestamp;
+        removalNonces[_key]++;
 
         bytes32[] storage purposeKeys = keysByPurpose[_purpose];
         for (uint256 i = 0; i < purposeKeys.length; i++) {
@@ -299,18 +305,8 @@ abstract contract OnchainIDKeys is IOnchainID, Ownable2Step, ReentrancyGuard {
         require(keys[_key].revokedAt == 0, "OnchainID: Key already revoked");
         require(keys[_key].keyType == ECDSA_TYPE, "OnchainID: Only ECDSA keys support proof");
 
-        // Construct the message that should have been signed
-        bytes32 message = keccak256(abi.encodePacked(
-            "Remove key from OnchainID",
-            address(this),
-            _key,
-            _purpose,
-            block.chainid
-        ));
-
-        // Recover the signer from the signature
-        bytes32 ethSignedMessageHash = MessageHashUtils.toEthSignedMessageHash(message);
-        address signer = ECDSA.recover(ethSignedMessageHash, _signature);
+        // Recover the signer from the digest getRemoveKeyMessage returns
+        address signer = ECDSA.recover(_removeKeyDigest(_key, _purpose), _signature);
 
         // Verify the signer owns the key being removed. Address keys are
         // stored as keccak256(abi.encodePacked(address)) (constructor,
@@ -328,24 +324,33 @@ abstract contract OnchainIDKeys is IOnchainID, Ownable2Step, ReentrancyGuard {
      * @param _purpose The purpose of the key
      * @return messageHash toEthSignedMessageHash(keccak256(abi.encodePacked(
      *         "Remove key from OnchainID", address(this), _key, _purpose,
-     *         block.chainid)))
+     *         removalNonces[_key], block.chainid)))
      *
      * @notice Already EIP-191 prefixed: it is the digest to check, not the
      * bytes to pass to personal_sign (that would prefix twice). Sign the
      * inner keccak256 with signMessage(getBytes(inner)); the result
-     * recovers against this digest.
+     * recovers against this digest. The nonce makes a signature good for
+     * one removal of the key.
      */
     function getRemoveKeyMessage(
         bytes32 _key,
         uint256 _purpose
     ) external view returns (bytes32 messageHash) {
-        bytes32 message = keccak256(abi.encodePacked(
-            "Remove key from OnchainID",
-            address(this),
-            _key,
-            _purpose,
-            block.chainid
-        ));
+        return _removeKeyDigest(_key, _purpose);
+    }
+
+    /// @dev One definition of the removal digest for both paths.
+    function _removeKeyDigest(bytes32 _key, uint256 _purpose) private view returns (bytes32) {
+        bytes32 message = keccak256(
+            abi.encodePacked(
+                "Remove key from OnchainID",
+                address(this),
+                _key,
+                _purpose,
+                removalNonces[_key],
+                block.chainid
+            )
+        );
         return MessageHashUtils.toEthSignedMessageHash(message);
     }
 

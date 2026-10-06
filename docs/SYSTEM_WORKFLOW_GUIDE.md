@@ -247,7 +247,8 @@ paused for longer cannot revive when the identity re-authorizes.
   the only path for a non-ECDSA key). `OnchainID.removeKeyWithProof(key,
   purpose, signature)` is still sent by a MANAGEMENT key but also needs
   the key's own address to have signed `getRemoveKeyMessage(key,
-  purpose)` (identity, key, purpose and chain id; the returned digest is
+  purpose)` (identity, key, purpose, the key's removal nonce and chain id,
+  so a signature removes the key once; the returned digest is
   already EIP-191 prefixed, so the holder signs the inner keccak256 with
   `signMessage`). Demo options 5 -> 1 and 5a.
 - **Recovery**: a MANAGEMENT key names up to ten distinct recovery agents

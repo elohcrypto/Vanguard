@@ -18,8 +18,15 @@ const k = (a: string) => ethers.solidityPackedKeccak256(["address"], [a]);
 async function inner(id: any, key: string, purpose: number) {
   const { chainId } = await ethers.provider.getNetwork();
   return ethers.solidityPackedKeccak256(
-    ["string", "address", "bytes32", "uint256", "uint256"],
-    ["Remove key from OnchainID", await id.getAddress(), key, purpose, chainId],
+    ["string", "address", "bytes32", "uint256", "uint256", "uint256"],
+    [
+      "Remove key from OnchainID",
+      await id.getAddress(),
+      key,
+      purpose,
+      await id.removalNonces(key),
+      chainId,
+    ],
   );
 }
 
@@ -213,5 +220,35 @@ describe("OnchainID key removal (plan v2 Task 4.5)", function () {
       id.connect(holder).removeKeyWithProof(key, ACTION, sig),
     ).to.be.revertedWith("OnchainID: Key already revoked");
     expect((await id.getKey(key)).revokedAt).to.equal(at);
+  });
+
+  // L-1 (review of 4.5): the removal nonce makes a holder's signature good
+  // for one removal; after the key is re-added the old one is stale.
+  it("a removal signature is not replayed after the key is re-added", async function () {
+    const { holder, id } = await setup();
+    const w = ethers.Wallet.createRandom();
+    const key = k(w.address);
+    await id.connect(holder).addKey(key, ACTION, ECDSA);
+    expect(await id.removalNonces(key)).to.equal(0n);
+    const old = await w.signMessage(
+      ethers.getBytes(await inner(id, key, ACTION)),
+    );
+    await id.connect(holder).removeKeyWithProof(key, ACTION, old);
+    expect(await id.removalNonces(key)).to.equal(1n);
+
+    await id.connect(holder).addKey(key, ACTION, ECDSA);
+    await expect(
+      id.connect(holder).removeKeyWithProof(key, ACTION, old),
+    ).to.be.revertedWith(
+      "OnchainID: Signature does not prove ownership of key",
+    );
+    expect(await id.keyHasPurpose(key, ACTION)).to.equal(true);
+
+    const fresh = await w.signMessage(
+      ethers.getBytes(await inner(id, key, ACTION)),
+    );
+    await id.connect(holder).removeKeyWithProof(key, ACTION, fresh);
+    expect(await id.keyHasPurpose(key, ACTION)).to.equal(false);
+    expect(await id.removalNonces(key)).to.equal(2n);
   });
 });

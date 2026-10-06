@@ -42,8 +42,15 @@ describe("OnchainID lifecycle (2F.2, L6, L8)", function () {
     await id.connect(holder).addKey(k(other.address), MGMT, 1);
     const { chainId } = await ethers.provider.getNetwork();
     const msg = ethers.solidityPackedKeccak256(
-      ["string", "address", "bytes32", "uint256", "uint256"],
-      ["Remove key from OnchainID", idA, k(other.address), MGMT, chainId],
+      ["string", "address", "bytes32", "uint256", "uint256", "uint256"],
+      [
+        "Remove key from OnchainID",
+        idA,
+        k(other.address),
+        MGMT,
+        await id.removalNonces(k(other.address)),
+        chainId,
+      ],
     );
     const sig = await other.signMessage(ethers.getBytes(msg));
     // The helper returns the same digest the signer signed.
@@ -56,8 +63,15 @@ describe("OnchainID lifecycle (2F.2, L6, L8)", function () {
     // A signature by someone else does not prove ownership.
     await id.connect(holder).addKey(k(attacker.address), MGMT, 1);
     const msg2 = ethers.solidityPackedKeccak256(
-      ["string", "address", "bytes32", "uint256", "uint256"],
-      ["Remove key from OnchainID", idA, k(attacker.address), MGMT, chainId],
+      ["string", "address", "bytes32", "uint256", "uint256", "uint256"],
+      [
+        "Remove key from OnchainID",
+        idA,
+        k(attacker.address),
+        MGMT,
+        await id.removalNonces(k(attacker.address)),
+        chainId,
+      ],
     );
     await expect(
       id

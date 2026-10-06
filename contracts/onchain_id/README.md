@@ -36,20 +36,30 @@ This directory contains OnchainID implementation contracts following ERC-734 and
   removal. It is still sent by a MANAGEMENT key, and the key's own address
   must have signed. The contract recovers the signer from
   `getRemoveKeyMessage(key, purpose)`, which is
-  `toEthSignedMessageHash(keccak256(abi.encodePacked("Remove key from
-OnchainID", identity, key, purpose, chainid)))`, and requires
+  the EIP-191 digest of the packed message `"Remove key from OnchainID"`,
+  identity, key, purpose, `removalNonces(key)` and chain id, and requires
   `keccak256(abi.encodePacked(signer)) == key`, the way address keys are
-  stored. The identity address and chain id in the message stop a
-  signature from being replayed on another identity or chain. ECDSA keys
-  only ("Only ECDSA keys support proof").
+  stored. The identity address and chain id stop a signature from being
+  replayed on another identity or chain; the key's removal nonce (raised
+  by every removal) makes it good for one removal, so it cannot remove
+  the key again after the key is re-added. ECDSA keys only ("Only ECDSA
+  keys support proof"). A revoked key is not removed again ("Key already
+  revoked").
 - `getRemoveKeyMessage` returns the already-prefixed digest to check, not
   the bytes to pass to `personal_sign` (that would prefix twice and be
   refused). Sign the inner message:
 
   ```javascript
   const inner = ethers.solidityPackedKeccak256(
-    ["string", "address", "bytes32", "uint256", "uint256"],
-    ["Remove key from OnchainID", identityAddress, keyHash, purpose, chainId],
+    ["string", "address", "bytes32", "uint256", "uint256", "uint256"],
+    [
+      "Remove key from OnchainID",
+      identityAddress,
+      keyHash,
+      purpose,
+      await identity.removalNonces(keyHash),
+      chainId,
+    ],
   );
   const signature = await keyWallet.signMessage(ethers.getBytes(inner));
   // ethers.hashMessage(ethers.getBytes(inner)) == getRemoveKeyMessage(keyHash, purpose)

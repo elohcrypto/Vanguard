@@ -22,16 +22,22 @@ const ACTION = 2;
 const ECDSA = 1;
 const PURPOSES = { 1: "MANAGEMENT", 2: "ACTION", 3: "CLAIM", 4: "ENCRYPTION" };
 
-/** The inner message removeKeyWithProof prefixes and recovers from. */
+/**
+ * The inner message removeKeyWithProof prefixes and recovers from. The
+ * key's removal nonce is read from chain: a signature is good for one
+ * removal of the key.
+ */
 async function innerMessage(identity, key, purpose) {
   const { chainId } = await ethers.provider.getNetwork();
+  const nonce = await identity.removalNonces(key);
   return ethers.solidityPackedKeccak256(
-    ["string", "address", "bytes32", "uint256", "uint256"],
+    ["string", "address", "bytes32", "uint256", "uint256", "uint256"],
     [
       "Remove key from OnchainID",
       await identity.getAddress(),
       key,
       purpose,
+      nonce,
       chainId,
     ],
   );
