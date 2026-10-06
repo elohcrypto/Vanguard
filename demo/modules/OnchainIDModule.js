@@ -1007,11 +1007,12 @@ class OnchainIDModule {
   }
 
   /**
-   * Option 10: Verify UTXO contains compliance data
+   * Option 10: show a UTXO record option 9 stored in demo memory, with the
+   * KYC/AML statuses copied into it then. Nothing is read from chain here.
    *
    * @returns {Promise<void>}
    */
-  async verifyUTXOCompliance() {
+  async showUTXORecord() {
     displaySection("VERIFY UTXO CONTAINS COMPLIANCE DATA", "🔍");
 
     if (!this.state.utxos || this.state.utxos.size === 0) {
@@ -1045,8 +1046,9 @@ class OnchainIDModule {
         return;
       }
 
-      console.log("\n🔍 VERIFYING UTXO COMPLIANCE DATA...");
-      console.log("\n✅ UTXO COMPLIANCE VERIFICATION COMPLETE");
+      console.log(
+        "\n📋 UTXO RECORD (demo memory; statuses as option 9 read them)",
+      );
       console.log("=".repeat(60));
       console.log(`📋 UTXO ID: ${selectedUtxoId}`);
       console.log(`👤 Owner: ${selectedMetadata.owner}`);

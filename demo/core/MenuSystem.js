@@ -269,7 +269,7 @@ class MenuSystem {
           await onchainID.createUTXOWithCompliance();
           break;
         case "10":
-          await onchainID.verifyUTXOCompliance();
+          await onchainID.showUTXORecord();
           break;
         case "11":
           await onchainID.demoClaimExpiry();
