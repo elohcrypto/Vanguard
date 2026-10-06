@@ -763,6 +763,73 @@ describe("Enhanced Escrow System", function () {
       expect(await wallet.investorSigned()).to.be.true;
     });
 
+    // Escrow review 2.5.1: each release is recorded in the factory ledger.
+    it("records the investor fee in the factory on release", async function () {
+      await wallet.connect(payee).signAsPayee();
+      await wallet.connect(investor).signAsInvestor(true);
+      const p = await factory.getInvestorProfile(investor.address);
+      expect(p.totalFeesEarned).to.equal(INVESTOR_FEE);
+      await expect(factory.updateInvestorFeesEarned(investor.address, 1n)).to.be
+        .reverted; // only a wallet the factory created
+    });
+
+    // Task 4.3: the fee lands in the investor's 2-of-2 MultiSigWallet and
+    // leaves it only with both signatures.
+    it("routes the investor fee to a MultiSigWallet, released 2-of-2", async function () {
+      const bank = signers[7];
+      const msw = await (
+        await ethers.getContractFactory("MultiSigWallet")
+      ).deploy(bank.address, investor.address, await vscToken.getAddress());
+      const mAddr = await msw.getAddress();
+      await factory.deactivateInvestor(investor.address);
+      await factory.registerInvestor(investor.address, mAddr);
+      await factory
+        .connect(investor)
+        .createEscrowWallet(payer.address, payee.address, PAYMENT_AMOUNT);
+      const w2 = await ethers.getContractAt(
+        "MultiSigEscrowWallet",
+        await factory.getWalletAddress(2),
+      );
+      expect(await w2.investorWallet()).to.equal(mAddr);
+      await vscToken
+        .connect(payer)
+        .approve(await factory.getAddress(), TOTAL_AMOUNT);
+      await factory.connect(payer).fundEscrowWallet(2);
+      const dataHash = ethers.keccak256(ethers.toUtf8Bytes("p2"));
+      await w2
+        .connect(payee)
+        .submitShipmentProof(
+          "p2",
+          dataHash,
+          await signProof(payee, await w2.getAddress(), dataHash),
+        );
+      await time.increase(15 * 24 * 60 * 60);
+      await w2.connect(payee).signAsPayee();
+      await w2.connect(investor).signAsInvestor(true);
+      expect(await vscToken.balanceOf(mAddr)).to.equal(INVESTOR_FEE);
+      expect(await msw.lockedAmount()).to.equal(0);
+
+      const rc = await (
+        await msw
+          .connect(investor)
+          .proposeUnlock(INVESTOR_FEE, investor.address, "fees")
+      ).wait();
+      const id = rc.logs
+        .map((l) => {
+          try {
+            return msw.interface.parseLog(l);
+          } catch {
+            return null;
+          }
+        })
+        .find((x) => x && x.name === "UnlockProposalCreated").args[0];
+      await msw.connect(investor).signUnlock(id);
+      expect(await vscToken.balanceOf(mAddr)).to.equal(INVESTOR_FEE);
+      await msw.connect(bank).signUnlock(id);
+      expect(await vscToken.balanceOf(mAddr)).to.equal(0);
+      expect(await vscToken.balanceOf(investor.address)).to.equal(INVESTOR_FEE);
+    });
+
     it("Should not allow payee signing during dispute window", async function () {
       // Create new wallet
       await factory
@@ -1217,6 +1284,26 @@ describe("Enhanced Escrow System", function () {
           ownerWallet.address,
         ),
       ).to.be.revertedWithCustomError(W, "InvestorCannotBePayer");
+    });
+
+    // Escrow review 2.3.1: payer == payee was refused only by the factory.
+    it("wallet constructor rejects payer == payee (defence in depth)", async function () {
+      const W = await ethers.getContractFactory("MultiSigEscrowWallet");
+      await expect(
+        W.deploy(
+          1,
+          payee.address /* payer==payee */,
+          payee.address,
+          investor.address,
+          await vscToken.getAddress(),
+          PAYMENT_AMOUNT,
+          0,
+          0,
+          owner.address,
+          investorWallet.address,
+          ownerWallet.address,
+        ),
+      ).to.be.revertedWithCustomError(W, "PayerCannotBePayee");
     });
   });
 

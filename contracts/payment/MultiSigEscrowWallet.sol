@@ -6,6 +6,11 @@ import "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
 import {ECDSA} from "@openzeppelin/contracts/utils/cryptography/ECDSA.sol";
 import {MessageHashUtils} from "@openzeppelin/contracts/utils/cryptography/MessageHashUtils.sol";
 
+/// @dev The factory's fee ledger (EscrowWalletFactory.updateInvestorFeesEarned).
+interface IEscrowFeeLedger {
+    function updateInvestorFeesEarned(address investor, uint256 feeAmount) external;
+}
+
 /**
  * @title MultiSigEscrowWallet
  * @notice One-time-use multi-signature escrow wallet for a single payment
@@ -172,6 +177,9 @@ contract MultiSigEscrowWallet is ReentrancyGuard {
         require(_investor != address(0), "Invalid investor");
         if (_investor == _payee) revert InvestorCannotBePayee();
         if (_payer != address(0) && _investor == _payer) revert InvestorCannotBePayer();
+        // Escrow review 2.3.1: the factory refuses payer == payee; so does
+        // the wallet, for anyone who deploys it directly.
+        if (_payer != address(0) && _payer == _payee) revert PayerCannotBePayee();
         require(_vscToken != address(0), "Invalid token");
         require(_vscToken.code.length > 0, "MultiSigEscrowWallet: VSC token is not a contract");
         require(_amount > 0, "Invalid amount");
@@ -411,6 +419,9 @@ contract MultiSigEscrowWallet is ReentrancyGuard {
         require(vscToken.transfer(payee, amount), "Transfer to payee failed");
         require(vscToken.transfer(investorWallet, investorFee), "Investor fee transfer failed");
         require(vscToken.transfer(ownerWallet, ownerFee), "Owner fee transfer failed");
+        // Escrow review 2.5.1: the factory's per-investor fee total
+        // (getInvestorProfile; option 69 prints it) records each release.
+        IEscrowFeeLedger(factory).updateInvestorFeesEarned(investor, investorFee);
 
         emit FundsReleased(payee, amount, investor, investorFee, owner, ownerFee);
     }

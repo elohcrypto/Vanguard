@@ -1253,6 +1253,14 @@ class EscrowModule {
         selectedWallet.state = "Released";
         displaySuccess("Funds released to payee!");
         console.log("   Payment completed successfully");
+        // Escrow review 2.5.1: the factory's ledger records every release.
+        const factory = this.state.getContract("escrowFactory");
+        if (factory) {
+          const p = await factory.getInvestorProfile(await wallet.investor());
+          console.log(
+            `   📒 Investor fees earned (factory ledger): ${ethers.formatEther(p.totalFeesEarned)} VSC, paid to ${p.walletAddress}`,
+          );
+        }
       } else if (refundedEvent) {
         selectedWallet.state = "Refunded";
         displaySuccess("Funds refunded to payer!");

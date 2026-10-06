@@ -180,6 +180,12 @@ async function runEscrowSmoke(state, failures) {
   });
   if ((await token.balanceOf(wAddr)) !== 0n)
     failures.push("escrow wallet not empty after release");
+  // Escrow review 2.5.1: the factory ledger records the investor fee.
+  if (
+    (await factory.getInvestorProfile(investor.address)).totalFeesEarned !==
+    e("30")
+  )
+    failures.push("factory totalFeesEarned is not the 30 VSC investor fee");
   for (const s of [payee, investorWallet, ownerWallet])
     if (
       await rules["isTrustedContract(address,address)"](token.target, s.address)
