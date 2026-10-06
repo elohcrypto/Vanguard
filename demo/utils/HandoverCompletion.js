@@ -35,7 +35,7 @@ const {
 } = require("./HandoverScans");
 const { privacyLines } = require("./HandoverPrivacy");
 const { keyManagerLines } = require("./HandoverKeys");
-const { registrarLines } = require("./HandoverRegistrars");
+const { registrarLines, custodyOwnerLines } = require("./HandoverRegistrars");
 
 const ZERO = ethers.ZeroAddress;
 const EXEMPT_ABI = [
@@ -103,6 +103,8 @@ async function assertHandoverComplete(o) {
   for (const [label, pass] of await keyManagerLines(o, dAddr)) add(label, pass);
   // Task 4.3: every trusted-contract registrar names compiled wallet code.
   for (const [label, pass] of await registrarLines(o)) add(label, pass);
+  for (const [label, pass] of await custodyOwnerLines(o, dAddr, ops, govAddr))
+    add(label, pass);
   // Bound in governance, or the creator of a trusted escrow (review M-2),
   // but not named by the config: still checked.
   const d = o.derived;

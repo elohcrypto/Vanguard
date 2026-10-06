@@ -32,7 +32,8 @@ async function compiledWallets() {
  */
 async function liveRegistrars(o) {
   const rules = o.complianceRules;
-  if (!rules) return [];
+  // A ceremony without ComplianceRules is a config error (review N1).
+  if (!rules) fail("no ComplianceRules in the handover config");
   const known = await compiledWallets();
   const events = await scanLogs(rules, rules.filters.TrustedRegistrarSet(), o);
   const out = [];
@@ -77,4 +78,50 @@ async function registrarLines(o) {
   ]);
 }
 
-module.exports = { liveRegistrars, preflightRegistrars, registrarLines };
+/**
+ * Review L1: the contracts holding trust or type power, every live
+ * registrar and every live InvestorTypeRegistry compliance officer that is
+ * a contract (governance itself excepted), must be owned by ops or
+ * governance: a deployer-owned InvestorRequestManager would let the
+ * deployer assign investor types and create trusted wallets after the
+ * handover. One line; it names each offender.
+ */
+async function custodyOwnerLines(o, dAddr, ops, govAddr) {
+  const owned = [];
+  for (const r of await liveRegistrars(o)) owned.push(r.registrar);
+  const reg = o.investorTypeRegistry;
+  if (reg) {
+    const evs = await scanLogs(reg, reg.filters.ComplianceOfficerUpdated(), o);
+    for (const ev of evs) {
+      const a = ev.args[0];
+      if (same(a, govAddr) || owned.some((x) => same(x, a))) continue;
+      if ((await ethers.provider.getCode(a)) === "0x") continue;
+      if (await reg.isComplianceOfficer(a)) owned.push(ethers.getAddress(a));
+    }
+  }
+  const bad = [];
+  for (const a of owned) {
+    const c = await ethers.getContractAt(
+      ["function owner() view returns (address)"],
+      a,
+    );
+    const owner = await c.owner().catch(() => null);
+    if (!owner || !(same(owner, ops) || same(owner, govAddr)))
+      bad.push(`${a} (owner ${owner ?? "unreadable"})`);
+  }
+  return [
+    [
+      bad.length
+        ? `registrar / compliance-officer contracts not owned by ops or governance: ${bad.join(", ")}`
+        : `every ComplianceRules registrar and compliance-officer contract (${owned.length}) is owned by ops or governance, not the deployer ${dAddr}`,
+      bad.length === 0,
+    ],
+  ];
+}
+
+module.exports = {
+  liveRegistrars,
+  preflightRegistrars,
+  registrarLines,
+  custodyOwnerLines,
+};

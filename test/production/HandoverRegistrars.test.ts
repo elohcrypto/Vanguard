@@ -84,4 +84,63 @@ describe("Handover: trusted-contract registrars (Task 4.3)", function () {
     await network.provider.send("hardhat_setCode", [s, "0x"]);
     await refused(new RegExp(`registrar ${s} on token ${vsc} has no code`));
   });
+
+  async function ceremony() {
+    const report = await handoverDeployerPowers(f.args);
+    await acceptAllByVote({
+      governance: f.c.governance,
+      contracts: f.c,
+      proposer: f.proposer,
+      voters: f.voters,
+      registryProposals: report.registryProposals,
+      log: quiet,
+    });
+  }
+
+  // Review L1: a deployer-owned contract with trust or type power.
+  it("fails completion on a deployer-owned compliance-officer contract", async function () {
+    const m = await (
+      await ethers.getContractFactory("InvestorRequestManager")
+    ).deploy(
+      f.ops.address,
+      vsc,
+      await f.c.investorTypeRegistry.getAddress(),
+      await f.c.identityRegistry.getAddress(),
+    );
+    const mAddr = await m.getAddress();
+    await f.c.investorTypeRegistry.setComplianceOfficer(mAddr, true);
+    await ceremony();
+    const { failures } = await assertHandoverComplete(f.args);
+    expect(failures).to.deep.equal([
+      `registrar / compliance-officer contracts not owned by ops or governance: ${mAddr} (owner ${f.deployer.address})`,
+    ]);
+  });
+
+  it("passes the owner line when ops owns the officer contract", async function () {
+    const m = await (
+      await ethers.getContractFactory("InvestorRequestManager")
+    ).deploy(
+      f.ops.address,
+      vsc,
+      await f.c.investorTypeRegistry.getAddress(),
+      await f.c.identityRegistry.getAddress(),
+    );
+    await m.transferOwnership(f.ops.address);
+    await f.c.investorTypeRegistry.setComplianceOfficer(
+      await m.getAddress(),
+      true,
+    );
+    await ceremony();
+    const { ok, checks } = await assertHandoverComplete(f.args);
+    expect(ok).to.equal(true);
+    expect(checks.map((x: any) => x.label)).to.include(
+      `every ComplianceRules registrar and compliance-officer contract (2) is owned by ops or governance, not the deployer ${f.deployer.address}`,
+    );
+  });
+
+  it("refuses a config without ComplianceRules", async function () {
+    await expect(
+      liveRegistrars({ ...f.args, complianceRules: null }),
+    ).to.be.rejectedWith(/no ComplianceRules in the handover config/);
+  });
 });
