@@ -1,386 +1,136 @@
-# Investor Type System Documentation
-
-## Overview
-
-The Investor Type System is a comprehensive framework that implements differentiated investor categories with appropriate transfer limits, holding limits, and privileges for the Vanguard StableCoin ecosystem. This system ensures regulatory compliance while providing enhanced features for qualified investors.
-
-## Architecture
-
-### Core Components
-
-1. **InvestorTypeRegistry** - Central registry for managing investor types and configurations
-2. **InvestorTypeCompliance** - Compliance module that enforces investor type rules
-3. **Enhanced IdentityRegistry** - Integration with existing identity management
-4. **Enhanced Token Contract** - Integration with ERC-3643 token transfers
-
-### Investor Type Categories
-
-| Type | Max Transfer | Max Holding | Whitelist Tier | Cooldown | Large Transfer Threshold | Enhanced Features |
-|------|-------------|-------------|----------------|----------|-------------------------|-------------------|
-| **Normal** | 8,000 VSC | 50,000 VSC | Tier 1+ | 1 hour | N/A | Basic logging, Standard privacy |
-| **Retail** | 8,000 VSC | 50,000 VSC | Tier 2+ | 1 hour | N/A | Basic logging, Standard privacy |
-| **Accredited** | 50,000 VSC | 500,000 VSC | Tier 3+ | 30 minutes | >10,000 VSC | Enhanced logging, Enhanced privacy |
-| **Institutional** | 500,000 VSC | 5,000,000 VSC | Tier 4+ | 15 minutes | >100,000 VSC | Enhanced logging, Premium privacy |
-
-An address with no assigned type is Normal. `Token.mint` runs the same check as `canTransfer(address(0), to, amount)` and reverts with the first failure: `Recipient frozen`, `Identity not verified`, `Compliance check failed` or `Holding limit exceeded`. A treasury is not an investor (decision D22 (a)): `setInvestorLimitExempt(account, true)` emits `InvestorLimitExemptionUpdated` and makes `canHoldAmount` and `canTransferAmount` return true for that address. It only lifts the two amount caps; freeze, identity and compliance still apply. Treasury exemption is a governance decision: only the registry owner can set it, which is the deployer before the handover and, after it, an InvestorTypeConfig vote. A compliance officer cannot set it. The demo marks the central bank exempt. The production deploy mints nothing and names no treasury; when a production treasury is designated, the owner sets the exemption before the handover, or governance sets it by vote after. No cap is raised to fit a fixture.
-
-## Smart Contracts
-
-### InvestorTypeRegistry.sol
-
-Central registry for managing investor types and their configurations.
-
-#### Key Functions
-
-```solidity
-// Assign investor type (compliance officer only)
-function assignInvestorType(address investor, InvestorType investorType) external;
-
-// Upgrade investor type (compliance officer only)
-function upgradeInvestorType(address investor, InvestorType newType) external;
-
-// Downgrade investor type (compliance officer only)
-function downgradeInvestorType(address investor, InvestorType newType) external;
-
-// Get investor type for address
-function getInvestorType(address investor) external view returns (InvestorType);
-
-// Check transfer amount limits
-function canTransferAmount(address investor, uint256 amount) external view returns (bool);
-
-// Check holding amount limits
-function canHoldAmount(address investor, uint256 amount) external view returns (bool);
-
-// Check if transfer is considered "large"
-function isLargeTransfer(address investor, uint256 amount) external view returns (bool);
-```
-
-#### Events
-
-```solidity
-event InvestorTypeAssigned(address indexed investor, InvestorType investorType, address indexed officer);
-event InvestorTypeUpgraded(address indexed investor, InvestorType oldType, InvestorType newType, address indexed officer);
-event InvestorTypeDowngraded(address indexed investor, InvestorType oldType, InvestorType newType, address indexed officer);
-```
-
-### InvestorTypeCompliance.sol
-
-Compliance module that enforces investor type rules and manages large transfer approvals.
-
-#### Key Functions
-
-```solidity
-// Check if transfer is allowed based on investor type rules
-function canTransfer(address _from, address _to, uint256 _value) external view returns (bool);
-
-// Approve large transfer (compliance officer only)
-function approveLargeTransfer(address _from, address _to, uint256 _value, uint256 _expiryTime) external;
-
-// Emergency override for compliance situations
-function activateEmergencyOverride(address _investor) external;
-function deactivateEmergencyOverride(address _investor) external;
-
-// Get remaining transfer cooldown
-function getRemainingCooldown(address _investor) external view returns (uint256);
-```
-
-#### Events
-
-```solidity
-event LargeTransferDetected(address indexed from, address indexed to, uint256 amount, InvestorType investorType);
-event LargeTransferApproved(address indexed from, address indexed to, uint256 amount, address indexed officer);
-event TransferCooldownViolation(address indexed investor, uint256 remainingCooldown);
-event EmergencyOverrideActivated(address indexed investor, address indexed officer);
-```
-
-## Integration Points
-
-### 1. Identity Registry Integration
-
-The IdentityRegistry has been enhanced to work with the InvestorTypeRegistry:
-
-```solidity
-// Set investor type registry
-function setInvestorTypeRegistry(address _investorTypeRegistry) external onlyOwner;
-
-// Get investor type for user
-function getInvestorType(address _userAddress) external view returns (InvestorType);
-
-// Check transfer/holding limits
-function canTransferAmount(address _userAddress, uint256 _amount) external view returns (bool);
-function canHoldAmount(address _userAddress, uint256 _amount) external view returns (bool);
-```
-
-### 2. Token Contract Integration
-
-The Token contract has been enhanced to enforce investor type limits:
-
-```solidity
-// Set investor type registry
-function setInvestorTypeRegistry(address _investorTypeRegistryAddress) external onlyOwner;
-
-// Enhanced canTransfer with investor type validation
-function canTransfer(address _from, address _to, uint256 _amount) public view override returns (bool);
-```
-
-The enhanced `canTransfer` function now checks:
-- Transfer amount limits based on sender's investor type
-- Holding amount limits based on recipient's investor type
-- Integration with existing compliance and identity validation
-
-## Workflows
-
-### 1. Investor Onboarding Workflow
-
-```mermaid
-sequenceDiagram
-    participant User as New Investor
-    participant CO as Compliance Officer
-    participant ITR as InvestorTypeRegistry
-    participant IR as IdentityRegistry
-    participant Token as VSC Token
-
-    User->>CO: Submit documentation for investor type
-    CO->>CO: Review documentation and verify eligibility
-    CO->>ITR: Assign investor type
-    ITR-->>User: Investor type assigned
-    CO->>IR: Register identity with country code
-    IR-->>User: Identity registered
-    User->>Token: Can now participate with type-specific limits
-```
-
-### 2. Transfer Validation Workflow
-
-```mermaid
-sequenceDiagram
-    participant User as Investor
-    participant Token as VSC Token
-    participant ITR as InvestorTypeRegistry
-    participant ITC as InvestorTypeCompliance
-    participant CO as Compliance Officer
-
-    User->>Token: Initiate transfer
-    Token->>ITR: Check transfer amount limit
-    ITR-->>Token: Limit validation result
-    Token->>ITR: Check recipient holding limit
-    ITR-->>Token: Holding limit validation result
-    Token->>ITC: Check compliance rules
-    ITC->>ITC: Check cooldown period
-    
-    alt Large Transfer Detected
-        ITC->>CO: Notify large transfer
-        CO->>ITC: Approve large transfer (if valid)
-        ITC-->>Token: Transfer approved
-    else Normal Transfer
-        ITC-->>Token: Transfer allowed
-    end
-    
-    Token->>Token: Execute transfer
-    Token-->>User: Transfer completed
-```
-
-### 3. Investor Type Upgrade Workflow
-
-```mermaid
-sequenceDiagram
-    participant User as Investor
-    participant CO as Compliance Officer
-    participant ITR as InvestorTypeRegistry
-
-    User->>CO: Request investor type upgrade
-    CO->>CO: Review upgraded documentation
-    CO->>ITR: Upgrade investor type
-    ITR-->>User: Type upgraded with new limits
-    ITR->>ITR: Emit upgrade event
-```
-
-## Access Control
-
-### Roles and Permissions
-
-1. **Owner** (Contract Deployer)
-   - Update investor type configurations
-   - Set compliance officers
-   - Authorize tokens to use the registry
-
-2. **Compliance Officer**
-   - Assign investor types
-   - Upgrade/downgrade investor types
-   - Approve large transfers
-   - Activate/deactivate emergency overrides
-
-3. **Authorized Tokens**
-   - Query investor type information
-   - Validate transfer and holding limits
-
-### Security Features
-
-1. **Multi-signature Support** - Critical operations can require multiple compliance officer approvals
-2. **Emergency Override** - Compliance officers can temporarily bypass limits for emergency situations
-3. **Time-based Approvals** - Large transfer approvals have expiry times
-4. **Audit Trail** - All investor type changes and approvals are logged with events
-
-## Configuration Management
-
-### Default Configurations
-
-The system comes with pre-configured limits that can be updated by the owner:
-
-```solidity
-struct InvestorTypeConfig {
-    uint256 maxTransferAmount;      // Maximum transfer per transaction
-    uint256 maxHoldingAmount;       // Maximum total holding
-    uint8 requiredWhitelistTier;    // Minimum whitelist tier
-    uint256 transferCooldownMinutes; // Cooldown between transfers
-    uint256 largeTransferThreshold; // Threshold for large transfers
-    bool enhancedLogging;           // Enhanced audit logging
-    bool enhancedPrivacy;           // Enhanced privacy features
-}
-```
-
-### Updating Configurations
-
-Only the contract owner can update investor type configurations:
-
-```solidity
-function updateInvestorTypeConfig(
-    InvestorType investorType,
-    InvestorTypeConfig calldata config
-) external onlyOwner;
-```
-
-## Compliance Features
-
-### 1. Transfer Cooldowns
-
-Each investor type has a specific cooldown period between transfers:
-- **Normal/Retail**: 1 hour
-- **Accredited**: 30 minutes  
-- **Institutional**: 15 minutes
-
-### 2. Large Transfer Notifications
-
-Transfers above certain thresholds require compliance officer approval:
-- **Accredited**: >10,000 VSC
-- **Institutional**: >100,000 VSC
-
-### 3. Emergency Overrides
-
-Compliance officers can activate emergency overrides to bypass all limits temporarily for specific investors.
-
-### 4. Enhanced Logging
-
-Higher-tier investors (Accredited and Institutional) have enhanced audit logging enabled by default.
-
-## Testing
-
-### Test Coverage
-
-The system includes comprehensive tests covering:
-
-1. **Investor Type Assignment**
-   - Compliance officer authorization
-   - Type upgrade/downgrade workflows
-   - Access control validation
-
-2. **Transfer Limit Enforcement**
-   - Amount limits by investor type
-   - Holding limits by investor type
-   - Integration with token transfers
-
-3. **Large Transfer Management**
-   - Detection of large transfers
-   - Approval workflow
-   - Expiry handling
-
-4. **Cooldown Management**
-   - Cooldown period enforcement
-   - Remaining cooldown calculation
-   - Integration with compliance checks
-
-5. **Emergency Procedures**
-   - Emergency override activation/deactivation
-   - Override bypass validation
-
-### Running Tests
-
-```bash
-# Run all investor type system tests
-npx hardhat test test/InvestorTypeSystem.test.ts
-
-# Run with coverage
-npx hardhat coverage --testfiles "test/InvestorTypeSystem.test.ts"
-```
-
-## Deployment
-
-### Deployment Script
-
-Use the provided deployment script:
-
-```bash
-npx hardhat run scripts/deploy-investor-type-system.ts --network <network>
-```
-
-### Post-Deployment Setup
-
-1. **Set Compliance Officers**
-   ```solidity
-   investorTypeRegistry.setComplianceOfficer(officerAddress, true);
-   investorTypeCompliance.setComplianceOfficer(officerAddress, true);
-   ```
-
-2. **Integrate with Existing Contracts**
-   ```solidity
-   identityRegistry.setInvestorTypeRegistry(investorTypeRegistryAddress);
-   token.setInvestorTypeRegistry(investorTypeRegistryAddress);
-   ```
-
-3. **Authorize Tokens**
-   ```solidity
-   investorTypeRegistry.authorizeToken(tokenAddress, true);
-   ```
-
-## Integration with Existing System
-
-### Oracle Integration
-
-The investor type system integrates with the existing oracle whitelist system by requiring specific whitelist tiers for each investor type:
-
-- **Normal**: Tier 1+ (Basic whitelist)
-- **Retail**: Tier 2+ (Standard whitelist)  
-- **Accredited**: Tier 3+ (Enhanced whitelist)
-- **Institutional**: Tier 4+ (Premium whitelist)
-
-### Privacy Integration
-
-The system supports different privacy levels:
-- **Standard Privacy**: Normal and Retail investors
-- **Enhanced Privacy**: Accredited investors
-- **Premium Privacy**: Institutional investors
-
-### Compliance Rules Integration
-
-The InvestorTypeCompliance module works alongside the existing ComplianceRules engine to provide comprehensive compliance validation.
-
-## Future Enhancements
-
-### Planned Features
-
-1. **Dynamic Limit Adjustment** - Automatic limit adjustments based on market conditions
-2. **Risk-Based Scoring** - Integration with risk assessment systems
-3. **Automated Upgrades** - Automatic investor type upgrades based on criteria
-4. **Cross-Chain Support** - Multi-chain investor type synchronization
-5. **Advanced Analytics** - Investor behavior analytics and reporting
-
-### Extensibility
-
-The system is designed to be extensible:
-- New investor types can be added
-- Additional compliance rules can be integrated
-- Custom validation logic can be implemented
-- Integration with external compliance systems
-
-## Conclusion
-
-The Investor Type System provides a robust, flexible framework for managing differentiated investor access to the Vanguard StableCoin ecosystem. It ensures regulatory compliance while enabling enhanced features for qualified investors, supporting the system's growth and adoption across different investor segments.
+# Investor Type System
+
+Each VSC holder has an investor type in `InvestorTypeRegistry`
+(`contracts/erc3643/InvestorTypeRegistry.sol`). The type sets two caps the
+token enforces on every transfer and mint, and five more parameters the
+registry records but no contract enforces today (decision D37 is open).
+This page describes the contract as it is in this tree.
+
+## Types and their defaults
+
+`IInvestorTypeRegistry.InvestorType` is `Normal` (0), `Retail` (1),
+`Accredited` (2), `Institutional` (3). An address with no assigned type is
+`Normal`. The constructor sets these configurations (`InvestorTypeConfig`):
+
+| Type | maxTransferAmount | maxHoldingAmount | requiredWhitelistTier | transferCooldownMinutes | largeTransferThreshold | enhancedLogging | enhancedPrivacy |
+|---|---|---|---|---|---|---|---|
+| Normal | 8,000 VSC | 50,000 VSC | 1 | 60 | 3,000 VSC | false | false |
+| Retail | 8,000 VSC | 50,000 VSC | 2 | 60 | 5,000 VSC | false | false |
+| Accredited | 50,000 VSC | 500,000 VSC | 3 | 30 | 10,000 VSC | true | true |
+| Institutional | 500,000 VSC | 5,000,000 VSC | 4 | 15 | 100,000 VSC | true | true |
+
+`getInvestorTypeConfig(type)` and `getAllInvestorTypeConfigs()` return the
+current values; `updateInvestorTypeConfig(type, config)` (owner only)
+replaces one, requiring both caps above zero and a tier from 1 to 5, and
+emits `InvestorTypeConfigUpdated`.
+
+## What the token enforces
+
+`Token.setInvestorTypeRegistry(registry)` (Token owner) binds the registry.
+With a registry bound, `Token._checkTransfer` (behind `transfer`,
+`transferFrom`, `canTransfer` and `mint`) applies:
+
+- **Transfer cap**: `canTransferAmount(from, amount)`, `amount <=
+  maxTransferAmount` of the sender's type, per transfer. There is no daily
+  or cumulative total. Refusal: `Transfer amount limit exceeded`.
+- **Holding cap**: `canHoldAmount(to, balanceOf(to) + amount)` for the
+  recipient. Refusal: `Holding limit exceeded`.
+
+`mint` runs the same check as `canTransfer(address(0), to, amount)` and
+reverts with the first failure: `Recipient frozen`, `Identity not
+verified`, `Compliance check failed` or `Holding limit exceeded`. A
+trusted contract (an escrow wallet, a custody `MultiSigWallet`,
+governance on VGT) has no type, so only its own side skips the cap: the
+human side of a trusted transfer is still capped (D26).
+
+**Treasury exemption (D22 a).** A treasury is not an investor.
+`setInvestorLimitExempt(account, true)` (owner only) emits
+`InvestorLimitExemptionUpdated` and makes `canTransferAmount` and
+`canHoldAmount` return true for that address. It lifts only the two caps;
+freeze, identity and compliance still apply. It is a governance decision:
+the deployer sets it before the handover, an InvestorTypeConfig vote
+(option 76, type 0) after it; a compliance officer cannot. The demo
+exempts the treasury (signer 0) and the two escrow fee wallets. The
+production deploy (`scripts/production/DeployProduction.ts`) deploys no
+InvestorTypeRegistry and names no treasury; no cap is raised to fit a
+fixture.
+
+## Recorded, not enforced (D37)
+
+`getRequiredWhitelistTier(investor)`, `getTransferCooldown(investor)`
+(minutes), `isLargeTransfer(investor, amount)` (`amount >
+largeTransferThreshold`), `hasEnhancedLogging(investor)` and
+`hasEnhancedPrivacy(investor)` return the type's values. No contract reads
+them: the token checks no tier, no cooldown and no large-transfer
+approval, and nothing changes with the two flags.
+`IdentityRegistry.getRequiredWhitelistTier` only forwards the first.
+Demo options 16 and 17 (and 20c, 20d) print the cooldowns and tiers as
+"recorded, not enforced"; 57 and 58 read the threshold and cooldowns.
+
+## Assigning a type
+
+| Call | Who | Rule |
+|---|---|---|
+| `assignInvestorType(investor, type)` | compliance officer or owner | any type |
+| `upgradeInvestorType(investor, newType)` | compliance officer or owner | `newType` above the current one ("Not an upgrade") |
+| `downgradeInvestorType(investor, newType)` | compliance officer or owner | `newType` below the current one ("Not a downgrade") |
+
+Events: `InvestorTypeAssigned`, `InvestorTypeUpgraded`,
+`InvestorTypeDowngraded`, each naming the officer. A wallet recovery
+(`Token.recoveryAddress`) moves the balance but not the type: re-assign
+the type (and any exemption) to the new wallet.
+
+**Investor custody (Task 4.3, D13 b).** A type upgrade normally goes
+through `InvestorRequestManager` (`contracts/investor/`), a compliance
+officer of the registry: the user requests a type
+(`requestInvestorStatus`), the bank (ops) creates a 2-of-2
+`MultiSigWallet` for the user (`createMultiSigWallet`), the user locks the
+type's `lockRequirements` amount in it (`lockTokens`, then
+`confirmTokensLocked`), and the bank approves (`approveRequest`), which
+assigns the type. A downgrade is a 2-of-2 unlock, then the type goes back
+to Normal. Details: `docs/SYSTEM_WORKFLOW_GUIDE.md`, "Investor custody".
+
+## Roles
+
+- **Owner** (`Ownable2Step`): the deployer, then VanguardGovernance after
+  the handover (accepted by a vote, option 83b or 83d). It updates
+  configurations, sets exemptions, compliance officers, governors and the
+  internal governance parameters, authorizes tokens and cancels internal
+  proposals. A governed call is an InvestorTypeConfig proposal (type 0).
+- **Compliance officers** (`setComplianceOfficer`): assign, upgrade and
+  downgrade types. The constructor makes the deployer one; the handover
+  makes ops one and removes the deployer (and the deployer as a governor).
+- **Authorized tokens** (`authorizeToken`, `isTokenAuthorized`): recorded
+  only; no registry function checks the list today.
+
+**The registry's own proposals.** `createProposal(type, config,
+description)` (governor or owner), `approveProposal` (governors) and
+`executeProposal` (anyone, after `governanceDelay`, 2 days by default,
+within `PROPOSAL_LIFETIME`, 7 days, with `requiredApprovals`, 2 by
+default) change a configuration with governor approvals. `setGovernor`
+bumps `governorEpoch`, which voids every open proposal created under the
+previous governor set. This layer does not protect owner calls:
+`updateInvestorTypeConfig` is `onlyOwner` and bypasses it; once
+VanguardGovernance is the owner, its vote is the protection.
+
+## Demo options
+
+- 51 deploys the registry, wires it into VSC and, when VSC exists, the
+  investor custody (Task 4.3); 52 shows the configurations; 53 assigns
+  types; 54 upgrades or downgrades.
+- 55 and 56 test the transfer and holding caps; 57 and 58 show the large
+  transfer threshold and the cooldowns (recorded only); 59 runs 52, 56, 57
+  and 58; 60 is the dashboard.
+- 15, 16 and 17 (with 20b, 20c, 20d) show the caps, cooldowns and tiers.
+- 23 is the custody flow above; 83 manages the registry through
+  governance; 83b has governance accept its ownership by vote.
+
+## Tests
+
+`test/InvestorTypeSystem.test.ts`, `test/InvestorTypeBasic.test.ts`,
+`test/erc3643/InvestorTypeRegistry.Display.test.js`,
+`test/erc3643/MintLimits.test.ts` (mint against the holding cap),
+`test/erc3643/TrustedPathCaps.test.ts` (D26),
+`test/investor/InvestorOnboarding.test.ts` (custody),
+`test/simple-transfer-limits-test.js` and
+`test/transfer-limits-verification.js`. All run under `npm test`.
