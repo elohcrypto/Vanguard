@@ -3,8 +3,9 @@
  * 4.4, D11 = a). OracleManager is the gate: queries open there, nodes answer
  * there (submitResponse, the one vote entry) and the Whitelist/Blacklist
  * oracles read the verdict there. ConsensusOracle is its engine: it
- * snapshots the active weight when a query opens and resolves a side at
- * consensusThreshold percent of that snapshot (66: two of three nodes).
+ * snapshots every registered node (active or paused) when a query opens and
+ * resolves a side at consensusThreshold percent of that snapshot (66: two
+ * of three nodes), so pausing nodes never lowers the bar.
  * The operator (ops, wallet 10) pauses, unpauses and emergency-designates
  * nodes; removal and parameters are the manager owner's (the deployer,
  * governance after the handover). Options 33a, 34a, 35a, 37 and 40 and
@@ -152,7 +153,7 @@ async function consensusRound(state, type, subject, data, log = console.log) {
   const q = await raiseQuery(state, n1, subject, type, data);
   log(`   📝 Query ${q}`);
   log(
-    `      raised by node ${short(n1.address)} for ${subject}; threshold ${await engine.consensusThreshold()}% of the active weight`,
+    `      raised by node ${short(n1.address)} for ${subject}; threshold ${await engine.consensusThreshold()}% of the registered weight`,
   );
   const t = await answerUntilResolved(
     state,
@@ -235,11 +236,29 @@ async function refusal(fn) {
 }
 
 /**
+ * Why `node` cannot take part in 35a (paused then unpaused by ops), or null:
+ * a node the owner paused or one at the reputation floor stays paused.
+ */
+async function lifecycleBlock(om, node, label) {
+  if (await om.pausedByOwner(node)) {
+    return `${label} was paused by the owner; only the owner unpauses it`;
+  }
+  const rep = await om.getOracleReputation(node);
+  if (rep <= (await om.MIN_REPUTATION())) {
+    return `${label} is at the reputation floor (${rep}); ops cannot unpause it`;
+  }
+  return null;
+}
+
+/**
  * Option 35a: the node lifecycle, no prompts. Ops pauses node 3, whose
- * answer is then refused while nodes 1 and 2 still resolve a query against
- * a snapshot without it; ops unpauses it, designates node 2 for emergency
- * listings, uses and clears it; the owner registers and removes a fourth,
- * throwaway node (skipped once governance owns the manager).
+ * answer is refused while nodes 1 and 2 still resolve (node 3 stays in the
+ * snapshot's denominator); ops pauses node 2 too and node 1 alone cannot
+ * resolve (pausing never lowers the bar); ops unpauses both, designates
+ * node 2 for emergency listings, uses and clears it; the owner registers
+ * and removes a fourth, throwaway node (skipped once governance owns the
+ * manager). Refuses to start when ops could not undo its pauses; a failed
+ * run still unpauses what it paused.
  */
 async function runLifecycle(state, log = console.log) {
   const c = oracleContracts(state, log);
@@ -249,6 +268,13 @@ async function runLifecycle(state, log = console.log) {
   const [n1, n2, n3] = nodeSigners(state);
   const out = { done: false };
   log("\n🔁 ORACLE LIFECYCLE (OPTION 35a)");
+  for (const [n, label] of [
+    [n2, "node 2"],
+    [n3, "node 3"],
+  ]) {
+    const why = await lifecycleBlock(om, n.address, label);
+    if (why) return (log(`❌ 35a not started: ${why}`), out);
+  }
   const op = await ensureOperator(state, log);
   if (!op.ok) {
     log(
@@ -259,35 +285,71 @@ async function runLifecycle(state, log = console.log) {
     return out;
   }
 
-  if (!(await om.isActiveOracle(n3.address))) {
-    await (await om.connect(ops).unpauseOracle(n3.address)).wait();
-  }
-  await (await om.connect(ops).pauseOracle(n3.address)).wait();
-  log(`   ⏸️  ops paused node 3 ${n3.address}`);
-  const subject = throwawaySubject();
-  const q = await raiseQuery(state, n1, subject, QUERY.COMPLIANCE);
-  out.pausedRefusal = await refusal(() =>
-    om.connect(n3).submitResponse(q, false),
-  );
-  log(
-    out.pausedRefusal
-      ? `   🚫 node 3's answer refused: ${out.pausedRefusal}`
-      : "❌ node 3's answer was accepted while paused",
-  );
-  out.tally = await answerUntilResolved(
-    state,
-    q,
-    [
-      [n1, true],
-      [n2, true],
-    ],
-    log,
-  );
-  log(`   ⚖️  ${tallyLine(out.tally)} (node 3 not in the snapshot)`);
+  const paused = [];
+  const pause = async (n, label) => {
+    if (!(await om.isActiveOracle(n.address))) {
+      await (await om.connect(ops).unpauseOracle(n.address)).wait();
+    }
+    await (await om.connect(ops).pauseOracle(n.address)).wait();
+    paused.push(n);
+    log(`   ⏸️  ops paused ${label} ${n.address}`);
+  };
+  try {
+    await pause(n3, "node 3");
+    const q = await raiseQuery(state, n1, throwawaySubject(), QUERY.COMPLIANCE);
+    out.pausedRefusal = await refusal(() =>
+      om.connect(n3).submitResponse(q, false),
+    );
+    log(
+      out.pausedRefusal
+        ? `   🚫 node 3's answer refused: ${out.pausedRefusal}`
+        : "❌ node 3's answer was accepted while paused",
+    );
+    out.tally = await answerUntilResolved(
+      state,
+      q,
+      [
+        [n1, true],
+        [n2, true],
+      ],
+      log,
+    );
+    log(
+      `   ⚖️  ${tallyLine(out.tally)} (paused node 3 still in the denominator)`,
+    );
 
-  await (await om.connect(ops).unpauseOracle(n3.address)).wait();
-  out.unpaused = await om.isActiveOracle(n3.address);
-  log(`   ▶️  ops unpaused node 3: active = ${out.unpaused}`);
+    await pause(n2, "node 2");
+    const q2 = await raiseQuery(
+      state,
+      n1,
+      throwawaySubject(),
+      QUERY.COMPLIANCE,
+    );
+    out.aloneTally = await answerUntilResolved(state, q2, [[n1, true]], log);
+    log(
+      `   ⚖️  ${tallyLine(out.aloneTally)}: node 1 alone cannot resolve, pausing never lowers the bar`,
+    );
+
+    for (const [n, label] of [
+      [n2, "node 2"],
+      [n3, "node 3"],
+    ]) {
+      await (await om.connect(ops).unpauseOracle(n.address)).wait();
+      paused.splice(paused.indexOf(n), 1);
+      log(
+        `   ▶️  ops unpaused ${label}: active = ${await om.isActiveOracle(n.address)}`,
+      );
+    }
+    out.unpaused = await om.isActiveOracle(n3.address);
+  } finally {
+    // A failure between pause and unpause must not leave a node paused.
+    for (const n of paused) {
+      if (!(await om.isActiveOracle(n.address))) {
+        await (await om.connect(ops).unpauseOracle(n.address)).wait();
+        log(`   ▶️  restored ${n.address} after a failed step`);
+      }
+    }
+  }
 
   await (await om.connect(ops).setEmergencyOracle(n2.address, true)).wait();
   const target = throwawaySubject();

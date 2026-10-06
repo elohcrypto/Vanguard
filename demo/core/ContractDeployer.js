@@ -981,7 +981,7 @@ class ContractDeployer {
 
       const pct = await oracleManager.getConsensusThreshold();
       console.log(
-        `   ✅ Consensus threshold: ${pct}% of the active weight (two of three equal nodes)`,
+        `   ✅ Consensus threshold: ${pct}% of the registered weight (two of three equal nodes)`,
       );
 
       // Wire the BLACKLIST gate into the token's compliance, when both exist.
