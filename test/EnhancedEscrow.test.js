@@ -571,7 +571,7 @@ describe("Enhanced Escrow System", function () {
         .connect(payee)
         .submitShipmentProof(proofData, dataHash, signature);
 
-      const proof = await wallet.getShipmentProof();
+      const proof = await wallet.shipmentProof();
       expect(proof.exists).to.be.true;
       expect(proof.data).to.equal(proofData);
       expect(proof.dataHash).to.equal(dataHash);
@@ -649,10 +649,10 @@ describe("Enhanced Escrow System", function () {
     });
 
     it("Should check if dispute window is open", async function () {
-      expect(await wallet.isDisputeWindowOpen()).to.be.true;
+      expect((await wallet.getWalletStatus()).disputeWindowOpen).to.be.true;
 
       await time.increase(15 * 24 * 60 * 60);
-      expect(await wallet.isDisputeWindowOpen()).to.be.false;
+      expect((await wallet.getWalletStatus()).disputeWindowOpen).to.be.false;
     });
   });
 
@@ -954,7 +954,7 @@ describe("Enhanced Escrow System", function () {
     });
 
     it("Should check if ready for signatures", async function () {
-      expect(await wallet.isReadyForSignatures()).to.be.true;
+      expect((await wallet.getWalletStatus()).readyForSignatures).to.be.true;
     });
   });
 
