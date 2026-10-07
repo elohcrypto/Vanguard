@@ -1,18 +1,19 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.19;
 
-import "@openzeppelin/contracts/access/Ownable2Step.sol";
 import "@openzeppelin/contracts/utils/structs/Checkpoints.sol";
-import "./interfaces/IIdentityRegistry.sol";
+import "./RegistryVerification.sol";
 import "./interfaces/IInvestorTypeRegistry.sol";
 import "../compliance/interfaces/IComplianceRules.sol";
-import "../onchain_id/interfaces/IClaimIssuer.sol";
 
 /**
  * @title IdentityRegistry
- * @dev Implementation of identity registry for ERC-3643 ecosystem
+ * @dev Implementation of identity registry for ERC-3643 ecosystem: wallets,
+ *      identities, countries, agents, investor types and the jurisdiction
+ *      link. Required topics, trusted issuers, isVerified and its cache live
+ *      in RegistryVerification (Task 4.9).
  */
-contract IdentityRegistry is IIdentityRegistry, Ownable2Step {
+contract IdentityRegistry is RegistryVerification {
     using Checkpoints for Checkpoints.Trace208;
 
     // Mapping from wallet address to OnchainID identity
@@ -73,27 +74,6 @@ contract IdentityRegistry is IIdentityRegistry, Ownable2Step {
 
     // Token address for jurisdiction validation
     address private _tokenForJurisdiction;
-
-    // ---- Required claims (folds ClaimTopicsRegistry + TrustedIssuersRegistry) ----
-    // A wallet is verified only if, for EVERY required topic, an issuer
-    // trusted for that topic reports a live claim (issued to the identity,
-    // not revoked, not expired).
-    uint256[] private _claimTopics;
-    mapping(uint256 => bool) private _isRequiredTopic;
-    mapping(uint256 => address[]) private _trustedIssuersForTopic;
-    mapping(address => mapping(uint256 => bool)) private _issuerHasTopic;
-    mapping(address => uint256[]) private _issuerTopics;
-
-    // ponytail: bounded loop in isVerified. Raise if a topic needs more issuers.
-    uint256 public constant MAX_TRUSTED_ISSUERS_PER_TOPIC = 8;
-
-    error TooManyTrustedIssuers(uint256 topic);
-    error IssuerNotAContract(address issuer);
-
-    event ClaimTopicAdded(uint256 indexed topic);
-    event ClaimTopicRemoved(uint256 indexed topic);
-    event TrustedIssuerAdded(address indexed issuer, uint256[] topics);
-    event TrustedIssuerRemoved(address indexed issuer);
 
     // Events
     event IdentityUnstored(address indexed userAddress, address indexed identity);
@@ -270,132 +250,8 @@ contract IdentityRegistry is IIdentityRegistry, Ownable2Step {
         return _countries[_userAddress];
     }
 
-    /**
-     * @dev Verified = registered by an agent AND holding a live claim from a
-     *      trusted issuer on every required topic. A registry with no required
-     *      topics verifies nobody (fail closed; T-REX would verify everyone).
-     *      The deploy guard in scripts/deploy-helpers.ts is the second line.
-     */
-    function isVerified(address _userAddress) external view override returns (bool) {
-        address id = _identities[_userAddress];
-        if (id == address(0)) return false;
-        uint256 n = _claimTopics.length;
-        if (n == 0) return false;
-        for (uint256 t = 0; t < n; t++) {
-            if (!_hasValidClaim(id, _claimTopics[t])) return false;
-        }
-        return true;
-    }
-
-    // ---- Required-claim configuration (owner = governance after handover) ----
-
-    /// @dev Never a topic no trusted issuer covers (2F.5 review L-1): it
-    ///      would verify nobody, so no vote could ever pass again. Trust the
-    ///      issuer first (addTrustedIssuer accepts a non-required topic).
-    function addClaimTopic(uint256 _topic) external onlyOwner {
-        require(!_isRequiredTopic[_topic], "Topic already required");
-        require(_trustedIssuersForTopic[_topic].length > 0, "No trusted issuer for topic");
-        _isRequiredTopic[_topic] = true;
-        _claimTopics.push(_topic);
-        emit ClaimTopicAdded(_topic);
-    }
-
-    /// @dev Never the last topic (2F.5, L3): zero topics verifies nobody, so
-    ///      no vote could ever pass again. Zero is only a fail-closed initial state.
-    function removeClaimTopic(uint256 _topic) external onlyOwner {
-        require(_isRequiredTopic[_topic], "Topic not required");
-        require(_claimTopics.length > 1, "Last claim topic");
-        _isRequiredTopic[_topic] = false;
-        _removeFromList(_claimTopics, _topic);
-        emit ClaimTopicRemoved(_topic);
-    }
-
-    function addTrustedIssuer(address _issuer, uint256[] calldata _topics) external onlyOwner {
-        if (_issuer.code.length == 0) revert IssuerNotAContract(_issuer);
-        require(_topics.length > 0, "No topics");
-        for (uint256 i = 0; i < _topics.length; i++) {
-            uint256 topic = _topics[i];
-            if (_issuerHasTopic[_issuer][topic]) continue;
-            if (_trustedIssuersForTopic[topic].length >= MAX_TRUSTED_ISSUERS_PER_TOPIC) {
-                revert TooManyTrustedIssuers(topic);
-            }
-            _issuerHasTopic[_issuer][topic] = true;
-            _trustedIssuersForTopic[topic].push(_issuer);
-            _issuerTopics[_issuer].push(topic);
-        }
-        emit TrustedIssuerAdded(_issuer, _topics);
-    }
-
-    function removeTrustedIssuer(address _issuer) external onlyOwner {
-        uint256[] storage topics = _issuerTopics[_issuer];
-        require(topics.length > 0, "Issuer not trusted");
-        for (uint256 i = 0; i < topics.length; i++) {
-            // A required topic with no trusted issuer verifies nobody (2F.5, L3).
-            require(
-                !_isRequiredTopic[topics[i]] || _trustedIssuersForTopic[topics[i]].length > 1,
-                "Last issuer for required topic"
-            );
-            _issuerHasTopic[_issuer][topics[i]] = false;
-            _removeAddressFromList(_trustedIssuersForTopic[topics[i]], _issuer);
-        }
-        delete _issuerTopics[_issuer];
-        emit TrustedIssuerRemoved(_issuer);
-    }
-
-    function getClaimTopics() external view returns (uint256[] memory) {
-        return _claimTopics;
-    }
-
-    function getTrustedIssuersForClaimTopic(uint256 _topic) external view returns (address[] memory) {
-        return _trustedIssuersForTopic[_topic];
-    }
-
-    function isTrustedIssuer(address _issuer, uint256 _topic) external view returns (bool) {
-        return _issuerHasTopic[_issuer][_topic];
-    }
-
-    /**
-     * @dev True if some issuer trusted for `topic` reports a live claim on it
-     *      for `id`. Asks the issuers, never the identity's claim list: anyone
-     *      may add claims naming themselves to an identity (OnchainID.addClaim),
-     *      so that list cannot decide verification (2F.2, H2). A self-added
-     *      claim naming a trusted issuer fails because the issuer has no
-     *      record of it. A low-level staticcall: an issuer that reverts
-     *      or returns short data counts as "no claim", never reverts here.
-     */
-    function _hasValidClaim(address id, uint256 topic) private view returns (bool) {
-        // Wallets registered with a non-identity address are unverified.
-        if (id.code.length == 0) return false;
-        address[] storage issuers = _trustedIssuersForTopic[topic];
-        for (uint256 i = 0; i < issuers.length; i++) {
-            (bool ok, bytes memory ret) = issuers[i].staticcall(
-                abi.encodeCall(IClaimIssuer.hasValidClaim, (id, topic))
-            );
-            if (ok && ret.length >= 32 && abi.decode(ret, (bool))) return true;
-        }
-        return false;
-    }
-
-    function _removeFromList(uint256[] storage list, uint256 value) private {
-        uint256 len = list.length;
-        for (uint256 i = 0; i < len; i++) {
-            if (list[i] == value) {
-                list[i] = list[len - 1];
-                list.pop();
-                return;
-            }
-        }
-    }
-
-    function _removeAddressFromList(address[] storage list, address value) private {
-        uint256 len = list.length;
-        for (uint256 i = 0; i < len; i++) {
-            if (list[i] == value) {
-                list[i] = list[len - 1];
-                list.pop();
-                return;
-            }
-        }
+    function _identityOf(address _wallet) internal view override returns (address) {
+        return _identities[_wallet];
     }
 
     function batchRegisterIdentity(
