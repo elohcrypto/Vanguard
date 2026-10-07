@@ -8,6 +8,7 @@
  */
 
 const { ethers } = require("hardhat");
+const { waitOutCooldown } = require("./InvestorTypeRules");
 
 /** Option 27: Investor-to-User Transfer */
 async function investorToUserTransfer(mod) {
@@ -289,6 +290,9 @@ async function completeInvestorToUserNormalTransfer(mod, investor, users) {
     // Get investor signer
     const investorSigner = investor.signer;
 
+    // Task 4.10: wait out the investor's cooldown (dev node), else stop.
+    if (!(await waitOutCooldown(mod.state, investorSigner))) return;
+
     // Execute on-chain transfer
     const digitalToken = mod.state.getContract("digitalToken");
     const amountWei = ethers.parseEther(amount.toString());
@@ -343,7 +347,7 @@ async function completeInvestorToUserNormalTransfer(mod, investor, users) {
  * @private
  */
 async function executeInvestorToUserExcessTransfer(mod, investors, users) {
-  console.log("\n❌ EXCESS INVESTOR-TO-USER TRANSFER");
+  console.log("\n🚫 EXCESS INVESTOR-TO-USER TRANSFER");
   console.log("-".repeat(40));
 
   const investor = investors[0];
@@ -364,7 +368,7 @@ async function executeInvestorToUserExcessTransfer(mod, investors, users) {
   console.log(`\n💸 Attempting transfer...`);
   console.log(`⏳ Validating ERC-3643 compliance...`);
   console.log(`⏳ Checking transfer limits...`);
-  console.log(`❌ TRANSFER BLOCKED!`);
+  console.log(`⛔ TRANSFER BLOCKED! (expected)`);
   console.log(`🚫 Reason: Amount exceeds ERC-3643 transfer limit of 8,000 VSC`);
 
   // Record blocked transaction
@@ -378,7 +382,7 @@ async function executeInvestorToUserExcessTransfer(mod, investors, users) {
     reason: "Exceeds 8,000 VSC ERC-3643 transfer limit",
   });
 
-  console.log("\n❌ TRANSFER BLOCKED BY ERC-3643 LIMITS!");
+  console.log("\n⛔ TRANSFER BLOCKED BY ERC-3643 LIMITS! (expected)");
   console.log("💡 Maximum transfer amount is 8,000 VSC per transaction");
 }
 
@@ -387,7 +391,7 @@ async function executeInvestorToUserExcessTransfer(mod, investors, users) {
  * @private
  */
 async function executeInvestorToUserBlockedTransfer(mod, investors) {
-  console.log("\n❌ TRANSFER TO NON-COMPLIANT USER");
+  console.log("\n🚫 TRANSFER TO NON-COMPLIANT USER");
   console.log("-".repeat(40));
 
   const nonCompliantUsers = Array.from(mod.state.normalUsers.values()).filter(
@@ -395,7 +399,7 @@ async function executeInvestorToUserBlockedTransfer(mod, investors) {
   );
 
   if (nonCompliantUsers.length === 0) {
-    console.log("❌ No non-compliant users available for this demo");
+    console.log("ℹ️  No non-compliant users available for this demo");
     console.log("💡 Create a non-compliant user first (option 24 → 2)");
     return;
   }
@@ -417,7 +421,7 @@ async function executeInvestorToUserBlockedTransfer(mod, investors) {
 
   console.log(`\n💸 Attempting transfer...`);
   console.log(`⏳ Validating ERC-3643 compliance...`);
-  console.log(`❌ TRANSFER BLOCKED!`);
+  console.log(`⛔ TRANSFER BLOCKED! (expected)`);
   console.log(
     `🚫 Reason: Recipient is not KYC/AML compliant per ERC-3643 rules`,
   );
@@ -433,7 +437,7 @@ async function executeInvestorToUserBlockedTransfer(mod, investors) {
     reason: "Recipient not KYC/AML compliant (ERC-3643 violation)",
   });
 
-  console.log("\n❌ TRANSFER BLOCKED BY ERC-3643 COMPLIANCE!");
+  console.log("\n⛔ TRANSFER BLOCKED BY ERC-3643 COMPLIANCE! (expected)");
   console.log("💡 Only KYC/AML approved users can receive Vanguard StableCoin");
 }
 

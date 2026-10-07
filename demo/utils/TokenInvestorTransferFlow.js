@@ -8,6 +8,7 @@
  */
 
 const { whitelistHints } = require("./WhitelistLiveFlow");
+const { waitOutCooldown } = require("./InvestorTypeRules");
 const { ethers } = require("hardhat");
 
 /** Option 26: Investor-to-Investor Transfer */
@@ -242,6 +243,10 @@ async function completeNormalTransfer(
     `   💰 Recipient Balance: ${ethers.formatEther(recipientBalanceBefore)} VSC`,
   );
 
+  // Task 4.10: the sender may be inside its type's cooldown (e.g. it just
+  // locked or received); wait it out on a dev node, else say until when.
+  if (!(await waitOutCooldown(mod.state, sender.signer))) return;
+
   // Step 5: Execute transfer on-chain
   console.log("\n📝 Step 5: Executing transfer on blockchain...");
   const tx = await digitalToken
@@ -305,7 +310,7 @@ async function completeNormalTransfer(
  * @private
  */
 async function executeExcessTransfer(mod, compliantInvestors) {
-  console.log("\n❌ EXCESS TRANSFER ATTEMPT (>8,000 LIMIT)");
+  console.log("\n🚫 EXCESS TRANSFER ATTEMPT (>8,000 LIMIT)");
   console.log("-".repeat(40));
 
   const sender = compliantInvestors[0];
@@ -334,7 +339,7 @@ async function executeExcessTransfer(mod, compliantInvestors) {
   console.log(`\n💸 Attempting transfer...`);
   console.log(`⏳ Validating compliance...`);
   console.log(`⏳ Checking transfer limits...`);
-  console.log(`❌ TRANSFER BLOCKED!`);
+  console.log(`⛔ TRANSFER BLOCKED! (expected)`);
   console.log(`🚫 Reason: Amount exceeds daily limit of 8,000 VSC`);
 
   // Record blocked transaction
@@ -348,7 +353,7 @@ async function executeExcessTransfer(mod, compliantInvestors) {
     reason: "Exceeds 8,000 VSC transfer limit",
   });
 
-  console.log("\n❌ TRANSFER BLOCKED BY StableCoin LIMITS!");
+  console.log("\n⛔ TRANSFER BLOCKED BY StableCoin LIMITS! (expected)");
   console.log("💡 Maximum transfer amount is 8,000 VSC per transaction");
 }
 
@@ -357,7 +362,7 @@ async function executeExcessTransfer(mod, compliantInvestors) {
  * @private
  */
 async function executeBlockedTransfer(mod, allInvestors) {
-  console.log("\n❌ TRANSFER TO NON-COMPLIANT (BLOCKED)");
+  console.log("\n🚫 TRANSFER TO NON-COMPLIANT (BLOCKED)");
   console.log("-".repeat(40));
 
   const compliantInvestors = allInvestors.filter((inv) => inv.tokenEligible);
@@ -367,7 +372,7 @@ async function executeBlockedTransfer(mod, allInvestors) {
 
   if (compliantInvestors.length === 0 || nonCompliantInvestors.length === 0) {
     console.log(
-      "❌ Need both compliant and non-compliant investors for this demo",
+      "ℹ️  Need both compliant and non-compliant investors for this demo",
     );
     return;
   }
@@ -389,7 +394,7 @@ async function executeBlockedTransfer(mod, allInvestors) {
 
   console.log(`\n💸 Attempting transfer...`);
   console.log(`⏳ Validating compliance...`);
-  console.log(`❌ TRANSFER BLOCKED!`);
+  console.log(`⛔ TRANSFER BLOCKED! (expected)`);
   console.log(`🚫 Reason: Recipient is not KYC/AML compliant`);
 
   // Record blocked transaction
@@ -403,7 +408,7 @@ async function executeBlockedTransfer(mod, allInvestors) {
     reason: "Recipient not KYC/AML compliant",
   });
 
-  console.log("\n❌ TRANSFER BLOCKED BY COMPLIANCE!");
+  console.log("\n⛔ TRANSFER BLOCKED BY COMPLIANCE! (expected)");
   console.log(
     "💡 Only KYC/AML approved investors can receive Vanguard StableCoin",
   );

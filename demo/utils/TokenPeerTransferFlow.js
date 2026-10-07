@@ -8,6 +8,7 @@
  */
 
 const { ethers } = require("hardhat");
+const { waitOutCooldown } = require("./InvestorTypeRules");
 
 /** Option 27.5: User-to-User Transfer */
 async function userToUserTransfer(mod) {
@@ -126,6 +127,10 @@ async function userToUserTransfer(mod) {
       console.log("   ❌ One or both users not verified on-chain!");
       return;
     }
+
+    // Task 4.10: wait out the sender's cooldown (dev node), else stop, so
+    // canTransfer below answers for the limits, not the cooldown.
+    if (!(await waitOutCooldown(mod.state, sender.signer))) return;
 
     // Step 3: Check transfer limits on-chain
     console.log("\n📝 Step 3: Checking transfer limits on blockchain...");
