@@ -147,6 +147,21 @@ describe("Investor-type whitelist tier (Task 4.10)", function () {
     await token.connect(alice).transfer(carol.address, 1n);
   });
 
+  it("Either: an expired short entry beside a proof binding counts as none", async function () {
+    const { alice, carol, rules, token, wl, binder, tierOk, can } =
+      await deploy();
+    await rules.setWhitelistMode(token.target, M.Either);
+    await binder.setBound(alice.address, true);
+    await wl.addToWhitelist(alice.address, 1, 60, "short, expiring");
+    expect(await tierOk(alice.address)).to.equal(false); // live and short
+    await time.increase(120);
+    expect(await wl.isWhitelisted(alice.address)).to.equal(false);
+    expect((await wl.getWhitelistInfo(alice.address))[3]).to.equal(1n);
+    expect(await tierOk(alice.address)).to.equal(true);
+    expect(await can(alice.address, carol.address)).to.equal(true);
+    await token.connect(alice).transfer(carol.address, 1n);
+  });
+
   it("D26 trusted path: the human's tier is checked, the contract's is not", async function () {
     const { alice, rules, token, can, list } = await deploy();
     const c = await (await ethers.getContractFactory("MockTarget")).deploy();
