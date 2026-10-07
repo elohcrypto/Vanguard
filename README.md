@@ -159,7 +159,7 @@ Vanguard/
 
 ### Installation
 
-````bash
+```bash
 # 1. Clone the repository
 git clone <repository-url>
 cd ERC-3643
@@ -173,18 +173,19 @@ npx hardhat compile
 # 4. Compile ZK circuits (optional - pre-compiled artifacts included)
 
 npm run setup:zk             # Setup ZK circuits (one-time)
-
+```
 
 ### Available NPM Scripts
 
 **Core Development** (Most Used):
+
 ```bash
 npm run compile              # Compile smart contracts
 npm run test                 # Run all tests
 npm run node                 # Start local Hardhat node
 npm run clean                # Clean build artifacts
 npm run demo:interactive:proof  # Run main interactive demo (89 options)
-````
+```
 
 **Testing & Analysis**:
 
