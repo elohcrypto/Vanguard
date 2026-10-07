@@ -200,14 +200,16 @@ contract Token is IERC3643, ERC20, Ownable2Step, Pausable {
             // Fail closed (R-410-1): a registry that has not authorized this
             // token cannot take its cooldown clock, so nothing moves until
             // the owner calls authorizeToken; the misconfiguration is loud.
-            if (!_investorTypeRegistry.isTokenAuthorized(address(this))) return (false, NOT_AUTHORIZED);
-
-            // Transfer amount limit and type cooldown for a non-trusted
-            // sender (D37 = a): a trusted contract has no type and no clock.
-            if (!fromTrusted) {
-                if (!_investorTypeRegistry.canTransferAmount(_from, _amount))
-                    return (false, "Transfer amount limit exceeded");
-                if (!_investorTypeRegistry.canTransferNow(_from)) return (false, "Transfer cooldown");
+            // For a non-trusted sender one call answers the authorization,
+            // its transfer cap and its type cooldown (D37 = a), in that
+            // order; a trusted contract has no type and no clock.
+            if (fromTrusted) {
+                if (!_investorTypeRegistry.isTokenAuthorized(address(this))) return (false, NOT_AUTHORIZED);
+            } else {
+                uint8 code = _investorTypeRegistry.transferCheck(_from, _amount);
+                if (code == 1) return (false, NOT_AUTHORIZED);
+                if (code == 2) return (false, "Transfer amount limit exceeded");
+                if (code == 3) return (false, "Transfer cooldown");
             }
 
             // Check holding limit for a non-trusted recipient

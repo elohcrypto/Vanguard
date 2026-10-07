@@ -151,9 +151,31 @@ contract InvestorTypeRegistry is InvestorTypeGovernance {
      */
     function canTransferNow(address sender) external view returns (bool) {
         if (investorLimitExempt[sender]) return true;
-        uint256 cooldown = _typeConfigs[_investorTypes[sender]].transferCooldownMinutes;
-        if (cooldown == 0) return true;
-        return (block.timestamp - lastTransferAt[sender]) / 60 >= cooldown;
+        return _cooledDown(sender, _typeConfigs[_investorTypes[sender]].transferCooldownMinutes);
+    }
+
+    /**
+     * @notice The sending side of a token's transfer in one call, for the
+     *         calling token (msg.sender): 0 allowed; 1 the caller is not an
+     *         authorized token; 2 `amount` is above the sender's
+     *         maxTransferAmount; 3 the sender is inside its cooldown. Checked
+     *         in that order, as canTransferAmount and canTransferNow would;
+     *         an investorLimitExempt sender skips 2 and 3, never 1. Token
+     *         maps each code to its revert reason (Task 4.10).
+     */
+    function transferCheck(address sender, uint256 amount) external view returns (uint8) {
+        if (!_authorizedTokens[msg.sender]) return 1;
+        if (investorLimitExempt[sender]) return 0;
+        InvestorTypeConfig storage config = _typeConfigs[_investorTypes[sender]];
+        if (amount > config.maxTransferAmount) return 2;
+        if (!_cooledDown(sender, config.transferCooldownMinutes)) return 3;
+        return 0;
+    }
+
+    /// @dev True when `cooldown` (minutes) is 0 or has passed since the
+    ///      sender's last recorded transfer.
+    function _cooledDown(address sender, uint256 cooldown) private view returns (bool) {
+        return cooldown == 0 || (block.timestamp - lastTransferAt[sender]) / 60 >= cooldown;
     }
 
     /**

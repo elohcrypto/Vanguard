@@ -118,6 +118,10 @@ interface IInvestorTypeRegistry {
     /// @dev False while `sender` is inside its type's transfer cooldown.
     function canTransferNow(address sender) external view returns (bool);
 
+    /// @dev For the calling token: 0 allowed, 1 caller not authorized,
+    /// 2 above the sender's transfer cap, 3 inside its cooldown.
+    function transferCheck(address sender, uint256 amount) external view returns (uint8);
+
     /// @dev Authorized tokens only: start `sender`'s cooldown now.
     function recordTransfer(address sender) external;
 
