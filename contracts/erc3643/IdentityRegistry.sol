@@ -3,15 +3,15 @@ pragma solidity ^0.8.19;
 
 import "@openzeppelin/contracts/utils/structs/Checkpoints.sol";
 import "./RegistryVerification.sol";
-import "./interfaces/IInvestorTypeRegistry.sol";
 import "../compliance/interfaces/IComplianceRules.sol";
 
 /**
  * @title IdentityRegistry
  * @dev Implementation of identity registry for ERC-3643 ecosystem: wallets,
- *      identities, countries, agents, investor types and the jurisdiction
- *      link. Required topics, trusted issuers, isVerified and its cache live
- *      in RegistryVerification (Task 4.9).
+ *      identities, countries, agents and the jurisdiction link (investor
+ *      types live on the token's InvestorTypeRegistry, Task 4.10).
+ *      Required topics, trusted issuers, isVerified and its cache live in
+ *      RegistryVerification (Task 4.9).
  */
 contract IdentityRegistry is RegistryVerification {
     using Checkpoints for Checkpoints.Trace208;
@@ -66,9 +66,6 @@ contract IdentityRegistry is RegistryVerification {
     // Mapping of authorized agents
     mapping(address => bool) private _agents;
 
-    // Investor Type Registry integration
-    IInvestorTypeRegistry private _investorTypeRegistry;
-
     // Compliance Rules integration
     IComplianceRules private _complianceRules;
 
@@ -78,7 +75,6 @@ contract IdentityRegistry is RegistryVerification {
     // Events
     event IdentityUnstored(address indexed userAddress, address indexed identity);
     event IdentityModified(address indexed oldIdentity, address indexed newIdentity);
-    event InvestorTypeRegistryUpdated(address indexed oldRegistry, address indexed newRegistry);
     event ComplianceRulesUpdated(address indexed oldRules, address indexed newRules);
     event IdentityRegistrationRejected(address indexed userAddress, uint16 country, string reason);
     event AgentAdded(address indexed agent);
@@ -288,29 +284,6 @@ contract IdentityRegistry is RegistryVerification {
     // Additional utility functions
 
     /**
-     * @dev Set investor type registry
-     */
-    function setInvestorTypeRegistry(address _investorTypeRegistryAddress) external onlyOwner {
-        require(_investorTypeRegistryAddress != address(0), "Invalid registry address");
-        require(
-            _investorTypeRegistryAddress.code.length > 0,
-            "IdentityRegistry: Investor type registry address is not a contract"
-        );
-
-        address oldRegistry = address(_investorTypeRegistry);
-        _investorTypeRegistry = IInvestorTypeRegistry(_investorTypeRegistryAddress);
-
-        emit InvestorTypeRegistryUpdated(oldRegistry, _investorTypeRegistryAddress);
-    }
-
-    /**
-     * @dev Get investor type registry address
-     */
-    function getInvestorTypeRegistry() external view returns (address) {
-        return address(_investorTypeRegistry);
-    }
-
-    /**
      * @dev Set compliance rules for jurisdiction validation
      */
     function setComplianceRules(address _complianceRulesAddress, address _token) external onlyOwner {
@@ -333,37 +306,5 @@ contract IdentityRegistry is RegistryVerification {
      */
     function getComplianceRules() external view returns (address) {
         return address(_complianceRules);
-    }
-
-    /**
-     * @dev Get investor type for a user (integrated with InvestorTypeRegistry)
-     */
-    function getInvestorType(address _userAddress) external view returns (IInvestorTypeRegistry.InvestorType) {
-        require(address(_investorTypeRegistry) != address(0), "InvestorTypeRegistry not set");
-        return _investorTypeRegistry.getInvestorType(_userAddress);
-    }
-
-    /**
-     * @dev Check if user can transfer specified amount based on investor type
-     */
-    function canTransferAmount(address _userAddress, uint256 _amount) external view returns (bool) {
-        require(address(_investorTypeRegistry) != address(0), "InvestorTypeRegistry not set");
-        return _investorTypeRegistry.canTransferAmount(_userAddress, _amount);
-    }
-
-    /**
-     * @dev Check if user can hold specified amount based on investor type
-     */
-    function canHoldAmount(address _userAddress, uint256 _amount) external view returns (bool) {
-        require(address(_investorTypeRegistry) != address(0), "InvestorTypeRegistry not set");
-        return _investorTypeRegistry.canHoldAmount(_userAddress, _amount);
-    }
-
-    /**
-     * @dev Get required whitelist tier for user based on investor type
-     */
-    function getRequiredWhitelistTier(address _userAddress) external view returns (uint8) {
-        require(address(_investorTypeRegistry) != address(0), "InvestorTypeRegistry not set");
-        return _investorTypeRegistry.getRequiredWhitelistTier(_userAddress);
     }
 }

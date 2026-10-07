@@ -116,10 +116,9 @@ in Either. Not applicable: in ZkOnly, and for a party that passes Either
 by a proof binding with no live entry, since a proof binding carries no
 tier. `investorLimitExempt` parties skip it. Token reports the refusal as
 `Compliance check failed`; `ComplianceRules.whitelistTierAllows(token,
-party)` is false exactly when the tier rule is the cause.
-`IdentityRegistry.getRequiredWhitelistTier` forwards the registry the
-IdentityRegistry is pointed at (only one test sets it); the rule reads the
-token's registry instead.
+party)` is false exactly when the tier rule is the cause. The
+IdentityRegistry holds no investor-type registry (its pointer and
+forwarders were deleted in Task 4.8); the token's registry is the only one.
 
 In the demo no deploy path binds a `WhitelistOracle` to VSC, so VSC reads
 no entry and the tier rule does not apply to VSC today; option 58 proves

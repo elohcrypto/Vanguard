@@ -28,7 +28,7 @@ abstract contract GovernanceConfig is Ownable2Step {
         // that ComplianceRules reads (plan 2D.1, D6').
         ListUpdate,
         // Index 7: governs the IdentityRegistry's onlyOwner surface (claim
-        // topics, trusted issuers, agents, compliance/investor-type wiring).
+        // topics, trusted issuers, agents, compliance wiring).
         IdentityRegistryParameters,
         // Index 8: governs the vote token's owner surface (plan 2C.2, D19).
         GovernanceTokenParameters,

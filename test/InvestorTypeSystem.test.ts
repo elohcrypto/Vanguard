@@ -59,11 +59,6 @@ describe("Investor Type System", function () {
       true,
     );
 
-    // Set up investor type registry in identity registry
-    await identityRegistry.setInvestorTypeRegistry(
-      await investorTypeRegistry.getAddress(),
-    );
-
     // Register identities for testing
     await identityRegistry.registerIdentity(
       normalInvestor.address,
