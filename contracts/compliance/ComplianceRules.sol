@@ -4,6 +4,7 @@ pragma solidity ^0.8.20;
 import "./ComplianceRulesAdmin.sol";
 import "../erc3643/interfaces/ICompliance.sol";
 import "../erc3643/interfaces/IIdentityRegistry.sol";
+import {IInvestorTypeRegistry} from "../erc3643/interfaces/IInvestorTypeRegistry.sol";
 
 /**
  * @title ComplianceRules
@@ -85,26 +86,73 @@ contract ComplianceRules is ComplianceRulesAdmin, IComplianceHooks {
      *      exempt: a contract will never be on an investor allow list),
      *      canReceive (wallet recovery) checks the new wallet. Burn is never
      *      gated.
+     *      Tier (D37 = a, Task 4.10): wherever a party passes by its oracle
+     *      entry (OracleOnly, or Either with a live entry), the entry's tier
+     *      must reach its investor type's requiredWhitelistTier, so every
+     *      caller above applies it to the same parties. Not applicable in
+     *      ZkOnly, nor to a party that passes Either by a proof binding with
+     *      no live entry: a proof binding carries no tier.
      */
     function _whitelistAllows(address token, address from, address to) internal view returns (bool) {
         return _whitelisted(token, from) && _whitelisted(token, to);
     }
 
     /// @dev One party of _whitelistAllows; address(0) (mint/burn side) passes.
-    ///      Each source is called at most once.
+    ///      Each source is called at most once. A party that passes by its
+    ///      oracle entry must also meet its investor type's required tier
+    ///      (_tierMet, Task 4.10); a tier-short entry refuses even in Either.
     function _whitelisted(address token, address party) private view returns (bool) {
         if (party == address(0)) return true;
         WhitelistMode mode = whitelistMode[token];
         if (mode != WhitelistMode.ZkOnly) {
             address wlOracle = whitelistOracle[token];
             if (wlOracle != address(0)) {
-                if (IWhitelistOracleView(wlOracle).isWhitelisted(party)) return true;
+                if (IWhitelistOracleView(wlOracle).isWhitelisted(party)) return _tierMet(token, wlOracle, party);
                 if (mode == WhitelistMode.OracleOnly) return false;
             } else if (mode == WhitelistMode.OracleOnly) {
                 return true;
             }
         }
         return IPrivacyManagerView(privacyManager[token]).hasValidWhitelistProof(party);
+    }
+
+    /**
+     * @notice The whitelist tier rule (D37 = a, Task 4.10) for `party` on
+     *         `token`: false only when the token's mode is OracleOnly or
+     *         Either, its whitelist oracle holds a live entry for the party,
+     *         and that entry's tier is below the tier the party's investor
+     *         type requires in the token's investor-type registry. True
+     *         (not applicable) in ZkOnly and for a party with no live entry,
+     *         such as one that passes Either by its proof binding: a proof
+     *         binding carries no tier. Lets a reader name the cause of a
+     *         "Compliance check failed" refusal.
+     */
+    function whitelistTierAllows(address token, address party) external view returns (bool) {
+        address wlOracle = whitelistOracle[token];
+        if (whitelistMode[token] == WhitelistMode.ZkOnly || wlOracle == address(0)) return true;
+        if (!IWhitelistOracleView(wlOracle).isWhitelisted(party)) return true;
+        return _tierMet(token, wlOracle, party);
+    }
+
+    /// @dev The party's oracle entry tier meets its investor type's required
+    ///      tier. No rule when the token applies no investor-type registry
+    ///      (Token.investorTypeRegistry() is zero, or the token is not a
+    ///      Token) or the party is investorLimitExempt (D22, as for the caps).
+    function _tierMet(address token, address wlOracle, address party) private view returns (bool) {
+        IInvestorTypeRegistry types = _typesOf(token);
+        if (address(types) == address(0) || types.investorLimitExempt(party)) return true;
+        (, , , uint8 tier, , ) = IWhitelistOracleView(wlOracle).getWhitelistInfo(party);
+        return tier >= types.getRequiredWhitelistTier(party);
+    }
+
+    /// @dev The token's own investor-type registry (R-410-2), or zero.
+    function _typesOf(address token) private view returns (IInvestorTypeRegistry) {
+        if (token.code.length == 0) return IInvestorTypeRegistry(address(0));
+        try ITokenInvestorTypesView(token).investorTypeRegistry() returns (address r) {
+            return IInvestorTypeRegistry(r);
+        } catch {
+            return IInvestorTypeRegistry(address(0));
+        }
     }
 
     /**

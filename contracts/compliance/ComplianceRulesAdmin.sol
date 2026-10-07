@@ -13,6 +13,16 @@ interface IBlacklistOracleView {
 /// @dev Read-only slice of WhitelistOracle. Same rationale as above.
 interface IWhitelistOracleView {
     function isWhitelisted(address subject) external view returns (bool);
+
+    /// @dev The entry's tier is the fourth field (Task 4.10 tier rule).
+    function getWhitelistInfo(
+        address subject
+    ) external view returns (bool, uint256, uint256, uint8 tier, string memory, address[] memory);
+}
+
+/// @dev Read-only slice of Token: the investor-type registry it applies.
+interface ITokenInvestorTypesView {
+    function investorTypeRegistry() external view returns (address);
 }
 
 /// @dev Read-only slice of PrivacyManager (the ZK whitelist binder). Same rationale.
