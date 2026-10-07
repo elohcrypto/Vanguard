@@ -64,7 +64,17 @@ describe("ZK deployment mode", function () {
         expect(src.includes(banned), `${f} mentions ${banned}`).to.be.false;
       }
     }
-    const deployer = fs.readFileSync("demo/core/ContractDeployer.js", "utf8");
+    // Task 4.8 split ContractDeployer's deploy steps into helpers; the
+    // privacy pair (and this line) lives in demo/utils/DeployCoreFlow.js.
+    const deployer = [
+      "demo/core/ContractDeployer.js",
+      ...fs
+        .readdirSync("demo/utils")
+        .filter((f: string) => /^Deploy\w*Flow\.js$/.test(f))
+        .map((f: string) => `demo/utils/${f}`),
+    ]
+      .map((f) => fs.readFileSync(f, "utf8"))
+      .join("\n");
     expect(deployer).to.match(
       /getContractFactory\("ZKVerifierIntegrated"\)\s*\)\.deploy\(false\)/,
     );
