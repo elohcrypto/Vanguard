@@ -37,7 +37,8 @@ contracts/
 Each folder has its interfaces in `interfaces/`; `contracts/README.md`
 and the folder READMEs describe the contracts. "X on Y" means Y is an
 abstract base of X, not deployed on its own: X is one contract at one
-address.
+address. The Task 4.8 splits changed storage layouts, so a deployment made
+before them is redeployed, not upgraded (there are no proxies).
 
 ## Workflows
 
