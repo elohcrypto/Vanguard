@@ -33,18 +33,18 @@ and the folder READMEs describe the contracts.
 
 ## Workflows
 
-| Workflow | Contracts | Demo options |
-|---|---|---|
-| User onboarding | OnchainIDFactory, ClaimIssuer, IdentityRegistry | 1, 3, 6, 7, 23, 24 |
-| Identity keys | OnchainID, KeyManager | 2, 4, 5, 5a, 12, 12a, 12b |
-| Oracle whitelist and blacklist | OracleManager, ConsensusOracle, WhitelistOracle, BlacklistOracle | 31-40, 33a-35a |
-| Minting | Token, ComplianceRules, InvestorTypeRegistry | 22, 25 |
-| Transfers | Token, ComplianceRules, InvestorTypeRegistry | 26, 27, 27.5, 28 |
-| Privacy and ZK verification | ZKVerifierIntegrated, PrivacyManager, ComplianceRules | 41-50 |
-| Investor custody | InvestorRequestManager, MultiSigWallet | 23, 51 |
-| Escrow payment | EscrowWalletFactory, MultiSigEscrowWallet | 61-73b |
-| Burning | Token | (agent call, below) |
-| Governance | GovernanceToken, VanguardGovernance | 74-83e |
+| Workflow                       | Contracts                                                        | Demo options              |
+| ------------------------------ | ---------------------------------------------------------------- | ------------------------- |
+| User onboarding                | OnchainIDFactory, ClaimIssuer, IdentityRegistry                  | 1, 3, 6, 7, 23, 24        |
+| Identity keys                  | OnchainID, KeyManager                                            | 2, 4, 5, 5a, 12, 12a, 12b |
+| Oracle whitelist and blacklist | OracleManager, ConsensusOracle, WhitelistOracle, BlacklistOracle | 31-40, 33a-35a            |
+| Minting                        | Token, ComplianceRules, InvestorTypeRegistry                     | 22, 25                    |
+| Transfers                      | Token, ComplianceRules, InvestorTypeRegistry                     | 26, 27, 27.5, 28          |
+| Privacy and ZK verification    | ZKVerifierIntegrated, PrivacyManager, ComplianceRules            | 41-50                     |
+| Investor custody               | InvestorRequestManager, MultiSigWallet                           | 23, 51                    |
+| Escrow payment                 | EscrowWalletFactory, MultiSigEscrowWallet                        | 61-73b                    |
+| Burning                        | Token                                                            | (agent call, below)       |
+| Governance                     | GovernanceToken, VanguardGovernance                              | 74-83e                    |
 
 ## User Onboarding
 
@@ -62,12 +62,12 @@ required topic from a trusted issuer.
    wallet.
 3. **Claims.** A trusted issuer's key signs the claim data and the issuer
    calls `ClaimIssuer.issueClaim(identity, topic, scheme, data, uri,
-   validTo, signature)`. The ClaimIssuer keeps the claim; a copy written to
+validTo, signature)`. The ClaimIssuer keeps the claim; a copy written to
    the OnchainID is a record only (`demo/utils/Kyc.js`).
 4. **Verification.** `IdentityRegistry.isVerified(wallet)` is true when
    every topic in `getClaimTopics()` (6 KYC and 7 AML in the demo) has a
    trusted issuer (`addTrustedIssuer`) whose `hasValidClaim(identity,
-   topic)` answers true for its latest claim on that topic
+topic)` answers true for its latest claim on that topic
    (`latestClaimId`): not revoked (`revokeClaim`) and not past `validTo`
    (0 = no expiry). No topics verifies nobody, and the last topic cannot
    be removed. `refreshVerified(wallet)` (anyone) caches a passing walk
@@ -100,7 +100,7 @@ that it reverts ("execution window passed, re-initiate"), so an item
 paused for longer cannot revive when the identity re-authorizes.
 
 - **Rotation**: a MANAGEMENT key calls `initiateKeyRotation(identity,
-  oldKey, newKey, purpose)`; after the timelock anyone calls
+oldKey, newKey, purpose)`; after the timelock anyone calls
   `executeKeyRotation`, which adds the new key and revokes the old one. The
   timelock is 24 hours (`DEFAULT_TIMELOCK`) unless the identity's own
   MANAGEMENT key set another with `setCustomTimelock` (1 hour to 7 days;
@@ -122,9 +122,9 @@ paused for longer cannot revive when the identity re-authorizes.
 - **Removal with the holder's consent**: `removeKey` is the management
   action (no consent; KeyManager batches and rotations use it, and it is
   the only path for a non-ECDSA key). `OnchainID.removeKeyWithProof(key,
-  purpose, signature)` is still sent by a MANAGEMENT key but also needs
+purpose, signature)` is still sent by a MANAGEMENT key but also needs
   the key's own address to have signed `getRemoveKeyMessage(key,
-  purpose)` (identity, key, purpose, the key's removal nonce and chain id,
+purpose)` (identity, key, purpose, the key's removal nonce and chain id,
   so a signature removes the key once; the returned digest is
   already EIP-191 prefixed, so the holder signs the inner keccak256 with
   `signMessage`). Demo options 5 -> 1 and 5a.
@@ -216,9 +216,9 @@ investor type's holding cap comes from InvestorTypeRegistry. Demo: option
 amount)` and revert with its reason:
 
 1. A paused token reverts `EnforcedPause` and a frozen sender `Address
-   is frozen` before the check; inside it, `Recipient frozen`.
+is frozen` before the check; inside it, `Recipient frozen`.
 2. Unless one side is a trusted contract on this token: `Sender not
-   verified`, `Recipient not verified` (`IdentityRegistry.isVerified`).
+verified`, `Recipient not verified` (`IdentityRegistry.isVerified`).
 3. `Insufficient balance` (the free balance: balance minus partially
    frozen tokens).
 4. `Compliance check failed` when `ComplianceRules.canTransfer` is false:
@@ -233,10 +233,10 @@ amount)` and revert with its reason:
    country rule (`setJurisdictionRule(token, allowed, blocked)`; the
    default blocked list always applies).
 5. With an InvestorTypeRegistry bound: `Token not authorized by investor
-   registry` while the registry has not authorized the token
+registry` while the registry has not authorized the token
    (`authorizeToken`, fail closed); then, for a non-trusted sender,
    `Transfer amount limit exceeded` (its per-transfer cap) and `Transfer
-   cooldown` (inside its type's `transferCooldownMinutes` since its last
+cooldown` (inside its type's `transferCooldownMinutes` since its last
    send, Task 4.10); then `Holding limit exceeded` (a non-trusted
    recipient's holding cap). A trusted contract's own side skips its cap
    and has no cooldown (D26).
@@ -319,13 +319,13 @@ one year.
 
 Plan v2 Task 4.3 (owner decision D13 = b). An investor-status request locks VSC in a contract custody wallet, not as a freeze in the user's own wallet.
 
-| Step (demo option 23) | Who signs | On chain |
-|---|---|---|
-| 2. Request | User | `InvestorRequestManager.requestInvestorStatus(type)`: needs a verified, Normal holder; the lock amount comes from `lockRequirements` |
-| 4. Create wallet | Bank (ops, wallet 10) | `createMultiSigWallet(user)` deploys `MultiSigWallet(bank, user, VSC)`; the manager, a ComplianceRules registrar for the `MultiSigWallet` code hash, trusts it on VSC in the same call; the address is read back from `requests(user)` |
-| 5. Lock | User | `approve(wallet, amount)`, `MultiSigWallet.lockTokens(amount)` (the tokens move into the wallet), `confirmTokensLocked()` |
-| 6. Approve | Bank | `approveRequest(user)`: the manager, a compliance officer, assigns the type while the lock is held |
-| 8. Downgrade | User, then bank | `proposeUnlock(amount, recipient, reason)`, `signUnlock` by both; the second signature pays out. Then a compliance officer sets the type back to Normal |
+| Step (demo option 23) | Who signs             | On chain                                                                                                                                                                                                                               |
+| --------------------- | --------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 2. Request            | User                  | `InvestorRequestManager.requestInvestorStatus(type)`: needs a verified, Normal holder; the lock amount comes from `lockRequirements`                                                                                                   |
+| 4. Create wallet      | Bank (ops, wallet 10) | `createMultiSigWallet(user)` deploys `MultiSigWallet(bank, user, VSC)`; the manager, a ComplianceRules registrar for the `MultiSigWallet` code hash, trusts it on VSC in the same call; the address is read back from `requests(user)` |
+| 5. Lock               | User                  | `approve(wallet, amount)`, `MultiSigWallet.lockTokens(amount)` (the tokens move into the wallet), `confirmTokensLocked()`                                                                                                              |
+| 6. Approve            | Bank                  | `approveRequest(user)`: the manager, a compliance officer, assigns the type while the lock is held                                                                                                                                     |
+| 8. Downgrade          | User, then bank       | `proposeUnlock(amount, recipient, reason)`, `signUnlock` by both; the second signature pays out. Then a compliance officer sets the type back to Normal                                                                                |
 
 Neither signer can move the tokens alone, and every payout passes the token's gate on the recipient (identity, country, caps). The wallet may also hold escrow investor fees routed to it (option 62); an unlock pays from that free balance first, then from the lock. The demo sets the lock requirements within the Normal type's one-transfer cap (2,000 / 4,000 / 8,000 VSC for Retail / Accredited / Institutional), because the user is still Normal when locking; the contract defaults (10,000 / 100,000 / 1,000,000) exceed the default Normal caps. A platform contract holds client tokens here: the bank alone cannot move them, but it is contract custody.
 
@@ -335,12 +335,12 @@ A conditional VSC payment between a **payer** and a **payee**, mediated by a reg
 
 ### Parties and money
 
-| Party | Does | Must be |
-|-------|------|---------|
-| Payer | Funds the escrow. May dispute. Signs to allow a refund. | KYC/AML verified. May be unknown at creation (marketplace): the first verified funder becomes the payer. |
-| Payee | Ships, submits the signed shipment proof, signs to allow a release. | KYC/AML verified. |
-| Investor | Creates the escrow, states the settlement direction, mediates disputes, may refund. | Registered on the factory (`registerInvestor`, `INVESTOR_ROLE`). |
-| Platform | Receives the owner fee. | Fee wallet set on the factory. |
+| Party    | Does                                                                                | Must be                                                                                                  |
+| -------- | ----------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------- |
+| Payer    | Funds the escrow. May dispute. Signs to allow a refund.                             | KYC/AML verified. May be unknown at creation (marketplace): the first verified funder becomes the payer. |
+| Payee    | Ships, submits the signed shipment proof, signs to allow a release.                 | KYC/AML verified.                                                                                        |
+| Investor | Creates the escrow, states the settlement direction, mediates disputes, may refund. | Registered on the factory (`registerInvestor`, `INVESTOR_ROLE`).                                         |
+| Platform | Receives the owner fee.                                                             | Fee wallet set on the factory.                                                                           |
 
 The escrow holds **amount + 3% investor fee + 2% owner fee**, all fixed at creation. A 1000 VSC payment is funded with 1050 VSC. On release the payee gets 1000, the investor fee wallet 30, the platform fee wallet 20. On refund the payer gets the full 1050 back.
 
@@ -380,10 +380,10 @@ stateDiagram-v2
 
 **7. Settle, 2-of-3 with an explicit direction.** The payee signs (68) once the window has closed; the payer may sign at any time while the escrow is active. Neither signature moves funds. The investor then signs (69) and **states the direction**:
 
-| Investor says | Requires | Result |
-|---------------|----------|--------|
-| release | payee has signed | amount to payee, fees to the two fee wallets, state `Released` |
-| refund | payer has signed | full total back to the payer, state `Refunded` |
+| Investor says | Requires         | Result                                                         |
+| ------------- | ---------------- | -------------------------------------------------------------- |
+| release       | payee has signed | amount to payee, fees to the two fee wallets, state `Released` |
+| refund        | payer has signed | full total back to the payer, state `Refunded`                 |
 
 If the required counterparty signature is missing the call reverts (`PayeeHasNotSigned` / `PayerHasNotSigned`). The direction is never inferred from who signed first; that inference used to let a payer pre-sign and turn an intended release into a refund to themselves.
 
@@ -397,9 +397,9 @@ The escrow wallet is a trusted contract, but the human side of every escrow leg 
 
 Release and refund pay **fixed** sums. Anything else that reaches the escrow address is not part of the settlement and stays there:
 
-| How tokens arrive | Stopped? | What happens |
-|-------------------|----------|--------------|
-| `fundEscrowWallet` through the factory | Yes, once only (`funded`) | Second call reverts. |
+| How tokens arrive                                           | Stopped?                       | What happens                                |
+| ----------------------------------------------------------- | ------------------------------ | ------------------------------------------- |
+| `fundEscrowWallet` through the factory                      | Yes, once only (`funded`)      | Second call reverts.                        |
 | A plain `transfer(escrowAddress, x)` by any verified holder | No. The factory never sees it. | Lands in the escrow. Settlement ignores it. |
 
 Once the escrow is `Released` or `Refunded`, an escrow party (payer, payee, investor or the platform owner) may call `sweepExcess()`; anyone else gets `NotEscrowParty`. It sends the entire remaining VSC balance to the payer, the party who funds escrows and the only one who plausibly paid twice. If no payer was ever set (a marketplace escrow settled purely from direct transfers) it goes to the platform fee wallet instead, never to the zero address. It reverts while the escrow is still active (`EscrowStillActive`) and when there is nothing to sweep (`NothingToSweep`). It only ever touches the one token the escrow was created for, and the recipient's holding cap applies to the sweep like any other transfer.
@@ -451,18 +451,18 @@ execution, 83b-83e are the handover ceremony. Rules and the ceremony:
 
 The strings below are the contracts' own.
 
-| Where | Revert | Meaning |
-|---|---|---|
-| Token | `Sender not verified` / `Recipient not verified` | no identity, or a required claim is missing, revoked or expired |
-| Token | `Compliance check failed` | blacklist, whitelist mode, country rule or an unbound registry (above) |
-| Token | `Transfer amount limit exceeded` / `Holding limit exceeded` | investor type caps |
-| Token | `Transfer cooldown` | the sender's investor-type cooldown (Task 4.10) |
-| Token | `Token not authorized by investor registry` | the bound InvestorTypeRegistry has not authorized the token |
-| Token | `Address is frozen` (sender) / `Recipient frozen` / `EnforcedPause()` | agent freeze or guardian pause |
-| IdentityRegistry | `Country not allowed: <reason>` | registration in a refused country |
-| IdentityRegistry | `Identity already registered` / `Identity already bound` | one wallet, one identity |
-| VanguardGovernance | `Proposer cannot vote on own proposal` | the proposer's identity never votes on its proposal |
-| MultiSigEscrowWallet | `PayeeHasNotSigned` / `PayerHasNotSigned` | the stated direction lacks its counterparty's signature |
+| Where                | Revert                                                                | Meaning                                                                |
+| -------------------- | --------------------------------------------------------------------- | ---------------------------------------------------------------------- |
+| Token                | `Sender not verified` / `Recipient not verified`                      | no identity, or a required claim is missing, revoked or expired        |
+| Token                | `Compliance check failed`                                             | blacklist, whitelist mode, country rule or an unbound registry (above) |
+| Token                | `Transfer amount limit exceeded` / `Holding limit exceeded`           | investor type caps                                                     |
+| Token                | `Transfer cooldown`                                                   | the sender's investor-type cooldown (Task 4.10)                        |
+| Token                | `Token not authorized by investor registry`                           | the bound InvestorTypeRegistry has not authorized the token            |
+| Token                | `Address is frozen` (sender) / `Recipient frozen` / `EnforcedPause()` | agent freeze or guardian pause                                         |
+| IdentityRegistry     | `Country not allowed: <reason>`                                       | registration in a refused country                                      |
+| IdentityRegistry     | `Identity already registered` / `Identity already bound`              | one wallet, one identity                                               |
+| VanguardGovernance   | `Proposer cannot vote on own proposal`                                | the proposer's identity never votes on its proposal                    |
+| MultiSigEscrowWallet | `PayeeHasNotSigned` / `PayerHasNotSigned`                             | the stated direction lacks its counterparty's signature                |
 
 Demo dashboards: options 20 (rules), 29 (token), 39 (oracles), 60
 (investor types), 72 (escrow), 80 (governance).

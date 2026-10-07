@@ -14,12 +14,12 @@ describes the contract as it is in this tree.
 `Accredited` (2), `Institutional` (3). An address with no assigned type is
 `Normal`. The constructor sets these configurations (`InvestorTypeConfig`):
 
-| Type | maxTransferAmount | maxHoldingAmount | requiredWhitelistTier | transferCooldownMinutes | largeTransferThreshold | enhancedLogging | enhancedPrivacy |
-|---|---|---|---|---|---|---|---|
-| Normal | 8,000 VSC | 50,000 VSC | 1 | 60 | 3,000 VSC | false | false |
-| Retail | 8,000 VSC | 50,000 VSC | 2 | 60 | 5,000 VSC | false | false |
-| Accredited | 50,000 VSC | 500,000 VSC | 3 | 30 | 10,000 VSC | true | true |
-| Institutional | 500,000 VSC | 5,000,000 VSC | 4 | 15 | 100,000 VSC | true | true |
+| Type          | maxTransferAmount | maxHoldingAmount | requiredWhitelistTier | transferCooldownMinutes | largeTransferThreshold | enhancedLogging | enhancedPrivacy |
+| ------------- | ----------------- | ---------------- | --------------------- | ----------------------- | ---------------------- | --------------- | --------------- |
+| Normal        | 8,000 VSC         | 50,000 VSC       | 1                     | 60                      | 3,000 VSC              | false           | false           |
+| Retail        | 8,000 VSC         | 50,000 VSC       | 2                     | 60                      | 5,000 VSC              | false           | false           |
+| Accredited    | 50,000 VSC        | 500,000 VSC      | 3                     | 30                      | 10,000 VSC             | true            | true            |
+| Institutional | 500,000 VSC       | 5,000,000 VSC    | 4                     | 15                      | 100,000 VSC            | true            | true            |
 
 `getInvestorTypeConfig(type)` and `getAllInvestorTypeConfigs()` return the
 current values; `updateInvestorTypeConfig(type, config)` (owner only)
@@ -36,15 +36,15 @@ and the registry's owner must authorize the token
 - **Authorization (fail closed)**: while the bound registry has not
   authorized the token (`isTokenAuthorized(token)` false), every mint and
   every transfer is refused with `Token not authorized by investor
-  registry` (burn is not gated). A misconfiguration is loud, not a silent
+registry` (burn is not gated). A misconfiguration is loud, not a silent
   skip of the cooldown.
 
 - **Transfer cap**: `canTransferAmount(from, amount)`, `amount <=
-  maxTransferAmount` of the sender's type, per transfer. There is no daily
+maxTransferAmount` of the sender's type, per transfer. There is no daily
   or cumulative total. Refusal: `Transfer amount limit exceeded`.
 - **Transfer cooldown** (Task 4.10): `canTransferNow(from)` for a
   non-trusted sender, right after the transfer cap. Refusal: `Transfer
-  cooldown`. See "Cooldown and tier" below.
+cooldown`. See "Cooldown and tier" below.
 - **Holding cap**: `canHoldAmount(to, balanceOf(to) + amount)` for the
   recipient. Refusal: `Holding limit exceeded`.
 
@@ -124,10 +124,10 @@ reads the threshold.
 
 ## Assigning a type
 
-| Call | Who | Rule |
-|---|---|---|
-| `assignInvestorType(investor, type)` | compliance officer or owner | any type |
-| `upgradeInvestorType(investor, newType)` | compliance officer or owner | `newType` above the current one ("Not an upgrade") |
+| Call                                       | Who                         | Rule                                                |
+| ------------------------------------------ | --------------------------- | --------------------------------------------------- |
+| `assignInvestorType(investor, type)`       | compliance officer or owner | any type                                            |
+| `upgradeInvestorType(investor, newType)`   | compliance officer or owner | `newType` above the current one ("Not an upgrade")  |
 | `downgradeInvestorType(investor, newType)` | compliance officer or owner | `newType` below the current one ("Not a downgrade") |
 
 Events: `InvestorTypeAssigned`, `InvestorTypeUpgraded`,

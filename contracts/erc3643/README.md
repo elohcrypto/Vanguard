@@ -5,6 +5,7 @@ This directory contains the complete implementation of ERC-3643 (T-REX) standard
 ## 🏗️ Core Contracts Implemented
 
 ### 1. **Token.sol** - ERC-3643 Compliant Security Token
+
 - Full ERC-3643 implementation with compliance checks
 - Integrated with Identity Registry and Compliance Registry
 - Support for token freezing, partial freezing, and recovery
@@ -12,6 +13,7 @@ This directory contains the complete implementation of ERC-3643 (T-REX) standard
 - Pausable functionality for emergency situations
 
 ### 2. **IdentityRegistry.sol** - Investor Identity Management
+
 - OnchainID integration for blockchain-based identity verification
 - Country code management for jurisdiction compliance
 - Batch registration capabilities for efficient onboarding
@@ -20,12 +22,14 @@ This directory contains the complete implementation of ERC-3643 (T-REX) standard
   verification cache in the base `RegistryVerification.sol`
 
 ### 3. **ComplianceRegistry.sol** - Compliance Rule Engine
+
 - Modular compliance system supporting pluggable rules
 - Integration with Identity Registry for verification
 - Token binding for secure compliance enforcement
 - Module management for extensible compliance logic
 
 ### 4. **InvestorTypeRegistry.sol** - Investor Types
+
 - Per-type transfer and holding caps, transfer cooldown and required
   whitelist tier; Token enforces the caps and the cooldown, ComplianceRules
   the tier (Task 4.10, docs/INVESTOR_TYPE_SYSTEM.md)
@@ -45,24 +49,28 @@ All contracts implement comprehensive interfaces located in `interfaces/`:
 ## 🎯 Key Features Implemented
 
 ### ✅ **ERC-3643 Standard Compliance**
+
 - Full T-REX standard implementation
 - Transfer restrictions and compliance validation
 - Identity verification requirements
 - Claim-based authorization system
 
 ### ✅ **Security Features**
+
 - Address and token freezing capabilities
 - Recovery mechanism for lost wallets
 - Agent-based access control
 - Emergency pause functionality
 
 ### ✅ **Modular Architecture**
+
 - Pluggable compliance modules
 - Extensible claim validation system
 - Configurable transfer restrictions
 - Upgradeable registry system
 
 ### ✅ **Integration Ready**
+
 - OnchainID (ERC-734/ERC-735) compatibility
 - Oracle network integration points
 - UTXO compliance system hooks
@@ -71,6 +79,7 @@ All contracts implement comprehensive interfaces located in `interfaces/`:
 ## 🚀 Usage Examples
 
 ### Deploy Token System
+
 ```solidity
 // 1. Deploy registries
 IdentityRegistry identityRegistry = new IdentityRegistry();
@@ -89,6 +98,7 @@ compliance.bindToken(address(token));
 ```
 
 ### Register Investor Identity
+
 ```solidity
 // Register investor with OnchainID and country
 identityRegistry.registerIdentity(
@@ -99,6 +109,7 @@ identityRegistry.registerIdentity(
 ```
 
 ### Mint Compliant Tokens
+
 ```solidity
 // Mint tokens to verified investor
 token.mint(investorWallet, 1000 * 10**18);

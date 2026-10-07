@@ -60,7 +60,7 @@ struct Key {
   removal: still sent by a MANAGEMENT key, it recovers the signer from
   `getRemoveKeyMessage(key, purpose)`, the EIP-191 digest of
   `keccak256(abi.encodePacked("Remove key from OnchainID", identity, key,
-  purpose, removalNonces[key], chainid))`, and requires
+purpose, removalNonces[key], chainid))`, and requires
   `keccak256(abi.encodePacked(signer)) == key`. Every removal raises the
   key's nonce, so a signature removes the key once and is stale after a
   re-add. ECDSA keys only; a revoked key is not removed again. The digest is already prefixed: the holder
@@ -129,66 +129,69 @@ struct Claim {
 ### Transfer Validation Pipeline
 
 **Multi-Layer Validation:**
+
 ```solidity
-function _transfer(address from, address to, uint256 amount) 
-    internal 
-    override 
-    whenNotPaused 
-    whenNotFrozen(from) 
-    whenNotFrozen(to) 
+function _transfer(address from, address to, uint256 amount)
+    internal
+    override
+    whenNotPaused
+    whenNotFrozen(from)
+    whenNotFrozen(to)
 {
     // Layer 1: Identity Verification
     require(_identityRegistry.isVerified(to), "Recipient not verified");
     require(_identityRegistry.isVerified(from), "Sender not verified");
-    
+
     // Layer 2: Compliance Check
     require(_compliance.canTransfer(from, to, amount), "Compliance failed");
-    
+
     // Layer 3: Frozen Token Check
     require(getFreeBalance(from) >= amount, "Insufficient free balance");
-    
+
     // Layer 4: Execute Transfer
     super._transfer(from, to, amount);
-    
+
     // Layer 5: Post-Transfer Hook
     _compliance.transferred(from, to, amount);
 }
 ```
 
 **Frozen Token Management:**
+
 ```solidity
 function getFreeBalance(address _userAddress) public view returns (uint256) {
     uint256 totalBalance = balanceOf(_userAddress);
     uint256 frozenAmount = _frozenTokens[_userAddress];
-    
+
     // Prevent underflow
     if (frozenAmount >= totalBalance) {
         return 0;
     }
-    
+
     return totalBalance - frozenAmount;
 }
 
-function freezePartialTokens(address _userAddress, uint256 _amount) 
-    external 
-    override 
-    onlyAgent 
+function freezePartialTokens(address _userAddress, uint256 _amount)
+    external
+    override
+    onlyAgent
 {
     uint256 currentBalance = balanceOf(_userAddress);
     uint256 currentFrozen = _frozenTokens[_userAddress];
-    
+
     // Ensure sufficient balance to freeze
     require(
-        currentBalance >= currentFrozen + _amount, 
+        currentBalance >= currentFrozen + _amount,
         "Insufficient balance to freeze"
     );
-    
+
     _frozenTokens[_userAddress] += _amount;
     emit TokensFrozen(_userAddress, _amount);
 }
 ```
 
 **Recovery Mechanism:**
+
 ```solidity
 function recoveryAddress(
     address _lostWallet,
@@ -198,26 +201,26 @@ function recoveryAddress(
     // Validate new wallet
     require(_newWallet != address(0), "Invalid new wallet");
     require(_newWallet != _lostWallet, "Same wallet");
-    
+
     // Verify new wallet is registered
     require(
         _identityRegistry.identity(_newWallet) == _investorOnchainID,
         "New wallet not registered to same identity"
     );
-    
+
     // Transfer balance
     uint256 balance = balanceOf(_lostWallet);
     if (balance > 0) {
         _transfer(_lostWallet, _newWallet, balance);
     }
-    
+
     // Transfer frozen tokens
     uint256 frozen = _frozenTokens[_lostWallet];
     if (frozen > 0) {
         _frozenTokens[_newWallet] += frozen;
         _frozenTokens[_lostWallet] = 0;
     }
-    
+
     emit RecoverySuccess(_lostWallet, _newWallet, _investorOnchainID);
     return true;
 }
@@ -265,12 +268,14 @@ raised. Opening costs about 263k gas with 3 nodes and 2.9M with 100
 
 **Opening a query** (`OracleManager.submitQuery`, owner or an active
 node; the blacklist severity rules of R-2F3-2 apply first):
+
 ```solidity
 queryId = keccak256(abi.encodePacked(_subject, _queryType, _data, block.timestamp, msg.sender));
 _boundEngine().openQuery(queryId); // snapshot; refuses an existing id or no registered weight
 ```
 
 **Answering** (`OracleManager.submitResponse`, an active node):
+
 ```solidity
 if (query.hasResult) revert QueryAlreadyResolved();
 (bool resolved, bool result) = _boundEngine().recordVote(_queryId, msg.sender, _result);
@@ -283,6 +288,7 @@ if (resolved) {
 ```
 
 **The tally** (`ConsensusOracle.recordVote`, manager only):
+
 ```solidity
 if (block.timestamp >= q.expiresAt) revert QueryExpired();
 if (q.hasVoted[voter]) revert AlreadyVoted();
@@ -312,14 +318,14 @@ handover (OracleParameters, type 2): `setConsensusThreshold(percent)`,
 
 ### Node lifecycle
 
-| Action | Who | Effect |
-|---|---|---|
-| `registerOracle(node, name, description, reputation)` | owner | active node, reputation 100-1000 |
-| `pauseOracle(node)` / `unpauseOracle(node)` | owner or operator | stops / resumes answering and attesting (the node stays in every snapshot's denominator); the owner pausing an already inactive node adopts the pause; unpause refuses a node at `MIN_REPUTATION` (100), where `penalizeOracle` parks it, and refuses the operator a node the owner paused (`pausedByOwner`) |
-| `setEmergencyOracle(node, flag)` | owner or operator | the one emergency designation: `BlacklistOracle.emergencyBlacklist` requires it and an active node |
-| `removeOracle(node, reason)` | owner | offboards the node, clears its designation, resets its engine weight |
-| `setOperator(account)` | owner | the operator role (ops after the handover) |
-| `rewardOracle` / `penalizeOracle` / `updateOracleReputation` | owner | reputation, emitted as `OracleReputationUpdated`; engine weights do not follow it |
+| Action                                                       | Who               | Effect                                                                                                                                                                                                                                                                                                       |
+| ------------------------------------------------------------ | ----------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `registerOracle(node, name, description, reputation)`        | owner             | active node, reputation 100-1000                                                                                                                                                                                                                                                                             |
+| `pauseOracle(node)` / `unpauseOracle(node)`                  | owner or operator | stops / resumes answering and attesting (the node stays in every snapshot's denominator); the owner pausing an already inactive node adopts the pause; unpause refuses a node at `MIN_REPUTATION` (100), where `penalizeOracle` parks it, and refuses the operator a node the owner paused (`pausedByOwner`) |
+| `setEmergencyOracle(node, flag)`                             | owner or operator | the one emergency designation: `BlacklistOracle.emergencyBlacklist` requires it and an active node                                                                                                                                                                                                           |
+| `removeOracle(node, reason)`                                 | owner             | offboards the node, clears its designation, resets its engine weight                                                                                                                                                                                                                                         |
+| `setOperator(account)`                                       | owner             | the operator role (ops after the handover)                                                                                                                                                                                                                                                                   |
+| `rewardOracle` / `penalizeOracle` / `updateOracleReputation` | owner             | reputation, emitted as `OracleReputationUpdated`; engine weights do not follow it                                                                                                                                                                                                                            |
 
 ## 🔒 Compliance Rules Engine
 
@@ -373,7 +379,7 @@ PrivacyManager folds into its jurisdiction policy hash.
 Trusted contracts and rule administrators are kept per token:
 
 - `addTrustedContract(token, account)` / `removeTrustedContract(token,
-  account)` (owner; contracts only, never a wallet or an EIP-7702
+account)` (owner; contracts only, never a wallet or an EIP-7702
   delegated wallet; the owner stays trusted, D21). Trusting governance
   for VGT, where it holds proposal fees, does not trust it on VSC.
 - `isTrustedContract(account)` answers for `msg.sender`: Token and
@@ -398,6 +404,7 @@ Statement: the commitment `Poseidon(identity, secret)` is a leaf of the
 whitelist tree under the public root, for this wallet.
 
 **Circuit Logic (every check a hard constraint, no validity output):**
+
 ```circom
 template WhitelistMembership(levels) {
     // Private inputs
@@ -454,6 +461,7 @@ wrapper checks), and a nullifier binds one wallet per root version.
 Publishing a new root lapses every binding until its holder proves again.
 
 **Security Properties (what holds):**
+
 - ✅ **Soundness:** a wallet cannot bind without a commitment in the
   current root and its secret (hard inclusion, binary path bits).
 - ✅ **Confidential list:** the leaves are commitments, so the list cannot
@@ -475,6 +483,7 @@ the wallet's holder owns a commitment in the current whitelist root whose
 identity is not in the sanctions tree; nothing on chain gates on it (D2).
 
 **Circuit Logic (every check a hard constraint, no validity output):**
+
 ```circom
 template BlacklistNonMembership(levels, smtLevels) {
     // Private: identity, secret, whitelist path, sanctions-tree witness
@@ -501,6 +510,7 @@ listed identities; the prover gets the non-membership witness from it and
 refuses a listed identity before proving.
 
 **Properties:**
+
 - ✅ Proves **non-membership** of an onboarded identity, not of an arbitrary value: the identity is tied to a whitelisted commitment
 - ✅ A listed identity has no witness (`oldKey == key` and root mismatch both fail)
 - ✅ The wrapper refuses any signal at or above the field order (no aliased signals)
@@ -524,11 +534,11 @@ sig.R8x <== R8x; sig.R8y <== R8y; sig.S <== S; sig.M <== message.out;
 // nullifier = Poseidon(salt, policyHash): one wallet per attestation per policy
 ```
 
-| Circuit | Attested (private) | Policy (public) | Public signals |
-|---|---|---|---|
-| `jurisdiction_proof` | PrivacyManager's bit for the investor's ISO country code | `allowedMask` = OR of the bits of the registered codes ComplianceRules allows for VSC | `[nullifier, Ax, Ay, chainId, verifierContext, allowedMask, walletBinding]` |
-| `accreditation_proof` | the accreditation amount (< 2^64) | `minimumAccreditation` | `[nullifier, Ax, Ay, chainId, verifierContext, minimumAccreditation, walletBinding]` |
-| `compliance_aggregation` | four scores 0..100 in one attestation | minimum and four weights summing to 100 | `[nullifier, Ax, Ay, chainId, verifierContext, minimum, wK, wA, wJ, wAcc, walletBinding]` |
+| Circuit                  | Attested (private)                                       | Policy (public)                                                                       | Public signals                                                                            |
+| ------------------------ | -------------------------------------------------------- | ------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------- |
+| `jurisdiction_proof`     | PrivacyManager's bit for the investor's ISO country code | `allowedMask` = OR of the bits of the registered codes ComplianceRules allows for VSC | `[nullifier, Ax, Ay, chainId, verifierContext, allowedMask, walletBinding]`               |
+| `accreditation_proof`    | the accreditation amount (< 2^64)                        | `minimumAccreditation`                                                                | `[nullifier, Ax, Ay, chainId, verifierContext, minimumAccreditation, walletBinding]`      |
+| `compliance_aggregation` | four scores 0..100 in one attestation                    | minimum and four weights summing to 100                                               | `[nullifier, Ax, Ay, chainId, verifierContext, minimum, wK, wA, wJ, wAcc, walletBinding]` |
 
 Every check is a hard constraint: the mask has exactly one bit and it is set
 in `allowedMask` (both range-checked to 64 bits); `amount >= minimum`; the
@@ -546,6 +556,7 @@ still trusted and it has not expired; `validatePrivate*` add the user's
 preference flags.
 
 **Properties:**
+
 - ✅ A forged or altered attestation has no witness (EdDSA under the public key)
 - ✅ An untrusted issuer key or a stale policy is refused on chain
 - ✅ One wallet per attestation per policy; a policy change re-admits
@@ -564,6 +575,7 @@ repo (a `Succeeded` status, an `executionWindow`, `ParameterChange` and
 that is actually deployed.
 
 **1 Person = 1 Vote Mechanism (one vote per identity, plan 2F.1 / D25):**
+
 ```solidity
 function castVote(uint256 proposalId, bool support, string calldata reason)
     external nonReentrant
@@ -610,6 +622,7 @@ casts one vote and its delegator still casts its own
 `castVote` is scheduled after the external audit (D12, plan v2 Task 4.6).
 
 **Proposal Execution (settles every outcome, reverts only on invalid calls):**
+
 ```solidity
 function executeProposal(uint256 proposalId) external nonReentrant {
     Proposal storage proposal = _proposals[proposalId];
@@ -647,6 +660,7 @@ function executeProposal(uint256 proposalId) external nonReentrant {
 ```
 
 **Refunds are pulled, not pushed:**
+
 ```solidity
 // Settlement only records; no transfer, so it cannot be blocked.
 function _settleWithRefund(uint256 proposalId, ProposalStatus terminal) internal {
@@ -680,6 +694,7 @@ again.
 ### Gas Usage Analysis
 
 **Typical Operations:**
+
 - OnchainID Creation: ~500,000 gas
 - Claim Addition: ~150,000 gas
 - Token Transfer (with compliance): ~200,000 gas
@@ -690,6 +705,7 @@ again.
 ### Optimization Opportunities
 
 1. **Storage Packing:**
+
    ```solidity
    // Current
    struct Claim {
@@ -699,7 +715,7 @@ again.
        uint256 validFrom;  // 32 bytes
        uint256 validTo;    // 32 bytes
    }
-   
+
    // Optimized
    struct Claim {
        uint64 topic;       // 8 bytes
@@ -712,6 +728,7 @@ again.
    ```
 
 2. **Batch Operations:**
+
    ```solidity
    // Add multiple claims in one transaction
    function addClaimsBatch(ClaimData[] calldata claims) external {
@@ -738,12 +755,14 @@ again.
 ### Critical Invariants
 
 1. **Token Supply Invariant:**
+
    ```solidity
    // Total supply = sum of all balances + frozen tokens
    assert(totalSupply() == sumOfBalances + sumOfFrozenTokens);
    ```
 
 2. **Identity Uniqueness:**
+
    ```solidity
    // Each address can have only one OnchainID
    assert(onchainIDFactory.getIdentityByOwner(user) != address(0) => unique);
@@ -787,11 +806,12 @@ This technical deep dive reveals a **sophisticated, well-architected system** wi
 ✅ **Comprehensive compliance** (ERC-3643 with multi-layer validation)  
 ✅ **Secure oracle consensus** (weighted voting with reputation)  
 ✅ **Advanced privacy** (ZK circuits for compliance proofs)  
-✅ **Fair governance** (1 person = 1 vote with Sybil resistance)  
+✅ **Fair governance** (1 person = 1 vote with Sybil resistance)
 
 The implementation demonstrates **production-grade quality** with proper security measures, efficient algorithms, and extensible architecture.
 
 **Next Steps:**
+
 1. Complete formal verification of ZK circuits
 2. Optimize gas usage (storage packing, batch operations)
 3. External security audit
@@ -801,4 +821,3 @@ The implementation demonstrates **production-grade quality** with proper securit
 
 **Analyzed by:** AI Technical Review Agent  
 **Date:** 2025-10-02
-

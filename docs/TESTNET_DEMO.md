@@ -13,17 +13,17 @@ that reads `signers[2]` means "the KYC issuer" whether the node is local or
 Sepolia. Each role signs only its own transactions; the contracts' 26 access
 modifiers are what enforce the separation.
 
-| Index | Role | Signs |
-|---|---|---|
-| 0 | Platform owner, deployer, central bank | deploys, agent grants, treasury mints (investor-limit exempt, D22), governance ownership (until the handover ceremony) |
-| 1 | Fee wallet, compliance officer | investor-type assignments |
-| 2 | KYC issuer | KYC claims, identity registration |
-| 3 | AML issuer | AML claims |
-| 4, 5 | Risk and fraud oracles | attestations |
-| 6, 7, 8 | Investors Alice, Bob, Carol | proposals, votes, transfers, escrow parties |
-| 9 | Deliberately unverified; issuer admin | rejection demonstrations; after the handover, owner of every claim issuer the deployer held (D25 b) |
-| 10 | Ops multisig stand-in | agent roles, compliance officer, oracle ownership and the escrow factory's ADMIN_ROLE after handover |
-| 11 | Guardian | pause only |
+| Index   | Role                                   | Signs                                                                                                                  |
+| ------- | -------------------------------------- | ---------------------------------------------------------------------------------------------------------------------- |
+| 0       | Platform owner, deployer, central bank | deploys, agent grants, treasury mints (investor-limit exempt, D22), governance ownership (until the handover ceremony) |
+| 1       | Fee wallet, compliance officer         | investor-type assignments                                                                                              |
+| 2       | KYC issuer                             | KYC claims, identity registration                                                                                      |
+| 3       | AML issuer                             | AML claims                                                                                                             |
+| 4, 5    | Risk and fraud oracles                 | attestations                                                                                                           |
+| 6, 7, 8 | Investors Alice, Bob, Carol            | proposals, votes, transfers, escrow parties                                                                            |
+| 9       | Deliberately unverified; issuer admin  | rejection demonstrations; after the handover, owner of every claim issuer the deployer held (D25 b)                    |
+| 10      | Ops multisig stand-in                  | agent roles, compliance officer, oracle ownership and the escrow factory's ADMIN_ROLE after handover                   |
+| 11      | Guardian                               | pause only                                                                                                             |
 
 On Sepolia and beyond, wallets 9, 10 and 11 must be multisig addresses, not
 single keys, held by different parties: ops is an IdentityRegistry agent and
@@ -45,11 +45,11 @@ every voting period and execution delay. `1` is the mainnet schedule
 table (1 day) is still 60 s. The percentages are never scaled. The demo reads
 `GOV_TIME_SCALE` from the environment at deploy time.
 
-| GOV_TIME_SCALE | InvestorTypeConfig vote | delay | Use |
-|---|---|---|---|
-| 1 | 7 days | 2 days | mainnet, tests |
-| 336 | 30 min | ~9 min | Sepolia walkthrough |
-| 1440 | 7 min | 1 min | local rehearsal (the ceiling) |
+| GOV_TIME_SCALE | InvestorTypeConfig vote | delay  | Use                           |
+| -------------- | ----------------------- | ------ | ----------------------------- |
+| 1              | 7 days                  | 2 days | mainnet, tests                |
+| 336            | 30 min                  | ~9 min | Sepolia walkthrough           |
+| 1440           | 7 min                   | 1 min  | local rehearsal (the ceiling) |
 
 ## KYC claims and verification (2F.2)
 
@@ -978,12 +978,12 @@ refreshed into the verification cache (D). Re-run with `npm run gas:claims`
 **Task 4.9 (measured 2026-10-07).** Before: 88d9454, no cache. After: the
 cache (D17 = a) with the review fixes.
 
-| Scenario | before gasUsed | before isVerified est. | after gasUsed | after delta vs A | after isVerified est. |
-|---|---|---|---|---|---|
-| A: MockIdentityRegistry (baseline) | 96,503 | 23,938 | 96,503 | 0 | 23,938 |
-| B: 1 topic (KYC), unrefreshed | 136,673 | 48,942 | 142,647 | +46,144 | 51,885 |
-| C: 2 topics (KYC+AML), unrefreshed | 167,737 | 68,724 | 174,287 | +77,784 | 71,955 |
-| D: C + both identities refreshed | n/a | n/a | 105,849 | +9,346 | 29,236 |
+| Scenario                           | before gasUsed | before isVerified est. | after gasUsed | after delta vs A | after isVerified est. |
+| ---------------------------------- | -------------- | ---------------------- | ------------- | ---------------- | --------------------- |
+| A: MockIdentityRegistry (baseline) | 96,503         | 23,938                 | 96,503        | 0                | 23,938                |
+| B: 1 topic (KYC), unrefreshed      | 136,673        | 48,942                 | 142,647       | +46,144          | 51,885                |
+| C: 2 topics (KYC+AML), unrefreshed | 167,737        | 68,724                 | 174,287       | +77,784          | 71,955                |
+| D: C + both identities refreshed   | n/a            | n/a                    | 105,849       | +9,346           | 29,236                |
 
 `refreshVerified` for one wallet with two topics costs 100,139 gas (one
 `claimValidTo` call per topic on top of the walk). D is within the 40,000
@@ -1000,12 +1000,12 @@ the measured transfer runs after the sender's cooldown, so its clock
 write overwrites a set slot. Before: ec505cb (caps only, no cooldown).
 After: the cooldown, the authorization read and the clock write.
 
-| Scenario | before gasUsed | after gasUsed | after delta vs A |
-|---|---|---|---|
-| A: MockIdentityRegistry (baseline) | 96,503 | 96,797 | 0 |
-| D: 2 topics, both refreshed, no registry | 105,849 | 106,143 | +9,346 |
-| E: D + investor-type registry | 133,947 | 146,961 | +50,164 |
-| E first transfer (warm-up) | 151,047 | 181,161 | n/a |
+| Scenario                                 | before gasUsed | after gasUsed | after delta vs A |
+| ---------------------------------------- | -------------- | ------------- | ---------------- |
+| A: MockIdentityRegistry (baseline)       | 96,503         | 96,797        | 0                |
+| D: 2 topics, both refreshed, no registry | 105,849        | 106,143       | +9,346           |
+| E: D + investor-type registry            | 133,947        | 146,961       | +50,164          |
+| E first transfer (warm-up)               | 151,047        | 181,161       | n/a              |
 
 The registry's two caps already cost 28,098 over D at ec505cb; Task 4.10
 adds 13,014 per transfer after the first (two cold reads, the
