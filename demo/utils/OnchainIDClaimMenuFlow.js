@@ -10,7 +10,13 @@
 
 const { ethers } = require("hardhat");
 const { displaySection, displayError } = require("./DisplayHelpers");
-const { attestKyc, attestAml, cacheVerification } = require("./Kyc");
+const {
+  attestKyc,
+  attestAml,
+  cacheVerification,
+  KYC_TOPIC,
+  AML_TOPIC,
+} = require("./Kyc");
 
 /**
  * Option 6: Manage KYC claims
@@ -206,14 +212,21 @@ async function reviewClaimStatusHistory(mod) {
     }
   }
 
+  // The counts come from the issuers, not the local records above: an
+  // identity counts while its latest claim on the topic is live.
+  const kycIssuer = mod.state.getContract("kycIssuer");
+  const amlIssuer = mod.state.getContract("amlIssuer");
+  let kycLive = 0;
+  let amlLive = 0;
+  for (const identity of mod.state.identities.values()) {
+    if (await kycIssuer.hasValidClaim(identity.address, KYC_TOPIC)) kycLive++;
+    if (await amlIssuer.hasValidClaim(identity.address, AML_TOPIC)) amlLive++;
+  }
+
   console.log("\n" + "=".repeat(70));
   console.log(`📊 Total Identities: ${mod.state.identities.size}`);
-  console.log(
-    `✅ KYC Issued: ${Array.from(mod.state.claims.values()).filter((c) => c.type === "KYC").length}`,
-  );
-  console.log(
-    `✅ AML Issued: ${Array.from(mod.state.claims.values()).filter((c) => c.type === "AML").length}`,
-  );
+  console.log(`✅ KYC Issued: ${kycLive} (chain: hasValidClaim)`);
+  console.log(`✅ AML Issued: ${amlLive} (chain: hasValidClaim)`);
 }
 
 /**
