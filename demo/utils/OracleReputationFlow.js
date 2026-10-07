@@ -31,7 +31,7 @@ async function manageReputation(mod) {
       console.log(`   ${key.toUpperCase()}: ${config.address}`);
       console.log(`     🏆 Reputation: ${oracleInfo.reputation}`);
       console.log(
-        `     ✅ Correct Attestations: ${oracleInfo.correctAttestations}`,
+        `     🏅 Rewards: ${oracleInfo.correctAttestations} (owner-granted)`,
       );
       console.log(`     🗳️ Answers: ${oracleInfo.totalAttestations}`);
       console.log(`     📊 Role: ${config.role}`);
@@ -215,24 +215,15 @@ async function viewDetailedOracleStats(mod) {
       console.log(`📍 Address: ${config.address}`);
       console.log(`📊 Role: ${config.role}`);
       console.log(`🏆 Reputation: ${oracleInfo.reputation}/1000`);
-      console.log(`✅ Correct Attestations: ${oracleInfo.correctAttestations}`);
+      // correctAttestations counts the owner's rewardOracle calls only
+      // (OracleManager.sol:431), not correct answers.
+      console.log(
+        `🏅 Rewards: ${oracleInfo.correctAttestations} (owner-granted)`,
+      );
       console.log(`🗳️ Answers: ${oracleInfo.totalAttestations}`);
       console.log(
         `🔄 Active Status: ${oracleInfo.active ? "✅ ACTIVE" : "❌ INACTIVE"}`,
       );
-
-      // Calculate accuracy
-      // getOracleInfo has no incorrectAttestations: total is the answers.
-      const total = Number(oracleInfo.totalAttestations);
-      if (total > 0) {
-        const accuracy = (
-          (Number(oracleInfo.correctAttestations) / total) *
-          100
-        ).toFixed(2);
-        console.log(`🎯 Accuracy: ${accuracy}%`);
-      } else {
-        console.log(`🎯 Accuracy: N/A (No attestations yet)`);
-      }
 
       console.log("");
     } catch (error) {
