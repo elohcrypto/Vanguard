@@ -111,17 +111,29 @@ async function deployEscrowSystem(mod) {
     );
     console.log(`   Owner Wallet: ${ownerWallet.address}`);
     console.log("");
-    console.log("🔐 SECURITY MODEL:");
-    console.log("   ✅ Payer must have valid OnchainID + KYC/AML");
-    console.log("   ✅ Payee must have valid OnchainID + KYC/AML");
+    // The design the factory and VSC implement; the checks above and the
+    // two reads below are the chain state, the bullets are not.
+    console.log("🔐 SECURITY MODEL (design, enforced by the contracts):");
+    console.log("   • Payer and payee must be verified (OnchainID + KYC/AML)");
     console.log(
-      "   ✅ Escrow wallets trusted at creation by the factory (registrar, code-hash bound)",
+      "   • Escrow wallets trusted at creation by the factory (registrar, code-hash bound)",
     );
     console.log(
-      "   ✅ Owner and investor fee wallets are verified investors, not trusted",
+      "   • Owner and investor fee wallets are verified, not trusted",
     );
-    console.log("   ✅ Jurisdiction rules enforced for all parties");
-    console.log("   ✅ No KYC/AML bypass - secure compliance!");
+    console.log("   • VSC applies its jurisdiction rule to every party");
+    const ownerVerified = await identityRegistry.isVerified(
+      ownerWallet.address,
+    );
+    const [ruleActive] = await mod.state
+      .getContract("complianceRules")
+      .getJurisdictionRule(digitalToken.target);
+    console.log(
+      `   Owner fee wallet verified: ${ownerVerified ? "✅ yes" : "⚠️  no"} (chain)`,
+    );
+    console.log(
+      `   VSC jurisdiction rule active: ${ruleActive ? "✅ yes" : "⚠️  no"} (chain)`,
+    );
     console.log("");
     console.log("💡 NEXT STEPS:");
     console.log("   1. Register investors (Option 62)");
