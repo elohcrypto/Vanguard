@@ -257,9 +257,11 @@ async function runEscrowSmoke(state, failures) {
 }
 
 module.exports = {
-  // Task 4.3: the custody leg (demo-smoke-custody.js) runs after this one.
+  // Task 4.3: the custody leg (demo-smoke-custody.js) runs after this one,
+  // then Task 4.10's cooldown and tier leg (demo-smoke-investor.js).
   runEscrowSmoke: async (state, failures) => {
     await runEscrowSmoke(state, failures);
     await require("./demo-smoke-custody").runCustodySmoke(state, failures);
+    await require("./demo-smoke-investor").runInvestorSmoke(state, failures); // 4.10
   },
 };

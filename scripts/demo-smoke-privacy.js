@@ -13,6 +13,7 @@
 
 const { ethers } = require("hardhat");
 const ProofGenerator = require("../demo/utils/ProofGenerator");
+const { waitOutCooldown } = require("../demo/utils/InvestorTypeRules");
 const {
   demoWhitelist,
   proveForDemoUser,
@@ -208,6 +209,7 @@ async function privacyFlow(state, failures) {
   if (!r.senderRemoved)
     fail("(d) the rotated root still admits the sender (it could re-prove)");
   if (!r.reproved) fail("(e) after re-proving the transfer did not go through");
+  await waitOutCooldown(state, alice, () => {}); // (e) sent: Task 4.10 cooldown
   if (!(await token.canTransfer(alice.address, bob.address, amount))) {
     fail("(e) canTransfer(alice -> bob) is false after re-proving");
   }
