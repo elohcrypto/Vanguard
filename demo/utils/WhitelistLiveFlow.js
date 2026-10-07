@@ -206,8 +206,6 @@ async function runLiveWhitelistFlow({
     );
   }
   out.transferred = await tryTransfer(token, sender, recipient, amount, log);
-  // Task 4.10: wait out the sender's cooldown, so (c)-(e) show the binding.
-  await waitOutCooldown(state, sender, log);
 
   // (c) A verified wallet without a binding.
   log("\n(c) a verified wallet without a binding");
@@ -267,11 +265,18 @@ async function runLiveWhitelistFlow({
   for (const s of [sender, recipient]) {
     await proveAndBind(state, pm, s, root3, log);
   }
-  out.reproved = await tryTransfer(token, sender, recipient, amount, log);
+  // Task 4.10: (b) started the sender's cooldown. A dev node jumps past
+  // it; elsewhere the wait is printed and (e)'s transfer is skipped.
+  out.reproved = (await waitOutCooldown(state, sender, log))
+    ? await tryTransfer(token, sender, recipient, amount, log)
+    : null;
+  const others = out.transferred && out.rotatedRefused && out.senderRemoved;
   log(
-    out.transferred && out.rotatedRefused && out.senderRemoved && out.reproved
+    others && out.reproved
       ? "\n✅ ZK allow list on VSC: bound -> transfer, sender removed -> refused, re-proved -> transfer"
-      : "\n⚠️  ZK allow list on VSC: a step did not behave as expected (see above)",
+      : others && out.reproved === null
+        ? "\nℹ️  ZK allow list on VSC: (b)-(d) as expected; (e) re-proved and re-bound, its transfer waits for the sender's cooldown (re-run 42 -> 1 after it)"
+        : "\n⚠️  ZK allow list on VSC: a step did not behave as expected (see above)",
   );
   log(
     `\nℹ️  VSC STAYS in whitelist mode ${out.mode} (allow list of bindings ON): every verified wallet without a live PrivacyManager binding is refused on VSC from now on (option 43 shows the bindings).`,

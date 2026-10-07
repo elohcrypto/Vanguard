@@ -18,6 +18,7 @@
  */
 const { ethers } = require("hardhat");
 const { canJumpTime, advancePast } = require("./ChainTime");
+const { cooldownWaitLine } = require("./InvestorTypeRules");
 
 const AMOUNT = ethers.parseEther("1");
 const iso = (s) => new Date(Number(s) * 1000).toISOString();
@@ -113,9 +114,8 @@ async function proveCooldown(state, log = console.log) {
   if (!(await registry.canTransferNow(sender.address))) {
     const last = await registry.lastTransferAt(sender.address);
     if (!(await canJumpTime())) {
-      log(
-        `   sender is in cooldown until ${iso(last + BigInt(minutes * 60))}; run 58 again then`,
-      );
+      log(`   ${await cooldownWaitLine(last + BigInt(minutes * 60))}`);
+      log("   the cooldown proof is skipped until then (the tier proof runs)");
       return null;
     }
     await advancePast(last + BigInt(minutes * 60) - 1n, "earlier cooldown", {
@@ -145,9 +145,8 @@ async function proveCooldown(state, log = console.log) {
 
   const end = last + BigInt(minutes * 60);
   if (!(await canJumpTime())) {
-    log(
-      `   3. real network: the sender may send again at ${iso(end)} (run 58 again)`,
-    );
+    log(`   3. no evm_increaseTime here: ${await cooldownWaitLine(end)}`);
+    log("      the send after the cooldown is skipped; run 58 again then");
     return { sender, recipient, refused, passed: null };
   }
   await advancePast(end - 1n, `${minutes}-minute cooldown`, { margin: 1 });

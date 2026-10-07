@@ -164,6 +164,16 @@ async function printTiers(state, log = console.log) {
 }
 
 /**
+ * The line a network without evm_increaseTime prints instead of waiting:
+ * minutes left until `end` (unix seconds) on the chain clock.
+ */
+async function cooldownWaitLine(end) {
+  const now = (await ethers.provider.getBlock("latest")).timestamp;
+  const left = Math.max(0, Math.ceil((Number(end) - now) / 60));
+  return `⏰ cooldown: ${left} minutes left, re-run after ${iso(end)}`;
+}
+
+/**
  * Let `wallet` send again on VSC: on a dev node jump past its type's
  * cooldown (Task 4.10); elsewhere say until when. True when it may send.
  */
@@ -177,7 +187,7 @@ async function waitOutCooldown(state, wallet, log = console.log) {
   const minutes = Number(await reg.getTransferCooldown(wallet.address));
   const end = (await reg.lastTransferAt(wallet.address)) + BigInt(minutes * 60);
   if (!(await canJumpTime())) {
-    log(`   ⏰ ${wallet.address} may send again at ${iso(end)} (cooldown)`);
+    log(`   ${await cooldownWaitLine(end)} (${wallet.address})`);
     return false;
   }
   await advancePast(end - 1n, `${minutes}-minute transfer cooldown`, {
@@ -187,6 +197,7 @@ async function waitOutCooldown(state, wallet, log = console.log) {
 }
 
 module.exports = {
+  cooldownWaitLine,
   waitOutCooldown,
   TYPE_NAMES,
   MODE_NAMES,
