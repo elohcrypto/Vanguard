@@ -1007,10 +1007,10 @@ gas round below.
 
 | Scenario                                 | before gasUsed | after gasUsed | after delta vs A |
 | ---------------------------------------- | -------------- | ------------- | ---------------- |
-| A: MockIdentityRegistry (baseline)       | 96,503         | 96,840        | 0                |
-| D: 2 topics, both refreshed, no registry | 105,849        | 106,186       | +9,346           |
-| E: D + investor-type registry            | 133,947        | 135,478       | +38,638          |
-| E first transfer (warm-up)               | 151,047        | 169,678       | n/a              |
+| A: MockIdentityRegistry (baseline)       | 96,503         | 96,902        | 0                |
+| D: 2 topics, both refreshed, no registry | 105,849        | 106,248       | +9,346           |
+| E: D + investor-type registry            | 133,947        | 135,584       | +38,682          |
+| E first transfer (warm-up)               | 151,047        | 169,784       | n/a              |
 
 The gas round, E (and E's first transfer) after each step: first cut
 146,961 (181,161); the three cap views read one config field from
@@ -1019,11 +1019,13 @@ one registry call, `transferCheck`, answers the authorization, the
 transfer cap and the cooldown, 136,376 (170,576); `recordTransfer` skips
 exempt senders, 136,580 (170,780); the token reuses the sender's trust
 flag for the clock write instead of asking ComplianceRules again,
-135,478 (169,678). E is within the 40,000 D17 tolerance over A after the
+135,478 (169,678); the review's zero-amount guard (H1), 135,584
+(169,784). E is within the 40,000 D17 tolerance over A after the
 sender's first transfer (it was 37,444 over A at ec505cb, the caps
 alone); a sender's first transfer pays the clock's zero-to-nonzero
-write. Every transfer pays 337 more than at ec505cb without a registry
-(the clock branch and the trust flag in `_checkTransferFull`).
+write. Every transfer pays 399 more than at ec505cb without a registry
+(the clock branch, the zero-amount guard and the trust flag in
+`_checkTransferFull`).
 
 **The verification cache.** `IdentityRegistry` (claim half in
 `RegistryVerification.sol`) caches a passing claim walk per identity, not

@@ -371,7 +371,7 @@ describe("IdentityRegistry verification cache (Task 4.9)", function () {
         `${eFirst} (+${eFirst - dFirst})`,
     );
     // D17 budget after the sender's first transfer; the registry side
-    // (caps, cooldown, clock) measured 29,292 over D after the gas round.
+    // (caps, cooldown, clock) measured 29,336 over D after the review fixes.
     expect(e - a).to.be.lte(40000n);
     expect(e - d).to.be.lte(30000n);
   });
