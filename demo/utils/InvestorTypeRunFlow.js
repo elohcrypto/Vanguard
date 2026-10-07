@@ -40,6 +40,10 @@ async function testLargeTransferDetection(mod) {
       "\n📊 LARGE TRANSFER DETECTION (recorded: no transfer reads isLargeTransfer):",
     );
 
+    // Counted for option 59: a type passes when the amount under its
+    // threshold is normal and the amount over it is large.
+    let checked = 0;
+    let flagged = 0;
     for (let i = 0; i < testUsers.length; i++) {
       const config = await investorTypeRegistry.getInvestorTypeConfig(
         investorTypes[i],
@@ -70,9 +74,12 @@ async function testLargeTransferDetection(mod) {
       console.log(
         `   📊 ${ethers.formatEther(largeAmount)} VSC: ${isLarge ? "🚨 LARGE" : "✅ NORMAL"}`,
       );
+      checked++;
+      if (!isNormalLarge && isLarge) flagged++;
     }
 
     displaySuccess("LARGE TRANSFER DETECTION TESTING COMPLETE");
+    return { checked, flagged };
   } catch (error) {
     displayError(`Large transfer detection testing failed: ${error.message}`);
   }
@@ -101,17 +108,17 @@ async function runCompleteTests(mod) {
 
     // Test 1: Show configurations
     console.log("1️⃣  Testing: Show Investor Type Configurations");
-    await mod.showInvestorTypeConfigurations();
+    const shown = await mod.showInvestorTypeConfigurations();
     console.log("");
 
     // Test 2: Holding limits
     console.log("2️⃣  Testing: Holding Limits by Type");
-    await mod.testHoldingLimits();
+    const holding = await mod.testHoldingLimits();
     console.log("");
 
     // Test 3: Large transfer detection
     console.log("3️⃣  Testing: Large Transfer Detection");
-    await mod.testLargeTransferDetection();
+    const large = await mod.testLargeTransferDetection();
     console.log("");
 
     // Test 4: the cooldown and the tier, proven on chain (option 58)
@@ -120,9 +127,22 @@ async function runCompleteTests(mod) {
     console.log("");
 
     displaySuccess("ALL INVESTOR TYPE TESTS COMPLETED!");
-    console.log("   ✅ Configurations displayed");
-    console.log("   ✅ Holding limits tested");
-    console.log("   ✅ Large transfer detection tested");
+    // Each line from the counted result of the step that ran (R-47-2).
+    console.log(
+      shown
+        ? `   ✅ Configurations displayed: ${shown} of 4 types read`
+        : "   ℹ️  Configurations not run",
+    );
+    console.log(
+      holding?.checked
+        ? `   ${holding.held === holding.checked ? "✅" : "⚠️ "} Holding limits tested: ${holding.held} of ${holding.checked} types allow under the cap and block over it`
+        : "   ℹ️  Holding limits not run",
+    );
+    console.log(
+      large?.checked
+        ? `   ${large.flagged === large.checked ? "✅" : "⚠️ "} Large transfer detection tested: ${large.flagged} of ${large.checked} types flag only over the threshold`
+        : "   ℹ️  Large transfer detection not run",
+    );
     for (const [k, label] of [
       ["cooldown", "Transfer cooldown"],
       ["tier", "Whitelist tier"],
@@ -153,21 +173,42 @@ async function showDashboard(mod) {
   try {
     console.log("\n📊 SYSTEM STATUS:");
     console.log("=".repeat(50));
-    console.log(
-      `   📋 InvestorTypeRegistry: ${await investorTypeRegistry.getAddress()}`,
-    );
-    console.log(`   👮 Owner: ${mod.state.signers[0].address}`);
+    const registryAddress = await investorTypeRegistry.getAddress();
+    console.log(`   📋 InvestorTypeRegistry: ${registryAddress}`);
+    // Owners as the chain reports them, not signer 0 (R-47-2).
+    const registryOwner = await investorTypeRegistry.owner();
+    const registryPending = await investorTypeRegistry.pendingOwner();
+    console.log(`   👮 Owner: ${registryOwner}`);
+    if (registryPending !== ethers.ZeroAddress) {
+      console.log(`   ⏳ Pending owner: ${registryPending}`);
+    }
 
-    // Check governance integration
+    // Governance integration: whether it owns (or is nominated for) the
+    // registry, read from chain.
     const governance =
       mod.state.getContract("governance") ||
       mod.state.getContract("vanguardGovernance");
+    let governanceState = "Not integrated";
     if (governance) {
-      console.log(`   🗳️ Governance: Integrated`);
-      console.log(`   📍 Governance Address: ${await governance.getAddress()}`);
+      const governanceAddress = await governance.getAddress();
+      governanceState =
+        registryOwner === governanceAddress
+          ? "Integrated (owns the registry)"
+          : registryPending === governanceAddress
+            ? "Nominated (accepts the registry by vote, option 83b)"
+            : "Not integrated (does not own the registry)";
+      console.log(`   🗳️ Governance: ${governanceState}`);
+      console.log(`   📍 Governance Address: ${governanceAddress}`);
+      console.log(`   👮 Governance owner: ${await governance.owner()}`);
     } else {
       console.log(`   🗳️ Governance: Not integrated`);
     }
+
+    // The rules bind transfers only when the token reads this registry.
+    const token =
+      mod.state.getContract("token") || mod.state.getContract("digitalToken");
+    const enforced =
+      !!token && (await token.investorTypeRegistry()) === registryAddress;
 
     // Show investor type configurations
     console.log("\n📋 INVESTOR TYPE CONFIGURATIONS:");
@@ -191,7 +232,7 @@ async function showDashboard(mod) {
         `   🏦 Max Holding: ${ethers.formatEther(config.maxHoldingAmount)} VSC`,
       );
       console.log(
-        `   ⏰ Cooldown: ${config.transferCooldownMinutes} minutes (enforced)`,
+        `   ⏰ Cooldown: ${config.transferCooldownMinutes} minutes ${enforced ? "(enforced)" : "(not enforced: no token reads this registry)"}`,
       );
 
       const thresholdDisplay =
@@ -231,10 +272,10 @@ async function showDashboard(mod) {
     console.log(
       `   👥 Assigned Investors: ${mod.state.investors ? mod.state.investors.size : 0}`,
     );
-    console.log(`   🔒 Compliance Checks: Active`);
     console.log(
-      `   ⚖️ Governance: ${governance ? "Integrated" : "Not integrated"}`,
+      `   🔒 Compliance Checks: ${enforced ? "Active" : "Not active (no token reads this registry)"}`,
     );
+    console.log(`   ⚖️ Governance: ${governanceState}`);
 
     displaySuccess("DASHBOARD DISPLAYED SUCCESSFULLY");
   } catch (error) {

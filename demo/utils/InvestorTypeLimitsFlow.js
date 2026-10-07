@@ -30,7 +30,7 @@ async function upgradeDowngradeInvestorTypes(mod) {
 
   try {
     if (!mod.state.investors || mod.state.investors.size === 0) {
-      console.log("\n❌ NO INVESTORS FOUND!");
+      console.log("\nℹ️  NO INVESTORS FOUND!");
       console.log("💡 Create investors first using Option 23");
       return;
     }
@@ -80,14 +80,14 @@ async function upgradeDowngradeInvestorTypes(mod) {
       // Upgrade
       newType = Math.min(currentType + 1, 3);
       if (newType === currentType) {
-        console.log("❌ Already at maximum type (Institutional)");
+        console.log("ℹ️  Already at maximum type (Institutional)");
         return;
       }
     } else if (actionChoice === "2") {
       // Downgrade
       newType = Math.max(currentType - 1, 0);
       if (newType === currentType) {
-        console.log("❌ Already at minimum type (Normal)");
+        console.log("ℹ️  Already at minimum type (Normal)");
         return;
       }
     } else {
@@ -150,7 +150,7 @@ async function testTransferLimits(mod) {
   try {
     // Check if we have investors from the onboarding system
     if (!mod.state.investors || mod.state.investors.size === 0) {
-      console.log("\n❌ NO INVESTORS FOUND!");
+      console.log("\nℹ️  NO INVESTORS FOUND!");
       console.log("");
       console.log("💡 To create investors for transfer testing:");
       console.log("   1. Go to Option 23: INVESTOR ONBOARDING SYSTEM");
@@ -304,7 +304,7 @@ async function testTransferLimits(mod) {
 
     // Check if amount exceeds limit
     if (transferAmount > maxTransfer) {
-      console.log(`❌ TRANSFER BLOCKED!`);
+      console.log(`⛔ TRANSFER BLOCKED!`);
       console.log(`   Amount: ${amount} VSC`);
       console.log(`   Limit: ${ethers.formatEther(maxTransfer)} VSC`);
       console.log(`   Reason: Exceeds ${sender.type} investor transfer limit`);
@@ -343,6 +343,10 @@ async function testHoldingLimits(mod) {
     const typeNames = ["Normal", "Retail", "Accredited", "Institutional"];
 
     console.log("\n📊 HOLDING LIMIT TESTS:");
+    // Counted for option 59: a type holds when its within-cap amount is
+    // allowed and its over-cap amount blocked.
+    let checked = 0;
+    let held = 0;
 
     for (let i = 0; i < testUsers.length; i++) {
       const config = await investorTypeRegistry.getInvestorTypeConfig(
@@ -373,9 +377,12 @@ async function testHoldingLimits(mod) {
       console.log(
         `   ❌ Holding over limit: ${overLimit ? "ALLOWED" : "BLOCKED"}`,
       );
+      checked++;
+      if (withinLimit && !overLimit) held++;
     }
 
     displaySuccess("HOLDING LIMITS TESTING COMPLETE");
+    return { checked, held };
   } catch (error) {
     displayError(`Holding limits testing failed: ${error.message}`);
   }

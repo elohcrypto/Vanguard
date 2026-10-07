@@ -55,19 +55,24 @@ async function deployInvestorTypeSystem(mod) {
       mod.state.getContract("vanguardGovernance");
 
     if (governance) {
-      console.log("🗳️ Integrating with existing VanguardGovernance...");
-      try {
-        // Set VanguardGovernance as authorized to update investor type rules
-        const governanceAddress = await governance.getAddress();
-        await investorTypeRegistry.setGovernance(governanceAddress);
-        console.log(`✅ VanguardGovernance integrated: ${governanceAddress}`);
-        console.log(
-          "   💡 Investor type updates now require governance proposals",
-        );
-      } catch (error) {
-        console.log("⚠️ Governance integration failed:", error.message);
-        console.log("   💡 You can manually integrate later if needed");
-      }
+      // The registry has no setGovernance: VanguardGovernance takes it as
+      // owner. It is Ownable2Step, so this only nominates, as option 74's
+      // step 7 does when the registry exists first; governance accepts
+      // through a passed proposal (option 83b).
+      console.log(
+        "🗳️ Nominating VanguardGovernance as InvestorTypeRegistry owner...",
+      );
+      const governanceAddress = await governance.getAddress();
+      await (
+        await investorTypeRegistry.transferOwnership(governanceAddress)
+      ).wait();
+      console.log(`   Current owner:  ${await investorTypeRegistry.owner()}`);
+      console.log(
+        `   Pending owner:  ${await investorTypeRegistry.pendingOwner()}`,
+      );
+      console.log(
+        "   💡 Use option 83b to run the vote that completes the handover",
+      );
     } else {
       console.log("🗳️ VanguardGovernance not detected");
       console.log(
@@ -84,14 +89,21 @@ async function deployInvestorTypeSystem(mod) {
     displaySuccess("INVESTOR TYPE SYSTEM DEPLOYED SUCCESSFULLY!");
     console.log("📊 System Status:");
     console.log(`   📋 InvestorTypeRegistry: ${registryAddress}`);
-    console.log(`   👮 Compliance Officers: 1`);
+    // Read back, not assumed (R-47-2).
+    const officer = mod.state.signers[1].address;
+    console.log(
+      `   👮 Compliance officer ${officer}: ${(await investorTypeRegistry.isComplianceOfficer(officer)) ? "set" : "not set"}`,
+    );
 
     // Show governance status
     if (governance) {
       const governanceAddress = await governance.getAddress();
-      console.log(`   🗳️ Governance: Integrated with VanguardGovernance`);
+      const nominated =
+        (await investorTypeRegistry.pendingOwner()) === governanceAddress;
+      console.log(
+        `   🗳️ Governance: ${nominated ? "nominated owner, accepts by vote (83b)" : "not nominated"}`,
+      );
       console.log(`   📍 Governance Address: ${governanceAddress}`);
-      console.log(`   ⚖️ Updates require governance proposals`);
     } else {
       console.log(`   🗳️ Governance: Not integrated (owner-based control)`);
       console.log(`   💡 Deploy Option 74 for democratic governance`);
@@ -176,11 +188,13 @@ async function showInvestorTypeConfigurations(mod) {
     const investorTypes = [0, 1, 2, 3]; // Normal, Retail, Accredited, Institutional
     const typeNames = ["Normal", "Retail", "Accredited", "Institutional"];
     const typeEmojis = ["👤", "🛒", "💼", "🏛️"];
+    let shown = 0; // option 59 counts the configurations read
 
     for (let i = 0; i < investorTypes.length; i++) {
       const config = await investorTypeRegistry.getInvestorTypeConfig(
         investorTypes[i],
       );
+      shown++;
       console.log(
         `\n${typeEmojis[i]} ${typeNames[i]} Investor (Type ${investorTypes[i]}):`,
       );
@@ -214,6 +228,7 @@ async function showInvestorTypeConfigurations(mod) {
     }
 
     displaySuccess("INVESTOR TYPE CONFIGURATIONS DISPLAYED");
+    return shown;
   } catch (error) {
     displayError(`Failed to show configurations: ${error.message}`);
   }
@@ -241,7 +256,7 @@ async function assignInvestorTypes(mod) {
   try {
     // Check if we have investors from the onboarding system
     if (!mod.state.investors || mod.state.investors.size === 0) {
-      console.log("\n❌ NO INVESTORS FOUND!");
+      console.log("\nℹ️  NO INVESTORS FOUND!");
       console.log("");
       console.log("💡 To create investors with proper onboarding:");
       console.log("   1. Go to Option 23: INVESTOR ONBOARDING SYSTEM");
