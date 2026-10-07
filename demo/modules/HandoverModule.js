@@ -279,8 +279,9 @@ class HandoverModule {
 
       const bound = await vanguardGovernance.boundTarget(proposalType);
       if (!same(bound, targetAddr)) {
-        displayError(
-          `This governance was deployed against a different ${label}.`,
+        // An expected refusal (e.g. 51 run after 74), not an error.
+        console.log(
+          `⛔ This governance was deployed against a different ${label}.`,
         );
         console.log(`   Bound ${typeName} target: ${bound}`);
         console.log(`   💡 ${deployHint}`);
