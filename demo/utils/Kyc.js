@@ -159,20 +159,28 @@ async function attestAll(state, identityAddress, label, validTo) {
  * @param {Object} state - DemoState with identityRegistry registered.
  * @param {string} wallet - The registered wallet to refresh.
  * @param {Function} [log] - Printer, console.log by default.
- * @returns {Promise<{receipt: Object, until: bigint}>} until is 0n if
- *   nothing was cached (the walk failed).
+ * @returns {Promise<{receipt: Object|null, until: bigint}>} until is 0n
+ *   if nothing was cached; receipt is null for an unregistered wallet.
  */
 async function cacheVerification(state, wallet, log = console.log) {
   const registry = state.getContract("identityRegistry");
+  const identity = await registry.identity(wallet);
+  if (identity === ethers.ZeroAddress) {
+    log("   ⚠️  refreshVerified: wallet not registered, nothing cached");
+    return { receipt: null, until: 0n };
+  }
+  const passed = await registry.refreshVerified.staticCall(wallet);
   const receipt = await (await registry.refreshVerified(wallet)).wait();
-  const [, until] = await registry.verifiedUntil(
-    await registry.identity(wallet),
-  );
-  if (until === 0n) {
-    log("   ⚠️  refreshVerified: claim walk failed, nothing cached");
-  } else {
+  const [, until] = await registry.verifiedUntil(identity);
+  if (until !== 0n) {
     const when = new Date(Number(until) * 1000).toISOString();
     log(`   ✅ refreshVerified: verification cached until ${when} (chain)`);
+  } else if (passed) {
+    log(
+      "   ⚠️  refreshVerified: walk passed but not cached (issuer gives no expiry)",
+    );
+  } else {
+    log("   ❌ refreshVerified: claim walk failed, nothing cached");
   }
   log(`   ⛽ Gas Used: ${receipt.gasUsed.toLocaleString()}`);
   return { receipt, until };

@@ -46,7 +46,8 @@ async function runEscrowSmoke(state, failures) {
   ])
     await onboard(state, s, tag);
 
-  // Task 4.9: the onboarding refresh caches verification; read it back.
+  // Task 4.9: refresh the payee as the demo's onboarding options do
+  // (onboard() above does not), then read the cache back from chain.
   await cacheVerification(state, payee.address, () => {});
   const [, payeeUntil] = await idReg.verifiedUntil(
     await idReg.identity(payee.address),
