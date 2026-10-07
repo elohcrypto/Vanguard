@@ -568,7 +568,10 @@ preference flags.
 
 ### Fair Voting Implementation
 
-The listings below are condensed from `contracts/governance/VanguardGovernance.sol`.
+The listings below are condensed from `contracts/governance/`: `castVote` lives
+in `GovernanceProposals.sol`, `executeProposal`, `_settleWithRefund` and
+`claimRefund` in `VanguardGovernance.sol` (one deployed contract, split by
+inheritance in Task 4.8).
 An earlier version of this section showed code that never existed in the
 repo (a `Succeeded` status, an `executionWindow`, `ParameterChange` and
 `UpgradeContract` types, `forVotes++`); it is replaced here with the shape

@@ -7,8 +7,10 @@ This directory contains OnchainID implementation contracts following ERC-734 and
 - `OnchainIDFactory.sol` - Factory for deploying OnchainID contracts
 - `OnchainID.sol` - Core OnchainID contract: ERC-735 claims on top of `OnchainIDKeys`
 - `OnchainIDKeys.sol` - Abstract base of OnchainID: ERC-734 keys, execution requests, manager authorization, ownership (one deployed contract; split for size in plan v2 Task 4.5)
-- `ClaimIssuer.sol` - Trusted claim issuer contract
+- `ClaimIssuer.sol` - Trusted claim issuer contract: issued claims, revocation, `hasValidClaim` and `claimValidTo`
+- `ClaimIssuerKeys.sol` - Abstract base of ClaimIssuer, not deployed: the issuer's keys, trusted-issuer list, issuer info and the signer checks (split in Task 4.8)
 - `KeyManager.sol` - Timelocked key rotation and agent recovery for identities that authorize it (no owner)
+- `KeyManagerRecovery.sol` - Abstract base of KeyManager, not deployed: recovery agents, candidates, approvals and execution (split in Task 4.8)
 
 ## Interfaces
 

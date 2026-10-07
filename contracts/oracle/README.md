@@ -15,6 +15,9 @@ This directory contains oracle network management contracts for real-time compli
 - `BlacklistOracle.sol` - Blacklist entries; applies a resolved verdict;
   `emergencyBlacklist` needs the manager's emergency designation and an
   active node
+- `ListOracleBase.sol` - Abstract base of both list oracles, not deployed:
+  oracle status and reputation, signature check, list-manager role, pause
+  and the verdict rules (Task 4.8)
 
 ## Interfaces
 

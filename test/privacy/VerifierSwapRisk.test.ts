@@ -6,8 +6,9 @@ import { ethers } from "hardhat";
  *
  * `testingMode` is immutable, so a mainnet instance cannot be flipped into
  * mock-verification mode. But in production mode verification delegates to a
- * swappable verifier address (ZKVerifierIntegrated.sol:101), and updateVerifier()
- * (line 407) lets the owner replace it with any contract exposing verifyProof.
+ * swappable verifier address (the verifier instances in ZKVerifierAdmin.sol),
+ * and ZKVerifierAdmin.updateVerifier() lets the owner replace it with any
+ * contract exposing verifyProof.
  *
  * The immutability of testingMode therefore does NOT bound the owner's power:
  * a single key can install an accept-everything verifier and reach the same

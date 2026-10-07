@@ -3,10 +3,10 @@ import { ethers } from "hardhat";
 
 /**
  * VanguardGovernance defines per-proposal-type quorum thresholds
- * (VanguardGovernance.sol:180-260 — e.g. 20% for InvestorTypeConfig) but
- * executeProposal (line 378) never reads them. It checks only:
+ * (GovernanceConfig._initializeThresholds — e.g. 20% for InvestorTypeConfig)
+ * but executeProposal (VanguardGovernance.sol) never reads them. It checks only:
  *
- *   require(totalVotes > 0)                 // line 384
+ *   require(totalVotes > 0)
  *   approvalPercentage = votesFor*100/totalVotes >= 51
  *
  * Consequence: a single voter is a 100% approval. Any proposal — including one

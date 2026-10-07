@@ -331,15 +331,17 @@ New votes now cost 5 VGT each
 
 ## 🔧 **Contract Changes**
 
-### **VanguardGovernance.sol:**
+### **VanguardGovernance (one deployed contract, split by inheritance in Task 4.8):**
 
 **New State Variables:**
 ```solidity
+// GovernanceConfig.sol
 IIdentityRegistry public identityRegistry;
 uint256 public proposalCreationCost = 10 * 10**18; // 10 VGT
 uint256 public votingCost = 10 * 10**18; // 10 VGT
-mapping(uint256 => uint256) private _lockedTokens;
-mapping(uint256 => mapping(address => uint256)) private _voterLockedTokens;
+// GovernanceProposals.sol
+mapping(uint256 => uint256) internal _lockedTokens;
+mapping(uint256 => mapping(address => uint256)) internal _voterLockedTokens;
 mapping(uint256 => address[]) private _proposalVoters;
 ```
 

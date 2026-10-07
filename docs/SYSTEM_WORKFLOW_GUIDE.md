@@ -14,22 +14,30 @@ investor types in `docs/INVESTOR_TYPE_SYSTEM.md`.
 ```
 contracts/
 ├── onchain_id/       OnchainID (ERC-735 claims) on OnchainIDKeys (ERC-734
-│                     keys), OnchainIDFactory, ClaimIssuer, KeyManager
+│                     keys), OnchainIDFactory, ClaimIssuer on
+│                     ClaimIssuerKeys, KeyManager on KeyManagerRecovery
 ├── erc3643/          Token (VSC), IdentityRegistry, InvestorTypeRegistry
 ├── compliance/       ComplianceRules on ComplianceRulesAdmin and
 │                     ComplianceRulesTrust (one deployed contract)
 ├── oracle/           OracleManager (the gate), ConsensusOracle (its
-│                     engine), WhitelistOracle, BlacklistOracle
-├── privacy/          PrivacyManager, ZKVerifierIntegrated, DynamicListManager,
-│                     verifiers/ (five snarkjs PLONK verifiers)
+│                     engine), WhitelistOracle and BlacklistOracle (both
+│                     on ListOracleBase)
+├── privacy/          PrivacyManager on PrivacyAttestationPolicy,
+│                     ZKVerifierIntegrated on ZKVerifierAdmin,
+│                     DynamicListManager, verifiers/ (five snarkjs PLONK
+│                     verifiers)
 ├── investor/         InvestorRequestManager, MultiSigWallet (custody)
-├── payment/          EscrowWalletFactory, MultiSigEscrowWallet
-├── governance/       GovernanceToken (VGT), VanguardGovernance
+├── payment/          EscrowWalletFactory, MultiSigEscrowWallet on
+│                     MultiSigEscrowTerms
+├── governance/       GovernanceToken (VGT), VanguardGovernance on
+│                     GovernanceProposals and GovernanceConfig
 └── test/             MockTarget and mocks/ (tests only)
 ```
 
 Each folder has its interfaces in `interfaces/`; `contracts/README.md`
-and the folder READMEs describe the contracts.
+and the folder READMEs describe the contracts. "X on Y" means Y is an
+abstract base of X, not deployed on its own: X is one contract at one
+address.
 
 ## Workflows
 
