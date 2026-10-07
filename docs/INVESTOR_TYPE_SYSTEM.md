@@ -73,14 +73,18 @@ fixture.
 
 **Cooldown.** The registry keeps one `lastTransferAt(sender)` (the only
 storage write a transfer adds). `recordTransfer(sender)` writes
-`block.timestamp` and is callable only by an authorized token
+`block.timestamp` (nothing for an `investorLimitExempt` sender, which has
+no cooldown) and is callable only by an authorized token
 (`onlyAuthorizedToken`): `authorizeToken` / `isTokenAuthorized`, inert
 since Phase 1, are the hook through which a token writes the clock.
 `canTransferNow(sender)` is true when the sender is
 `investorLimitExempt`, when its type's `transferCooldownMinutes` is 0, or
 when at least that many whole minutes have passed since `lastTransferAt`
-(60 / 60 / 30 / 15 minutes by default). Token asks it for a non-trusted
-sender and, after a successful `transfer` or `transferFrom`, calls
+(60 / 60 / 30 / 15 minutes by default). Token asks the same question in
+one call, `transferCheck(sender, amount)`, which answers for the calling
+token 0 (allowed), 1 (token not authorized), 2 (over the transfer cap) or
+3 (inside the cooldown), and maps each code to its reason; a trusted
+sender is asked only `isTokenAuthorized`. After a successful `transfer` or `transferFrom`, calls
 `recordTransfer(from)` when the registry is set and the sender is not a
 trusted contract. Mint, burn and `recoveryAddress` write no clock;
 receiving starts none; `transferFrom` writes the owner's clock, not the

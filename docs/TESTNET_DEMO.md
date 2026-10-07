@@ -707,7 +707,10 @@ failed", `whitelistTierAllows` false) and passes when re-listed at
 tier 3. Option 59 runs 52, 56, 57 and 58 and reports 58's two verdicts;
 16 and 17 (20c, 20d) print the cooldowns with each demo wallet's clock and
 the tiers with VSC's mode, oracle and each wallet's entry. Option 42 -> 1
-waits out the sender's cooldown after its first transfer. A wallet that
+waits out the sender's cooldown before its re-proof transfer (e). Without
+`evm_increaseTime` (a public testnet) 58 and 42 -> 1 never wait: they
+print "cooldown: N minutes left, re-run after <time>" and skip only the
+step that needs the cooldown over. A wallet that
 sends twice by hand within its cooldown sees "Transfer cooldown".
 `scripts/demo-smoke-investor.js` runs 58 and asserts both rules from
 chain.
@@ -998,23 +1001,28 @@ walk. Earlier history: 447,939 for C before Task
 Scenario E is D with an authorized `InvestorTypeRegistry` on the token;
 the measured transfer runs after the sender's cooldown, so its clock
 write overwrites a set slot. Before: ec505cb (caps only, no cooldown).
-After: the cooldown, the authorization read and the clock write.
+After: the cooldown, the authorization and the clock write, after the
+gas round below.
 
 | Scenario                                 | before gasUsed | after gasUsed | after delta vs A |
 | ---------------------------------------- | -------------- | ------------- | ---------------- |
-| A: MockIdentityRegistry (baseline)       | 96,503         | 96,797        | 0                |
-| D: 2 topics, both refreshed, no registry | 105,849        | 106,143       | +9,346           |
-| E: D + investor-type registry            | 133,947        | 146,961       | +50,164          |
-| E first transfer (warm-up)               | 151,047        | 181,161       | n/a              |
+| A: MockIdentityRegistry (baseline)       | 96,503         | 96,840        | 0                |
+| D: 2 topics, both refreshed, no registry | 105,849        | 106,186       | +9,346           |
+| E: D + investor-type registry            | 133,947        | 135,478       | +38,638          |
+| E first transfer (warm-up)               | 151,047        | 169,678       | n/a              |
 
-The registry's two caps already cost 28,098 over D at ec505cb; Task 4.10
-adds 13,014 per transfer after the first (two cold reads, the
-authorization and the sender's clock, a warm overwrite and three calls)
-and 30,114 on a sender's first transfer (the clock's zero-to-nonzero
-write). Every transfer also pays 294 more without a registry (the
-`recordTransfer` branch). E is 50,164 over A, above the 40,000 D17
-tolerance, which was set for the claim walk with no registry bound
-(at ec505cb E was 37,444 over A); D stays within it.
+The gas round, E (and E's first transfer) after each step: first cut
+146,961 (181,161); the three cap views read one config field from
+storage instead of copying the seven-field struct, 139,359 (173,559);
+one registry call, `transferCheck`, answers the authorization, the
+transfer cap and the cooldown, 136,376 (170,576); `recordTransfer` skips
+exempt senders, 136,580 (170,780); the token reuses the sender's trust
+flag for the clock write instead of asking ComplianceRules again,
+135,478 (169,678). E is within the 40,000 D17 tolerance over A after the
+sender's first transfer (it was 37,444 over A at ec505cb, the caps
+alone); a sender's first transfer pays the clock's zero-to-nonzero
+write. Every transfer pays 337 more than at ec505cb without a registry
+(the clock branch and the trust flag in `_checkTransferFull`).
 
 **The verification cache.** `IdentityRegistry` (claim half in
 `RegistryVerification.sol`) caches a passing claim walk per identity, not
