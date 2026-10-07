@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.19;
 
-import "./InvestorTypeGovernance.sol";
+import {InvestorTypeGovernance, Ownable} from "./InvestorTypeGovernance.sol";
 
 /**
  * @title InvestorTypeRegistry
@@ -33,6 +33,9 @@ contract InvestorTypeRegistry is InvestorTypeGovernance {
     mapping(address => bool) private _authorizedTokens;
     // D22 (a): a treasury is not an investor; exempt accounts skip type caps.
     mapping(address => bool) public investorLimitExempt;
+    /// @notice When an authorized token last recorded a transfer SENT by the
+    ///         account (D37 = a, Task 4.10). Written only by recordTransfer.
+    mapping(address => uint256) public lastTransferAt;
 
     modifier onlyComplianceOfficer() {
         require(_complianceOfficers[msg.sender] || msg.sender == owner(), "Not authorized compliance officer");
@@ -138,6 +141,37 @@ contract InvestorTypeRegistry is InvestorTypeGovernance {
     }
 
     /**
+     * @notice False while `sender` is inside its investor type's transfer
+     *         cooldown: true when the sender is investorLimitExempt (D22),
+     *         when its type's cooldown is 0, or when at least
+     *         `transferCooldownMinutes` minutes have passed since an
+     *         authorized token last recorded a transfer it sent. Token asks
+     *         this for a non-trusted sender next to canTransferAmount
+     *         (D37 = a, Task 4.10). Receiving starts no cooldown.
+     * @dev Compared in whole minutes elapsed, which equals
+     *      `elapsed >= cooldown * 60` without the multiplication, so no
+     *      configured cooldown can overflow into a reason-less revert.
+     */
+    function canTransferNow(address sender) external view returns (bool) {
+        if (investorLimitExempt[sender]) return true;
+        uint256 cooldown = _typeConfigs[_investorTypes[sender]].transferCooldownMinutes;
+        if (cooldown == 0) return true;
+        return (block.timestamp - lastTransferAt[sender]) / 60 >= cooldown;
+    }
+
+    /**
+     * @notice Start `sender`'s cooldown now. Only a token this registry
+     *         authorized (authorizeToken) may call it: the authorization
+     *         list is the hook through which a token writes the clock.
+     *         Token calls it after a user transfer (transfer/transferFrom)
+     *         by a non-trusted sender; mint, burn, recovery and trusted
+     *         contract senders never write it.
+     */
+    function recordTransfer(address sender) external onlyAuthorizedToken {
+        lastTransferAt[sender] = block.timestamp;
+    }
+
+    /**
      * @dev Check if transfer amount requires large transfer notification
      */
     function isLargeTransfer(address investor, uint256 amount) external view returns (bool) {
@@ -194,7 +228,10 @@ contract InvestorTypeRegistry is InvestorTypeGovernance {
     }
 
     /**
-     * @dev Authorize token to use this registry
+     * @dev Authorize token to use this registry: an authorized token may
+     *      write the cooldown clock (recordTransfer), and Token refuses every
+     *      mint and transfer with "Token not authorized by investor registry"
+     *      while its registry is set but has not authorized it (Task 4.10).
      */
     function authorizeToken(address token, bool authorized) external onlyOwner {
         require(token != address(0), "Invalid token address");

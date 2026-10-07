@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.19;
 
-import "@openzeppelin/contracts/access/Ownable2Step.sol";
-import "./interfaces/IInvestorTypeRegistry.sol";
+import {Ownable, Ownable2Step} from "@openzeppelin/contracts/access/Ownable2Step.sol";
+import {IInvestorTypeRegistry} from "./interfaces/IInvestorTypeRegistry.sol";
 
 /**
  * @title InvestorTypeGovernance

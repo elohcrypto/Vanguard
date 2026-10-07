@@ -108,6 +108,19 @@ interface IInvestorTypeRegistry {
      */
     function getTransferCooldown(address investor) external view returns (uint256);
 
+    /// @dev Whether `token` may write the cooldown clock (authorizeToken).
+    function isTokenAuthorized(address token) external view returns (bool);
+
+    /// @dev When an authorized token last recorded a transfer sent by
+    /// `sender` (0 if never). D37 = a, Task 4.10.
+    function lastTransferAt(address sender) external view returns (uint256);
+
+    /// @dev False while `sender` is inside its type's transfer cooldown.
+    function canTransferNow(address sender) external view returns (bool);
+
+    /// @dev Authorized tokens only: start `sender`'s cooldown now.
+    function recordTransfer(address sender) external;
+
     /**
      * @dev Check if transfer amount requires large transfer notification
      */
