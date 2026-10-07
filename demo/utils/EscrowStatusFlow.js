@@ -174,10 +174,11 @@ async function viewEscrowStatus(mod) {
 
     console.log("\n💳 ESCROW WALLET BALANCE:");
     console.log(`   Current Balance: ${ethers.formatEther(walletBalance)} VSC`);
-    console.log(
-      `   Funded: ${walletBalance >= totalRequired ? "✅ Yes" : "❌ No"}`,
-    );
-    if (walletBalance < totalRequired) {
+    // The wallet records its funding once; after a release or refund the
+    // balance is 0 but the escrow was funded (chain: funded()).
+    const funded = await wallet.funded();
+    console.log(`   Funded: ${funded ? "✅ Yes" : "⏳ Not yet"} (chain)`);
+    if (!funded && walletBalance < totalRequired) {
       console.log(
         `   Remaining: ${ethers.formatEther(totalRequired - walletBalance)} VSC`,
       );
