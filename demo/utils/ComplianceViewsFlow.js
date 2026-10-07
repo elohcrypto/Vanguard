@@ -26,7 +26,7 @@ async function _investorTypeContext(mod) {
   const registry = mod.state.getContract("investorTypeRegistry");
   const token = mod.state.getContract("digitalToken");
   if (!registry || !token) {
-    console.log("❌ InvestorTypeRegistry or VSC not deployed!");
+    console.log("ℹ️  InvestorTypeRegistry or VSC not deployed!");
     console.log("💡 Deploy VSC (option 21) and the registry (option 51)");
     return null;
   }
@@ -144,7 +144,7 @@ async function testAllComplianceValidations(mod) {
 
   const complianceRules = mod.state.getContract("complianceRules");
   if (!complianceRules) {
-    console.log("❌ ComplianceRules contract not deployed!");
+    console.log("ℹ️  ComplianceRules contract not deployed!");
     console.log("💡 Please deploy ComplianceRules first using option 13");
     return;
   }
@@ -152,7 +152,7 @@ async function testAllComplianceValidations(mod) {
   try {
     const token = mod.state.getContract("digitalToken");
     if (!token) {
-      console.log("❌ Token not deployed!");
+      console.log("ℹ️  Token not deployed!");
       return;
     }
     const tokenAddress = await token.getAddress();
@@ -233,20 +233,35 @@ async function showComplianceRulesDashboard(mod) {
 
   const complianceRules = mod.state.getContract("complianceRules");
   if (!complianceRules) {
-    console.log("❌ ComplianceRules contract not deployed!");
+    console.log("ℹ️  ComplianceRules contract not deployed!");
     console.log("💡 Please deploy ComplianceRules first using option 13");
     return;
   }
 
   try {
     console.log("\n🔧 ORACLE SYSTEM STATUS:");
-    console.log("   🚨 Emergency Oracle: AML Oracle");
-    console.log("   ⚖️ Equal Voting Weights: 100 each");
+    // Read from OracleManager, not constants (R-47-2).
+    const oracleManager = mod.state.getContract("oracleManager");
+    if (!oracleManager) {
+      console.log("   ℹ️  No OracleManager deployed (option 31)");
+    } else {
+      const registered = await oracleManager.getRegisteredOracles();
+      const emergency = [];
+      for (const oracle of registered)
+        if (await oracleManager.isEmergencyOracle(oracle))
+          emergency.push(await oracleManager.getOracleName(oracle));
+      console.log(
+        `   🚨 Emergency Oracle: ${emergency.join(", ") || "none designated"}`,
+      );
+      console.log(
+        `   ⚖️ Registered oracles: ${registered.length}, consensus threshold ${await oracleManager.getConsensusThreshold()}% of the registered weight`,
+      );
+    }
 
     // Add more dashboard content here
     console.log("\n✅ COMPLIANCE RULES DASHBOARD LOADED");
   } catch (error) {
-    console.error("❌ Oracle registration failed:", error.message);
+    console.error("❌ Compliance dashboard failed:", error.message);
   }
 }
 
@@ -261,7 +276,7 @@ async function viewJurisdictionRules(mod) {
 
   const complianceRules = mod.state.getContract("complianceRules");
   if (!complianceRules) {
-    console.log("❌ ComplianceRules contract not deployed!");
+    console.log("ℹ️  ComplianceRules contract not deployed!");
     console.log("💡 Please deploy ComplianceRules first using option 13");
     return;
   }
@@ -270,7 +285,7 @@ async function viewJurisdictionRules(mod) {
     // Get token address
     const token = mod.state.getContract("digitalToken");
     if (!token) {
-      console.log("❌ Token not deployed!");
+      console.log("ℹ️  Token not deployed!");
       return;
     }
     const tokenAddress = await token.getAddress();
@@ -337,7 +352,7 @@ async function viewJurisdictionRules(mod) {
     console.log("");
 
     // Display blocked countries (blacklist)
-    console.log("❌ BLACKLIST (Blocked Countries):");
+    console.log("🚫 BLACKLIST (Blocked Countries):");
     if (rule.blockedCountries.length === 0) {
       console.log("   ℹ️  No countries blocked");
       console.log("   💡 All countries are allowed");

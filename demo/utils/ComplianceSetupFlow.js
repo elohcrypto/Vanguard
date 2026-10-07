@@ -149,7 +149,7 @@ async function configureJurisdictionRules(mod) {
 
   const complianceRules = mod.state.getContract("complianceRules");
   if (!complianceRules) {
-    console.log("❌ ComplianceRules contract not deployed!");
+    console.log("ℹ️  ComplianceRules contract not deployed!");
     console.log("💡 Please deploy ComplianceRules first using option 13");
     return;
   }
@@ -158,7 +158,7 @@ async function configureJurisdictionRules(mod) {
     // Use the ERC-3643 Digital Token for compliance testing
     const token = mod.state.getContract("digitalToken");
     if (!token) {
-      console.log("❌ Token not deployed!");
+      console.log("ℹ️  Token not deployed!");
       console.log("💡 Please deploy contracts first using option 1");
       return;
     }
@@ -190,7 +190,7 @@ async function configureJurisdictionRules(mod) {
         console.log(`   📋 Countries: ${currentAllowed.join(", ")}`);
       }
 
-      console.log("\n❌ Current BLACKLIST (Blocked Countries):");
+      console.log("\n🚫 Current BLACKLIST (Blocked Countries):");
       if (currentBlocked.length === 0) {
         console.log("   ℹ️  No countries blocked");
       } else {
@@ -329,7 +329,7 @@ async function configureJurisdictionRules(mod) {
         break;
 
       case "6": // Cancel
-        console.log("\n❌ Operation cancelled");
+        console.log("\nℹ️  Operation cancelled");
         return;
 
       default:
