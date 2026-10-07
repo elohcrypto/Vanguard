@@ -25,35 +25,37 @@ const same = (a, b) => String(a).toLowerCase() === String(b).toLowerCase();
 const iso = (s) => new Date(Number(s) * 1000).toISOString();
 
 /**
- * Point `token` at `registry` and have the registry authorize it. The
- * token side needs the token owner, the authorization the registry owner;
- * when the runner is not the registry owner it says who must act.
- * @returns {Promise<boolean>} whether the registry authorizes the token
+ * Point `token` at `registry`, authorized first. A registry that has not
+ * authorized the token makes it refuse every mint and transfer, so when
+ * the runner cannot authorize (it does not own the registry, e.g. after
+ * the handover) the token is NOT pointed at it; the owner and the vote
+ * that must authorize it are printed instead (review L4).
+ * @returns {Promise<boolean>} whether the token now enforces an
+ *   authorizing registry
  */
 async function wireInvestorRegistry(token, registry, log = console.log) {
   const t = await token.getAddress();
   const r = await registry.getAddress();
+  if (!(await registry.isTokenAuthorized(t))) {
+    const owner = await registry.owner();
+    const me = await registry.runner.getAddress();
+    if (!same(owner, me)) {
+      log(
+        `   ⚠️  InvestorTypeRegistry NOT wired into ${t}: its owner ${owner} must first call authorizeToken(${t}, true) (an InvestorTypeConfig vote, option 76 type 0, after the handover); wiring it before would make the token refuse every mint and transfer ("${NOT_AUTHORIZED}")`,
+      );
+      return false;
+    }
+    await (await registry.authorizeToken(t, true)).wait();
+    log(
+      `   ✅ registry.isTokenAuthorized(token) = ${await registry.isTokenAuthorized(t)}: the token writes each sender's cooldown clock (Task 4.10)`,
+    );
+  } else {
+    log(`   ✅ InvestorTypeRegistry already authorizes the token ${t}`);
+  }
   if (!same(await token.investorTypeRegistry(), r)) {
     await (await token.setInvestorTypeRegistry(r)).wait();
   }
-  if (await registry.isTokenAuthorized(t)) {
-    log(`   ✅ InvestorTypeRegistry already authorizes the token ${t}`);
-    return true;
-  }
-  const owner = await registry.owner();
-  const me = await registry.runner.getAddress();
-  if (!same(owner, me)) {
-    log(
-      `   ⚠️  The registry owner ${owner} must call authorizeToken(${t}, true) (an InvestorTypeConfig vote, option 76 type 0, after the handover): until then the token refuses every mint and transfer ("${NOT_AUTHORIZED}")`,
-    );
-    return false;
-  }
-  await (await registry.authorizeToken(t, true)).wait();
-  const ok = await registry.isTokenAuthorized(t);
-  log(
-    `   ${ok ? "✅" : "⚠️ "} registry.isTokenAuthorized(token) = ${ok}: the token writes each sender's cooldown clock (Task 4.10)`,
-  );
-  return ok;
+  return same(await token.investorTypeRegistry(), r);
 }
 
 /** VSC, its registry and ComplianceRules from state, or null after a hint. */
