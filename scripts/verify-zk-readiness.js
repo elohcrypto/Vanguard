@@ -265,7 +265,13 @@ function inheritedSources(file, name, seen = new Set()) {
   let out = src;
   if (m) {
     for (const base of m[1].split(",").map((b) => b.trim().split(/[\s(]/)[0])) {
-      out += "\n" + inheritedSources(path.join(path.dirname(file), `${base}.sol`), base, seen);
+      out +=
+        "\n" +
+        inheritedSources(
+          path.join(path.dirname(file), `${base}.sol`),
+          base,
+          seen,
+        );
     }
   }
   return out;
