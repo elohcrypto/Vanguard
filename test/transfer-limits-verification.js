@@ -237,6 +237,9 @@ describe("Transfer Limits Verification - 8,000 Yuan Max", function () {
           .transfer(investor2.address, ethers.parseEther("4000")),
       ).to.not.be.reverted;
 
+      // Task 4.10: a Normal sender waits out its 60-minute cooldown.
+      await ethers.provider.send("evm_increaseTime", [3600]);
+
       // Second transfer of 4,000 (total 8,000 - should work)
       await expect(
         token

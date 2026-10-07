@@ -18,6 +18,7 @@ contract Token is IERC3643, ERC20, Ownable2Step, Pausable {
     IIdentityRegistry private _identityRegistry;
     IComplianceHooks internal _compliance;
     IInvestorTypeRegistry private _investorTypeRegistry;
+    string private constant NOT_AUTHORIZED = "Token not authorized by investor registry";
 
     // Frozen addresses
     mapping(address => bool) private _frozen;
@@ -155,10 +156,11 @@ contract Token is IERC3643, ERC20, Ownable2Step, Pausable {
             if (_frozen[_to]) return (false, "Recipient frozen");
             if (!_identityRegistry.isVerified(_to)) return (false, "Identity not verified");
             if (!_compliance.canTransfer(_from, _to, _amount)) return (false, "Compliance check failed");
-            if (
-                address(_investorTypeRegistry) != address(0) &&
-                !_investorTypeRegistry.canHoldAmount(_to, balanceOf(_to) + _amount)
-            ) return (false, "Holding limit exceeded");
+            if (address(_investorTypeRegistry) != address(0)) {
+                if (!_investorTypeRegistry.isTokenAuthorized(address(this))) return (false, NOT_AUTHORIZED);
+                if (!_investorTypeRegistry.canHoldAmount(_to, balanceOf(_to) + _amount))
+                    return (false, "Holding limit exceeded");
+            }
             return (true, "");
         }
 
@@ -195,12 +197,17 @@ contract Token is IERC3643, ERC20, Ownable2Step, Pausable {
         // skips the cap; the human side of a trusted transfer is still capped
         // (D26), or a settled escrow relays any amount past both caps.
         if (address(_investorTypeRegistry) != address(0)) {
-            // Check transfer amount limit for a non-trusted sender
-            if (
-                !fromTrusted &&
-                !_investorTypeRegistry.canTransferAmount(_from, _amount)
-            ) {
-                return (false, "Transfer amount limit exceeded");
+            // Fail closed (R-410-1): a registry that has not authorized this
+            // token cannot take its cooldown clock, so nothing moves until
+            // the owner calls authorizeToken; the misconfiguration is loud.
+            if (!_investorTypeRegistry.isTokenAuthorized(address(this))) return (false, NOT_AUTHORIZED);
+
+            // Transfer amount limit and type cooldown for a non-trusted
+            // sender (D37 = a): a trusted contract has no type and no clock.
+            if (!fromTrusted) {
+                if (!_investorTypeRegistry.canTransferAmount(_from, _amount))
+                    return (false, "Transfer amount limit exceeded");
+                if (!_investorTypeRegistry.canTransferNow(_from)) return (false, "Transfer cooldown");
             }
 
             // Check holding limit for a non-trusted recipient
@@ -351,6 +358,8 @@ contract Token is IERC3643, ERC20, Ownable2Step, Pausable {
         emit ComplianceAdded(_complianceAddress);
     }
 
+    /// @notice The registry's owner must also call authorizeToken(this): until
+    ///         then every mint and transfer is refused (Task 4.10, R-410-1).
     function setInvestorTypeRegistry(address _investorTypeRegistryAddress) external onlyOwner {
         require(_investorTypeRegistryAddress != address(0), "Token: Investor type registry is zero address");
         require(
@@ -402,8 +411,19 @@ contract Token is IERC3643, ERC20, Ownable2Step, Pausable {
         bool success = super.transfer(_to, _amount);
         if (success) {
             _compliance.transferred(msg.sender, _to, _amount);
+            _recordTransfer(msg.sender);
         }
         return success;
+    }
+
+    /// @dev Start the sender's investor-type cooldown (D37 = a, Task 4.10).
+    ///      Only transfer and transferFrom call this, the two user-initiated
+    ///      paths: mint, burn and recoveryAddress never write the clock, and
+    ///      neither does a trusted contract sender (no type, D26).
+    function _recordTransfer(address _from) private {
+        if (address(_investorTypeRegistry) != address(0) && !_compliance.isTrustedContract(_from)) {
+            _investorTypeRegistry.recordTransfer(_from);
+        }
     }
 
     function transferFrom(
@@ -421,6 +441,7 @@ contract Token is IERC3643, ERC20, Ownable2Step, Pausable {
         bool success = super.transferFrom(_from, _to, _amount);
         if (success) {
             _compliance.transferred(_from, _to, _amount);
+            _recordTransfer(_from);
         }
         return success;
     }

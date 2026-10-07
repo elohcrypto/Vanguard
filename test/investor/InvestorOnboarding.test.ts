@@ -109,6 +109,8 @@ describe("Investor Onboarding System", function () {
     await token.setInvestorTypeRegistry(
       await investorTypeRegistry.getAddress(),
     );
+    // Task 4.10: a registry refuses every move until it authorizes the token.
+    await investorTypeRegistry.authorizeToken(await token.getAddress(), true);
 
     // Register user identity
     await identityRegistry.addAgent(owner.address);
@@ -704,7 +706,9 @@ describe("Investor Onboarding System", function () {
       const wallet = await lockedWallet();
       const w = await wallet.getAddress();
       const fee = ethers.parseEther("30");
-      // As an escrow release pays the fee wallet: a transfer in.
+      // As an escrow release pays the fee wallet: a transfer in, after the
+      // user's lock transfer cooldown (Task 4.10, Retail: 60 minutes).
+      await ethers.provider.send("evm_increaseTime", [3600]);
       await token.connect(user).transfer(w, fee);
       expect(await token.balanceOf(w)).to.equal(RETAIL_LOCK + fee);
       // The fee alone: the lock stays whole.
@@ -722,6 +726,7 @@ describe("Investor Onboarding System", function () {
           .proposeUnlock(RETAIL_LOCK + 1n, user.address, "too much"),
       ).to.be.revertedWith("Invalid amount");
       // A second fee plus part of the lock: the lock shrinks by the rest.
+      await ethers.provider.send("evm_increaseTime", [3600]);
       await token.connect(user).transfer(w, fee);
       const part = ethers.parseEther("1000");
       id = await proposalId(

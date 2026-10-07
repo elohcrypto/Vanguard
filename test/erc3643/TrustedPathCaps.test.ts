@@ -262,6 +262,24 @@ describe("Investor caps on the trusted path (2F.4)", function () {
         .withArgs(payer.address, e("5000"));
     });
 
+    it("Task 4.10: funding writes the payer's clock, the release writes none", async function () {
+      const f = await escrowFixture();
+      const { payer, payee, alice, investor, token, types, wallet } = f;
+      // fundEscrowWallet moved the payer's tokens by transferFrom.
+      const funded = await types.lastTransferAt(payer.address);
+      expect(funded).to.be.gt(0n);
+      // The fixture's 15-day dispute window outlasted the 60-minute cooldown.
+      expect(await types.canTransferNow(payer.address)).to.equal(true);
+      await f.agree(payer, alice.address, 1n);
+      await f.agree(payer, alice.address, 1n, "Transfer cooldown");
+      const sent = await types.lastTransferAt(payer.address);
+      await wallet.connect(investor).signAsInvestor(true);
+      expect(await wallet.state()).to.equal(1n); // Released
+      for (const a of [f.walletAddr, payee.address, f.investorWallet.address])
+        expect(await types.lastTransferAt(a)).to.equal(0n);
+      expect(await types.lastTransferAt(payer.address)).to.equal(sent);
+    });
+
     it("an over-cap release reverts at release; the refund path stays open", async function () {
       const { treasury, payer, payee, investor, token, wallet, walletAddr } =
         await escrowFixture();
