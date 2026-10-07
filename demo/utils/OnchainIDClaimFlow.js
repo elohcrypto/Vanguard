@@ -7,10 +7,9 @@
  * logger and sibling methods) and runs the option's code unchanged.
  */
 
-const { ethers } = require("hardhat");
 const { markRevoked, updateStatus } = require("./OnchainIDClaimChain");
 const { displaySuccess, displayError } = require("./DisplayHelpers");
-const { attestAll, cacheVerification } = require("./Kyc");
+const { attestAll, attestAml, cacheVerification, AML_TOPIC } = require("./Kyc");
 
 // ========== KYC CLAIM HELPER METHODS ==========
 
@@ -153,7 +152,7 @@ async function issueKYCClaimForIdentity(mod, identity) {
  * @private
  */
 async function rejectKYCClaimForIdentity(mod, identity) {
-  console.log(`\n❌ REJECTING KYC CLAIM FOR: ${identity.address}`);
+  console.log(`\n🚫 REJECTING KYC CLAIM FOR: ${identity.address}`);
   await markRevoked(mod.state, identity, "KYC", "REJECTED");
 }
 
@@ -180,7 +179,7 @@ async function viewKYCHistoryForIdentity(mod, identity) {
 
   const claim = mod.state.claims.get(`${identity.address}_KYC`);
   if (!claim) {
-    console.log("❌ No KYC claim found");
+    console.log("ℹ️  No KYC claim found");
     return;
   }
 
@@ -217,46 +216,43 @@ async function issueAMLClaimForIdentity(mod, identity) {
   console.log(`\n🔍 ISSUING AML CLAIM FOR: ${identity.address}`);
 
   try {
-    const amlIssuer = mod.state.signers[2]; // AML issuer
-    const claimTopics = [2]; // AML topic
-    const claimData = ethers.AbiCoder.defaultAbiCoder().encode(
-      ["bool"],
-      [true],
+    // Through the AML ClaimIssuer (wallet 3 signs, as Kyc.attestAll does):
+    // the only AML claim IdentityRegistry.isVerified() reads.
+    const amlIssuer = mod.state.getContract("amlIssuer");
+    const amlIssuerAddr = await amlIssuer.getAddress();
+    console.log("\n📝 Issuing AML claim on-chain (ClaimIssuer.issueClaim)...");
+    const code = identity.countryCode ?? 0;
+    const rc = await attestAml(
+      amlIssuer,
+      mod.state.signers[3],
+      identity.address,
+      `country:${code}`,
     );
-
-    console.log("\n📝 Issuing AML claim on-chain...");
-    const OnchainID = await ethers.getContractFactory("OnchainID");
-    const identityContract = OnchainID.attach(identity.address);
-
-    await mod.logger.logTransaction(
-      "AML Claim Issuance",
-      identityContract.connect(amlIssuer).addClaim(
-        claimTopics[0],
-        1, // scheme
-        amlIssuer.address,
-        "0x", // signature
-        claimData,
-        "",
-      ),
-      {
-        identity: identity.address,
-        topic: claimTopics[0],
-        issuer: amlIssuer.address,
-      },
-    );
+    console.log(`   ✅ issueClaim mined in block ${rc.blockNumber}`);
+    const registry = mod.state.getContract("identityRegistry");
+    if (
+      registry &&
+      (await registry.identity(identity.owner)) === identity.address
+    )
+      await cacheVerification(mod.state, identity.owner);
+    const valid = await amlIssuer.hasValidClaim(identity.address, AML_TOPIC);
+    if (!valid) {
+      displayError("AML claim not valid on chain after issuance");
+      return;
+    }
 
     // Store claim in state
     mod.state.claims.set(`${identity.address}_AML`, {
       type: "AML",
       identity: identity.address,
-      issuer: amlIssuer.address,
+      issuer: amlIssuerAddr,
       status: "ISSUED",
       issuedAt: new Date().toISOString(),
     });
 
-    displaySuccess("AML CLAIM ISSUED SUCCESSFULLY!");
+    displaySuccess("AML CLAIM ISSUED (hasValidClaim true, chain)");
     console.log(`   Identity: ${identity.address}`);
-    console.log(`   Issuer: ${amlIssuer.address}`);
+    console.log(`   Issuer: ${amlIssuerAddr}`);
   } catch (error) {
     displayError(`AML claim issuance failed: ${error.message}`);
   }
@@ -269,7 +265,7 @@ async function issueAMLClaimForIdentity(mod, identity) {
  * @private
  */
 async function rejectAMLClaimForIdentity(mod, identity) {
-  console.log(`\n❌ REJECTING AML CLAIM FOR: ${identity.address}`);
+  console.log(`\n🚫 REJECTING AML CLAIM FOR: ${identity.address}`);
   await markRevoked(mod.state, identity, "AML", "REJECTED");
 }
 
@@ -296,7 +292,7 @@ async function viewAMLHistoryForIdentity(mod, identity) {
 
   const claim = mod.state.claims.get(`${identity.address}_AML`);
   if (!claim) {
-    console.log("❌ No AML claim found");
+    console.log("ℹ️  No AML claim found");
     return;
   }
 
