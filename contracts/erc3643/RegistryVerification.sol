@@ -9,8 +9,8 @@ import "../onchain_id/interfaces/IClaimIssuer.sol";
  * @title RegistryVerification
  * @dev The verification half of IdentityRegistry: required claim topics,
  *      trusted issuers, the claim walk and its cache. IdentityRegistry adds
- *      wallets, identities, countries, agents and the investor-type and
- *      compliance links; one contract is deployed (plan v2 Task 4.9, split
+ *      wallets, identities, countries, agents and the compliance link;
+ *      one contract is deployed (plan v2 Task 4.9, split
  *      by inheritance as OnchainID was in 4.5).
  *
  *      Verification cache (D17 = a). The walk asks every trusted issuer of
