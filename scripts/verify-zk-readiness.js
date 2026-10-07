@@ -252,8 +252,27 @@ const zkVerifierPath = path.join(
   "privacy",
   "ZKVerifierIntegrated.sol",
 );
+// The deployed contract's source set: ZKVerifierIntegrated.sol plus every
+// base it inherits that lives beside it in contracts/privacy/ (Task 4.8
+// moved the five verifier instances and the immutable testingMode into the
+// base ZKVerifierAdmin). Bases come from the `is` lists, so the generated
+// verifiers, which are only imported, never count as the wrapper's source.
+function inheritedSources(file, name, seen = new Set()) {
+  if (seen.has(name) || !fs.existsSync(file)) return "";
+  seen.add(name);
+  const src = fs.readFileSync(file, "utf8");
+  const m = src.match(new RegExp(`contract\\s+${name}\\s+is\\s+([^{]+)\\{`));
+  let out = src;
+  if (m) {
+    for (const base of m[1].split(",").map((b) => b.trim().split(/[\s(]/)[0])) {
+      out += "\n" + inheritedSources(path.join(path.dirname(file), `${base}.sol`), base, seen);
+    }
+  }
+  return out;
+}
+
 if (fs.existsSync(zkVerifierPath)) {
-  const content = fs.readFileSync(zkVerifierPath, "utf8");
+  const content = inheritedSources(zkVerifierPath, "ZKVerifierIntegrated");
 
   // testingMode (tests only) must be fixed at deploy: PrivacyManager and
   // the handover ceremony refuse a wrapper deployed with it on.
