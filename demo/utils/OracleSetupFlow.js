@@ -67,7 +67,7 @@ async function registerOracles(mod) {
 
   const oracleManager = mod.state.getContract("oracleManager");
   if (!oracleManager) {
-    console.log("❌ Please deploy Oracle Management System first (option 31)");
+    console.log("ℹ️  Please deploy Oracle Management System first (option 31)");
     return;
   }
 

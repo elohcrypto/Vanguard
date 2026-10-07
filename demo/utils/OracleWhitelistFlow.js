@@ -16,7 +16,7 @@ async function manageWhitelist(mod) {
 
   const whitelistOracle = mod.state.getContract("whitelistOracle");
   if (!whitelistOracle) {
-    console.log("❌ Please deploy Oracle Management System first (option 31)");
+    console.log("ℹ️  Please deploy Oracle Management System first (option 31)");
     return;
   }
 
@@ -66,7 +66,7 @@ async function addUserToWhitelist(mod) {
   // Show available identities
   if (!mod.state.identities || mod.state.identities.size === 0) {
     console.log(
-      "❌ No OnchainID identities found. Please create identities first (option 3)",
+      "ℹ️  No OnchainID identities found. Please create identities first (option 3)",
     );
     return;
   }
@@ -134,7 +134,7 @@ async function upgradeWhitelistTier(mod) {
   // Show available identities
   if (!mod.state.identities || mod.state.identities.size === 0) {
     console.log(
-      "❌ No OnchainID identities found. Please create identities first (option 3)",
+      "ℹ️  No OnchainID identities found. Please create identities first (option 3)",
     );
     return;
   }
@@ -172,7 +172,7 @@ async function upgradeWhitelistTier(mod) {
   }
 
   if (uniqueIdentities.length === 0) {
-    console.log("❌ No whitelisted users found to upgrade");
+    console.log("ℹ️  No whitelisted users found to upgrade");
     return;
   }
 
@@ -216,14 +216,14 @@ async function upgradeWhitelistTier(mod) {
 }
 
 async function removeFromWhitelist(mod) {
-  console.log("\n❌ REMOVE FROM WHITELIST");
+  console.log("\n➖ REMOVE FROM WHITELIST");
   console.log("-".repeat(40));
 
   const whitelistOracle = mod.state.getContract("whitelistOracle");
 
   // Show whitelisted identities
   if (!mod.state.identities || mod.state.identities.size === 0) {
-    console.log("❌ No OnchainID identities found");
+    console.log("ℹ️  No OnchainID identities found");
     return;
   }
 
@@ -252,7 +252,7 @@ async function removeFromWhitelist(mod) {
   }
 
   if (whitelistedUsers.length === 0) {
-    console.log("❌ No whitelisted users found");
+    console.log("ℹ️  No whitelisted users found");
     return;
   }
 
@@ -287,7 +287,7 @@ async function viewWhitelistStatus(mod) {
   const whitelistOracle = mod.state.getContract("whitelistOracle");
 
   if (!mod.state.identities || mod.state.identities.size === 0) {
-    console.log("❌ No identities to check");
+    console.log("ℹ️  No identities to check");
     return;
   }
 
@@ -329,7 +329,7 @@ async function batchWhitelistOperations(mod) {
   const whitelistOracle = mod.state.getContract("whitelistOracle");
 
   if (!mod.state.identities || mod.state.identities.size === 0) {
-    console.log("❌ No identities available");
+    console.log("ℹ️  No identities available");
     return;
   }
 

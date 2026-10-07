@@ -19,14 +19,14 @@ async function integrateWithToken(mod) {
   const digitalToken = mod.state.getContract("digitalToken");
   if (!digitalToken) {
     console.log(
-      "❌ Please deploy Vanguard StableCoin System first (option 21)",
+      "ℹ️  Please deploy Vanguard StableCoin System first (option 21)",
     );
     return;
   }
 
   const oracleManager = mod.state.getContract("oracleManager");
   if (!oracleManager) {
-    console.log("❌ Please deploy Oracle Management System first (option 31)");
+    console.log("ℹ️  Please deploy Oracle Management System first (option 31)");
     return;
   }
 
@@ -108,7 +108,7 @@ async function showDashboard(mod) {
 
   const oracleManager = mod.state.getContract("oracleManager");
   if (!oracleManager) {
-    console.log("❌ Oracle Management System not deployed");
+    console.log("ℹ️  Oracle Management System not deployed");
     console.log("💡 Please run option 31 first");
     return;
   }
@@ -188,16 +188,19 @@ async function showDashboard(mod) {
 
     console.log("\n🔗 INTEGRATION STATUS:");
     console.log(
-      `   🏛️ ERC-3643 Vanguard StableCoin: ${digitalToken ? "✅ CONNECTED" : "❌ NOT CONNECTED"}`,
+      `   🏛️ ERC-3643 Vanguard StableCoin: ${digitalToken ? "✅ DEPLOYED" : "❌ NOT DEPLOYED"}`,
     );
     console.log(
-      `   ⚖️ ComplianceRules: ${complianceRules ? "✅ CONNECTED" : "❌ NOT CONNECTED"}`,
+      `   ⚖️ ComplianceRules: ${complianceRules ? "✅ DEPLOYED" : "❌ NOT DEPLOYED"}`,
     );
     console.log(
-      `   🆔 OnchainID System: ${onchainIDFactory ? "✅ CONNECTED" : "❌ NOT CONNECTED"}`,
+      `   🆔 OnchainID System: ${onchainIDFactory ? "✅ DEPLOYED" : "❌ NOT DEPLOYED"}`,
     );
 
-    console.log("\n🎯 ORACLE SYSTEM HEALTH: ✅ OPERATIONAL");
+    // From the oracle counts read above, not a constant (R-47-2).
+    console.log(
+      `\n🎯 ORACLE SYSTEM HEALTH: ${activeOracles.length > 0 ? "✅" : "⚠️ "} ${activeOracles.length} of ${totalOracles} oracles active`,
+    );
   } catch (error) {
     console.error("❌ Dashboard generation failed:", error.message);
   }
@@ -212,7 +215,7 @@ async function testIntegration(mod) {
   const digitalToken = mod.state.getContract("digitalToken");
 
   if (!oracleManager || !digitalToken) {
-    console.log("❌ Missing required systems:");
+    console.log("ℹ️  Missing required systems:");
     console.log(`   Oracle System: ${oracleManager ? "✅" : "❌"}`);
     console.log(`   Vanguard StableCoin: ${digitalToken ? "✅" : "❌"}`);
     console.log("💡 Please deploy both systems first");

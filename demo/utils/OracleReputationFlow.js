@@ -18,7 +18,7 @@ async function manageReputation(mod) {
 
   const oracleManager = mod.state.getContract("oracleManager");
   if (!oracleManager) {
-    console.log("❌ Please deploy Oracle Management System first (option 31)");
+    console.log("ℹ️  Please deploy Oracle Management System first (option 31)");
     return;
   }
 
@@ -75,7 +75,7 @@ async function rewardOracle(mod) {
   const oracleManager = mod.state.getContract("oracleManager");
 
   if (!mod.state.oracleConfig || mod.state.oracleConfig.size === 0) {
-    console.log("❌ No oracles registered");
+    console.log("ℹ️  No oracles registered");
     return;
   }
 
@@ -138,7 +138,7 @@ async function penalizeOracle(mod) {
   const oracleManager = mod.state.getContract("oracleManager");
 
   if (!mod.state.oracleConfig || mod.state.oracleConfig.size === 0) {
-    console.log("❌ No oracles registered");
+    console.log("ℹ️  No oracles registered");
     return;
   }
 
@@ -201,7 +201,7 @@ async function viewDetailedOracleStats(mod) {
   const oracleManager = mod.state.getContract("oracleManager");
 
   if (!mod.state.oracleConfig || mod.state.oracleConfig.size === 0) {
-    console.log("❌ No oracles registered");
+    console.log("ℹ️  No oracles registered");
     return;
   }
 
@@ -219,7 +219,7 @@ async function viewDetailedOracleStats(mod) {
       console.log(`🏆 Reputation: ${oracleInfo.reputation}/1000`);
       console.log(`✅ Correct Attestations: ${oracleInfo.correctAttestations}`);
       console.log(
-        `❌ Incorrect Attestations: ${oracleInfo.incorrectAttestations}`,
+        `📉 Incorrect Attestations: ${oracleInfo.incorrectAttestations}`,
       );
       console.log(
         `🔄 Active Status: ${oracleInfo.isActive ? "✅ ACTIVE" : "❌ INACTIVE"}`,
@@ -256,7 +256,7 @@ async function consensusOperations(mod) {
 
   const consensusOracle = mod.state.getContract("consensusOracle");
   if (!consensusOracle) {
-    console.log("❌ Please deploy Oracle Management System first (option 31)");
+    console.log("ℹ️  Please deploy Oracle Management System first (option 31)");
     return;
   }
 

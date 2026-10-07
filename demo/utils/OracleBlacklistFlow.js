@@ -16,7 +16,7 @@ async function manageBlacklist(mod) {
 
   const blacklistOracle = mod.state.getContract("blacklistOracle");
   if (!blacklistOracle) {
-    console.log("❌ Please deploy Oracle Management System first (option 31)");
+    console.log("ℹ️  Please deploy Oracle Management System first (option 31)");
     return;
   }
 
@@ -66,7 +66,7 @@ async function addUserToBlacklist(mod) {
   // Show available identities
   if (!mod.state.identities || mod.state.identities.size === 0) {
     console.log(
-      "❌ No OnchainID identities found. Please create identities first (option 3)",
+      "ℹ️  No OnchainID identities found. Please create identities first (option 3)",
     );
     return;
   }
@@ -147,7 +147,7 @@ async function removeFromBlacklist(mod) {
 
   // Show blacklisted identities
   if (!mod.state.identities || mod.state.identities.size === 0) {
-    console.log("❌ No OnchainID identities found");
+    console.log("ℹ️  No OnchainID identities found");
     return;
   }
 
@@ -177,7 +177,7 @@ async function removeFromBlacklist(mod) {
   }
 
   if (blacklistedUsers.length === 0) {
-    console.log("❌ No blacklisted users found");
+    console.log("ℹ️  No blacklisted users found");
     return;
   }
 
@@ -212,7 +212,7 @@ async function viewBlacklistStatus(mod) {
   const blacklistOracle = mod.state.getContract("blacklistOracle");
 
   if (!mod.state.identities || mod.state.identities.size === 0) {
-    console.log("❌ No identities to check");
+    console.log("ℹ️  No identities to check");
     return;
   }
 
@@ -258,7 +258,7 @@ async function updateBlacklistSeverity(mod) {
 
   // Show blacklisted identities
   if (!mod.state.identities || mod.state.identities.size === 0) {
-    console.log("❌ No identities found");
+    console.log("ℹ️  No identities found");
     return;
   }
 
@@ -291,7 +291,7 @@ async function updateBlacklistSeverity(mod) {
   }
 
   if (blacklistedUsers.length === 0) {
-    console.log("❌ No blacklisted users found");
+    console.log("ℹ️  No blacklisted users found");
     return;
   }
 
@@ -346,7 +346,7 @@ async function emergencyActions(mod) {
 
   const blacklistOracle = mod.state.getContract("blacklistOracle");
   if (!blacklistOracle) {
-    console.log("❌ Please deploy Oracle Management System first (option 31)");
+    console.log("ℹ️  Please deploy Oracle Management System first (option 31)");
     return;
   }
 
@@ -358,7 +358,7 @@ async function emergencyActions(mod) {
 
   // Show available users
   if (!mod.state.identities || mod.state.identities.size === 0) {
-    console.log("❌ No identities available for emergency action");
+    console.log("ℹ️  No identities available for emergency action");
     return;
   }
 
