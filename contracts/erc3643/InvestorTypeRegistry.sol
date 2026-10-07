@@ -226,7 +226,7 @@ contract InvestorTypeRegistry is InvestorTypeGovernance {
         require(config.maxTransferAmount > 0, "Invalid max transfer amount");
         require(config.maxHoldingAmount > 0, "Invalid max holding amount");
         require(config.requiredWhitelistTier >= 1 && config.requiredWhitelistTier <= 5, "Invalid whitelist tier");
-        require(config.transferCooldownMinutes <= MAX_COOLDOWN_MINUTES, "Cooldown above 30 days");
+        _checkCooldown(config.transferCooldownMinutes);
 
         _typeConfigs[investorType] = config;
         emit InvestorTypeConfigUpdated(investorType, config);

@@ -61,10 +61,17 @@ abstract contract InvestorTypeGovernance is IInvestorTypeRegistry, Ownable2Step 
 
     error GovernorSetChanged(uint256 proposalId);
     error ProposalExpired(uint256 proposalId);
+    /// @notice A config's transferCooldownMinutes exceeds MAX_COOLDOWN_MINUTES.
+    error CooldownAboveMax(uint256 cooldownMinutes, uint256 maxMinutes);
 
     modifier onlyGovernor() {
         require(_governors[msg.sender] || msg.sender == owner(), "Not authorized governor");
         _;
+    }
+
+    /// @dev Refuse a cooldown above 30 days (R-410-12), on both config paths.
+    function _checkCooldown(uint256 cooldownMinutes) internal pure {
+        if (cooldownMinutes > MAX_COOLDOWN_MINUTES) revert CooldownAboveMax(cooldownMinutes, MAX_COOLDOWN_MINUTES);
     }
 
     /// @dev Writes an executed proposal's config into the registry's store.
@@ -82,7 +89,7 @@ abstract contract InvestorTypeGovernance is IInvestorTypeRegistry, Ownable2Step 
         require(config.maxTransferAmount > 0, "Invalid max transfer amount");
         require(config.maxHoldingAmount > 0, "Invalid max holding amount");
         require(config.requiredWhitelistTier >= 1 && config.requiredWhitelistTier <= 5, "Invalid whitelist tier");
-        require(config.transferCooldownMinutes <= MAX_COOLDOWN_MINUTES, "Cooldown above 30 days");
+        _checkCooldown(config.transferCooldownMinutes);
 
         uint256 proposalId = _nextProposalId++;
         Proposal storage proposal = _proposals[proposalId];

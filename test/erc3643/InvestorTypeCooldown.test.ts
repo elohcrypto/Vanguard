@@ -162,13 +162,12 @@ describe("Investor-type transfer cooldown (Task 4.10)", function () {
       enhancedLogging: c.enhancedLogging,
       enhancedPrivacy: c.enhancedPrivacy,
     });
-    const why = "Cooldown above 30 days";
-    await expect(
-      types.updateInvestorTypeConfig(0, cfg(max + 1n)),
-    ).to.be.revertedWith(why);
-    await expect(
-      types.createProposal(0, cfg(max + 1n), "too long"),
-    ).to.be.revertedWith(why);
+    await expect(types.updateInvestorTypeConfig(0, cfg(max + 1n)))
+      .to.be.revertedWithCustomError(types, "CooldownAboveMax")
+      .withArgs(max + 1n, max);
+    await expect(types.createProposal(0, cfg(max + 1n), "too long"))
+      .to.be.revertedWithCustomError(types, "CooldownAboveMax")
+      .withArgs(max + 1n, max);
     await types.updateInvestorTypeConfig(0, cfg(max));
     await types.createProposal(0, cfg(max), "at the bound");
     expect(await types.getTransferCooldown(ethers.ZeroAddress)).to.equal(max);

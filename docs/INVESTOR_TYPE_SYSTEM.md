@@ -93,7 +93,7 @@ zero-value transfer writes no clock, since anyone may `transferFrom` a
 holder's wallet for 0 without an allowance (review H1). A cooldown is
 at most `MAX_COOLDOWN_MINUTES` (43,200, 30 days; R-410-12):
 `updateInvestorTypeConfig` and `createProposal` refuse a longer one
-("Cooldown above 30 days"). The clock is one per registry, not per
+(`CooldownAboveMax`). The clock is one per registry, not per
 token: a send on any token the registry authorizes starts the sender's
 cooldown on every token it authorizes (only VSC today). Mint, burn and `recoveryAddress` write no clock;
 receiving starts none; `transferFrom` writes the owner's clock, not the
