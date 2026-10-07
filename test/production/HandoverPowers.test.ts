@@ -430,6 +430,7 @@ describe("Handover power set from chain (plan 2F.5)", function () {
     it("names the deployer's exemption and non-exempt or late fee wallets", async function () {
       const reg = c.investorTypeRegistry;
       await c.token.setInvestorTypeRegistry(await reg.getAddress());
+      await reg.authorizeToken(await c.token.getAddress(), true);
       await reg.setInvestorLimitExempt(deployer.address, true);
       await ceremony();
       // ops (ADMIN_ROLE now) registers an escrow investor after the ceremony.

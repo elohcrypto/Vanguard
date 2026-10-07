@@ -418,6 +418,7 @@ describe("Handover preflight and self-healing (plan 2E.2)", function () {
   it("refuses to leave out an unbound registry the Token enforces (M-A)", async function () {
     const reg2 = await unboundRegistry();
     await c.token.setInvestorTypeRegistry(await reg2.getAddress());
+    await reg2.authorizeToken(await c.token.getAddress(), true);
     expect((await check(SKIP_LINE)).ok).to.equal(false);
     await rejectsBeforeAnyTx(
       /not bound to InvestorTypeRegistry .* which the Token enforces: redeploy governance/,

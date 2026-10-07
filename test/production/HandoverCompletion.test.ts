@@ -387,6 +387,7 @@ describe("Handover completion check (table)", function () {
     const gov = await ethers.getSigner(govAddr);
     const reg = c.investorTypeRegistry;
     await c.token.connect(gov).setInvestorTypeRegistry(await reg.getAddress());
+    await reg.connect(gov).authorizeToken(await c.token.getAddress(), true);
     const line = `escrow fee wallet ${feeWallet.address} (factory ownerWallet) is not investorLimitExempt`;
     const before = await assertHandoverComplete(args);
     expect(before.ok).to.equal(true);
