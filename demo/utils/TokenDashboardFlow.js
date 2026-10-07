@@ -232,8 +232,23 @@ async function showDashboardMetrics(mod, digitalToken) {
     console.log(`   Transfer Limit: 8,000 VSC (default)`);
   }
 
-  console.log(`   KYC/AML Required: ✅ ENFORCED`);
-  console.log(`   Token Issuer Only Minting: ✅ ENFORCED`);
+  // What VSC enforces, read from VSC: the registry it asks isVerified
+  // (KYC/AML), its compliance module, its investor-type registry.
+  const idReg = await digitalToken.identityRegistry();
+  const rules = await digitalToken.compliance();
+  const types = await digitalToken.investorTypeRegistry();
+  console.log(`   Identity Registry (KYC/AML gate): ${idReg} (chain)`);
+  console.log(`   Compliance: ${rules} (chain)`);
+  if (types === ethers.ZeroAddress) {
+    console.log(`   Investor Type Registry: none (chain)`);
+  } else {
+    const reg = await ethers.getContractAt("InvestorTypeRegistry", types);
+    const authorized = await reg.isTokenAuthorized(digitalToken.target);
+    console.log(`   Investor Type Registry: ${types} (chain)`);
+    console.log(
+      `   Registry authorizes VSC: ${authorized ? "✅ yes" : "⚠️  no (mints and transfers refused)"} (chain)`,
+    );
+  }
 
   // Transaction History
   const totalTransactions = mod.state.transferHistory.length;
@@ -285,9 +300,10 @@ async function showDashboardMetrics(mod, digitalToken) {
   const systemStatus =
     digitalToken && centralBank ? "OPERATIONAL" : "SETUP_REQUIRED";
   console.log(`   ERC-3643 Digital Token: ${systemStatus}`);
-  console.log(`   Compliance Enforcement: ✅ ACTIVE`);
-  console.log(`   Transfer Restrictions: ✅ ACTIVE`);
-  console.log(`   Real-time Monitoring: ✅ ACTIVE`);
+  const paused = await digitalToken.paused();
+  console.log(
+    `   Transfers: ${paused ? "⏸️  PAUSED" : "▶️  not paused"} (chain: paused())`,
+  );
 
   if (systemStatus === "SETUP_REQUIRED") {
     console.log("\n💡 NEXT STEPS:");
@@ -328,7 +344,7 @@ async function showTransactionSummary(mod) {
     ).length;
 
     console.log(`✅ Successful: ${successfulTxs}`);
-    console.log(`❌ Failed: ${failedTxs}`);
+    console.log(`${failedTxs > 0 ? "❌" : "▫️ "} Failed: ${failedTxs}`);
 
     if (transactionHistory.length > 0) {
       const successRate = (
@@ -353,7 +369,9 @@ async function showTransactionSummary(mod) {
 
       console.log(`📊 Total Transfer Attempts: ${totalTransfers}`);
       console.log(`✅ Successful Transfers: ${successfulTransfers}`);
-      console.log(`❌ Blocked Transfers: ${blockedTransfers}`);
+      console.log(
+        `${blockedTransfers > 0 ? "⛔" : "▫️ "} Blocked Transfers: ${blockedTransfers}`,
+      );
       console.log(
         `📈 Transfer Success Rate: ${((successfulTransfers / totalTransfers) * 100).toFixed(1)}%`,
       );
