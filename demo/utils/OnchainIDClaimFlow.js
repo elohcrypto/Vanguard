@@ -8,6 +8,7 @@
  */
 
 const { ethers } = require("hardhat");
+const { markRevoked, updateStatus } = require("./OnchainIDClaimChain");
 const { displaySuccess, displayError } = require("./DisplayHelpers");
 const { attestAll, cacheVerification } = require("./Kyc");
 
@@ -153,15 +154,7 @@ async function issueKYCClaimForIdentity(mod, identity) {
  */
 async function rejectKYCClaimForIdentity(mod, identity) {
   console.log(`\n❌ REJECTING KYC CLAIM FOR: ${identity.address}`);
-
-  const claim = mod.state.claims.get(`${identity.address}_KYC`);
-  if (claim) {
-    claim.status = "REJECTED";
-    claim.rejectedAt = new Date().toISOString();
-    displaySuccess("KYC claim rejected");
-  } else {
-    displayError("No KYC claim found to reject");
-  }
+  await markRevoked(mod.state, identity, "KYC", "REJECTED");
 }
 
 /**
@@ -172,34 +165,7 @@ async function rejectKYCClaimForIdentity(mod, identity) {
  */
 async function updateKYCStatusForIdentity(mod, identity) {
   console.log(`\n🔄 UPDATING KYC STATUS FOR: ${identity.address}`);
-
-  const claim = mod.state.claims.get(`${identity.address}_KYC`);
-  if (!claim) {
-    displayError("No KYC claim found to update");
-    return;
-  }
-
-  console.log("\n📋 Select new status:");
-  console.log("1. ISSUED");
-  console.log("2. REJECTED");
-  console.log("3. REVOKED");
-  console.log("4. EXPIRED");
-
-  const choice = await mod.promptUser("Select status (1-4): ");
-  const statusMap = {
-    1: "ISSUED",
-    2: "REJECTED",
-    3: "REVOKED",
-    4: "EXPIRED",
-  };
-
-  if (statusMap[choice]) {
-    claim.status = statusMap[choice];
-    claim.updatedAt = new Date().toISOString();
-    displaySuccess(`KYC status updated to: ${statusMap[choice]}`);
-  } else {
-    displayError("Invalid choice");
-  }
+  await updateStatus(mod, identity, "KYC");
 }
 
 /**
@@ -236,15 +202,7 @@ async function viewKYCHistoryForIdentity(mod, identity) {
  */
 async function revokeKYCClaimForIdentity(mod, identity) {
   console.log(`\n🚫 REVOKING KYC CLAIM FOR: ${identity.address}`);
-
-  const claim = mod.state.claims.get(`${identity.address}_KYC`);
-  if (claim) {
-    claim.status = "REVOKED";
-    claim.revokedAt = new Date().toISOString();
-    displaySuccess("KYC claim revoked");
-  } else {
-    displayError("No KYC claim found to revoke");
-  }
+  await markRevoked(mod.state, identity, "KYC", "REVOKED");
 }
 
 // ========== AML CLAIM HELPER METHODS ==========
@@ -312,15 +270,7 @@ async function issueAMLClaimForIdentity(mod, identity) {
  */
 async function rejectAMLClaimForIdentity(mod, identity) {
   console.log(`\n❌ REJECTING AML CLAIM FOR: ${identity.address}`);
-
-  const claim = mod.state.claims.get(`${identity.address}_AML`);
-  if (claim) {
-    claim.status = "REJECTED";
-    claim.rejectedAt = new Date().toISOString();
-    displaySuccess("AML claim rejected");
-  } else {
-    displayError("No AML claim found to reject");
-  }
+  await markRevoked(mod.state, identity, "AML", "REJECTED");
 }
 
 /**
@@ -331,34 +281,7 @@ async function rejectAMLClaimForIdentity(mod, identity) {
  */
 async function updateAMLStatusForIdentity(mod, identity) {
   console.log(`\n🔄 UPDATING AML STATUS FOR: ${identity.address}`);
-
-  const claim = mod.state.claims.get(`${identity.address}_AML`);
-  if (!claim) {
-    displayError("No AML claim found to update");
-    return;
-  }
-
-  console.log("\n📋 Select new status:");
-  console.log("1. ISSUED");
-  console.log("2. REJECTED");
-  console.log("3. REVOKED");
-  console.log("4. EXPIRED");
-
-  const choice = await mod.promptUser("Select status (1-4): ");
-  const statusMap = {
-    1: "ISSUED",
-    2: "REJECTED",
-    3: "REVOKED",
-    4: "EXPIRED",
-  };
-
-  if (statusMap[choice]) {
-    claim.status = statusMap[choice];
-    claim.updatedAt = new Date().toISOString();
-    displaySuccess(`AML status updated to: ${statusMap[choice]}`);
-  } else {
-    displayError("Invalid choice");
-  }
+  await updateStatus(mod, identity, "AML");
 }
 
 /**
@@ -394,15 +317,7 @@ async function viewAMLHistoryForIdentity(mod, identity) {
  */
 async function revokeAMLClaimForIdentity(mod, identity) {
   console.log(`\n🚫 REVOKING AML CLAIM FOR: ${identity.address}`);
-
-  const claim = mod.state.claims.get(`${identity.address}_AML`);
-  if (claim) {
-    claim.status = "REVOKED";
-    claim.revokedAt = new Date().toISOString();
-    displaySuccess("AML claim revoked");
-  } else {
-    displayError("No AML claim found to revoke");
-  }
+  await markRevoked(mod.state, identity, "AML", "REVOKED");
 }
 
 module.exports = {

@@ -8,7 +8,10 @@
  * identity in state.keyLifecycle for the handover ceremony's check.
  * Then option 5a (demo/utils/KeyRemovalFlow.js, Task 4.5): a key removed
  * with its holder's signature is gone, a stranger's signature is refused,
- * and a removed key is not removed again.
+ * and a removed key is not removed again. First, options 6/7 revoke and
+ * update (Task 4.8 b, demo/utils/OnchainIDClaimChain.js) through the
+ * module API: a revoked-then-refreshed wallet reads isVerified false and,
+ * re-attested by "update -> ISSUED", true again (chain reads).
  */
 
 const { ethers } = require("hardhat");
@@ -22,6 +25,9 @@ const {
   innerMessage,
   runRemovalDemo,
 } = require("../demo/utils/KeyRemovalFlow");
+const OnchainIDModule = require("../demo/modules/OnchainIDModule");
+const { EnhancedLogger } = require("../demo/logging");
+const { KYC_TOPIC, cacheVerification } = require("../demo/utils/Kyc");
 
 const MANAGEMENT = 1;
 const ACTION = 2;
@@ -81,7 +87,62 @@ async function removalFacts(state, failures) {
   ];
 }
 
+/** Options 6 -> 5 and 6 -> 3 -> 1 on wallet 6 (verified in the smoke's step 6). */
+async function claimRevocationSmoke(state, failures) {
+  const wallet = state.signers[6].address;
+  const registry = state.getContract("identityRegistry");
+  const kyc = state.getContract("kycIssuer");
+  const address = await registry.identity(wallet);
+  if (address === ethers.ZeroAddress || !(await registry.isVerified(wallet))) {
+    failures.push("4.8b: wallet 6 is not a verified identity to revoke");
+    return;
+  }
+  // Cache wallet 6's verification first (4.9), so a stale cache would keep
+  // isVerified true unless the option refreshes after revoking.
+  await cacheVerification(state, wallet, () => {});
+  if ((await registry.verifiedUntil(address))[1] === 0n) {
+    failures.push("4.8b: wallet 6's verification did not cache");
+    return;
+  }
+  const identity = { address, owner: wallet };
+  // The record option 6 -> 1 writes; the smoke attested wallet 6 directly.
+  state.claims.set(`${address}_KYC`, { type: "KYC", countryCode: 840 });
+  const oid = new OnchainIDModule(state, new EnhancedLogger(), async () => "1");
+  const real = console.log;
+  const facts = async () => [
+    await kyc.hasValidClaim(address, KYC_TOPIC),
+    await registry.isVerified(wallet),
+  ];
+  let revoked, reissued;
+  console.log = () => {};
+  try {
+    await oid.revokeKYCClaimForIdentity(identity);
+    revoked = await facts();
+    await oid.updateKYCStatusForIdentity(identity); // prompt answers "1"
+    reissued = await facts();
+  } catch (e) {
+    failures.push(`4.8b: claim options threw: ${e.message.split("\n")[0]}`);
+    return;
+  } finally {
+    console.log = real;
+  }
+  const ok =
+    revoked.join() === "false,false" &&
+    state.claims.get(`${address}_KYC`).status === "ISSUED" &&
+    reissued.join() === "true,true";
+  if (!ok) {
+    failures.push(
+      `4.8b: revoke -> (hasValidClaim, isVerified) ${revoked}, re-issue -> ${reissued}`,
+    );
+    return;
+  }
+  console.log(
+    "✅ Claim options 6/7: revoked + refreshed reads isVerified false, re-attested true (chain).",
+  );
+}
+
 async function runKeySmoke(state, failures) {
+  await claimRevocationSmoke(state, failures); // 4.8 (b)
   const km = state.getContract("keyManager");
   if (!km) {
     failures.push("4.2: option 1 did not register keyManager");
