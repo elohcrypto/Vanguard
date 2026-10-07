@@ -86,10 +86,15 @@ async function distributeToAllApproved(mod, centralBank, approvedInvestors) {
   );
   console.log(`   Total Distribution: ${totalAmount.toLocaleString()} VSC`);
 
-  console.log("\n🔍 COMPLIANCE VALIDATION:");
-  approvedInvestors.forEach((investor, index) => {
-    console.log(`   ${index + 1}. ${investor.name}: KYC ✅ AML ✅ → APPROVED`);
-  });
+  // KYC + AML both live is what IdentityRegistry.isVerified answers.
+  console.log("\n🔍 COMPLIANCE VALIDATION (chain: isVerified):");
+  const registry = mod.state.getContract("identityRegistry");
+  for (const [index, investor] of approvedInvestors.entries()) {
+    const verified = await registry.isVerified(investor.address);
+    console.log(
+      `   ${index + 1}. ${investor.name}: ${verified ? "✅ verified (KYC + AML)" : "⚠️  not verified"}`,
+    );
+  }
 
   // Continue in next method due to 150-line limit...
   await mod.completeDistributeToAllApproved(
@@ -251,7 +256,7 @@ async function distributeToSpecificInvestor(
       amountWei,
     );
     if (refusal) {
-      console.log(`❌ Mint refused: ${refusal}`);
+      console.log(`⛔ Mint refused (expected, chain rule): ${refusal}`);
       return;
     }
 
