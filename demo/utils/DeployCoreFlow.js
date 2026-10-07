@@ -168,7 +168,9 @@ async function deployPrivacyPair(mod) {
     zkAddr,
   ]);
 
-  console.log(`   ✅ ZKVerifierIntegrated: ${zkAddr} (testingMode false)`);
+  console.log(
+    `   ✅ ZKVerifierIntegrated: ${zkAddr} (testingMode ${await zkVerifier.testingMode()})`,
+  );
   console.log(
     `   ✅ PrivacyManager:       ${await privacyManager.getAddress()} (owner publishes roots until the handover makes ops the listOperator)`,
   );

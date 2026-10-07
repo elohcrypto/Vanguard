@@ -241,10 +241,10 @@ async function deployDigitalTokenSystem(mod) {
         `${complianceIsContract ? " (contract verified on-chain)" : " (NO CODE AT ADDRESS)"}`,
     );
 
+    let itrOk = false; // the chain read below gates the limits lines
     if (investorTypeRegistryAddr) {
       const wiredITR = await token.investorTypeRegistry();
-      const itrOk =
-        wiredITR.toLowerCase() === investorTypeRegistryAddr.toLowerCase();
+      itrOk = wiredITR.toLowerCase() === investorTypeRegistryAddr.toLowerCase();
       console.log(
         `   ${itrOk ? "✅" : "❌"} InvestorTypeRegistry: ${wiredITR}`,
       );
@@ -253,8 +253,19 @@ async function deployDigitalTokenSystem(mod) {
         "   ⚠️  InvestorTypeRegistry: Not Connected (Deploy with option 51)",
       );
     }
-    console.log("   ✅ Trusted Issuers: Configured");
-    console.log("   ✅ Claim Topics: Configured");
+    // Topics and issuers as IdentityRegistry reports them (R-47-2).
+    const topicRegistry = mod.state.getContract("identityRegistry");
+    const topics = await topicRegistry.getClaimTopics();
+    let issuerCount = 0;
+    for (const topic of topics)
+      issuerCount += (await topicRegistry.getTrustedIssuersForClaimTopic(topic))
+        .length;
+    console.log(
+      `   ${issuerCount ? "✅" : "⚠️ "} Trusted Issuers: ${issuerCount} across the claim topics`,
+    );
+    console.log(
+      `   ${topics.length ? "✅" : "⚠️ "} Claim Topics: ${topics.join(", ") || "none"}`,
+    );
 
     // Display security features
     console.log("\n🔒 ON-CHAIN SECURITY FEATURES:");
@@ -264,7 +275,7 @@ async function deployDigitalTokenSystem(mod) {
     console.log(
       "      • Layer 2: ComplianceRules checks IdentityRegistry + business rules",
     );
-    if (investorTypeRegistryAddr) {
+    if (itrOk) {
       console.log("   ✅ Transfer limits enforced by smart contract");
       console.log("   ✅ Investor type validation on-chain");
       console.log("   ✅ Cannot bypass limits by calling contract directly");
