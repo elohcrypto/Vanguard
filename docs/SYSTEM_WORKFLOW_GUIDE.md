@@ -186,9 +186,13 @@ this path without prompts (docs/TESTNET_DEMO.md, "Oracle nodes and
 consensus").
 
 WhitelistOracle tiers run 1 to 5 (higher is better); a consensus verdict
-adds the subject at tier 3. Nothing compares a whitelist tier with
-InvestorTypeRegistry's `requiredWhitelistTier` today (D37). The
-whitelist oracle gates VSC only when bound to it in ComplianceRules
+adds the subject at tier 3. Where a party passes the whitelist by its
+oracle entry (OracleOnly, or Either with a live entry), ComplianceRules
+requires the entry's tier to reach the party's `requiredWhitelistTier`
+in the token's InvestorTypeRegistry (D37 = a, Task 4.10); in ZkOnly, or
+for a proof-bound party with no entry, no tier applies (a proof binding
+carries none). The whitelist oracle gates VSC only when bound to it in
+ComplianceRules
 (`setWhitelistOracle`), by the token's whitelist mode (below); the
 blacklist oracle bound with `setBlacklistOracle` gates every path.
 
@@ -197,9 +201,11 @@ blacklist oracle bound with `setBlacklistOracle` gates every path.
 `Token.mint(to, amount)` is agent only (the deployer before the handover,
 ops after it) and runs the same check as `canTransfer(address(0), to,
 amount)`, reverting with the first failure: `Recipient frozen`,
-`Identity not verified`, `Compliance check failed`, `Holding limit
-exceeded` (a paused token reverts before it, `EnforcedPause`). For a mint, `ComplianceRules.canTransfer` applies the
-list gates to the recipient (the blacklist, and the whitelist by mode) and,
+`Identity not verified`, `Compliance check failed`, `Token not authorized
+by investor registry`, `Holding limit exceeded` (a paused token reverts
+before it, `EnforcedPause`). For a mint, `ComplianceRules.canTransfer` applies the
+list gates to the recipient (the blacklist, and the whitelist by mode and,
+on an oracle entry, the recipient's investor-type tier) and,
 with an identity registry bound for the token, its country rule. The
 investor type's holding cap comes from InvestorTypeRegistry. Demo: option
 25 mints to the central bank and distributes; 22 creates the issuer.
@@ -221,13 +227,23 @@ amount)` and revert with its reason:
    closed); on the trusted path the non-trusted counterparty is not
    verified, not allowed by the whitelist or not allowed by the country
    rule; otherwise either party fails the whitelist (by `whitelistMode`:
-   OracleOnly, ZkOnly, Either) or the country rule
-   (`setJurisdictionRule(token, allowed, blocked)`; the default blocked
-   list always applies).
-5. With an InvestorTypeRegistry bound: `Transfer amount limit exceeded`
-   (the sender's per-transfer cap) and `Holding limit exceeded` (the
-   recipient's holding cap); a trusted contract's own side skips its cap
-   (D26).
+   OracleOnly, ZkOnly, Either; a party passing by its oracle entry also
+   needs that entry's tier at its investor type's `requiredWhitelistTier`,
+   Task 4.10, named by `ComplianceRules.whitelistTierAllows`) or the
+   country rule (`setJurisdictionRule(token, allowed, blocked)`; the
+   default blocked list always applies).
+5. With an InvestorTypeRegistry bound: `Token not authorized by investor
+   registry` while the registry has not authorized the token
+   (`authorizeToken`, fail closed); then, for a non-trusted sender,
+   `Transfer amount limit exceeded` (its per-transfer cap) and `Transfer
+   cooldown` (inside its type's `transferCooldownMinutes` since its last
+   send, Task 4.10); then `Holding limit exceeded` (a non-trusted
+   recipient's holding cap). A trusted contract's own side skips its cap
+   and has no cooldown (D26).
+
+After a successful `transfer` or `transferFrom` the token calls the
+registry's `recordTransfer(from)` for a non-trusted sender, starting its
+cooldown (an authorized token only); mint, burn and recovery do not.
 
 `canTransfer(from, to, amount)` answers the same question without
 reverting. Demo: options 26, 27 and 27.5 transfer between investors and
@@ -440,6 +456,8 @@ The strings below are the contracts' own.
 | Token | `Sender not verified` / `Recipient not verified` | no identity, or a required claim is missing, revoked or expired |
 | Token | `Compliance check failed` | blacklist, whitelist mode, country rule or an unbound registry (above) |
 | Token | `Transfer amount limit exceeded` / `Holding limit exceeded` | investor type caps |
+| Token | `Transfer cooldown` | the sender's investor-type cooldown (Task 4.10) |
+| Token | `Token not authorized by investor registry` | the bound InvestorTypeRegistry has not authorized the token |
 | Token | `Address is frozen` (sender) / `Recipient frozen` / `EnforcedPause()` | agent freeze or guardian pause |
 | IdentityRegistry | `Country not allowed: <reason>` | registration in a refused country |
 | IdentityRegistry | `Identity already registered` / `Identity already bound` | one wallet, one identity |

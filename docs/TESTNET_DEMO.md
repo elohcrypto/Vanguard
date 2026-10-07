@@ -689,6 +689,29 @@ when the argument carries the answers (`23:<sub-option>:...`, see
 `scripts/demo-smoke-custody.js` runs the custody flow on the live node
 in the smoke.
 
+## Investor-type cooldown and tier (Task 4.10, D37 = a)
+
+Options 21 and 51 point VSC at the InvestorTypeRegistry and, while the
+deployer owns the registry, have it authorize VSC (`authorizeToken`);
+otherwise they name the owner, since a registry that has not authorized
+VSC makes VSC refuse every mint and transfer ("Token not authorized by
+investor registry"). Option 58 asks nothing: on VSC a verified,
+non-exempt wallet sends 1 VSC, a second send is refused ("Transfer
+cooldown", `canTransfer` false), a dev node jumps past the type's
+cooldown and the send passes (a real network prints when to run 58
+again); no deploy path binds a whitelist oracle to VSC, so 58 shows the
+tier on a probe token (its own ComplianceRules in OracleOnly,
+WhitelistOracle and registry, on the demo's IdentityRegistry): an
+Accredited wallet listed at tier 2 is refused ("Compliance check
+failed", `whitelistTierAllows` false) and passes when re-listed at
+tier 3. Option 59 runs 52, 56, 57 and 58 and reports 58's two verdicts;
+16 and 17 (20c, 20d) print the cooldowns with each demo wallet's clock and
+the tiers with VSC's mode, oracle and each wallet's entry. Option 42 -> 1
+waits out the sender's cooldown after its first transfer. A wallet that
+sends twice by hand within its cooldown sees "Transfer cooldown".
+`scripts/demo-smoke-investor.js` runs 58 and asserts both rules from
+chain.
+
 ## Oracle nodes and consensus (Task 4.4, D11 a)
 
 OracleManager is the gate and ConsensusOracle its engine. A query opens in
@@ -970,6 +993,28 @@ a cold read of its (empty) cache entry: B and C rose by about 6,000, about
 walk. Earlier history: 447,939 for C before Task
 2A.7, 386,716 after it, 165,190 after Task 2F.2 (issuer-side
 `hasValidClaim`, no OnchainID read).
+
+**With an investor-type registry (Task 4.10, measured 2026-10-07).**
+Scenario E is D with an authorized `InvestorTypeRegistry` on the token;
+the measured transfer runs after the sender's cooldown, so its clock
+write overwrites a set slot. Before: ec505cb (caps only, no cooldown).
+After: the cooldown, the authorization read and the clock write.
+
+| Scenario | before gasUsed | after gasUsed | after delta vs A |
+|---|---|---|---|
+| A: MockIdentityRegistry (baseline) | 96,503 | 96,797 | 0 |
+| D: 2 topics, both refreshed, no registry | 105,849 | 106,143 | +9,346 |
+| E: D + investor-type registry | 133,947 | 146,961 | +50,164 |
+| E first transfer (warm-up) | 151,047 | 181,161 | n/a |
+
+The registry's two caps already cost 28,098 over D at ec505cb; Task 4.10
+adds 13,014 per transfer after the first (two cold reads, the
+authorization and the sender's clock, a warm overwrite and three calls)
+and 30,114 on a sender's first transfer (the clock's zero-to-nonzero
+write). Every transfer also pays 294 more without a registry (the
+`recordTransfer` branch). E is 50,164 over A, above the 40,000 D17
+tolerance, which was set for the claim walk with no registry bound
+(at ec505cb E was 37,444 over A); D stays within it.
 
 **The verification cache.** `IdentityRegistry` (claim half in
 `RegistryVerification.sol`) caches a passing claim walk per identity, not

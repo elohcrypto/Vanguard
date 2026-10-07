@@ -338,9 +338,12 @@ investor-type, holding-period and compliance-level rules it once stored
 were removed in Task 4.1: no transfer ever read them. Investor-type
 limits live in `InvestorTypeRegistry`, which the token reads on every
 transfer and mint (`canTransferAmount`, `canHoldAmount`: "Transfer amount
-limit exceeded", "Holding limit exceeded"). The registry also records a
-cooldown and a required whitelist tier per type; no transfer path reads
-either today.
+limit exceeded", "Holding limit exceeded") and since Task 4.10 the
+sender's cooldown (`canTransferNow`, "Transfer cooldown"; the clock is
+written by `recordTransfer` from an authorized token). ComplianceRules
+also requires a party's whitelist oracle entry tier to reach its type's
+required tier where the party passes by that entry
+(`whitelistTierAllows`); see docs/INVESTOR_TYPE_SYSTEM.md.
 
 ### Jurisdiction verdict
 

@@ -25,6 +25,15 @@ This directory contains the complete implementation of ERC-3643 (T-REX) standard
 - Token binding for secure compliance enforcement
 - Module management for extensible compliance logic
 
+### 4. **InvestorTypeRegistry.sol** - Investor Types
+- Per-type transfer and holding caps, transfer cooldown and required
+  whitelist tier; Token enforces the caps and the cooldown, ComplianceRules
+  the tier (Task 4.10, docs/INVESTOR_TYPE_SYSTEM.md)
+- `lastTransferAt` per sender, written by `recordTransfer` only from a
+  token the registry authorized (`authorizeToken`)
+- Its own config proposals and governors in the base
+  `InvestorTypeGovernance.sol`
+
 ## 🔗 Interface Definitions
 
 All contracts implement comprehensive interfaces located in `interfaces/`:
