@@ -148,6 +148,32 @@ describe("Investor-type transfer cooldown (Task 4.10)", function () {
     await agree(token, alice, bob.address);
   });
 
+  it("R-410-12: a cooldown above 30 days is refused on both config paths", async function () {
+    const { types } = await deploy();
+    const max = await types.MAX_COOLDOWN_MINUTES();
+    expect(max).to.equal(43200n);
+    const c = await types.getInvestorTypeConfig(0);
+    const cfg = (minutes: bigint) => ({
+      maxTransferAmount: c.maxTransferAmount,
+      maxHoldingAmount: c.maxHoldingAmount,
+      requiredWhitelistTier: c.requiredWhitelistTier,
+      transferCooldownMinutes: minutes,
+      largeTransferThreshold: c.largeTransferThreshold,
+      enhancedLogging: c.enhancedLogging,
+      enhancedPrivacy: c.enhancedPrivacy,
+    });
+    const why = "Cooldown above 30 days";
+    await expect(
+      types.updateInvestorTypeConfig(0, cfg(max + 1n)),
+    ).to.be.revertedWith(why);
+    await expect(
+      types.createProposal(0, cfg(max + 1n), "too long"),
+    ).to.be.revertedWith(why);
+    await types.updateInvestorTypeConfig(0, cfg(max));
+    await types.createProposal(0, cfg(max), "at the bound");
+    expect(await types.getTransferCooldown(ethers.ZeroAddress)).to.equal(max);
+  });
+
   it("transferFrom writes the owner's clock, not the spender's", async function () {
     const { alice, bob, carol, token, types } = await deploy();
     await token.connect(alice).approve(carol.address, 10n);

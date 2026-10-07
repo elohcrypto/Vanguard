@@ -54,6 +54,10 @@ abstract contract InvestorTypeGovernance is IInvestorTypeRegistry, Ownable2Step 
     /// @notice A proposal not executed within this window after its
     ///         executionTime is dead.
     uint256 public constant PROPOSAL_LIFETIME = 7 days;
+    /// @notice Longest transfer cooldown a type may have: 30 days, in
+    ///         minutes (R-410-12). Bounded so a config cannot freeze a type
+    ///         for good; elapsed-minute comparison cannot overflow anyway.
+    uint256 public constant MAX_COOLDOWN_MINUTES = 43_200;
 
     error GovernorSetChanged(uint256 proposalId);
     error ProposalExpired(uint256 proposalId);
@@ -78,6 +82,7 @@ abstract contract InvestorTypeGovernance is IInvestorTypeRegistry, Ownable2Step 
         require(config.maxTransferAmount > 0, "Invalid max transfer amount");
         require(config.maxHoldingAmount > 0, "Invalid max holding amount");
         require(config.requiredWhitelistTier >= 1 && config.requiredWhitelistTier <= 5, "Invalid whitelist tier");
+        require(config.transferCooldownMinutes <= MAX_COOLDOWN_MINUTES, "Cooldown above 30 days");
 
         uint256 proposalId = _nextProposalId++;
         Proposal storage proposal = _proposals[proposalId];
