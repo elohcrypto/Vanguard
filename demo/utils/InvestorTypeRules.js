@@ -124,7 +124,17 @@ async function printTiers(state, log = console.log) {
   const ctx = await rulesContext(state, log);
   if (!ctx) return;
   const { registry, rules, tAddr, wired } = ctx;
-  const how = wired ? "enforced by ComplianceRules" : "not wired to VSC";
+  if (!rules) return log("   ComplianceRules not deployed (option 13)");
+  const mode = MODE_NAMES[Number(await rules.whitelistMode(tAddr))];
+  const wl = await rules.whitelistOracle(tAddr);
+  const bound = wl !== ethers.ZeroAddress;
+  const how = !wired
+    ? "not wired to VSC"
+    : mode === "ZkOnly"
+      ? "enforced where an oracle entry is read; not applicable to VSC in ZkOnly"
+      : bound
+        ? "enforced by ComplianceRules on VSC"
+        : "enforced where a whitelist oracle is bound; not applicable to VSC today";
   log(`\n📊 REQUIRED TIER PER TYPE (${how}):`);
   for (let t = 0; t < TYPE_NAMES.length; t++) {
     const c = await registry.getInvestorTypeConfig(t);
@@ -132,10 +142,6 @@ async function printTiers(state, log = console.log) {
       `   ${t} ${TYPE_NAMES[t].padEnd(13)} tier ${Number(c.requiredWhitelistTier)}+`,
     );
   }
-  if (!rules) return log("   ComplianceRules not deployed (option 13)");
-  const mode = MODE_NAMES[Number(await rules.whitelistMode(tAddr))];
-  const wl = await rules.whitelistOracle(tAddr);
-  const bound = wl !== ethers.ZeroAddress;
   log(
     `\n⚖️  VSC whitelist mode ${mode}, whitelist oracle ${bound ? wl : "none"}`,
   );

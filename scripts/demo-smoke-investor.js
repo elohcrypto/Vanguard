@@ -135,7 +135,7 @@ async function runInvestorSmoke(state, failures) {
   }
   const text = views.join("\n");
   console.log(text);
-  for (const want of ["enforced by Token", "enforced by ComplianceRules"])
+  for (const want of ["enforced by Token", "REQUIRED TIER PER TYPE (enforced"])
     if (!text.includes(want)) failures.push(`options 16/17: no "${want}" line`);
   if (/not enforced|^❌/m.test(text))
     failures.push("options 16/17 print 'not enforced' or an error line");

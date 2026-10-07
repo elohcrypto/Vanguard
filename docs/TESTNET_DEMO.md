@@ -972,10 +972,11 @@ key.
 `Token.transfer` verifies each party once (`IdentityRegistry.isVerified` on
 sender and recipient); `ComplianceRules.canTransfer` verifies only the escrow
 counterparty on trusted transfers. `scripts/gas-analysis.ts` measures a real
-second transfer (after a warm-up) for four deployments: the permissive
+second transfer (after a warm-up) for five deployments: the permissive
 `MockIdentityRegistry` with compliance bound to it as the baseline (A), one
 required topic (B, KYC), two (C, KYC+AML), and two with both identities
-refreshed into the verification cache (D). Re-run with `npm run gas:claims`
+refreshed into the verification cache (D), and D with an authorized
+investor-type registry (E, Task 4.10). Re-run with `npm run gas:claims`
 (fresh in-process Hardhat network, no external node needed).
 
 **Task 4.9 (measured 2026-10-07).** Before: 88d9454, no cache. After: the

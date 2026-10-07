@@ -39,11 +39,13 @@ and the registry's owner must authorize the token
 registry` (burn is not gated). A misconfiguration is loud, not a silent
   skip of the cooldown.
 
-- **Transfer cap**: `canTransferAmount(from, amount)`, `amount <=
-maxTransferAmount` of the sender's type, per transfer. There is no daily
+- **Transfer cap**: `amount <= maxTransferAmount` of the sender's type,
+  per transfer: the comparison `canTransferAmount(from, amount)` makes,
+  asked by the token through `transferCheck(from, amount)` (code 2). There is no daily
   or cumulative total. Refusal: `Transfer amount limit exceeded`.
-- **Transfer cooldown** (Task 4.10): `canTransferNow(from)` for a
-  non-trusted sender, right after the transfer cap. Refusal: `Transfer
+- **Transfer cooldown** (Task 4.10): the `canTransferNow(from)` rule for
+  a non-trusted sender, right after the transfer cap, asked through
+  `transferCheck` (code 3). Refusal: `Transfer
 cooldown`. See "Cooldown and tier" below.
 - **Holding cap**: `canHoldAmount(to, balanceOf(to) + amount)` for the
   recipient. Refusal: `Holding limit exceeded`.
@@ -84,9 +86,16 @@ when at least that many whole minutes have passed since `lastTransferAt`
 one call, `transferCheck(sender, amount)`, which answers for the calling
 token 0 (allowed), 1 (token not authorized), 2 (over the transfer cap) or
 3 (inside the cooldown), and maps each code to its reason; a trusted
-sender is asked only `isTokenAuthorized`. After a successful `transfer` or `transferFrom`, calls
-`recordTransfer(from)` when the registry is set and the sender is not a
-trusted contract. Mint, burn and `recoveryAddress` write no clock;
+sender is asked only `isTokenAuthorized`. After a successful `transfer` or
+`transferFrom` of a non-zero amount, Token calls `recordTransfer(from)`
+when the registry is set and the sender is not a trusted contract; a
+zero-value transfer writes no clock, since anyone may `transferFrom` a
+holder's wallet for 0 without an allowance (review H1). A cooldown is
+at most `MAX_COOLDOWN_MINUTES` (43,200, 30 days; R-410-12):
+`updateInvestorTypeConfig` and `createProposal` refuse a longer one
+("Cooldown above 30 days"). The clock is one per registry, not per
+token: a send on any token the registry authorizes starts the sender's
+cooldown on every token it authorizes (only VSC today). Mint, burn and `recoveryAddress` write no clock;
 receiving starts none; `transferFrom` writes the owner's clock, not the
 spender's. On the trusted path (D26) the human side follows the rule: an
 investor funding an escrow or locking into custody starts its cooldown,
