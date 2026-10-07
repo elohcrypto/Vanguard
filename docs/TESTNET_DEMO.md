@@ -60,8 +60,10 @@ themselves. The issuer's `issueClaim` still writes a copy onto the
 OnchainID (ERC-735 view), but nothing reads that copy to decide
 verification; correctness rests on the issuer's record. Verification
 follows the issuer's latest claim per topic for that identity: revoking the
-latest claim unverifies the holder in the same block, even if an older claim
-is unrevoked, and revoking an older, superseded claim has no effect; the
+latest claim unverifies the holder at once after a `refreshVerified` (options
+6 and 7 run it right after the revoke; see the verification cache below),
+even if an older claim is unrevoked, and revoking an older, superseded claim
+has no effect; the
 issuer restores a holder by issuing a new claim. Batch-issued claims verify
 and revoke the same way. `revokeClaim` also removes the identity-side copy
 (a `ClaimRemovalFailed` event flags a copy the holder had already removed,
@@ -416,6 +418,9 @@ acceptances and registry proposals still pending, then verifies.
   (`setTrustedRegistrar(VSC, factory, MultiSigEscrowWallet code hash)`;
   vote with 77, execute with 78); no escrow can be created until it passes.
   Option 63 needs no vote: the factory trusts each escrow it deploys.
+  Option 61's closing "security model" is the design the contracts enforce;
+  the two lines under it (owner fee wallet verified, VSC jurisdiction rule
+  active) are chain reads.
 - Revoking a whitelist binding is root rotation: publish a root without
   the commitment (ops, or a PrivacyParameters vote). Expiry alone does not
   revoke, since a holder may resubmit the same proof under the same root
@@ -797,7 +802,10 @@ The four demo paths that used to call `evm_increaseTime` (governance option
 `demo/utils/ChainTime.advancePast`. It reads the real deadline from the
 chain, jumps if the node allows it, and otherwise polls until the deadline
 has passed. The 13-of-14-day escrow demonstration is dev-node only and says
-so on a network that cannot jump.
+so on a network that cannot jump. Option 73 runs 62 -> 63 -> 64 -> 65 -> 73b
+-> 68 -> 69 -> 71 with no prompts and a chain-read verdict per step; on a
+network that cannot jump it stops after the proof and prints when the
+dispute window closes.
 
 ## Identity keys through KeyManager (Task 4.2)
 
@@ -1043,7 +1051,8 @@ that latency zero, the issuer's operator (or anyone) calls
 entry in the same transaction, so a removed issuer stops counting at
 once. `verifiedUntil(identity)` shows the fresh entry. The blacklist
 oracle path and token freezes do not go through the cache and stay
-immediate. The demo refreshes after onboarding claims and prints
-"verification cached until <date>".
+immediate. The demo refreshes after onboarding claims and after a revoke in
+options 6/7, and prints "verification cached until <date>" (or, after a
+revoke, "walk fails (no live claim), cache entry cleared").
 
 Deploying all eleven contracts costs under 0.01 ETH at 1.3 gwei.
