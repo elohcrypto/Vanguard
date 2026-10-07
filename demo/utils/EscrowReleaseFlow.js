@@ -15,6 +15,7 @@ const {
   displayWarning,
 } = require("./DisplayHelpers");
 const { advancePast, canJumpTime } = require("./ChainTime");
+const { runCompleteWorkflow } = require("./EscrowWorkflowFlow");
 const { ethers } = require("hardhat");
 
 /** Option 69: Investor: Sign Release */
@@ -226,26 +227,13 @@ async function investorSignRelease(mod) {
   }
 }
 
-/** Option 73: Demo Complete Enhanced Escrow Workflow */
+/**
+ * Option 73: Demo Complete Enhanced Escrow Workflow. Runs 62 -> 63 -> 64
+ * -> 65 -> 73b -> 68 -> 69 -> 71 with the prompts answered from what each
+ * option prints and every verdict read from chain (EscrowWorkflowFlow).
+ */
 async function demoCompleteWorkflow(mod) {
-  displaySection("DEMO: COMPLETE ENHANCED ESCROW WORKFLOW", "🧪");
-  console.log("This demo will showcase both normal and dispute scenarios");
-  console.log("");
-
-  displayWarning("This is a placeholder for the complete workflow demo");
-  console.log(
-    "💡 Use individual options (62-71) to test the escrow system manually",
-  );
-  console.log("");
-  console.log("📋 RECOMMENDED WORKFLOW:");
-  console.log("   1. Option 62: Register Investor");
-  console.log("   2. Option 63: Create Escrow Wallet");
-  console.log("   3. Option 64: Fund Escrow Wallet");
-  console.log("   4. Option 65: Submit Shipment Proof");
-  console.log("   5. Option 73b: Time Travel 14 Days (close dispute window)");
-  console.log("   6. Option 68: Payee Sign Release");
-  console.log("   7. Option 69: Investor Sign Release");
-  console.log("   8. Option 71: View Status (verify release)");
+  return runCompleteWorkflow(mod);
 }
 
 /** Option 73a: Time Travel (13 Days) */
