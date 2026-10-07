@@ -170,6 +170,12 @@ async function runHandoverSmoke(state, failures) {
 
   const result = await assertHandoverComplete(args);
   for (const f of result.failures) failures.push(`handover: ${f}`);
+  // 4.10: the registry governance now owns still authorizes VSC.
+  const itr = c("investorTypeRegistry");
+  if (itr && !(await itr.isTokenAuthorized(c("digitalToken").target)))
+    failures.push(
+      "4.10: after the ceremony the registry does not authorize VSC",
+    );
 
   // 4.4: ops (the operator) may pause a node; the deployer no longer may.
   const node = s[1].address;
