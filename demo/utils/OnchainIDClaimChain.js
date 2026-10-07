@@ -12,6 +12,8 @@
  * local record is kept only because options 6-9 read it later.
  */
 
+"use strict";
+
 const { ethers } = require("hardhat");
 const { displaySuccess, displayError } = require("./DisplayHelpers");
 const {

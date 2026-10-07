@@ -7,6 +7,8 @@
  * logger and sibling methods) and runs the option's code unchanged.
  */
 
+"use strict";
+
 const { ethers } = require("hardhat");
 
 /** Option 28: transfer restriction scenarios on VSC (sub-menu 1-3) */

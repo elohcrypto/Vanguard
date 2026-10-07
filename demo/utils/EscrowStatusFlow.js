@@ -7,6 +7,8 @@
  * logger and sibling methods) and runs the option's code unchanged.
  */
 
+"use strict";
+
 const { displaySection, displayError } = require("./DisplayHelpers");
 const { ethers } = require("hardhat");
 

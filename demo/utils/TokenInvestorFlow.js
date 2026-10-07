@@ -8,6 +8,8 @@
  * logger and sibling methods) and runs the option's code unchanged.
  */
 
+"use strict";
+
 const { displayError } = require("./DisplayHelpers");
 const Custody = require("./CustodyFlow");
 const { ethers } = require("hardhat");

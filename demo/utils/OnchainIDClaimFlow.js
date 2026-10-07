@@ -7,6 +7,8 @@
  * logger and sibling methods) and runs the option's code unchanged.
  */
 
+"use strict";
+
 const { markRevoked, updateStatus } = require("./OnchainIDClaimChain");
 const { displaySuccess, displayError } = require("./DisplayHelpers");
 const { attestAll, attestAml, cacheVerification, AML_TOPIC } = require("./Kyc");

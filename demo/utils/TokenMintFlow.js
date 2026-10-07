@@ -8,6 +8,8 @@
  * logger and sibling methods) and runs the option's code unchanged.
  */
 
+"use strict";
+
 const { attestAll } = require("./Kyc");
 const { whitelistHints } = require("./WhitelistLiveFlow");
 const { ethers } = require("hardhat");

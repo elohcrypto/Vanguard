@@ -1,4 +1,3 @@
-"use strict";
 /**
  * @fileoverview Escrow option 73: the complete workflow, no prompts
  * @module EscrowWorkflowFlow
@@ -11,6 +10,8 @@
  * amount, funded, shipmentProof, block time, getWalletStatus). A step that
  * does not hold stops the run with a counted summary (plan v2 Task 4.8).
  */
+
+"use strict";
 
 const { ethers } = require("hardhat");
 const { displaySection, displaySuccess } = require("./DisplayHelpers");

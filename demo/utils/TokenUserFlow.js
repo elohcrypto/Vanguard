@@ -8,6 +8,8 @@
  * logger and sibling methods) and runs the option's code unchanged.
  */
 
+"use strict";
+
 const { displaySection, displayError } = require("./DisplayHelpers");
 const { attestAll, cacheVerification, signClaim } = require("./Kyc");
 const { ethers } = require("hardhat");
