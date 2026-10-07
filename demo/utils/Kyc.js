@@ -180,7 +180,9 @@ async function cacheVerification(state, wallet, log = console.log) {
       "   ⚠️  refreshVerified: walk passed but not cached (issuer gives no expiry)",
     );
   } else {
-    log("   ❌ refreshVerified: claim walk failed, nothing cached");
+    log(
+      "   ℹ️  refreshVerified: walk fails (no live claim), cache entry cleared",
+    );
   }
   log(`   ⛽ Gas Used: ${receipt.gasUsed.toLocaleString()}`);
   return { receipt, until };

@@ -76,11 +76,13 @@ async function revokeOnChain(state, identity, kind, log = console.log) {
   log(`   ${kind} issuer: ${await issuer.getAddress()}`);
   log(`   Latest claim: ${before.claimId}`);
   printFacts("Before", kind, before, log);
+  let mined = false;
   if (before.valid) {
     const signer = state.signers[k.wallet];
     try {
       const tx = await issuer.connect(signer).revokeClaim(before.claimId);
       const rc = await tx.wait();
+      mined = true;
       log(
         `   ✅ revokeClaim by wallet ${k.wallet} (${signer.address}) mined in block ${rc.blockNumber}`,
       );
@@ -93,7 +95,7 @@ async function revokeOnChain(state, identity, kind, log = console.log) {
   if (before.registered) await cacheVerification(state, identity.owner, log);
   const after = await readFacts(state, identity, kind);
   printFacts("After", kind, after, log);
-  return { before, after };
+  return { before, after, mined };
 }
 
 /**
@@ -138,7 +140,11 @@ async function markRevoked(state, identity, kind, status, log = console.log) {
     claim[status === "REJECTED" ? "rejectedAt" : "revokedAt"] =
       new Date().toISOString();
   }
-  displaySuccess(`${kind} claim ${status.toLowerCase()} (not valid on chain)`);
+  if (r.mined)
+    displaySuccess(
+      `${kind} claim ${status.toLowerCase()} (not valid on chain)`,
+    );
+  else log("ℹ️  already not valid on chain; record updated");
 }
 
 /** The update sub-action: same prompt as before, the change made on chain. */
