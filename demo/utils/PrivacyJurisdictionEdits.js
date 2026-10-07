@@ -420,13 +420,10 @@ async function resetJurisdictionLists(mod) {
   ]);
   mod.state.disallowedJurisdictions = new Set();
 
-  displaySuccess("JURISDICTION LISTS RESET TO DEFAULTS!");
-  console.log("   ✅ Allowed: 4 jurisdictions");
-  console.log("      • 840 - United States");
-  console.log("      • 826 - United Kingdom");
-  console.log("      • 276 - Germany (EU)");
-  console.log("      • 124 - Canada");
-  console.log("   ✅ Disallowed: 0 jurisdictions");
+  console.log(
+    "   📝 Local lists set to the defaults (840, 826, 276, 124; none",
+  );
+  console.log("      disallowed); the chain is read back after the update.");
   console.log("");
 
   // Check if contracts are deployed before trying to update on-chain
@@ -437,11 +434,29 @@ async function resetJurisdictionLists(mod) {
   if (token && complianceRules) {
     console.log("   📝 Contracts detected - updating on-chain...");
     await mod.updateJurisdictionRuleOnChain();
+    // The verdict is what VSC's rule holds now, not the local lists: a
+    // proposal (option 1 above) changes it only once it passes.
+    const [, allowed, blocked] = await complianceRules.getJurisdictionRule(
+      token.target,
+    );
+    const want = ["124", "276", "826", "840"];
+    const got = allowed.map((c) => c.toString()).sort();
+    console.log(
+      `   Chain (getJurisdictionRule): allowed [${allowed.join(", ")}], disallowed [${blocked.join(", ")}]`,
+    );
+    if (got.join() === want.join() && blocked.length === 0) {
+      displaySuccess("JURISDICTION LISTS RESET TO DEFAULTS (chain)");
+    } else {
+      console.log(
+        "   ℹ️  VSC's rule is not the defaults yet (update skipped, refused, or a proposal pending)",
+      );
+    }
   } else {
     console.log("   ℹ️  Changes saved locally (contracts not deployed yet)");
     console.log("   💡 Deploy token and compliance rules to save on-chain:");
-    console.log("      • Option 1: Deploy Token");
-    console.log("      • Option 13: Create Compliance Rules");
+    console.log(
+      "      • Option 21: Deploy the ERC-3643 system (VSC + ComplianceRules)",
+    );
   }
 }
 

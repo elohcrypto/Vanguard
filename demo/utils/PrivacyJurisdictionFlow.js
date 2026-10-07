@@ -114,8 +114,9 @@ async function loadJurisdictionListsFromContract(mod) {
     if (!complianceRules || !token) {
       console.log("\n⚠️  Compliance system not fully deployed");
       console.log("   ℹ️  Please deploy the token and compliance rules first:");
-      console.log("      • Option 1: Deploy Token");
-      console.log("      • Option 13: Create Compliance Rules");
+      console.log(
+        "      • Option 21: Deploy the ERC-3643 system (VSC + ComplianceRules)",
+      );
       console.log("");
       console.log("   📝 Using empty jurisdiction lists for now...");
 
