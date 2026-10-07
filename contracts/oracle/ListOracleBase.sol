@@ -73,6 +73,10 @@ abstract contract ListOracleBase is IOracle, Ownable, ReentrancyGuard, Pausable 
     event ListManagerUpdated(address indexed previous, address indexed current);
 
     /// @dev Only the OracleManager; each oracle names itself in the reason.
+    ///      Declared without a body: every list oracle MUST override it with
+    ///      a body that restricts the caller to its oracleManager, or
+    ///      updateReputation is open to anyone. The two overrides
+    ///      (WhitelistOracle, BlacklistOracle) are not virtual.
     modifier onlyOracleManager() virtual;
 
     /// @notice Grant (or clear, with address(0)) the list-manager writer role.
