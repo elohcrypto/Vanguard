@@ -330,20 +330,20 @@ describe("IdentityRegistry verification cache (Task 4.9)", function () {
   // registry on the token, measured after the sender's cooldown so the
   // clock write overwrites (the first transfer pays the zero-to-nonzero
   // write). Base build ec505cb, same scenario (scripts/gas-analysis.ts E):
-  // 133,947 with the registry (caps only), 105,849 without (D).
-  it("Task 4.10: the cooldown and its clock add at most 14,000 to a refreshed transfer", async function () {
+  // 133,947 with the registry (caps only), 105,849 without (D), 96,503 A.
+  it("Task 4.10: with the registry a refreshed transfer still costs at most A + 40,000", async function () {
     const { owner, registry, alice, bob } = await deploy();
     const amount = ethers.parseEther("10");
     await registry.refreshVerified(alice.address);
     await registry.refreshVerified(bob.address);
-    const measure = async (withTypes: boolean) => {
+    const measure = async (reg: any, withTypes: boolean) => {
       const rules = await (
         await ethers.getContractFactory("ComplianceRules")
       ).deploy(owner.address, [], []);
       const token = await (
         await ethers.getContractFactory("Token")
-      ).deploy("G", "G", registry.target, rules.target);
-      await rules.setTokenIdentityRegistry(token.target, registry.target);
+      ).deploy("G", "G", reg.target, rules.target);
+      await rules.setTokenIdentityRegistry(token.target, reg.target);
       if (withTypes) {
         const types = await (
           await ethers.getContractFactory("InvestorTypeRegistry")
@@ -357,15 +357,23 @@ describe("IdentityRegistry verification cache (Task 4.9)", function () {
       const tx = await token.connect(alice).transfer(bob.address, amount);
       return [(await tx.wait())!.gasUsed, (await first.wait())!.gasUsed];
     };
-    const [d, dFirst] = await measure(false);
-    const [e, eFirst] = await measure(true);
+    const mock = await (
+      await ethers.getContractFactory("MockIdentityRegistry")
+    ).deploy();
+    await mock.registerIdentity(alice.address, alice.address, 0);
+    await mock.registerIdentity(bob.address, bob.address, 0);
+    const [a] = await measure(mock, false);
+    const [d, dFirst] = await measure(registry, false);
+    const [e, eFirst] = await measure(registry, true);
     console.log(
-      `      gas: refreshed transfer ${d} without, ${e} with the registry ` +
-        `(+${e - d}); first transfer ${dFirst} / ${eFirst} (+${eFirst - dFirst})`,
+      `      gas: A ${a}; refreshed transfer ${d} without, ${e} with the ` +
+        `registry (+${e - d}, A +${e - a}); first transfer ${dFirst} / ` +
+        `${eFirst} (+${eFirst - dFirst})`,
     );
-    // ec505cb paid 28,098 for the caps alone; this task adds about 13,000.
-    expect(e - d).to.be.lte(28098n + 14000n);
-    expect(e - d).to.be.gt(28098n);
+    // D17 budget after the sender's first transfer; the registry side
+    // (caps, cooldown, clock) measured 29,292 over D after the gas round.
+    expect(e - a).to.be.lte(40000n);
+    expect(e - d).to.be.lte(30000n);
   });
 
   it("only positives are cached: a failing refresh does not stop a later attestation verifying", async function () {
