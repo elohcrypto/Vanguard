@@ -54,24 +54,16 @@ async function deployInvestorTypeSystem(mod) {
       mod.state.getContract("governance") ||
       mod.state.getContract("vanguardGovernance");
 
+    // The registry has no setGovernance, and VanguardGovernance fixes its
+    // InvestorTypeConfig target at construction (boundTarget(0), no
+    // setter): a registry deployed after 74 can never be accepted by vote,
+    // so nothing is wired here.
+    const boundRegistry = governance
+      ? await governance.boundTarget(0)
+      : ethers.ZeroAddress;
     if (governance) {
-      // The registry has no setGovernance: VanguardGovernance takes it as
-      // owner. It is Ownable2Step, so this only nominates, as option 74's
-      // step 7 does when the registry exists first; governance accepts
-      // through a passed proposal (option 83b).
       console.log(
-        "🗳️ Nominating VanguardGovernance as InvestorTypeRegistry owner...",
-      );
-      const governanceAddress = await governance.getAddress();
-      await (
-        await investorTypeRegistry.transferOwnership(governanceAddress)
-      ).wait();
-      console.log(`   Current owner:  ${await investorTypeRegistry.owner()}`);
-      console.log(
-        `   Pending owner:  ${await investorTypeRegistry.pendingOwner()}`,
-      );
-      console.log(
-        "   💡 Use option 83b to run the vote that completes the handover",
+        `ℹ️  Governance is bound to InvestorTypeRegistry ${boundRegistry}, not this one; no vote can target it. Run 51 before 74 (74 nominates it).`,
       );
     } else {
       console.log("🗳️ VanguardGovernance not detected");
@@ -98,10 +90,8 @@ async function deployInvestorTypeSystem(mod) {
     // Show governance status
     if (governance) {
       const governanceAddress = await governance.getAddress();
-      const nominated =
-        (await investorTypeRegistry.pendingOwner()) === governanceAddress;
       console.log(
-        `   🗳️ Governance: ${nominated ? "nominated owner, accepts by vote (83b)" : "not nominated"}`,
+        `   🗳️ Governance: not nominated (governance bound to ${boundRegistry})`,
       );
       console.log(`   📍 Governance Address: ${governanceAddress}`);
     } else {
@@ -231,6 +221,7 @@ async function showInvestorTypeConfigurations(mod) {
     return shown;
   } catch (error) {
     displayError(`Failed to show configurations: ${error.message}`);
+    return { failed: true };
   }
 }
 

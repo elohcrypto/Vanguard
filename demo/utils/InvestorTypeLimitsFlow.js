@@ -347,6 +347,7 @@ async function testHoldingLimits(mod) {
     // allowed and its over-cap amount blocked.
     let checked = 0;
     let held = 0;
+    const wallets = []; // per wallet, with its actual type (option 59)
 
     for (let i = 0; i < testUsers.length; i++) {
       const config = await investorTypeRegistry.getInvestorTypeConfig(
@@ -379,12 +380,22 @@ async function testHoldingLimits(mod) {
       );
       checked++;
       if (withinLimit && !overLimit) held++;
+      wallets.push({
+        address: testUsers[i].address,
+        actual:
+          typeNames[
+            await investorTypeRegistry.getInvestorType(testUsers[i].address)
+          ],
+        cap: typeNames[i],
+        ok: withinLimit && !overLimit,
+      });
     }
 
     displaySuccess("HOLDING LIMITS TESTING COMPLETE");
-    return { checked, held };
+    return { checked, held, wallets };
   } catch (error) {
     displayError(`Holding limits testing failed: ${error.message}`);
+    return { failed: true };
   }
 }
 

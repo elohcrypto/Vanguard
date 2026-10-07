@@ -44,6 +44,7 @@ async function testLargeTransferDetection(mod) {
     // threshold is normal and the amount over it is large.
     let checked = 0;
     let flagged = 0;
+    const wallets = []; // per wallet, with its actual type (option 59)
     for (let i = 0; i < testUsers.length; i++) {
       const config = await investorTypeRegistry.getInvestorTypeConfig(
         investorTypes[i],
@@ -76,12 +77,22 @@ async function testLargeTransferDetection(mod) {
       );
       checked++;
       if (!isNormalLarge && isLarge) flagged++;
+      wallets.push({
+        address: testUsers[i].address,
+        actual:
+          typeNames[
+            await investorTypeRegistry.getInvestorType(testUsers[i].address)
+          ],
+        cap: typeNames[i],
+        ok: !isNormalLarge && isLarge,
+      });
     }
 
     displaySuccess("LARGE TRANSFER DETECTION TESTING COMPLETE");
-    return { checked, flagged };
+    return { checked, flagged, wallets };
   } catch (error) {
     displayError(`Large transfer detection testing failed: ${error.message}`);
+    return { failed: true };
   }
 }
 
@@ -128,20 +139,38 @@ async function runCompleteTests(mod) {
 
     displaySuccess("ALL INVESTOR TYPE TESTS COMPLETED!");
     // Each line from the counted result of the step that ran (R-47-2).
+    // A step that threw says "failed"; one that never ran, "not run".
+    const unrun = (r, label) =>
+      r?.failed
+        ? `   ❌ ${label} failed (see above)`
+        : `   ℹ️  ${label} not run`;
     console.log(
-      shown
+      typeof shown === "number"
         ? `   ✅ Configurations displayed: ${shown} of 4 types read`
-        : "   ℹ️  Configurations not run",
+        : unrun(shown, "Configurations"),
     );
-    console.log(
-      holding?.checked
-        ? `   ${holding.held === holding.checked ? "✅" : "⚠️ "} Holding limits tested: ${holding.held} of ${holding.checked} types allow under the cap and block over it`
-        : "   ℹ️  Holding limits not run",
+    // Steps 2 and 3 check wallet i against type i's caps, while the
+    // registry applies each wallet's actual type: counted per wallet.
+    const perWallet = (r, label, what) => {
+      if (!r?.checked) return console.log(unrun(r, label));
+      const ok = r.wallets.filter((w) => w.ok).length;
+      console.log(
+        `   ${ok === r.checked ? "✅" : "⚠️ "} ${label} tested: ${ok} of ${r.checked} wallets ${what}`,
+      );
+      for (const w of r.wallets)
+        console.log(
+          `      ${w.ok ? "✅" : "⚠️ "} ${w.address} (actual type ${w.actual}, tested at the ${w.cap} caps)`,
+        );
+    };
+    perWallet(
+      holding,
+      "Holding limits",
+      "allowed under the cap and blocked over it",
     );
-    console.log(
-      large?.checked
-        ? `   ${large.flagged === large.checked ? "✅" : "⚠️ "} Large transfer detection tested: ${large.flagged} of ${large.checked} types flag only over the threshold`
-        : "   ℹ️  Large transfer detection not run",
+    perWallet(
+      large,
+      "Large transfer detection",
+      "flagged only over the threshold",
     );
     for (const [k, label] of [
       ["cooldown", "Transfer cooldown"],
@@ -191,12 +220,16 @@ async function showDashboard(mod) {
     let governanceState = "Not integrated";
     if (governance) {
       const governanceAddress = await governance.getAddress();
+      // A vote can target only the registry governance was built with.
+      const bound = (await governance.boundTarget(0)) === registryAddress;
       governanceState =
         registryOwner === governanceAddress
           ? "Integrated (owns the registry)"
-          : registryPending === governanceAddress
-            ? "Nominated (accepts the registry by vote, option 83b)"
-            : "Not integrated (does not own the registry)";
+          : !bound
+            ? "Not integrated (governance bound to another registry)"
+            : registryPending === governanceAddress
+              ? "Nominated (accepts by vote, 83b)"
+              : "Not integrated (does not own the registry)";
       console.log(`   🗳️ Governance: ${governanceState}`);
       console.log(`   📍 Governance Address: ${governanceAddress}`);
       console.log(`   👮 Governance owner: ${await governance.owner()}`);
