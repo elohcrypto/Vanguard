@@ -326,6 +326,48 @@ describe("IdentityRegistry verification cache (Task 4.9)", function () {
     expect(d - a).to.be.lte(40000n);
   });
 
+  // Task 4.10: the same refreshed transfer with an authorized investor-type
+  // registry on the token, measured after the sender's cooldown so the
+  // clock write overwrites (the first transfer pays the zero-to-nonzero
+  // write). Base build ec505cb, same scenario (scripts/gas-analysis.ts E):
+  // 133,947 with the registry (caps only), 105,849 without (D).
+  it("Task 4.10: the cooldown and its clock add at most 14,000 to a refreshed transfer", async function () {
+    const { owner, registry, alice, bob } = await deploy();
+    const amount = ethers.parseEther("10");
+    await registry.refreshVerified(alice.address);
+    await registry.refreshVerified(bob.address);
+    const measure = async (withTypes: boolean) => {
+      const rules = await (
+        await ethers.getContractFactory("ComplianceRules")
+      ).deploy(owner.address, [], []);
+      const token = await (
+        await ethers.getContractFactory("Token")
+      ).deploy("G", "G", registry.target, rules.target);
+      await rules.setTokenIdentityRegistry(token.target, registry.target);
+      if (withTypes) {
+        const types = await (
+          await ethers.getContractFactory("InvestorTypeRegistry")
+        ).deploy();
+        await token.setInvestorTypeRegistry(types.target);
+        await types.authorizeToken(token.target, true);
+      }
+      await token.mint(alice.address, ethers.parseEther("100"));
+      const first = await token.connect(alice).transfer(bob.address, amount);
+      await time.increase(HOUR);
+      const tx = await token.connect(alice).transfer(bob.address, amount);
+      return [(await tx.wait())!.gasUsed, (await first.wait())!.gasUsed];
+    };
+    const [d, dFirst] = await measure(false);
+    const [e, eFirst] = await measure(true);
+    console.log(
+      `      gas: refreshed transfer ${d} without, ${e} with the registry ` +
+        `(+${e - d}); first transfer ${dFirst} / ${eFirst} (+${eFirst - dFirst})`,
+    );
+    // ec505cb paid 28,098 for the caps alone; this task adds about 13,000.
+    expect(e - d).to.be.lte(28098n + 14000n);
+    expect(e - d).to.be.gt(28098n);
+  });
+
   it("only positives are cached: a failing refresh does not stop a later attestation verifying", async function () {
     const { registry, kyc, kycSigner, aml, amlSigner, carol, ids } =
       await deploy();

@@ -15,7 +15,10 @@ import {
 // transfer gas as that loop grows: 0 topics (MockIdentityRegistry, no
 // topic concept), 1 (KYC), 2 (KYC+AML). Task 4.9: D is C with both
 // identities' verification cached by refreshVerified (D17 = a), so
-// isVerified answers from one entry instead of the claim walk.
+// isVerified answers from one entry instead of the claim walk. Task 4.10:
+// E is D with an authorized InvestorTypeRegistry on the token (caps,
+// cooldown, the clock write); the measured transfer runs after the
+// sender's cooldown, so it overwrites a clock the warm-up wrote.
 
 const MINT_AMOUNT = ethers.parseEther("1000");
 const TRANSFER_AMOUNT = ethers.parseEther("10");
@@ -24,6 +27,7 @@ const NO_COUNTRIES: number[] = [];
 interface ScenarioResult {
   name: string;
   transferGasUsed: bigint;
+  firstTransferGasUsed: bigint;
   isVerifiedGasEstimate: bigint;
   refreshGasUsed?: bigint;
 }
@@ -52,18 +56,20 @@ async function deployTokenWithCompliance(
 }
 
 // Warm-up transfer, then the measured one, so both see the same storage
-// warmth. Throws (script exits non-zero) if either reverts.
+// warmth. Throws (script exits non-zero) if either reverts. The clock
+// moves past the longest default cooldown (60 minutes) in between.
 async function measureTransfer(
   token: Token,
   sender: SignerWithAddress,
   recipient: SignerWithAddress,
-): Promise<bigint> {
+): Promise<[bigint, bigint]> {
   const warmup = await token
     .connect(sender)
     .transfer(recipient.address, TRANSFER_AMOUNT);
   const warmupReceipt = await warmup.wait();
   if (!warmupReceipt || warmupReceipt.status !== 1)
     throw new Error("warm-up transfer reverted");
+  await ethers.provider.send("evm_increaseTime", [3600]);
 
   const tx = await token
     .connect(sender)
@@ -71,7 +77,7 @@ async function measureTransfer(
   const receipt = await tx.wait();
   if (!receipt || receipt.status !== 1)
     throw new Error("measured transfer reverted");
-  return receipt.gasUsed;
+  return [receipt.gasUsed, warmupReceipt.gasUsed];
 }
 
 /**
@@ -108,13 +114,18 @@ async function runBaselineScenario(
   await registry.registerIdentity(recipient.address, recipient.address, 0);
   await (await token.mint(sender.address, MINT_AMOUNT)).wait();
 
-  const transferGasUsed = await measureTransfer(token, sender, recipient);
+  const [transferGasUsed, firstTransferGasUsed] = await measureTransfer(
+    token,
+    sender,
+    recipient,
+  );
   const isVerifiedGasEstimate = await registry.isVerified.estimateGas(
     sender.address,
   );
   return {
     name: "A: MockIdentityRegistry (baseline)",
     transferGasUsed,
+    firstTransferGasUsed,
     isVerifiedGasEstimate,
   };
 }
@@ -129,6 +140,7 @@ async function runClaimScenario(
   name: string,
   topics: 1 | 2,
   refresh: boolean,
+  withTypes: boolean,
   deployer: SignerWithAddress,
   sender: SignerWithAddress,
   recipient: SignerWithAddress,
@@ -191,6 +203,16 @@ async function runClaimScenario(
       registryAddr,
     )
   ).wait();
+  if (withTypes) {
+    const types = await (
+      await ethers.getContractFactory("InvestorTypeRegistry")
+    ).deploy();
+    await types.waitForDeployment();
+    await (
+      await token.setInvestorTypeRegistry(await types.getAddress())
+    ).wait();
+    await (await types.authorizeToken(await token.getAddress(), true)).wait();
+  }
   await (await token.mint(sender.address, MINT_AMOUNT)).wait();
 
   let refreshGasUsed: bigint | undefined;
@@ -200,11 +222,21 @@ async function runClaimScenario(
     refreshGasUsed = r!.gasUsed;
   }
 
-  const transferGasUsed = await measureTransfer(token, sender, recipient);
+  const [transferGasUsed, firstTransferGasUsed] = await measureTransfer(
+    token,
+    sender,
+    recipient,
+  );
   const isVerifiedGasEstimate = await registry.isVerified.estimateGas(
     sender.address,
   );
-  return { name, transferGasUsed, isVerifiedGasEstimate, refreshGasUsed };
+  return {
+    name,
+    transferGasUsed,
+    firstTransferGasUsed,
+    isVerifiedGasEstimate,
+    refreshGasUsed,
+  };
 }
 
 function printTable(results: ScenarioResult[]): void {
@@ -244,6 +276,7 @@ async function main() {
       "B: IdentityRegistry, 1 topic (KYC)",
       1,
       false,
+      false,
       deployer,
       sender,
       recipient,
@@ -254,6 +287,7 @@ async function main() {
       "C: IdentityRegistry, 2 topics (KYC+AML)",
       2,
       false,
+      false,
       deployer,
       sender,
       recipient,
@@ -263,6 +297,18 @@ async function main() {
     await runClaimScenario(
       "D: C + both identities refreshed",
       2,
+      true,
+      false,
+      deployer,
+      sender,
+      recipient,
+      kycIssuerSigner,
+      amlIssuerSigner,
+    ),
+    await runClaimScenario(
+      "E: D + investor-type registry",
+      2,
+      true,
       true,
       deployer,
       sender,
@@ -286,6 +332,18 @@ async function main() {
     `2-topic delta over A, refreshed (D): +${cached} gas, ` +
       (cached <= 40000n ? "within" : "ABOVE") +
       " the 40,000 gas threshold.",
+  );
+  const typed = results[4].transferGasUsed - base;
+  console.log(
+    `with the investor-type registry (E): +${typed} gas over A, ` +
+      `+${results[4].transferGasUsed - results[3].transferGasUsed} over D, ` +
+      (typed <= 40000n ? "within" : "ABOVE") +
+      " the 40,000 gas threshold.",
+  );
+  console.log(
+    `first transfer (warm-up) D: ${results[3].firstTransferGasUsed}, ` +
+      `E: ${results[4].firstTransferGasUsed} ` +
+      `(+${results[4].firstTransferGasUsed - results[3].firstTransferGasUsed})`,
   );
 }
 
