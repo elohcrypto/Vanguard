@@ -3,7 +3,7 @@
  * @module ComplianceModule
  * @description ComplianceRules jurisdiction rules and access control, plus
  * read-only views of the investor-type limits, cooldowns and whitelist tiers
- * that live in InvestorTypeRegistry (plan v2 Task 4.1 removed the inert
+ * that live in InvestorTypeRegistry (enforced since Task 4.10) (plan v2 Task 4.1 removed the inert
  * copies ComplianceRules kept). Covers menu options 13-20.
  *
  * @example
@@ -14,6 +14,7 @@
 
 const { ethers } = require("hardhat");
 const { runAccessControlChecks } = require("../utils/AccessControlChecks");
+const { printCooldowns, printTiers } = require("../utils/InvestorTypeRules");
 const {
   displaySection,
   displaySuccess,
@@ -519,71 +520,31 @@ class ComplianceModule {
   }
 
   /**
-   * Options 16 and 20c: transfer cooldowns. ComplianceRules' holding-period
-   * rule is gone (Task 4.1): nothing ever recorded a transfer, so it could
-   * not block one. InvestorTypeRegistry keeps a cooldown per type; Token
-   * does not enforce it today, and this option says so.
+   * Options 16 and 20c: the per-type transfer cooldowns Token enforces
+   * (Task 4.10, D37 = a) and each demo wallet's clock, read from chain.
    *
    * @returns {Promise<void>}
    */
   async showTransferCooldowns() {
     displaySection("TRANSFER COOLDOWNS (InvestorTypeRegistry)", "⏰");
-    const ctx = await this._investorTypeContext();
-    if (!ctx) return;
     try {
-      const configs = await this._typeConfigs(ctx.registry);
-      console.log("\n📊 COOLDOWN PER TYPE (recorded, not enforced):");
-      configs.forEach((c, t) => {
-        console.log(
-          `   ${t} ${TYPE_NAMES[t].padEnd(13)} ${Number(c.transferCooldownMinutes)} minutes`,
-        );
-      });
-      console.log(
-        "\n⚠️  Token reads no cooldown: a holder can transfer again at once.",
-      );
-      console.log(
-        "   Token enforces the transfer and holding caps (option 15) only.",
-      );
-      console.log(
-        "   There is no minimum holding period on chain (ComplianceRules' was removed in Task 4.1).",
-      );
+      await printCooldowns(this.state);
     } catch (error) {
       displayError(`Reading transfer cooldowns failed: ${error.message}`);
     }
   }
 
   /**
-   * Options 17 and 20d: the whitelist tier each investor type requires. The
-   * former ComplianceRules compliance-level rule (min/max level, inheritance)
-   * was removed in Task 4.1; it gated nothing. The tier lives in
-   * InvestorTypeRegistry and is readable through IdentityRegistry; no
-   * transfer path compares it today, and this option says so.
+   * Options 17 and 20d: the whitelist tier each investor type requires,
+   * enforced by ComplianceRules where a party passes by its oracle entry
+   * (Task 4.10); VSC's mode and oracle and each wallet's verdict from chain.
    *
    * @returns {Promise<void>}
    */
   async showWhitelistTiers() {
     displaySection("REQUIRED WHITELIST TIERS (InvestorTypeRegistry)", "📊");
-    const ctx = await this._investorTypeContext();
-    if (!ctx) return;
     try {
-      const configs = await this._typeConfigs(ctx.registry);
-      console.log("\n📊 REQUIRED TIER PER TYPE (recorded, not enforced):");
-      configs.forEach((c, t) => {
-        console.log(
-          `   ${t} ${TYPE_NAMES[t].padEnd(13)} tier ${Number(c.requiredWhitelistTier)}+`,
-        );
-      });
-      console.log("\n👤 Demo wallets:");
-      for (const s of this.state.signers.slice(1, 5)) {
-        const type = Number(await ctx.registry.getInvestorType(s.address));
-        const tier = Number(
-          await ctx.registry.getRequiredWhitelistTier(s.address),
-        );
-        console.log(`   ${s.address}: ${TYPE_NAMES[type]}, tier ${tier}+`);
-      }
-      console.log(
-        "\n⚠️  No transfer path compares tiers; the whitelist gate is the oracle or the ZK whitelist mode.",
-      );
+      await printTiers(this.state);
     } catch (error) {
       displayError(`Reading whitelist tiers failed: ${error.message}`);
     }

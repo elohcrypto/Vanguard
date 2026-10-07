@@ -19,6 +19,7 @@ const {
   proveForDemoUser,
   publisherFor,
 } = require("./WhitelistBinderFlow");
+const { waitOutCooldown } = require("./InvestorTypeRules");
 
 const EITHER = 2;
 const MODES = ["OracleOnly", "ZkOnly", "Either"];
@@ -205,6 +206,8 @@ async function runLiveWhitelistFlow({
     );
   }
   out.transferred = await tryTransfer(token, sender, recipient, amount, log);
+  // Task 4.10: wait out the sender's cooldown, so (c)-(e) show the binding.
+  await waitOutCooldown(state, sender, log);
 
   // (c) A verified wallet without a binding.
   log("\n(c) a verified wallet without a binding");

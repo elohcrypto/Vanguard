@@ -14,6 +14,8 @@ const {
 } = require("../utils/DisplayHelpers");
 const { ethers } = require("hardhat");
 const { deployCustody } = require("../utils/CustodyFlow");
+const { wireInvestorRegistry } = require("../utils/InvestorTypeRules");
+const { runOption58 } = require("../utils/InvestorTypeProof");
 
 /**
  * @class InvestorTypeModule
@@ -117,8 +119,7 @@ class InvestorTypeModule {
       if (token) {
         console.log("\n🔗 Connecting InvestorTypeRegistry to VSC token...");
         try {
-          const tx = await token.setInvestorTypeRegistry(registryAddress);
-          await tx.wait();
+          await wireInvestorRegistry(token, investorTypeRegistry); // 4.10
           const wired = await token.investorTypeRegistry();
           console.log(`   ✅ Token.investorTypeRegistry(): ${wired}`);
           // D22 (a): mint now enforces holding caps; a treasury is exempt.
@@ -763,7 +764,9 @@ class InvestorTypeModule {
       const investorTypes = [0, 1, 2, 3];
       const typeNames = ["Normal", "Retail", "Accredited", "Institutional"];
 
-      console.log("\n📊 LARGE TRANSFER DETECTION TESTS:");
+      console.log(
+        "\n📊 LARGE TRANSFER DETECTION (recorded: no transfer reads isLargeTransfer):",
+      );
 
       for (let i = 0; i < testUsers.length; i++) {
         const config = await investorTypeRegistry.getInvestorTypeConfig(
@@ -803,53 +806,9 @@ class InvestorTypeModule {
     }
   }
 
-  /** Option 58: Test Transfer Cooldowns */
+  /** Option 58: prove the cooldown and the tier on chain (Task 4.10) */
   async testTransferCooldowns() {
-    displaySection("TEST TRANSFER COOLDOWNS", "🔄");
-
-    const investorTypeRegistry = this.state.getContract("investorTypeRegistry");
-    if (!investorTypeRegistry) {
-      displayError(
-        "InvestorTypeRegistry not deployed. Please deploy first (option 51).",
-      );
-      return;
-    }
-
-    try {
-      console.log("\n🧪 TESTING TRANSFER COOLDOWNS FOR EACH TYPE");
-
-      const testUsers = this.state.signers.slice(0, 4);
-      const investorTypes = [0, 1, 2, 3];
-      const typeNames = ["Normal", "Retail", "Accredited", "Institutional"];
-
-      console.log("\n📊 TRANSFER COOLDOWN TESTS:");
-
-      for (let i = 0; i < testUsers.length; i++) {
-        const config = await investorTypeRegistry.getInvestorTypeConfig(
-          investorTypes[i],
-        );
-        const cooldownMinutes = Number(config.transferCooldownMinutes); // Convert BigInt to Number
-
-        console.log(`\n${typeNames[i]} Investor (${testUsers[i].address}):`);
-        console.log(`   ⏰ Transfer Cooldown: ${cooldownMinutes} minutes`);
-        console.log(`   📊 Cooldown in seconds: ${cooldownMinutes * 60}`);
-
-        // Get cooldown from registry (returns minutes, not seconds!)
-        const cooldownMinutesFromRegistry =
-          await investorTypeRegistry.getTransferCooldown(testUsers[i].address);
-        const cooldownMins = Number(cooldownMinutesFromRegistry); // Convert BigInt to Number
-        console.log(
-          `   ✅ Registry cooldown: ${cooldownMins} minutes (${cooldownMins * 60} seconds)`,
-        );
-      }
-
-      console.log(
-        "\n💡 Note: Actual cooldown enforcement would be implemented in the token contract",
-      );
-      displaySuccess("TRANSFER COOLDOWNS TESTING COMPLETE");
-    } catch (error) {
-      displayError(`Transfer cooldowns testing failed: ${error.message}`);
-    }
+    return runOption58(this.state);
   }
 
   /** Option 59: Run Complete Investor Type Tests */
@@ -883,16 +842,22 @@ class InvestorTypeModule {
       await this.testLargeTransferDetection();
       console.log("");
 
-      // Test 4: Transfer cooldowns
-      console.log("4️⃣  Testing: Transfer Cooldowns");
-      await this.testTransferCooldowns();
+      // Test 4: the cooldown and the tier, proven on chain (option 58)
+      console.log("4️⃣  Proving: transfer cooldown and whitelist tier");
+      const proof = await this.testTransferCooldowns();
       console.log("");
 
       displaySuccess("ALL INVESTOR TYPE TESTS COMPLETED!");
       console.log("   ✅ Configurations displayed");
       console.log("   ✅ Holding limits tested");
       console.log("   ✅ Large transfer detection tested");
-      console.log("   ✅ Transfer cooldowns tested");
+      for (const [k, label] of [
+        ["cooldown", "Transfer cooldown"],
+        ["tier", "Whitelist tier"],
+      ])
+        console.log(
+          `   ${proof?.[k] ? "✅" : "⚠️ "} ${label} ${proof?.[k] ? "enforced on chain" : "not proven this run (see 58)"}`,
+        );
       console.log("");
       console.log("💡 Use Option 60 to view the complete dashboard");
     } catch (error) {
@@ -956,7 +921,7 @@ class InvestorTypeModule {
           `   🏦 Max Holding: ${ethers.formatEther(config.maxHoldingAmount)} VSC`,
         );
         console.log(
-          `   ⏰ Cooldown: ${config.transferCooldownMinutes} minutes`,
+          `   ⏰ Cooldown: ${config.transferCooldownMinutes} minutes (enforced)`,
         );
 
         const thresholdDisplay =
