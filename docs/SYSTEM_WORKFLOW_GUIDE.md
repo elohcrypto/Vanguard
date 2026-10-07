@@ -4,7 +4,8 @@
 
 How the contracts in `contracts/` are used, workflow by workflow, with the
 interactive demo option that runs each step (`npm run
-demo:interactive:proof`; the menu is `demo/core/MenuSystem.js`). Every
+demo:interactive:proof`; the menu text is `demo/core/MenuText.js`, its routing
+`demo/core/MenuSystem.js`). Every
 contract, function and option named here exists in this tree. The
 governance votes and the handover ceremony are in `docs/TESTNET_DEMO.md`;
 investor types in `docs/INVESTOR_TYPE_SYSTEM.md`.

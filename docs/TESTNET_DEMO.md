@@ -709,7 +709,10 @@ tier on a probe token (its own ComplianceRules in OracleOnly,
 WhitelistOracle and registry, on the demo's IdentityRegistry): an
 Accredited wallet listed at tier 2 is refused ("Compliance check
 failed", `whitelistTierAllows` false) and passes when re-listed at
-tier 3. Option 59 runs 52, 56, 57 and 58 and reports 58's two verdicts;
+tier 3. Option 59 runs 52, 56, 57 and 58 and reports 58's two verdicts,
+plus counted lines for the others: the types 52 read, and per wallet
+(with its actual type) whether 56 and 57 held; a step that threw says
+"failed";
 16 and 17 (20c, 20d) print the cooldowns with each demo wallet's clock and
 the tiers with VSC's mode, oracle and each wallet's entry. Option 42 -> 1
 waits out the sender's cooldown before its re-proof transfer (e). Without

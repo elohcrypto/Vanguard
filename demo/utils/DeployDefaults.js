@@ -12,7 +12,7 @@
  * Default jurisdiction rules for every automated ComplianceRules deployment.
  *
  * ISO 3166-1 numeric codes, matching the list the demo prints at
- * ComplianceModule.js:66-75.
+ * demo/utils/ComplianceSetupFlow.js:48-58 (option 13).
  *
  * WHITELIST SEMANTICS: a NON-EMPTY allow list is EXCLUSIVE — ComplianceRules
  * .sol:138-140 blocks any country not in it. So adding Hong Kong here does not
