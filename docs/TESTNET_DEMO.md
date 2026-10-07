@@ -953,7 +953,7 @@ refreshed into the verification cache (D). Re-run with `npm run gas:claims`
 (fresh in-process Hardhat network, no external node needed).
 
 **Task 4.9 (measured 2026-10-07).** Before: 88d9454, no cache. After: the
-cache commit (D17 = a).
+cache (D17 = a) with the review fixes.
 
 | Scenario | before gasUsed | before isVerified est. | after gasUsed | after delta vs A | after isVerified est. |
 |---|---|---|---|---|---|
@@ -962,10 +962,12 @@ cache commit (D17 = a).
 | C: 2 topics (KYC+AML), unrefreshed | 167,737 | 68,724 | 174,287 | +77,784 | 71,955 |
 | D: C + both identities refreshed | n/a | n/a | 105,849 | +9,346 | 29,236 |
 
-`refreshVerified` for one wallet with two topics costs 150,717 gas. D is
-within the 40,000 gas tolerance over A; an unrefreshed identity pays the
-walk as before plus one cold read of its (empty) cache entry, which is why
-B and C rose by about 6,000. Earlier history: 447,939 for C before Task
+`refreshVerified` for one wallet with two topics costs 100,139 gas (one
+`claimValidTo` call per topic on top of the walk). D is within the 40,000
+gas tolerance over A. An unrefreshed identity pays the walk as before plus
+a cold read of its (empty) cache entry: B and C rose by about 6,000, about
+4,200 of it the two parties' cold reads and about 1,800 the restructured
+walk. Earlier history: 447,939 for C before Task
 2A.7, 386,716 after it, 165,190 after Task 2F.2 (issuer-side
 `hasValidClaim`, no OnchainID read).
 
@@ -975,7 +977,8 @@ per wallet. `refreshVerified(wallet)` and `refreshIdentity(identity)` run
 the full walk and may be called by anyone; they only write the truth: a
 passing walk stores an entry, a failing walk clears it. An entry lives
 until the earlier of 24 hours after the refresh and the `validTo` of every
-claim the walk accepted, so claim expiry is exact. While it is fresh,
+claim the walk accepted (`ClaimIssuer.claimValidTo`), so claim expiry is
+exact; an issuer without that view is never cached. While it is fresh,
 `isVerified` answers without asking the issuers. A revoked or superseded
 claim keeps verifying until the entry lapses (at most 24 hours); to make
 that latency zero, the issuer's operator (or anyone) calls
