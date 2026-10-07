@@ -176,7 +176,7 @@ contract GovernanceToken is Token {
             require(amounts[i] > 0, "Amount must be greater than 0");
 
             // Use transfer() instead of _transfer() to enforce KYC/AML verification
-            // This ensures the whenTransferAllowed modifier is applied
+            // This ensures Token's transfer checks (_checkTransfer) apply
             require(transfer(recipients[i], amounts[i]), "Transfer failed");
         }
     }

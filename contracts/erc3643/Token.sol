@@ -44,16 +44,6 @@ contract Token is IERC3643, ERC20, Ownable2Step, Pausable {
         _;
     }
 
-    modifier whenTransferAllowed(
-        address _from,
-        address _to,
-        uint256 _amount
-    ) {
-        (bool ok, string memory why) = _checkTransfer(_from, _to, _amount);
-        require(ok, why);
-        _;
-    }
-
     constructor(
         string memory _name,
         string memory _symbol,
@@ -149,25 +139,36 @@ contract Token is IERC3643, ERC20, Ownable2Step, Pausable {
         address _to,
         uint256 _amount
     ) internal view returns (bool ok, string memory reason) {
+        (ok, reason, ) = _checkTransferFull(_from, _to, _amount);
+    }
+
+    /// @dev _checkTransfer, plus whether the sender is a trusted contract on
+    ///      this token (false for mint and burn), so transfer and transferFrom
+    ///      decide the clock write without asking compliance again (4.10).
+    function _checkTransferFull(
+        address _from,
+        address _to,
+        uint256 _amount
+    ) internal view returns (bool ok, string memory reason, bool fromTrusted) {
         // mint and transfer are whenNotPaused; the predicate must agree.
-        if (paused()) return (false, "Token paused");
+        if (paused()) return (false, "Token paused", false);
         if (_from == address(0)) {
             // Minting case: freeze, identity, compliance, recipient holding cap
-            if (_frozen[_to]) return (false, "Recipient frozen");
-            if (!_identityRegistry.isVerified(_to)) return (false, "Identity not verified");
-            if (!_compliance.canTransfer(_from, _to, _amount)) return (false, "Compliance check failed");
+            if (_frozen[_to]) return (false, "Recipient frozen", false);
+            if (!_identityRegistry.isVerified(_to)) return (false, "Identity not verified", false);
+            if (!_compliance.canTransfer(_from, _to, _amount)) return (false, "Compliance check failed", false);
             if (address(_investorTypeRegistry) != address(0)) {
-                if (!_investorTypeRegistry.isTokenAuthorized(address(this))) return (false, NOT_AUTHORIZED);
+                if (!_investorTypeRegistry.isTokenAuthorized(address(this))) return (false, NOT_AUTHORIZED, false);
                 if (!_investorTypeRegistry.canHoldAmount(_to, balanceOf(_to) + _amount))
-                    return (false, "Holding limit exceeded");
+                    return (false, "Holding limit exceeded", false);
             }
-            return (true, "");
+            return (true, "", false);
         }
 
         if (_to == address(0)) {
             // Burning case
-            if (getFreeBalance(_from) >= _amount) return (true, "");
-            return (false, "Transfer not allowed");
+            if (getFreeBalance(_from) >= _amount) return (true, "", false);
+            return (false, "Transfer not allowed", false);
         }
 
         // Regular transfer - check transfer limits and holding limits
@@ -176,21 +177,21 @@ contract Token is IERC3643, ERC20, Ownable2Step, Pausable {
         //            because they are verified through ComplianceRules instead
 
         // Check if either party is a trusted contract
-        bool fromTrusted = _compliance.isTrustedContract(_from);
+        fromTrusted = _compliance.isTrustedContract(_from);
         bool toTrusted = _compliance.isTrustedContract(_to);
         bool isTrustedTransfer = fromTrusted || toTrusted;
 
         // Same checks in the same order for both branches; a trusted transfer
         // skips only the identity pair (ComplianceRules verifies the
         // counterparty instead) and the trusted side's own investor cap.
-        if (_frozen[_from]) return (false, "Sender frozen");
-        if (_frozen[_to]) return (false, "Recipient frozen");
+        if (_frozen[_from]) return (false, "Sender frozen", fromTrusted);
+        if (_frozen[_to]) return (false, "Recipient frozen", fromTrusted);
         if (!isTrustedTransfer) {
-            if (!_identityRegistry.isVerified(_from)) return (false, "Sender not verified");
-            if (!_identityRegistry.isVerified(_to)) return (false, "Recipient not verified");
+            if (!_identityRegistry.isVerified(_from)) return (false, "Sender not verified", fromTrusted);
+            if (!_identityRegistry.isVerified(_to)) return (false, "Recipient not verified", fromTrusted);
         }
-        if (getFreeBalance(_from) < _amount) return (false, "Insufficient balance");
-        if (!_compliance.canTransfer(_from, _to, _amount)) return (false, "Compliance check failed");
+        if (getFreeBalance(_from) < _amount) return (false, "Insufficient balance", fromTrusted);
+        if (!_compliance.canTransfer(_from, _to, _amount)) return (false, "Compliance check failed", fromTrusted);
 
         // Investor type limits if a registry is set. Only a trusted contract
         // (escrow, governance) has no investor type, so only its own side
@@ -204,12 +205,12 @@ contract Token is IERC3643, ERC20, Ownable2Step, Pausable {
             // its transfer cap and its type cooldown (D37 = a), in that
             // order; a trusted contract has no type and no clock.
             if (fromTrusted) {
-                if (!_investorTypeRegistry.isTokenAuthorized(address(this))) return (false, NOT_AUTHORIZED);
+                if (!_investorTypeRegistry.isTokenAuthorized(address(this))) return (false, NOT_AUTHORIZED, fromTrusted);
             } else {
                 uint8 code = _investorTypeRegistry.transferCheck(_from, _amount);
-                if (code == 1) return (false, NOT_AUTHORIZED);
-                if (code == 2) return (false, "Transfer amount limit exceeded");
-                if (code == 3) return (false, "Transfer cooldown");
+                if (code == 1) return (false, NOT_AUTHORIZED, fromTrusted);
+                if (code == 2) return (false, "Transfer amount limit exceeded", fromTrusted);
+                if (code == 3) return (false, "Transfer cooldown", fromTrusted);
             }
 
             // Check holding limit for a non-trusted recipient
@@ -217,11 +218,11 @@ contract Token is IERC3643, ERC20, Ownable2Step, Pausable {
                 !toTrusted &&
                 !_investorTypeRegistry.canHoldAmount(_to, balanceOf(_to) + _amount)
             ) {
-                return (false, "Holding limit exceeded");
+                return (false, "Holding limit exceeded", fromTrusted);
             }
         }
 
-        return (true, "");
+        return (true, "", fromTrusted);
     }
 
     function recoveryAddress(
@@ -407,13 +408,13 @@ contract Token is IERC3643, ERC20, Ownable2Step, Pausable {
         override(ERC20, IERC20)
         whenNotPaused
         whenNotFrozen(msg.sender)
-        whenTransferAllowed(msg.sender, _to, _amount)
         returns (bool)
     {
+        bool fromTrusted = _requireTransfer(msg.sender, _to, _amount);
         bool success = super.transfer(_to, _amount);
         if (success) {
             _compliance.transferred(msg.sender, _to, _amount);
-            _recordTransfer(msg.sender);
+            _recordTransfer(msg.sender, fromTrusted);
         }
         return success;
     }
@@ -422,10 +423,19 @@ contract Token is IERC3643, ERC20, Ownable2Step, Pausable {
     ///      Only transfer and transferFrom call this, the two user-initiated
     ///      paths: mint, burn and recoveryAddress never write the clock, and
     ///      neither does a trusted contract sender (no type, D26).
-    function _recordTransfer(address _from) private {
-        if (address(_investorTypeRegistry) != address(0) && !_compliance.isTrustedContract(_from)) {
+    function _recordTransfer(address _from, bool _fromTrusted) private {
+        if (!_fromTrusted && address(_investorTypeRegistry) != address(0)) {
             _investorTypeRegistry.recordTransfer(_from);
         }
+    }
+
+    /// @dev Revert with _checkTransfer's reason unless the transfer may
+    ///      proceed; returns whether the sender is a trusted contract.
+    function _requireTransfer(address _from, address _to, uint256 _amount) private view returns (bool fromTrusted) {
+        bool ok;
+        string memory why;
+        (ok, why, fromTrusted) = _checkTransferFull(_from, _to, _amount);
+        require(ok, why);
     }
 
     function transferFrom(
@@ -437,13 +447,13 @@ contract Token is IERC3643, ERC20, Ownable2Step, Pausable {
         override(ERC20, IERC20)
         whenNotPaused
         whenNotFrozen(_from)
-        whenTransferAllowed(_from, _to, _amount)
         returns (bool)
     {
+        bool fromTrusted = _requireTransfer(_from, _to, _amount);
         bool success = super.transferFrom(_from, _to, _amount);
         if (success) {
             _compliance.transferred(_from, _to, _amount);
-            _recordTransfer(_from);
+            _recordTransfer(_from, fromTrusted);
         }
         return success;
     }
