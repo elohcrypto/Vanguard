@@ -325,4 +325,69 @@ describe("IdentityRegistry verification cache (Task 4.9)", function () {
     const d = await measure(registry);
     expect(d - a).to.be.lte(40000n);
   });
+
+  it("only positives are cached: a failing refresh does not stop a later attestation verifying", async function () {
+    const { registry, kyc, kycSigner, aml, amlSigner, carol, ids } =
+      await deploy();
+    const id = ids[carol.address];
+    expect(await registry.refreshVerified.staticCall(carol.address)).to.equal(
+      false,
+    );
+    await registry.refreshVerified(carol.address);
+    const [gen, until] = await registry.verifiedUntil(id);
+    expect([gen, until]).to.deep.equal([0n, 0n]);
+
+    await attest(kyc, kycSigner, id);
+    await attest(aml, amlSigner, id, AML_TOPIC);
+    expect(await registry.isVerified(carol.address)).to.equal(true);
+    expect(await cached(registry, id)).to.equal(0n);
+  });
+
+  it("an issuer without claimValidTo verifies but is never cached, and a refresh through it clears", async function () {
+    const f = await deploy();
+    const { registry, kyc, kycSigner, aml, amlSigner, carol, ids } = f;
+    const id = ids[carol.address];
+    const noExpiry = await (
+      await ethers.getContractFactory("MockClaimIssuerNoExpiry")
+    ).deploy();
+    await registry.addTrustedIssuer(noExpiry.target, [KYC_TOPIC]);
+    await attest(aml, amlSigner, id, AML_TOPIC);
+
+    // Cached through the real KYC issuer (first in the topic's list).
+    await attest(kyc, kycSigner, id);
+    await registry.refreshVerified(carol.address);
+    expect(await cached(registry, id)).to.not.equal(0n);
+
+    // The real claim is revoked; only the mock now accepts the topic.
+    await kyc.connect(kycSigner).revokeClaim(f.claimId(kyc, id, KYC_TOPIC));
+    expect(await registry.refreshVerified.staticCall(carol.address)).to.equal(
+      true,
+    );
+    await expect(registry.refreshVerified(carol.address))
+      .to.emit(registry, "VerificationCleared")
+      .withArgs(id)
+      .and.not.to.emit(registry, "VerificationRefreshed");
+    expect(await cached(registry, id)).to.equal(0n);
+    expect(await registry.isVerified(carol.address)).to.equal(true); // walk
+  });
+
+  it("claimValidTo 0 caches for the full TTL; a past one is not cached", async function () {
+    const { registry, aml, amlSigner, carol, ids } = await deploy();
+    const id = ids[carol.address];
+    const mock = await (
+      await ethers.getContractFactory("MockClaimIssuerExpiry")
+    ).deploy();
+    await registry.addTrustedIssuer(mock.target, [KYC_TOPIC]);
+    await attest(aml, amlSigner, id, AML_TOPIC);
+
+    await registry.refreshVerified(carol.address);
+    const at = BigInt(await time.latest());
+    expect(await cached(registry, id)).to.equal(at + BigInt(TTL));
+
+    await mock.setValidTo((await time.latest()) - 1);
+    await expect(registry.refreshVerified(carol.address))
+      .to.emit(registry, "VerificationCleared")
+      .withArgs(id);
+    expect(await cached(registry, id)).to.equal(0n);
+  });
 });
