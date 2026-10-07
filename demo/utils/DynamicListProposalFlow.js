@@ -148,7 +148,17 @@ async function createListUpdateProposal(mod) {
           ? "   Duration: never expires"
           : `   Duration: ${duration / 86400n} days (expires ${duration / 86400n} days after execution)`,
       );
-    console.log(`   Status: Active`);
+    // GovernanceConfig.ProposalStatus, read back (R-47-2).
+    const STATUS = [
+      "Pending",
+      "Active",
+      "Approved",
+      "Rejected",
+      "Executed",
+      "Cancelled",
+    ];
+    const created = (await vanguardGovernance.getProposal(proposalId)).proposal;
+    console.log(`   Status: ${STATUS[Number(created.status)]}`);
     console.log("");
     console.log("📊 Next Steps:");
     console.log("   1. Community votes on this proposal (option 77)");
@@ -282,8 +292,13 @@ async function demoCompleteUserLifecycle(mod) {
 
     // Step 3: User can now generate whitelist proof
     console.log("\n📊 STEP 3: User Generates Whitelist Proof");
-    console.log("   ✅ User is whitelisted - proof generation would succeed");
-    console.log("   ✅ User can use platform features");
+    // From the status read in step 2, not assumed (R-47-2).
+    if (statusNames[status] === "WHITELISTED") {
+      console.log("   ✅ User is whitelisted - proof generation would succeed");
+      console.log("   ✅ User can use platform features");
+    } else {
+      console.log(`   ⚠️  User is ${statusNames[status]}: no whitelist proof`);
+    }
     console.log("");
 
     await mod.promptUser("Press Enter to continue to Step 4...");
@@ -345,9 +360,15 @@ async function demoCompleteUserLifecycle(mod) {
 
     // Step 7: User can generate new proof
     console.log("📊 STEP 7: User Can Generate New Whitelist Proof");
-    console.log("   ✅ User is back on whitelist");
-    console.log("   ✅ User can generate NEW whitelist proof");
-    console.log("   ✅ User can use platform again");
+    if (statusNames[status] === "WHITELISTED") {
+      console.log("   ✅ User is back on whitelist");
+      console.log("   ✅ User can generate NEW whitelist proof");
+      console.log("   ✅ User can use platform again");
+    } else {
+      console.log(
+        `   ⚠️  User is ${statusNames[status]}, not back on the whitelist`,
+      );
+    }
     console.log("");
 
     // Summary
