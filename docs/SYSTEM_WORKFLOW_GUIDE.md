@@ -70,7 +70,10 @@ required topic from a trusted issuer.
    topic)` answers true for its latest claim on that topic
    (`latestClaimId`): not revoked (`revokeClaim`) and not past `validTo`
    (0 = no expiry). No topics verifies nobody, and the last topic cannot
-   be removed.
+   be removed. `refreshVerified(wallet)` (anyone) caches a passing walk
+   for the identity up to 24 hours, capped at the claims' `validTo`; a
+   revocation counts at once only after a refresh (TESTNET_DEMO.md,
+   "The verification cache").
 
 Demo: option 3 creates the OnchainID, 6 and 7 issue the KYC and AML
 claims, 8 reviews them, 11 shows a short-lived claim expiring; options 23

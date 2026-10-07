@@ -946,56 +946,45 @@ key.
 `Token.transfer` verifies each party once (`IdentityRegistry.isVerified` on
 sender and recipient); `ComplianceRules.canTransfer` verifies only the escrow
 counterparty on trusted transfers. `scripts/gas-analysis.ts` measures a real
-second transfer (after a warm-up) for three deployments: the permissive
-`MockIdentityRegistry` with compliance bound to it as the baseline, one
-required topic (KYC), and two (KYC+AML). Since Task 2F.2 the remaining cost
-is one `ClaimIssuer.hasValidClaim` call per party per topic
-(`IdentityRegistry -> ClaimIssuer`, no OnchainID read). The two-topic delta
-(+71,234) is still above the 40,000 gas tolerance; the next lever is plan v2
-decision D17 (verified-until cache).
+second transfer (after a warm-up) for four deployments: the permissive
+`MockIdentityRegistry` with compliance bound to it as the baseline (A), one
+required topic (B, KYC), two (C, KYC+AML), and two with both identities
+refreshed into the verification cache (D). Re-run with `npm run gas:claims`
+(fresh in-process Hardhat network, no external node needed).
 
-**Before Task 2A.7 (measured 2026-09-26):**
+**Task 4.9 (measured 2026-10-07).** Before: 88d9454, no cache. After: the
+cache commit (D17 = a).
 
-| Scenario | transfer gasUsed | delta vs A | isVerified est. |
-|---|---|---|---|
-| A: MockIdentityRegistry (baseline) | 77,361 | 0 | 23,938 |
-| B: IdentityRegistry, 1 topic (KYC) | 276,471 | +199,110 | 104,428 |
-| C: IdentityRegistry, 2 topics (KYC+AML) | 447,939 | +370,578 | 179,670 |
+| Scenario | before gasUsed | before isVerified est. | after gasUsed | after delta vs A | after isVerified est. |
+|---|---|---|---|---|---|
+| A: MockIdentityRegistry (baseline) | 96,503 | 23,938 | 96,503 | 0 | 23,938 |
+| B: 1 topic (KYC), unrefreshed | 136,673 | 48,942 | 142,647 | +46,144 | 51,885 |
+| C: 2 topics (KYC+AML), unrefreshed | 167,737 | 68,724 | 174,287 | +77,784 | 71,955 |
+| D: C + both identities refreshed | n/a | n/a | 105,849 | +9,346 | 29,236 |
 
-The 2-topic delta over baseline (370,578 gas) is well above the 40,000
-gas threshold the cleanup plan uses as a trigger for a per-wallet
-verified-until cache — each additional required topic adds a full
-`IdentityRegistry -> OnchainID -> ClaimIssuer` cross-contract call chain
-per verified party, not just a single storage read. Re-run with
-`npm run gas:claims` (fresh in-process Hardhat network, no external node
-needed).
+`refreshVerified` for one wallet with two topics costs 150,717 gas. D is
+within the 40,000 gas tolerance over A; an unrefreshed identity pays the
+walk as before plus one cold read of its (empty) cache entry, which is why
+B and C rose by about 6,000. Earlier history: 447,939 for C before Task
+2A.7, 386,716 after it, 165,190 after Task 2F.2 (issuer-side
+`hasValidClaim`, no OnchainID read).
 
-**After Task 2A.7 (measured 2026-09-27):**
-
-| Scenario | transfer gasUsed | delta vs A | isVerified est. |
-|---|---|---|---|
-| A: MockIdentityRegistry (baseline) | 93,696 | 0 | 23,938 |
-| B: IdentityRegistry, 1 topic (KYC) | 244,732 | +151,036 | 104,428 |
-| C: IdentityRegistry, 2 topics (KYC+AML) | 386,716 | +293,020 | 179,670 |
-
-Task 2A.7 made Token the single identity gate (ERC-3643 shape), so
-`ComplianceRules.canTransfer` no longer re-verifies sender and recipient on
-the normal path (two `isVerified` calls per transfer instead of four), and
-scenario A now binds `ComplianceRules` to the mock (whose `investorCountry`
-returns `uint16`), which is why the baseline rose while B and C fell.
-
-**After Task 2F.2 (measured 2026-10-01):** the registry asks the issuer
-instead of walking the identity's claims, and the issuer reads one
-latest-claim pointer per (identity, topic).
-
-| Scenario | transfer gasUsed | delta vs A | isVerified est. |
-|---|---|---|---|
-| A: MockIdentityRegistry (baseline) | 93,956 | 0 | 23,938 |
-| B: IdentityRegistry, 1 topic (KYC) | 134,126 | +40,170 | 48,942 |
-| C: IdentityRegistry, 2 topics (KYC+AML) | 165,190 | +71,234 | 68,724 |
-
-Before this change, at 1d61eed: B 246,346 (+152,390), C 389,550 (+295,594);
-with the first 2F.2 issuer scan (efd0313): B 143,568 (+49,612), C 184,068
-(+90,112).
+**The verification cache.** `IdentityRegistry` (claim half in
+`RegistryVerification.sol`) caches a passing claim walk per identity, not
+per wallet. `refreshVerified(wallet)` and `refreshIdentity(identity)` run
+the full walk and may be called by anyone; they only write the truth: a
+passing walk stores an entry, a failing walk clears it. An entry lives
+until the earlier of 24 hours after the refresh and the `validTo` of every
+claim the walk accepted, so claim expiry is exact. While it is fresh,
+`isVerified` answers without asking the issuers. A revoked or superseded
+claim keeps verifying until the entry lapses (at most 24 hours); to make
+that latency zero, the issuer's operator (or anyone) calls
+`refreshVerified` right after `revokeClaim`. `addClaimTopic` and
+`removeTrustedIssuer` bump `verificationGeneration`, which voids every
+entry in the same transaction, so a removed issuer stops counting at
+once. `verifiedUntil(identity)` shows the fresh entry. The blacklist
+oracle path and token freezes do not go through the cache and stay
+immediate. The demo refreshes after onboarding claims and prints
+"verification cached until <date>".
 
 Deploying all eleven contracts costs under 0.01 ETH at 1.3 gwei.

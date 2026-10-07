@@ -16,6 +16,8 @@ This directory contains the complete implementation of ERC-3643 (T-REX) standard
 - Country code management for jurisdiction compliance
 - Batch registration capabilities for efficient onboarding
 - Agent-based access control with owner oversight
+- Required topics, trusted issuers, `isVerified` and its per-identity
+  verification cache in the base `RegistryVerification.sol`
 
 ### 3. **ComplianceRegistry.sol** - Compliance Rule Engine
 - Modular compliance system supporting pluggable rules

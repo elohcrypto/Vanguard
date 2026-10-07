@@ -117,7 +117,8 @@ struct Claim {
   each trusted issuer (`ClaimIssuer.hasValidClaim(identity, topic)`,
   which checks expiry and revocation); it never reads the identity's
   lists, so a claim the owner or a stranger writes naming an issuer
-  counts for nothing. The identity keeps no trusted-issuer list,
+  counts for nothing. A passing walk can be cached per identity by
+  `refreshVerified` (24h, capped at claim expiry; Task 4.9). The identity keeps no trusted-issuer list,
   required topics or `isCompliant` of its own (removed in Task 4.5 as a
   third copy).
 
