@@ -129,6 +129,9 @@ abstract contract RegistryVerification is IIdentityRegistry, Ownable2Step {
         return (0, 0);
     }
 
+    /// @dev A refresh starved of gas (an issuer call runs out) can clear a
+    ///      true entry; the next isVerified then walks. It never produces a
+    ///      false positive: a failed issuer call counts as "no claim".
     function _refresh(address id) private returns (bool ok) {
         uint64 until;
         (ok, until) = _walk(id, true);
@@ -262,28 +265,14 @@ abstract contract RegistryVerification is IIdentityRegistry, Ownable2Step {
     }
 
     /**
-     * @dev validTo of the issuer's latest claim on (id, topic), read through
-     *      ClaimIssuer's public getters latestClaimId and issuedClaims (word 7
-     *      of the flattened IssuedClaim: identity, topic, scheme, signature,
-     *      data, uri, issuedAt, validTo, revoked, revokedAt). An issuer
-     *      without these getters, or a record for another identity or
-     *      topic, returns 1: a past expiry, so the walk is never cached.
+     * @dev validTo of the issuer's latest claim on (id, topic) through
+     *      IClaimIssuer.claimValidTo (0 = no expiry). An issuer without that
+     *      view returns 1: a past expiry, so the walk is never cached.
      */
-    function _claimValidTo(address issuer, address id, uint256 topic) private view returns (uint256 validTo) {
-        (bool ok, bytes memory ret) = issuer.staticcall(abi.encodeWithSignature("latestClaimId(address,uint256)", id, topic));
+    function _claimValidTo(address issuer, address id, uint256 topic) private view returns (uint256) {
+        (bool ok, bytes memory ret) = issuer.staticcall(abi.encodeCall(IClaimIssuer.claimValidTo, (id, topic)));
         if (!ok || ret.length < 32) return 1;
-        bytes32 claimId = abi.decode(ret, (bytes32));
-        (ok, ret) = issuer.staticcall(abi.encodeWithSignature("issuedClaims(bytes32)", claimId));
-        if (!ok || ret.length < 320) return 1;
-        uint256 claimIdentity;
-        uint256 claimTopic;
-        // solhint-disable-next-line no-inline-assembly
-        assembly {
-            claimIdentity := mload(add(ret, 32))
-            claimTopic := mload(add(ret, 64))
-            validTo := mload(add(ret, 256))
-        }
-        if (claimIdentity != uint256(uint160(id)) || claimTopic != topic) return 1;
+        return abi.decode(ret, (uint256));
     }
 
     function _removeFromList(uint256[] storage list, uint256 value) private {

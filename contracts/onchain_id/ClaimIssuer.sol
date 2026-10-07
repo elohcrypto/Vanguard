@@ -315,6 +315,11 @@ contract ClaimIssuer is IClaimIssuer, Ownable2Step, ReentrancyGuard {
         return isClaimValid(latestClaimId[_identity][_topic]);
     }
 
+    /// @inheritdoc IClaimIssuer
+    function claimValidTo(address _identity, uint256 _topic) external view returns (uint256) {
+        return issuedClaims[latestClaimId[_identity][_topic]].validTo;
+    }
+
     /**
      * @dev Verify a claim signature
      * @param _identity The OnchainID address

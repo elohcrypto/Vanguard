@@ -11,4 +11,9 @@ interface IClaimIssuer {
 
     /// @dev True if the issuer holds a live claim on `topic` for `identity`.
     function hasValidClaim(address identity, uint256 topic) external view returns (bool);
+
+    /// @dev validTo of the issuer's latest claim on `topic` for `identity`
+    ///      (0 = no expiry). IdentityRegistry caps its verification cache
+    ///      at it (Task 4.9).
+    function claimValidTo(address identity, uint256 topic) external view returns (uint256);
 }
