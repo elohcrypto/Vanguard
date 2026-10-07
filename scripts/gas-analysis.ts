@@ -13,7 +13,9 @@ import {
 // ComplianceRules.canTransfer calls it twice more once a registry is
 // bound. isVerified loops over required claim topics, so this measures
 // transfer gas as that loop grows: 0 topics (MockIdentityRegistry, no
-// topic concept), 1 (KYC), 2 (KYC+AML).
+// topic concept), 1 (KYC), 2 (KYC+AML). Task 4.9: D is C with both
+// identities' verification cached by refreshVerified (D17 = a), so
+// isVerified answers from one entry instead of the claim walk.
 
 const MINT_AMOUNT = ethers.parseEther("1000");
 const TRANSFER_AMOUNT = ethers.parseEther("10");
@@ -23,6 +25,7 @@ interface ScenarioResult {
   name: string;
   transferGasUsed: bigint;
   isVerifiedGasEstimate: bigint;
+  refreshGasUsed?: bigint;
 }
 
 /** Deploys ComplianceRules (no jurisdiction rules) + Token bound to it. */
@@ -117,13 +120,15 @@ async function runBaselineScenario(
 }
 
 /**
- * Scenarios B and C: a real IdentityRegistry with `topics` required claim
- * topics (KYC only, or KYC+AML), each satisfied by a live signed claim
- * from its own trusted issuer, on a real OnchainID for both wallets.
+ * Scenarios B, C and D: a real IdentityRegistry with `topics` required
+ * claim topics (KYC only, or KYC+AML), each satisfied by a live signed
+ * claim from its own trusted issuer, on a real OnchainID for both
+ * wallets. With `refresh`, both wallets are refreshed (cached) first.
  */
 async function runClaimScenario(
   name: string,
   topics: 1 | 2,
+  refresh: boolean,
   deployer: SignerWithAddress,
   sender: SignerWithAddress,
   recipient: SignerWithAddress,
@@ -188,11 +193,18 @@ async function runClaimScenario(
   ).wait();
   await (await token.mint(sender.address, MINT_AMOUNT)).wait();
 
+  let refreshGasUsed: bigint | undefined;
+  if (refresh) {
+    const r = await (await registry.refreshVerified(sender.address)).wait();
+    await (await registry.refreshVerified(recipient.address)).wait();
+    refreshGasUsed = r!.gasUsed;
+  }
+
   const transferGasUsed = await measureTransfer(token, sender, recipient);
   const isVerifiedGasEstimate = await registry.isVerified.estimateGas(
     sender.address,
   );
-  return { name, transferGasUsed, isVerifiedGasEstimate };
+  return { name, transferGasUsed, isVerifiedGasEstimate, refreshGasUsed };
 }
 
 function printTable(results: ScenarioResult[]): void {
@@ -231,6 +243,7 @@ async function main() {
     await runClaimScenario(
       "B: IdentityRegistry, 1 topic (KYC)",
       1,
+      false,
       deployer,
       sender,
       recipient,
@@ -240,6 +253,17 @@ async function main() {
     await runClaimScenario(
       "C: IdentityRegistry, 2 topics (KYC+AML)",
       2,
+      false,
+      deployer,
+      sender,
+      recipient,
+      kycIssuerSigner,
+      amlIssuerSigner,
+    ),
+    await runClaimScenario(
+      "D: C + both identities refreshed",
+      2,
+      true,
       deployer,
       sender,
       recipient,
@@ -251,12 +275,18 @@ async function main() {
   console.log();
   printTable(results);
 
-  const twoTopicDelta = results[2].transferGasUsed - results[0].transferGasUsed;
-  if (twoTopicDelta > 40000n) {
-    console.log(
-      `\n2-topic delta over baseline is ${twoTopicDelta} gas, above the 40,000 gas threshold.`,
-    );
-  }
+  const base = results[0].transferGasUsed;
+  const unrefreshed = results[2].transferGasUsed - base;
+  const cached = results[3].transferGasUsed - base;
+  console.log(
+    `\nrefreshVerified (2 topics, one wallet): ${results[3].refreshGasUsed} gas`,
+  );
+  console.log(`2-topic delta over A, unrefreshed (C): +${unrefreshed} gas`);
+  console.log(
+    `2-topic delta over A, refreshed (D): +${cached} gas, ` +
+      (cached <= 40000n ? "within" : "ABOVE") +
+      " the 40,000 gas threshold.",
+  );
 }
 
 main()
