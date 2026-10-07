@@ -107,7 +107,8 @@ contract ComplianceRules is ComplianceRulesAdmin, IComplianceHooks {
         if (mode != WhitelistMode.ZkOnly) {
             address wlOracle = whitelistOracle[token];
             if (wlOracle != address(0)) {
-                if (IWhitelistOracleView(wlOracle).isWhitelisted(party)) return _tierMet(token, wlOracle, party);
+                IWhitelistOracleView wl = IWhitelistOracleView(wlOracle);
+                if (wl.isWhitelisted(party)) return _tierMet(token, wl, party);
                 if (mode == WhitelistMode.OracleOnly) return false;
             } else if (mode == WhitelistMode.OracleOnly) {
                 return true;
@@ -130,18 +131,19 @@ contract ComplianceRules is ComplianceRulesAdmin, IComplianceHooks {
     function whitelistTierAllows(address token, address party) external view returns (bool) {
         address wlOracle = whitelistOracle[token];
         if (whitelistMode[token] == WhitelistMode.ZkOnly || wlOracle == address(0)) return true;
-        if (!IWhitelistOracleView(wlOracle).isWhitelisted(party)) return true;
-        return _tierMet(token, wlOracle, party);
+        IWhitelistOracleView wl = IWhitelistOracleView(wlOracle);
+        if (!wl.isWhitelisted(party)) return true;
+        return _tierMet(token, wl, party);
     }
 
     /// @dev The party's oracle entry tier meets its investor type's required
     ///      tier. No rule when the token applies no investor-type registry
     ///      (Token.investorTypeRegistry() is zero, or the token is not a
     ///      Token) or the party is investorLimitExempt (D22, as for the caps).
-    function _tierMet(address token, address wlOracle, address party) private view returns (bool) {
+    function _tierMet(address token, IWhitelistOracleView wlOracle, address party) private view returns (bool) {
         IInvestorTypeRegistry types = _typesOf(token);
         if (address(types) == address(0) || types.investorLimitExempt(party)) return true;
-        (, , , uint8 tier, , ) = IWhitelistOracleView(wlOracle).getWhitelistInfo(party);
+        (, , , uint8 tier, , ) = wlOracle.getWhitelistInfo(party);
         return tier >= types.getRequiredWhitelistTier(party);
     }
 
