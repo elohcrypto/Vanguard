@@ -109,9 +109,8 @@ contract InvestorTypeRegistry is InvestorTypeGovernance {
      */
     function canTransferAmount(address investor, uint256 amount) external view returns (bool) {
         if (investorLimitExempt[investor]) return true;
-        InvestorType investorType = _investorTypes[investor]; // Defaults to Normal (0) if not set
-        InvestorTypeConfig memory config = _typeConfigs[investorType];
-        return amount <= config.maxTransferAmount;
+        // One field from storage, not a memory copy of all seven (Task 4.10).
+        return amount <= _typeConfigs[_investorTypes[investor]].maxTransferAmount;
     }
 
     /**
@@ -119,9 +118,7 @@ contract InvestorTypeRegistry is InvestorTypeGovernance {
      */
     function canHoldAmount(address investor, uint256 amount) external view returns (bool) {
         if (investorLimitExempt[investor]) return true;
-        InvestorType investorType = _investorTypes[investor];
-        InvestorTypeConfig memory config = _typeConfigs[investorType];
-        return amount <= config.maxHoldingAmount;
+        return amount <= _typeConfigs[_investorTypes[investor]].maxHoldingAmount;
     }
 
     /**
@@ -175,9 +172,7 @@ contract InvestorTypeRegistry is InvestorTypeGovernance {
      * @dev Check if transfer amount requires large transfer notification
      */
     function isLargeTransfer(address investor, uint256 amount) external view returns (bool) {
-        InvestorType investorType = _investorTypes[investor];
-        InvestorTypeConfig memory config = _typeConfigs[investorType];
-        return amount > config.largeTransferThreshold;
+        return amount > _typeConfigs[_investorTypes[investor]].largeTransferThreshold;
     }
 
     /**
