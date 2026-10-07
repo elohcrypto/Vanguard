@@ -150,7 +150,7 @@ async function demonstrateAmountLimit(mod) {
  * @private
  */
 async function demonstrateNonCompliantRecipient(mod) {
-  console.log("\n❌ NON-COMPLIANT RECIPIENT DEMO");
+  console.log("\n🚫 NON-COMPLIANT RECIPIENT DEMO");
   console.log("=".repeat(40));
   console.log("⚠️  This demonstrates on-chain compliance verification");
   console.log("");
@@ -177,7 +177,7 @@ async function demonstrateNonCompliantRecipient(mod) {
   }
 
   if (nonCompliantInvestors.length === 0) {
-    console.log("❌ No non-compliant investors available for this demo");
+    console.log("ℹ️  No non-compliant investors available for this demo");
     console.log("💡 This demo requires a non-compliant investor");
     console.log(
       "💡 In production, non-compliant users are blocked automatically",

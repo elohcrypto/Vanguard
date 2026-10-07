@@ -220,7 +220,7 @@ async function createCompliantNormalUser(mod) {
  * @private
  */
 async function createNonCompliantNormalUser(mod) {
-  console.log("\n❌ CREATING NON-COMPLIANT NORMAL USER - ON-CHAIN");
+  console.log("\n🚫 CREATING NON-COMPLIANT NORMAL USER - ON-CHAIN");
   console.log("=".repeat(60));
 
   const digitalToken = mod.state.getContract("digitalToken");
@@ -329,13 +329,13 @@ async function createNonCompliantNormalUser(mod) {
     // Store in normal users map
     mod.state.normalUsers.set(userId, user);
 
-    console.log("\n❌ NON-COMPLIANT NORMAL USER CREATED ON-CHAIN!");
+    console.log("\n🚫 NON-COMPLIANT NORMAL USER CREATED ON-CHAIN!");
     console.log("=".repeat(60));
     console.log(`👤 Name: ${userName}`);
     console.log(`🆔 Address: ${signer.address}`);
     console.log(`🔗 OnchainID: ${identityAddress}`);
-    console.log(`❌ KYC Status: REJECTED (on-chain)`);
-    console.log(`❌ AML Status: NOT_ISSUED`);
+    console.log(`🚫 KYC Status: REJECTED (on-chain)`);
+    console.log(`🚫 AML Status: NOT_ISSUED`);
     console.log(`💰 Token Eligible: NO`);
     console.log(`📝 Reason: ${reason}`);
     console.log(`⛽ Total Gas Used: ${totalGasUsed.toLocaleString()}`);

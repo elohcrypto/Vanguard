@@ -134,7 +134,9 @@ async function createProposal(mod) {
     const isVerified = await identityRegistry.isVerified(owner.address);
 
     if (!isVerified) {
-      displayError("You must be KYC/AML verified to create proposals");
+      console.log(
+        "ℹ️  You must be KYC/AML verified to create proposals (isVerified false)",
+      );
       console.log("\n💡 SOLUTION:");
       console.log("   1. Use Option 6 to issue KYC to yourself (signer 0)");
       console.log("   2. Use Option 7 to issue AML to yourself (signer 0)");

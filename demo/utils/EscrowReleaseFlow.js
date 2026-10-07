@@ -223,7 +223,11 @@ async function investorSignRelease(mod) {
       console.log("   Waiting for payee/payer signature");
     }
   } catch (error) {
-    displayError(`Signing failed: ${error.message}`);
+    if (/Dispute window still open/.test(error.message))
+      console.log(
+        "⛔ Signing refused (expected): Dispute window still open (73b closes it)",
+      );
+    else displayError(`Signing failed: ${error.message}`);
   }
 }
 

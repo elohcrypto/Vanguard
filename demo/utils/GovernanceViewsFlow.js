@@ -190,7 +190,7 @@ async function testComplianceEnforcement(mod) {
     console.log("PART 1: VSC TRANSFER CONTROL");
     console.log("=".repeat(70));
 
-    console.log("\n✅ TEST 1.1: VSC transfer to verified user");
+    console.log("\n🧪 TEST 1.1: VSC transfer to verified user");
     try {
       const tx1 = await digitalToken.transfer(
         verifiedUser.address,
@@ -204,7 +204,7 @@ async function testComplianceEnforcement(mod) {
       console.log(`   ❌ FAILED: ${error.message}`);
     }
 
-    console.log("\n❌ TEST 1.2: VSC transfer to unverified user (should FAIL)");
+    console.log("\n🧪 TEST 1.2: VSC transfer to unverified user (should FAIL)");
     try {
       const tx2 = await digitalToken.transfer(
         unverifiedUser.address,
@@ -224,7 +224,7 @@ async function testComplianceEnforcement(mod) {
     console.log("PART 2: VGT TRANSFER CONTROL");
     console.log("=".repeat(70));
 
-    console.log("\n✅ TEST 2.1: VGT distribution to verified user");
+    console.log("\n🧪 TEST 2.1: VGT distribution to verified user");
     try {
       const tx3 = await governanceToken.distributeGovernanceTokens(
         [verifiedUser.address],
@@ -238,7 +238,7 @@ async function testComplianceEnforcement(mod) {
       console.log(`   ❌ FAILED: ${error.message}`);
     }
 
-    console.log("\n❌ TEST 2.2: VGT transfer to unverified user (should FAIL)");
+    console.log("\n🧪 TEST 2.2: VGT transfer to unverified user (should FAIL)");
     try {
       const vgtWithSigner = governanceToken.connect(verifiedUser);
       const tx4 = await vgtWithSigner.transfer(
@@ -284,7 +284,7 @@ async function testComplianceEnforcement(mod) {
       `\n   Voting fee: ${ethers.formatEther(votingFee)} VGT per vote`,
     );
 
-    console.log("\n✅ TEST 3.1: Verified user may vote");
+    console.log("\n🧪 TEST 3.1: Verified user may vote");
     console.log(`   KYC/AML verified: ${verifiedOk ? "✅ yes" : "❌ no"}`);
     console.log(
       `   Can pay fee: ${verifiedBal >= votingFee ? "✅ yes" : "❌ no"} (${ethers.formatEther(verifiedBal)} VGT)`,
@@ -293,7 +293,7 @@ async function testComplianceEnforcement(mod) {
       `   ${verifiedOk && verifiedBal >= votingFee ? "✅ CAN vote — worth 1 vote" : "❌ CANNOT vote"}`,
     );
 
-    console.log("\n❌ TEST 3.2: Unverified user is blocked by verification");
+    console.log("\n🧪 TEST 3.2: Unverified user is blocked by verification");
     console.log(
       `   KYC/AML verified: ${unverifiedOk ? "❌ yes (unexpected)" : "✅ no"}`,
     );

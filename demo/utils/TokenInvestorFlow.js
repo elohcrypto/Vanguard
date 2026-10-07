@@ -282,7 +282,12 @@ async function downgradeToNormalUser(mod) {
     );
     console.log("✅ User can request investor status again (23 -> 2)");
   } catch (error) {
-    console.error("❌ Downgrade failed:", error.message);
+    // A Normal-type holding cap the released balance would exceed is a
+    // chain rule refusing, not a demo failure.
+    if (/Holding limit exceeded/.test(error.message)) {
+      console.log("⛔ Downgrade refused (expected, chain rule): Holding limit");
+      console.log("   exceeded: as Normal the user could not hold the release");
+    } else console.error("❌ Downgrade failed:", error.message);
   }
 }
 

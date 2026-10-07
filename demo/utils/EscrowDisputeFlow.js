@@ -239,7 +239,11 @@ async function payeeSignRelease(mod) {
     displaySuccess("Payee signed successfully!");
     console.log("   Waiting for investor signature to release funds");
   } catch (error) {
-    displayError(`Signing failed: ${error.message}`);
+    if (/Dispute window still open/.test(error.message))
+      console.log(
+        "⛔ Signing refused (expected): Dispute window still open (73b closes it)",
+      );
+    else displayError(`Signing failed: ${error.message}`);
   }
 }
 
@@ -253,7 +257,9 @@ async function manualRefund(mod) {
     mod.state.enhancedEscrowWallets.values(),
   ).filter((w) => w.state === "Funded" || w.state === "Disputed");
   if (activeWallets.length === 0) {
-    displayError("No active wallets");
+    console.log(
+      "ℹ️  No active wallets (refund needs a Funded or Disputed escrow)",
+    );
     return;
   }
 
@@ -354,7 +360,11 @@ async function sweepExcess(mod) {
     console.log(`   To: ${swept.args.to}`);
     console.log(`   Amount: ${ethers.formatEther(swept.args.amount)} VSC`);
   } catch (error) {
-    displayError(`Sweep failed: ${error.message}`);
+    if (/NothingToSweep/.test(error.message))
+      console.log(
+        "ℹ️  Nothing to sweep: the escrow holds no stranded VSC (chain)",
+      );
+    else displayError(`Sweep failed: ${error.message}`);
   }
 }
 

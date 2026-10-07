@@ -255,7 +255,7 @@ async function verifyWhitelistMembership(mod) {
       );
     }
     if (found === 0) {
-      displayError("NO WALLET HAS A WHITELIST BINDING");
+      console.log("ℹ️  NO WALLET HAS A WHITELIST BINDING (chain)");
       console.log("   💡 Prove and bind a wallet first (option 42 -> 1)");
     } else {
       console.log(
@@ -285,7 +285,7 @@ async function attestationView(mod, circuit, title, emoji, option) {
         "   🕵️ Only the record is public: no attribute, salt or signature",
       );
     } else {
-      displayError(`NO VALID ${circuit.toUpperCase()} ATTESTATION`);
+      console.log(`ℹ️  NO VALID ${circuit.toUpperCase()} ATTESTATION (chain)`);
       console.log(`   💡 Sign, prove and bind one first (option ${option})`);
     }
   } catch (error) {

@@ -352,8 +352,8 @@ async function fundEscrowWallet(mod) {
     if (
       !(await digitalToken.canTransfer(payerAddress, walletAddress, fundTotal))
     ) {
-      displayError(
-        `The token refuses payer -> escrow for ${ethers.formatEther(fundTotal)} VSC`,
+      console.log(
+        `⛔ The token refuses payer -> escrow for ${ethers.formatEther(fundTotal)} VSC (expected, chain rule; nothing approved)`,
       );
       const types = mod.state.getContract("investorTypeRegistry");
       if (types && !(await types.canTransferAmount(payerAddress, fundTotal))) {
