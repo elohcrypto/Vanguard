@@ -9,7 +9,7 @@
  */
 const { ethers } = require("hardhat");
 const { signShipmentProof } = require("../demo/utils/ShipmentProof");
-const { attestAll } = require("../demo/utils/Kyc");
+const { attestAll, cacheVerification } = require("../demo/utils/Kyc");
 const { walletCodeHash } = require("../demo/utils/GovernedCalls");
 const EscrowModule = require("../demo/modules/EscrowModule");
 const { EnhancedLogger } = require("../demo/logging");
@@ -45,6 +45,16 @@ async function runEscrowSmoke(state, failures) {
     [ownerWallet, "fee"],
   ])
     await onboard(state, s, tag);
+
+  // Task 4.9: the onboarding refresh caches verification; read it back.
+  await cacheVerification(state, payee.address, () => {});
+  const [, payeeUntil] = await idReg.verifiedUntil(
+    await idReg.identity(payee.address),
+  );
+  if (payeeUntil === 0n || !(await idReg.isVerified(payee.address)))
+    failures.push(
+      `refreshed payee: verifiedUntil = ${payeeUntil}, expected a cached entry and isVerified true`,
+    );
 
   // 1. Mint limits (2E.3). demo-smoke.js set the exemption while the
   //    deployer still owned the registry (owner only, D22).

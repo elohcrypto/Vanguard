@@ -149,8 +149,38 @@ async function attestAll(state, identityAddress, label, validTo) {
   return { kyc, aml };
 }
 
+/**
+ * Cache a wallet's verification after its claims are issued (Task 4.9,
+ * D17 = a). IdentityRegistry.refreshVerified runs the full claim walk and,
+ * if it passes, stores the identity's entry until the earlier of 24h and
+ * the earliest claim expiry; isVerified then answers from that entry.
+ * Anyone may call it; a failing walk clears the entry instead.
+ *
+ * @param {Object} state - DemoState with identityRegistry registered.
+ * @param {string} wallet - The registered wallet to refresh.
+ * @param {Function} [log] - Printer, console.log by default.
+ * @returns {Promise<{receipt: Object, until: bigint}>} until is 0n if
+ *   nothing was cached (the walk failed).
+ */
+async function cacheVerification(state, wallet, log = console.log) {
+  const registry = state.getContract("identityRegistry");
+  const receipt = await (await registry.refreshVerified(wallet)).wait();
+  const [, until] = await registry.verifiedUntil(
+    await registry.identity(wallet),
+  );
+  if (until === 0n) {
+    log("   ⚠️  refreshVerified: claim walk failed, nothing cached");
+  } else {
+    const when = new Date(Number(until) * 1000).toISOString();
+    log(`   ✅ refreshVerified: verification cached until ${when} (chain)`);
+  }
+  log(`   ⛽ Gas Used: ${receipt.gasUsed.toLocaleString()}`);
+  return { receipt, until };
+}
+
 module.exports = {
   signClaim,
+  cacheVerification,
   attestKyc,
   attestAml,
   attestAll,

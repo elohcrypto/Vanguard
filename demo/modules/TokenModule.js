@@ -18,7 +18,7 @@ const {
   displayError,
   displayProgress,
 } = require("../utils/DisplayHelpers");
-const { attestAll, signClaim } = require("../utils/Kyc");
+const { attestAll, cacheVerification, signClaim } = require("../utils/Kyc");
 const { whitelistHints } = require("../utils/WhitelistLiveFlow");
 const Custody = require("../utils/CustodyFlow");
 const { ethers } = require("hardhat");
@@ -467,6 +467,12 @@ class TokenModule {
         `   ✅ Registered with country: ${userCountry} (${countryName})`,
       );
       console.log(`   ⛽ Gas Used: ${receipt4.gasUsed.toLocaleString()}`);
+      console.log("\n📝 Step 4b: Caching verification (refreshVerified)...");
+      const { receipt: receipt4b } = await cacheVerification(
+        this.state,
+        signer.address,
+      );
+      totalGasUsed += receipt4b.gasUsed;
 
       // Step 5: Assign NORMAL investor type
       console.log(
@@ -1284,6 +1290,13 @@ class TokenModule {
       console.log(`   ✅ Transaction Hash: ${receipt4.hash}`);
       console.log(`   ⛽ Gas Used: ${receipt4.gasUsed.toLocaleString()}`);
       console.log(`   🌍 Country Code: ${userCountry}`);
+
+      console.log("\n📝 Step 4b: Caching verification (refreshVerified)...");
+      const { receipt: receipt4b } = await cacheVerification(
+        this.state,
+        signer.address,
+      );
+      totalGasUsed += receipt4b.gasUsed;
 
       // Verify registration on-chain
       const isVerified = await identityRegistry.isVerified(signer.address);

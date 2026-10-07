@@ -18,7 +18,12 @@ const {
   displayError,
   displayInfo,
 } = require("../utils/DisplayHelpers");
-const { attestKyc, attestAml, attestAll } = require("../utils/Kyc");
+const {
+  attestKyc,
+  attestAml,
+  attestAll,
+  cacheVerification,
+} = require("../utils/Kyc");
 const {
   recoverInteractive,
   replaceInteractive,
@@ -1119,8 +1124,13 @@ class OnchainIDModule {
         (await ethers.provider.getBlock("latest")).timestamp + 60;
 
       await issueKyc("expiry-demo-short", shortValidTo);
+      // The new claim supersedes the old one; a cache entry from onboarding
+      // would keep verifying until it lapses. Refresh: the entry is now
+      // capped at this claim's expiry (Task 4.9).
+      console.log("\n🔄 Refreshing the verification cache (anyone may)...");
+      await cacheVerification(this.state, identity.owner);
       console.log(
-        `\n✅ Short-lived KYC claim issued (60s). isVerified: ${await verified()}`,
+        `✅ Short-lived KYC claim issued (60s). isVerified: ${await verified()}`,
       );
 
       console.log("\n⏰ Advancing chain time by 120 seconds...");
@@ -1129,6 +1139,7 @@ class OnchainIDModule {
       console.log(`❌ After expiry. isVerified: ${await verified()}`);
 
       await issueKyc("expiry-demo-renewed");
+      await cacheVerification(this.state, identity.owner);
       console.log(
         `✅ Re-attested with default validity. isVerified: ${await verified()}`,
       );
@@ -1247,6 +1258,11 @@ class OnchainIDModule {
       // leave the identity unverified.
       console.log("\n📝 Issuing KYC and AML claims on-chain...");
       await attestAll(this.state, identity.address, `country:${countryCode}`);
+      if (
+        identityRegistry &&
+        (await identityRegistry.identity(identity.owner)) === identity.address
+      )
+        await cacheVerification(this.state, identity.owner);
       const kycIssuerAddr = await this.state
         .getContract("kycIssuer")
         .getAddress();
