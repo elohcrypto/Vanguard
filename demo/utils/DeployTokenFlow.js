@@ -256,12 +256,14 @@ async function deployDigitalTokenSystem(mod) {
     // Topics and issuers as IdentityRegistry reports them (R-47-2).
     const topicRegistry = mod.state.getContract("identityRegistry");
     const topics = await topicRegistry.getClaimTopics();
-    let issuerCount = 0;
+    const issuers = new Set(); // distinct issuers, not issuer-topic pairs
     for (const topic of topics)
-      issuerCount += (await topicRegistry.getTrustedIssuersForClaimTopic(topic))
-        .length;
+      for (const issuer of await topicRegistry.getTrustedIssuersForClaimTopic(
+        topic,
+      ))
+        issuers.add(issuer);
     console.log(
-      `   ${issuerCount ? "✅" : "⚠️ "} Trusted Issuers: ${issuerCount} across the claim topics`,
+      `   ${issuers.size ? "✅" : "⚠️ "} Trusted Issuers: ${issuers.size} across the claim topics`,
     );
     console.log(
       `   ${topics.length ? "✅" : "⚠️ "} Claim Topics: ${topics.join(", ") || "none"}`,
