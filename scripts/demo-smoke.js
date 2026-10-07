@@ -18,6 +18,7 @@ const { ethers } = require("hardhat");
 const DemoState = require("../demo/core/DemoState");
 const { attestAll } = require("../demo/utils/Kyc");
 const { advancePastVoterAge } = require("../demo/utils/ChainTime");
+const { wireInvestorRegistry } = require("../demo/utils/InvestorTypeRules");
 const ContractDeployer = require("../demo/core/ContractDeployer");
 const { EnhancedLogger } = require("../demo/logging");
 
@@ -204,11 +205,10 @@ async function main() {
   await registry.waitForDeployment();
   state.setContract("investorTypeRegistry", registry);
 
-  // Task 2A.2: this script deploys InvestorTypeRegistry directly, not via
-  // option 51, so it wires the token and (4.3) deploys custody as 51 does.
+  // 2A.2/4.3/4.10: wire, authorize and deploy custody as option 51 does.
   if (token) {
     const registryAddr = await registry.getAddress();
-    await (await token.setInvestorTypeRegistry(registryAddr)).wait();
+    await wireInvestorRegistry(token, registry, () => {});
     const wiredRegistry = await token.investorTypeRegistry();
     if (wiredRegistry === ethers.ZeroAddress) {
       failures.push(

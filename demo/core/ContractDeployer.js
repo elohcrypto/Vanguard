@@ -18,6 +18,7 @@ const {
   wireJurisdictionSource,
 } = require("../utils/AttestationFlow");
 const { deployCustody } = require("../utils/CustodyFlow");
+const { wireInvestorRegistry } = require("../utils/InvestorTypeRules");
 const {
   displaySection,
   displaySuccess,
@@ -725,15 +726,11 @@ class ContractDeployer {
         investorTypeRegistryAddr = await this.state
           .getContract("investorTypeRegistry")
           .getAddress();
-        const tx3 = await token.setInvestorTypeRegistry(
-          investorTypeRegistryAddr,
+        // Task 4.10: set the registry and have it authorize VSC.
+        await wireInvestorRegistry(
+          token,
+          this.state.getContract("investorTypeRegistry"),
         );
-        const receipt3 = await tx3.wait();
-        totalGasUsed += receipt3.gasUsed;
-
-        console.log(`   ✅ Transaction Hash: ${receipt3.hash}`);
-        console.log(`   🧱 Block Number: ${receipt3.blockNumber}`);
-        console.log(`   ⛽ Gas Used: ${receipt3.gasUsed.toLocaleString()}`);
         console.log(`   🔗 InvestorTypeRegistry: ${investorTypeRegistryAddr}`);
 
         // Verify the connection
@@ -855,7 +852,7 @@ class ContractDeployer {
           "   • ✅ Limits are enforced ON-CHAIN by the Token contract",
         );
         console.log(
-          "   • ✅ Token.transfer() calls InvestorTypeRegistry.canTransferAmount()",
+          "   • ✅ Token.transfer() calls canTransferAmount() and canTransferNow() (cooldown, Task 4.10)",
         );
         console.log(
           "   • ✅ Cannot be bypassed - all transfers checked on blockchain",
