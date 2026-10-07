@@ -184,9 +184,11 @@ contract InvestorTypeRegistry is InvestorTypeGovernance {
      *         list is the hook through which a token writes the clock.
      *         Token calls it after a user transfer (transfer/transferFrom)
      *         by a non-trusted sender; mint, burn, recovery and trusted
-     *         contract senders never write it.
+     *         contract senders never write it. An investorLimitExempt sender
+     *         has no cooldown, so nothing is written for it (R-410-8).
      */
     function recordTransfer(address sender) external onlyAuthorizedToken {
+        if (investorLimitExempt[sender]) return;
         lastTransferAt[sender] = block.timestamp;
     }
 

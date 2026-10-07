@@ -119,10 +119,17 @@ describe("Investor-type transfer cooldown (Task 4.10)", function () {
     });
   }
 
-  it("an investorLimitExempt sender has no cooldown", async function () {
-    const { treasury, alice, bob, token } = await deploy();
+  it("an investorLimitExempt sender has no cooldown and no clock", async function () {
+    const { treasury, alice, bob, token, types } = await deploy();
     await agree(token, treasury, alice.address);
     await agree(token, treasury, bob.address);
+    expect(await types.lastTransferAt(treasury.address)).to.equal(0n);
+    // A sender exempted later keeps its old clock but is never held to it.
+    await token.connect(alice).transfer(bob.address, 1n);
+    const t0 = await types.lastTransferAt(alice.address);
+    await types.setInvestorLimitExempt(alice.address, true);
+    await agree(token, alice, bob.address);
+    expect(await types.lastTransferAt(alice.address)).to.equal(t0);
   });
 
   it("a type whose cooldown is 0 has no cooldown", async function () {
@@ -168,7 +175,8 @@ describe("Investor-type transfer cooldown (Task 4.10)", function () {
     expect(await types.lastTransferAt(fresh.address)).to.equal(0n);
     // The recovered wallet may send at once.
     await agree(token, fresh, bob.address);
-    expect(await types.lastTransferAt(treasury.address)).to.be.gt(0n);
+    // R-410-8: the exempt treasury sent in the fixture; no clock written.
+    expect(await types.lastTransferAt(treasury.address)).to.equal(0n);
   });
 
   it("D26: the human sender's clock is written, a trusted sender has none", async function () {
