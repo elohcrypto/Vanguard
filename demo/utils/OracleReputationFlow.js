@@ -33,9 +33,7 @@ async function manageReputation(mod) {
       console.log(
         `     ✅ Correct Attestations: ${oracleInfo.correctAttestations}`,
       );
-      console.log(
-        `     ❌ Incorrect Attestations: ${oracleInfo.incorrectAttestations}`,
-      );
+      console.log(`     🗳️ Answers: ${oracleInfo.totalAttestations}`);
       console.log(`     📊 Role: ${config.role}`);
       console.log("");
     }
@@ -218,17 +216,14 @@ async function viewDetailedOracleStats(mod) {
       console.log(`📊 Role: ${config.role}`);
       console.log(`🏆 Reputation: ${oracleInfo.reputation}/1000`);
       console.log(`✅ Correct Attestations: ${oracleInfo.correctAttestations}`);
+      console.log(`🗳️ Answers: ${oracleInfo.totalAttestations}`);
       console.log(
-        `📉 Incorrect Attestations: ${oracleInfo.incorrectAttestations}`,
-      );
-      console.log(
-        `🔄 Active Status: ${oracleInfo.isActive ? "✅ ACTIVE" : "❌ INACTIVE"}`,
+        `🔄 Active Status: ${oracleInfo.active ? "✅ ACTIVE" : "❌ INACTIVE"}`,
       );
 
       // Calculate accuracy
-      const total =
-        Number(oracleInfo.correctAttestations) +
-        Number(oracleInfo.incorrectAttestations);
+      // getOracleInfo has no incorrectAttestations: total is the answers.
+      const total = Number(oracleInfo.totalAttestations);
       if (total > 0) {
         const accuracy = (
           (Number(oracleInfo.correctAttestations) / total) *
