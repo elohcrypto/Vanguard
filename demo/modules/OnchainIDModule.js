@@ -1136,7 +1136,12 @@ class OnchainIDModule {
       console.log("\n⏰ Advancing chain time by 120 seconds...");
       await ethers.provider.send("evm_increaseTime", [120]);
       await ethers.provider.send("evm_mine", []);
-      console.log(`❌ After expiry. isVerified: ${await verified()}`);
+      const afterExpiry = await verified();
+      console.log(
+        afterExpiry
+          ? "❌ After expiry: isVerified still true — expiry not enforced (chain read)"
+          : "✅ After expiry: isVerified false, as expected (chain read)",
+      );
 
       await issueKyc("expiry-demo-renewed");
       await cacheVerification(this.state, identity.owner);
