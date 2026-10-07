@@ -414,7 +414,7 @@ contract Token is IERC3643, ERC20, Ownable2Step, Pausable {
         bool success = super.transfer(_to, _amount);
         if (success) {
             _compliance.transferred(msg.sender, _to, _amount);
-            _recordTransfer(msg.sender, fromTrusted);
+            _recordTransfer(msg.sender, _amount, fromTrusted);
         }
         return success;
     }
@@ -423,8 +423,11 @@ contract Token is IERC3643, ERC20, Ownable2Step, Pausable {
     ///      Only transfer and transferFrom call this, the two user-initiated
     ///      paths: mint, burn and recoveryAddress never write the clock, and
     ///      neither does a trusted contract sender (no type, D26).
-    function _recordTransfer(address _from, bool _fromTrusted) private {
-        if (!_fromTrusted && address(_investorTypeRegistry) != address(0)) {
+    ///      A zero-value transfer writes nothing: OpenZeppelin lets anyone
+    ///      transferFrom(victim, x, 0) with no allowance, which would
+    ///      otherwise restart the victim's cooldown at will (review H1).
+    function _recordTransfer(address _from, uint256 _amount, bool _fromTrusted) private {
+        if (_amount != 0 && !_fromTrusted && address(_investorTypeRegistry) != address(0)) {
             _investorTypeRegistry.recordTransfer(_from);
         }
     }
@@ -453,7 +456,7 @@ contract Token is IERC3643, ERC20, Ownable2Step, Pausable {
         bool success = super.transferFrom(_from, _to, _amount);
         if (success) {
             _compliance.transferred(_from, _to, _amount);
-            _recordTransfer(_from, fromTrusted);
+            _recordTransfer(_from, _amount, fromTrusted);
         }
         return success;
     }

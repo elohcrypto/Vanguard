@@ -159,6 +159,37 @@ describe("Investor-type transfer cooldown (Task 4.10)", function () {
     ).to.be.revertedWith("Transfer cooldown");
   });
 
+  it("H1: a stranger's zero transferFrom writes no victim clock", async function () {
+    // carol: a verified wallet alice never approved (the reviewer probe).
+    const { alice, bob, carol: stranger, token, types } = await deploy();
+    // No allowance: OpenZeppelin lets a zero-value transferFrom through.
+    expect(await token.allowance(alice.address, stranger.address)).to.equal(0n);
+    await token
+      .connect(stranger)
+      .transferFrom(alice.address, stranger.address, 0n);
+    await token
+      .connect(stranger)
+      .transferFrom(alice.address, alice.address, 0n);
+    expect(await types.lastTransferAt(alice.address)).to.equal(0n);
+    // The victim's next real transfer passes and starts its own clock.
+    await agree(token, alice, bob.address);
+    const t0 = await types.lastTransferAt(alice.address);
+    expect(t0).to.be.gt(0n);
+    await time.increase(3600);
+    await token
+      .connect(stranger)
+      .transferFrom(alice.address, stranger.address, 0n);
+    expect(await types.lastTransferAt(alice.address)).to.equal(t0);
+    await agree(token, alice, bob.address);
+  });
+
+  it("H1: a holder's zero-value transfer writes no clock", async function () {
+    const { alice, bob, token, types } = await deploy();
+    await token.connect(alice).transfer(bob.address, 0n);
+    expect(await types.lastTransferAt(alice.address)).to.equal(0n);
+    await agree(token, alice, bob.address);
+  });
+
   it("receiving, mint, burn and recovery write no clock", async function () {
     const { owner, treasury, alice, bob, fresh, token, types, ids } =
       await deploy();
