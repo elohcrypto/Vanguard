@@ -343,13 +343,14 @@ describe("IdentityRegistry verification cache (Task 4.9)", function () {
     expect(await cached(registry, id)).to.equal(0n);
   });
 
-  it("an issuer without claimValidTo verifies but is never cached, and a refresh through it clears", async function () {
+  it("an issuer whose claimValidTo reverts (as a missing function does) is never cached and clears", async function () {
     const f = await deploy();
     const { registry, kyc, kycSigner, aml, amlSigner, carol, ids } = f;
     const id = ids[carol.address];
     const noExpiry = await (
-      await ethers.getContractFactory("MockClaimIssuerNoExpiry")
+      await ethers.getContractFactory("MockClaimIssuer")
     ).deploy();
+    await noExpiry.setNoExpiryView(true);
     await registry.addTrustedIssuer(noExpiry.target, [KYC_TOPIC]);
     await attest(aml, amlSigner, id, AML_TOPIC);
 
@@ -375,7 +376,7 @@ describe("IdentityRegistry verification cache (Task 4.9)", function () {
     const { registry, aml, amlSigner, carol, ids } = await deploy();
     const id = ids[carol.address];
     const mock = await (
-      await ethers.getContractFactory("MockClaimIssuerExpiry")
+      await ethers.getContractFactory("MockClaimIssuer")
     ).deploy();
     await registry.addTrustedIssuer(mock.target, [KYC_TOPIC]);
     await attest(aml, amlSigner, id, AML_TOPIC);
