@@ -86,6 +86,11 @@ async function deployOnchainIDContracts(mod) {
   await keyManager.waitForDeployment();
   mod.state.setContract("keyManager", keyManager);
   await mod.logger.logContractDeployment("KeyManager", keyManager, []);
+  // Task 4.11 (R-411-14): every identity the factory creates pins this
+  // KeyManager as its one recovery manager.
+  const kmAddr = await keyManager.getAddress();
+  await (await factory.setRecoveryManager(kmAddr)).wait();
+  console.log(`   🔗 OnchainIDFactory.recoveryManager = KeyManager ${kmAddr}`);
 }
 
 /**

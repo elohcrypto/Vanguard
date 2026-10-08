@@ -21,6 +21,8 @@ const MANAGED_ABI = [
   "function authorizedManagers(address) view returns (bool)",
   "function keyHasPurpose(bytes32,uint256) view returns (bool)",
   "function owner() view returns (address)",
+  "function recoveryManager() view returns (address)",
+  "function getManagers() view returns (address[])",
 ];
 const KM_ABI = [
   "function getKeyRecovery(address) view returns (address[],uint256,uint256,bool,uint256,bytes32)",
@@ -52,7 +54,16 @@ async function identityFacts(o, kmAddr, dAddr) {
   )
     roles.push("recovery agent");
   const authorizes = (await read(id.authorizedManagers(kmAddr))) === true;
-  return { idAddr, authorizes, deployerRoles: roles };
+  // Task 4.11 (R-411-14): KeyManager is the pinned recovery manager and
+  // the only authorized manager.
+  const pin = await read(id.recoveryManager());
+  const managers = await read(id.getManagers());
+  const pinned = pin !== null && pin.toLowerCase() === kmAddr.toLowerCase();
+  const onlyKm =
+    managers !== null &&
+    managers.length === 1 &&
+    managers[0].toLowerCase() === kmAddr.toLowerCase();
+  return { idAddr, authorizes, pinned, onlyKm, deployerRoles: roles };
 }
 
 /** { addr, hasCode, actual, expected } for o.keyManager, or null. */
@@ -102,6 +113,16 @@ async function preflightKeyManager(o) {
         `the deployer is still ${f.deployerRoles.join(", ")} on keyManagerIdentity ${f.idAddr}: its owner must remove that before the handover`,
       );
     }
+    if (!f.pinned) {
+      fail(
+        `keyManagerIdentity ${f.idAddr} does not pin KeyManager ${k.addr} as its recovery manager: create it through the factory (recoveryManager set) or have its owner pinRecoveryManager(${k.addr})`,
+      );
+    }
+    if (!f.onlyKm) {
+      fail(
+        `keyManagerIdentity ${f.idAddr} authorizes managers other than KeyManager ${k.addr} (getManagers): its owner must deauthorize them`,
+      );
+    }
   }
 }
 
@@ -111,15 +132,15 @@ async function keyManagerLines(o, dAddr) {
   if (!k) return [];
   const lines = [
     [
-      `KeyManager ${k.addr} code matches the compiled KeyManager: no owner, no allowlist, the deployer holds no KeyManager power; an identity's recovery agents at their threshold evict its MANAGEMENT keys after 48h and move its owner after 7 days`,
+      `KeyManager ${k.addr} code matches the compiled KeyManager: no owner, no allowlist, the deployer holds no KeyManager power; only an identity's pinned recovery manager can move its ownership: its recovery agents at their threshold evict its MANAGEMENT keys after 48h and move its owner after 7 days`,
       k.hasCode && k.actual === k.expected,
     ],
   ];
   if (o.keyManagerIdentity) {
     const f = await identityFacts(o, k.addr, dAddr);
     lines.push([
-      `demo identity ${f.idAddr} authorizes KeyManager ${k.addr}; the deployer is not its owner, manager, MANAGEMENT key or recovery agent`,
-      f.authorizes && f.deployerRoles.length === 0,
+      `demo identity ${f.idAddr} pins KeyManager ${k.addr} as its recovery manager and authorizes only it; the deployer is not its owner, manager, MANAGEMENT key or recovery agent`,
+      f.authorizes && f.pinned && f.onlyKm && f.deployerRoles.length === 0,
     ]);
   }
   return lines;

@@ -69,9 +69,28 @@ async function drillIdentity(state, owner, opts, run) {
   return (await ethers.getContractAt("OnchainID", run.identity)).connect(owner);
 }
 
-/** Owner steps: authorize KeyManager, plant the rogue key, seat the agents. */
-async function prepare(state, km, id, owner, agents, run) {
+/**
+ * Owner steps: pin KeyManager as the recovery manager (once), authorize it,
+ * plant the rogue key, seat the agents. A re-seat of seated agents waits
+ * 48h (R-411-16): jumped on a dev node, else printed. False: not ready.
+ */
+async function prepare(state, km, id, owner, agents, run, back) {
   const kmAddr = await km.getAddress();
+  const pinned = await id.recoveryManager();
+  if (pinned === ethers.ZeroAddress) {
+    await (await id.pinRecoveryManager(kmAddr)).wait();
+    console.log(
+      `   📌 pinRecoveryManager(KeyManager) by the owner (once, never changeable)`,
+    );
+  } else if (!same(pinned, kmAddr)) {
+    console.log(
+      `   ❌ recoveryManager() is ${pinned}, not this KeyManager: no recovery here`,
+    );
+    return false;
+  }
+  console.log(
+    `   📌 recoveryManager() = KeyManager ${await id.recoveryManager()}`,
+  );
   if (!(await id.authorizedManagers(kmAddr))) {
     await (await id.authorizeManager(kmAddr)).wait();
     console.log(`   ✅ authorizeManager(KeyManager ${kmAddr}) by the owner`);
@@ -84,11 +103,35 @@ async function prepare(state, km, id, owner, agents, run) {
     );
   }
   const list = agents.map((a) => a.address);
-  await (
-    await km.connect(owner).setupKeyRecovery(run.identity, list, 2)
-  ).wait();
-  console.log(`   🛡️  setupKeyRecovery by the owner: 2-of-2 agents`);
+  const rec = await km.getKeyRecovery(run.identity);
+  const seated =
+    rec.recoveryAgents.join() === list.join() && rec.threshold === 2n;
+  if (seated && !rec.completed) {
+    console.log(`   🛡️  agents already seated (2-of-2):`);
+  } else {
+    let p = await km.getPendingRecoverySetup(run.identity);
+    if (p.effectiveAt === 0n || p.agents.join() !== list.join()) {
+      await (
+        await km.connect(owner).setupKeyRecovery(run.identity, list, 2)
+      ).wait();
+      p = await km.getPendingRecoverySetup(run.identity);
+    }
+    if (p.effectiveAt > 0n) {
+      console.log(
+        "   ⏳ setupKeyRecovery re-seats seated agents: pending 48h,",
+      );
+      console.log("      the seated agents may veto it (R-411-16)");
+      if (!(await passTimelock(p.effectiveAt, "re-seat timelock (48h)", back)))
+        return false;
+      await (
+        await km.connect(owner).applyKeyRecoverySetup(run.identity)
+      ).wait();
+      console.log("   ✅ applyKeyRecoverySetup: the new agents are seated");
+    }
+    console.log(`   🛡️  setupKeyRecovery by the owner: 2-of-2 agents`);
+  }
   for (const a of list) console.log(`      agent ${who(state, a)}`);
+  return true;
 }
 
 /** Opens (if needed) and approves the candidate; returns the approval. */
@@ -180,7 +223,8 @@ async function runRecoveryDrill(state, opts) {
   const executed = rec.completed && rec.lastKey === run.key;
   let a = await km.getRecoveryApproval(idAddr);
   if (!executed && !(a.key === run.key && a.locked)) {
-    await prepare(state, km, id, owner, agents, run);
+    if (!(await prepare(state, km, id, owner, agents, run, back)))
+      return { ...run, done: false, executed: false };
     a = await approve(state, km, agents, run);
   }
   if (!executed) {

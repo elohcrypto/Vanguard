@@ -306,6 +306,16 @@ async function main(): Promise<DeploymentResult> {
   await setRecipientTx.wait(config.confirmations);
   console.log(`   Fee recipient set to: ${config.feeRecipient}`);
 
+  // Task 4.11 (R-411-14): identities the factory creates pin KeyManager
+  // as their one recovery manager.
+  const setRecoveryTx = await factory
+    .connect(deployer)
+    .setRecoveryManager(keyManagerAddress, deploymentOptions);
+  await setRecoveryTx.wait(config.confirmations);
+  console.log(
+    `   Recovery manager pinned on new identities: ${keyManagerAddress}`,
+  );
+
   // Configure IdentityRegistry: require KYC and AML claims from the
   // deployed issuers before any wallet verifies. A registry with no
   // required topics would verify anyone who registers. This runs before
