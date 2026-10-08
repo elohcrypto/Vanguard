@@ -9,6 +9,9 @@
  * deployer is neither its owner, nor an authorized manager, nor a
  * MANAGEMENT key on it. Both config keys are optional: "keyManager" (an
  * address) and "keyManagerIdentity" (an OnchainID, only with keyManager).
+ * A named onchainIDFactory is checked either way (review L-1): its
+ * recoveryManagerCodeHash must be zero or the compiled KeyManager's, and a
+ * recovery manager it pins must be named as "keyManager".
  * Nothing in the ceremony changes the identity, so the preflight refuses
  * a failing identity before Step 1.
  */
@@ -67,21 +70,53 @@ async function identityFacts(o, kmAddr, dAddr) {
 }
 
 /**
- * Task 4.11 (R-411-19): the factory pins KeyManager on every identity it
- * creates. { addr, pins } for o.onchainIDFactory, or null when not named.
+ * Task 4.11 (R-411-19): the factory pins its recovery manager on every
+ * identity it creates. For o.onchainIDFactory (null when not named):
+ * hashOk is a recoveryManagerCodeHash of zero (pins nothing, ever) or the
+ * compiled KeyManager's; pins says it pins kmAddr; pinsNone that it pins
+ * nothing. Checked whether or not a keyManager is named (review L-1).
  */
 async function factoryFacts(o, kmAddr) {
   if (!o.onchainIDFactory) return null;
   const addr = await addrOf(o.onchainIDFactory);
   const f = await ethers.getContractAt(
-    ["function recoveryManager() view returns (address)"],
+    [
+      "function recoveryManager() view returns (address)",
+      "function recoveryManagerCodeHash() view returns (bytes32)",
+    ],
     addr,
   );
   const rm = await f.recoveryManager().catch(() => null);
+  const hash = await f.recoveryManagerCodeHash().catch(() => null);
+  const expected = await expectedHash("KeyManager");
   return {
     addr,
-    pins: rm !== null && rm.toLowerCase() === kmAddr.toLowerCase(),
+    rm,
+    hash,
+    expected,
+    hashOk: hash === ethers.ZeroHash || hash === expected,
+    pins: !!kmAddr && rm !== null && rm.toLowerCase() === kmAddr.toLowerCase(),
+    pinsNone: rm === ethers.ZeroAddress,
   };
+}
+
+/** Refuse a factory that pins, or may pin, a recovery manager unchecked. */
+function refuseFactory(fac, kmAddr) {
+  if (!fac.hashOk) {
+    fail(
+      `onchainIDFactory ${fac.addr} recoveryManagerCodeHash ${fac.hash} is neither zero nor the compiled KeyManager (${fac.expected}): it accepts a recovery manager that is not KeyManager; redeploy it from this build`,
+    );
+  }
+  if (!kmAddr && !fac.pinsNone) {
+    fail(
+      `onchainIDFactory ${fac.addr} pins recovery manager ${fac.rm} on every identity it creates: name it as keyManager so the ceremony checks it`,
+    );
+  }
+  if (kmAddr && !fac.pins) {
+    fail(
+      `onchainIDFactory ${fac.addr} does not pin KeyManager ${kmAddr} on the identities it creates: its owner must setRecoveryManager(${kmAddr}) first`,
+    );
+  }
 }
 
 /** { addr, hasCode, actual, expected } for o.keyManager, or null. */
@@ -104,7 +139,11 @@ async function preflightKeyManager(o) {
     );
   }
   const k = await keyManagerCode(o);
-  if (!k) return;
+  const fac = await factoryFacts(o, k && k.addr);
+  if (!k) {
+    if (fac) refuseFactory(fac, null);
+    return;
+  }
   if (!k.hasCode) {
     fail(
       `keyManager ${k.addr} has no code: name the deployed KeyManager, or leave "keyManager" out`,
@@ -115,12 +154,7 @@ async function preflightKeyManager(o) {
       `KeyManager ${k.addr} runtime code hash ${k.actual} is not the compiled KeyManager (${k.expected}): one from before Task 4.2 keeps an owner and an allowlist; redeploy it from this build`,
     );
   }
-  const fac = await factoryFacts(o, k.addr);
-  if (fac && !fac.pins) {
-    fail(
-      `onchainIDFactory ${fac.addr} does not pin KeyManager ${k.addr} on the identities it creates: its owner must setRecoveryManager(${k.addr}) first`,
-    );
-  }
+  if (fac) refuseFactory(fac, k.addr);
   if (o.keyManagerIdentity) {
     const id = await addrOf(o.keyManagerIdentity);
     if ((await ethers.provider.getCode(id)) === "0x") {
@@ -150,21 +184,32 @@ async function preflightKeyManager(o) {
   }
 }
 
-/** Completion lines: [label, pass][]; none when the config names no KeyManager. */
+/**
+ * Completion lines: [label, pass][]. A named factory always gets a line;
+ * the KeyManager lines come only with a keyManager.
+ */
 async function keyManagerLines(o, dAddr) {
   const k = await keyManagerCode(o);
-  if (!k) return [];
+  const fac = await factoryFacts(o, k && k.addr);
+  if (!k) {
+    if (!fac) return [];
+    return [
+      [
+        `OnchainIDFactory ${fac.addr} pins no recovery manager (none named as keyManager) and accepts only the compiled KeyManager (recoveryManagerCodeHash zero or its code hash)`,
+        fac.hashOk && fac.pinsNone,
+      ],
+    ];
+  }
   const lines = [
     [
       `KeyManager ${k.addr} code matches the compiled KeyManager: no owner, no allowlist, the deployer holds no KeyManager power; only an identity's pinned recovery manager can move its ownership: its recovery agents at their threshold evict its MANAGEMENT keys after 48h and move its owner after 7 days`,
       k.hasCode && k.actual === k.expected,
     ],
   ];
-  const fac = await factoryFacts(o, k.addr);
   if (fac) {
     lines.push([
       `OnchainIDFactory ${fac.addr} pins KeyManager ${k.addr} as the recovery manager of every identity it creates (recoveryManager, code-hash checked)`,
-      fac.pins,
+      fac.pins && fac.hashOk,
     ]);
   }
   if (o.keyManagerIdentity) {

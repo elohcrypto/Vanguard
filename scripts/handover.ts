@@ -51,7 +51,10 @@
  * deployer owns, manages or holds a MANAGEMENT key on, or that is named
  * without "keyManager"; the completion check proves the deployer holds no
  * KeyManager power and that the identity authorizes it
- * (demo/utils/HandoverKeys.js). OracleManager (4.4) must bind a consensus
+ * (demo/utils/HandoverKeys.js). A named "onchainIDFactory" is checked with
+ * or without "keyManager": its recoveryManagerCodeHash must be zero or the
+ * compiled KeyManager's, and a recovery manager it pins must be named as
+ * "keyManager" (4.11). OracleManager (4.4) must bind a consensus
  * engine whose code is the compiled ConsensusOracle and that serves it
  * (the engine has no owner, so it is not handed over); the deployer step
  * makes ops the manager's operator, and an operator other than ops is
