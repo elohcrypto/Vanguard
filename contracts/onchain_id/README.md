@@ -6,11 +6,13 @@ This directory contains OnchainID implementation contracts following ERC-734 and
 
 - `OnchainIDFactory.sol` - Factory for deploying OnchainID contracts
 - `OnchainID.sol` - Core OnchainID contract: ERC-735 claims on top of `OnchainIDKeys`
-- `OnchainIDKeys.sol` - Abstract base of OnchainID: ERC-734 keys, execution requests, manager authorization, ownership (one deployed contract; split for size in plan v2 Task 4.5)
+- `OnchainIDKeys.sol` - Abstract base of OnchainID: ERC-734 keys and execution requests (one deployed contract; split for size in plan v2 Task 4.5)
+- `OnchainIDOwnership.sol` - Abstract base of OnchainID over OnchainIDKeys: manager authorization, two-step ownership, the recovery hook (`transferOwnershipByRecovery`) and the freeze while a recovery is approved (split in Task 4.11)
 - `ClaimIssuer.sol` - Trusted claim issuer contract: issued claims, revocation, `hasValidClaim` and `claimValidTo`
 - `ClaimIssuerKeys.sol` - Abstract base of ClaimIssuer, not deployed: the issuer's keys, trusted-issuer list, issuer info and the signer checks (split in Task 4.8)
 - `KeyManager.sol` - Timelocked key rotation and agent recovery for identities that authorize it (no owner)
-- `KeyManagerRecovery.sol` - Abstract base of KeyManager, not deployed: recovery agents, candidates, approvals and execution (split in Task 4.8)
+- `KeyManagerRecovery.sol` - Abstract base of KeyManager, not deployed: recovery agents, candidates, approvals, cancel votes, execution with eviction, `recoveryLocked` (split in Task 4.8)
+- `KeyManagerOwnerTransfer.sol` - Abstract base of KeyManager over KeyManagerRecovery: the owner transfer 7 days after an approval (Task 4.11)
 
 ## Interfaces
 
@@ -23,14 +25,30 @@ This directory contains OnchainID implementation contracts following ERC-734 and
 - A MANAGEMENT key (or the owner, or an authorized manager such as
   KeyManager) adds and removes any key at once with `addKey` and
   `removeKey`, a MANAGEMENT key included and without the holder's consent
-  (ERC-734), and can cancel or re-seat KeyManager recovery
-  (`cancelKeyRecovery`, `setupKeyRecovery`). KeyManager's timelocks bind
-  only the rotations and recoveries sent through it (plan v2 Task 4.5,
-  R-45-1). The defence against a rogue MANAGEMENT key is the owner:
-  `owner()` always passes `onlyManagementKey`, so it can `removeKey` the
-  rogue key, and it alone controls `authorizeManager`,
-  `deauthorizeManager` and `transferOwnership`. Recovery restores a lost
-  key; it does not evict a key that is still active.
+  (ERC-734). KeyManager's timelocks bind only the rotations and
+  recoveries sent through it (plan v2 Task 4.5, R-45-1).
+- Recovery is the defence against a rogue MANAGEMENT key and a stolen
+  owner key (Task 4.11, D38 = c). Who can do what, and when:
+  the identity's owner alone seats the agents and threshold
+  (`setupKeyRecovery`), never while a recovery is approved; an agent opens
+  a candidate (`initiateKeyRecovery`); until the agents' approvals reach
+  the threshold its initiator or the owner may cancel it, a MANAGEMENT key
+  may not; from that approval only the agents cancel it, at the same
+  threshold, and the identity refuses its owner's `authorizeManager`,
+  `deauthorizeManager` and `transferOwnership` (`ownershipFrozen`); 48
+  hours after the approval (`RECOVERY_TIMELOCK`), within 7 days, anyone
+  executes it: the recovered key is added and every other MANAGEMENT key,
+  the owner's included, is removed (ACTION, CLAIM and ENCRYPTION keys
+  stay); 7 days after the approval (`OWNER_TRANSFER_TIMELOCK`), within 7
+  days, anyone proposes the recovered wallet as owner
+  (`executeOwnerTransfer`) and that wallet accepts it itself; on that
+  acceptance any MANAGEMENT key added meanwhile goes too. Until then
+  `owner()` keeps its other powers (it still passes `onlyManagementKey`).
+  Agents at the threshold can therefore take the identity: choose agents
+  you would trust with it. The owner sees the approval on chain and has
+  the 48 hours to move assets through the issuer's `Token.recoveryAddress`,
+  which stays the asset-side bound. Authorizing a manager trusts it with
+  the ownership move.
 - `removeKey` is the management action: KeyManager rotations and batches
   use it, and it is the only path for a key nobody can sign for (an
   RSA-type or passphrase key).

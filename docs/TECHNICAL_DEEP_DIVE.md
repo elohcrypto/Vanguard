@@ -68,13 +68,14 @@ purpose, removalNonces[key], chainid))`, and requires
   digest prefixes twice and is refused. Demo options 5 -> 1 and 5a.
 - KeyManager's timelocks bind only the rotations and recoveries sent
   through it (`executeKeyRotation` / `executeKeyRecovery` call `addKey`
-  themselves). A MANAGEMENT key can cancel or re-seat KeyManager
-  recovery. The defence against a rogue MANAGEMENT key is the owner:
-  `owner()` always passes `onlyManagementKey` (it can `removeKey` the
-  rogue key) and alone controls `authorizeManager`, `deauthorizeManager`
-  and `transferOwnership`. Recovery restores a lost key; it does not
-  evict a key that is still active (docs/SYSTEM_WORKFLOW_GUIDE.md,
-  "Identity key lifecycle").
+  themselves). The defence against a rogue MANAGEMENT key or a stolen
+  owner key is recovery (Task 4.11): the owner seats the agents; from
+  the agents' approval only they cancel, at their threshold, and the
+  owner's `authorizeManager`, `deauthorizeManager` and
+  `transferOwnership` are frozen; 48 hours later execution evicts every
+  other MANAGEMENT key; 7 days after the approval the recovered wallet
+  is proposed as owner and accepts. Agents at the threshold can take the
+  identity (docs/SYSTEM_WORKFLOW_GUIDE.md, "Identity key lifecycle").
 - `authorizeManager` / `deauthorizeManager` (owner only) are the one way
   KeyManager accepts. Any contract can also be added as a MANAGEMENT key
   with `addKey(keccak256(abi.encodePacked(contract)), 1, 1)` and then

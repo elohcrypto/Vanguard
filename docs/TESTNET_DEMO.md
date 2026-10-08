@@ -826,11 +826,22 @@ Every print names each wallet's role.
   factory, or created through the factory) authorizes KeyManager, adds a
   fresh MANAGEMENT key with `batchAddKeys`, rotates it to another fresh
   key through the rotation timelock (24 hours unless 12b set another),
-  then wallets 7 and 8, as 2-of-2 recovery agents, recover the identity
-  onto a third fresh key through the 48-hour timelock, the keys are
-  listed, and the two keys the run created (held by nobody) are revoked
-  with `batchRemoveKeys`. Wallet 1 keeps its own key. Run it again for a
-  fresh round.
+  lists the keys and revokes the rotated-in key (held by nobody) with
+  `batchRemoveKeys`; wallet 1 keeps its own key. Then the recovery drill
+  (Task 4.11) on a drill identity wallet 1 deploys and owns (not in the
+  registry): a rogue MANAGEMENT key is planted (a fresh wallet nobody
+  uses, standing for a stolen key), wallet 1 seats wallets 7 and 8 as
+  2-of-2 agents, they open and approve a candidate for wallet 6's key
+  (the receipt prints both opening times); the rogue key's cancel and
+  re-seat, the owner's cancel, re-seat and `deauthorizeManager` are each
+  shown refused (⛔, the chain's reason) and so is an execution before
+  48 hours; 48 hours after the approval the candidate executes and the
+  receipt lists the evicted keys (the rogue key and wallet 1's), read
+  back with `keyHasPurpose` and `getKeysByPurpose`; 7 days after the
+  approval `executeOwnerTransfer` proposes wallet 6 (`pendingOwner()`),
+  wallet 1's `acceptOwnership` is refused, wallet 6 accepts, `owner()`
+  is read back and wallet 1's `transferOwnership` is refused. Run it
+  again for a fresh round (a new drill identity).
 - **12a** (no prompts): withdraws KeyManager's authorization on that
   identity (`deauthorizeManager`) and shows KeyManager refusing a
   rotation; run again to restore it.
@@ -839,8 +850,10 @@ Every print names each wallet's role.
   key for a throwaway wallet, shows a stranger's signature refused, removes
   the key with the throwaway wallet's signature through
   `removeKeyWithProof` and reads `keyHasPurpose` and `getKey` back.
-- **5**: picks an identity; 2 recovers it onto a new key (a wallet index,
-  or a passphrase, which is only a label nobody can sign with), 3
+- **5**: picks an identity; 2 runs the recovery drill on it (Task 4.11:
+  a planted rogue key, wallets 7 and 8 as agents, the eviction at 48
+  hours and the owner transfer at 7 days to the wallet given, which
+  must be a demo signer since it accepts the ownership itself), 3
   replaces one of its MANAGEMENT keys by a timelocked rotation, both
   through KeyManager; 1 removes a key at once, sent by the owner (a
   MANAGEMENT key): an address key through `removeKeyWithProof` with the
@@ -848,12 +861,12 @@ Every print names each wallet's role.
   key's wallet must be a demo signer), a passphrase key through
   `removeKey`; it prints the method it called and reads the key back
   (`keyHasPurpose`, `getKey` revokedAt). In 5 -> 2 the
-  owner authorizes KeyManager and names the agents: that is the holder's
-  step, taken while it still holds its key (at onboarding); a holder who
-  already lost every key cannot take it. In 5 -> 3, replacing the owner's
-  own key leaves `owner()` rights on OnchainID only: KeyManager accepts
-  MANAGEMENT keys, so 12, 12b and 5 -> 2/3 refuse that owner until it
-  holds a MANAGEMENT key again.
+  owner authorizes KeyManager and names the agents: that is the owner's
+  step, taken at onboarding; a holder who already lost every key cannot
+  take it. In 5 -> 3, replacing the owner's own key leaves `owner()`
+  rights on OnchainID only: KeyManager accepts MANAGEMENT keys for
+  rotations, so 12, 12b and 5 -> 3 refuse that owner until it holds a
+  MANAGEMENT key again.
 
 The rotation timelock binds only rotations sent through KeyManager: a
 MANAGEMENT key adds and removes keys at once (ERC-734), with
@@ -861,16 +874,33 @@ MANAGEMENT key adds and removes keys at once (ERC-734), with
 nothing stops it. That stands by design (Task 4.5, R-45-1):
 `executeKeyRotation` and `executeKeyRecovery` call `addKey` themselves,
 so a timelock in `addKey` would block them or tie the identity to one
-manager. The timelock is visibility for the holder. A MANAGEMENT key can
-also cancel or re-seat KeyManager recovery, so recovery is no defence
-against a rogue one: the owner is. `owner()` always passes
-`onlyManagementKey`, so it can `removeKey` the rogue key, and it alone
-controls `authorizeManager`, `deauthorizeManager` and
-`transferOwnership`. Recovery restores a lost key; it does not evict a
-key that is still active.
+manager. The timelock is visibility for the holder.
 
-Withdrawing the authorization pauses KeyManager for the identity; it does
-not cancel. Agents can then neither open nor approve candidates, and
+Recovery is the defence against a rogue MANAGEMENT key and a stolen
+owner key (Task 4.11, D38 = c). Who can do what, and when:
+the identity's owner alone seats the agents and threshold
+(`setupKeyRecovery`), never while a recovery is approved; an agent opens
+a candidate (`initiateKeyRecovery`); until the agents' approvals reach
+the threshold its initiator or the owner may cancel it, a MANAGEMENT key
+may not; from that approval only the agents cancel it, at the same
+threshold, and the identity refuses its owner's `authorizeManager`,
+`deauthorizeManager` and `transferOwnership` (`ownershipFrozen`); 48
+hours after the approval (`RECOVERY_TIMELOCK`), within 7 days, anyone
+executes it: the recovered key is added and every other MANAGEMENT key,
+the owner's included, is removed (ACTION, CLAIM and ENCRYPTION keys
+stay); 7 days after the approval (`OWNER_TRANSFER_TIMELOCK`), within 7
+days, anyone proposes the recovered wallet as owner
+(`executeOwnerTransfer`) and that wallet accepts it itself; on that
+acceptance any MANAGEMENT key added meanwhile goes too. Until then
+`owner()` keeps its other powers (it still passes `onlyManagementKey`).
+Agents at the threshold can therefore take the identity: choose agents
+you would trust with it. The owner sees the approval on chain and has
+the 48 hours to move assets through the issuer's `Token.recoveryAddress`,
+which stays the asset-side bound. Authorizing a manager trusts it with
+the ownership move.
+
+Withdrawing the authorization pauses KeyManager for the identity (it is
+refused while a recovery is approved); it does not cancel. Agents can then neither open nor approve candidates, and
 nothing executes; `cancelKeyRotation` and `cancelKeyRecovery` (both work
 while withdrawn) stop an item. A rotation or recovery runs only within 7
 days after its execution time (`EXECUTION_WINDOW`); after that it is dead
@@ -888,13 +918,19 @@ restarted demo starts over with fresh keys.
 `scripts/demo-smoke.js` (via `scripts/demo-smoke-keys.js`) runs option 12
 and checks on chain that KeyManager answers neither `owner()` nor
 `authorizedManagers()`, is authorized on wallet 1's identity, that the
-rotated-out key is revoked, the rotation and the recovery completed and
-waited 24 and 48 hours (event block times), recovery ran with agents 7
-and 8, option 12 revoked the keys it created, and wallet 1 kept its key;
-then it runs option 5a and checks that the key removed with its proof is
-gone (keyHasPurpose false, revokedAt set), KeyRemoved was emitted, a
-stranger's signature is refused on a live key, and the removed key is not
-removed again (13 checks).
+rotated-out key is revoked, the rotation completed and waited 24 hours
+(event block times); on the drill identity that the recovery executed 48
+hours after the approval (`KeyRecoveryApproved` to `KeyRecoveryCompleted`
+block times) with agents 7 and 8, the rogue key was evicted
+(`KeyRecoveryKeyEvicted`, `keyHasPurpose` false), wallet 6's key is the
+only MANAGEMENT key, the owner transfer waited 7 days after the approval,
+`owner()` is wallet 6, the rogue key's cancel and the old owner's accept
+were refused; that option 12 revoked the rotated-in key and wallet 1 kept
+its key; then it runs option 5a and checks that the key removed with its
+proof is gone (keyHasPurpose false, revokedAt set), KeyRemoved was
+emitted, a stranger's signature is refused on a live key, and the removed
+key is not removed again (17 checks: "Key lifecycle: 17 chain checks
+pass").
 `DEMO_SMOKE_OUT` records `keyManager`.
 
 The handover ceremony hands nothing over for KeyManager (it has no
@@ -903,11 +939,14 @@ owner). handover.json may name `"keyManager"` and `"keyManagerIdentity"`
 refuses a `keyManager` with no code or whose runtime code is not the
 compiled KeyManager, a `keyManagerIdentity` with no code, one that has not
 authorized the named KeyManager, one where the deployer is owner,
-authorized manager or a MANAGEMENT key, and a `keyManagerIdentity` named
-without `keyManager`. 83e adds two lines: the code matches the compiled
-KeyManager (no owner, no allowlist, so the deployer holds no KeyManager
-power), and the identity authorizes KeyManager while the deployer is not
-its owner, manager or MANAGEMENT key. The smoke's ceremony passes 75
+authorized manager, a MANAGEMENT key or a recovery agent (agents at the
+threshold can take an identity, Task 4.11), and a `keyManagerIdentity`
+named without `keyManager`. 83e adds two lines: the code matches the
+compiled KeyManager (no owner, no allowlist, so the deployer holds no
+KeyManager power; the line names the agents' power: eviction after 48
+hours, owner transfer after 7 days), and the identity authorizes
+KeyManager while the deployer is not its owner, manager, MANAGEMENT key
+or recovery agent. The smoke's ceremony passes 75
 checks (Task 4.4 adds the five oracle lines below).
 
 `scripts/production/DeployProduction.ts` deploys KeyManager and authorizes
