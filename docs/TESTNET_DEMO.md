@@ -966,10 +966,11 @@ pass").
 `DEMO_SMOKE_OUT` records `keyManager`.
 
 The handover ceremony hands nothing over for KeyManager (it has no
-owner). handover.json may name `"keyManager"` and `"keyManagerIdentity"`
-(the demo OnchainID). Before Step 1, without a transaction, the preflight
-refuses a `keyManager` with no code or whose runtime code is not the
-compiled KeyManager, a `keyManagerIdentity` with no code, one that has not
+owner). handover.json names `"keyManager"` (required when the factory
+pins one) and may name `"keyManagerIdentity"` (the demo OnchainID).
+Before Step 1, without a transaction, the preflight refuses a
+`keyManager` with no code or whose runtime code is not the compiled
+KeyManager, a `keyManagerIdentity` with no code, one that has not
 authorized the named KeyManager, one where the deployer is owner,
 authorized manager, a MANAGEMENT key or a recovery agent (agents at the
 threshold can take an identity, Task 4.11), one that does not pin the
@@ -980,12 +981,13 @@ without `keyManager`) whose `recoveryManagerCodeHash` is neither zero nor
 the compiled KeyManager's or whose `recoveryManager()` is not the named
 KeyManager: a factory that pins one needs `"keyManager"` named, so a
 config for an option 1 deployment names both. Option 83c names option 1's
-KeyManager and, once option 12 ran, its identity. 83e adds three lines: the code matches the
-compiled KeyManager (no owner, no allowlist, so the deployer holds no
-KeyManager power; only an identity's pinned recovery manager can move its
-ownership, after the agents' eviction at 48 hours and transfer at 7
-days), and the identity pins KeyManager as its recovery manager and
-authorizes only it while the deployer is not its owner, manager,
+KeyManager and, once option 12 ran, its identity. 83e adds the KeyManager
+and factory lines, plus the identity line once option 12 ran: the code
+matches the compiled KeyManager (no owner, no allowlist, so the
+deployer holds no KeyManager power; only an identity's pinned recovery
+manager can move its ownership, after the agents' eviction at 48 hours
+and transfer at 7 days), and the identity pins KeyManager as its
+recovery manager and authorizes only it while the deployer is not its owner, manager,
 MANAGEMENT key or recovery agent, and the factory pins KeyManager on
 every identity it creates. Option 1 sets the factory's `recoveryManager`
 to its KeyManager; the factory accepts only a contract with the compiled
