@@ -6,7 +6,8 @@
  * printed lines: the engine is bound both ways and is the compiled
  * ConsensusOracle; the threshold is 66%; a whitelist and a blacklist
  * query resolve two of three through the engine (ConsensusReached) and
- * the verdicts apply; ops (the operator) pauses a node whose answer is
+ * the verdicts apply, the whitelist one at the tier the query was raised
+ * with (Task 4.12: the query data and the entry both read 4); ops (the operator) pauses a node whose answer is
  * then refused while two of three still resolve (it stays in the
  * denominator), pauses a second one and the third cannot resolve alone,
  * unpauses both, and the manager's emergency designation gates
@@ -35,6 +36,7 @@ async function quietly(fn) {
 
 async function runOracleSmoke(state, failures) {
   const facts = [];
+  let tierLine = "";
   const check = (label, ok) => facts.push([label, Boolean(ok)]);
   const c = Flow.oracleContracts(state, () => {});
   if (!c) return failures.push("4.4: no oracleManager / consensusOracle");
@@ -72,6 +74,16 @@ async function runOracleSmoke(state, failures) {
     check(
       "33a: the verdict whitelisted the subject",
       w && (await wl.isWhitelisted(w.subject)),
+    );
+    const raised = w && (await om.getQueryData(w.q));
+    const entry = w && (await wl.getWhitelistInfo(w.subject));
+    tierLine = `33a raised tier ${w && w.tier}, listed tier ${entry && entry.tier} (chain)`;
+    check(
+      `33a: listed at the raised tier ${Flow.WHITELIST_TIER} (query data and entry, chain)`,
+      w &&
+        raised === Flow.tierData(Flow.WHITELIST_TIER) &&
+        Number(entry.tier) === Flow.WHITELIST_TIER &&
+        w.listedTier === Flow.WHITELIST_TIER,
     );
 
     const [b] = await quietly((log) => Flow.runBlacklistRound(state, log));
@@ -159,7 +171,7 @@ async function runOracleSmoke(state, failures) {
     if (!ok) failures.push(`4.4: ${label} failed`);
   if (facts.every(([, ok]) => ok)) {
     console.log(
-      `✅ Oracles: ${facts.length} chain checks pass (one engine under the gate, ops lifecycle).`,
+      `✅ Oracles: ${facts.length} chain checks pass (one engine under the gate, ops lifecycle; ${tierLine}).`,
     );
   }
 }
