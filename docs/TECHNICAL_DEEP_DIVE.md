@@ -69,7 +69,10 @@ purpose, removalNonces[key], chainid))`, and requires
 - KeyManager's timelocks bind only the rotations and recoveries sent
   through it (`executeKeyRotation` / `executeKeyRecovery` call `addKey`
   themselves). The defence against a rogue MANAGEMENT key or a stolen
-  owner key is recovery (Task 4.11): the owner seats the agents; from
+  owner key is recovery (Task 4.11), through the identity's one pinned
+  recovery manager (other managers hold key powers only and are cleared
+  when the recovered wallet accepts): the owner seats the agents (a
+  re-seat waits 48 hours and the seated agents can veto it); from
   the agents' approval only they cancel, at their threshold, and the
   owner's `authorizeManager`, `deauthorizeManager` and
   `transferOwnership` and new MANAGEMENT keys are frozen; 48 hours later

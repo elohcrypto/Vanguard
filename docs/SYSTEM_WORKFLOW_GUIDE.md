@@ -96,15 +96,16 @@ and 24 onboard users in one step.
 timelocks. It has no owner and no allowlist of its own. An identity opts in
 with `OnchainID.authorizeManager(keyManager)`, which only the identity's
 owner can send; while it is authorized, KeyManager may add and remove the
-identity's keys. Every KeyManager write for an identity needs the caller
-to hold a MANAGEMENT key on it (or, for recovery, to be one of its agents)
-and the identity to have authorized KeyManager ("KeyManager: Identity has
-not authorized KeyManager" otherwise).
+identity's keys. Every KeyManager rotation or batch for an identity needs
+the caller to hold a MANAGEMENT key on it and the identity to have
+authorized KeyManager ("KeyManager: Identity has not authorized
+KeyManager" otherwise). Recovery instead needs the identity to have
+pinned KeyManager as its recovery manager (Task 4.11, below).
 
-`deauthorizeManager` pauses KeyManager for the identity (refused while a
-recovery is approved, Task 4.11); it does not cancel. While withdrawn nothing executes and agents can neither open nor
-approve candidates; `cancelKeyRotation` and `cancelKeyRecovery` work while
-withdrawn and are how to stop an item. A rotation or recovery executes
+`deauthorizeManager` pauses KeyManager's rotations and batches for the
+identity (refused while a recovery is approved); it does not cancel, and
+it does not pause recovery. `cancelKeyRotation` and `cancelKeyRecovery`
+work while withdrawn and are how to stop an item. A rotation or recovery executes
 only within `EXECUTION_WINDOW` (7 days) after its execution time; after
 that it reverts ("execution window passed, re-initiate"), so an item
 paused for longer cannot revive when the identity re-authorizes.
@@ -136,29 +137,47 @@ purpose)` (identity, key, purpose, the key's removal nonce and chain id,
   `signMessage`). Demo options 5 -> 1 and 5a.
 - **Recovery**: the owner names up to ten distinct recovery agents and a
   threshold at onboarding (a holder who lost every key cannot). Recovery is the defence against a rogue MANAGEMENT key and a stolen
-  owner key (Task 4.11, D38 = c). Who can do what, and when:
-  the identity's owner alone seats the agents and threshold
-  (`setupKeyRecovery`), never while a recovery is approved; an agent opens
-  a candidate (`initiateKeyRecovery`); until the agents' approvals reach
-  the threshold its initiator or the owner may cancel it, a MANAGEMENT key
-  may not; from that approval only the agents cancel it, at the same
-  threshold, and the identity refuses its owner's `authorizeManager`,
-  `deauthorizeManager` and `transferOwnership` (`ownershipFrozen`) and
-  any new MANAGEMENT key (`ManagementAdditionsFrozen`); 48
-  hours after the approval (`RECOVERY_TIMELOCK`), within 7 days, anyone
-  executes it: the recovered key is added and every other MANAGEMENT key,
-  the owner's included, is removed (ACTION, CLAIM and ENCRYPTION keys
-  stay), 100 keys per call (`MAX_EVICTIONS_PER_CALL`, ~50k gas each), the
-  rest through `continueKeyEviction` or the owner transfer's own batch; 7
-  days after the approval (`OWNER_TRANSFER_TIMELOCK`), within 7
-  days, anyone proposes the recovered wallet as owner
-  (`executeOwnerTransfer`) and that wallet accepts it itself. Until then
-  `owner()` keeps its other powers (it still passes `onlyManagementKey`).
-  Agents at the threshold can therefore take the identity: choose agents
-  you would trust with it. The owner sees the approval on chain and has
-  the 48 hours to move assets through the issuer's `Token.recoveryAddress`,
-  which stays the asset-side bound. Authorizing a manager trusts it with
-  the ownership move.
+  owner key (Task 4.11, D38 = c). It runs only through the identity's ONE
+  pinned recovery manager (`recoveryManager()`): the factory pins its
+  KeyManager when it creates the identity; an identity deployed directly
+  is pinned once by its creator or owner (`pinRecoveryManager`), and with
+  none pinned it has no recovery. The pin never changes. Recovery does not
+  depend on `authorizedManagers`, so withdrawing KeyManager pauses its
+  rotations and batches, never recovery. Who can do what, and when:
+  the owner seats the agents and threshold (`setupKeyRecovery`); the
+  first seating is immediate, a re-seat of seated agents is pending for
+  48 hours, the seated agents can veto it at their threshold
+  (`vetoKeyRecoverySetup`), anyone applies it afterwards
+  (`applyKeyRecoverySetup`), an approved recovery blocks it and an executed
+  one drops it. An agent opens a candidate (`initiateKeyRecovery`); until
+  the agents' approvals reach the threshold its initiator or the owner may
+  cancel it, a MANAGEMENT key may not. A thief holding the owner key can
+  race each approval from the mempool and cancel before the threshold;
+  the agents' answer is to land their approvals together (one block, a
+  private bundle). From the approval only the agents cancel it, at the
+  same threshold, and the identity refuses its owner's `authorizeManager`,
+  `deauthorizeManager` and `transferOwnership` (`ownershipFrozen`, asked of
+  the recovery manager only) and any new MANAGEMENT key
+  (`ManagementAdditionsFrozen`). 48 hours after the approval
+  (`RECOVERY_TIMELOCK`), within 7 days, anyone executes it: the recovered
+  key is added and every other MANAGEMENT key, the owner's included, is
+  removed (ACTION, CLAIM and ENCRYPTION keys stay), 100 per call
+  (`MAX_EVICTIONS_PER_CALL`), the rest through `continueKeyEviction` or the
+  owner transfer's own batch. 7 days after the approval
+  (`OWNER_TRANSFER_TIMELOCK`) and before 14 days, someone (the recovered
+  wallet, or anyone for it) must call `executeOwnerTransfer` and the
+  recovered wallet must accept (`acceptOwnership`); if nobody does in that
+  window the lock lifts and the old owner keeps the identity. Between the
+  execution and the transfer the old owner keeps its other owner powers:
+  it can remove claims and ACTION or CLAIM keys and remove the recovered
+  key (the transfer restores it), but it cannot add a MANAGEMENT key, a
+  manager or a new owner. On the recovered wallet's acceptance every other
+  MANAGEMENT key is removed and every authorized manager but the recovery
+  manager is de-authorized (one `ManagerDeauthorized` each). Agents at the
+  threshold can therefore take the identity: choose agents you would trust
+  with it. The owner sees the approval on chain and has the 48 hours to
+  move assets through the issuer's `Token.recoveryAddress`, which stays the
+  asset-side bound.
   Each candidate has its own approvals; one is approved at a time; an
   expired candidate can be re-opened, with its approvals reset; recovery
   closes after an execution until the next setup. Demo options 12 (the
