@@ -31,9 +31,14 @@ This directory contains OnchainID implementation contracts following ERC-734 and
 - Recovery is the defence against a rogue MANAGEMENT key and a stolen
   owner key (Task 4.11, D38 = c). It runs only through the identity's ONE
   pinned recovery manager (`recoveryManager()`): the factory pins its
-  KeyManager when it creates the identity; an identity deployed directly
-  is pinned once by its creator or owner (`pinRecoveryManager`), and with
-  none pinned it has no recovery. The pin never changes. Recovery does not
+  KeyManager when it creates the identity (its owner can only choose a
+  contract with the compiled KeyManager's code hash,
+  `recoveryManagerCodeHash`, fixed at construction, or none); an
+  identity deployed directly is pinned (`pinRecoveryManager`) by its
+  creator in the creating block or by its owner, and with none pinned
+  it has no recovery. The pin never changes and outlives ownership
+  transfers. On an unpinned identity the owner key can pin any
+  manager, so a new owner checks `recoveryManager()` first. Recovery does not
   depend on `authorizedManagers`, so withdrawing KeyManager pauses its
   rotations and batches, never recovery. Who can do what, and when:
   the owner seats the agents and threshold (`setupKeyRecovery`); the

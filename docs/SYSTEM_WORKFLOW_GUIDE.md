@@ -135,53 +135,37 @@ purpose)` (identity, key, purpose, the key's removal nonce and chain id,
   so a signature removes the key once; the returned digest is
   already EIP-191 prefixed, so the holder signs the inner keccak256 with
   `signMessage`). Demo options 5 -> 1 and 5a.
-- **Recovery**: the owner names up to ten distinct recovery agents and a
-  threshold at onboarding (a holder who lost every key cannot). Recovery is the defence against a rogue MANAGEMENT key and a stolen
-  owner key (Task 4.11, D38 = c). It runs only through the identity's ONE
-  pinned recovery manager (`recoveryManager()`): the factory pins its
-  KeyManager when it creates the identity; an identity deployed directly
-  is pinned once by its creator or owner (`pinRecoveryManager`), and with
-  none pinned it has no recovery. The pin never changes. Recovery does not
-  depend on `authorizedManagers`, so withdrawing KeyManager pauses its
-  rotations and batches, never recovery. Who can do what, and when:
-  the owner seats the agents and threshold (`setupKeyRecovery`); the
-  first seating is immediate, a re-seat of seated agents is pending for
-  48 hours, the seated agents can veto it at their threshold
-  (`vetoKeyRecoverySetup`), anyone applies it afterwards
-  (`applyKeyRecoverySetup`), an approved recovery blocks it and an executed
-  one drops it. An agent opens a candidate (`initiateKeyRecovery`); until
-  the agents' approvals reach the threshold its initiator or the owner may
-  cancel it, a MANAGEMENT key may not. A thief holding the owner key can
-  race each approval from the mempool and cancel before the threshold;
-  the agents' answer is to land their approvals together (one block, a
-  private bundle). From the approval only the agents cancel it, at the
-  same threshold, and the identity refuses its owner's `authorizeManager`,
-  `deauthorizeManager` and `transferOwnership` (`ownershipFrozen`, asked of
-  the recovery manager only) and any new MANAGEMENT key
-  (`ManagementAdditionsFrozen`). 48 hours after the approval
-  (`RECOVERY_TIMELOCK`), within 7 days, anyone executes it: the recovered
-  key is added and every other MANAGEMENT key, the owner's included, is
-  removed (ACTION, CLAIM and ENCRYPTION keys stay), 100 per call
-  (`MAX_EVICTIONS_PER_CALL`), the rest through `continueKeyEviction` or the
-  owner transfer's own batch. 7 days after the approval
-  (`OWNER_TRANSFER_TIMELOCK`) and before 14 days, someone (the recovered
-  wallet, or anyone for it) must call `executeOwnerTransfer` and the
-  recovered wallet must accept (`acceptOwnership`); if nobody does in that
-  window the lock lifts and the old owner keeps the identity. Between the
-  execution and the transfer the old owner keeps its other owner powers:
-  it can remove claims and ACTION or CLAIM keys and remove the recovered
-  key (the transfer restores it), but it cannot add a MANAGEMENT key, a
-  manager or a new owner. On the recovered wallet's acceptance every other
-  MANAGEMENT key is removed and every authorized manager but the recovery
-  manager is de-authorized (one `ManagerDeauthorized` each). Agents at the
-  threshold can therefore take the identity: choose agents you would trust
-  with it. The owner sees the approval on chain and has the 48 hours to
-  move assets through the issuer's `Token.recoveryAddress`, which stays the
-  asset-side bound.
-  Each candidate has its own approvals; one is approved at a time; an
-  expired candidate can be re-opened, with its approvals reset; recovery
-  closes after an execution until the next setup. Demo options 12 (the
-  drill) and 5 -> 2.
+- **Recovery** (Task 4.11, D38 = c) is the defence against a rogue
+  MANAGEMENT key and a stolen owner key. It runs only through the
+  identity's one pinned recovery manager (`recoveryManager()`): the factory
+  pins its KeyManager at creation (its owner can only choose a contract
+  with the compiled KeyManager's code hash, `recoveryManagerCodeHash`, or
+  none); a directly deployed identity is pinned by its creator in the
+  creating block or by its owner. The pin is final and outlives ownership
+  transfers; on an unpinned identity the owner key can pin any manager, so
+  a new owner checks `recoveryManager()` first. Withdrawing KeyManager
+  pauses rotations and batches, never recovery. The owner seats up to ten
+  agents and a threshold (`setupKeyRecovery`, at onboarding); a re-seat
+  waits 48 hours, the seated agents can veto it at their threshold, and
+  an approved recovery blocks it. Before the agents' approvals reach the
+  threshold the candidate's initiator or the owner may cancel it (a thief
+  with the owner key can race each approval from the mempool; the agents
+  land their approvals together, one block or a private bundle); after,
+  only the agents cancel, at the threshold, and the owner's
+  `authorizeManager`, `deauthorizeManager`, `transferOwnership` and any new
+  MANAGEMENT key are refused. 48 hours after the approval, within 7 days,
+  anyone executes: the recovered key is added and every other MANAGEMENT
+  key, the owner's included, is removed (100 per call, then
+  `continueKeyEviction`; other purposes stay). From 7 to 14 days after the
+  approval someone must call `executeOwnerTransfer` and the recovered
+  wallet must accept, or the lock lifts and the old owner keeps the
+  identity. Until the transfer the old owner can still remove claims,
+  ACTION or CLAIM keys and the recovered key (the transfer restores it).
+  The acceptance removes every other MANAGEMENT key and every manager but
+  the recovery manager. Agents at the threshold can take the identity:
+  choose agents you would trust with it; the owner has the 48 hours to
+  move assets through the issuer's `Token.recoveryAddress`. Demo options
+  12 (the drill) and 5 -> 2.
 - **Batch and multi-signature keys**: `batchAddKeys` and `batchRemoveKeys`
   write several keys in one call; `addMultiSigKey` records an N-of-M
   signer set that `signMultiSigOperation` and `checkMultiSigThreshold`

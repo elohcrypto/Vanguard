@@ -881,9 +881,14 @@ manager. The timelock is visibility for the holder.
 Recovery is the defence against a rogue MANAGEMENT key and a stolen
 owner key (Task 4.11, D38 = c). It runs only through the identity's ONE
 pinned recovery manager (`recoveryManager()`): the factory pins its
-KeyManager when it creates the identity; an identity deployed directly
-is pinned once by its creator or owner (`pinRecoveryManager`), and with
-none pinned it has no recovery. The pin never changes. Recovery does not
+KeyManager when it creates the identity (its owner can only choose a
+contract with the compiled KeyManager's code hash,
+`recoveryManagerCodeHash`, fixed at construction, or none); an
+identity deployed directly is pinned (`pinRecoveryManager`) by its
+creator in the creating block or by its owner, and with none pinned
+it has no recovery. The pin never changes and outlives ownership
+transfers. On an unpinned identity the owner key can pin any
+manager, so a new owner checks `recoveryManager()` first. Recovery does not
 depend on `authorizedManagers`, so withdrawing KeyManager pauses its
 rotations and batches, never recovery. Who can do what, and when:
 the owner seats the agents and threshold (`setupKeyRecovery`); the
@@ -967,16 +972,21 @@ authorized the named KeyManager, one where the deployer is owner,
 authorized manager, a MANAGEMENT key or a recovery agent (agents at the
 threshold can take an identity, Task 4.11), one that does not pin the
 named KeyManager as its recovery manager or authorizes any other manager
-(`getManagers()` must be exactly [KeyManager]), and a `keyManagerIdentity`
-named without `keyManager`. 83e adds two lines: the code matches the
+(`getManagers()` must be exactly [KeyManager]), a `keyManagerIdentity`
+named without `keyManager`, and an `onchainIDFactory` whose
+`recoveryManager()` is not the named KeyManager. 83e adds three lines: the code matches the
 compiled KeyManager (no owner, no allowlist, so the deployer holds no
 KeyManager power; only an identity's pinned recovery manager can move its
 ownership, after the agents' eviction at 48 hours and transfer at 7
 days), and the identity pins KeyManager as its recovery manager and
 authorizes only it while the deployer is not its owner, manager,
-MANAGEMENT key or recovery agent. Option 1 sets the factory's
-`recoveryManager` to its KeyManager, so every identity the factory
-creates pins it. The smoke's ceremony passes 75
+MANAGEMENT key or recovery agent, and the factory pins KeyManager on
+every identity it creates. Option 1 sets the factory's `recoveryManager`
+to its KeyManager; the factory accepts only a contract with the compiled
+KeyManager's code hash (`recoveryManagerCodeHash`, fixed at
+construction), so after the handover governance can switch pinning off or
+to another KeyManager deployment, never to a contract of its own. The
+smoke's ceremony passes 76
 checks (Task 4.4 adds the five oracle lines below).
 
 `scripts/production/DeployProduction.ts` deploys KeyManager and authorizes
