@@ -13,13 +13,15 @@ import "./interfaces/IOnchainID.sol";
  *      ERC-735 claims; one contract is deployed (plan v2 Task 4.5, split
  *      by inheritance as ComplianceRules was in 4.1).
  *
- *      A MANAGEMENT key adds and removes any key at once (ERC-734) and can
- *      cancel or re-seat KeyManager recovery; KeyManager timelocks bind
- *      only what is sent through it (R-45-1). The defence against a rogue
- *      MANAGEMENT key is the owner: owner() always passes
- *      onlyManagementKey and alone controls authorizeManager,
- *      deauthorizeManager and transferOwnership. Recovery restores a lost
- *      key; it does not evict a key that is still active.
+ *      A MANAGEMENT key adds and removes any key at once (ERC-734);
+ *      KeyManager timelocks bind only what is sent through it (R-45-1).
+ *      The defence against a rogue MANAGEMENT key is KeyManager recovery
+ *      (Task 4.11): agents at the threshold evict every other MANAGEMENT
+ *      key after RECOVERY_TIMELOCK and move the ownership after
+ *      OWNER_TRANSFER_TIMELOCK; a MANAGEMENT key can neither cancel an
+ *      approved recovery nor re-seat its agents. The owner keeps its
+ *      powers (owner() always passes onlyManagementKey) except while a
+ *      recovery is approved: see OnchainIDOwnership.
  */
 abstract contract OnchainIDKeys is IOnchainID, Ownable2Step {
     using ECDSA for bytes32;
@@ -47,8 +49,8 @@ abstract contract OnchainIDKeys is IOnchainID, Ownable2Step {
     event Approved(uint256 indexed executionId, bool approved);
 
     // State variables
-    mapping(bytes32 => Key) private keys;
-    mapping(uint256 => bytes32[]) private keysByPurpose;
+    mapping(bytes32 => Key) internal keys;
+    mapping(uint256 => bytes32[]) internal keysByPurpose;
 
     uint256 private executionNonce;
     uint256 internal creationTime;
@@ -170,33 +172,6 @@ abstract contract OnchainIDKeys is IOnchainID, Ownable2Step {
         return Ownable.owner();
     }
 
-    /// @dev An identity must always have a controller. Renouncing used to
-    ///      reopen initialize() to anyone (2F.2, L6).
-    function renounceOwnership() public pure override {
-        revert("OnchainID: identity needs an owner");
-    }
-
-    /// @dev Two-step, as ClaimIssuer (D18). On acceptance the old owner's
-    ///      MANAGEMENT key is retired (unless the owner did not change) and
-    ///      the new owner ends with a MANAGEMENT key: a revoked key is
-    ///      re-activated and a key held for another purpose is moved to
-    ///      MANAGEMENT (2F.2, L8; review F4). Other keys and
-    ///      authorizedManagers survive; the new owner audits them.
-    function acceptOwnership() public override {
-        address previous = owner();
-        super.acceptOwnership();
-        bytes32 newKey = keccak256(abi.encodePacked(msg.sender));
-        if (previous != msg.sender) {
-            bytes32 oldKey = keccak256(abi.encodePacked(previous));
-            if (keyHasPurpose(oldKey, MANAGEMENT_KEY)) _removeKey(oldKey, MANAGEMENT_KEY);
-        }
-        if (!keyHasPurpose(newKey, MANAGEMENT_KEY)) {
-            Key storage held = keys[newKey];
-            if (held.key != bytes32(0) && held.revokedAt == 0) _removeKey(newKey, held.purpose);
-            _addKey(newKey, MANAGEMENT_KEY, ECDSA_TYPE);
-        }
-    }
-
     /**
      * @dev Initialize function (for factory pattern)
      */
@@ -266,7 +241,7 @@ abstract contract OnchainIDKeys is IOnchainID, Ownable2Step {
     }
 
     /// @dev Revoke `_key` and drop it from keysByPurpose[_purpose].
-    function _removeKey(bytes32 _key, uint256 _purpose) private {
+    function _removeKey(bytes32 _key, uint256 _purpose) internal {
         keys[_key].revokedAt = block.timestamp;
         removalNonces[_key]++;
 
@@ -465,24 +440,5 @@ abstract contract OnchainIDKeys is IOnchainID, Ownable2Step {
         } else {
             emit ExecutionFailed(_executionId, request.to, request.value, request.data);
         }
-    }
-
-    /**
-     * @dev Authorize a manager to perform management operations
-     * @param _manager The manager address to authorize
-     */
-    function authorizeManager(address _manager) external {
-        require(msg.sender == owner(), "OnchainID: Only owner can authorize managers");
-        require(_manager != address(0), "OnchainID: Invalid manager address");
-        authorizedManagers[_manager] = true;
-    }
-
-    /**
-     * @dev Remove authorization from a manager
-     * @param _manager The manager address to deauthorize
-     */
-    function deauthorizeManager(address _manager) external {
-        require(msg.sender == owner(), "OnchainID: Only owner can deauthorize managers");
-        authorizedManagers[_manager] = false;
     }
 }

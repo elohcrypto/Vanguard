@@ -1,17 +1,18 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.20;
 
-import "./OnchainIDKeys.sol";
+import "./OnchainIDOwnership.sol";
 
 /**
  * @title OnchainID
- * @dev OnchainID: ERC-734 keys (OnchainIDKeys) and ERC-735 claims (here).
+ * @dev OnchainID: ERC-734 keys (OnchainIDKeys, OnchainIDOwnership) and
+ *      ERC-735 claims (here).
  *      Claims are stored for the identity; whether a wallet is verified is
  *      decided by IdentityRegistry, which asks each trusted ClaimIssuer
  *      (ClaimIssuer.hasValidClaim) and never reads these lists.
  * @author CMTA UTXO Compliance Team
  */
-contract OnchainID is OnchainIDKeys {
+contract OnchainID is OnchainIDOwnership {
     // Claim topics
     uint256 public constant IDENTITY_TOPIC = 1;
     uint256 public constant BIOMETRIC_TOPIC = 2;
@@ -52,7 +53,7 @@ contract OnchainID is OnchainIDKeys {
      * @dev Constructor
      * @param _owner Initial owner of the identity (zero: initialize() sets one)
      */
-    constructor(address _owner) OnchainIDKeys(_owner) {}
+    constructor(address _owner) OnchainIDOwnership(_owner) {}
 
     // ERC-735 Implementation
 

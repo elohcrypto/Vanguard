@@ -2,7 +2,7 @@
 pragma solidity ^0.8.20;
 
 import "@openzeppelin/contracts/utils/cryptography/ECDSA.sol";
-import "./KeyManagerRecovery.sol";
+import "./KeyManagerOwnerTransfer.sol";
 import "./interfaces/IERC734.sol";
 
 /**
@@ -10,15 +10,17 @@ import "./interfaces/IERC734.sol";
  * @dev Key rotation, recovery, multi-sig and batch key operations for
  *      OnchainID identities. Holds no owner and no allowlist: every write
  *      is gated per identity, by the caller holding a MANAGEMENT key on it
- *      and by the identity having authorized this contract
- *      (`OnchainID.authorizeManager`), which its key writes check anyway.
- *      Withdrawing that authorization (`deauthorizeManager`) pauses
- *      pending rotations and recoveries; `cancelKeyRotation` and
+ *      (recovery: its owner and its agents) and by the identity having
+ *      authorized this contract (`OnchainID.authorizeManager`), which its
+ *      key writes check anyway. Withdrawing that authorization
+ *      (`deauthorizeManager`) pauses pending rotations and unapproved
+ *      recovery candidates; it is refused while a recovery is approved
+ *      (recoveryLocked, Task 4.11). `cancelKeyRotation` and
  *      `cancelKeyRecovery` (both usable while withdrawn) stop them. An
  *      item not executed within EXECUTION_WINDOW of its executionTime is
  *      dead and must be re-initiated, so a paused item cannot revive later.
  */
-contract KeyManager is KeyManagerRecovery {
+contract KeyManager is KeyManagerOwnerTransfer {
     using ECDSA for bytes32;
 
     // Events

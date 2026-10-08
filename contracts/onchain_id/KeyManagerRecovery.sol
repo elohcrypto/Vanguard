@@ -17,11 +17,47 @@ interface IManagedIdentity {
  *      their own approvals and timelock, execution, and the per-identity
  *      gates both halves use (MANAGEMENT key, authorization, execution
  *      window). KeyManager is the only contract deployed.
+ *
+ *      Recovery is the defence against a rogue MANAGEMENT key and a stolen
+ *      owner key (D38 = c, Task 4.11):
+ *      - the identity OWNER sets up the agents and threshold, never while
+ *        a recovery is approved or its owner transfer is pending;
+ *      - an agent opens a candidate; before the threshold of approvals is
+ *        reached its initiator or the owner may cancel it; once reached
+ *        (the APPROVAL) only the agents cancel it, by the same threshold;
+ *      - RECOVERY_TIMELOCK after the approval, within EXECUTION_WINDOW,
+ *        anyone executes: the recovered key is added and every other
+ *        MANAGEMENT key on the identity is removed (ACTION, CLAIM and
+ *        ENCRYPTION keys are untouched);
+ *      - OWNER_TRANSFER_TIMELOCK after the approval, within
+ *        EXECUTION_WINDOW, anyone proposes the recovered wallet (the
+ *        address whose key was recovered) as the identity's owner; the
+ *        wallet accepts it itself (Ownable2Step).
+ *      From the approval until the owner moves (or the windows close) the
+ *      identity refuses its owner's authorizeManager, deauthorizeManager
+ *      and transferOwnership (recoveryLocked).
+ *      Trust rule: agents at the threshold can take the identity (evict its
+ *      keys, become its owner after OWNER_TRANSFER_TIMELOCK). Choose agents
+ *      you would trust with the identity. The owner sees the approval on
+ *      chain and has RECOVERY_TIMELOCK to move assets through the issuer's
+ *      Token.recoveryAddress, which stays the asset-side bound.
  */
 abstract contract KeyManagerRecovery is ReentrancyGuard {
     event KeyRecoveryInitiated(address indexed identity, bytes32 indexed recoveryKey, address initiator);
     event KeyRecoveryCompleted(address indexed identity, bytes32 indexed recoveryKey);
     event KeyRecoveryCancelled(address indexed identity, bytes32 indexed recoveryKey, address by);
+    event KeyRecoverySetUp(address indexed identity, uint256 agents, uint256 threshold, uint256 epoch);
+    /// @dev The threshold was reached: both timelocks run from here.
+    event KeyRecoveryApproved(
+        address indexed identity,
+        bytes32 indexed recoveryKey,
+        uint256 executionTime,
+        uint256 ownerTransferTime
+    );
+    /// @dev An agent's vote to cancel the approved candidate.
+    event KeyRecoveryCancelVote(address indexed identity, bytes32 indexed recoveryKey, address agent, uint256 votes);
+    /// @dev A MANAGEMENT key removed by executeKeyRecovery.
+    event KeyRecoveryKeyEvicted(address indexed identity, bytes32 indexed evictedKey, bytes32 indexed recoveryKey);
 
     /// @dev Per identity. Candidates live under (epoch, key); bumping the
     ///      epoch (setup, execute) drops every candidate at once.
@@ -31,6 +67,8 @@ abstract contract KeyManagerRecovery is ReentrancyGuard {
         uint256 epoch;
         bool completed;
         bytes32 lastKey; // last candidate opened, or the key recovered
+        bytes32 approvedKey; // candidate that reached the threshold
+        uint256 approvedAt; // when it did; both timelocks run from here
     }
 
     /// @dev One proposed recovery key with its own tally (2F.2 review, F2):
@@ -42,15 +80,19 @@ abstract contract KeyManagerRecovery is ReentrancyGuard {
         address initiator;
         uint256 round; // bumps on each (re)open; older approvals die
         mapping(address => uint256) approvedRound;
+        uint256 cancelCount; // agents' votes to cancel once approved
+        mapping(address => uint256) cancelledRound;
     }
 
-    mapping(address => KeyRecovery) private _recoveries;
+    mapping(address => KeyRecovery) internal _recoveries;
     mapping(address => mapping(uint256 => mapping(bytes32 => RecoveryCandidate))) private _candidates;
 
     uint256 public constant RECOVERY_TIMELOCK = 48 hours;
     uint256 public constant MAX_RECOVERY_AGENTS = 10;
     /// @dev An item runs only within this window after its executionTime.
     uint256 public constant EXECUTION_WINDOW = 7 days;
+    /// @dev From the approval to the owner transfer (D38 c).
+    uint256 public constant OWNER_TRANSFER_TIMELOCK = 7 days;
 
     /// @dev Sender holds a MANAGEMENT key on `_identity`, and `_identity`
     ///      authorized this contract as its manager.
@@ -83,17 +125,20 @@ abstract contract KeyManagerRecovery is ReentrancyGuard {
     // Key recovery functions
 
     /**
-     * @dev Set up key recovery. Clears every pending candidate and approval
-     *      (new epoch) and re-opens recovery after a completed one.
+     * @dev Set up key recovery: the identity OWNER only (a MANAGEMENT key
+     *      could otherwise seat its own agents and, through them, take the
+     *      identity). Refused while recoveryLocked: re-seating the agents
+     *      must not kill an approved recovery. Clears every pending
+     *      candidate and approval (new epoch) and re-opens recovery after a
+     *      completed one.
      * @param _identity The OnchainID contract address
      * @param _recoveryAgents Distinct recovery agent addresses
      * @param _threshold Number of agents required for recovery
      */
-    function setupKeyRecovery(
-        address _identity,
-        address[] calldata _recoveryAgents,
-        uint256 _threshold
-    ) external onlyIdentityManager(_identity) {
+    function setupKeyRecovery(address _identity, address[] calldata _recoveryAgents, uint256 _threshold) external {
+        require(msg.sender == IManagedIdentity(_identity).owner(), "KeyManager: only the identity owner sets up recovery");
+        _checkAuthorized(_identity);
+        require(!recoveryLocked(_identity), "KeyManager: recovery approved, setup locked");
         require(_recoveryAgents.length > 0, "KeyManager: No recovery agents");
         require(_recoveryAgents.length <= MAX_RECOVERY_AGENTS, "KeyManager: Too many recovery agents");
         require(_threshold > 0 && _threshold <= _recoveryAgents.length, "KeyManager: Invalid threshold");
@@ -110,6 +155,9 @@ abstract contract KeyManagerRecovery is ReentrancyGuard {
         recovery.threshold = _threshold;
         recovery.completed = false;
         recovery.lastKey = bytes32(0);
+        recovery.approvedKey = bytes32(0);
+        recovery.approvedAt = 0;
+        emit KeyRecoverySetUp(_identity, _recoveryAgents.length, _threshold, recovery.epoch);
     }
 
     /**
@@ -137,6 +185,7 @@ abstract contract KeyManagerRecovery is ReentrancyGuard {
 
         c.round++;
         c.approvalCount = 0;
+        c.cancelCount = 0;
         c.initiatedAt = block.timestamp;
         c.executionTime = block.timestamp + RECOVERY_TIMELOCK;
         c.initiator = msg.sender;
@@ -146,7 +195,11 @@ abstract contract KeyManagerRecovery is ReentrancyGuard {
     }
 
     /**
-     * @dev Approve the pending candidate for `_key`, once per agent.
+     * @dev Approve the pending candidate for `_key`, once per agent. The
+     *      approval that reaches the threshold approves the candidate: its
+     *      timelock restarts from now (RECOVERY_TIMELOCK to execution,
+     *      OWNER_TRANSFER_TIMELOCK to the owner transfer). One candidate is
+     *      approved at a time.
      * @param _identity The OnchainID contract address
      * @param _key The recovery key being approved
      */
@@ -158,37 +211,72 @@ abstract contract KeyManagerRecovery is ReentrancyGuard {
         require(_isRecoveryAgent(recovery, msg.sender), "KeyManager: Not a recovery agent");
         _checkAuthorized(_identity);
         require(c.approvedRound[msg.sender] != c.round, "KeyManager: Already approved");
+        require(
+            block.timestamp <= c.executionTime + EXECUTION_WINDOW,
+            "KeyManager: execution window passed, re-initiate"
+        );
+        bool approved = _liveApproval(recovery);
+        require(!approved || recovery.approvedKey == _key, "KeyManager: another recovery is approved");
 
         c.approvedRound[msg.sender] = c.round;
         c.approvalCount++;
+        if (!approved && c.approvalCount >= recovery.threshold) {
+            recovery.approvedKey = _key;
+            recovery.approvedAt = block.timestamp;
+            c.executionTime = block.timestamp + RECOVERY_TIMELOCK;
+            emit KeyRecoveryApproved(
+                _identity,
+                _key,
+                c.executionTime,
+                block.timestamp + OWNER_TRANSFER_TIMELOCK
+            );
+        }
     }
 
     /**
-     * @dev Cancel the pending candidate for `_key`: the identity owner, a
-     *      MANAGEMENT key, or the agent that opened that candidate. Other
+     * @dev Cancel the candidate for `_key`. Before its approval: the agent
+     *      that opened it or the identity owner (a MANAGEMENT key no longer
+     *      may: it is what recovery defends against). Once approved: only
+     *      the agents, each voting once, cancelling at the threshold; the
+     *      owner and MANAGEMENT keys are refused, so a stolen owner key or a
+     *      rogue MANAGEMENT key cannot veto its own eviction. Other
      *      candidates are untouched.
      */
     function cancelKeyRecovery(address _identity, bytes32 _key) external {
         KeyRecovery storage recovery = _recoveries[_identity];
         RecoveryCandidate storage c = _candidates[_identity][recovery.epoch][_key];
         require(c.initiatedAt > 0 && !recovery.completed, "KeyManager: Recovery not initiated");
-        require(
-            msg.sender == c.initiator ||
-                IOnchainID(_identity).keyHasPurpose(keccak256(abi.encodePacked(msg.sender)), 1) ||
-                msg.sender == IManagedIdentity(_identity).owner(),
-            "KeyManager: Not allowed to cancel recovery"
-        );
+        if (_liveApproval(recovery) && recovery.approvedKey == _key) {
+            require(_isRecoveryAgent(recovery, msg.sender), "KeyManager: approved recovery, only its agents cancel");
+            require(c.cancelledRound[msg.sender] != c.round, "KeyManager: Already voted to cancel");
+            c.cancelledRound[msg.sender] = c.round;
+            c.cancelCount++;
+            emit KeyRecoveryCancelVote(_identity, _key, msg.sender, c.cancelCount);
+            if (c.cancelCount < recovery.threshold) return;
+            recovery.approvedKey = bytes32(0);
+            recovery.approvedAt = 0;
+        } else {
+            require(
+                msg.sender == c.initiator || msg.sender == IManagedIdentity(_identity).owner(),
+                "KeyManager: Not allowed to cancel recovery"
+            );
+        }
         c.initiatedAt = 0;
         c.executionTime = 0;
         c.approvalCount = 0;
+        c.cancelCount = 0;
         c.initiator = address(0);
         emit KeyRecoveryCancelled(_identity, _key, msg.sender);
     }
 
     /**
-     * @dev Execute the candidate for `_key` after its timelock with enough
-     *      approvals: adds `_key` as MANAGEMENT and ends the epoch, so every
-     *      other candidate dies. Recovery stays closed until the next setup.
+     * @dev Execute the approved candidate for `_key`, RECOVERY_TIMELOCK
+     *      after its approval and within EXECUTION_WINDOW: removes every
+     *      other MANAGEMENT key on the identity (owner's included; owner()
+     *      keeps its owner powers until the owner transfer), adds `_key` as
+     *      MANAGEMENT (moving it from another purpose if it holds one) and
+     *      ends the epoch, so every other candidate dies. Recovery stays
+     *      closed until the next setup.
      * @param _identity The OnchainID contract address
      * @param _key The recovery key to add
      */
@@ -200,15 +288,65 @@ abstract contract KeyManagerRecovery is ReentrancyGuard {
         _checkWindow(c.executionTime);
         _checkAuthorized(_identity);
         // Exact: agents are distinct and fixed within an epoch.
-        require(c.approvalCount >= recovery.threshold, "KeyManager: Insufficient approvals");
+        require(
+            recovery.approvedKey == _key && c.approvalCount >= recovery.threshold,
+            "KeyManager: Insufficient approvals"
+        );
 
         recovery.completed = true;
         recovery.lastKey = _key;
         recovery.epoch++;
 
-        require(IOnchainID(_identity).addKey(_key, 1, 1), "KeyManager: Failed to add recovery key");
+        _evictManagementKeys(_identity, _key);
+        IOnchainID id = IOnchainID(_identity);
+        if (!id.keyHasPurpose(_key, 1)) {
+            (uint256 purpose, , bytes32 held, uint256 revokedAt) = id.getKey(_key);
+            if (held != bytes32(0) && revokedAt == 0) id.removeKey(_key, purpose);
+            require(id.addKey(_key, 1, 1), "KeyManager: Failed to add recovery key");
+        }
 
         emit KeyRecoveryCompleted(_identity, _key);
+    }
+
+    /// @dev Removes every MANAGEMENT key but `_keep`. Order: the first, then
+    ///      the rest from the end, so each victim sits at the front of the
+    ///      identity's swap-and-pop list when removed (linear, not quadratic).
+    function _evictManagementKeys(address _identity, bytes32 _keep) private {
+        IOnchainID id = IOnchainID(_identity);
+        bytes32[] memory mgmt = id.getKeysByPurpose(1);
+        uint256 n = mgmt.length;
+        for (uint256 i = 0; i < n; i++) {
+            bytes32 victim = i == 0 ? mgmt[0] : mgmt[n - i];
+            if (victim == _keep) continue;
+            require(id.removeKey(victim, 1), "KeyManager: Failed to evict key");
+            emit KeyRecoveryKeyEvicted(_identity, victim, _keep);
+        }
+    }
+
+    /**
+     * @dev True from an approval until the recovered wallet owns the
+     *      identity, or until the window that applies has passed (execution
+     *      not run: RECOVERY_TIMELOCK + EXECUTION_WINDOW; owner not moved:
+     *      OWNER_TRANSFER_TIMELOCK + EXECUTION_WINDOW). While true, setup is
+     *      refused here and the identity refuses its owner's
+     *      authorizeManager, deauthorizeManager and transferOwnership.
+     */
+    function recoveryLocked(address _identity) public view returns (bool) {
+        KeyRecovery storage recovery = _recoveries[_identity];
+        if (_liveApproval(recovery)) return true;
+        return
+            recovery.completed &&
+            recovery.approvedKey != bytes32(0) &&
+            block.timestamp <= recovery.approvedAt + OWNER_TRANSFER_TIMELOCK + EXECUTION_WINDOW &&
+            keccak256(abi.encodePacked(IManagedIdentity(_identity).owner())) != recovery.approvedKey;
+    }
+
+    /// @dev An approved, not yet executed candidate whose window is open.
+    function _liveApproval(KeyRecovery storage recovery) internal view returns (bool) {
+        return
+            recovery.approvedKey != bytes32(0) &&
+            !recovery.completed &&
+            block.timestamp <= recovery.approvedAt + RECOVERY_TIMELOCK + EXECUTION_WINDOW;
     }
 
     function _isRecoveryAgent(KeyRecovery storage recovery, address who) private view returns (bool) {
