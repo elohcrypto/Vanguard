@@ -9,17 +9,17 @@ import "./interfaces/IERC734.sol";
 /**
  * @title KeyManager
  * @dev Key rotation, recovery, multi-sig and batch key operations for
- *      OnchainID identities. Holds no owner and no allowlist: every write
- *      is gated per identity, by the caller holding a MANAGEMENT key on it
- *      (recovery: its owner and its agents) and by the identity having
- *      authorized this contract (`OnchainID.authorizeManager`), which its
- *      key writes check anyway. Withdrawing that authorization
- *      (`deauthorizeManager`) pauses pending rotations and unapproved
- *      recovery candidates; it is refused while a recovery is approved
- *      (recoveryLocked, Task 4.11). `cancelKeyRotation` and
- *      `cancelKeyRecovery` (both usable while withdrawn) stop them. An
- *      item not executed within EXECUTION_WINDOW of its executionTime is
- *      dead and must be re-initiated, so a paused item cannot revive later.
+ *      OnchainID identities. Holds no owner and no allowlist. Rotations,
+ *      batches and multi-sig keys are gated per identity by the caller
+ *      holding a MANAGEMENT key on it and by the identity having authorized
+ *      this contract (`OnchainID.authorizeManager`); withdrawing that
+ *      authorization (`deauthorizeManager`) pauses them, and
+ *      `cancelKeyRotation` stops one. Recovery is gated by the identity
+ *      PINNING this contract as its recovery manager (Task 4.11, R-411-14),
+ *      not by the authorization, so a stolen owner key cannot switch it
+ *      off; its owner seats the agents, a re-seat waits 48h and can be
+ *      vetoed (R-411-16). An item not executed within EXECUTION_WINDOW of
+ *      its executionTime is dead and must be re-initiated.
  */
 contract KeyManager is KeyManagerOwnerTransfer {
     using ECDSA for bytes32;

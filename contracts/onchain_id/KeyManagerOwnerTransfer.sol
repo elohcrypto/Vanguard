@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.20;
 
-import {KeyManagerRecovery, IManagedIdentity, IOnchainID} from "./KeyManagerRecovery.sol";
+import {IManagedIdentity, IOnchainID} from "./KeyManagerRecovery.sol";
+import {KeyManagerRecoverySetup} from "./KeyManagerRecoverySetup.sol";
 
 /// @dev The identity's ownership hook (OnchainIDOwnership, Task 4.11).
 interface IRecoverableIdentity {
@@ -17,7 +18,7 @@ interface IRecoverableIdentity {
  *      contract back (isRecoveryOwner). KeyManager is the only contract
  *      deployed; see KeyManagerRecovery for the rules and the trust rule.
  */
-abstract contract KeyManagerOwnerTransfer is KeyManagerRecovery {
+abstract contract KeyManagerOwnerTransfer is KeyManagerRecoverySetup {
     event RecoveryOwnerTransferProposed(address indexed identity, address indexed newOwner, bytes32 indexed recoveryKey);
 
     /// @dev No executed recovery for this identity (or a new setup since).
@@ -45,7 +46,7 @@ abstract contract KeyManagerOwnerTransfer is KeyManagerRecovery {
         if (keccak256(abi.encodePacked(_newOwner)) != recovery.approvedKey) revert NotRecoveredWallet();
         _checkWindow(recovery.approvedAt + OWNER_TRANSFER_TIMELOCK);
         if (IManagedIdentity(_identity).owner() == _newOwner) revert AlreadyOwner();
-        _checkAuthorized(_identity);
+        _checkPinned(_identity);
         // Restores the recovered key if the old owner removed it and evicts
         // what is left; the transfer needs it to be the only MANAGEMENT key.
         _evictBatch(IManagedIdentity(_identity), _identity, recovery.approvedKey);
@@ -64,7 +65,7 @@ abstract contract KeyManagerOwnerTransfer is KeyManagerRecovery {
         KeyRecovery storage recovery = _recoveries[_identity];
         if (!recovery.completed || recovery.approvedKey == bytes32(0)) revert NoExecutedRecovery();
         if (!recoveryLocked(_identity)) revert RecoveryNotLocked();
-        _checkAuthorized(_identity);
+        _checkPinned(_identity);
         _evictBatch(IManagedIdentity(_identity), _identity, recovery.approvedKey);
     }
 

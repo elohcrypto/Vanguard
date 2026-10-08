@@ -29,6 +29,12 @@ contract OnchainIDFactory is Ownable2Step {
     bool public deploymentPaused;
     uint256 public deploymentFee;
     address public feeRecipient;
+    /// @dev Pinned as recovery manager on every identity this factory
+    ///      creates (Task 4.11, R-411-14); zero: identities get none.
+    address public recoveryManager;
+
+    event RecoveryManagerSet(address indexed manager);
+    error RecoveryManagerNotAContract();
 
     /**
      * @dev Constructor
@@ -62,6 +68,7 @@ contract OnchainIDFactory is Ownable2Step {
         bytes memory bytecode = abi.encodePacked(type(OnchainID).creationCode, abi.encode(_owner));
 
         identity = Create2.deploy(0, _salt, bytecode);
+        _pin(identity);
 
         // Register the deployed identity
         isOnchainID[identity] = true;
@@ -105,6 +112,7 @@ contract OnchainIDFactory is Ownable2Step {
         );
 
         identity = Create2.deploy(0, _salt, bytecode);
+        _pin(identity);
 
         // The OnchainID is deployed with the owner, so we can add the management key directly
         // The owner can add the management key themselves after deployment
@@ -163,6 +171,7 @@ contract OnchainIDFactory is Ownable2Step {
             bytes memory bytecode = abi.encodePacked(type(OnchainID).creationCode, abi.encode(_owners[i]));
 
             address identity = Create2.deploy(0, _salts[i], bytecode);
+            _pin(identity);
 
             // Register the deployed identity
             isOnchainID[identity] = true;
@@ -255,6 +264,20 @@ contract OnchainIDFactory is Ownable2Step {
     }
 
     // Admin functions
+
+    /// @dev The recovery manager future identities pin (a KeyManager, the
+    ///      one the ceremony checks); zero turns pinning off.
+    function setRecoveryManager(address _manager) external onlyOwner {
+        if (_manager != address(0) && _manager.code.length == 0) revert RecoveryManagerNotAContract();
+        recoveryManager = _manager;
+        emit RecoveryManagerSet(_manager);
+    }
+
+    /// @dev Pins the configured recovery manager on a new identity (the
+    ///      factory is its creator).
+    function _pin(address identity) private {
+        if (recoveryManager != address(0)) OnchainID(identity).pinRecoveryManager(recoveryManager);
+    }
 
     /**
      * @dev Set deployment fee

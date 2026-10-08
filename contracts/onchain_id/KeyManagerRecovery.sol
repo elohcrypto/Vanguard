@@ -9,6 +9,7 @@ interface IManagedIdentity {
     function authorizedManagers(address manager) external view returns (bool);
     function owner() external view returns (address);
     function evictManagementKeys(bytes32 keep, uint256 max) external returns (bytes32[] memory evicted);
+    function recoveryManager() external view returns (address);
 }
 
 /**
@@ -21,8 +22,12 @@ interface IManagedIdentity {
  *
  *      Recovery is the defence against a rogue MANAGEMENT key and a stolen
  *      owner key (D38 = c, Task 4.11):
- *      - the identity OWNER sets up the agents and threshold, never while
- *        a recovery is approved or its owner transfer is pending;
+ *      - recovery runs only for an identity that pinned this contract as
+ *        its recovery manager (OnchainIDOwnership, R-411-14);
+ *      - the identity OWNER seats the agents and threshold, never while a
+ *        recovery is approved or its owner transfer is pending; a re-seat
+ *        of seated agents waits RECOVERY_TIMELOCK and the seated agents
+ *        can veto it (KeyManagerRecoverySetup, R-411-16);
  *      - an agent opens a candidate; before the threshold of approvals is
  *        reached its initiator or the owner may cancel it; once reached
  *        (the APPROVAL) only the agents cancel it, by the same threshold;
@@ -73,6 +78,8 @@ abstract contract KeyManagerRecovery is ReentrancyGuard {
     error AlreadyVotedToCancel();
     error EvictionFailed(bytes32 key);
     error IdentityNotAContract();
+    /// @dev The identity pinned another recovery manager, or none.
+    error NotRecoveryManager();
 
     /// @dev Per identity. Candidates live under (epoch, key); bumping the
     ///      epoch (setup, execute) drops every candidate at once.
@@ -100,6 +107,17 @@ abstract contract KeyManagerRecovery is ReentrancyGuard {
     }
 
     mapping(address => KeyRecovery) internal _recoveries;
+
+    /// @dev A re-seat of seated agents waiting RECOVERY_TIMELOCK (R-411-16).
+    struct PendingSetup {
+        address[] agents;
+        uint256 threshold;
+        uint256 effectiveAt; // 0: none pending
+        uint256 vetoes;
+        uint256 round;
+        mapping(address => uint256) vetoedRound;
+    }
+    mapping(address => PendingSetup) internal _pendingSetups;
     mapping(address => mapping(uint256 => mapping(bytes32 => RecoveryCandidate))) private _candidates;
 
     uint256 public constant RECOVERY_TIMELOCK = 48 hours;
@@ -128,6 +146,13 @@ abstract contract KeyManagerRecovery is ReentrancyGuard {
     }
 
     /// @dev Refuses an item whose execution window has passed.
+    /// @dev Recovery runs only through the identity's pinned recovery
+    ///      manager (R-411-14); it does not need authorizedManagers, so
+    ///      withdrawing that authorization cannot switch recovery off.
+    function _checkPinned(address _identity) internal view {
+        if (IManagedIdentity(_identity).recoveryManager() != address(this)) revert NotRecoveryManager();
+    }
+
     function _checkWindow(uint256 executionTime) internal view {
         require(block.timestamp >= executionTime, "KeyManager: Timelock not expired");
         require(
@@ -143,42 +168,6 @@ abstract contract KeyManagerRecovery is ReentrancyGuard {
     // Key recovery functions
 
     /**
-     * @dev Set up key recovery: the identity OWNER only (a MANAGEMENT key
-     *      could otherwise seat its own agents and, through them, take the
-     *      identity). Refused while recoveryLocked: re-seating the agents
-     *      must not kill an approved recovery. Clears every pending
-     *      candidate and approval (new epoch) and re-opens recovery after a
-     *      completed one.
-     * @param _identity The OnchainID contract address
-     * @param _recoveryAgents Distinct recovery agent addresses
-     * @param _threshold Number of agents required for recovery
-     */
-    function setupKeyRecovery(address _identity, address[] calldata _recoveryAgents, uint256 _threshold) external {
-        if (msg.sender != IManagedIdentity(_identity).owner()) revert NotIdentityOwner();
-        _checkAuthorized(_identity);
-        if (recoveryLocked(_identity)) revert RecoveryLocked();
-        require(_recoveryAgents.length > 0, "KeyManager: No recovery agents");
-        require(_recoveryAgents.length <= MAX_RECOVERY_AGENTS, "KeyManager: Too many recovery agents");
-        require(_threshold > 0 && _threshold <= _recoveryAgents.length, "KeyManager: Invalid threshold");
-        // A duplicate would let one agent count twice (2F.2 review, F3).
-        for (uint256 i = 0; i < _recoveryAgents.length; i++) {
-            for (uint256 j = i + 1; j < _recoveryAgents.length; j++) {
-                require(_recoveryAgents[i] != _recoveryAgents[j], "KeyManager: Duplicate agent");
-            }
-        }
-
-        KeyRecovery storage recovery = _recoveries[_identity];
-        recovery.epoch++;
-        recovery.recoveryAgents = _recoveryAgents;
-        recovery.threshold = _threshold;
-        recovery.completed = false;
-        recovery.lastKey = bytes32(0);
-        recovery.approvedKey = bytes32(0);
-        recovery.approvedAt = 0;
-        emit KeyRecoverySetUp(_identity, _recoveryAgents.length, _threshold, recovery.epoch);
-    }
-
-    /**
      * @dev Open a recovery candidate for `_newRecoveryKey`. Each candidate
      *      has its own approvals and timelock, so an agent proposing another
      *      key never erases or delays an honest candidate (2F.2 review, F2).
@@ -192,7 +181,7 @@ abstract contract KeyManagerRecovery is ReentrancyGuard {
         require(recovery.recoveryAgents.length > 0, "KeyManager: Recovery not set up");
         require(!recovery.completed, "KeyManager: Recovery already completed");
         require(_isRecoveryAgent(recovery, msg.sender), "KeyManager: Not a recovery agent");
-        _checkAuthorized(_identity);
+        _checkPinned(_identity);
         require(_newRecoveryKey != bytes32(0), "KeyManager: Invalid recovery key");
         RecoveryCandidate storage c = _candidates[_identity][recovery.epoch][_newRecoveryKey];
         // A candidate past its execution window is dead and may be re-opened.
@@ -227,7 +216,7 @@ abstract contract KeyManagerRecovery is ReentrancyGuard {
         RecoveryCandidate storage c = _candidates[_identity][recovery.epoch][_key];
         require(c.initiatedAt > 0, "KeyManager: Recovery not initiated");
         require(_isRecoveryAgent(recovery, msg.sender), "KeyManager: Not a recovery agent");
-        _checkAuthorized(_identity);
+        _checkPinned(_identity);
         require(c.approvedRound[msg.sender] != c.round, "KeyManager: Already approved");
         if (block.timestamp > c.executionTime + EXECUTION_WINDOW) revert CandidateExpired();
         bool approved = _liveApproval(recovery);
@@ -303,7 +292,7 @@ abstract contract KeyManagerRecovery is ReentrancyGuard {
         RecoveryCandidate storage c = _candidates[_identity][recovery.epoch][_key];
         require(c.initiatedAt > 0, "KeyManager: Recovery not initiated");
         _checkWindow(c.executionTime);
-        _checkAuthorized(_identity);
+        _checkPinned(_identity);
         // Exact: agents are distinct and fixed within an epoch.
         require(
             recovery.approvedKey == _key && c.approvalCount >= recovery.threshold,
@@ -313,6 +302,8 @@ abstract contract KeyManagerRecovery is ReentrancyGuard {
         recovery.completed = true;
         recovery.lastKey = _key;
         recovery.epoch++;
+        // A pending re-seat (perhaps the thief's) dies with the recovery.
+        _clearPendingSetup(_pendingSetups[_identity]);
 
         _evictBatch(IManagedIdentity(_identity), _identity, _key);
         emit KeyRecoveryCompleted(_identity, _key);
@@ -352,7 +343,16 @@ abstract contract KeyManagerRecovery is ReentrancyGuard {
             block.timestamp <= recovery.approvedAt + RECOVERY_TIMELOCK + EXECUTION_WINDOW;
     }
 
-    function _isRecoveryAgent(KeyRecovery storage recovery, address who) private view returns (bool) {
+    /// @dev Drops a pending re-seat; bumping the round voids its vetoes.
+    function _clearPendingSetup(PendingSetup storage p) internal {
+        delete p.agents;
+        p.threshold = 0;
+        p.effectiveAt = 0;
+        p.vetoes = 0;
+        p.round++;
+    }
+
+    function _isRecoveryAgent(KeyRecovery storage recovery, address who) internal view returns (bool) {
         for (uint256 i = 0; i < recovery.recoveryAgents.length; i++) {
             if (recovery.recoveryAgents[i] == who) return true;
         }
