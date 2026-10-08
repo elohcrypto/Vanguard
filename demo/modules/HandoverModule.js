@@ -113,6 +113,11 @@ class HandoverModule {
       // a testingMode verifier is refused by the preflight.
       privacyManager: s.getContract("privacyManager") || undefined,
       zkVerifier: s.getContract("zkVerifierIntegrated") || undefined,
+      // 4.2/4.11: option 1 pins this KeyManager on the OnchainIDFactory,
+      // so it must be named (it holds no power; nothing is handed over).
+      keyManager: s.getContract("keyManager") || undefined,
+      // Option 12's demo identity authorizes it (as in the demo smoke).
+      keyManagerIdentity: s.keyLifecycle?.identity,
       // ConsensusOracle is the manager's ownerless engine (4.4), not here.
       oracles: pick(["whitelistOracle", "blacklistOracle"]),
       issuers: pick(["kycIssuer", "amlIssuer"]),

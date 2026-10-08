@@ -257,6 +257,36 @@ describe("Handover: KeyManager (4.2)", function () {
     });
   });
 
+  // 4.11 round 5: demo option 1 pins its KeyManager on the factory, so
+  // option 83c's config must name it or the preflight refuses.
+  it("option 83c's config names the KeyManager option 1 pinned", async function () {
+    const HandoverModule = require("../../demo/modules/HandoverModule");
+    const byKey: Record<string, any> = {
+      ...f.c,
+      digitalToken: f.c.token,
+      escrowFactory: f.c.escrowWalletFactory,
+      zkVerifierIntegrated: f.c.zkVerifier,
+      vanguardGovernance: f.c.governance,
+      keyManager: km,
+      whitelistOracle: f.args.oracles[0],
+      kycIssuer: f.kycIssuer,
+    };
+    const signers: any[] = [];
+    signers[0] = f.deployer;
+    signers[9] = f.issuerAdmin;
+    signers[10] = f.ops;
+    signers[11] = f.guardian;
+    const state = {
+      signers,
+      getContract: (k: string) => byKey[k] ?? null,
+      keyLifecycle: { identity: await identity.getAddress() },
+    };
+    const built = new HandoverModule(state, null, null)._ceremonyArgs();
+    expect(built.keyManager).to.equal(km);
+    await handoverDeployerPowers({ ...built, log: () => {} });
+    expect(await f.c.token.isAgent(f.ops.address)).to.equal(true);
+  });
+
   it("scripts/handover.ts reads keyManager from handover.json", async function () {
     const a = async (k: string) => f.c[k].getAddress();
     const cfg: Record<string, any> = {
