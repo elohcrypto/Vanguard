@@ -3,9 +3,12 @@
  *
  * Runs demo option 12 (demo/utils/KeyLifecycleFlow.js) against the smoke's
  * deployment: the KeyManager option 1 deployed is authorized on wallet 1's
- * identity, one rotation and one recovery run through their timelocks on
- * the dev node, and the key set is read back from chain. Records the
- * identity in state.keyLifecycle for the handover ceremony's check.
+ * identity, one rotation runs through its timelock on the dev node, and
+ * option 12's recovery drill (Task 4.11) evicts a planted rogue MANAGEMENT
+ * key 48h after the agents' approval and moves the drill identity's
+ * ownership to wallet 6 7 days after it; the key sets, owners, event
+ * timestamps and refusals are read back from chain. Records the identity
+ * in state.keyLifecycle for the handover ceremony's check.
  * Then option 5a (demo/utils/KeyRemovalFlow.js, Task 4.5): a key removed
  * with its holder's signature is gone, a stranger's signature is refused,
  * and a removed key is not removed again. First, options 6/7 revoke and
@@ -18,6 +21,7 @@ const { ethers } = require("hardhat");
 const {
   DEMO_WALLET,
   AGENT_WALLETS,
+  RECOVERED_WALLET,
   keyOf,
   runKeyLifecycle,
 } = require("../demo/utils/KeyLifecycleFlow");
@@ -25,6 +29,7 @@ const {
   innerMessage,
   runRemovalDemo,
 } = require("../demo/utils/KeyRemovalFlow");
+const { refusal } = require("../demo/utils/KeyRecoveryDrill");
 const OnchainIDModule = require("../demo/modules/OnchainIDModule");
 const { EnhancedLogger } = require("../demo/logging");
 const { KYC_TOPIC, cacheVerification } = require("../demo/utils/Kyc");
@@ -203,13 +208,27 @@ async function runKeySmoke(state, failures) {
   const rotInit = await one(
     km.filters.KeyRotationInitiated(r.identity, r.oldKey, r.newKey),
   );
-  const recInit = await one(
-    km.filters.KeyRecoveryInitiated(r.identity, r.recoveryKey),
+  // Task 4.11: the drill identity, read from chain.
+  const d = r.recovery;
+  const drill = await ethers.getContractAt("OnchainID", d.identity);
+  const rescued = state.signers[RECOVERED_WALLET].address;
+  const rogueKey = keyOf(d.rogue);
+  const recApproved = await one(km.filters.KeyRecoveryApproved(d.identity));
+  const recDone = await one(km.filters.KeyRecoveryCompleted(d.identity));
+  const evicted = await km.queryFilter(
+    km.filters.KeyRecoveryKeyEvicted(d.identity, rogueKey),
   );
-  const recDone = await one(
-    km.filters.KeyRecoveryCompleted(r.identity, r.recoveryKey),
+  const proposed = await one(
+    km.filters.RecoveryOwnerTransferProposed(d.identity, rescued),
   );
-  const rec = await km.getKeyRecovery(r.identity);
+  const rec = await km.getKeyRecovery(d.identity);
+  const mgmt = await drill.getKeysByPurpose(MANAGEMENT);
+  const rogueCancel = await refusal(
+    km,
+    "cancelKeyRecovery",
+    [d.identity, keyOf(rescued)],
+    d.rogue,
+  );
   const agents = AGENT_WALLETS.map((i) => state.signers[i].address);
   const facts = [
     [
@@ -222,25 +241,45 @@ async function runKeySmoke(state, failures) {
       Boolean(rotDone),
     ],
     [
-      "the recovery added the recovery key (KeyRecoveryCompleted)",
-      Boolean(recDone),
-    ],
-    [
       "the rotation waited its 24h timelock",
       rotInit && rotDone && (await ts(rotDone)) - (await ts(rotInit)) >= 86400,
     ],
     [
-      "the recovery waited its 48h timelock",
-      recInit && recDone && (await ts(recDone)) - (await ts(recInit)) >= 172800,
+      "recovery executed 48h after the approval (KeyRecoveryApproved -> Completed)",
+      recApproved &&
+        recDone &&
+        (await ts(recDone)) - (await ts(recApproved)) >= 172800,
     ],
     [
-      "recovery completed with agents 7 and 8 (no issuer role)",
+      "recovery ran with agents 7 and 8 (no issuer role)",
       rec.completed && rec.recoveryAgents.join() === agents.join(),
     ],
     [
-      "option 12 revoked the rotated-in and recovered keys it created",
-      (await wasMgmtNowRevoked(r.newKey)) &&
-        (await wasMgmtNowRevoked(r.recoveryKey)),
+      "the rogue MANAGEMENT key was evicted (KeyRecoveryKeyEvicted, keyHasPurpose false)",
+      evicted.length === 1 &&
+        !(await drill.keyHasPurpose(rogueKey, MANAGEMENT)),
+    ],
+    [
+      "wallet 6's key is the drill identity's only MANAGEMENT key",
+      mgmt.length === 1 && mgmt[0] === keyOf(rescued),
+    ],
+    [
+      "the owner transfer waited 7 days after the approval",
+      recApproved &&
+        proposed &&
+        (await ts(proposed)) - (await ts(recApproved)) >= 604800,
+    ],
+    [
+      "wallet 6 accepted: owner() is wallet 6",
+      (await drill.owner()) === rescued,
+    ],
+    [
+      "the rogue key's cancel was refused (and the old owner's accept)",
+      Boolean(rogueCancel) && d.refused && d.oldOwnerRefused,
+    ],
+    [
+      "option 12 revoked the rotated-in key it created",
+      await wasMgmtNowRevoked(r.newKey),
     ],
     ["wallet 1 keeps its MANAGEMENT key", await has(keyOf(wallet))],
     ...(await removalFacts(state, failures)),
@@ -249,7 +288,7 @@ async function runKeySmoke(state, failures) {
     if (!ok) failures.push(`4.2/4.5: ${label} failed`);
   if (facts.every(([, ok]) => ok)) {
     console.log(
-      `✅ Key lifecycle: ${facts.length} chain checks pass (rotation and recovery through KeyManager, removal with proof).`,
+      `✅ Key lifecycle: ${facts.length} chain checks pass (rotation, recovery eviction at 48h and owner transfer at 7 days through KeyManager, removal with proof).`,
     );
   }
 }
