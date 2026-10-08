@@ -369,7 +369,9 @@ cannot be `null` while a PrivacyManager is named, and a testingMode
 verifier is refused; a PrivacyManager that ComplianceRules wires for VSC
 or VGT, `privacyManager(token)` for the ZkOnly/Either whitelist modes, is
 in the ceremony even before governance is bound to it, so `privacyManager`
-must name it, and two different ones wired or bound are refused), the optional `oracles` and `issuers` arrays (omitted: the
+must name it, and two different ones wired or bound are refused), `keyManager`
+(required when the OnchainIDFactory pins a recovery manager, as option 1's
+does) and the optional `keyManagerIdentity` (both below), the optional `oracles` and `issuers` arrays (omitted: the
 set read from chain), the optional `feeWallets` array (escrow fee wallets
 to check for the exemption), the
 optional `fromBlock` (where the event scans start: trusted contracts,
@@ -973,8 +975,12 @@ authorized manager, a MANAGEMENT key or a recovery agent (agents at the
 threshold can take an identity, Task 4.11), one that does not pin the
 named KeyManager as its recovery manager or authorizes any other manager
 (`getManagers()` must be exactly [KeyManager]), a `keyManagerIdentity`
-named without `keyManager`, and an `onchainIDFactory` whose
-`recoveryManager()` is not the named KeyManager. 83e adds three lines: the code matches the
+named without `keyManager`, and an `onchainIDFactory` (checked with or
+without `keyManager`) whose `recoveryManagerCodeHash` is neither zero nor
+the compiled KeyManager's or whose `recoveryManager()` is not the named
+KeyManager: a factory that pins one needs `"keyManager"` named, so a
+config for an option 1 deployment names both. Option 83c names option 1's
+KeyManager and, once option 12 ran, its identity. 83e adds three lines: the code matches the
 compiled KeyManager (no owner, no allowlist, so the deployer holds no
 KeyManager power; only an identity's pinned recovery manager can move its
 ownership, after the agents' eviction at 48 hours and transfer at 7

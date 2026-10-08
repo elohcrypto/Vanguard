@@ -15,7 +15,8 @@
  *     "onchainIDFactory": "0x.." | null,        // required key (2F.5), null = not deployed
  *     "privacyManager": "0x.." | null,          // required key (3.3), null = not deployed
  *     "zkVerifier": "0x.." | null,              // required key (3.3), ZKVerifierIntegrated
- *     "keyManager": "0x..",                     // optional (4.2), KeyManager
+ *     "keyManager": "0x..",                     // KeyManager (4.2); required when
+ *                                               // onchainIDFactory pins it (4.11)
  *     "keyManagerIdentity": "0x..",             // optional (4.2), the demo OnchainID
  *     "oracles": ["0x..", "0x.."],              // optional, one-step Ownable
  *     "issuers": ["0x..", "0x.."],              // optional, ClaimIssuer
