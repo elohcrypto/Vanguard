@@ -191,7 +191,7 @@ sequenceDiagram
     participant Engine as ConsensusOracle (engine)
     participant Whitelist as WhitelistOracle
 
-    Node1->>Manager: submitQuery(investor, WHITELIST)
+    Node1->>Manager: submitQuery(investor, WHITELIST, abi.encode(tier 4))
     Manager->>Engine: openQuery: snapshot every registered node (300)
     Node1->>Manager: submitResponse(query, YES)
     Manager->>Engine: recordVote (100 of 300)
@@ -199,8 +199,8 @@ sequenceDiagram
     Manager->>Engine: recordVote (200 of 300 meets 66%)
     Engine-->>Manager: resolved YES; the manager stamps resolvedAt
     Node1->>Whitelist: provideAttestation(investor, query, YES, signature)
-    Whitelist->>Manager: getQueryBinding, getQueryResolution
-    Whitelist->>Whitelist: add the investor (tier 3, the consensus default)
+    Whitelist->>Manager: getQueryBinding, getQueryResolution, getQueryData
+    Whitelist->>Whitelist: add the investor at tier 4 (the voted tier)
 ```
 
 Plan v2 Task 4.4 (D11 a): OracleManager is the only vote entry and
@@ -212,8 +212,12 @@ threshold by an OracleParameters vote. Demo options 33a, 34a and 35a run
 this path without prompts (docs/TESTNET_DEMO.md, "Oracle nodes and
 consensus").
 
-WhitelistOracle tiers run 1 to 5 (higher is better); a consensus verdict
-adds the subject at tier 3. Where a party passes the whitelist by its
+WhitelistOracle tiers run 1 to 5 (higher is better). The owner or list
+manager (`addToWhitelist`, a DynamicListManager vote) names the tier in
+the call; a consensus query names (wallet, tier), its data
+`abi.encode(tier)` checked at submit (a node raises 1 to 4, the owner 5),
+and the verdict lists at that tier or moves a live entry to it (Task
+4.12; a rejection of tier T delists an entry at T or above). Where a party passes the whitelist by its
 oracle entry (OracleOnly, or Either with a live entry), ComplianceRules
 requires the entry's tier to reach the party's `requiredWhitelistTier`
 in the token's InvestorTypeRegistry (D37 = a, Task 4.10); in ZkOnly, or
