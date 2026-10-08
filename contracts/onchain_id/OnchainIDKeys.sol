@@ -92,6 +92,8 @@ abstract contract OnchainIDKeys is IOnchainID, Ownable2Step {
 
     /// @dev One approver, one approval: a key may not approve the same request twice.
     error AlreadyApproved();
+    /// @dev addKey(MANAGEMENT) while a recovery is approved (Task 4.11).
+    error ManagementAdditionsFrozen();
 
     /**
      * @dev Who has already approved a given request. Approvals were counted
@@ -222,8 +224,14 @@ abstract contract OnchainIDKeys is IOnchainID, Ownable2Step {
         uint256 _purpose,
         uint256 _keyType
     ) external override onlyManagementKey returns (bool success) {
+        // Task 4.11: no MANAGEMENT key joins while a recovery is approved,
+        // so its eviction runs against a fixed set.
+        if (_purpose == MANAGEMENT_KEY && _managementAdditionsFrozen()) revert ManagementAdditionsFrozen();
         return _addKey(_key, _purpose, _keyType);
     }
+
+    /// @dev True while a recovery is approved (OnchainIDOwnership).
+    function _managementAdditionsFrozen() internal view virtual returns (bool);
 
     /**
      * @dev Remove a key: the management action. Any MANAGEMENT key (or the

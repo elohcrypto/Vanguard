@@ -264,8 +264,10 @@ describe("KeyManager recovery evicts and moves ownership (4.11, D38 c)", functio
     await expect(
       f.id.connect(f.owner).transferOwnership(f.owner.address),
     ).to.be.revertedWithCustomError(f.id, "FrozenByRecovery");
-    // Keys the old owner adds meanwhile go on acceptance.
-    await f.id.connect(f.owner).addKey(ethers.id("late"), MGMT, 1);
+    // No MANAGEMENT key joins meanwhile, not even the owner's.
+    await expect(
+      f.id.connect(f.owner).addKey(ethers.id("late"), MGMT, 1),
+    ).to.be.revertedWithCustomError(f.id, "ManagementAdditionsFrozen");
     await f.id.connect(f.rescued).acceptOwnership();
     expect(await f.id.owner()).to.equal(f.rescued.address);
     expect(await f.id.getKeysByPurpose(MGMT)).to.deep.equal([key]);
@@ -348,5 +350,80 @@ describe("KeyManager recovery evicts and moves ownership (4.11, D38 c)", functio
     await f.id.authorizeManager(f.stranger.address);
     expect(await f.id.ownershipFrozen()).to.equal(false);
     await f.id.deauthorizeManager(f.stranger.address);
+  });
+
+  it("additions are frozen from the approval, through KeyManager too", async function () {
+    const f = await setup();
+    await expect(f.id.connect(f.rogue).addKey(ethers.id("x"), ACTION, 1)).to.not
+      .be.reverted;
+    await approved(f);
+    await expect(
+      f.id.connect(f.rogue).addKey(ethers.id("y"), MGMT, 1),
+    ).to.be.revertedWithCustomError(f.id, "ManagementAdditionsFrozen");
+    await expect(
+      f.km.connect(f.rogue).batchAddKeys(f.idA, [ethers.id("y")], [MGMT], [1]),
+    ).to.be.revertedWithCustomError(f.id, "ManagementAdditionsFrozen");
+    // Other purposes are not frozen.
+    await f.id.connect(f.rogue).addKey(ethers.id("z"), ACTION, 1);
+  });
+
+  it("a bloated MANAGEMENT list is evicted in batches before the owner moves", async function () {
+    const f = await setup();
+    // The rogue key bloats the list before any approval.
+    const extra = 250;
+    for (let i = 0; i < extra; i++) {
+      await f.id.connect(f.rogue).addKey(ethers.id(`bloat-${i}`), MGMT, 1);
+    }
+    const t = await approved(f);
+    const key = k(f.rescued.address);
+    await time.increase(2 * DAY + 1);
+    const rc = await (
+      await f.km.connect(f.anyone).executeKeyRecovery(f.idA, key)
+    ).wait();
+    const evicted = rc!.logs.filter(
+      (l: any) => f.km.interface.parseLog(l)?.name === "KeyRecoveryKeyEvicted",
+    );
+    expect(evicted.length).to.equal(100);
+    expect(rc!.gasUsed).to.be.lt(8_000_000n);
+    // owner + rogue + 250 others, minus 100, plus the recovered key.
+    expect((await f.id.getKeysByPurpose(MGMT)).length).to.equal(153);
+    await time.setNextBlockTimestamp(t + 7n * BigInt(DAY));
+    await expect(
+      f.km.executeOwnerTransfer(f.idA, f.rescued.address),
+    ).to.be.revertedWithCustomError(f.km, "EvictionIncomplete");
+    // One more batch here; the transfer's own batch takes the last 52.
+    await f.km.connect(f.anyone).continueKeyEviction(f.idA);
+    expect((await f.id.getKeysByPurpose(MGMT)).length).to.equal(53);
+    await f.km.executeOwnerTransfer(f.idA, f.rescued.address);
+    expect(await f.id.getKeysByPurpose(MGMT)).to.deep.equal([key]);
+    await f.id.connect(f.rescued).acceptOwnership();
+    expect(await f.id.owner()).to.equal(f.rescued.address);
+    await expect(f.km.continueKeyEviction(f.idA)).to.be.revertedWithCustomError(
+      f.km,
+      "RecoveryNotLocked",
+    );
+  });
+
+  it("the owner transfer restores a recovered key the old owner removed", async function () {
+    const f = await setup();
+    const t = await approved(f);
+    const key = k(f.rescued.address);
+    await time.increase(2 * DAY + 1);
+    await f.km.executeKeyRecovery(f.idA, key);
+    await f.id.connect(f.owner).removeKey(key, MGMT);
+    expect(await f.id.keyHasPurpose(key, MGMT)).to.equal(false);
+    await time.setNextBlockTimestamp(t + 7n * BigInt(DAY));
+    await f.km.executeOwnerTransfer(f.idA, f.rescued.address);
+    expect(await f.id.getKeysByPurpose(MGMT)).to.deep.equal([key]);
+    await f.id.connect(f.rescued).acceptOwnership();
+    expect(await f.id.owner()).to.equal(f.rescued.address);
+  });
+
+  it("continueKeyEviction needs an executed recovery", async function () {
+    const f = await setup();
+    await expect(f.km.continueKeyEviction(f.idA)).to.be.revertedWithCustomError(
+      f.km,
+      "NoExecutedRecovery",
+    );
   });
 });

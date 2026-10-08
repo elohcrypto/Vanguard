@@ -8,6 +8,7 @@ import "./interfaces/IOnchainID.sol";
 interface IManagedIdentity {
     function authorizedManagers(address manager) external view returns (bool);
     function owner() external view returns (address);
+    function evictManagementKeys(bytes32 keep, uint256 max) external returns (bytes32[] memory evicted);
 }
 
 /**
@@ -107,6 +108,9 @@ abstract contract KeyManagerRecovery is ReentrancyGuard {
     uint256 public constant EXECUTION_WINDOW = 7 days;
     /// @dev From the approval to the owner transfer (D38 c).
     uint256 public constant OWNER_TRANSFER_TIMELOCK = 7 days;
+    /// @dev MANAGEMENT keys evicted per call (~50k gas each): a bloated key
+    ///      list is evicted over several calls (continueKeyEviction).
+    uint256 public constant MAX_EVICTIONS_PER_CALL = 100;
 
     /// @dev Sender holds a MANAGEMENT key on `_identity`, and `_identity`
     ///      authorized this contract as its manager.
@@ -282,12 +286,13 @@ abstract contract KeyManagerRecovery is ReentrancyGuard {
 
     /**
      * @dev Execute the approved candidate for `_key`, RECOVERY_TIMELOCK
-     *      after its approval and within EXECUTION_WINDOW: removes every
-     *      other MANAGEMENT key on the identity (owner's included; owner()
-     *      keeps its owner powers until the owner transfer), adds `_key` as
-     *      MANAGEMENT (moving it from another purpose if it holds one) and
-     *      ends the epoch, so every other candidate dies. Recovery stays
-     *      closed until the next setup.
+     *      after its approval and within EXECUTION_WINDOW: adds `_key` as
+     *      MANAGEMENT (moving it from another purpose if it holds one),
+     *      removes the other MANAGEMENT keys (the owner's included; owner()
+     *      keeps its owner powers until the owner transfer), up to
+     *      MAX_EVICTIONS_PER_CALL here and the rest through
+     *      continueKeyEviction, and ends the epoch, so every other
+     *      candidate dies. Recovery stays closed until the next setup.
      * @param _identity The OnchainID contract address
      * @param _key The recovery key to add
      */
@@ -309,27 +314,15 @@ abstract contract KeyManagerRecovery is ReentrancyGuard {
         recovery.lastKey = _key;
         recovery.epoch++;
 
-        _evictManagementKeys(IOnchainID(_identity), _identity, _key);
-        if (!IOnchainID(_identity).keyHasPurpose(_key, 1)) {
-            (uint256 purpose, , bytes32 held, uint256 revokedAt) = IOnchainID(_identity).getKey(_key);
-            if (held != bytes32(0) && revokedAt == 0) IOnchainID(_identity).removeKey(_key, purpose);
-            require(IOnchainID(_identity).addKey(_key, 1, 1), "KeyManager: Failed to add recovery key");
-        }
-
+        _evictBatch(IManagedIdentity(_identity), _identity, _key);
         emit KeyRecoveryCompleted(_identity, _key);
     }
 
-    /// @dev Removes every MANAGEMENT key but `_keep`. Order: the first, then
-    ///      the rest from the end, so each victim sits at the front of the
-    ///      identity's swap-and-pop list when removed (linear, not quadratic).
-    function _evictManagementKeys(IOnchainID id, address identityAddr, bytes32 _keep) private {
-        bytes32[] memory mgmt = id.getKeysByPurpose(1);
-        uint256 n = mgmt.length;
-        for (uint256 i = 0; i < n; i++) {
-            bytes32 victim = i == 0 ? mgmt[0] : mgmt[n - i];
-            if (victim == _keep) continue;
-            if (!id.removeKey(victim, 1)) revert EvictionFailed(victim);
-            emit KeyRecoveryKeyEvicted(identityAddr, victim, _keep);
+    /// @dev Makes `_keep` MANAGEMENT and evicts the next batch of others.
+    function _evictBatch(IManagedIdentity id, address identityAddr, bytes32 _keep) internal {
+        bytes32[] memory gone = id.evictManagementKeys(_keep, MAX_EVICTIONS_PER_CALL);
+        for (uint256 i = 0; i < gone.length; i++) {
+            emit KeyRecoveryKeyEvicted(identityAddr, gone[i], _keep);
         }
     }
 

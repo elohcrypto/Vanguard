@@ -73,6 +73,35 @@ abstract contract OnchainIDOwnership is OnchainIDKeys {
         return false;
     }
 
+    function _managementAdditionsFrozen() internal view override returns (bool) {
+        return ownershipFrozen();
+    }
+
+    /**
+     * @dev Recovery eviction (Task 4.11), by an authorized manager: makes
+     *      `keep` a MANAGEMENT key and removes up to `max` other MANAGEMENT
+     *      keys, the list's front first (each found at index 0 or 1, so
+     *      linear). No power beyond removeKey/addKey, which an authorized
+     *      manager already holds; here the add passes the freeze. Returns
+     *      the keys removed; call again while others remain.
+     */
+    function evictManagementKeys(bytes32 keep, uint256 max) external returns (bytes32[] memory evicted) {
+        if (!authorizedManagers[msg.sender]) revert NotAuthorizedManager();
+        if (!keyHasPurpose(keep, MANAGEMENT_KEY)) {
+            Key storage held = keys[keep];
+            if (held.key != bytes32(0) && held.revokedAt == 0) _removeKey(keep, held.purpose);
+            _addKey(keep, MANAGEMENT_KEY, ECDSA_TYPE);
+        }
+        bytes32[] storage mgmt = keysByPurpose[MANAGEMENT_KEY];
+        uint256 n = mgmt.length - 1;
+        if (n > max) n = max;
+        evicted = new bytes32[](n);
+        for (uint256 i = 0; i < n; i++) {
+            evicted[i] = mgmt[0] == keep ? mgmt[1] : mgmt[0];
+            _removeKey(evicted[i], MANAGEMENT_KEY);
+        }
+    }
+
     function _checkNotFrozen() private view {
         if (ownershipFrozen()) revert FrozenByRecovery();
     }
@@ -115,8 +144,9 @@ abstract contract OnchainIDOwnership is OnchainIDKeys {
     ///      MANAGEMENT (2F.2, L8; review F4). Other keys and
     ///      authorizedManagers survive; the new owner audits them. When the
     ///      acceptance completes a recovery's proposal, every other
-    ///      MANAGEMENT key is removed too (keys the old owner added after
-    ///      the recovery's eviction), so the recovered wallet is the only one.
+    ///      MANAGEMENT key is removed too, so the recovered wallet is the
+    ///      only one (none is expected: the proposal needs a single
+    ///      MANAGEMENT key and additions stay frozen until this acceptance).
     function acceptOwnership() public override {
         address previous = owner();
         super.acceptOwnership();
