@@ -9,7 +9,7 @@
 
 "use strict";
 
-const { ethers } = require("hardhat");
+const { ethers, artifacts } = require("hardhat");
 const { KYC_TOPIC, AML_TOPIC } = require("./Kyc");
 const {
   setupDemoAttestations,
@@ -36,7 +36,14 @@ async function deployOnchainIDContracts(mod) {
   // Deploy OnchainID Factory
   displayProgress("Deploying OnchainID Factory...");
   const OnchainIDFactory = await ethers.getContractFactory("OnchainIDFactory");
-  const factory = await OnchainIDFactory.deploy(mod.state.signers[0].address);
+  // Task 4.11 (R-411-19): only the compiled KeyManager may be pinned.
+  const kmHash = ethers.keccak256(
+    (await artifacts.readArtifact("KeyManager")).deployedBytecode,
+  );
+  const factory = await OnchainIDFactory.deploy(
+    mod.state.signers[0].address,
+    kmHash,
+  );
   await factory.waitForDeployment();
   mod.state.setContract("onchainIDFactory", factory);
 

@@ -15,6 +15,7 @@
  */
 
 const { ethers } = require("hardhat");
+const keys = require("./demo-smoke-keys");
 const DemoState = require("../demo/core/DemoState");
 const { attestAll } = require("../demo/utils/Kyc");
 const { advancePastVoterAge } = require("../demo/utils/ChainTime");
@@ -304,7 +305,6 @@ async function main() {
     const proposalFee = await govContract.proposalCreationCost();
     const voteFee = await govContract.votingCost();
     const stake = proposalFee + voteFee;
-    const OID0 = await ethers.getContractFactory("OnchainID");
 
     for (let i = 0; i < 4; i++) {
       const s = state.signers[i];
@@ -312,12 +312,7 @@ async function main() {
         // A real OnchainID is required: isVerified() reads claims off the
         // identity contract, and registration alone no longer verifies.
         // Both KYC and AML topics are required (Task 1R.3).
-        const id = await OID0.deploy(s.address);
-        // Task 4.11: its creator pins KeyManager as the recovery manager,
-        // as the factory does for the identities it creates.
-        await id.pinRecoveryManager(
-          await state.getContract("keyManager").getAddress(),
-        );
+        const id = await keys.deployPinned(state, s); // 4.11
         await idReg.registerIdentity(s.address, await id.getAddress(), 840);
         await attestAll(state, await id.getAddress(), `voter:${i}`);
       }
@@ -414,10 +409,9 @@ async function main() {
     const idReg = state.getContract("identityRegistry");
     const govAddr2 = await govC.getAddress();
     // Register + fund three investors so a proposal can pass.
-    const OID = await ethers.getContractFactory("OnchainID");
     for (const sgn of [alice, bob, carol]) {
       if (!(await idReg.isVerified(sgn.address))) {
-        const id = await OID.deploy(sgn.address);
+        const id = await keys.deployPinned(state, sgn); // 4.11
         await idReg.registerIdentity(sgn.address, await id.getAddress(), 840);
         await attestAll(
           state,
@@ -483,7 +477,7 @@ async function main() {
   // 6b. Task 3.6: the ZK allow list on VSC (demo-smoke-privacy.js); 7. Plan
   // 2C.1: the handover ceremony, last because it strips the deployer.
   await require("./demo-smoke-privacy").runPrivacySmoke(state, failures);
-  await require("./demo-smoke-keys").runKeySmoke(state, failures); // 4.2
+  await keys.runKeySmoke(state, failures); // 4.2
   await require("./demo-smoke-oracles").runOracleSmoke(state, failures); // 4.4
   await require("./demo-smoke-handover").runHandoverSmoke(state, failures);
 

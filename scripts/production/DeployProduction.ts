@@ -1,4 +1,4 @@
-import { ethers } from "hardhat";
+import { artifacts, ethers } from "hardhat";
 import {
   OnchainIDFactory,
   ClaimIssuer,
@@ -143,8 +143,14 @@ async function main(): Promise<DeploymentResult> {
   console.log("🏭 Deploying OnchainIDFactory...");
   const OnchainIDFactoryFactory =
     await ethers.getContractFactory("OnchainIDFactory");
+  // Task 4.11 (R-411-19): the factory accepts as recovery manager only a
+  // contract with the compiled KeyManager's runtime code hash.
+  const keyManagerCodeHash = ethers.keccak256(
+    (await artifacts.readArtifact("KeyManager")).deployedBytecode,
+  );
   const factory = await OnchainIDFactoryFactory.deploy(
     deployer.address,
+    keyManagerCodeHash,
     deploymentOptions,
   );
 

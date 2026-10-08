@@ -66,6 +66,24 @@ async function identityFacts(o, kmAddr, dAddr) {
   return { idAddr, authorizes, pinned, onlyKm, deployerRoles: roles };
 }
 
+/**
+ * Task 4.11 (R-411-19): the factory pins KeyManager on every identity it
+ * creates. { addr, pins } for o.onchainIDFactory, or null when not named.
+ */
+async function factoryFacts(o, kmAddr) {
+  if (!o.onchainIDFactory) return null;
+  const addr = await addrOf(o.onchainIDFactory);
+  const f = await ethers.getContractAt(
+    ["function recoveryManager() view returns (address)"],
+    addr,
+  );
+  const rm = await f.recoveryManager().catch(() => null);
+  return {
+    addr,
+    pins: rm !== null && rm.toLowerCase() === kmAddr.toLowerCase(),
+  };
+}
+
 /** { addr, hasCode, actual, expected } for o.keyManager, or null. */
 async function keyManagerCode(o) {
   if (!o.keyManager) return null;
@@ -95,6 +113,12 @@ async function preflightKeyManager(o) {
   if (k.actual !== k.expected) {
     fail(
       `KeyManager ${k.addr} runtime code hash ${k.actual} is not the compiled KeyManager (${k.expected}): one from before Task 4.2 keeps an owner and an allowlist; redeploy it from this build`,
+    );
+  }
+  const fac = await factoryFacts(o, k.addr);
+  if (fac && !fac.pins) {
+    fail(
+      `onchainIDFactory ${fac.addr} does not pin KeyManager ${k.addr} on the identities it creates: its owner must setRecoveryManager(${k.addr}) first`,
     );
   }
   if (o.keyManagerIdentity) {
@@ -136,6 +160,13 @@ async function keyManagerLines(o, dAddr) {
       k.hasCode && k.actual === k.expected,
     ],
   ];
+  const fac = await factoryFacts(o, k.addr);
+  if (fac) {
+    lines.push([
+      `OnchainIDFactory ${fac.addr} pins KeyManager ${k.addr} as the recovery manager of every identity it creates (recoveryManager, code-hash checked)`,
+      fac.pins,
+    ]);
+  }
   if (o.keyManagerIdentity) {
     const f = await identityFacts(o, k.addr, dAddr);
     lines.push([

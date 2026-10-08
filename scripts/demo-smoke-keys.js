@@ -303,4 +303,18 @@ async function runKeySmoke(state, failures) {
   }
 }
 
-module.exports = { runKeySmoke };
+/**
+ * Task 4.11 (R-411-18): an OnchainID for `ownerSigner`, deployed directly
+ * as the smoke's voters and investors are; its owner pins KeyManager as the
+ * recovery manager in the same step (the deployer is not the owner and may
+ * pin only in the creating block).
+ */
+async function deployPinned(state, ownerSigner) {
+  const F = await ethers.getContractFactory("OnchainID");
+  const id = await F.deploy(ownerSigner.address);
+  const km = await state.getContract("keyManager").getAddress();
+  await (await id.connect(ownerSigner).pinRecoveryManager(km)).wait();
+  return id;
+}
+
+module.exports = { runKeySmoke, deployPinned };

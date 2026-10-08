@@ -10,6 +10,10 @@ import { ethers } from "hardhat";
  *   - owned by another wallet (the ops key): the deploy prints the exact
  *     call that wallet must send, and nothing is authorized yet;
  *   - unset: the deploy prints the call with a placeholder.
+ * Task 4.11 (R-411-18, L-3): the ops identity must also pin KeyManager as
+ * its recovery manager. The deploy pins it when the deploying wallet owns
+ * the identity, prints the pinRecoveryManager call for another owner, and
+ * refuses an identity already pinned to another manager (a pin is final).
  */
 export interface OpsKeyManagerResult {
   opsIdentity: string | null;
@@ -43,6 +47,7 @@ export async function authorizeKeyManagerOnOps(
     );
   }
   const id = await ethers.getContractAt("OnchainID", opsIdentity);
+  await pinOnOps(id, opsIdentity, keyManager, deployer, overrides);
   if (await id.authorizedManagers(keyManager)) {
     console.log(
       `   KeyManager already authorized on ops identity ${opsIdentity}`,
@@ -67,4 +72,36 @@ export async function authorizeKeyManagerOnOps(
   }
   console.log(`   ✅ KeyManager authorized on ops identity ${opsIdentity}`);
   return { opsIdentity, authorized: true, pending: null };
+}
+
+/** Pins KeyManager on the ops identity, or prints the call (see above). */
+async function pinOnOps(
+  id: any,
+  opsIdentity: string,
+  keyManager: string,
+  deployer: { address: string },
+  overrides: Record<string, unknown>,
+): Promise<void> {
+  const pinned: string = await id.recoveryManager();
+  if (pinned.toLowerCase() === keyManager.toLowerCase()) {
+    console.log(`   KeyManager already pinned on ops identity ${opsIdentity}`);
+    return;
+  }
+  if (pinned !== ethers.ZeroAddress) {
+    throw new Error(
+      `ops identity ${opsIdentity} pins recovery manager ${pinned}, not KeyManager ${keyManager}; a pin is final: use another ops identity`,
+    );
+  }
+  const owner: string = await id.owner();
+  if (owner.toLowerCase() !== deployer.address.toLowerCase()) {
+    console.log(
+      `   The ops key must also send: OnchainID(${opsIdentity}).pinRecoveryManager(${keyManager}) from the identity owner ${owner}`,
+    );
+    return;
+  }
+  const signer = await ethers.getSigner(deployer.address);
+  await (
+    await id.connect(signer).pinRecoveryManager(keyManager, overrides)
+  ).wait();
+  console.log(`   ✅ KeyManager pinned as recovery manager on ${opsIdentity}`);
 }
