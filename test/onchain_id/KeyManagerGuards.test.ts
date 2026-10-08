@@ -162,7 +162,7 @@ describe("KeyManager recovery guards (2F.2, M2, review F2/F3)", function () {
     // the agents cancel it at the threshold.
     await expect(
       km.connect(holder).setupKeyRecovery(idA, [C.address], 1),
-    ).to.be.revertedWith("KeyManager: recovery approved, setup locked");
+    ).to.be.revertedWithCustomError(km, "RecoveryLocked");
     await km.connect(A).cancelKeyRecovery(idA, k(good.address));
     await km.connect(B).cancelKeyRecovery(idA, k(good.address));
     // Holder replaces the agent set: A and B are out.

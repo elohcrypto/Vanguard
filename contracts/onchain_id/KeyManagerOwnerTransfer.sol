@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.20;
 
-import "./KeyManagerRecovery.sol";
+import {KeyManagerRecovery, IManagedIdentity} from "./KeyManagerRecovery.sol";
 
 /// @dev The identity's ownership hook (OnchainIDOwnership, Task 4.11).
 interface IRecoverableIdentity {
@@ -20,6 +20,12 @@ interface IRecoverableIdentity {
 abstract contract KeyManagerOwnerTransfer is KeyManagerRecovery {
     event RecoveryOwnerTransferProposed(address indexed identity, address indexed newOwner, bytes32 indexed recoveryKey);
 
+    /// @dev No executed recovery for this identity (or a new setup since).
+    error NoExecutedRecovery();
+    /// @dev `newOwner` is not the wallet whose key was recovered.
+    error NotRecoveredWallet();
+    error AlreadyOwner();
+
     /**
      * @dev Propose `_newOwner` as the identity's owner: the wallet whose key
      *      the executed recovery added, OWNER_TRANSFER_TIMELOCK after the
@@ -30,13 +36,10 @@ abstract contract KeyManagerOwnerTransfer is KeyManagerRecovery {
      */
     function executeOwnerTransfer(address _identity, address _newOwner) external nonReentrant {
         KeyRecovery storage recovery = _recoveries[_identity];
-        require(recovery.completed && recovery.approvedKey != bytes32(0), "KeyManager: no executed recovery");
-        require(
-            keccak256(abi.encodePacked(_newOwner)) == recovery.approvedKey,
-            "KeyManager: not the recovered wallet"
-        );
+        if (!recovery.completed || recovery.approvedKey == bytes32(0)) revert NoExecutedRecovery();
+        if (keccak256(abi.encodePacked(_newOwner)) != recovery.approvedKey) revert NotRecoveredWallet();
         _checkWindow(recovery.approvedAt + OWNER_TRANSFER_TIMELOCK);
-        require(IManagedIdentity(_identity).owner() != _newOwner, "KeyManager: already the owner");
+        if (IManagedIdentity(_identity).owner() == _newOwner) revert AlreadyOwner();
         _checkAuthorized(_identity);
         IRecoverableIdentity(_identity).transferOwnershipByRecovery(_newOwner);
         emit RecoveryOwnerTransferProposed(_identity, _newOwner, recovery.approvedKey);

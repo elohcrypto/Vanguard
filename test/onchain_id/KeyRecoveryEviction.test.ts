@@ -87,14 +87,10 @@ describe("KeyManager recovery evicts and moves ownership (4.11, D38 c)", functio
     const key = k(f.rescued.address);
     await expect(
       f.km.connect(f.rogue).cancelKeyRecovery(f.idA, key),
-    ).to.be.revertedWith(
-      "KeyManager: approved recovery, only its agents cancel",
-    );
+    ).to.be.revertedWithCustomError(f.km, "ApprovedRecoveryAgentsOnly");
     await expect(
       f.km.connect(f.rogue).setupKeyRecovery(f.idA, [f.rogue.address], 1),
-    ).to.be.revertedWith(
-      "KeyManager: only the identity owner sets up recovery",
-    );
+    ).to.be.revertedWithCustomError(f.km, "NotIdentityOwner");
     // Not even before an approval: a MANAGEMENT key cancels nothing.
     await f.km.connect(f.C).initiateKeyRecovery(f.idA, ethers.id("other"));
     await expect(
@@ -113,12 +109,10 @@ describe("KeyManager recovery evicts and moves ownership (4.11, D38 c)", functio
     await approved(f);
     await expect(
       f.km.connect(f.owner).cancelKeyRecovery(f.idA, key),
-    ).to.be.revertedWith(
-      "KeyManager: approved recovery, only its agents cancel",
-    );
+    ).to.be.revertedWithCustomError(f.km, "ApprovedRecoveryAgentsOnly");
     await expect(
       f.km.connect(f.owner).setupKeyRecovery(f.idA, [f.C.address], 1),
-    ).to.be.revertedWith("KeyManager: recovery approved, setup locked");
+    ).to.be.revertedWithCustomError(f.km, "RecoveryLocked");
   });
 
   it("the agents cancel an approved recovery at the threshold, one vote each", async function () {
@@ -130,7 +124,7 @@ describe("KeyManager recovery evicts and moves ownership (4.11, D38 c)", functio
       .withArgs(f.idA, key, f.C.address, 1n);
     await expect(
       f.km.connect(f.C).cancelKeyRecovery(f.idA, key),
-    ).to.be.revertedWith("KeyManager: Already voted to cancel");
+    ).to.be.revertedWithCustomError(f.km, "AlreadyVotedToCancel");
     expect((await f.km.getRecoveryApproval(f.idA)).locked).to.equal(true);
     await expect(f.km.connect(f.A).cancelKeyRecovery(f.idA, key))
       .to.emit(f.km, "KeyRecoveryCancelled")
@@ -151,20 +145,23 @@ describe("KeyManager recovery evicts and moves ownership (4.11, D38 c)", functio
     await f.km.connect(f.C).initiateKeyRecovery(f.idA, other);
     await expect(
       f.km.connect(f.C).approveKeyRecovery(f.idA, other),
-    ).to.be.revertedWith("KeyManager: another recovery is approved");
+    ).to.be.revertedWithCustomError(f.km, "AnotherRecoveryApproved");
   });
 
   it("while approved the owner cannot withdraw KeyManager, add a manager or transfer", async function () {
     const f = await setup();
     await approved(f);
     expect(await f.id.ownershipFrozen()).to.equal(true);
-    await expect(f.id.deauthorizeManager(f.kmA)).to.be.revertedWith(LOCKED);
-    await expect(f.id.authorizeManager(f.stranger.address)).to.be.revertedWith(
-      LOCKED,
+    await expect(f.id.deauthorizeManager(f.kmA)).to.be.revertedWithCustomError(
+      f.id,
+      "FrozenByRecovery",
     );
-    await expect(f.id.transferOwnership(f.stranger.address)).to.be.revertedWith(
-      LOCKED,
-    );
+    await expect(
+      f.id.authorizeManager(f.stranger.address),
+    ).to.be.revertedWithCustomError(f.id, "FrozenByRecovery");
+    await expect(
+      f.id.transferOwnership(f.stranger.address),
+    ).to.be.revertedWithCustomError(f.id, "FrozenByRecovery");
   });
 
   it("execution after 48h evicts every other MANAGEMENT key, one event each", async function () {
@@ -173,7 +170,10 @@ describe("KeyManager recovery evicts and moves ownership (4.11, D38 c)", functio
     const key = k(f.rescued.address);
     await time.increase(2 * DAY + 1);
     const before = await f.id.getKeysByPurpose(MGMT);
-    expect([...before]).to.have.members([k(f.owner.address), k(f.rogue.address)]);
+    expect([...before]).to.have.members([
+      k(f.owner.address),
+      k(f.rogue.address),
+    ]);
     const tx = f.km.connect(f.anyone).executeKeyRecovery(f.idA, key);
     await expect(tx)
       .to.emit(f.km, "KeyRecoveryKeyEvicted")
@@ -233,17 +233,17 @@ describe("KeyManager recovery evicts and moves ownership (4.11, D38 c)", functio
     const key = k(f.rescued.address);
     await expect(
       f.km.executeOwnerTransfer(f.idA, f.rescued.address),
-    ).to.be.revertedWith("KeyManager: no executed recovery");
+    ).to.be.revertedWithCustomError(f.km, "NoExecutedRecovery");
     await time.increase(2 * DAY + 1);
     await f.km.connect(f.anyone).executeKeyRecovery(f.idA, key);
     // Executed, still locked: the owner cannot hand the identity on.
     expect(await f.km.recoveryLocked(f.idA)).to.equal(true);
-    await expect(f.id.transferOwnership(f.stranger.address)).to.be.revertedWith(
-      LOCKED,
-    );
+    await expect(
+      f.id.transferOwnership(f.stranger.address),
+    ).to.be.revertedWithCustomError(f.id, "FrozenByRecovery");
     await expect(
       f.km.executeOwnerTransfer(f.idA, f.stranger.address),
-    ).to.be.revertedWith("KeyManager: not the recovered wallet");
+    ).to.be.revertedWithCustomError(f.km, "NotRecoveredWallet");
     await time.setNextBlockTimestamp(t + 7n * BigInt(DAY) - 1n);
     await expect(
       f.km.executeOwnerTransfer(f.idA, f.rescued.address),
@@ -263,7 +263,7 @@ describe("KeyManager recovery evicts and moves ownership (4.11, D38 c)", functio
     await expect(f.id.connect(f.owner).acceptOwnership()).to.be.reverted;
     await expect(
       f.id.connect(f.owner).transferOwnership(f.owner.address),
-    ).to.be.revertedWith(LOCKED);
+    ).to.be.revertedWithCustomError(f.id, "FrozenByRecovery");
     // Keys the old owner adds meanwhile go on acceptance.
     await f.id.connect(f.owner).addKey(ethers.id("late"), MGMT, 1);
     await f.id.connect(f.rescued).acceptOwnership();
@@ -301,12 +301,12 @@ describe("KeyManager recovery evicts and moves ownership (4.11, D38 c)", functio
     const km2 = await (await ethers.getContractFactory("KeyManager")).deploy();
     await expect(
       km2.executeOwnerTransfer(f.idA, f.rescued.address),
-    ).to.be.revertedWith("KeyManager: no executed recovery");
+    ).to.be.revertedWithCustomError(km2, "NoExecutedRecovery");
     // Calling the hook directly: an EOA, then the authorized manager's
     // view for another wallet.
     await expect(
       f.id.connect(f.stranger).transferOwnershipByRecovery(f.stranger.address),
-    ).to.be.revertedWith("OnchainID: not an authorized manager");
+    ).to.be.revertedWithCustomError(f.id, "NotAuthorizedManager");
     expect(await f.km.isRecoveryOwner(f.idA, f.stranger.address)).to.equal(
       false,
     );
@@ -323,7 +323,7 @@ describe("KeyManager recovery evicts and moves ownership (4.11, D38 c)", functio
     await id.authorizeManager(await km.getAddress());
     await expect(
       km.executeOwnerTransfer(await id.getAddress(), rescued.address),
-    ).to.be.revertedWith("KeyManager: no executed recovery");
+    ).to.be.revertedWithCustomError(km, "NoExecutedRecovery");
     expect(await id.ownershipFrozen()).to.equal(false);
   });
 
@@ -344,9 +344,7 @@ describe("KeyManager recovery evicts and moves ownership (4.11, D38 c)", functio
     const f = await setup();
     await expect(
       f.km.connect(f.rogue).setupKeyRecovery(f.idA, [f.rogue.address], 1),
-    ).to.be.revertedWith(
-      "KeyManager: only the identity owner sets up recovery",
-    );
+    ).to.be.revertedWithCustomError(f.km, "NotIdentityOwner");
     await f.id.authorizeManager(f.stranger.address);
     expect(await f.id.ownershipFrozen()).to.equal(false);
     await f.id.deauthorizeManager(f.stranger.address);

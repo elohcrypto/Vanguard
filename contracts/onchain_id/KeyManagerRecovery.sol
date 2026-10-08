@@ -59,6 +59,20 @@ abstract contract KeyManagerRecovery is ReentrancyGuard {
     /// @dev A MANAGEMENT key removed by executeKeyRecovery.
     event KeyRecoveryKeyEvicted(address indexed identity, bytes32 indexed evictedKey, bytes32 indexed recoveryKey);
 
+    /// @dev Setup is the identity owner's (Task 4.11).
+    error NotIdentityOwner();
+    /// @dev Setup while a recovery is approved or its owner transfer pends.
+    error RecoveryLocked();
+    /// @dev The candidate's window has passed: re-initiate it.
+    error CandidateExpired();
+    /// @dev Another candidate is approved; one at a time.
+    error AnotherRecoveryApproved();
+    /// @dev An approved candidate is cancelled by its agents only.
+    error ApprovedRecoveryAgentsOnly();
+    error AlreadyVotedToCancel();
+    error EvictionFailed(bytes32 key);
+    error IdentityNotAContract();
+
     /// @dev Per identity. Candidates live under (epoch, key); bumping the
     ///      epoch (setup, execute) drops every candidate at once.
     struct KeyRecovery {
@@ -136,9 +150,9 @@ abstract contract KeyManagerRecovery is ReentrancyGuard {
      * @param _threshold Number of agents required for recovery
      */
     function setupKeyRecovery(address _identity, address[] calldata _recoveryAgents, uint256 _threshold) external {
-        require(msg.sender == IManagedIdentity(_identity).owner(), "KeyManager: only the identity owner sets up recovery");
+        if (msg.sender != IManagedIdentity(_identity).owner()) revert NotIdentityOwner();
         _checkAuthorized(_identity);
-        require(!recoveryLocked(_identity), "KeyManager: recovery approved, setup locked");
+        if (recoveryLocked(_identity)) revert RecoveryLocked();
         require(_recoveryAgents.length > 0, "KeyManager: No recovery agents");
         require(_recoveryAgents.length <= MAX_RECOVERY_AGENTS, "KeyManager: Too many recovery agents");
         require(_threshold > 0 && _threshold <= _recoveryAgents.length, "KeyManager: Invalid threshold");
@@ -211,12 +225,9 @@ abstract contract KeyManagerRecovery is ReentrancyGuard {
         require(_isRecoveryAgent(recovery, msg.sender), "KeyManager: Not a recovery agent");
         _checkAuthorized(_identity);
         require(c.approvedRound[msg.sender] != c.round, "KeyManager: Already approved");
-        require(
-            block.timestamp <= c.executionTime + EXECUTION_WINDOW,
-            "KeyManager: execution window passed, re-initiate"
-        );
+        if (block.timestamp > c.executionTime + EXECUTION_WINDOW) revert CandidateExpired();
         bool approved = _liveApproval(recovery);
-        require(!approved || recovery.approvedKey == _key, "KeyManager: another recovery is approved");
+        if (approved && recovery.approvedKey != _key) revert AnotherRecoveryApproved();
 
         c.approvedRound[msg.sender] = c.round;
         c.approvalCount++;
@@ -247,8 +258,8 @@ abstract contract KeyManagerRecovery is ReentrancyGuard {
         RecoveryCandidate storage c = _candidates[_identity][recovery.epoch][_key];
         require(c.initiatedAt > 0 && !recovery.completed, "KeyManager: Recovery not initiated");
         if (_liveApproval(recovery) && recovery.approvedKey == _key) {
-            require(_isRecoveryAgent(recovery, msg.sender), "KeyManager: approved recovery, only its agents cancel");
-            require(c.cancelledRound[msg.sender] != c.round, "KeyManager: Already voted to cancel");
+            if (!_isRecoveryAgent(recovery, msg.sender)) revert ApprovedRecoveryAgentsOnly();
+            if (c.cancelledRound[msg.sender] == c.round) revert AlreadyVotedToCancel();
             c.cancelledRound[msg.sender] = c.round;
             c.cancelCount++;
             emit KeyRecoveryCancelVote(_identity, _key, msg.sender, c.cancelCount);
@@ -281,6 +292,7 @@ abstract contract KeyManagerRecovery is ReentrancyGuard {
      * @param _key The recovery key to add
      */
     function executeKeyRecovery(address _identity, bytes32 _key) external nonReentrant {
+        if (_identity.code.length == 0) revert IdentityNotAContract();
         KeyRecovery storage recovery = _recoveries[_identity];
         require(!recovery.completed, "KeyManager: Recovery already completed");
         RecoveryCandidate storage c = _candidates[_identity][recovery.epoch][_key];
@@ -297,12 +309,11 @@ abstract contract KeyManagerRecovery is ReentrancyGuard {
         recovery.lastKey = _key;
         recovery.epoch++;
 
-        _evictManagementKeys(_identity, _key);
-        IOnchainID id = IOnchainID(_identity);
-        if (!id.keyHasPurpose(_key, 1)) {
-            (uint256 purpose, , bytes32 held, uint256 revokedAt) = id.getKey(_key);
-            if (held != bytes32(0) && revokedAt == 0) id.removeKey(_key, purpose);
-            require(id.addKey(_key, 1, 1), "KeyManager: Failed to add recovery key");
+        _evictManagementKeys(IOnchainID(_identity), _identity, _key);
+        if (!IOnchainID(_identity).keyHasPurpose(_key, 1)) {
+            (uint256 purpose, , bytes32 held, uint256 revokedAt) = IOnchainID(_identity).getKey(_key);
+            if (held != bytes32(0) && revokedAt == 0) IOnchainID(_identity).removeKey(_key, purpose);
+            require(IOnchainID(_identity).addKey(_key, 1, 1), "KeyManager: Failed to add recovery key");
         }
 
         emit KeyRecoveryCompleted(_identity, _key);
@@ -311,15 +322,14 @@ abstract contract KeyManagerRecovery is ReentrancyGuard {
     /// @dev Removes every MANAGEMENT key but `_keep`. Order: the first, then
     ///      the rest from the end, so each victim sits at the front of the
     ///      identity's swap-and-pop list when removed (linear, not quadratic).
-    function _evictManagementKeys(address _identity, bytes32 _keep) private {
-        IOnchainID id = IOnchainID(_identity);
+    function _evictManagementKeys(IOnchainID id, address identityAddr, bytes32 _keep) private {
         bytes32[] memory mgmt = id.getKeysByPurpose(1);
         uint256 n = mgmt.length;
         for (uint256 i = 0; i < n; i++) {
             bytes32 victim = i == 0 ? mgmt[0] : mgmt[n - i];
             if (victim == _keep) continue;
-            require(id.removeKey(victim, 1), "KeyManager: Failed to evict key");
-            emit KeyRecoveryKeyEvicted(_identity, victim, _keep);
+            if (!id.removeKey(victim, 1)) revert EvictionFailed(victim);
+            emit KeyRecoveryKeyEvicted(identityAddr, victim, _keep);
         }
     }
 

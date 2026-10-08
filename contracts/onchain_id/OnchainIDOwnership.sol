@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.20;
 
-import "./OnchainIDKeys.sol";
+import {OnchainIDKeys} from "./OnchainIDKeys.sol";
 
 /// @dev What the identity asks an authorized manager (KeyManager, 4.11).
 interface IRecoveryManager {
@@ -37,14 +37,18 @@ abstract contract OnchainIDOwnership is OnchainIDKeys {
     /// @dev An authorized manager proposed `newOwner` for a recovery.
     event RecoveryOwnerProposed(address indexed manager, address indexed newOwner);
 
+    /// @dev An authorized manager reports an approved recovery.
+    error FrozenByRecovery();
+    error NotAuthorizedManager();
+    /// @dev The manager does not report a due recovery naming `newOwner`.
+    error NoRecoveryForOwner(address newOwner);
+
     /// @dev The authorized managers, so the freeze check can ask each.
     address[] private _managers;
     /// @dev Pending owner proposed by a recovery; its acceptance evicts.
     address private _recoveryPendingOwner;
     /// @dev Set only inside transferOwnershipByRecovery (onlyOwner bypass).
     bool private _inRecoveryProposal;
-
-    constructor(address _owner) OnchainIDKeys(_owner) {}
 
     /// @dev An identity must always have a controller. Renouncing used to
     ///      reopen initialize() to anyone (2F.2, L6).
@@ -70,7 +74,7 @@ abstract contract OnchainIDOwnership is OnchainIDKeys {
     }
 
     function _checkNotFrozen() private view {
-        require(!ownershipFrozen(), "OnchainID: frozen by an approved recovery");
+        if (ownershipFrozen()) revert FrozenByRecovery();
     }
 
     /// @dev Two-step. Refused while ownershipFrozen; a direct transfer
@@ -93,11 +97,10 @@ abstract contract OnchainIDOwnership is OnchainIDKeys {
      *      `newOwner` (asked back here). `newOwner` must accept itself.
      */
     function transferOwnershipByRecovery(address newOwner) external {
-        require(authorizedManagers[msg.sender], "OnchainID: not an authorized manager");
-        require(
-            IRecoveryManager(msg.sender).isRecoveryOwner(address(this), newOwner),
-            "OnchainID: no approved recovery names this owner"
-        );
+        if (!authorizedManagers[msg.sender]) revert NotAuthorizedManager();
+        if (!IRecoveryManager(msg.sender).isRecoveryOwner(address(this), newOwner)) {
+            revert NoRecoveryForOwner(newOwner);
+        }
         _inRecoveryProposal = true;
         super.transferOwnership(newOwner);
         _inRecoveryProposal = false;

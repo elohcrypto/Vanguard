@@ -3,6 +3,7 @@ pragma solidity ^0.8.20;
 
 import "@openzeppelin/contracts/utils/cryptography/ECDSA.sol";
 import "./KeyManagerOwnerTransfer.sol";
+import {IOnchainID} from "./interfaces/IOnchainID.sol";
 import "./interfaces/IERC734.sol";
 
 /**

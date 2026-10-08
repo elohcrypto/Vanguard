@@ -50,7 +50,7 @@ describe("KeyManager withdrawal and execution window (4.2 M1)", function () {
     await id.authorizeManager(kmA);
     await expect(
       km.connect(a2).approveKeyRecovery(idA, evil),
-    ).to.be.revertedWith(EXPIRED);
+    ).to.be.revertedWithCustomError(km, "CandidateExpired");
     await expect(
       km.connect(y).executeKeyRecovery(idA, evil),
     ).to.be.revertedWith(EXPIRED);

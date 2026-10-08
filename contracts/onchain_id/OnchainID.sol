@@ -53,7 +53,7 @@ contract OnchainID is OnchainIDOwnership {
      * @dev Constructor
      * @param _owner Initial owner of the identity (zero: initialize() sets one)
      */
-    constructor(address _owner) OnchainIDOwnership(_owner) {}
+    constructor(address _owner) OnchainIDKeys(_owner) {}
 
     // ERC-735 Implementation
 
