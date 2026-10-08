@@ -38,7 +38,10 @@ This directory contains OnchainID implementation contracts following ERC-734 and
   creator in the creating block or by its owner, and with none pinned
   it has no recovery. The pin never changes and outlives ownership
   transfers. On an unpinned identity the owner key can pin any
-  manager, so a new owner checks `recoveryManager()` first. Recovery does not
+  manager, so a new owner checks `recoveryManager()` first. An identity
+  someone else deployed for you (a relayer, an issuer) may already be
+  pinned by that deployer in its creating block, so its owner checks
+  `recoveryManager()` before relying on recovery. Recovery does not
   depend on `authorizedManagers`, so withdrawing KeyManager pauses its
   rotations and batches, never recovery. Who can do what, and when:
   the owner seats the agents and threshold (`setupKeyRecovery`); the

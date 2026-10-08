@@ -143,7 +143,10 @@ purpose)` (identity, key, purpose, the key's removal nonce and chain id,
   none); a directly deployed identity is pinned by its creator in the
   creating block or by its owner. The pin is final and outlives ownership
   transfers; on an unpinned identity the owner key can pin any manager, so
-  a new owner checks `recoveryManager()` first. Withdrawing KeyManager
+  a new owner checks `recoveryManager()` first. One someone else deployed
+  for you (relayer, issuer) may already be pinned by that deployer in its
+  creating block: check `recoveryManager()` before relying on recovery.
+  Withdrawing KeyManager
   pauses rotations and batches, never recovery. The owner seats up to ten
   agents and a threshold (`setupKeyRecovery`, at onboarding); a re-seat
   waits 48 hours, the seated agents can veto it at their threshold, and
