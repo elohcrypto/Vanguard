@@ -38,7 +38,11 @@ async function refusal(contract, fn, args, from) {
         /* fall through */
       }
     }
-    return (e.reason ?? e.shortMessage ?? String(e.message)).split("\n")[0];
+    const why = (e.reason ?? e.shortMessage ?? String(e.message)).split(
+      "\n",
+    )[0];
+    const m = /reverted with (?:reason string|custom error) '(.*)'$/.exec(why);
+    return m ? m[1] : why;
   }
 }
 
