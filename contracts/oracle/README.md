@@ -11,9 +11,10 @@ This directory contains oracle network management contracts for real-time compli
   manager, every write manager-only, no owner; snapshots every registered node's weight
   when a query opens and resolves a side at `consensusThreshold` percent
   (66 by default); an expired query closes without a verdict
-- `WhitelistOracle.sol` - Whitelist entries; applies a resolved verdict
-  at the tier its query was raised with (Task 4.12); `addToWhitelist`
-  (owner or list manager) names its tier in the call
+- `WhitelistOracle.sol` - Whitelist entries; an approval lists at the
+  tier its query was raised with or raises a lower entry to it, never
+  lowers (Task 4.12); `addToWhitelist` (owner or list manager) names
+  its tier in the call and alone lowers one
 - `BlacklistOracle.sol` - Blacklist entries; applies a resolved verdict;
   `emergencyBlacklist` needs the manager's emergency designation and an
   active node

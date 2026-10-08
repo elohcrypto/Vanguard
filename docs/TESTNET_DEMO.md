@@ -752,8 +752,8 @@ a node ends its emergency power at once.
 
 Options: 31 deploys the manager, both oracles and the engine and binds
 it; 32 designates node 2 (AML) and checks the 66% threshold (through
-the manager, a proposal after the handover); 33a and 34a run a
-tier-4 whitelist and a HIGH blacklist round on a throwaway address (raise, two
+the manager, a proposal after the handover); 33a and 34a run a tier-4
+whitelist and a HIGH blacklist round on a throwaway address (raise, two
 YES answers, the verdict applied); 35a is the lifecycle: ops becomes the
 operator, pauses node 3 (its answer is refused, nodes 1 and 2 still
 resolve 200 of 300), pauses node 2 too (node 1 alone stays at 100 of 300,
@@ -773,9 +773,10 @@ setEmergencyOracle, setConsensusThreshold or setOperator for governance
 to vote (77, 78), from the first wallet among 0-8 that may propose. `demo-drive.sh --strict 1 21 31 32 33a 34a 35a 39 40`
 runs with no error; 33, 34, 35 and 37 ask sub-prompts, which a drive
 answers only when the argument carries them (`37:<sub-option>:...`).
-A whitelist query names its tier when raised (Task 4.12; 37 -> 1 asks
-1-4, tier 5 is the manager owner's) and the verdict lists at it; the
-owner or list-manager path (33, 40, DynamicListManager) names its own.
+A whitelist query names a tier T (Task 4.12; 37 -> 1 asks 1-4, 5 is the
+owner's): approval lists at T or raises a lower entry (expiry capped at
+365 days), never lowers; only the owner or list manager (33, 40,
+DynamicListManager) lowers.
 `DEMO_RPC_URL=http://127.0.0.1:<port>` points the drive at a node on
 another port (network `devnode`).
 
@@ -783,10 +784,11 @@ another port (network `devnode`).
 asserts from chain: the engine is bound both ways and its code is the
 compiled ConsensusOracle, the threshold is 66%, the 33a and 34a rounds
 resolve two of three (`ConsensusReached`, 200 of 300) and their verdicts
-apply (33a's at tier 4: the query data and the entry both read 4), 35a's paused node is refused as not active while two of three
-still resolve 200 of 300, with two paused the third cannot resolve alone,
-unpause restores both, the designation gates `emergencyBlacklist`, and an
-expired query refuses answers and has no verdict.
+apply (33a's at tier 4 in query and entry), 35a's paused node is refused
+as not active while two of three still resolve 200 of 300, with two
+paused the third cannot resolve alone, unpause restores both, the
+designation gates `emergencyBlacklist`, and an expired query refuses
+answers and has no verdict.
 
 The handover ceremony hands nothing over for the engine (it has no
 owner). Before Step 1, without a transaction, the preflight refuses an

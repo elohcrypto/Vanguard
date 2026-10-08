@@ -191,7 +191,7 @@ sequenceDiagram
     participant Engine as ConsensusOracle (engine)
     participant Whitelist as WhitelistOracle
 
-    Node1->>Manager: submitQuery(investor, WHITELIST, abi.encode(tier 4))
+    Node1->>Manager: submitQuery(investor, WHITELIST, tier 4)
     Manager->>Engine: openQuery: snapshot every registered node (300)
     Node1->>Manager: submitResponse(query, YES)
     Manager->>Engine: recordVote (100 of 300)
@@ -213,19 +213,19 @@ this path without prompts (docs/TESTNET_DEMO.md, "Oracle nodes and
 consensus").
 
 WhitelistOracle tiers run 1 to 5 (higher is better). The owner or list
-manager (`addToWhitelist`, a DynamicListManager vote) names the tier in
-the call; a consensus query names (wallet, tier), its data
-`abi.encode(tier)` checked at submit (a node raises 1 to 4, the owner 5),
-and the verdict lists at that tier or moves a live entry to it (Task
-4.12; a rejection of tier T delists an entry at T or above). Where a party passes the whitelist by its
-oracle entry (OracleOnly, or Either with a live entry), ComplianceRules
-requires the entry's tier to reach the party's `requiredWhitelistTier`
-in the token's InvestorTypeRegistry (D37 = a, Task 4.10); in ZkOnly, or
-for a proof-bound party with no entry, no tier applies (a proof binding
-carries none). The whitelist oracle gates VSC only when bound to it in
-ComplianceRules
-(`setWhitelistOracle`), by the token's whitelist mode (below); the
-blacklist oracle bound with `setBlacklistOracle` gates every path.
+manager (`addToWhitelist`, a DynamicListManager vote) names the tier and
+alone lowers it. A consensus query names (wallet, T), checked at submit
+(a node raises 1 to 4, the owner 5): an approval lists at T or raises a
+lower live entry to T (expiry capped at 365 days) and never lowers; a
+rejection delists an entry at T or above (Task 4.12). Where a party
+passes the whitelist by its oracle entry (OracleOnly, or Either with a
+live entry), ComplianceRules requires the entry's tier to reach the
+party's `requiredWhitelistTier` in the token's InvestorTypeRegistry (D37
+= a, Task 4.10); in ZkOnly, or for a proof-bound party with no entry, no
+tier applies (a proof binding carries none). The whitelist oracle gates
+VSC only when bound to it in ComplianceRules (`setWhitelistOracle`), by
+the token's whitelist mode (below); the blacklist oracle bound with
+`setBlacklistOracle` gates every path.
 
 ## Minting
 
