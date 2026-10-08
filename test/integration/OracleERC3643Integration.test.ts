@@ -578,7 +578,6 @@ describe("Oracle-ERC3643 Integration Tests", function () {
       console.log("🤝 Testing Oracle Consensus Mechanism...");
 
       // Step 1: Create consensus query for investor verification
-      // A whitelist query carries its tier (Task 4.12).
       const queryData = ethers.AbiCoder.defaultAbiCoder().encode(
         ["uint8"],
         [4],
