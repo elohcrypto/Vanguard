@@ -153,11 +153,18 @@ describe("KeyManager recovery guards (2F.2, M2, review F2/F3)", function () {
     ).to.be.revertedWith("KeyManager: Recovery not initiated");
   });
 
-  it("re-running setup clears every pending candidate and its approvals", async function () {
+  it("re-running setup (after the agents cancel) clears every candidate and its approvals", async function () {
     const { holder, A, B, C, good, anyone, idA, km } = await setup();
     await km.connect(A).initiateKeyRecovery(idA, k(good.address));
     await km.connect(A).approveKeyRecovery(idA, k(good.address));
     await km.connect(B).approveKeyRecovery(idA, k(good.address));
+    // Approved: the holder cannot re-seat the agents (Task 4.11) until
+    // the agents cancel it at the threshold.
+    await expect(
+      km.connect(holder).setupKeyRecovery(idA, [C.address], 1),
+    ).to.be.revertedWith("KeyManager: recovery approved, setup locked");
+    await km.connect(A).cancelKeyRecovery(idA, k(good.address));
+    await km.connect(B).cancelKeyRecovery(idA, k(good.address));
     // Holder replaces the agent set: A and B are out.
     await km.connect(holder).setupKeyRecovery(idA, [C.address], 1);
     await time.increase(DAY2 + 1);

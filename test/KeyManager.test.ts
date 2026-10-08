@@ -665,8 +665,8 @@ describe("KeyManager", function () {
     });
 
     describe("setupKeyRecovery", function () {
-      it("Should allow identity manager to setup key recovery", async function () {
-        await keyManager.connect(manager).setupKeyRecovery(
+      it("Should allow the identity owner to setup key recovery", async function () {
+        await keyManager.connect(identity).setupKeyRecovery(
           await onchainID.getAddress(),
           recoveryAgents,
           2, // 2-of-3 threshold
@@ -684,7 +684,7 @@ describe("KeyManager", function () {
       it("Should reject setup with no recovery agents", async function () {
         await expect(
           keyManager
-            .connect(manager)
+            .connect(identity)
             .setupKeyRecovery(await onchainID.getAddress(), [], 1),
         ).to.be.revertedWith("KeyManager: No recovery agents");
       });
@@ -693,7 +693,7 @@ describe("KeyManager", function () {
         const tooManyAgents = Array(11).fill(recoveryAgent1.address);
         await expect(
           keyManager
-            .connect(manager)
+            .connect(identity)
             .setupKeyRecovery(await onchainID.getAddress(), tooManyAgents, 1),
         ).to.be.revertedWith("KeyManager: Too many recovery agents");
       });
@@ -701,12 +701,12 @@ describe("KeyManager", function () {
       it("Should reject setup with invalid threshold", async function () {
         await expect(
           keyManager
-            .connect(manager)
+            .connect(identity)
             .setupKeyRecovery(await onchainID.getAddress(), recoveryAgents, 0),
         ).to.be.revertedWith("KeyManager: Invalid threshold");
 
         await expect(
-          keyManager.connect(manager).setupKeyRecovery(
+          keyManager.connect(identity).setupKeyRecovery(
             await onchainID.getAddress(),
             recoveryAgents,
             4, // > agents length
@@ -718,7 +718,7 @@ describe("KeyManager", function () {
     describe("initiateKeyRecovery", function () {
       beforeEach(async function () {
         await keyManager
-          .connect(manager)
+          .connect(identity)
           .setupKeyRecovery(await onchainID.getAddress(), recoveryAgents, 2);
       });
 
@@ -763,7 +763,7 @@ describe("KeyManager", function () {
     describe("approveKeyRecovery", function () {
       beforeEach(async function () {
         await keyManager
-          .connect(manager)
+          .connect(identity)
           .setupKeyRecovery(await onchainID.getAddress(), recoveryAgents, 2);
 
         await keyManager
@@ -806,7 +806,7 @@ describe("KeyManager", function () {
     describe("executeKeyRecovery", function () {
       beforeEach(async function () {
         await keyManager
-          .connect(manager)
+          .connect(identity)
           .setupKeyRecovery(await onchainID.getAddress(), recoveryAgents, 2);
 
         await keyManager
@@ -849,9 +849,16 @@ describe("KeyManager", function () {
       });
 
       it("Should reject execution with insufficient approvals", async function () {
+        // The beforeEach candidate is approved: setup is locked until its
+        // agents cancel it at the threshold (Task 4.11).
+        for (const agent of [recoveryAgent1, recoveryAgent2]) {
+          await keyManager
+            .connect(agent)
+            .cancelKeyRecovery(await onchainID.getAddress(), newRecoveryKey);
+        }
         // Setup with only one approval (need 2)
         await keyManager
-          .connect(manager)
+          .connect(identity)
           .setupKeyRecovery(await onchainID.getAddress(), recoveryAgents, 2);
 
         await keyManager
@@ -1051,7 +1058,7 @@ describe("KeyManager", function () {
 
       // 1. Setup recovery
       await keyManager
-        .connect(manager)
+        .connect(identity)
         .setupKeyRecovery(await onchainID.getAddress(), recoveryAgents, 2);
 
       // 2. Initiate recovery

@@ -36,14 +36,21 @@ describe("KeyManager withdrawal and execution window (4.2 M1)", function () {
     const evil = k(x.address);
     await km.connect(a1).initiateKeyRecovery(idA, evil);
     await km.connect(a1).approveKeyRecovery(idA, evil);
-    await km.connect(a2).approveKeyRecovery(idA, evil);
+    // Withdrawn below the threshold (an approved recovery freezes the
+    // owner's deauthorizeManager, Task 4.11): the second approval waits.
     await id.deauthorizeManager(kmA);
+    await expect(
+      km.connect(a2).approveKeyRecovery(idA, evil),
+    ).to.be.revertedWith(NOT_AUTH);
     await time.increase(49 * 3600);
     await expect(
       km.connect(y).executeKeyRecovery(idA, evil),
     ).to.be.revertedWith(NOT_AUTH);
     await time.increase(30 * DAY);
     await id.authorizeManager(kmA);
+    await expect(
+      km.connect(a2).approveKeyRecovery(idA, evil),
+    ).to.be.revertedWith(EXPIRED);
     await expect(
       km.connect(y).executeKeyRecovery(idA, evil),
     ).to.be.revertedWith(EXPIRED);
@@ -75,10 +82,12 @@ describe("KeyManager withdrawal and execution window (4.2 M1)", function () {
     await km.setupKeyRecovery(idA, [a1.address], 1);
     const key = k(x.address);
     await km.connect(a1).initiateKeyRecovery(idA, key);
-    await km.connect(a1).approveKeyRecovery(idA, key);
+    // Paused before the approval (after it, deauthorizeManager is frozen).
     await id.deauthorizeManager(kmA);
-    await time.increase(2 * DAY + 6 * DAY);
+    await time.increase(6 * DAY);
     await id.authorizeManager(kmA);
+    await km.connect(a1).approveKeyRecovery(idA, key);
+    await time.increase(2 * DAY + 1);
     await km.connect(y).executeKeyRecovery(idA, key);
     expect(await id.keyHasPurpose(key, MGMT)).to.equal(true);
   });
