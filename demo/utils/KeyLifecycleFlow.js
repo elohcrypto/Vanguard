@@ -5,12 +5,14 @@
  * KeyManager holds no owner and no allowlist. An identity opts in with
  * OnchainID.authorizeManager(KeyManager) (owner only); after that a
  * MANAGEMENT key of the identity rotates keys behind a timelock (24h, or the
- * identity's own custom timelock) and recovery agents add a new MANAGEMENT
- * key behind a 48h timelock. deauthorizeManager pauses KeyManager for the
- * identity; it does not cancel: cancelKeyRotation / cancelKeyRecovery stop
- * an item, and an item not executed within 7 days (EXECUTION_WINDOW) after
- * its executionTime expires. Before re-authorizing, the flow lists what is
- * still pending (option 5 and 12b ask first).
+ * identity's own custom timelock). Recovery (Task 4.11, KeyRecoveryDrill.js)
+ * evicts every other MANAGEMENT key 48h after the agents' approval and
+ * moves the ownership 7 days after it. deauthorizeManager pauses KeyManager
+ * for the identity (refused while a recovery is approved); it does not
+ * cancel: cancelKeyRotation / cancelKeyRecovery stop an item, and an item
+ * not executed within 7 days (EXECUTION_WINDOW) after its executionTime
+ * expires. Before re-authorizing, the flow lists what is still pending
+ * (option 5 and 12b ask first).
  *
  * Resuming works within one demo session (the keys live in memory): a
  * pending rotation or recovery candidate is not re-initiated. On a dev node
@@ -37,6 +39,8 @@ const ECDSA = 1;
  */
 const DEMO_WALLET = 1;
 const AGENT_WALLETS = [7, 8];
+/** The drill's recovered wallet: investor Alice, not an agent. */
+const RECOVERED_WALLET = 6;
 const ROLES = [
   "deployer",
   "fee wallet, compliance officer",
@@ -249,57 +253,6 @@ async function rotateKey(km, identity, manager, oldKey, newKey, purpose, back) {
   return { executed: true, executionTime: r.executionTime };
 }
 
-/**
- * Recover the identity onto `key` (added as MANAGEMENT): `manager` sets up
- * `agents` (threshold `threshold`), agents[0] opens the candidate, the
- * first `threshold` agents approve, then it executes after 48h. A pending
- * candidate for `key` is resumed, not re-opened.
- */
-async function recoverKey(
-  state,
-  km,
-  identity,
-  manager,
-  agents,
-  threshold,
-  key,
-  back,
-) {
-  const idAddr = await identity.getAddress();
-  if (await identity.keyHasPurpose(key, MANAGEMENT)) {
-    return { executed: true };
-  }
-  let c = await km.getRecoveryCandidate(idAddr, key);
-  if (c.initiatedAt === 0n || (await expired(km, c.executionTime))) {
-    const list = agents.map((a) => a.address);
-    await (
-      await km.connect(manager).setupKeyRecovery(idAddr, list, threshold)
-    ).wait();
-    console.log(
-      `   🛡️  setupKeyRecovery by ${who(state, manager.address)}: ${threshold}-of-${list.length} agents`,
-    );
-    for (const a of list) console.log(`      agent ${who(state, a)}`);
-    await (await km.connect(agents[0]).initiateKeyRecovery(idAddr, key)).wait();
-    c = await km.getRecoveryCandidate(idAddr, key);
-    console.log(
-      `   🚨 initiateKeyRecovery by ${who(state, agents[0].address)}: new key ${short(key)}`,
-    );
-  } else {
-    console.log(`   🚨 Recovery already pending since ${at(c.initiatedAt)}`);
-  }
-  for (const agent of agents.slice(0, threshold)) {
-    if (await km.hasApprovedRecovery(idAddr, key, agent.address)) continue;
-    await (await km.connect(agent).approveKeyRecovery(idAddr, key)).wait();
-    console.log(`   👍 approveKeyRecovery by ${who(state, agent.address)}`);
-  }
-  if (!(await passTimelock(c.executionTime, "recovery timelock", back))) {
-    return { executed: false, executionTime: c.executionTime };
-  }
-  await (await km.connect(agents[0]).executeKeyRecovery(idAddr, key)).wait();
-  console.log("   ✅ executeKeyRecovery: recovery key added as MANAGEMENT");
-  return { executed: true, executionTime: c.executionTime };
-}
-
 /** Print the identity's live keys by purpose and its KeyManager opt-in. */
 async function reviewKeys(identity, km, marks = {}) {
   const idAddr = await identity.getAddress();
@@ -333,10 +286,12 @@ function lifecycleContext(state) {
 /**
  * Option 12, no prompts: authorize KeyManager on wallet 1's demo identity,
  * add a fresh MANAGEMENT key through batchAddKeys, rotate it to another
- * fresh key, recover onto a third fresh key with agents 7 and 8 (2-of-2),
- * review the keys, then revoke the two MANAGEMENT keys it created (nobody
- * holds them; wallet 1 keeps its own). Re-running after a real-network
- * pause resumes the same keys in the same session. Returns what happened.
+ * fresh key, then run the recovery drill (KeyRecoveryDrill.js) on a drill
+ * identity owned by wallet 1: a planted rogue MANAGEMENT key is evicted
+ * 48h after agents 7 and 8 approve, and wallet 6 becomes the owner 7 days
+ * after it. Review the keys, then revoke the rotated-in key (nobody holds
+ * it; wallet 1 keeps its own). Re-running after a real-network pause
+ * resumes the same keys in the same session. Returns what happened.
  */
 async function runKeyLifecycle(state) {
   displaySection("KEY LIFECYCLE THROUGH KEYMANAGER (OPTION 12)", "🔐");
@@ -349,7 +304,7 @@ async function runKeyLifecycle(state) {
   let run = state.keyLifecycle;
   if (!run || run.done || !same(run.identity, idAddr)) {
     run = { identity: idAddr, oldKey: freshKey(), newKey: freshKey() };
-    run.recoveryKey = freshKey();
+    run.drill = {};
     state.keyLifecycle = run;
   }
   await setAuthorized(identity, owner, km, true);
@@ -375,41 +330,37 @@ async function runKeyLifecycle(state) {
   );
   if (!rotation.executed) return { ...run, rotation, done: false };
 
-  const agents = AGENT_WALLETS.map((i) => state.signers[i]);
-  const recovery = await recoverKey(
-    state,
-    km,
-    identity,
-    owner,
-    agents,
-    agents.length,
-    run.recoveryKey,
-    back,
-  );
-  if (!recovery.executed) return { ...run, rotation, recovery, done: false };
-
   const authorized = await reviewKeys(identity, km, {
     [run.oldKey]: "(rotated out)",
     [run.newKey]: "(rotated in)",
-    [run.recoveryKey]: "(recovered)",
   });
-  // N4: leave no live key nobody holds.
-  await (
-    await km
-      .connect(owner)
-      .batchRemoveKeys(
-        idAddr,
-        [run.newKey, run.recoveryKey],
-        [MANAGEMENT, MANAGEMENT],
-      )
-  ).wait();
-  console.log(
-    "   🧹 batchRemoveKeys: revoked the rotated-in and recovered keys",
-  );
-  console.log("      option 12 created (random, nobody holds them); wallet 1");
-  console.log("      keeps its own MANAGEMENT key.");
+  if (await identity.keyHasPurpose(run.newKey, MANAGEMENT)) {
+    // N4: leave no live key nobody holds.
+    await (
+      await km
+        .connect(owner)
+        .batchRemoveKeys(idAddr, [run.newKey], [MANAGEMENT])
+    ).wait();
+    console.log("   🧹 batchRemoveKeys: revoked the rotated-in key option 12");
+    console.log("      created (random, nobody holds it); wallet 1 keeps its");
+    console.log("      own MANAGEMENT key.");
+  }
+
+  console.log("\n🛡️  Recovery drill: eviction and owner transfer (Task 4.11)");
+  const { runRecoveryDrill } = require("./KeyRecoveryDrill");
+  const recovery = await runRecoveryDrill(state, {
+    km,
+    owner,
+    recovered: state.signers[RECOVERED_WALLET],
+    agents: AGENT_WALLETS.map((i) => state.signers[i]),
+    back,
+    run: run.drill,
+  });
+  if (!recovery.done) return { ...run, rotation, recovery, done: false };
   run.done = true;
-  displaySuccess("Key rotated and identity recovered through KeyManager");
+  displaySuccess(
+    "Key rotated; recovery evicted the rogue key and moved the owner",
+  );
   return {
     ...run,
     keyManager: await km.getAddress(),
@@ -454,6 +405,7 @@ async function toggleAuthorization(state) {
 module.exports = {
   DEMO_WALLET,
   AGENT_WALLETS,
+  RECOVERED_WALLET,
   MANAGEMENT,
   same,
   keyOf,
@@ -463,7 +415,7 @@ module.exports = {
   pendingItems,
   setAuthorized,
   rotateKey,
-  recoverKey,
+  passTimelock,
   reviewKeys,
   lifecycleContext,
   runKeyLifecycle,

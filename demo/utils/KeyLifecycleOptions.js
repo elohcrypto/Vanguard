@@ -20,10 +20,10 @@ const {
   demoIdentity,
   setAuthorized,
   rotateKey,
-  recoverKey,
   reviewKeys,
   lifecycleContext,
 } = require("./KeyLifecycleFlow");
+const { runRecoveryDrill } = require("./KeyRecoveryDrill");
 
 /** A wallet index or a passphrase -> key hash (option 5's input narrative). */
 async function askKey(state, prompt, question) {
@@ -53,10 +53,13 @@ async function ownerAndIdentity(state, record) {
 }
 
 /**
- * Option 5 -> 2: recovery agents add a new MANAGEMENT key to `record`
- * through KeyManager's 48h timelock. The setup is the holder's: the owner
- * authorizes KeyManager and names the agents while it still holds its key,
- * which the demo does here as a separate, labelled step.
+ * Option 5 -> 2: recovery through KeyManager (Task 4.11) on `record`: a
+ * rogue MANAGEMENT key is planted, the owner seats two agents, they
+ * approve the chosen wallet's key; 48h later every other MANAGEMENT key is
+ * evicted and 7 days after the approval the wallet becomes the owner
+ * (KeyRecoveryDrill.js). The setup is the owner's, done here as a
+ * labelled step; a holder who lost every key cannot do it, so recovery is
+ * set up at onboarding.
  */
 async function recoverInteractive(state, record, prompt) {
   const ctx = await ownerAndIdentity(state, record);
@@ -67,36 +70,44 @@ async function recoverInteractive(state, record, prompt) {
     .filter((s) => !same(s.address, owner.address))
     .slice(0, 2);
   console.log("\n🚨 RECOVERY THROUGH KEYMANAGER");
-  console.log(
-    "   Step A, the holder, beforehand: while it still holds its key,",
-  );
-  console.log("   the owner authorizes KeyManager and names recovery agents.");
-  console.log("   A holder who already lost every key cannot do this step;");
-  console.log("   set recovery up at onboarding.");
+  console.log("   Step A, the owner, beforehand: authorizes KeyManager and");
+  console.log("   names two recovery agents (owner only; a holder who lost");
+  console.log("   every key cannot do this: set recovery up at onboarding).");
   console.log(`   Owner: ${who(state, owner.address)}`);
   for (const a of agents) console.log(`   Agent: ${who(state, a.address)}`);
-  console.log("   Step B, later: the agents (2-of-2) add a new MANAGEMENT key");
-  console.log("   after 48h unless the owner or a MANAGEMENT key cancels it.");
-  console.log("   Recovery never restores owner().");
-  const k = await askKey(
-    state,
-    prompt,
-    "New key (wallet index or passphrase): ",
+  console.log(
+    "   Step B: the agents (2-of-2) approve a wallet's key. From the",
   );
-  if (!k) return displayError("No key given");
+  console.log("   approval only they can cancel; 48h later every other");
+  console.log("   MANAGEMENT key is evicted; 7 days after the approval the");
+  console.log("   wallet becomes the owner. Agents at the threshold can take");
+  console.log("   the identity: choose agents you would trust with it.");
+  const answer = (
+    await prompt("Recovered wallet (wallet index, it signs acceptOwnership): ")
+  ).trim();
+  const recovered = /^\d+$/.test(answer) && state.signers[Number(answer)];
+  if (!recovered) return displayError("Give a wallet index");
+  if (same(recovered.address, owner.address)) {
+    return displayError("The recovered wallet must not be the current owner");
+  }
   if (!(await setAuthorized(identity, owner, km, true, prompt))) return null;
-  const r = await recoverKey(
-    state,
+  record.recoveryDrill ??= {};
+  const r = await runRecoveryDrill(state, {
     km,
-    identity,
     owner,
+    recovered,
     agents,
-    2,
-    k.key,
-    "option 5 -> 2",
-  );
-  if (r.executed) displaySuccess(`Recovered onto ${k.info}`);
-  await reviewKeys(identity, km, { [k.key]: "(recovered)" });
+    back: "option 5 -> 2",
+    run: record.recoveryDrill,
+    identity: record.address,
+  });
+  if (r.ownerMoved) {
+    record.owner = recovered.address;
+    record.signer = recovered;
+    delete record.recoveryDrill;
+    displaySuccess(`Recovered: ${who(state, recovered.address)} owns it`);
+  }
+  await reviewKeys(identity, km, { [r.key]: "(recovered)" });
   return r;
 }
 
@@ -120,9 +131,7 @@ async function replaceInteractive(state, record, prompt) {
     console.log(
       "      owner() as a manager, but KeyManager accepts MANAGEMENT",
     );
-    console.log(
-      "      keys only: options 12, 12b and 5 -> 2/3 will refuse this",
-    );
+    console.log("      keys only: options 12, 12b and 5 -> 3 will refuse this");
     console.log("      owner until it holds a MANAGEMENT key again.");
   }
   const k = await askKey(

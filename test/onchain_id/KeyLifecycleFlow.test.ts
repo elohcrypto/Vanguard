@@ -3,8 +3,10 @@ import { ethers } from "hardhat";
 
 /**
  * Plan v2 Task 4.2: demo options 12, 12a, 12b and 5 -> 2/3 drive the
- * identity key lifecycle through the KeyManager option 1 deploys. Every
- * value below is read from the chain.
+ * identity key lifecycle through the KeyManager option 1 deploys; Task
+ * 4.11: their recovery evicts a planted rogue MANAGEMENT key and moves the
+ * ownership to the recovered wallet. Every value below is read from the
+ * chain.
  */
 describe("Key lifecycle flow (demo options 12, 12a, 12b, 5)", function () {
   this.timeout(300_000);
@@ -45,7 +47,7 @@ describe("Key lifecycle flow (demo options 12, 12a, 12b, 5)", function () {
     await quiet(() => deployer.deployAllContracts());
   });
 
-  it("option 1 deploys KeyManager; option 12 authorizes, rotates, recovers and cleans up", async function () {
+  it("option 1 deploys KeyManager; option 12 authorizes, rotates, cleans up and runs the recovery drill", async function () {
     const km = state.getContract("keyManager");
     expect(km, "option 1 registers keyManager").to.not.equal(undefined);
     const kmAddr = await km.getAddress();
@@ -60,19 +62,29 @@ describe("Key lifecycle flow (demo options 12, 12a, 12b, 5)", function () {
     const id = await ethers.getContractAt("OnchainID", r.identity);
 
     expect(await id.authorizedManagers(kmAddr)).to.equal(true);
-    expect(r.rotation.executed && r.recovery.executed).to.equal(true);
-    // The three fresh keys were MANAGEMENT and are all revoked now (N4).
-    for (const key of [r.oldKey, r.newKey, r.recoveryKey]) {
+    expect(r.rotation.executed && r.recovery.done).to.equal(true);
+    // The two fresh keys were MANAGEMENT and are both revoked now (N4).
+    for (const key of [r.oldKey, r.newKey]) {
       const info = await id.getKey(key);
       expect(info.purpose).to.equal(1n);
       expect(info.revokedAt).to.be.greaterThan(0n);
     }
     expect(await id.getKeysByPurpose(MGMT)).to.deep.equal([k(s[1].address)]);
-    // Recovery ran with agents 7 and 8 (no issuer role) and completed.
-    const rec = await km.getKeyRecovery(r.identity);
+    // The drill: agents 7 and 8 (no issuer role) recovered wallet 6's key
+    // on a drill identity wallet 1 owned; the rogue key and wallet 1's key
+    // were evicted and wallet 6 owns it.
+    const d = await ethers.getContractAt("OnchainID", r.recovery.identity);
+    const rec = await km.getKeyRecovery(r.recovery.identity);
     expect(rec.recoveryAgents).to.deep.equal([s[7].address, s[8].address]);
     expect(rec.completed).to.equal(true);
-    expect(rec.lastKey).to.equal(r.recoveryKey);
+    expect(rec.lastKey).to.equal(k(s[6].address));
+    expect(await d.getKeysByPurpose(MGMT)).to.deep.equal([k(s[6].address)]);
+    expect((await d.getKey(k(r.recovery.rogue))).revokedAt).to.be.gt(0n);
+    expect(await d.owner()).to.equal(s[6].address);
+    expect(r.recovery.refused && r.recovery.oldOwnerRefused).to.equal(true);
+    expect(r.recovery.oldOwnerLocked).to.equal(true);
+    expect(out).to.contain("⛔ rogue key cancels: refused");
+    expect(out).to.not.contain("❌");
     expect(out).to.contain("wallet 7 (investor Bob)");
     expect(out).to.contain("wallet 1 (fee wallet, compliance officer)");
     expect(out).to.contain("KeyManager authorized: yes");
@@ -82,6 +94,7 @@ describe("Key lifecycle flow (demo options 12, 12a, 12b, 5)", function () {
     const again = await quiet(() => flow.runKeyLifecycle(state));
     expect(again.identity).to.equal(r.identity);
     expect(again.newKey).to.not.equal(r.newKey);
+    expect(again.recovery.identity).to.not.equal(r.recovery.identity);
     expect(again.done).to.equal(true);
   });
 
@@ -157,15 +170,18 @@ describe("Key lifecycle flow (demo options 12, 12a, 12b, 5)", function () {
     const record = state.identities.get(await id.getAddress());
     expect(record.owner).to.equal(owner.address);
 
-    // Recovery onto wallet 6's key, agents 7 and 8.
+    // Recovery onto wallet 6, agents 7 and 8: wallet 4's key and a
+    // planted rogue key are evicted and wallet 6 becomes the owner.
     await quiet(() => opts.recoverInteractive(state, record, async () => "6"));
-    expect(await id.keyHasPurpose(k(s[6].address), MGMT)).to.equal(true);
-    expect(logged.join("\n")).to.contain("Recovery never restores owner()");
+    expect(await id.owner()).to.equal(s[6].address);
+    expect(await id.getKeysByPurpose(MGMT)).to.deep.equal([k(s[6].address)]);
+    expect(record.owner).to.equal(s[6].address);
+    expect(logged.join("\n")).to.contain("⛔ owner cancels: refused");
+    expect(logged.join("\n")).to.not.contain("❌");
 
-    // Replace wallet 6's key by a passphrase (a label, said so).
-    const keys = await id.getKeysByPurpose(MGMT);
-    const idx = keys.indexOf(k(s[6].address));
-    const answers = [String(idx), "a new passphrase"];
+    // 5 -> 3 by the new owner: its own key replaced by a passphrase (a
+    // label, said so); the warning names what stops working.
+    const answers = ["0", "a new passphrase"];
     await quiet(() =>
       opts.replaceInteractive(state, record, async () => answers.shift()),
     );
@@ -173,18 +189,9 @@ describe("Key lifecycle flow (demo options 12, 12a, 12b, 5)", function () {
     expect(
       await id.keyHasPurpose(ethers.id("a new passphrase"), MGMT),
     ).to.equal(true);
-    expect(logged.join("\n")).to.contain("nobody can sign with it");
-    expect(await id.keyHasPurpose(k(owner.address), MGMT)).to.equal(true);
-
-    // The owner's own key: the warning names what stops working.
-    const own = (await id.getKeysByPurpose(MGMT)).indexOf(k(owner.address));
-    const more = [String(own), "8"];
-    await quiet(() =>
-      opts.replaceInteractive(state, record, async () => more.shift()),
-    );
-    expect(logged.join("\n")).to.contain(
-      "options 12, 12b and 5 -> 2/3 will refuse this",
-    );
+    const out = logged.join("\n");
+    expect(out).to.contain("nobody can sign with it");
+    expect(out).to.contain("options 12, 12b and 5 -> 3 will refuse this");
   });
 
   it("where the clock cannot move it prints a come-back time; resume reuses the same keys", async function () {
@@ -208,16 +215,17 @@ describe("Key lifecycle flow (demo options 12, 12a, 12b, 5)", function () {
     } finally {
       ChainTime.canJumpTime = real;
     }
-    for (const key of ["oldKey", "newKey", "recoveryKey"]) {
+    for (const key of ["oldKey", "newKey"]) {
       expect(second[key]).to.equal(first[key]);
     }
     // Back on a dev node, option 12 finishes the same recovery.
     const third: any = await quiet(() => flow.runKeyLifecycle(state));
     expect(third.done).to.equal(true);
-    expect(third.recoveryKey).to.equal(first.recoveryKey);
+    expect(third.recovery.identity).to.equal(second.recovery.identity);
     const km = state.getContract("keyManager");
-    expect((await km.getKeyRecovery(third.identity)).lastKey).to.equal(
-      first.recoveryKey,
+    const drill = third.recovery.identity;
+    expect((await km.getKeyRecovery(drill)).lastKey).to.equal(
+      k(state.signers[6].address),
     );
   });
 });
