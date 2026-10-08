@@ -271,10 +271,8 @@ votes are refused and it closes without a verdict, so a new query must be
 raised. Opening costs about 263k gas with 3 nodes and 2.9M with 100
 (`MAX_ORACLES`), one storage write per node.
 
-**Opening a query** (`OracleManager.submitQuery`, owner or an active
-node; `_checkQueryPayload` (OracleQueryPayload) applies first: a blacklist
-severity 0..3 per R-2F3-2, and a whitelist tier 1..5, required, tier 5
-the owner's, which the verdict lists at (Task 4.12)):
+**Opening a query** (`OracleManager.submitQuery`, owner or active node; first
+`_checkQueryPayload`: R-2F3-2 severity, Task 4.12 tier 1..5, 5 the owner's):
 
 ```solidity
 queryId = keccak256(abi.encodePacked(_subject, _queryType, _data, block.timestamp, msg.sender));
