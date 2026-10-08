@@ -11,11 +11,12 @@
  * governance after the handover). Options 33a, 34a, 35a, 37 and 40 and
  * scripts/demo-smoke-oracles.js share these steps; every line printed is
  * read back from chain.
- * A whitelist query names (wallet, tier): its data is abi.encode(tier),
- * 1..5, fixed when raised (a node raises 1..4, only the owner 5) and the
- * verdict lists at that tier (Task 4.12). The owner or list-manager path
- * (addToWhitelist, options 33 and 40, DynamicListManager) names its tier
- * in the call.
+ * A whitelist query names (wallet, T): its data is abi.encode(T), 1..5,
+ * fixed when raised (a node raises 1..4, only the owner 5). An approval
+ * lists at T or raises a lower live entry to T (expiry capped at 365
+ * days) and never lowers (Task 4.12, R-412-7). The owner or list manager
+ * (addToWhitelist: options 33 and 40, DynamicListManager) names its tier
+ * in the call and alone lowers one.
  */
 
 const { ethers } = require("hardhat");
@@ -184,9 +185,18 @@ async function consensusRound(state, type, subject, data, log = console.log) {
   return t;
 }
 
+/** What a whitelist approval at `tier` did, from entry reads before/after. */
+function approvalOutcome(before, after, tier) {
+  const [was, now] = [Number(before.tier), Number(after.tier)];
+  if (!before.isWhitelistedStatus) return `listed at tier ${now}`;
+  if (now > was) return `raised: tier ${was} -> ${now}`;
+  return `already at tier ${was} (>= ${tier}), no change`;
+}
+
 /**
- * Option 33a: a whitelist verdict by consensus at `tier`, applied by node 1.
- * The nodes vote on (wallet, tier); the listing is read back from chain.
+ * Option 33a: a whitelist verdict by consensus at `tier`, applied by
+ * node 1. The nodes vote on (wallet, tier); the entry is read from chain
+ * before and after, and the line says listed, raised or no change.
  */
 async function runWhitelistRound(
   state,
@@ -207,13 +217,14 @@ async function runWhitelistRound(
   );
   log(`   🏷️  The query's tier (chain, getQueryData): ${t.tier}`);
   if (!t.hasResult) return (log("❌ The query did not resolve"), null);
+  const before = await c.wl.getWhitelistInfo(subject);
   await applyVerdict(c.wl, nodeSigners(state)[0], subject, t.q, true);
   const listed = await c.wl.isWhitelisted(subject);
   const info = await c.wl.getWhitelistInfo(subject);
   const listedTier = Number(info.tier);
   log(
     listed
-      ? `   ✅ ${subject} whitelisted by the verdict: tier ${listedTier} (chain), "${info.reason}"`
+      ? `   ✅ ${subject} by the verdict: ${approvalOutcome(before, info, tier)}; tier ${listedTier} (chain), "${info.reason}"`
       : `❌ ${subject} is not whitelisted after the verdict`,
   );
   return { ...t, listed, listedTier };
