@@ -21,9 +21,9 @@ describe("Handover: KeyManager (4.2)", function () {
   let args: Record<string, any>;
 
   const kmLine = (a: string) =>
-    `KeyManager ${a} code matches the compiled KeyManager: no owner, no allowlist, the deployer holds no KeyManager power`;
+    `KeyManager ${a} code matches the compiled KeyManager: no owner, no allowlist, the deployer holds no KeyManager power; an identity's recovery agents at their threshold evict its MANAGEMENT keys after 48h and move its owner after 7 days`;
   const idLine = (id: string, a: string) =>
-    `demo identity ${id} authorizes KeyManager ${a}; the deployer is not its owner, manager or MANAGEMENT key`;
+    `demo identity ${id} authorizes KeyManager ${a}; the deployer is not its owner, manager, MANAGEMENT key or recovery agent`;
   const dKey = () =>
     ethers.solidityPackedKeccak256(["address"], [f.deployer.address]);
 
@@ -73,6 +73,16 @@ describe("Handover: KeyManager (4.2)", function () {
     after = await assertHandoverComplete(args);
     expect(after.failures).to.deep.equal([idLine(idAddr, kmAddr)]);
     await identity.connect(f.proposer).removeKey(dKey(), 1);
+    expect((await assertHandoverComplete(args)).failures).to.deep.equal([]);
+    // ... or seats the deployer as a recovery agent (Task 4.11) ...
+    await km
+      .connect(f.proposer)
+      .setupKeyRecovery(idAddr, [f.deployer.address], 1);
+    after = await assertHandoverComplete(args);
+    expect(after.failures).to.deep.equal([idLine(idAddr, kmAddr)]);
+    await km
+      .connect(f.proposer)
+      .setupKeyRecovery(idAddr, [f.stranger.address], 1);
     expect((await assertHandoverComplete(args)).failures).to.deep.equal([]);
     // ... or makes the deployer its owner.
     await identity.connect(f.proposer).transferOwnership(f.deployer.address);
@@ -130,6 +140,13 @@ describe("Handover: KeyManager (4.2)", function () {
     it("one where the deployer is an authorized manager", async function () {
       await identity.connect(f.proposer).authorizeManager(f.deployer.address);
       await refuses(args, /the deployer is still authorized manager/);
+    });
+
+    it("one where the deployer is a recovery agent (4.11)", async function () {
+      await km
+        .connect(f.proposer)
+        .setupKeyRecovery(await identity.getAddress(), [f.deployer.address], 1);
+      await refuses(args, /the deployer is still recovery agent/);
     });
 
     it("one where the deployer holds a MANAGEMENT key", async function () {

@@ -22,6 +22,9 @@ const MANAGED_ABI = [
   "function keyHasPurpose(bytes32,uint256) view returns (bool)",
   "function owner() view returns (address)",
 ];
+const KM_ABI = [
+  "function getKeyRecovery(address) view returns (address[],uint256,uint256,bool,uint256,bytes32)",
+];
 
 /**
  * The demo identity's facts: { idAddr, authorizes, deployerRoles } where
@@ -40,6 +43,14 @@ async function identityFacts(o, kmAddr, dAddr) {
     roles.push("authorized manager");
   if ((await read(id.keyHasPurpose(key, 1))) !== false)
     roles.push("MANAGEMENT key");
+  // Task 4.11: agents at the threshold can take the identity.
+  const km = await ethers.getContractAt(KM_ABI, kmAddr);
+  const rec = await read(km.getKeyRecovery(idAddr));
+  if (
+    rec === null ||
+    rec[0].some((a) => a.toLowerCase() === dAddr.toLowerCase())
+  )
+    roles.push("recovery agent");
   const authorizes = (await read(id.authorizedManagers(kmAddr))) === true;
   return { idAddr, authorizes, deployerRoles: roles };
 }
@@ -100,14 +111,14 @@ async function keyManagerLines(o, dAddr) {
   if (!k) return [];
   const lines = [
     [
-      `KeyManager ${k.addr} code matches the compiled KeyManager: no owner, no allowlist, the deployer holds no KeyManager power`,
+      `KeyManager ${k.addr} code matches the compiled KeyManager: no owner, no allowlist, the deployer holds no KeyManager power; an identity's recovery agents at their threshold evict its MANAGEMENT keys after 48h and move its owner after 7 days`,
       k.hasCode && k.actual === k.expected,
     ],
   ];
   if (o.keyManagerIdentity) {
     const f = await identityFacts(o, k.addr, dAddr);
     lines.push([
-      `demo identity ${f.idAddr} authorizes KeyManager ${k.addr}; the deployer is not its owner, manager or MANAGEMENT key`,
+      `demo identity ${f.idAddr} authorizes KeyManager ${k.addr}; the deployer is not its owner, manager, MANAGEMENT key or recovery agent`,
       f.authorizes && f.deployerRoles.length === 0,
     ]);
   }
