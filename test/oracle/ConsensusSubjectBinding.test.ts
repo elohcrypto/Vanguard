@@ -58,11 +58,15 @@ describe("Oracle consensus is bound to the query subject", function () {
     queryType: number,
     result: boolean,
   ): Promise<string> {
-    // A blacklist query's data is its severity (empty = MEDIUM, plan 2F.3).
+    // A blacklist query's data is its severity (empty = MEDIUM, plan 2F.3),
+    // a whitelist query's its tier (Task 4.12).
+    const coder = ethers.AbiCoder.defaultAbiCoder();
     const data =
       queryType === BLACKLIST
         ? "0x"
-        : ethers.AbiCoder.defaultAbiCoder().encode(["string"], ["q"]);
+        : queryType === WHITELIST
+          ? coder.encode(["uint8"], [3])
+          : coder.encode(["string"], ["q"]);
     const tx = await oracleManager
       .connect(owner)
       .submitQuery(subject, queryType, data);

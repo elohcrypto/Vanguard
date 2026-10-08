@@ -17,6 +17,7 @@ const HIGH = 2;
 const CRITICAL = 3;
 const coder = ethers.AbiCoder.defaultAbiCoder();
 const sev = (s: number) => coder.encode(["uint8"], [s]);
+const tierData = (t: number) => coder.encode(["uint8"], [t]);
 
 async function inc(seconds: number) {
   await network.provider.send("evm_increaseTime", [seconds]);
@@ -73,10 +74,12 @@ describe("Oracle verdict integrity (2F.3)", function () {
     subj: string,
     type: number,
     verdict: boolean | null,
-    data = "0x",
+    data?: string,
     by?: SignerWithAddress,
   ): Promise<string> {
     const raiser = by ?? n1;
+    // A whitelist query carries its tier (Task 4.12); default tier 3.
+    data ??= type === WHITELIST ? tierData(3) : "0x";
     const tx = await OM.connect(raiser).submitQuery(subj, type, data);
     const blk = await ethers.provider.getBlock((await tx.wait()).blockNumber);
     const q = ethers.solidityPackedKeccak256(
@@ -415,7 +418,7 @@ describe("Oracle verdict integrity (2F.3)", function () {
         OM.connect(stranger).submitQuery(victim.address, BLACKLIST, "0x"),
       ).to.be.revertedWithCustomError(OM, "UnauthorizedQueryCreator");
       await OM.connect(owner).submitQuery(victim.address, BLACKLIST, "0x");
-      await OM.connect(n2).submitQuery(victim.address, WHITELIST, "0x99");
+      await OM.connect(n2).submitQuery(victim.address, WHITELIST, tierData(2));
       await OM.pauseOracle(n2.address);
       await expect(
         OM.connect(n2).submitQuery(victim.address, BLACKLIST, "0x"),

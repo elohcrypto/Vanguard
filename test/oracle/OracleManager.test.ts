@@ -182,9 +182,10 @@ describe("Oracle Management System", function () {
     it("Should submit and track queries", async function () {
       // The engine snapshots the active weight: a query needs a node.
       await oracleManager.registerOracle(oracle1.address, "O1", "", 500);
+      // A whitelist query carries its tier (Task 4.12).
       const queryData = ethers.AbiCoder.defaultAbiCoder().encode(
-        ["string"],
-        ["test query"],
+        ["uint8"],
+        [3],
       );
 
       const tx = await oracleManager.submitQuery(subject.address, 1, queryData);
@@ -486,10 +487,8 @@ describe("Oracle Management System", function () {
     });
 
     it("Should create consensus queries", async function () {
-      const data = ethers.AbiCoder.defaultAbiCoder().encode(
-        ["string"],
-        ["test query"],
-      );
+      // A whitelist query carries its tier (Task 4.12).
+      const data = ethers.AbiCoder.defaultAbiCoder().encode(["uint8"], [3]);
 
       await expect(oracleManager.submitQuery(subject.address, 1, data)).to.emit(
         consensusOracle,
@@ -569,10 +568,8 @@ describe("Oracle Management System", function () {
       for (const o of [oracle1, oracle2, oracle3]) {
         await oracleManager.setOracleWeight(o.address, 100);
       }
-      const data = ethers.AbiCoder.defaultAbiCoder().encode(
-        ["string"],
-        ["whitelist consensus test"],
-      );
+      // A whitelist query carries its tier (Task 4.12).
+      const data = ethers.AbiCoder.defaultAbiCoder().encode(["uint8"], [3]);
       const rc = await (
         await oracleManager.submitQuery(subject.address, 1, data)
       ).wait();

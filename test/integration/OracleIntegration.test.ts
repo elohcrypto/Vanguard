@@ -231,9 +231,10 @@ describe("Oracle Integration with OnchainID and ERC-3643", function () {
       await tx1.wait();
 
       // Step 3: Oracle consensus to add to whitelist
+      // A whitelist query carries its tier (Task 4.12).
       const queryData = ethers.AbiCoder.defaultAbiCoder().encode(
-        ["address", "uint256", "string"],
-        [onchainIDAddress, KYC_CLAIM_TOPIC, "KYC_APPROVED"],
+        ["uint8"],
+        [4],
       );
 
       const queryId = await raise(investor1.address, 1, queryData);
@@ -324,9 +325,10 @@ describe("Oracle Integration with OnchainID and ERC-3643", function () {
       await tx3.wait();
 
       // Step 2: Oracle consensus for AML verification
+      // A whitelist query carries its tier (Task 4.12).
       const queryData = ethers.AbiCoder.defaultAbiCoder().encode(
-        ["address", "uint256", "string"],
-        [onchainIDAddress, AML_CLAIM_TOPIC, "AML_CLEAR"],
+        ["uint8"],
+        [5],
       );
 
       const queryId = await raise(investor1.address, 1, queryData);
@@ -698,9 +700,10 @@ describe("Oracle Integration with OnchainID and ERC-3643", function () {
   describe("🔄 Oracle Consensus Integration", function () {
     it("Should handle oracle consensus for whitelist decisions", async function () {
       // Create consensus query for whitelist
+      // A whitelist query carries its tier (Task 4.12).
       const queryData = ethers.AbiCoder.defaultAbiCoder().encode(
-        ["address", "string"],
-        [investor1.address, "KYC_AML_VERIFICATION"],
+        ["uint8"],
+        [3],
       );
 
       // Create the query and get queryId from event

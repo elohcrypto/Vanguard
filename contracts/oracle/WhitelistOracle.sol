@@ -11,6 +11,10 @@ contract WhitelistOracle is ListOracleBase {
     /// @dev OracleManager.QUERY_TYPE_WHITELIST: the only query type whose verdict this oracle applies.
     uint8 private constant QUERY_TYPE_WHITELIST = 1;
 
+    /// @notice The resolved whitelist query carries no tier in 1..5 (the
+    ///         manager refuses one at submit; Task 4.12).
+    error InvalidQueryTier();
+
     struct WhitelistEntry {
         bool isWhitelisted;
         uint256 timestamp;
@@ -118,7 +122,7 @@ contract WhitelistOracle is ListOracleBase {
         totalAttestations++;
 
         // Update whitelist based on consensus
-        _updateWhitelistConsensus(_subject, _queryId, _result);
+        _updateWhitelistConsensus(_subject, _queryId);
 
         emit AttestationProvided(msg.sender, _subject, _queryId, _result, block.timestamp, _signature);
         emit AttestationSubmitted(msg.sender, _subject, _queryId, _result, block.timestamp);
@@ -237,61 +241,67 @@ contract WhitelistOracle is ListOracleBase {
     }
 
     /**
-     * @dev Update whitelist based on oracle consensus
+     * @dev Apply a resolved whitelist verdict (Task 4.12). The query names
+     *      (wallet, tier): the tier is the one the manager stored with the
+     *      query, which its id commits to and the nodes voted on, never the
+     *      relayer's. An approval lists a wallet with no live entry at that
+     *      tier for DEFAULT_WHITELIST_DURATION, and moves a live entry to
+     *      that tier (raise or lower) keeping its expiry; the same tier is a
+     *      no-op. A rejection of (wallet, T) delists an entry at tier T or
+     *      above (the wallet does not qualify for T); an entry below T stays.
      */
-    function _updateWhitelistConsensus(address _subject, bytes32 _queryId, bool /* _result */) internal {
-        // Get consensus from oracle manager
+    function _updateWhitelistConsensus(address _subject, bytes32 _queryId) internal {
         (bool hasConsensus, bool consensusResult, uint256 resolvedAt) = oracleManager.getQueryResolution(_queryId);
-        // Bind the resolved consensus to the address it was raised for. Without
-        // this, a single active oracle self-signs an attestation naming any
-        // victim and replays a benign, already-resolved queryId to whitelist
-        // them: a resolution keys on queryId alone.
-        // Bind to the subject AND the query type. Subject alone still let a
-        // resolved query of another kind (identity, compliance, blacklist)
-        // for this very subject be replayed as a whitelist verdict.
+        // Bind the resolved consensus to the subject AND the query type: a
+        // resolution keys on queryId alone, so a node could otherwise replay
+        // a benign resolved query (of any kind) at a victim.
         (address boundSubject, uint8 boundType) = oracleManager.getQueryBinding(_queryId);
         if (boundSubject != _subject || boundType != QUERY_TYPE_WHITELIST) revert QuerySubjectMismatch();
+        if (!hasConsensus) return;
 
         // Plan 2F.3: a resolved verdict applies once, only while fresh and only
-        // if it resolved after the subject's last write (lastWriteAt: a
-        // governance removal or addition, an owner write, or a verdict that
-        // resolved later), so an older verdict never undoes it. Consumed even
-        // when it changes nothing; lastWriteAt moves to its resolvedAt.
-        if (hasConsensus) {
-            _consumeVerdict(_queryId, _subject, resolvedAt);
+        // if it resolved after the subject's last write (lastWriteAt), so an
+        // older verdict never undoes a newer write. Consumed even when it
+        // changes nothing; lastWriteAt moves to its resolvedAt.
+        _consumeVerdict(_queryId, _subject, resolvedAt);
+        uint8 tier = _queryTier(_queryId);
+        WhitelistEntry storage entry = whitelistEntries[_subject];
+        bool live = entry.isWhitelisted && (entry.expiryTime == 0 || block.timestamp < entry.expiryTime);
 
-            // Review B N-d (recorded, plan 3.3): the add branch reads the
-            // stored flag, so a lapsed entry never removed (isWhitelisted()
-            // false, flag still set) blocks a consensus re-listing.
-            if (consensusResult && !whitelistEntries[_subject].isWhitelisted) {
-                // Add to whitelist with default tier
-                whitelistEntries[_subject] = WhitelistEntry({
-                    isWhitelisted: true,
-                    timestamp: block.timestamp,
-                    expiryTime: block.timestamp + DEFAULT_WHITELIST_DURATION,
-                    tier: 3, // Default tier
-                    reason: "Oracle consensus approval",
-                    attestingOracles: new address[](0)
-                });
-
-                emit WhitelistUpdated(
-                    _subject,
-                    true,
-                    3,
-                    block.timestamp + DEFAULT_WHITELIST_DURATION,
-                    "Oracle consensus approval"
-                );
-                correctAttestations++;
-            } else if (!consensusResult && whitelistEntries[_subject].isWhitelisted) {
-                // Remove from whitelist
-                whitelistEntries[_subject].isWhitelisted = false;
-                whitelistEntries[_subject].reason = "Oracle consensus rejection";
-                whitelistEntries[_subject].timestamp = block.timestamp;
-
-                emit WhitelistUpdated(_subject, false, 0, 0, "Oracle consensus rejection");
-                correctAttestations++;
-            }
+        if (consensusResult && !live) {
+            // Fresh listing (review B N-d closed: a lapsed entry re-lists).
+            uint256 expiryTime = block.timestamp + DEFAULT_WHITELIST_DURATION;
+            whitelistEntries[_subject] = WhitelistEntry({
+                isWhitelisted: true,
+                timestamp: block.timestamp,
+                expiryTime: expiryTime,
+                tier: tier,
+                reason: "Oracle consensus approval",
+                attestingOracles: new address[](0)
+            });
+            emit WhitelistUpdated(_subject, true, tier, expiryTime, "Oracle consensus approval");
+            correctAttestations++;
+        } else if (consensusResult && entry.tier != tier) {
+            entry.tier = tier;
+            entry.timestamp = block.timestamp;
+            entry.reason = "Oracle consensus tier change";
+            emit WhitelistUpdated(_subject, true, tier, entry.expiryTime, "Oracle consensus tier change");
+            correctAttestations++;
+        } else if (!consensusResult && entry.isWhitelisted && entry.tier >= tier) {
+            entry.isWhitelisted = false;
+            entry.reason = "Oracle consensus rejection";
+            entry.timestamp = block.timestamp;
+            emit WhitelistUpdated(_subject, false, 0, 0, "Oracle consensus rejection");
+            correctAttestations++;
         }
+    }
+
+    /// @dev The tier the whitelist query was raised with (abi.encode(tier)).
+    function _queryTier(bytes32 _queryId) internal view returns (uint8) {
+        bytes memory data = oracleManager.getQueryData(_queryId);
+        uint256 tier = data.length == 32 ? abi.decode(data, (uint256)) : 0;
+        if (tier < MIN_TIER || tier > MAX_TIER) revert InvalidQueryTier();
+        return uint8(tier);
     }
 
     /**

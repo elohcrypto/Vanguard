@@ -7,6 +7,7 @@ import "@openzeppelin/contracts/utils/cryptography/ECDSA.sol";
 import "@openzeppelin/contracts/utils/cryptography/MessageHashUtils.sol";
 import "./interfaces/IOracleManager.sol";
 import "./ConsensusOracle.sol";
+import "./OracleQueryPayload.sol";
 
 /**
  * @title OracleManager
@@ -17,16 +18,13 @@ import "./ConsensusOracle.sol";
  *         verdict it returns. Owner: governance after the handover
  *         (OracleParameters proposals). The operator (ops after the
  *         handover) may pause, unpause and emergency-designate nodes.
+ *         Query types and payload rules: OracleQueryPayload.
  */
-contract OracleManager is IOracleManager, Ownable2Step, ReentrancyGuard {
+contract OracleManager is IOracleManager, OracleQueryPayload, Ownable2Step, ReentrancyGuard {
     /// @notice A response arrived after the query resolved: a settled verdict is final.
     error QueryAlreadyResolved();
     /// @notice Only the owner or an active oracle may raise a query.
     error UnauthorizedQueryCreator();
-    /// @notice A blacklist query's data must be empty or one ABI-encoded severity 0..3.
-    error InvalidSeverity();
-    /// @notice A CRITICAL (365-day) blacklist query is raised by the owner only.
-    error SeverityRequiresOwner();
     /// @notice No engine bound: no query may open, fail closed.
     error NoConsensusEngine();
     /// @notice The engine has no code or serves another manager.
@@ -73,8 +71,6 @@ contract OracleManager is IOracleManager, Ownable2Step, ReentrancyGuard {
     uint256 public constant MAX_ORACLES = 100;
     uint256 public constant MIN_REPUTATION = 100;
     uint256 public constant MAX_REPUTATION = 1000;
-    /// @notice Highest BlacklistOracle.SeverityLevel (CRITICAL)
-    uint256 private constant MAX_SEVERITY = 3;
 
     /// @notice The emergency designation: BlacklistOracle.emergencyBlacklist
     ///         requires it and an active node (R-2F3-3); cleared on removal.
@@ -90,12 +86,6 @@ contract OracleManager is IOracleManager, Ownable2Step, ReentrancyGuard {
     event OperatorUpdated(address indexed previous, address indexed current);
     /// @notice The owner adopted a pause already in place (pausedByOwner).
     event OwnerPauseAdopted(address indexed oracle);
-
-    // Query types
-    uint8 public constant QUERY_TYPE_WHITELIST = 1;
-    uint8 public constant QUERY_TYPE_BLACKLIST = 2;
-    uint8 public constant QUERY_TYPE_IDENTITY = 3;
-    uint8 public constant QUERY_TYPE_COMPLIANCE = 4;
 
     modifier onlyActiveOracle() {
         require(oracles[msg.sender].active, "OracleManager: Oracle not active");
@@ -296,25 +286,20 @@ contract OracleManager is IOracleManager, Ownable2Step, ReentrancyGuard {
 
     /**
      * @dev Submit a query for oracle consensus. Raised by the owner or an
-     *      active oracle (plan 2F.3: a blacklist query fixes the severity, so
-     *      a stranger must not choose it). For QUERY_TYPE_BLACKLIST, `_data`
-     *      is empty (MEDIUM) or `abi.encode(uint8 severity)` with 0..3; the
-     *      blacklist oracle reads the severity from here, never from the relayer.
-     *      Responders vote a bare bool, so answering yes accepts the raiser's
-     *      severity: an active oracle may raise at most HIGH, only the owner
-     *      CRITICAL (review LOW-1). The id hashes the raiser and block time;
-     *      an existing id is refused by the engine (Task 4.4, was review N-8's
-     *      self-griefing reset). The engine snapshots the active weight now.
+     *      active oracle (plan 2F.3: a blacklist query fixes the severity and
+     *      a whitelist query the tier, so a stranger must not choose them).
+     *      `_data` is checked by _checkQueryPayload (OracleQueryPayload): a
+     *      blacklist severity 0..3 (CRITICAL the owner's), a whitelist tier
+     *      1..5 (tier 5 the owner's, Task 4.12). The id hashes the data,
+     *      the raiser and block time; an existing id is refused by the engine
+     *      (Task 4.4, was review N-8's self-griefing reset). The engine
+     *      snapshots the active weight now.
      */
     function submitQuery(address _subject, uint8 _queryType, bytes calldata _data) external returns (bytes32 queryId) {
         if (!oracles[msg.sender].active && msg.sender != owner()) revert UnauthorizedQueryCreator();
         require(_subject != address(0), "OracleManager: Invalid subject");
         require(_queryType >= 1 && _queryType <= 4, "OracleManager: Invalid query type");
-        if (_queryType == QUERY_TYPE_BLACKLIST && _data.length != 0) {
-            uint256 severity = _data.length == 32 ? abi.decode(_data, (uint256)) : type(uint256).max;
-            if (severity > MAX_SEVERITY) revert InvalidSeverity();
-            if (severity == MAX_SEVERITY && msg.sender != owner()) revert SeverityRequiresOwner();
-        }
+        _checkQueryPayload(_queryType, _data, msg.sender == owner());
 
         queryId = keccak256(abi.encodePacked(_subject, _queryType, _data, block.timestamp, msg.sender));
         _boundEngine().openQuery(queryId);

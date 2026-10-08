@@ -10,6 +10,8 @@ import { bindEngine } from "../helpers/oracles";
 // leave an open query alone.
 
 const WHITELIST = 1;
+// Task 4.12: a whitelist query carries its tier, abi.encode(tier) 1..5.
+const TIER3 = ethers.AbiCoder.defaultAbiCoder().encode(["uint8"], [3]);
 
 describe("Consensus snapshot: pausing never lowers the bar", function () {
   let owner: SignerWithAddress, ops: SignerWithAddress;
@@ -32,7 +34,7 @@ describe("Consensus snapshot: pausing never lowers the bar", function () {
       .map((l: any) => CO.interface.parseLog(l))
       .find((e: any) => e?.name === "ConsensusQueryCreated").args[0];
   async function raise(by: SignerWithAddress = owner): Promise<string> {
-    const tx = OM.connect(by).submitQuery(subject.address, WHITELIST, "0x");
+    const tx = OM.connect(by).submitQuery(subject.address, WHITELIST, TIER3);
     return idOf(await (await tx).wait());
   }
   const answer = (n: SignerWithAddress, q: string, v: boolean) =>
@@ -128,7 +130,7 @@ describe("Consensus snapshot: pausing never lowers the bar", function () {
   it("the same query id twice in one block is refused (QueryExists)", async function () {
     await network.provider.send("evm_setAutomine", [false]);
     try {
-      const args = [subject.address, WHITELIST, "0x"] as const;
+      const args = [subject.address, WHITELIST, TIER3] as const;
       const t1 = await OM.submitQuery(...args, { gasLimit: 3_000_000 });
       const t2 = await OM.submitQuery(...args, { gasLimit: 3_000_000 });
       await network.provider.send("evm_mine");
@@ -153,7 +155,7 @@ describe("Consensus snapshot: pausing never lowers the bar", function () {
     ).deploy();
     const engine = await bindEngine(empty);
     await expect(
-      empty.submitQuery(subject.address, WHITELIST, "0x"),
+      empty.submitQuery(subject.address, WHITELIST, TIER3),
     ).to.be.revertedWithCustomError(engine, "NoRegisteredWeight");
   });
 });

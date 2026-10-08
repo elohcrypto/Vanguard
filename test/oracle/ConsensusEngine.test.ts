@@ -9,6 +9,8 @@ import { bindEngine } from "../helpers/oracles";
 // verdict). The operator (ops) pauses, unpauses and emergency-designates.
 
 const WHITELIST = 1;
+// Task 4.12: a whitelist query carries its tier, abi.encode(tier) 1..5.
+const TIER3 = ethers.AbiCoder.defaultAbiCoder().encode(["uint8"], [3]);
 const CRITICAL = 3;
 
 describe("Consensus engine under the gate (4.4)", function () {
@@ -35,7 +37,7 @@ describe("Consensus engine under the gate (4.4)", function () {
 
   async function raise(by: SignerWithAddress = owner): Promise<string> {
     const rc = await (
-      await OM.connect(by).submitQuery(subject.address, WHITELIST, "0x")
+      await OM.connect(by).submitQuery(subject.address, WHITELIST, TIER3)
     ).wait();
     return rc.logs
       .map((l: any) => CO.interface.parseLog(l))
@@ -339,7 +341,7 @@ describe("Consensus engine under the gate (4.4)", function () {
       // A manager with no engine opens nothing and validates nothing.
       await other.registerOracle(n1.address, "node", "", 500);
       await expect(
-        other.submitQuery(subject.address, WHITELIST, "0x"),
+        other.submitQuery(subject.address, WHITELIST, TIER3),
       ).to.be.revertedWithCustomError(other, "NoConsensusEngine");
       expect(await other.getConsensusThreshold()).to.equal(0);
       const h = ethers.id("m");

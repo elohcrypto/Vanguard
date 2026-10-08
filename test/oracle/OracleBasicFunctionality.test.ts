@@ -316,9 +316,10 @@ describe("Oracle Basic Functionality Tests", function () {
     it("Should create and manage consensus queries", async function () {
       console.log("🤝 Testing Consensus Query Creation...");
 
+      // A whitelist query carries its tier (Task 4.12).
       const queryData = ethers.AbiCoder.defaultAbiCoder().encode(
-        ["string", "uint256"],
-        ["Test consensus query", Date.now()],
+        ["uint8"],
+        [3],
       );
 
       // Queries open through the manager; the engine snapshots the weight.
