@@ -884,14 +884,16 @@ a candidate (`initiateKeyRecovery`); until the agents' approvals reach
 the threshold its initiator or the owner may cancel it, a MANAGEMENT key
 may not; from that approval only the agents cancel it, at the same
 threshold, and the identity refuses its owner's `authorizeManager`,
-`deauthorizeManager` and `transferOwnership` (`ownershipFrozen`); 48
+`deauthorizeManager` and `transferOwnership` (`ownershipFrozen`) and
+any new MANAGEMENT key (`ManagementAdditionsFrozen`); 48
 hours after the approval (`RECOVERY_TIMELOCK`), within 7 days, anyone
 executes it: the recovered key is added and every other MANAGEMENT key,
 the owner's included, is removed (ACTION, CLAIM and ENCRYPTION keys
-stay); 7 days after the approval (`OWNER_TRANSFER_TIMELOCK`), within 7
+stay), 100 keys per call (`MAX_EVICTIONS_PER_CALL`, ~50k gas each), the
+rest through `continueKeyEviction` or the owner transfer's own batch; 7
+days after the approval (`OWNER_TRANSFER_TIMELOCK`), within 7
 days, anyone proposes the recovered wallet as owner
-(`executeOwnerTransfer`) and that wallet accepts it itself; on that
-acceptance any MANAGEMENT key added meanwhile goes too. Until then
+(`executeOwnerTransfer`) and that wallet accepts it itself. Until then
 `owner()` keeps its other powers (it still passes `onlyManagementKey`).
 Agents at the threshold can therefore take the identity: choose agents
 you would trust with it. The owner sees the approval on chain and has

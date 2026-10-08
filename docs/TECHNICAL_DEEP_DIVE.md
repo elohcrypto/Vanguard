@@ -72,8 +72,9 @@ purpose, removalNonces[key], chainid))`, and requires
   owner key is recovery (Task 4.11): the owner seats the agents; from
   the agents' approval only they cancel, at their threshold, and the
   owner's `authorizeManager`, `deauthorizeManager` and
-  `transferOwnership` are frozen; 48 hours later execution evicts every
-  other MANAGEMENT key; 7 days after the approval the recovered wallet
+  `transferOwnership` and new MANAGEMENT keys are frozen; 48 hours later
+  execution evicts every other MANAGEMENT key (in batches of 100,
+  `continueKeyEviction`); 7 days after the approval the recovered wallet
   is proposed as owner and accepts. Agents at the threshold can take the
   identity (docs/SYSTEM_WORKFLOW_GUIDE.md, "Identity key lifecycle").
 - `authorizeManager` / `deauthorizeManager` (owner only) are the one way
