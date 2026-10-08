@@ -127,6 +127,18 @@ describe("Whitelist consensus raises only (Task 4.12, R-412-7/8)", function () {
       expect(i[2]).to.equal(i[1] + YEAR); // set in the raising block
     });
 
+    it("a finite expiry later than the cap is capped too", async function () {
+      const threeYears = 3 * 365 * 86400;
+      await WO.connect(lm).addToWhitelist(who, 1, threeYears, "restricted");
+      await time.increase(60);
+      const q = await resolved(4, true);
+      const rc = await (await apply(q, true)).wait();
+      const blk = await ethers.provider.getBlock(rc.blockNumber);
+      const i = await info();
+      expect(Number(i[3])).to.equal(4);
+      expect(i[2]).to.equal(BigInt(blk!.timestamp) + YEAR);
+    });
+
     it("a sooner expiry is kept", async function () {
       await WO.addToWhitelist(who, 1, 30 * 86400, "owner");
       const expiry = (await info())[2];
