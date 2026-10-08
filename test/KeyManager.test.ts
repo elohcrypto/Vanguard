@@ -60,6 +60,10 @@ describe("KeyManager", function () {
     await onchainID
       .connect(identity)
       .authorizeManager(await keyManager.getAddress());
+    // Task 4.11: recovery runs only through the pinned recovery manager.
+    await onchainID
+      .connect(identity)
+      .pinRecoveryManager(await keyManager.getAddress());
   });
 
   describe("Deployment", function () {
@@ -111,9 +115,7 @@ describe("KeyManager", function () {
             [recoveryAgent1.address],
             1,
           ),
-      ).to.be.revertedWith(
-        "KeyManager: Identity has not authorized KeyManager",
-      );
+      ).to.be.revertedWithCustomError(keyManager, "NotRecoveryManager");
     });
 
     it("a non-manager cannot initiate on an authorizing identity", async function () {

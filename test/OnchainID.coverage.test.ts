@@ -52,6 +52,9 @@ describe("OnchainID System - Coverage Tests", function () {
     await onchainID
       .connect(identity)
       .authorizeManager(await keyManager.getAddress());
+    await onchainID
+      .connect(identity)
+      .pinRecoveryManager(await keyManager.getAddress());
   });
 
   describe("Edge Cases and Error Conditions", function () {
@@ -231,6 +234,9 @@ describe("OnchainID System - Coverage Tests", function () {
       await deployedIdentity
         .connect(user1)
         .authorizeManager(await keyManager.getAddress());
+      await deployedIdentity
+        .connect(user1)
+        .pinRecoveryManager(await keyManager.getAddress());
 
       await keyManager
         .connect(user1)

@@ -24,6 +24,7 @@ async function setup() {
   const km = await (await ethers.getContractFactory("KeyManager")).deploy();
   const kmA = await km.getAddress();
   await id.authorizeManager(kmA);
+  await id.pinRecoveryManager(kmA);
   // A live rogue MANAGEMENT key, plus keys recovery must not touch.
   await id.addKey(k(rogue.address), MGMT, 1);
   await id.addKey(k(actionHolder.address), ACTION, 1);
@@ -308,7 +309,7 @@ describe("KeyManager recovery evicts and moves ownership (4.11, D38 c)", functio
     // view for another wallet.
     await expect(
       f.id.connect(f.stranger).transferOwnershipByRecovery(f.stranger.address),
-    ).to.be.revertedWithCustomError(f.id, "NotAuthorizedManager");
+    ).to.be.revertedWithCustomError(f.id, "NotRecoveryManager");
     expect(await f.km.isRecoveryOwner(f.idA, f.stranger.address)).to.equal(
       false,
     );
@@ -323,6 +324,7 @@ describe("KeyManager recovery evicts and moves ownership (4.11, D38 c)", functio
     ).deploy(owner.address);
     const km = await (await ethers.getContractFactory("KeyManager")).deploy();
     await id.authorizeManager(await km.getAddress());
+    await id.pinRecoveryManager(await km.getAddress());
     await expect(
       km.executeOwnerTransfer(await id.getAddress(), rescued.address),
     ).to.be.revertedWithCustomError(km, "NoExecutedRecovery");

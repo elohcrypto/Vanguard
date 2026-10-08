@@ -20,6 +20,7 @@ async function setup() {
   const idA = await id.getAddress();
   const km = await (await ethers.getContractFactory("KeyManager")).deploy();
   await id.connect(holder).authorizeManager(await km.getAddress());
+  await id.connect(holder).pinRecoveryManager(await km.getAddress());
   await km
     .connect(holder)
     .setupKeyRecovery(idA, [A.address, B.address, C.address], 2);
@@ -165,9 +166,14 @@ describe("KeyManager recovery guards (2F.2, M2, review F2/F3)", function () {
     ).to.be.revertedWithCustomError(km, "RecoveryLocked");
     await km.connect(A).cancelKeyRecovery(idA, k(good.address));
     await km.connect(B).cancelKeyRecovery(idA, k(good.address));
-    // Holder replaces the agent set: A and B are out.
+    // Holder replaces the agent set: A and B are out once the re-seat
+    // applies, 48h later (R-411-16).
     await km.connect(holder).setupKeyRecovery(idA, [C.address], 1);
     await time.increase(DAY2 + 1);
+    await km.connect(anyone).applyKeyRecoverySetup(idA);
+    expect((await km.getKeyRecovery(idA)).recoveryAgents).to.deep.equal([
+      C.address,
+    ]);
     await expect(
       km.connect(anyone).executeKeyRecovery(idA, k(good.address)),
     ).to.be.revertedWith("KeyManager: Recovery not initiated");
@@ -175,6 +181,8 @@ describe("KeyManager recovery guards (2F.2, M2, review F2/F3)", function () {
     await km
       .connect(holder)
       .setupKeyRecovery(idA, [A.address, B.address, C.address], 2);
+    await time.increase(DAY2 + 1);
+    await km.connect(anyone).applyKeyRecoverySetup(idA);
     expect((await km.keyRecoveries(idA)).initiatedAt).to.equal(0);
     await km.connect(C).initiateKeyRecovery(idA, k(good.address));
     expect((await km.getKeyRecovery(idA)).approvalCount).to.equal(0);
@@ -254,6 +262,7 @@ describe("Recovered wallet votes after KeyManager recovery (2F.1 + 2F.2)", funct
     const km = await (await ethers.getContractFactory("KeyManager")).deploy();
     // Bob opted in to recovery before losing his wallet.
     await id.connect(bob).authorizeManager(await km.getAddress());
+    await id.connect(bob).pinRecoveryManager(await km.getAddress());
     await km
       .connect(bob)
       .setupKeyRecovery(bobId, [agentA.address, agentB.address], 2);

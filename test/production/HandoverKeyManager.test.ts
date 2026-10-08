@@ -1,5 +1,6 @@
 import { expect } from "chai";
 import { ethers } from "hardhat";
+import { time } from "@nomicfoundation/hardhat-network-helpers";
 import { handoverFixture } from "../helpers/governanceFixture";
 import { runHandover } from "../../scripts/handover";
 
@@ -21,9 +22,9 @@ describe("Handover: KeyManager (4.2)", function () {
   let args: Record<string, any>;
 
   const kmLine = (a: string) =>
-    `KeyManager ${a} code matches the compiled KeyManager: no owner, no allowlist, the deployer holds no KeyManager power; an identity's recovery agents at their threshold evict its MANAGEMENT keys after 48h and move its owner after 7 days`;
+    `KeyManager ${a} code matches the compiled KeyManager: no owner, no allowlist, the deployer holds no KeyManager power; only an identity's pinned recovery manager can move its ownership: its recovery agents at their threshold evict its MANAGEMENT keys after 48h and move its owner after 7 days`;
   const idLine = (id: string, a: string) =>
-    `demo identity ${id} authorizes KeyManager ${a}; the deployer is not its owner, manager, MANAGEMENT key or recovery agent`;
+    `demo identity ${id} pins KeyManager ${a} as its recovery manager and authorizes only it; the deployer is not its owner, manager, MANAGEMENT key or recovery agent`;
   const dKey = () =>
     ethers.solidityPackedKeccak256(["address"], [f.deployer.address]);
 
@@ -35,6 +36,7 @@ describe("Handover: KeyManager (4.2)", function () {
     const idAddr = await f.c.identityRegistry.identity(f.proposer.address);
     identity = await ethers.getContractAt("OnchainID", idAddr);
     await identity.connect(f.proposer).authorizeManager(kmAddr);
+    await identity.connect(f.proposer).pinRecoveryManager(kmAddr);
     args = { ...f.args, keyManager: km, keyManagerIdentity: idAddr };
   });
 
@@ -80,9 +82,18 @@ describe("Handover: KeyManager (4.2)", function () {
       .setupKeyRecovery(idAddr, [f.deployer.address], 1);
     after = await assertHandoverComplete(args);
     expect(after.failures).to.deep.equal([idLine(idAddr, kmAddr)]);
+    // The re-seat waits 48h (R-411-16), then applies.
     await km
       .connect(f.proposer)
       .setupKeyRecovery(idAddr, [f.stranger.address], 1);
+    await time.increase(48 * 3600 + 1);
+    await km.applyKeyRecoverySetup(idAddr);
+    expect((await assertHandoverComplete(args)).failures).to.deep.equal([]);
+    // ... or authorizes another manager besides KeyManager ...
+    await identity.connect(f.proposer).authorizeManager(f.stranger.address);
+    after = await assertHandoverComplete(args);
+    expect(after.failures).to.deep.equal([idLine(idAddr, kmAddr)]);
+    await identity.connect(f.proposer).deauthorizeManager(f.stranger.address);
     expect((await assertHandoverComplete(args)).failures).to.deep.equal([]);
     // ... or makes the deployer its owner.
     await identity.connect(f.proposer).transferOwnership(f.deployer.address);
@@ -163,6 +174,22 @@ describe("Handover: KeyManager (4.2)", function () {
         { ...args, keyManagerIdentity: await mine.getAddress() },
         /the deployer is still owner, MANAGEMENT key/,
       );
+    });
+
+    it("one that does not pin KeyManager as its recovery manager (4.11)", async function () {
+      const theirs = await (
+        await ethers.getContractFactory("OnchainID")
+      ).deploy(f.stranger.address);
+      await theirs.connect(f.stranger).authorizeManager(kmAddr);
+      await refuses(
+        { ...args, keyManagerIdentity: await theirs.getAddress() },
+        /does not pin KeyManager .* as its recovery manager/,
+      );
+    });
+
+    it("one that authorizes another manager besides KeyManager (4.11)", async function () {
+      await identity.connect(f.proposer).authorizeManager(f.stranger.address);
+      await refuses(args, /authorizes managers other than KeyManager/);
     });
 
     it("keyManagerIdentity named without keyManager", async function () {

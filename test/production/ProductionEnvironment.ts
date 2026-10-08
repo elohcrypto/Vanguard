@@ -421,6 +421,12 @@ export class ProductionEnvironment {
     await identity
       .connect(owner)
       .authorizeManager(await this.keyManager.getAddress());
+    // Task 4.11: recovery runs through the pinned recovery manager.
+    if ((await identity.recoveryManager()) === ethers.ZeroAddress) {
+      await identity
+        .connect(owner)
+        .pinRecoveryManager(await this.keyManager.getAddress());
+    }
 
     // Setup 2-of-3 recovery
     await this.keyManager.connect(owner).setupKeyRecovery(
