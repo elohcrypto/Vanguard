@@ -283,6 +283,8 @@ describe("Handover: KeyManager (4.2)", function () {
     };
     const built = new HandoverModule(state, null, null)._ceremonyArgs();
     expect(built.keyManager).to.equal(km);
+    // Option 12's identity rides along, so the preflight checks it too.
+    expect(built.keyManagerIdentity).to.equal(await identity.getAddress());
     await handoverDeployerPowers({ ...built, log: () => {} });
     expect(await f.c.token.isAgent(f.ops.address)).to.equal(true);
   });
