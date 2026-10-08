@@ -47,7 +47,11 @@ abstract contract ListOracleBase is IOracle, Ownable, ReentrancyGuard, Pausable 
     ///         resolvedAt for a consensus application (a no-op included), so
     ///         an older verdict applied late never beats a newer one.
     ///         `entry.timestamp` is the readers' write time and is not the
-    ///         ordering clock.
+    ///         ordering clock. R-412-8: keyed on resolution, not on when the
+    ///         query was raised: the deciding vote is cast after any earlier
+    ///         write, raise-time keying would refuse the newer of two
+    ///         overlapping verdicts, and refusing a stale-raised query stops
+    ///         no majority, which can raise the question afresh.
     mapping(bytes32 => bool) public verdictApplied;
     mapping(address => uint256) public lastWriteAt;
     uint256 public maxVerdictAge = 1 days;

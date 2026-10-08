@@ -10,7 +10,8 @@ import { bindEngine } from "../helpers/oracles";
 // one question and the verdict lists at exactly that tier, never a constant.
 // The manager refuses a tier outside 1..5 (or any other payload shape) at
 // submit, and only the owner raises tier 5 (R-412-1, R-412-2). Re-listing
-// and rejection follow R-412-4 and R-412-5.
+// and rejection follow R-412-7 and R-412-5 (more in
+// WhitelistConsensusRaise.test.ts).
 describe("Whitelist consensus tier (Task 4.12)", function () {
   const WHITELIST = 1;
   const BLACKLIST = 2;
@@ -173,20 +174,19 @@ describe("Whitelist consensus tier (Task 4.12)", function () {
     });
   });
 
-  describe("re-listing and rejection (R-412-4, R-412-5)", function () {
-    it("an approval at another tier raises or lowers a live entry, keeping its expiry", async function () {
+  describe("re-listing and rejection (R-412-7, R-412-5)", function () {
+    it("an approval above a live entry raises it; below it, nothing", async function () {
       const who = stranger.address;
-      await WO.addToWhitelist(who, 2, ethers.MaxUint256, "owner, no expiry");
+      await WO.addToWhitelist(who, 2, 30 * 86400, "owner");
       await time.increase(60);
       let q = await resolved(who, 4, true);
       await expect(apply(who, q, true))
         .to.emit(WO, "WhitelistUpdated")
-        .withArgs(who, true, 4, 0, "Oracle consensus tier change");
+        .withArgs(who, true, 4, anyUint, "Oracle consensus tier raise");
       expect(await entry(who)).to.deep.include({ live: true, tier: 4 });
-      expect((await entry(who)).expiry).to.equal(0n);
       q = await resolved(who, 1, true);
-      await apply(who, q, true);
-      expect(await entry(who)).to.deep.include({ live: true, tier: 1 });
+      await expect(apply(who, q, true)).to.not.emit(WO, "WhitelistUpdated");
+      expect(await entry(who)).to.deep.include({ live: true, tier: 4 });
     });
 
     it("an approval at the same tier changes nothing and is consumed", async function () {

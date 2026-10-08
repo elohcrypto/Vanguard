@@ -244,11 +244,14 @@ contract WhitelistOracle is ListOracleBase {
      * @dev Apply a resolved whitelist verdict (Task 4.12). The query names
      *      (wallet, tier): the tier is the one the manager stored with the
      *      query, which its id commits to and the nodes voted on, never the
-     *      relayer's. An approval lists a wallet with no live entry at that
-     *      tier for DEFAULT_WHITELIST_DURATION, and moves a live entry to
-     *      that tier (raise or lower) keeping its expiry; the same tier is a
-     *      no-op. A rejection of (wallet, T) delists an entry at tier T or
-     *      above (the wallet does not qualify for T); an entry below T stays.
+     *      relayer's. An approval means "qualifies for at least T"
+     *      (R-412-7): it lists a wallet with no live entry at T for
+     *      DEFAULT_WHITELIST_DURATION, raises a live entry below T to T with
+     *      its expiry capped at that same duration from now (R-412-L1), and
+     *      is a consumed no-op on an entry at T or above: it never lowers
+     *      (lowering is the owner's or list manager's, addToWhitelist). A
+     *      rejection of (wallet, T) delists an entry at tier T or above (the
+     *      wallet does not qualify for T); an entry below T stays.
      */
     function _updateWhitelistConsensus(address _subject, bytes32 _queryId) internal {
         (bool hasConsensus, bool consensusResult, uint256 resolvedAt) = oracleManager.getQueryResolution(_queryId);
@@ -281,11 +284,14 @@ contract WhitelistOracle is ListOracleBase {
             });
             emit WhitelistUpdated(_subject, true, tier, expiryTime, "Oracle consensus approval");
             correctAttestations++;
-        } else if (consensusResult && entry.tier != tier) {
+        } else if (consensusResult && entry.tier < tier) {
+            // Raise only; the consensus grant lasts no longer than a fresh one.
+            uint256 cap = block.timestamp + DEFAULT_WHITELIST_DURATION;
+            if (entry.expiryTime == 0 || entry.expiryTime > cap) entry.expiryTime = cap;
             entry.tier = tier;
             entry.timestamp = block.timestamp;
-            entry.reason = "Oracle consensus tier change";
-            emit WhitelistUpdated(_subject, true, tier, entry.expiryTime, "Oracle consensus tier change");
+            entry.reason = "Oracle consensus tier raise";
+            emit WhitelistUpdated(_subject, true, tier, entry.expiryTime, "Oracle consensus tier raise");
             correctAttestations++;
         } else if (!consensusResult && entry.isWhitelisted && entry.tier >= tier) {
             entry.isWhitelisted = false;
