@@ -125,10 +125,20 @@ describe("Handover: KeyManager (4.2)", function () {
   });
 
   it("without a keyManager key the ceremony adds no KeyManager line", async function () {
+    await f.c.onchainIDFactory.setRecoveryManager(ethers.ZeroAddress);
     const r = await assertHandoverComplete(f.args);
     expect(
       r.checks.some((c: any) => c.label.startsWith("KeyManager ")),
     ).to.equal(false);
+    // L-1: the factory still gets its line; unpinned, KeyManager hash: ok.
+    const fac = r.checks.find((c: any) => /pins no recovery/.test(c.label));
+    expect(fac.ok).to.equal(true);
+  });
+
+  it("L-1: an unpinned factory with keyManager omitted passes", async function () {
+    await f.c.onchainIDFactory.setRecoveryManager(ethers.ZeroAddress);
+    await handoverDeployerPowers(f.args);
+    expect(await f.c.token.isAgent(f.ops.address)).to.equal(true);
   });
 
   it("preflight refuses a KeyManager with no code, before any transaction", async function () {
@@ -216,6 +226,28 @@ describe("Handover: KeyManager (4.2)", function () {
         args,
         /does not pin KeyManager .* on the identities it creates/,
       );
+    });
+
+    // Review L-1: the factory is checked even when keyManager is left out.
+    it("a factory pinning its own code hash, keyManager omitted", async function () {
+      const evil = await (
+        await ethers.getContractFactory("EvilRecoveryManager")
+      ).deploy();
+      const evilA = await evil.getAddress();
+      const evilHash = ethers.keccak256(await ethers.provider.getCode(evilA));
+      const fac = await (
+        await ethers.getContractFactory("OnchainIDFactory")
+      ).deploy(f.deployer.address, evilHash);
+      await fac.setRecoveryManager(evilA);
+      const o = { ...f.args, onchainIDFactory: fac };
+      await refuses(o, /recoveryManagerCodeHash .* is neither zero nor/);
+      const r = await assertHandoverComplete(o);
+      expect(r.failures.join("\n")).to.match(/pins no recovery manager/);
+    });
+
+    it("a factory pinning a recovery manager, keyManager omitted", async function () {
+      // beforeEach pinned kmAddr on the fixture factory.
+      await refuses(f.args, /pins recovery manager .* name it as keyManager/);
     });
 
     it("keyManagerIdentity named without keyManager", async function () {
