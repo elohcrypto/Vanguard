@@ -11,6 +11,11 @@
  * governance after the handover). Options 33a, 34a, 35a, 37 and 40 and
  * scripts/demo-smoke-oracles.js share these steps; every line printed is
  * read back from chain.
+ * A whitelist query names (wallet, tier): its data is abi.encode(tier),
+ * 1..5, fixed when raised (a node raises 1..4, only the owner 5) and the
+ * verdict lists at that tier (Task 4.12). The owner or list-manager path
+ * (addToWhitelist, options 33 and 40, DynamicListManager) names its tier
+ * in the call.
  */
 
 const { ethers } = require("hardhat");
@@ -22,6 +27,11 @@ const OPS_WALLET = 10;
 const THRESHOLD = 66;
 const QUERY = { WHITELIST: 1, BLACKLIST: 2, IDENTITY: 3, COMPLIANCE: 4 };
 const SEVERITY = ["LOW", "MEDIUM", "HIGH", "CRITICAL"];
+/** The tier option 33a lists at: Institutional's (Task 4.10). */
+const WHITELIST_TIER = 4;
+const coder = ethers.AbiCoder.defaultAbiCoder();
+/** A whitelist query's data: abi.encode(tier). */
+const tierData = (tier) => coder.encode(["uint8"], [tier]);
 
 const same = (a, b) => a.toLowerCase() === b.toLowerCase();
 const short = (a) => `${a.slice(0, 8)}…${a.slice(-4)}`;
@@ -86,10 +96,16 @@ async function tally(state, q) {
   const r = await engine.getConsensusResult(q);
   const [hasResult, result, resolvedAt] = await om.getQueryResolution(q);
   const [subject, type] = await om.getQueryBinding(q);
+  // A whitelist query's tier, read from the manager's stored data.
+  const tier =
+    Number(type) === QUERY.WHITELIST
+      ? Number(coder.decode(["uint8"], await om.getQueryData(q))[0])
+      : null;
   return {
     q,
     subject,
     type: Number(type),
+    tier,
     yes: r.positiveVotes,
     no: r.negativeVotes,
     snapshot: r.snapshotWeight,
@@ -168,23 +184,39 @@ async function consensusRound(state, type, subject, data, log = console.log) {
   return t;
 }
 
-/** Option 33a: a whitelist verdict by consensus, applied by node 1. */
-async function runWhitelistRound(state, log = console.log) {
+/**
+ * Option 33a: a whitelist verdict by consensus at `tier`, applied by node 1.
+ * The nodes vote on (wallet, tier); the listing is read back from chain.
+ */
+async function runWhitelistRound(
+  state,
+  log = console.log,
+  tier = WHITELIST_TIER,
+) {
   const c = oracleContracts(state, log);
   if (!c) return null;
   log("\n📋 WHITELIST BY CONSENSUS (OPTION 33a)");
   const subject = throwawaySubject();
-  const t = await consensusRound(state, QUERY.WHITELIST, subject, "0x", log);
+  log(`   Tier ${tier} is fixed when the query is raised (Task 4.12)`);
+  const t = await consensusRound(
+    state,
+    QUERY.WHITELIST,
+    subject,
+    tierData(tier),
+    log,
+  );
+  log(`   🏷️  The query's tier (chain, getQueryData): ${t.tier}`);
   if (!t.hasResult) return (log("❌ The query did not resolve"), null);
   await applyVerdict(c.wl, nodeSigners(state)[0], subject, t.q, true);
   const listed = await c.wl.isWhitelisted(subject);
   const info = await c.wl.getWhitelistInfo(subject);
+  const listedTier = Number(info.tier);
   log(
     listed
-      ? `   ✅ ${subject} whitelisted by the verdict: tier ${info.tier}, "${info.reason}"`
+      ? `   ✅ ${subject} whitelisted by the verdict: tier ${listedTier} (chain), "${info.reason}"`
       : `❌ ${subject} is not whitelisted after the verdict`,
   );
-  return { ...t, listed };
+  return { ...t, listed, listedTier };
 }
 
 /** Option 34a: a HIGH blacklist verdict by consensus, applied by node 1. */
@@ -399,6 +431,8 @@ module.exports = {
   THRESHOLD,
   QUERY,
   SEVERITY,
+  WHITELIST_TIER,
+  tierData,
   opsSigner,
   nodeSigners,
   throwawaySubject,

@@ -251,6 +251,8 @@ async function testIntegration(mod) {
 
     // A throwaway address for 30 days, written by the whitelist oracle's
     // owner (the deployer, ops after the handover): no demo holder changes.
+    // This path names its tier in the call; a consensus listing takes the
+    // tier its query was raised with (option 33a, Task 4.12).
     const wlOwner = await whitelistOracle.owner();
     const writer = [mod.state.signers[0], Flow.opsSigner(mod.state)].find(
       (w) => w.address.toLowerCase() === wlOwner.toLowerCase(),
@@ -264,7 +266,7 @@ async function testIntegration(mod) {
       ).wait();
       const info = await whitelistOracle.getWhitelistInfo(who);
       console.log(
-        `✅ ${who} whitelisted by ${writer.address}: tier ${info.tier}, until ${info.expiryTime}`,
+        `✅ ${who} whitelisted by ${writer.address} (addToWhitelist names tier 5): tier ${info.tier} (chain), until ${info.expiryTime}`,
       );
     } else {
       console.log(

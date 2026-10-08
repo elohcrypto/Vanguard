@@ -3,6 +3,8 @@
  * real path: a node raises the query in OracleManager, nodes answer with
  * OracleManager.submitResponse, and the tally is read from the
  * ConsensusOracle engine. The shared steps live in OracleLifecycleFlow.js.
+ * A whitelist query names its tier when raised (Task 4.12): a node may
+ * raise 1..4, only the manager owner 5; the tier is read back from chain.
  */
 
 const { ethers } = require("hardhat");
@@ -12,11 +14,16 @@ const {
   nodeSigners,
   oracleContracts,
   raiseQuery,
+  tierData,
   tally,
   tallyLine,
 } = require("./OracleLifecycleFlow");
 
 const TYPE_NAMES = ["", "Whitelist", "Blacklist", "Identity", "Compliance"];
+
+/** "Whitelist, tier 4" for a whitelist query (tally.tier from chain). */
+const typeLabel = (t) =>
+  t.tier ? `${TYPE_NAMES[t.type]}, tier ${t.tier}` : TYPE_NAMES[t.type];
 
 function printNodes(state) {
   nodeSigners(state).forEach((n, i) =>
@@ -47,20 +54,27 @@ async function createQueryInteractive(state, prompt) {
   const subject = ids[Number(await prompt(`Subject (0-${ids.length - 1}): `))];
   if (!subject) return displayError("Invalid subject");
   console.log(
-    "   Types: 1 Whitelist, 2 Blacklist (MEDIUM), 3 Identity, 4 Compliance",
+    "   Types: 1 Whitelist (names a tier), 2 Blacklist (MEDIUM), 3 Identity, 4 Compliance",
   );
   const type = Number(await prompt("Query type (1-4): "));
   if (!(type >= QUERY.WHITELIST && type <= QUERY.COMPLIANCE)) {
     return displayError("Query type must be 1-4");
   }
+  let data = "0x";
+  if (type === QUERY.WHITELIST) {
+    // A node raises tiers 1..4; tier 5 is the manager owner's.
+    const tier = Number(await prompt("Whitelist tier to list at (1-4): "));
+    if (!(tier >= 1 && tier <= 4)) return displayError("Tier must be 1-4");
+    data = tierData(tier);
+  }
   printNodes(state);
   const raiser = nodeSigners(state)[Number(await prompt("Raised by (0-2): "))];
   if (!raiser) return displayError("Invalid node");
-  const q = await raiseQuery(state, raiser, subject.owner, type);
+  const q = await raiseQuery(state, raiser, subject.owner, type, data);
   const t = await tally(state, q);
   displaySuccess("QUERY RAISED IN ORACLEMANAGER");
   console.log(`🆔 Query ID: ${q}`);
-  console.log(`   👤 Subject: ${subject.owner} (${TYPE_NAMES[type]})`);
+  console.log(`   👤 Subject: ${subject.owner} (${typeLabel(t)})`);
   console.log(
     `   ⚖️  Snapshot weight ${t.snapshot}; expires at ${t.expiresAt}`,
   );
@@ -99,7 +113,7 @@ async function resultInteractive(state, prompt) {
   const t = await tally(state, q);
   if (t.type === 0) return displayError(`No query ${q} in OracleManager`);
   console.log(`\n📊 QUERY ${q}`);
-  console.log(`   👤 Subject: ${t.subject} (${TYPE_NAMES[t.type]})`);
+  console.log(`   👤 Subject: ${t.subject} (${typeLabel(t)})`);
   console.log(`   ⚖️  ${tallyLine(t)}`);
   console.log(`   🗳️  Voters: ${t.voters.join(", ") || "none"}`);
   if (t.hasResult) console.log(`   ⏱️  Resolved at ${t.resolvedAt}`);
@@ -117,7 +131,7 @@ async function listQueries(state) {
   const out = [];
   for (const ev of events.slice(-10).reverse()) {
     const t = await tally(state, ev.args.queryId);
-    console.log(`   ${t.q} ${TYPE_NAMES[t.type]}: ${tallyLine(t)}`);
+    console.log(`   ${t.q} ${typeLabel(t)}: ${tallyLine(t)}`);
     out.push(t);
   }
   return out;
