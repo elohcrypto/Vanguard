@@ -6,9 +6,9 @@
  * printed lines: the engine is bound both ways and is the compiled
  * ConsensusOracle; the threshold is 66%; a whitelist and a blacklist
  * query resolve two of three through the engine (ConsensusReached) and
- * the verdicts apply, the whitelist one at the tier the query was raised
- * with (Task 4.12: the query data and the entry both read 4); ops (the operator) pauses a node whose answer is
- * then refused while two of three still resolve (it stays in the
+ * the verdicts apply, the whitelist one at the tier the query was
+ * raised with (Task 4.12: the query data and the entry both read 4);
+ * ops (the operator) pauses a node whose answer is then refused while two of three still resolve (it stays in the
  * denominator), pauses a second one and the third cannot resolve alone,
  * unpauses both, and the manager's emergency designation gates
  * emergencyBlacklist; an
