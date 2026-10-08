@@ -313,6 +313,11 @@ async function main() {
         // identity contract, and registration alone no longer verifies.
         // Both KYC and AML topics are required (Task 1R.3).
         const id = await OID0.deploy(s.address);
+        // Task 4.11: its creator pins KeyManager as the recovery manager,
+        // as the factory does for the identities it creates.
+        await id.pinRecoveryManager(
+          await state.getContract("keyManager").getAddress(),
+        );
         await idReg.registerIdentity(s.address, await id.getAddress(), 840);
         await attestAll(state, await id.getAddress(), `voter:${i}`);
       }

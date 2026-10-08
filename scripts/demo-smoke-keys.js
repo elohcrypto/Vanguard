@@ -282,13 +282,23 @@ async function runKeySmoke(state, failures) {
       await wasMgmtNowRevoked(r.newKey),
     ],
     ["wallet 1 keeps its MANAGEMENT key", await has(keyOf(wallet))],
+    [
+      "wallet 1's identity pins KeyManager as its recovery manager and authorizes only it",
+      (await id.recoveryManager()) === kmAddr &&
+        (await id.getManagers()).join() === kmAddr,
+    ],
+    [
+      "the drill identity pins KeyManager; after the recovered wallet accepted, no other manager is authorized",
+      (await drill.recoveryManager()) === kmAddr &&
+        (await drill.getManagers()).every((m) => m === kmAddr),
+    ],
     ...(await removalFacts(state, failures)),
   ];
   for (const [label, ok] of facts)
     if (!ok) failures.push(`4.2/4.5: ${label} failed`);
   if (facts.every(([, ok]) => ok)) {
     console.log(
-      `✅ Key lifecycle: ${facts.length} chain checks pass (rotation, recovery eviction at 48h and owner transfer at 7 days through KeyManager, removal with proof).`,
+      `✅ Key lifecycle: ${facts.length} chain checks pass (rotation, recovery through the pinned KeyManager: eviction at 48h and owner transfer at 7 days, removal with proof).`,
     );
   }
 }
