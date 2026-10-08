@@ -18,8 +18,11 @@ interface IRecoveryManager {
  *
  *      ONE recovery manager is pinned per identity (R-411-14): the factory
  *      pins its KeyManager at creation; an identity deployed directly is
- *      pinned once by its creator or owner (pinRecoveryManager). It can
- *      never be changed. With none pinned there is no recovery:
+ *      pinned once (pinRecoveryManager) by its creator in the creating
+ *      block or by its owner (R-411-18). It can never be changed and
+ *      outlives later ownership transfers. On an unpinned identity the
+ *      owner key can pin any manager, so a new owner checks
+ *      recoveryManager() first. With none pinned there is no recovery:
  *      ownershipFrozen is false and both hooks refuse.
  *      - Only the recovery manager may evict MANAGEMENT keys
  *        (evictManagementKeys) and propose an owner
@@ -57,6 +60,9 @@ abstract contract OnchainIDOwnership is OnchainIDKeys {
     address public recoveryManager;
 
     address private immutable CREATOR = msg.sender;
+    /// @dev The creator may pin only in the creating transaction's block
+    ///      (R-411-18): a deployer that is not the owner cannot pin later.
+    uint256 private immutable CREATED_AT = block.number;
     /// @dev The authorized managers, listable (getManagers).
     address[] private _managers;
     /// @dev Pending owner proposed by a recovery; its acceptance evicts.
@@ -70,11 +76,14 @@ abstract contract OnchainIDOwnership is OnchainIDKeys {
         revert("OnchainID: identity needs an owner");
     }
 
-    /// @dev Pin the recovery manager, once: the creator (the factory, in
-    ///      the creating transaction) or the owner. Never changeable.
+    /// @dev Pin the recovery manager, once: the creator in the creating
+    ///      block (the factory, in its creating transaction) or the owner.
+    ///      Never changeable, and it outlives later ownership transfers: a
+    ///      new owner checks recoveryManager() first.
     function pinRecoveryManager(address manager) external {
         if (recoveryManager != address(0)) revert RecoveryManagerAlreadyPinned();
-        if (msg.sender != CREATOR && msg.sender != owner()) revert NotCreatorOrOwner();
+        bool creatorNow = msg.sender == CREATOR && block.number == CREATED_AT;
+        if (!creatorNow && msg.sender != owner()) revert NotCreatorOrOwner();
         if (manager.code.length == 0) revert NotAContract();
         recoveryManager = manager;
         emit RecoveryManagerPinned(manager);

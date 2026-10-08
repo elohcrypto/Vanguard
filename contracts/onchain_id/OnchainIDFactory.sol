@@ -33,15 +33,23 @@ contract OnchainIDFactory is Ownable2Step {
     ///      creates (Task 4.11, R-411-14); zero: identities get none.
     address public recoveryManager;
 
+    /// @dev The only runtime code hash setRecoveryManager accepts (the
+    ///      compiled KeyManager's), fixed at construction (R-411-19); zero:
+    ///      no recovery manager can ever be set.
+    bytes32 public immutable recoveryManagerCodeHash;
+
     event RecoveryManagerSet(address indexed manager);
-    error RecoveryManagerNotAContract();
+    error RecoveryManagerCodeMismatch();
 
     /**
      * @dev Constructor
      * @param _owner Initial owner of the factory
+     * @param _recoveryManagerCodeHash Runtime code hash of the KeyManager
+     *        build identities may pin (bytes32(0): none)
      */
-    constructor(address _owner) Ownable(_owner) {
+    constructor(address _owner, bytes32 _recoveryManagerCodeHash) Ownable(_owner) {
         feeRecipient = _owner;
+        recoveryManagerCodeHash = _recoveryManagerCodeHash;
     }
 
     /**
@@ -265,10 +273,16 @@ contract OnchainIDFactory is Ownable2Step {
 
     // Admin functions
 
-    /// @dev The recovery manager future identities pin (a KeyManager, the
-    ///      one the ceremony checks); zero turns pinning off.
+    /// @dev The recovery manager future identities pin; zero turns pinning
+    ///      off. Only a contract whose runtime code hash is
+    ///      recoveryManagerCodeHash (the KeyManager build) is accepted, so
+    ///      the factory owner can choose which KeyManager deployment, never
+    ///      a contract of its own (R-411-19).
     function setRecoveryManager(address _manager) external onlyOwner {
-        if (_manager != address(0) && _manager.code.length == 0) revert RecoveryManagerNotAContract();
+        if (
+            _manager != address(0) &&
+            (recoveryManagerCodeHash == bytes32(0) || _manager.codehash != recoveryManagerCodeHash)
+        ) revert RecoveryManagerCodeMismatch();
         recoveryManager = _manager;
         emit RecoveryManagerSet(_manager);
     }
