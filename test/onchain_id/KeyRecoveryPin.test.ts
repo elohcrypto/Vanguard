@@ -102,6 +102,54 @@ describe("Recovery manager pinned per identity (4.11 R-411-14/15)", function () 
     await expect(
       none.setRecoveryManager(await km.getAddress()),
     ).to.be.revertedWithCustomError(none, "RecoveryManagerCodeMismatch");
+    // Not even a never-used address, whose code hash is zero (review L-2b).
+    await expect(
+      none.setRecoveryManager(ethers.Wallet.createRandom().address),
+    ).to.be.revertedWithCustomError(none, "RecoveryManagerCodeMismatch");
+    expect(await none.recoveryManager()).to.equal(ethers.ZeroAddress);
+  });
+
+  it("in the creating block only the creator may pin, not a stranger (review L-2a)", async function () {
+    const [creator, owner, stranger] = await ethers.getSigners();
+    const km = await (await ethers.getContractFactory("KeyManager")).deploy();
+    const evil = await (
+      await ethers.getContractFactory("EvilRecoveryManager")
+    ).deploy();
+    const gwei = (n: number) => ethers.parseUnits(String(n), "gwei");
+    // Mempool order by tip: deploy, then the stranger, then the creator.
+    const fee = (tip: number) => ({
+      gasLimit: 300_000,
+      maxPriorityFeePerGas: gwei(tip),
+      maxFeePerGas: gwei(100),
+    });
+    const idA = ethers.getCreateAddress({
+      from: creator.address,
+      nonce: await creator.getNonce(),
+    });
+    const id = await ethers.getContractAt("OnchainID", idA);
+    await ethers.provider.send("evm_setAutomine", [false]);
+    try {
+      await (
+        await ethers.getContractFactory("OnchainID")
+      )
+        .connect(creator)
+        .deploy(owner.address, { ...fee(30), gasLimit: 8_000_000 });
+      const byStranger = await id
+        .connect(stranger)
+        .pinRecoveryManager(await evil.getAddress(), fee(20));
+      const byCreator = await id
+        .connect(creator)
+        .pinRecoveryManager(await km.getAddress(), fee(10));
+      await ethers.provider.send("evm_mine", []);
+      const rs = await ethers.provider.getTransactionReceipt(byStranger.hash);
+      const rc = await ethers.provider.getTransactionReceipt(byCreator.hash);
+      expect(rs!.blockNumber).to.equal(rc!.blockNumber);
+      expect(rs!.status).to.equal(0);
+      expect(rc!.status).to.equal(1);
+    } finally {
+      await ethers.provider.send("evm_setAutomine", [true]);
+    }
+    expect(await id.recoveryManager()).to.equal(await km.getAddress());
   });
 
   it("a directly deployed identity has no recovery until pinned; a stranger cannot pin", async function () {
