@@ -39,7 +39,7 @@ function displayMenu(mod) {
   console.log("10. Verify UTXO Contains Compliance Data");
   console.log("11. Demo: KYC Claim Expiry (Short-Lived Claim)");
   console.log(
-    "12. Key lifecycle: authorize + rotate + recover (KeyManager, wallet 1)",
+    "12. Key lifecycle: rotate, then recovery evicts + moves owner (KeyManager)",
   );
   console.log("12a. Toggle KeyManager authorization on wallet 1's identity");
   console.log("12b. Set wallet 1's identity rotation timelock (hours)");
