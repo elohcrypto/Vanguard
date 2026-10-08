@@ -1,4 +1,4 @@
-import { artifacts, ethers } from "hardhat";
+import { ethers } from "hardhat";
 import {
   OnchainIDFactory,
   ClaimIssuer,
@@ -7,7 +7,13 @@ import {
   ComplianceRules,
 } from "../../typechain-types";
 import { DeploymentHelper } from "../deploy-helpers";
-import { authorizeKeyManagerOnOps, OpsKeyManagerResult } from "./opsKeyManager";
+import {
+  configureKeyManager,
+  deployKeyManager,
+  keyManagerCodeHash,
+  OpsKeyManagerResult,
+  pinKeyManagerOnFactory,
+} from "./opsKeyManager";
 
 /**
  * Production Deployment Script
@@ -145,12 +151,9 @@ async function main(): Promise<DeploymentResult> {
     await ethers.getContractFactory("OnchainIDFactory");
   // Task 4.11 (R-411-19): the factory accepts as recovery manager only a
   // contract with the compiled KeyManager's runtime code hash.
-  const keyManagerCodeHash = ethers.keccak256(
-    (await artifacts.readArtifact("KeyManager")).deployedBytecode,
-  );
   const factory = await OnchainIDFactoryFactory.deploy(
     deployer.address,
-    keyManagerCodeHash,
+    await keyManagerCodeHash(),
     deploymentOptions,
   );
 
@@ -167,25 +170,10 @@ async function main(): Promise<DeploymentResult> {
   console.log(`✅ Factory deployed at: ${factoryAddress}`);
   console.log(`   Gas used: ${gasUsed.factory.toLocaleString()}`);
 
-  // 2. Deploy KeyManager
-  console.log("\n🔐 Deploying KeyManager...");
-  const KeyManagerFactory = await ethers.getContractFactory("KeyManager");
-  const keyManager = await KeyManagerFactory.deploy(deploymentOptions);
-
-  console.log(
-    `   Transaction hash: ${keyManager.deploymentTransaction()?.hash}`,
-  );
-  console.log("   Waiting for confirmations...");
-
-  await keyManager.waitForDeployment();
-  const keyManagerReceipt = await keyManager
-    .deploymentTransaction()
-    ?.wait(config.confirmations);
-  gasUsed.keyManager = keyManagerReceipt?.gasUsed || BigInt(0);
-
-  const keyManagerAddress = await keyManager.getAddress();
-  console.log(`✅ KeyManager deployed at: ${keyManagerAddress}`);
-  console.log(`   Gas used: ${gasUsed.keyManager.toLocaleString()}`);
+  // 2. Deploy KeyManager (scripts/production/opsKeyManager.ts)
+  const km = await deployKeyManager(deploymentOptions, config.confirmations);
+  const { keyManager, address: keyManagerAddress } = km;
+  gasUsed.keyManager = km.gasUsed;
 
   // 3. Deploy KYC Issuer
   console.log("\n📋 Deploying KYC Issuer...");
@@ -312,14 +300,11 @@ async function main(): Promise<DeploymentResult> {
   await setRecipientTx.wait(config.confirmations);
   console.log(`   Fee recipient set to: ${config.feeRecipient}`);
 
-  // Task 4.11 (R-411-14): identities the factory creates pin KeyManager
-  // as their one recovery manager.
-  const setRecoveryTx = await factory
-    .connect(deployer)
-    .setRecoveryManager(keyManagerAddress, deploymentOptions);
-  await setRecoveryTx.wait(config.confirmations);
-  console.log(
-    `   Recovery manager pinned on new identities: ${keyManagerAddress}`,
+  await pinKeyManagerOnFactory(
+    factory.connect(deployer),
+    keyManagerAddress,
+    deploymentOptions,
+    config.confirmations,
   );
 
   // Configure IdentityRegistry: require KYC and AML claims from the
@@ -358,24 +343,14 @@ async function main(): Promise<DeploymentResult> {
     identityRegistryAddress,
   );
 
-  // Configure KeyManager: RECOVERY_TIMELOCK (48h) and DEFAULT_TIMELOCK (24h)
-  // are fixed contract constants, not configurable — KeyManager exposes no
-  // setRecoveryTimelock/setKeyRotationTimelock setters (only a per-identity
-  // setCustomTimelock override). Read and log them so this step stays
-  // informative without pretending to configure something immutable.
-  console.log("\n🔐 Configuring KeyManager...");
-  const recoveryTimelock = await keyManager.RECOVERY_TIMELOCK();
-  const keyRotationTimelock = await keyManager.DEFAULT_TIMELOCK();
-  console.log(`   Recovery timelock: ${recoveryTimelock} seconds (fixed)`);
-  console.log(
-    `   Key rotation timelock: ${keyRotationTimelock} seconds (default; an identity's MANAGEMENT key may set its own)`,
-  );
-  const opsKeyManager = await authorizeKeyManagerOnOps(
-    keyManagerAddress,
-    deployer,
-    process.env.OPS_IDENTITY,
-    deploymentOptions,
-  );
+  // Configure KeyManager (timelocks, ops identity): opsKeyManager.ts.
+  const { recoveryTimelock, keyRotationTimelock, opsKeyManager } =
+    await configureKeyManager(
+      keyManager,
+      deployer,
+      process.env.OPS_IDENTITY,
+      deploymentOptions,
+    );
 
   console.log("\n✅ System Configuration Complete!");
 

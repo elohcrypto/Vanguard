@@ -1,4 +1,5 @@
-import { ethers } from "hardhat";
+import { artifacts, ethers } from "hardhat";
+import { KeyManager, OnchainIDFactory } from "../../typechain-types";
 
 /**
  * Plan v2 Task 4.2: the production deploy authorizes KeyManager on the
@@ -14,7 +15,91 @@ import { ethers } from "hardhat";
  * its recovery manager. The deploy pins it when the deploying wallet owns
  * the identity, prints the pinRecoveryManager call for another owner, and
  * refuses an identity already pinned to another manager (a pin is final).
+ *
+ * The KeyManager steps of scripts/production/DeployProduction.ts live
+ * here too: the code hash the factory accepts, the deploy, and the
+ * configuration step (timelocks logged, the ops identity wired).
  */
+
+/** Task 4.11 (R-411-19): the compiled KeyManager's runtime code hash. */
+export async function keyManagerCodeHash(): Promise<string> {
+  return ethers.keccak256(
+    (await artifacts.readArtifact("KeyManager")).deployedBytecode,
+  );
+}
+
+/** Step 2 of the production deploy: KeyManager, with its gas used. */
+export async function deployKeyManager(
+  overrides: Record<string, unknown>,
+  confirmations: number,
+): Promise<{ keyManager: KeyManager; address: string; gasUsed: bigint }> {
+  console.log("\n🔐 Deploying KeyManager...");
+  const KeyManagerFactory = await ethers.getContractFactory("KeyManager");
+  const keyManager = await KeyManagerFactory.deploy(overrides);
+
+  console.log(
+    `   Transaction hash: ${keyManager.deploymentTransaction()?.hash}`,
+  );
+  console.log("   Waiting for confirmations...");
+
+  await keyManager.waitForDeployment();
+  const receipt = await keyManager.deploymentTransaction()?.wait(confirmations);
+  const gasUsed = receipt?.gasUsed || BigInt(0);
+
+  const address = await keyManager.getAddress();
+  console.log(`✅ KeyManager deployed at: ${address}`);
+  console.log(`   Gas used: ${gasUsed.toLocaleString()}`);
+  return { keyManager, address, gasUsed };
+}
+
+/**
+ * Task 4.11 (R-411-14): identities the factory creates pin KeyManager as
+ * their one recovery manager.
+ */
+export async function pinKeyManagerOnFactory(
+  factory: OnchainIDFactory,
+  keyManager: string,
+  overrides: Record<string, unknown>,
+  confirmations: number,
+): Promise<void> {
+  const tx = await factory.setRecoveryManager(keyManager, overrides);
+  await tx.wait(confirmations);
+  console.log(`   Recovery manager pinned on new identities: ${keyManager}`);
+}
+
+/**
+ * Configure KeyManager: RECOVERY_TIMELOCK (48h) and DEFAULT_TIMELOCK (24h)
+ * are fixed contract constants, not configurable — KeyManager exposes no
+ * setRecoveryTimelock/setKeyRotationTimelock setters (only a per-identity
+ * setCustomTimelock override). Read and log them so this step stays
+ * informative without pretending to configure something immutable; then
+ * wire the ops identity (authorizeKeyManagerOnOps).
+ */
+export async function configureKeyManager(
+  keyManager: KeyManager,
+  deployer: { address: string },
+  opsIdentity: string | undefined,
+  overrides: Record<string, unknown>,
+): Promise<{
+  recoveryTimelock: bigint;
+  keyRotationTimelock: bigint;
+  opsKeyManager: OpsKeyManagerResult;
+}> {
+  console.log("\n🔐 Configuring KeyManager...");
+  const recoveryTimelock = await keyManager.RECOVERY_TIMELOCK();
+  const keyRotationTimelock = await keyManager.DEFAULT_TIMELOCK();
+  console.log(`   Recovery timelock: ${recoveryTimelock} seconds (fixed)`);
+  console.log(
+    `   Key rotation timelock: ${keyRotationTimelock} seconds (default; an identity's MANAGEMENT key may set its own)`,
+  );
+  const opsKeyManager = await authorizeKeyManagerOnOps(
+    await keyManager.getAddress(),
+    deployer,
+    opsIdentity,
+    overrides,
+  );
+  return { recoveryTimelock, keyRotationTimelock, opsKeyManager };
+}
 export interface OpsKeyManagerResult {
   opsIdentity: string | null;
   authorized: boolean;
