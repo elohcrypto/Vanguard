@@ -25,6 +25,8 @@ describe("Handover: KeyManager (4.2)", function () {
     `KeyManager ${a} code matches the compiled KeyManager: no owner, no allowlist, the deployer holds no KeyManager power; only an identity's pinned recovery manager can move its ownership: its recovery agents at their threshold evict its MANAGEMENT keys after 48h and move its owner after 7 days`;
   const idLine = (id: string, a: string) =>
     `demo identity ${id} pins KeyManager ${a} as its recovery manager and authorizes only it; the deployer is not its owner, manager, MANAGEMENT key or recovery agent`;
+  const facLine = (fac: string, a: string) =>
+    `OnchainIDFactory ${fac} pins KeyManager ${a} as the recovery manager of every identity it creates (recoveryManager, code-hash checked)`;
   const dKey = () =>
     ethers.solidityPackedKeccak256(["address"], [f.deployer.address]);
 
@@ -37,6 +39,8 @@ describe("Handover: KeyManager (4.2)", function () {
     identity = await ethers.getContractAt("OnchainID", idAddr);
     await identity.connect(f.proposer).authorizeManager(kmAddr);
     await identity.connect(f.proposer).pinRecoveryManager(kmAddr);
+    // Task 4.11 (R-411-19): the factory pins this KeyManager on new ones.
+    await f.c.onchainIDFactory.setRecoveryManager(kmAddr);
     args = { ...f.args, keyManager: km, keyManagerIdentity: idAddr };
   });
 
@@ -53,12 +57,26 @@ describe("Handover: KeyManager (4.2)", function () {
   }
 
   it("the completion check proves no KeyManager power and the opt-in", async function () {
+    // Before the ceremony (the deployer still owns the factory): the
+    // factory line catches a factory that pins nothing (R-411-19).
+    const facAt = await f.c.onchainIDFactory.getAddress();
+    await f.c.onchainIDFactory.setRecoveryManager(ethers.ZeroAddress);
+    const unpinned = await assertHandoverComplete(args);
+    expect(unpinned.failures).to.include(facLine(facAt, kmAddr));
+    await f.c.onchainIDFactory.setRecoveryManager(kmAddr);
+    const pinned = await assertHandoverComplete(args);
+    expect(pinned.failures).to.not.include(facLine(facAt, kmAddr));
     await ceremony();
     const idAddr = await identity.getAddress();
     const r = await assertHandoverComplete(args);
     expect(r.failures).to.deep.equal([]);
     const labels = r.checks.map((c: any) => c.label);
-    expect(labels).to.include.members([kmLine(kmAddr), idLine(idAddr, kmAddr)]);
+    const facAddr = await f.c.onchainIDFactory.getAddress();
+    expect(labels).to.include.members([
+      kmLine(kmAddr),
+      idLine(idAddr, kmAddr),
+      facLine(facAddr, kmAddr),
+    ]);
 
     // Each line catches its break: the identity withdraws the opt-in ...
     await identity.connect(f.proposer).deauthorizeManager(kmAddr);
@@ -190,6 +208,14 @@ describe("Handover: KeyManager (4.2)", function () {
     it("one that authorizes another manager besides KeyManager (4.11)", async function () {
       await identity.connect(f.proposer).authorizeManager(f.stranger.address);
       await refuses(args, /authorizes managers other than KeyManager/);
+    });
+
+    it("a factory that does not pin KeyManager (4.11 R-411-19)", async function () {
+      await f.c.onchainIDFactory.setRecoveryManager(ethers.ZeroAddress);
+      await refuses(
+        args,
+        /does not pin KeyManager .* on the identities it creates/,
+      );
     });
 
     it("keyManagerIdentity named without keyManager", async function () {

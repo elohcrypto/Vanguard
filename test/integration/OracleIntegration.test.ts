@@ -94,7 +94,10 @@ describe("Oracle Integration with OnchainID and ERC-3643", function () {
     // Deploy OnchainID System
     const OnchainIDFactoryContract =
       await ethers.getContractFactory("OnchainIDFactory");
-    onchainIDFactory = await OnchainIDFactoryContract.deploy(owner.address);
+    onchainIDFactory = await OnchainIDFactoryContract.deploy(
+      owner.address,
+      ethers.ZeroHash,
+    );
     await onchainIDFactory.waitForDeployment();
 
     const ClaimIssuerFactory = await ethers.getContractFactory("ClaimIssuer");

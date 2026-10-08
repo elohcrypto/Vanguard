@@ -44,7 +44,7 @@ describe("IdentityRegistry.isVerified requires both KYC and AML claims (plan Tas
 
     factory = await (
       await ethers.getContractFactory("OnchainIDFactory")
-    ).deploy(owner.address);
+    ).deploy(owner.address, ethers.ZeroHash);
     kycIssuer = await (
       await ethers.getContractFactory("ClaimIssuer")
     ).deploy(kycProvider.address, "KYC Issuer", "Trusted KYC attestations");

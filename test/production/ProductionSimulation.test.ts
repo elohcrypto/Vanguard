@@ -769,6 +769,8 @@ describe("🔐 Production deploy: KeyManager on the ops identity (4.2)", functio
       pending: null,
     });
     expect(await ownOps.authorizedManagers(km)).to.equal(true);
+    // Task 4.11: the deploy pins KeyManager as its recovery manager.
+    expect(await ownOps.recoveryManager()).to.equal(km);
 
     // An ops identity the ops key owns: nothing sent, the call is printed.
     const theirs = await OID.deploy(opsKey.address);
@@ -787,6 +789,10 @@ describe("🔐 Production deploy: KeyManager on the ops identity (4.2)", functio
       pending,
     });
     expect(out.join("\n")).to.contain(`The ops key must send: ${pending}`);
+    expect(out.join("\n")).to.contain(
+      `The ops key must also send: OnchainID(${tAddr}).pinRecoveryManager(${km})`,
+    );
+    expect(await theirs.recoveryManager()).to.equal(ethers.ZeroAddress);
     expect(await theirs.authorizedManagers(km)).to.equal(false);
     // The printed call is the one that works, and only from the owner.
     await expect(theirs.authorizeManager(km)).to.be.revertedWith(

@@ -19,7 +19,10 @@ describe("OnchainIDFactory", function () {
 
     const OnchainIDFactoryFactory =
       await ethers.getContractFactory("OnchainIDFactory");
-    factory = await OnchainIDFactoryFactory.deploy(owner.address);
+    factory = await OnchainIDFactoryFactory.deploy(
+      owner.address,
+      ethers.ZeroHash,
+    );
     await factory.waitForDeployment();
 
     // Set deployment fee and fee recipient
@@ -35,7 +38,10 @@ describe("OnchainIDFactory", function () {
     it("Should set initial fee recipient to owner", async function () {
       const OnchainIDFactoryFactory =
         await ethers.getContractFactory("OnchainIDFactory");
-      const newFactory = await OnchainIDFactoryFactory.deploy(user1.address);
+      const newFactory = await OnchainIDFactoryFactory.deploy(
+        user1.address,
+        ethers.ZeroHash,
+      );
       expect(await newFactory.feeRecipient()).to.equal(user1.address);
     });
 

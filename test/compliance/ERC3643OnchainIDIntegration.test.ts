@@ -35,7 +35,10 @@ describe("ERC-3643 and OnchainID Integration Tests", function () {
     // Deploy OnchainID Factory
     const OnchainIDFactoryFactory =
       await ethers.getContractFactory("OnchainIDFactory");
-    onchainIDFactory = await OnchainIDFactoryFactory.deploy(owner.address);
+    onchainIDFactory = await OnchainIDFactoryFactory.deploy(
+      owner.address,
+      ethers.ZeroHash,
+    );
     await onchainIDFactory.waitForDeployment();
 
     // Deploy KYC Issuer

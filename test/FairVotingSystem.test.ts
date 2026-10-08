@@ -159,7 +159,10 @@ describe("Fair Voting System (1 Person = 1 Vote)", function () {
     // Deploy OnchainIDFactory
     const OnchainIDFactory =
       await ethers.getContractFactory("OnchainIDFactory");
-    const onchainIDFactory = await OnchainIDFactory.deploy(owner.address);
+    const onchainIDFactory = await OnchainIDFactory.deploy(
+      owner.address,
+      ethers.ZeroHash,
+    );
     await onchainIDFactory.waitForDeployment();
 
     // Setup identities for Owner, Alice, Bob, Carol, Dave

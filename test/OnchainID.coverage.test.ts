@@ -34,6 +34,7 @@ describe("OnchainID System - Coverage Tests", function () {
     // Deploy all contracts
     factory = await TestHelpers.deployContract("OnchainIDFactory", [
       owner.address,
+      ethers.ZeroHash,
     ]);
     claimIssuer = await TestHelpers.deployContract("ClaimIssuer", [
       owner.address,

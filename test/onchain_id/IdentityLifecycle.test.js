@@ -155,7 +155,7 @@ describe("OnchainIDFactory identity map (2F.2, L7)", function () {
     [owner, victim, attacker] = await ethers.getSigners();
     f = await (
       await ethers.getContractFactory("OnchainIDFactory")
-    ).deploy(owner.address);
+    ).deploy(owner.address, ethers.ZeroHash);
   });
 
   it("the first deployment for a wallet stays open to anyone", async function () {

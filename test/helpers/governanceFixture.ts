@@ -1,4 +1,4 @@
-import { ethers } from "hardhat";
+import { artifacts, ethers } from "hardhat";
 import { addRegistrar } from "./registrars";
 import { time } from "@nomicfoundation/hardhat-network-helpers";
 import { attest, configureKyc, deployIdentity } from "./kyc";
@@ -55,7 +55,11 @@ export async function handoverFixture() {
     "KYC",
   );
   await configureKyc(identityRegistry, await kycIssuer.getAddress());
-  const factory = await deploy("OnchainIDFactory", deployer.address);
+  // Task 4.11 (R-411-19): the factory accepts only the compiled KeyManager.
+  const kmHash = ethers.keccak256(
+    (await artifacts.readArtifact("KeyManager")).deployedBytecode,
+  );
+  const factory = await deploy("OnchainIDFactory", deployer.address, kmHash);
   const governanceToken = await deploy(
     "GovernanceToken",
     "VGT",

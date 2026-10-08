@@ -149,7 +149,7 @@ async function runClaimScenario(
 ): Promise<ScenarioResult> {
   const factory = await (
     await ethers.getContractFactory("OnchainIDFactory")
-  ).deploy(deployer.address);
+  ).deploy(deployer.address, ethers.ZeroHash);
   await factory.waitForDeployment();
 
   const ClaimIssuerFactory = await ethers.getContractFactory("ClaimIssuer");

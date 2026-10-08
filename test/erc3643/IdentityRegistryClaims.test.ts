@@ -39,7 +39,7 @@ describe("IdentityRegistry.isVerified requires trusted-issuer claims (plan Task 
 
     factory = await (
       await ethers.getContractFactory("OnchainIDFactory")
-    ).deploy(owner.address);
+    ).deploy(owner.address, ethers.ZeroHash);
     kycIssuer = await (
       await ethers.getContractFactory("ClaimIssuer")
     ).deploy(kycProvider.address, "KYC Issuer", "Trusted KYC attestations");

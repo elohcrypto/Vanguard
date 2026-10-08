@@ -48,7 +48,7 @@ describe("Token.canTransfer is a predicate", function () {
 
     const factory = await (
       await ethers.getContractFactory("OnchainIDFactory")
-    ).deploy(owner.address);
+    ).deploy(owner.address, ethers.ZeroHash);
     for (const who of [alice, bob]) {
       const id = await deployIdentity(factory, who.address);
       await idReg.registerIdentity(who.address, id, 840);
@@ -68,8 +68,8 @@ describe("Token.canTransfer is a predicate", function () {
   });
 
   it("returns false (no revert) for an unverified recipient", async function () {
-    expect(await token.canTransfer(alice.address, stranger.address, E("10")))
-      .to.be.false;
+    expect(await token.canTransfer(alice.address, stranger.address, E("10"))).to
+      .be.false;
   });
 
   it("returns false (no revert) for a frozen sender", async function () {

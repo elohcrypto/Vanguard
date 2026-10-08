@@ -126,6 +126,7 @@ export class ProductionEnvironment {
     const FactoryFactory = await ethers.getContractFactory("OnchainIDFactory");
     this.factory = await FactoryFactory.deploy(
       this.admin.address,
+      ethers.ZeroHash,
       deployOptions,
     );
     await this.factory.waitForDeployment();

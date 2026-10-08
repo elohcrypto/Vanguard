@@ -1,5 +1,5 @@
 import { expect } from "chai";
-import { ethers } from "hardhat";
+import { artifacts, ethers } from "hardhat";
 import { time } from "@nomicfoundation/hardhat-network-helpers";
 
 // Task 4.11 fix round (review H-1, M-1). One recovery manager is pinned
@@ -11,6 +11,13 @@ const MGMT = 1;
 const DAY = 24 * 3600;
 const k = (a: string) => ethers.solidityPackedKeccak256(["address"], [a]);
 
+/** The compiled KeyManager's runtime code hash (R-411-19). */
+async function kmCodeHash() {
+  return ethers.keccak256(
+    (await artifacts.readArtifact("KeyManager")).deployedBytecode,
+  );
+}
+
 async function factoryIdentity() {
   const [deployer, owner, A, B, rescued, anyone, other] =
     await ethers.getSigners();
@@ -18,7 +25,7 @@ async function factoryIdentity() {
   const kmA = await km.getAddress();
   const factory = await (
     await ethers.getContractFactory("OnchainIDFactory")
-  ).deploy(deployer.address);
+  ).deploy(deployer.address, await kmCodeHash());
   await expect(factory.setRecoveryManager(kmA))
     .to.emit(factory, "RecoveryManagerSet")
     .withArgs(kmA);
@@ -49,6 +56,52 @@ describe("Recovery manager pinned per identity (4.11 R-411-14/15)", function () 
     await expect(
       f.id.connect(f.owner).pinRecoveryManager(await km2.getAddress()),
     ).to.be.revertedWithCustomError(f.id, "RecoveryManagerAlreadyPinned");
+  });
+
+  it("H-2: a creator that is not the owner cannot pin after the creating block (R-411-18)", async function () {
+    const [creator, owner] = await ethers.getSigners();
+    const id = await (
+      await ethers.getContractFactory("OnchainID")
+    )
+      .connect(creator)
+      .deploy(owner.address);
+    const evil = await (
+      await ethers.getContractFactory("EvilRecoveryManager")
+    ).deploy();
+    await expect(
+      id.connect(creator).pinRecoveryManager(await evil.getAddress()),
+    ).to.be.revertedWithCustomError(id, "NotCreatorOrOwner");
+    expect(await id.recoveryManager()).to.equal(ethers.ZeroAddress);
+    // The owner still may.
+    const km = await (await ethers.getContractFactory("KeyManager")).deploy();
+    await id.connect(owner).pinRecoveryManager(await km.getAddress());
+    expect(await id.recoveryManager()).to.equal(await km.getAddress());
+  });
+
+  it("the factory accepts only the compiled KeyManager (R-411-19)", async function () {
+    const [deployer] = await ethers.getSigners();
+    const F = await ethers.getContractFactory("OnchainIDFactory");
+    const factory = await F.deploy(deployer.address, await kmCodeHash());
+    const evil = await (
+      await ethers.getContractFactory("EvilRecoveryManager")
+    ).deploy();
+    await expect(
+      factory.setRecoveryManager(await evil.getAddress()),
+    ).to.be.revertedWithCustomError(factory, "RecoveryManagerCodeMismatch");
+    await expect(
+      factory.setRecoveryManager(deployer.address),
+    ).to.be.revertedWithCustomError(factory, "RecoveryManagerCodeMismatch");
+    const km = await (await ethers.getContractFactory("KeyManager")).deploy();
+    await factory.setRecoveryManager(await km.getAddress());
+    await factory.setRecoveryManager(ethers.ZeroAddress); // pinning off
+    expect(await factory.recoveryManagerCodeHash()).to.equal(
+      await kmCodeHash(),
+    );
+    // A factory built with no hash accepts no recovery manager at all.
+    const none = await F.deploy(deployer.address, ethers.ZeroHash);
+    await expect(
+      none.setRecoveryManager(await km.getAddress()),
+    ).to.be.revertedWithCustomError(none, "RecoveryManagerCodeMismatch");
   });
 
   it("a directly deployed identity has no recovery until pinned; a stranger cannot pin", async function () {

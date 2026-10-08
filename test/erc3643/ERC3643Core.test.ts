@@ -37,7 +37,10 @@ describe("ERC-3643 Core Implementation", function () {
     // Deploy OnchainID system
     const OnchainIDFactory =
       await ethers.getContractFactory("OnchainIDFactory");
-    onchainIDFactory = await OnchainIDFactory.deploy(owner.address);
+    onchainIDFactory = await OnchainIDFactory.deploy(
+      owner.address,
+      ethers.ZeroHash,
+    );
 
     const ClaimIssuer = await ethers.getContractFactory("ClaimIssuer");
     claimIssuer = await ClaimIssuer.deploy(

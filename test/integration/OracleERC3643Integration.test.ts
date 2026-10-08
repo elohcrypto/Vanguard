@@ -92,7 +92,10 @@ describe("Oracle-ERC3643 Integration Tests", function () {
     // Deploy OnchainID contracts
     const OnchainIDFactoryContract =
       await ethers.getContractFactory("OnchainIDFactory");
-    onchainIDFactory = await OnchainIDFactoryContract.deploy(owner.address);
+    onchainIDFactory = await OnchainIDFactoryContract.deploy(
+      owner.address,
+      ethers.ZeroHash,
+    );
     await onchainIDFactory.waitForDeployment();
 
     const ClaimIssuerFactory = await ethers.getContractFactory("ClaimIssuer");

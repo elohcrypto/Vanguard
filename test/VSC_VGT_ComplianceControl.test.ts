@@ -35,7 +35,10 @@ describe("🔒 VSC & VGT Compliance Control - Complete Proof", function () {
     // Deploy infrastructure
     const OnchainIDFactory =
       await ethers.getContractFactory("OnchainIDFactory");
-    onchainIDFactory = await OnchainIDFactory.deploy(owner.address);
+    onchainIDFactory = await OnchainIDFactory.deploy(
+      owner.address,
+      ethers.ZeroHash,
+    );
 
     const ClaimIssuer = await ethers.getContractFactory("ClaimIssuer");
     kycIssuer = await ClaimIssuer.deploy(

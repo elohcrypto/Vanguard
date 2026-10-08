@@ -108,7 +108,7 @@ describe("Factories are governable by proposal (2F.5)", function () {
     await addRegistrar(rules, vsc, escrowF, "MultiSigEscrowWallet");
     idF = await (
       await ethers.getContractFactory("OnchainIDFactory")
-    ).deploy(owner.address);
+    ).deploy(owner.address, ethers.ZeroHash);
     idFAddr = await idF.getAddress();
   });
 

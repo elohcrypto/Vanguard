@@ -128,7 +128,7 @@ describe("Deployer holds no power after handover (plan Task 0.3)", function () {
     await configureKyc(identityRegistry, await kycIssuer.getAddress());
     const factory = await (
       await ethers.getContractFactory("OnchainIDFactory")
-    ).deploy(deployer.address);
+    ).deploy(deployer.address, ethers.ZeroHash);
     identityAddr = await deployIdentity(factory, investor.address);
     await identityRegistry.registerIdentity(
       investor.address,
@@ -319,7 +319,7 @@ describe("ClaimIssuer key handover (plan 2B.4)", function () {
     await configureKyc(registry, await kycIssuer.getAddress());
     const factory = await (
       await ethers.getContractFactory("OnchainIDFactory")
-    ).deploy(deployer.address);
+    ).deploy(deployer.address, ethers.ZeroHash);
     identityAddr = await deployIdentity(factory, investor.address);
     await registry.registerIdentity(investor.address, identityAddr, 344);
 

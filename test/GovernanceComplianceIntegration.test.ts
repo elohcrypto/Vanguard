@@ -40,7 +40,10 @@ describe("Governance → ComplianceRules Integration Test", function () {
     // Deploy OnchainIDFactory
     const OnchainIDFactory =
       await ethers.getContractFactory("OnchainIDFactory");
-    onchainIDFactory = await OnchainIDFactory.deploy(owner.address);
+    onchainIDFactory = await OnchainIDFactory.deploy(
+      owner.address,
+      ethers.ZeroHash,
+    );
     await onchainIDFactory.waitForDeployment();
 
     // Deploy KYC and AML ClaimIssuers

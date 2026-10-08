@@ -28,7 +28,10 @@ describe("95% Test Coverage Verification", function () {
     // Deploy all main contracts to ensure coverage
     const OnchainIDFactoryFactory =
       await ethers.getContractFactory("OnchainIDFactory");
-    onchainIDFactory = await OnchainIDFactoryFactory.deploy(owner.address);
+    onchainIDFactory = await OnchainIDFactoryFactory.deploy(
+      owner.address,
+      ethers.ZeroHash,
+    );
     await onchainIDFactory.waitForDeployment();
 
     const ClaimIssuerFactory = await ethers.getContractFactory("ClaimIssuer");
