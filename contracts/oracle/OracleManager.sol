@@ -7,7 +7,7 @@ import "@openzeppelin/contracts/utils/cryptography/ECDSA.sol";
 import "@openzeppelin/contracts/utils/cryptography/MessageHashUtils.sol";
 import "./interfaces/IOracleManager.sol";
 import "./ConsensusOracle.sol";
-import "./OracleQueryPayload.sol";
+import {OracleQueryPayload} from "./OracleQueryPayload.sol";
 
 /**
  * @title OracleManager
