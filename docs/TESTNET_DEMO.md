@@ -17,8 +17,8 @@ modifiers are what enforce the separation.
 | ------- | -------------------------------------- | ---------------------------------------------------------------------------------------------------------------------- |
 | 0       | Platform owner, deployer, central bank | deploys, agent grants, treasury mints (investor-limit exempt, D22), governance ownership (until the handover ceremony) |
 | 1       | Fee wallet, compliance officer         | investor-type assignments                                                                                              |
-| 2       | KYC issuer                             | KYC claims, identity registration                                                                                      |
-| 3       | AML issuer                             | AML claims                                                                                                             |
+| 2       | KYC oracle node                        | oracle attestations (option 31)                                                                                        |
+| 3       | AML oracle node                        | oracle attestations; emergency designation (option 32)                                                                 |
 | 4, 5    | Risk and fraud oracles                 | attestations                                                                                                           |
 | 6, 7, 8 | Investors Alice, Bob, Carol            | proposals, votes, transfers, escrow parties                                                                            |
 | 9       | Deliberately unverified; issuer admin  | rejection demonstrations; after the handover, owner of every claim issuer the deployer held (D25 b)                    |
@@ -196,9 +196,11 @@ token but not unpause it. Issuer ownership moves by nominate and accept:
 the deployer's `transferOwnership` only nominates the issuer admin, so on
 Sepolia, where it is a multisig the script does not control, that multisig
 must itself execute `acceptOwnership` and the deployer-key revoke for each
-claim issuer. The demo's issuers are owned by wallets 2 and 3 from deploy,
-so the ceremony leaves them there (no ops key on them; the separation check
-passes).
+claim issuer. Since Task 4.13 option 1 deploys both issuers owned by the
+deployer (wallet 0 signs every claim before the ceremony, wallet 9 after
+it): every trusted issuer must end owned by issuerAdmin with issuerAdmin's
+the only live key, so an issuer another wallet owns is refused, never
+skipped (R-413-7).
 The deployer's powers are read from chain, not from the config (2F.5): the
 oracles ComplianceRules binds to VSC and VGT, the registry's trusted issuers
 of each required topic, each oracle's `listManager`, the DynamicListManager
@@ -355,37 +357,47 @@ its own (Task 4.4, "Oracle nodes and consensus" below).
 
 Outside the demo, `HANDOVER_CONFIG=<path.json> npx hardhat run
 scripts/handover.ts --network <net>` runs the same ceremony and exits
-non-zero on any failure. The JSON holds the addresses `token`,
-`governanceToken`, `identityRegistry`, `complianceRules`, `oracleManager`, `governance`, the
-optional `investorTypeRegistry` and `dynamicListManager`, the required keys
-`escrowWalletFactory` and `onchainIDFactory` (an address, or `null` when not
-deployed: only the OnchainIDFactory is unreachable from the core
-contracts; the escrow factory is also read from every trusted escrow's
-`factory()`, and a config that does not name it is refused), the required
-keys `privacyManager` and `zkVerifier` (an address, or `null` when not
-deployed; `null` is refused when governance is already bound to the
-contract, `zkVerifier` must be the verifier PrivacyManager uses, so it
-cannot be `null` while a PrivacyManager is named, and a testingMode
-verifier is refused; a PrivacyManager that ComplianceRules wires for VSC
-or VGT, `privacyManager(token)` for the ZkOnly/Either whitelist modes, is
-in the ceremony even before governance is bound to it, so `privacyManager`
-must name it, and two different ones wired or bound are refused), `keyManager`
-(required when the OnchainIDFactory pins a recovery manager, as option 1's
-does) and the optional `keyManagerIdentity` (both below), the optional `oracles` and `issuers` arrays (omitted: the
-set read from chain), the optional `feeWallets` array (escrow fee wallets
-to check for the exemption), the
-optional `fromBlock` (where the event scans start: trusted contracts,
-registry agents, registry governors, escrow investors and roles; a block
-no later than the IdentityRegistry deploy, refused when the registry
-already has code before it; the demo records the IdentityRegistry deploy
-block at option 1) and `logChunk` (the
-scan's block range, default 5000, halved down to 100 when the RPC refuses a
-range), and the wallet indices `ops`, `guardian`, `issuerAdmin` (required
-whenever the registry trusts an issuer), `proposer` and `voters`
-(an array). Before step 1 it checks that the proposer and every voter are
-verified and hold the VGT fees for every proposal. After a partial run,
-`HANDOVER_PHASE=accept` skips the deployer steps and votes only the
-acceptances and registry proposals still pending, then verifies.
+non-zero on any failure. Since Task 4.13 the JSON has one root: the
+`governance` address; every other contract is derived from it (its bound
+targets and VGT, the tokens' registry and rules, the rules' oracles,
+registrars and wired PrivacyManager, the registry's issuers, the manager's
+engine and nodes, the factory's KeyManager). It also holds the wallet
+indices `ops`, `guardian`, `issuerAdmin`, `proposer` and `voters`, the
+optional `fromBlock` (a block before option 1's first deploy; refused when
+any scanned contract already had code) and `logChunk`, the optional
+`keyManagerIdentity` and `feeWallets`, and three acknowledgement lists,
+empty by default: `oracleNodes` (every registered consensus node), `attestors`
+(the Ax of every trusted attestor key) and `extraTrusted` (trusted contracts
+that are neither governance on VGT nor a wallet a live registrar created).
+An address key of an older config is an assertion, refused when it differs
+from the derivation (R-413-1); `escrowWalletFactory`, `onchainIDFactory`,
+`privacyManager` and `zkVerifier` must still be stated (an address, or
+`null`) while governance cannot derive them, before step 3 binds them
+(R-413-2); any other key is refused. `HANDOVER_PHASE=accept` resumes a
+partial run. The preflight (and 83e, as failing lines) also refuses, from
+the event scans: any agent but the deployer, ops, governance (VGT) and the
+tokens (registry), a missing governance or token agent; any
+InvestorTypeRegistry officer wallet but ops, a token other than VSC
+authorized, a registry or whitelist oracle on VGT (D56), a Token enforcing
+a registry governance is not bound to; a key on any issuer held by ops, the
+guardian, governance, a registry agent or an oracle node; a trusted contract
+outside governance on VGT, a live registrar's wallets and `extraTrusted`;
+a registrar or officer contract whose code is not the compiled
+InvestorRequestManager or EscrowWalletFactory, or whose immutable bank is
+not ops; an unacknowledged node, the deployer as a node, an emergency
+designation on an unacknowledged node (step 5 clears the rest), a paused
+list oracle or one below two consensus oracles; `minVoterAge` under 7 days,
+an open proposal targeting a plan contract, a factory `feeRecipient` other
+than the deployer or ops (step 5 sets ops, D54), an unacknowledged attestor
+key, a root published by a stranger, a pending re-seat on the demo
+identity; and a code hash off the compiled artifact for every plan
+contract, list oracle, registrar and issuer (immutables masked). A scan
+that cannot find a holder known to be granted by event fails rather than
+passing as clean (R-413-6). Completion re-derives everything and compares
+it with the preflight snapshot: nothing may appear the ceremony did not
+grant. Demo option 83c acknowledges what the demo itself registered and
+trusted, lists every stray the preflight refuses and offers to remove them
+as the deployer (answer `y`; the drive argument is `83c:y`).
 
 ### Runbook rules for the ceremony and after (plan 2F)
 
