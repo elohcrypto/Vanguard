@@ -100,6 +100,7 @@ describe("Handover CLI (scripts/handover.ts)", function () {
     cfg.governance = g.govAddr;
     cfg.oracles = [await g.args.oracles[0].getAddress()];
     cfg.issuers = [await g.args.issuers[0].getAddress()];
+    cfg.attestors = [Ax.toString()]; // Task 4.13: acknowledged, so warned
     out.length = 0;
     await runHandover(cfg);
     expect(out).to.include("\n⚠️  Handover complete with warnings: see above.");

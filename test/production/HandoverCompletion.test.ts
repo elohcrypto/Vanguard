@@ -460,6 +460,13 @@ describe("Handover completion check: deployer-era residue (3.9)", function () {
     const { Ax, Ay } = await attestorPublicKey(newAttestorKey());
     const JUR = ethers.id("JURISDICTION_PROOF");
     await c.privacyManager.setTrustedAttestor(JUR, Ax, Ay, true);
+    // Task 4.13: unacknowledged, the key is refused; acknowledged, it warns.
+    await expect(handoverDeployerPowers(args)).to.be.rejectedWith(
+      new RegExp(
+        `trusts attestor key\\(s\\) Ax ${Ax} for jurisdiction that the config does not acknowledge`,
+      ),
+    );
+    args.attestors = [Ax.toString()];
     await ceremony();
     const line = `PrivacyManager issuer key (Ax ${Ax}) for jurisdiction was trusted by the deployer: re-approve it by a PrivacyParameters vote or untrust it`;
     const before = await assertHandoverComplete(args);

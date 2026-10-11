@@ -48,6 +48,11 @@ const { withDerivedContracts, preflightLinks } = require("./HandoverDerive");
 const { preflightRoles } = require("./HandoverRoles");
 const { preflightTrust } = require("./HandoverTrust");
 const { preflightNodes, nodeSteps } = require("./HandoverNodes");
+const { preflightParams, paramSteps } = require("./HandoverParams");
+const { snapshotFacts } = require("./HandoverSnapshot");
+const { roleStrays } = require("./HandoverRoles");
+const { trustStrays } = require("./HandoverTrust");
+const { nodeStrays } = require("./HandoverNodes");
 const {
   proposeCall,
   proposeAcceptOwnership,
@@ -106,6 +111,9 @@ async function handoverDeployerPowers(o) {
   await preflightTrust(o); // Task 4.13: trusted contracts by provenance
   await preflightOracles(o); // Task 4.4
   await preflightNodes(o); // Task 4.13: nodes, designations, list oracles
+  await preflightParams(o); // Task 4.13: floors, proposals, fee sink, pins
+  // Task 4.13: what the preflight found; completion compares with it.
+  report.snapshot = await snapshotFacts(o);
   const ctx = { o, d, dAddr, govAddr, report, ok, log };
   // Send, read back, assert, print.
   const apply = async (tx, readBack, msg) => {
@@ -218,6 +226,7 @@ async function handoverDeployerPowers(o) {
   await factorySteps(ctx);
   await privacySteps(ctx);
   await nodeSteps(ctx); // Task 4.13: deployer-era emergency designations
+  await paramSteps(ctx); // Task 4.13: factory feeRecipient to ops (D54)
   for (const step of regSteps.slice(1)) await registryCall(ctx, step);
 
   log("\n📝 Step 3: nominate governance as owner");
@@ -312,8 +321,25 @@ async function registryCall(ctx, step) {
   );
 }
 
+/**
+ * Task 4.13 (R-413-4): the strays the preflight would refuse that one
+ * owner call removes, [{ what, on, fn, args }], read-only. Demo option
+ * 83c lists them and offers to send each as the deployer; the ceremony
+ * itself never removes them.
+ */
+async function findStrays(o) {
+  o = await withBoundRegistry(await withDerivedContracts(o));
+  o = await withDerivedPowers(o, () => {}, { strict: false });
+  return [
+    ...(await roleStrays(o)),
+    ...(await trustStrays(o)),
+    ...(await nodeStrays(o)),
+  ];
+}
+
 module.exports = {
   ACCEPTANCE_PLAN,
+  findStrays,
   handoverDeployerPowers,
   proposeCall,
   proposeAcceptOwnership,

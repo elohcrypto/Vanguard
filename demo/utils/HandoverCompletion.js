@@ -41,6 +41,8 @@ const { withDerivedContracts, linkLines } = require("./HandoverDerive");
 const { roleLines } = require("./HandoverRoles");
 const { trustLines } = require("./HandoverTrust");
 const { nodeLines } = require("./HandoverNodes");
+const { paramLines } = require("./HandoverParams");
+const { snapshotLines } = require("./HandoverSnapshot");
 
 const ZERO = ethers.ZeroAddress;
 const EXEMPT_ABI = [
@@ -130,6 +132,11 @@ async function assertHandoverComplete(o) {
     add(label, pass);
   // Task 4.13: acknowledged nodes, provenance, designations, list oracles.
   for (const [label, pass] of await nodeLines(o, dAddr, warnings, residual))
+    add(label, pass);
+  // Task 4.13: floors, open proposals, fee sink, attestors, root, pins.
+  for (const [label, pass] of await paramLines(o)) add(label, pass);
+  // Task 4.13: re-derived and compared with the preflight snapshot.
+  for (const [label, pass] of await snapshotLines(o, o.snapshot))
     add(label, pass);
   // Bound in governance, or the creator of a trusted escrow (review M-2),
   // but not named by the config: still checked.

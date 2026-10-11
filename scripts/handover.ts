@@ -1,73 +1,39 @@
 /**
- * Handover ceremony CLI (plan v2 Task 2C.1). The deployer (wallet 0) gives up
- * every power; governance takes the core contracts by vote.
+ * Handover ceremony CLI (plan v2 Task 2C.1; Task 4.13 derives everything
+ * from one root). The deployer (wallet 0) gives up every power; governance
+ * takes the core contracts by vote.
  *
  *   HANDOVER_CONFIG=handover.json npx hardhat run scripts/handover.ts --network <net>
  *
- * handover.json (addresses, wallet indices from docs/TESTNET_DEMO.md):
+ * handover.json (wallet indices from docs/TESTNET_DEMO.md):
  *   {
- *     "token": "0x..", "governanceToken": "0x..", "identityRegistry": "0x..",
- *     "complianceRules": "0x..",
- *     "oracleManager": "0x..", "governance": "0x..",
- *     "investorTypeRegistry": "0x..",          // optional, in the plan (type 0)
- *     "dynamicListManager": "0x..",            // optional, demo option 84
- *     "escrowWalletFactory": "0x.." | null,     // required key (2F.5), null = not deployed
- *     "onchainIDFactory": "0x.." | null,        // required key (2F.5), null = not deployed
- *     "privacyManager": "0x.." | null,          // required key (3.3), null = not deployed
- *     "zkVerifier": "0x.." | null,              // required key (3.3), ZKVerifierIntegrated
- *     "keyManager": "0x..",                     // KeyManager (4.2); required when
- *                                               // onchainIDFactory pins it (4.11)
- *     "keyManagerIdentity": "0x..",             // optional (4.2), the demo OnchainID
- *     "oracles": ["0x..", "0x.."],              // optional, one-step Ownable
- *     "issuers": ["0x..", "0x.."],              // optional, ClaimIssuer
- *     "feeWallets": ["0x.."],                   // optional, escrow fee wallets to check
- *     "fromBlock": 1234567,                     // optional, <= the IdentityRegistry deploy block
- *     "logChunk": 5000,                         // optional, eth_getLogs block range
+ *     "governance": "0x..",                   // the one root: every other
+ *                                             // contract is derived from it
  *     "ops": 10, "guardian": 11, "issuerAdmin": 9,
- *     "proposer": 1, "voters": [2, 3, 6]
+ *     "proposer": 1, "voters": [2, 3, 6],
+ *     "fromBlock": 1234567,                   // optional, before every deploy
+ *     "logChunk": 5000,                       // optional, eth_getLogs range
+ *     "keyManagerIdentity": "0x..",           // optional, the demo OnchainID
+ *     "feeWallets": ["0x.."],                 // optional, escrow fee wallets
+ *     "oracleNodes": ["0x.."],                // acknowledged consensus nodes
+ *     "attestors": ["<Ax>"],                  // acknowledged attestor keys
+ *     "extraTrusted": ["0x.."]                // acknowledged trusted contracts
  *   }
  *
- * The power set is read from chain (demo/utils/HandoverPowers.js): an
- * "oracles"/"issuers" list that omits a contract bound on chain is refused;
- * leave a list out to use the chain's set. "issuerAdmin" (a wallet index,
- * not ops/guardian/deployer) is required whenever the registry trusts an
- * issuer: the ceremony hands every deployer-held issuer to it (D25 b).
- * Both factory keys must be present; null states "none". The OnchainIDFactory
- * is unreachable from the core contracts, so only the config names it; the
- * escrow factory is also read from every trusted escrow's factory(), and a
- * config that does not name it is refused. The two privacy keys follow the
- * same rule (3.3): null is refused when governance is already bound to the
- * contract (types 11/12), "zkVerifier" must be the verifier PrivacyManager
- * uses (so null is refused whenever a PrivacyManager is named), a
- * PrivacyManager ComplianceRules wires for VSC or VGT (3.4) counts as bound
- * (it must be named, and two different ones wired or bound are refused), a
- * testingMode verifier is refused, and so is any PrivacyManager, wrapper or
- * circuit verifier whose runtime code hash is not the compiled artifact's
- * (demo/utils/HandoverCodeHash.js; the refusal names both hashes and is
- * printed unchanged after "❌ Handover failed: "). A "fromBlock" after the
- * IdentityRegistry deploy is refused (the scans would miss earlier agents).
- * KeyManager (4.2) has no owner, so nothing is handed over: a "keyManager"
- * with no code, or whose code is not the compiled KeyManager, is refused,
- * and so is a "keyManagerIdentity" that has not authorized it, that the
- * deployer owns, manages, holds a MANAGEMENT key on or is a recovery agent
- * of (4.11), that does not pin it as its recovery manager or that
- * authorizes any other manager (getManagers() must be exactly [KeyManager],
- * 4.11), or that is named without "keyManager"; the completion check
- * proves the deployer holds no KeyManager power and that the identity
- * authorizes it (demo/utils/HandoverKeys.js). A named "onchainIDFactory"
- * is checked with or without "keyManager": its recoveryManagerCodeHash
- * must be zero or the compiled KeyManager's, and a recovery manager it
- * pins must be named as "keyManager" (4.11). OracleManager (4.4) must bind a consensus
- * engine whose code is the compiled ConsensusOracle and that serves it
- * (the engine has no owner, so it is not handed over); the deployer step
- * makes ops the manager's operator, and an operator other than ops is
- * refused once governance owns the manager (demo/utils/HandoverOracles.js).
- *
- * Every contract in ACCEPTANCE_PLAN (demo/utils/HandoverChecks.js) given here
- * is nominated and accepted by vote, InvestorTypeRegistry included; a
- * preflight refuses to start before the first transaction if any
- * precondition fails. Exits non-zero on any failure. The ceremony itself is
- * demo/utils/Handover.js.
+ * The three acknowledgement lists default to empty: on a first handover
+ * nothing is acknowledged and any registered node, trusted attestor key
+ * or trusted contract outside governance and the registrars' wallets is
+ * refused. An address key of an older config ("token", "governanceToken",
+ * "identityRegistry", "complianceRules", "oracleManager",
+ * "investorTypeRegistry", "dynamicListManager", "escrowWalletFactory",
+ * "onchainIDFactory", "privacyManager", "zkVerifier", "keyManager", and
+ * the "oracles" / "issuers" lists) is still accepted as an assertion:
+ * refused when it differs from what governance derives (R-413-1). The
+ * OnchainIDFactory, an escrow factory that is no registrar yet, an unwired
+ * privacy pair and a KeyManager nothing pins are unreachable from
+ * governance before step 3 binds them, so those may still be named
+ * (R-413-2). Any other key is refused. The ceremony itself, every
+ * refusal and every completion line: demo/utils/Handover*.js.
  *
  * HANDOVER_PHASE=accept resumes after a partial run: it skips the deployer
  * steps and only votes the acceptances (and registry proposals) still
@@ -98,6 +64,7 @@ const {
   assertHandoverComplete,
 } = require("../demo/utils/Handover");
 const { planFor, withBoundRegistry } = require("../demo/utils/HandoverChecks");
+const { withDerivedContracts } = require("../demo/utils/HandoverDerive");
 
 /**
  * The whole CLI run for a parsed handover.json (`path` names it in errors).
@@ -108,15 +75,70 @@ export async function runHandover(
   phase = "full",
   path = "handover.json",
 ): Promise<void> {
-  for (const k of [
+  const ADDRESS_KEYS = [
     "token",
     "governanceToken",
     "identityRegistry",
     "complianceRules",
     "oracleManager",
+    "investorTypeRegistry",
+    "dynamicListManager",
+    "escrowWalletFactory",
+    "onchainIDFactory",
+    "privacyManager",
+    "zkVerifier",
+    "keyManager",
+    "keyManagerIdentity",
+  ];
+  const LIST_KEYS = [
+    "oracles",
+    "issuers",
+    "feeWallets",
+    "oracleNodes",
+    "attestors",
+    "extraTrusted",
+  ];
+  const allowed = new Set([
     "governance",
-  ]) {
-    if (!cfg[k]) throw new Error(`${path}: missing "${k}" address`);
+    "ops",
+    "guardian",
+    "issuerAdmin",
+    "proposer",
+    "voters",
+    "fromBlock",
+    "logChunk",
+    ...ADDRESS_KEYS,
+    ...LIST_KEYS,
+  ]);
+  for (const k of Object.keys(cfg)) {
+    if (!allowed.has(k)) {
+      throw new Error(
+        `${path}: unknown key "${k}" (allowed: ${[...allowed].join(", ")})`,
+      );
+    }
+  }
+  if (!ethers.isAddress(cfg.governance)) {
+    throw new Error(`${path}: "governance" must be the governance address`);
+  }
+  for (const k of ADDRESS_KEYS) {
+    if (cfg[k] != null && !ethers.isAddress(cfg[k])) {
+      throw new Error(`${path}: "${k}" must be an address or null`);
+    }
+  }
+  for (const k of LIST_KEYS) {
+    if (cfg[k] === undefined) continue;
+    const ok =
+      Array.isArray(cfg[k]) &&
+      cfg[k].every((x: unknown) =>
+        k === "attestors"
+          ? /^(0x[0-9a-fA-F]+|[0-9]+)$/.test(String(x))
+          : ethers.isAddress(x),
+      );
+    if (!ok) {
+      throw new Error(
+        `${path}: "${k}" must list ${k === "attestors" ? "attestor Ax values" : "addresses"}`,
+      );
+    }
   }
   for (const k of ["ops", "guardian", "proposer"]) {
     if (!Number.isInteger(cfg[k]))
@@ -124,18 +146,6 @@ export async function runHandover(
   }
   if (cfg.issuerAdmin !== undefined && !Number.isInteger(cfg.issuerAdmin)) {
     throw new Error(`${path}: "issuerAdmin" must be a wallet index`);
-  }
-  for (const k of [
-    "escrowWalletFactory",
-    "onchainIDFactory",
-    "privacyManager",
-    "zkVerifier",
-  ]) {
-    if (!(k in cfg)) {
-      throw new Error(
-        `${path}: missing "${k}" (an address, or null when not deployed): the deployer owns it until the ceremony hands it over`,
-      );
-    }
   }
   if (cfg.fromBlock !== undefined && !Number.isInteger(cfg.fromBlock)) {
     throw new Error(`${path}: "fromBlock" must be a block number`);
@@ -161,9 +171,22 @@ export async function runHandover(
   };
   const at = (name: string, a: string) => ethers.getContractAt(name, a);
 
-  const args = {
-    // Start of the trusted-contract event scan (the check reads logs in
-    // chunks from here to the latest block).
+  const ARTIFACT: Record<string, string> = {
+    token: "Token",
+    governanceToken: "GovernanceToken",
+    identityRegistry: "IdentityRegistry",
+    complianceRules: "ComplianceRules",
+    oracleManager: "OracleManager",
+    investorTypeRegistry: "InvestorTypeRegistry",
+    dynamicListManager: "DynamicListManager",
+    escrowWalletFactory: "EscrowWalletFactory",
+    onchainIDFactory: "OnchainIDFactory",
+    privacyManager: "PrivacyManager",
+    zkVerifier: "ZKVerifierIntegrated",
+    keyManager: "KeyManager",
+  };
+  const args: Record<string, any> = {
+    // Start of the event scans (read in chunks from here to the latest block).
     fromBlock: cfg.fromBlock,
     logChunk: cfg.logChunk,
     deployer: wallet(0),
@@ -172,35 +195,13 @@ export async function runHandover(
     issuerAdmin:
       cfg.issuerAdmin === undefined ? undefined : wallet(cfg.issuerAdmin),
     feeWallets: cfg.feeWallets,
+    oracleNodes: cfg.oracleNodes || [],
+    attestors: cfg.attestors || [],
+    extraTrusted: cfg.extraTrusted || [],
     governance: await at("VanguardGovernance", cfg.governance),
-    token: await at("Token", cfg.token),
-    governanceToken: await at("GovernanceToken", cfg.governanceToken),
-    identityRegistry: await at("IdentityRegistry", cfg.identityRegistry),
-    complianceRules: await at("ComplianceRules", cfg.complianceRules),
-    oracleManager: await at("OracleManager", cfg.oracleManager),
-    investorTypeRegistry: cfg.investorTypeRegistry
-      ? await at("InvestorTypeRegistry", cfg.investorTypeRegistry)
-      : undefined,
-    dynamicListManager: cfg.dynamicListManager
-      ? await at("DynamicListManager", cfg.dynamicListManager)
-      : undefined,
-    escrowWalletFactory: cfg.escrowWalletFactory
-      ? await at("EscrowWalletFactory", cfg.escrowWalletFactory)
-      : undefined,
-    onchainIDFactory: cfg.onchainIDFactory
-      ? await at("OnchainIDFactory", cfg.onchainIDFactory)
-      : undefined,
-    privacyManager: cfg.privacyManager
-      ? await at("PrivacyManager", cfg.privacyManager)
-      : undefined,
-    zkVerifier: cfg.zkVerifier
-      ? await at("ZKVerifierIntegrated", cfg.zkVerifier)
-      : undefined,
-    keyManager: cfg.keyManager
-      ? await at("KeyManager", cfg.keyManager)
-      : undefined,
     keyManagerIdentity: cfg.keyManagerIdentity,
-    // Left out: the ceremony uses the set read from chain.
+    // Assertions (R-413-1): what an older config names is checked against
+    // the derivation; a key left out is derived.
     oracles: cfg.oracles
       ? await Promise.all(
           cfg.oracles.map((a: string) => ethers.getContractAt(ORACLE_ABI, a)),
@@ -210,10 +211,27 @@ export async function runHandover(
       ? await Promise.all(cfg.issuers.map((a: string) => at("ClaimIssuer", a)))
       : undefined,
   };
-
+  for (const [k, name] of Object.entries(ARTIFACT)) {
+    if (cfg[k]) args[k] = await at(name, cfg[k]);
+  }
+  // R-413-2: a contract unreachable from governance before step 3 binds it
+  // must be stated (an address, or null for "not deployed") unless derived.
+  const derived = await withDerivedContracts(args);
+  for (const k of [
+    "escrowWalletFactory",
+    "onchainIDFactory",
+    "privacyManager",
+    "zkVerifier",
+  ]) {
+    if (!(k in cfg) && derived[k] == null) {
+      throw new Error(
+        `${path}: missing "${k}" (an address, or null when not deployed): governance does not derive it before step 3 binds it, so the deployer would keep it`,
+      );
+    }
+  }
   const proposer = wallet(cfg.proposer);
   const voters = cfg.voters.map(wallet);
-  const govAddr = cfg.governance.toLowerCase();
+  const govAddr = String(cfg.governance).toLowerCase();
   // Acceptance votes still to run: plan contracts governance does not own.
   const acceptances = async (o: any) => {
     let n = 0;
@@ -226,7 +244,10 @@ export async function runHandover(
   let registryProposals: any[];
   if (phase === "accept") {
     console.log("⏭️  HANDOVER_PHASE=accept: deployer steps skipped");
-    const o = await withBoundRegistry(args, console.log);
+    const o = await withBoundRegistry(
+      await withDerivedContracts(args, console.log),
+      console.log,
+    );
     await preflight(o, { acceptOnly: true });
     registryProposals = await pendingRegistryProposals(o);
     await checkVoters(
@@ -236,7 +257,7 @@ export async function runHandover(
       (await acceptances(o)) + registryProposals.length,
     );
   } else {
-    const o = await withBoundRegistry(args);
+    const o = await withBoundRegistry(await withDerivedContracts(args));
     const reg = o.investorTypeRegistry;
     // Registry calls become proposals only when governance already owns it.
     const regVotes =
@@ -245,12 +266,14 @@ export async function runHandover(
         : 0;
     await checkVoters(o, proposer, voters, (await acceptances(o)) + regVotes);
     console.log("🔑 Handover: deployer powers");
-    registryProposals = (await handoverDeployerPowers(args)).registryProposals;
+    const report = await handoverDeployerPowers(args);
+    registryProposals = report.registryProposals;
+    args.snapshot = report.snapshot; // completion compares with preflight
   }
 
   console.log("\n🏛️  Handover: governance accepts by vote");
   const contracts: Record<string, any> = {};
-  for (const e of ACCEPTANCE_PLAN) contracts[e.key] = (args as any)[e.key];
+  for (const e of ACCEPTANCE_PLAN) contracts[e.key] = args[e.key];
   await acceptAllByVote({
     governance: args.governance,
     contracts,

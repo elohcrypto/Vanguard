@@ -253,4 +253,146 @@ describe("Handover strays: roles (Task 4.13)", function () {
       await expect(assertHandoverComplete(args)).to.be.rejectedWith(re);
     });
   });
+
+  // A1 M3, B G-6/G-7/G-8/G-9, A2 M-B: nodes, floors, fee sink, re-seat.
+  describe("nodes and parameters", function () {
+    it("an unacknowledged node; acknowledged, it warns about its provenance", async function () {
+      const node = f.stranger.address;
+      await c.oracleManager.registerOracle(node, "RISK", "", 500);
+      await both(
+        new RegExp(
+          `OracleManager node\\(s\\) ${node} are registered but not acknowledged`,
+        ),
+        /^every registered OracleManager node is acknowledged in oracleNodes/,
+      );
+      args.oracleNodes = [node];
+      await handoverDeployerPowers(args);
+      const { warnings, residual } = await assertHandoverComplete(args);
+      const w = `OracleManager node ${node} (RISK) was registered by the deployer at block`;
+      expect(warnings.find((x: string) => x.startsWith(w))).to.not.equal(
+        undefined,
+      );
+      expect(residual.find((x: string) => x.startsWith(w))).to.not.equal(
+        undefined,
+      );
+      expect(warnings.join("\n")).to.include(
+        "below ConsensusOracle.MIN_NODES (2)",
+      );
+    });
+
+    it("the deployer as a node", async function () {
+      await c.oracleManager.registerOracle(f.deployer.address, "D", "", 500);
+      args.oracleNodes = [f.deployer.address];
+      // The issuer-key line (D25 b: an oracle node holds a key) fires first.
+      await both(
+        /carries a live key of oracle node .* \(MANAGEMENT\)|is a registered OracleManager node/,
+        new RegExp(
+          `^the deployer ${f.deployer.address} is not an OracleManager node`,
+        ),
+      );
+    });
+
+    it("an emergency designation on an unacknowledged node; an acknowledged one is cleared at step 5", async function () {
+      const node = f.stranger.address;
+      await c.oracleManager.registerOracle(node, "AML", "", 500);
+      await c.oracleManager.setEmergencyOracle(node, true);
+      // The node line is first; the designation line is its own.
+      const { failures } = await assertHandoverComplete(args);
+      expect(failures).to.include(
+        "every emergency designation sits on an acknowledged node (1 designated)",
+      );
+      await expect(handoverDeployerPowers(args)).to.be.rejectedWith(
+        /registered but not acknowledged/,
+      );
+      args.oracleNodes = [node];
+      const report = await handoverDeployerPowers(args);
+      expect(report.steps).to.include(
+        `emergency designation of node ${node} cleared (deployer era)`,
+      );
+      expect(await c.oracleManager.isEmergencyOracle(node)).to.equal(false);
+    });
+
+    it("a paused list oracle, and one requiring a single consensus oracle", async function () {
+      const [wl] = args.oracles;
+      await wl.emergencyPause();
+      await both(
+        /is paused: a paused list freezes every verdict/,
+        /is not paused and is active$/,
+      );
+      await wl.unpause();
+      await wl.setMinimumConsensusOracles(1);
+      await both(
+        /minimumConsensusOracles is 1: below 2/,
+        /minimumConsensusOracles >= 2 \(1\)$/,
+      );
+    });
+
+    it("minVoterAge below 7 days (the setter's floor is 1 day)", async function () {
+      const scale = await c.governance.TIME_SCALE();
+      await c.governance.setMinVoterAge(86400n / scale);
+      await both(
+        /minVoterAge is \d+s, below 7 days \/ TIME_SCALE/,
+        /^governance minVoterAge \d+s is at least 7 days/,
+      );
+    });
+
+    it("an open governance proposal targeting a plan contract", async function () {
+      const { proposeCall } = require("../../demo/utils/Handover");
+      const data = c.token.interface.encodeFunctionData("setGuardian", [
+        f.stranger.address,
+      ]);
+      await proposeCall(c.governance, f.proposer, 3, c.token, data, "planted");
+      await both(
+        /open governance proposal\(s\) #1 "planted" -> Token/,
+        /^no open governance proposal targets a plan contract/,
+      );
+    });
+
+    it("feeRecipient off the deployer and ops; step 5 moves it to ops (D54)", async function () {
+      await c.onchainIDFactory.setFeeRecipient(f.stranger.address);
+      await both(
+        /OnchainIDFactory feeRecipient is 0x[0-9a-fA-F]+, not the deployer or ops/,
+        /^OnchainIDFactory feeRecipient is ops/,
+      );
+      await c.onchainIDFactory.setFeeRecipient(f.deployer.address);
+      const report = await handoverDeployerPowers(args);
+      expect(report.steps).to.include(
+        `OnchainIDFactory feeRecipient: ops ${f.ops.address} (D54)`,
+      );
+      expect(await c.onchainIDFactory.feeRecipient()).to.equal(f.ops.address);
+    });
+
+    it("a pending recovery re-seat on the demo identity (A2 M-B)", async function () {
+      const km = await (await ethers.getContractFactory("KeyManager")).deploy();
+      const idAddr = await c.identityRegistry.identity(f.proposer.address);
+      const id = await ethers.getContractAt("OnchainID", idAddr);
+      await id.connect(f.proposer).authorizeManager(await km.getAddress());
+      await id.connect(f.proposer).pinRecoveryManager(await km.getAddress());
+      await c.onchainIDFactory.setRecoveryManager(await km.getAddress());
+      await km
+        .connect(f.proposer)
+        .setupKeyRecovery(idAddr, [f.stranger.address], 1);
+      await km
+        .connect(f.proposer)
+        .setupKeyRecovery(idAddr, [f.guardian.address], 1);
+      args.keyManagerIdentity = idAddr;
+      await both(
+        /has a pending recovery re-seat/,
+        new RegExp(`^demo identity ${idAddr} has no pending recovery re-seat`),
+      );
+    });
+
+    it("something appearing between the preflight and completion", async function () {
+      const report = await handoverDeployerPowers(args);
+      // The deployer still owns the Token until the vote: a late grant.
+      await c.token.addAgent(f.stranger.address);
+      const { failures } = await assertHandoverComplete({
+        ...args,
+        snapshot: report.snapshot,
+      });
+      expect(failures).to.include(
+        `appeared after the preflight, not granted by the ceremony: ${f.stranger.address} in Token agents`,
+      );
+    });
+  });
 });
