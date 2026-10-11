@@ -300,6 +300,29 @@ describe("Investor-type transfer cooldown (Task 4.10)", function () {
     ).to.be.revertedWith("Token not authorized");
   });
 
+  // Plan v2 Task 4.13 (D49 note): a wallet cannot pass as a token.
+  it("authorizeToken refuses a wallet and a delegated wallet; a contract passes", async function () {
+    const { stranger, types, token } = await deploy();
+    await expect(types.authorizeToken(stranger.address, true))
+      .to.be.revertedWithCustomError(types, "TokenNotAContract")
+      .withArgs(stranger.address);
+    const delegated = ethers.Wallet.createRandom().address;
+    await ethers.provider.send("hardhat_setCode", [
+      delegated,
+      "0xef0100" + (token.target as string).slice(2),
+    ]);
+    await expect(types.authorizeToken(delegated, true))
+      .to.be.revertedWithCustomError(types, "TokenDelegatedWallet")
+      .withArgs(delegated);
+    // Revoking never needs code: a dead address can still be cleared.
+    await types.authorizeToken(stranger.address, false);
+    const other = await (
+      await ethers.getContractFactory("MockTarget")
+    ).deploy();
+    await types.authorizeToken(other.target, true);
+    expect(await types.isTokenAuthorized(other.target)).to.equal(true);
+  });
+
   it("a token without a registry has no cooldown and writes no clock", async function () {
     const { alice, bob, registry, rules } = await deploy();
     const plain = await (

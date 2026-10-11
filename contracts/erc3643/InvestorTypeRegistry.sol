@@ -37,6 +37,11 @@ contract InvestorTypeRegistry is InvestorTypeGovernance {
     ///         account (D37 = a, Task 4.10). Written only by recordTransfer.
     mapping(address => uint256) public lastTransferAt;
 
+    /// @notice authorizeToken(token, true) on an address without code.
+    error TokenNotAContract(address token);
+    /// @notice authorizeToken(token, true) on an EIP-7702 delegated wallet.
+    error TokenDelegatedWallet(address token);
+
     modifier onlyComplianceOfficer() {
         require(_complianceOfficers[msg.sender] || msg.sender == owner(), "Not authorized compliance officer");
         _;
@@ -255,8 +260,21 @@ contract InvestorTypeRegistry is InvestorTypeGovernance {
      */
     function authorizeToken(address token, bool authorized) external onlyOwner {
         require(token != address(0), "Invalid token address");
+        // A wallet could otherwise write every holder's cooldown clock
+        // (recordTransfer) and pass as a token (Task 4.13, D49 note).
+        if (authorized) _requireContract(token);
         _authorizedTokens[token] = authorized;
         emit TokenAuthorized(token, authorized);
+    }
+
+    /// @dev Code present and not an EIP-7702 delegation indicator
+    ///      (0xef0100 || address, 23 bytes): a delegated EOA is a wallet.
+    function _requireContract(address account) private view {
+        if (account.code.length == 0) revert TokenNotAContract(account);
+        if (account.code.length == 23) {
+            bytes memory code = account.code;
+            if (code[0] == 0xef && code[1] == 0x01 && code[2] == 0x00) revert TokenDelegatedWallet(account);
+        }
     }
 
     /**
