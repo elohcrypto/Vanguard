@@ -313,28 +313,6 @@ describe("Handover completion check (table)", function () {
     return ethers.getSigner(f.govAddr);
   }
 
-  // Review 3.3 MEDIUM-2 (d), Task 4.13: the verifier is derived from
-  // PrivacyManager.zkVerifier() (which the contract refuses to point at a
-  // testingMode wrapper, TestingModeVerifier), so a config naming one
-  // fails the derivation line; the derived verifier's flag and pin pass.
-  it("a config naming a testingMode wrapper fails the derivation line", async function () {
-    const tm = await (
-      await ethers.getContractFactory("ZKVerifierIntegrated")
-    ).deploy(true);
-    const tmAddr = await tm.getAddress();
-    const { failures, checks } = await assertHandoverComplete({
-      ...args,
-      zkVerifier: tm,
-    });
-    expect(failures).to.deep.equal([
-      `config "zkVerifier" names ${tmAddr}, but PrivacyManager ${await c.privacyManager.getAddress()} zkVerifier() is ${await c.zkVerifier.getAddress()}: the ceremony derives every contract from governance; drop the key or fix the chain`,
-    ]);
-    expect(checks).to.deep.include({
-      label: "ZKVerifierIntegrated is not in testingMode",
-      ok: true,
-    });
-  });
-
   // Review 3.3 LOW-3: a deployer-published root is a warning, not a failure.
   it("warns while the current whitelist root was published by the deployer", async function () {
     const { deployer, ops } = f;

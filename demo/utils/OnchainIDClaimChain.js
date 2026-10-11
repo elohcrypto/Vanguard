@@ -22,12 +22,13 @@ const {
   cacheVerification,
   KYC_TOPIC,
   AML_TOPIC,
+  issuerOwnerSigner,
 } = require("./Kyc");
 
 /** Topic, issuer contract and issuer signer per claim kind (Kyc.attestAll). */
 const KINDS = {
-  KYC: { topic: KYC_TOPIC, issuer: "kycIssuer", wallet: 2, attest: attestKyc },
-  AML: { topic: AML_TOPIC, issuer: "amlIssuer", wallet: 3, attest: attestAml },
+  KYC: { topic: KYC_TOPIC, issuer: "kycIssuer", attest: attestKyc },
+  AML: { topic: AML_TOPIC, issuer: "amlIssuer", attest: attestAml },
 };
 
 /** Chain facts for one identity and claim kind. */
@@ -80,13 +81,15 @@ async function revokeOnChain(state, identity, kind, log = console.log) {
   printFacts("Before", kind, before, log);
   let mined = false;
   if (before.valid) {
-    const signer = state.signers[k.wallet];
+    // Task 4.13: the issuer's owner signs (the deployer, issuerAdmin after
+    // the handover); no provider wallet holds an issuer key.
+    const signer = await issuerOwnerSigner(state, issuer);
     try {
       const tx = await issuer.connect(signer).revokeClaim(before.claimId);
       const rc = await tx.wait();
       mined = true;
       log(
-        `   ✅ revokeClaim by wallet ${k.wallet} (${signer.address}) mined in block ${rc.blockNumber}`,
+        `   ✅ revokeClaim by the issuer owner (${signer.address}) mined in block ${rc.blockNumber}`,
       );
     } catch (e) {
       log(`   ⚠️  revokeClaim refused: ${e.shortMessage || e.message}`);
@@ -109,7 +112,7 @@ async function reissueOnChain(state, identity, kind, label, log) {
   const issuer = state.getContract(k.issuer);
   const first = await revokeOnChain(state, identity, kind, log);
   if (!first) return null;
-  const signer = state.signers[k.wallet];
+  const signer = await issuerOwnerSigner(state, issuer);
   const rc = await k.attest(issuer, signer, identity.address, label);
   log(
     `   ✅ ${kind} claim re-issued (ClaimIssuer.issueClaim, block ${rc.blockNumber})`,

@@ -91,8 +91,8 @@ class HandoverModule {
     }
     const pick = (keys) =>
       keys.map((k) => s.getContract(k)).filter((c) => Boolean(c));
-    // Log scans start at the IdentityRegistry deploy (review M-3).
-    let fromBlock = s.identityRegistryDeployBlock;
+    // Log scans start at option 1's first deploy (review M-3, Task 4.13).
+    let fromBlock = s.deployStartBlock ?? s.identityRegistryDeployBlock;
     if (fromBlock === undefined && s.complianceRulesDeployBlock !== undefined) {
       fromBlock = s.complianceRulesDeployBlock;
       displayWarning(

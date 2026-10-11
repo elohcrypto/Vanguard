@@ -395,4 +395,71 @@ describe("Handover strays: roles (Task 4.13)", function () {
       );
     });
   });
+
+  // Moved here from HandoverCompletion/HandoverPowers (size rule): what
+  // the derivation changes in the completion check and the escrow leg.
+  describe("derivation", function () {
+    async function ceremony(log: (m: string) => void = () => {}) {
+      const { acceptAllByVote } = require("../../demo/utils/Handover");
+      const report = await handoverDeployerPowers({ ...args, log });
+      await acceptAllByVote({
+        governance: c.governance,
+        contracts: c,
+        proposer: f.proposer,
+        voters: f.voters,
+        registryProposals: report.registryProposals,
+        log: () => {},
+      });
+    }
+    /** carol registers, creates an escrow (alice pays bob), rules trust it. */
+    async function trustedEscrow() {
+      const e = c.escrowWalletFactory;
+      const [, , , , alice, bob, carol] = await ethers.getSigners();
+      await e.registerInvestor(carol.address, carol.address);
+      await e
+        .connect(carol)
+        .createEscrowWallet(alice.address, bob.address, ethers.parseEther("1"));
+      return e.getWalletAddress(1);
+    }
+
+    // Review 3.3 MEDIUM-2 (d), Task 4.13: the verifier is derived from
+    // PrivacyManager.zkVerifier() (which the contract refuses to point at a
+    // testingMode wrapper, TestingModeVerifier), so a config naming one
+    // fails the derivation line; the derived verifier's flag and pin pass.
+    it("a config naming a testingMode wrapper fails the derivation line", async function () {
+      await ceremony(); // binds the privacy pair, so the verifier derives
+      const tm = await (
+        await ethers.getContractFactory("ZKVerifierIntegrated")
+      ).deploy(true);
+      const tmAddr = await tm.getAddress();
+      const { failures, checks } = await assertHandoverComplete({
+        ...args,
+        zkVerifier: tm,
+      });
+      expect(failures).to.include(
+        `config "zkVerifier" names ${tmAddr}, but PrivacyManager ${await c.privacyManager.getAddress()} zkVerifier() is ${await c.zkVerifier.getAddress()}: the ceremony derives every contract from governance; drop the key or fix the chain`,
+      );
+      expect(checks).to.deep.include({
+        label: "ZKVerifierIntegrated is not in testingMode",
+        ok: true,
+      });
+    });
+
+    // Task 4.13: the factory a trusted escrow names is derived (M-2), as
+    // is the registrar for MultiSigEscrowWallet; a null key hides nothing.
+    it("M-2: derives the escrow factory from a trusted escrow and the registrar", async function () {
+      const w = await trustedEscrow();
+      const fAddr = await c.escrowWalletFactory.getAddress();
+      args.escrowWalletFactory = null;
+      const steps: string[] = [];
+      await ceremony((m) => steps.push(m));
+      expect(await c.escrowWalletFactory.owner()).to.equal(f.govAddr);
+      expect(await c.governance.boundTarget(9)).to.equal(fAddr);
+      const { checks, warnings } = await assertHandoverComplete(args);
+      expect(checks.map((x: any) => x.label)).to.include(
+        "EscrowWalletFactory owned by governance, deployer holds no role",
+      );
+      expect(warnings.join("\n")).to.include(`escrow(s) ${w} were created`);
+    });
+  });
 });

@@ -110,8 +110,8 @@ async function runHandoverSmoke(state, failures) {
   const root = ethers.toBeHex(ethers.toBigInt(ethers.randomBytes(31)), 32);
   await (await privacyManager.publishWhitelistRoot(root)).wait();
 
-  // Log scans start at the IdentityRegistry deploy (review M-3).
-  let fromBlock = state.identityRegistryDeployBlock;
+  // Log scans start at option 1's first deploy (review M-3, Task 4.13).
+  let fromBlock = state.deployStartBlock ?? state.identityRegistryDeployBlock;
   if (fromBlock === undefined) {
     fromBlock = state.complianceRulesDeployBlock;
     console.log(

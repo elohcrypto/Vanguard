@@ -33,6 +33,9 @@ const {
  * @private
  */
 async function deployOnchainIDContracts(mod) {
+  // Task 4.13: the handover's event scans start at the block before any
+  // contract of this deployment (checkFromBlock refuses a later one).
+  mod.state.deployStartBlock = (await ethers.provider.getBlockNumber()) + 1;
   // Deploy OnchainID Factory
   displayProgress("Deploying OnchainID Factory...");
   const OnchainIDFactory = await ethers.getContractFactory("OnchainIDFactory");

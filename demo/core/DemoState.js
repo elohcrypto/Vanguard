@@ -95,6 +95,9 @@ class DemoState {
     this.complianceRulesDeployBlock = undefined;
     /** Block IdentityRegistry was deployed in: the handover's fromBlock. */
     this.identityRegistryDeployBlock = undefined;
+    // Block of option 1's first deploy: the handover's event scans start
+    // here (Task 4.13; every scanned contract must have no code before).
+    this.deployStartBlock = undefined;
 
     // ========== ORACLE MANAGEMENT SYSTEM ==========
 

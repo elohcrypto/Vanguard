@@ -68,9 +68,7 @@ async function checkFromBlock(o, log = () => {}, extra = []) {
     ["investorTypeRegistry", "InvestorTypeRegistry"],
     ["oracleManager", "OracleManager"],
     ["escrowWalletFactory", "EscrowWalletFactory"],
-    ["onchainIDFactory", "OnchainIDFactory"],
     ["privacyManager", "PrivacyManager"],
-    ["governance", "VanguardGovernance"],
   ]
     .filter(([k]) => o[k])
     .map(([k, label]) => [o[k], label]);

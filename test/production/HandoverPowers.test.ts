@@ -364,23 +364,6 @@ describe("Handover power set from chain (plan 2F.5)", function () {
       );
     });
 
-    // Task 4.13: the factory a trusted escrow names is derived (M-2), as
-    // is the registrar for MultiSigEscrowWallet; a null key hides nothing.
-    it("M-2: derives the escrow factory from a trusted escrow and the registrar", async function () {
-      const w = await trustedEscrow();
-      const fAddr = await c.escrowWalletFactory.getAddress();
-      args.escrowWalletFactory = null;
-      const steps: string[] = [];
-      await ceremony((m) => steps.push(m));
-      expect(await c.escrowWalletFactory.owner()).to.equal(govAddr);
-      expect(await c.governance.boundTarget(9)).to.equal(fAddr);
-      const { checks, warnings } = await assertHandoverComplete(args);
-      expect(checks.map((x: any) => x.label)).to.include(
-        "EscrowWalletFactory owned by governance, deployer holds no role",
-      );
-      expect(warnings.join("\n")).to.include(`escrow(s) ${w} were created`);
-    });
-
     it("M-3: refuses a fromBlock after the IdentityRegistry deploy", async function () {
       args.fromBlock = await ethers.provider.getBlockNumber();
       await refused(
