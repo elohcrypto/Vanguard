@@ -272,19 +272,32 @@ export async function runHandover(
     // L-9: the same chain, and a preflight that preceded step 1 (the first
     // AgentAdded(ops) on VSC is step 1's first transaction).
     const chainId = Number((await ethers.provider.getNetwork()).chainId);
-    if (Number(snap.chainId) !== chainId) {
+    // L-13: both numbers must be integers; NaN compares as "fine".
+    if (!Number.isInteger(snap.chainId) || !Number.isInteger(snap.block)) {
+      throw new Error(
+        `${snapshotPath}: "chainId" and "block" must be integers (got ${JSON.stringify(snap.chainId)}, ${JSON.stringify(snap.block)})`,
+      );
+    }
+    if (snap.chainId !== chainId) {
       throw new Error(
         `${snapshotPath} was taken on chain ${snap.chainId}, not ${chainId}`,
       );
     }
-    const tokenAddr = await args.governance.boundTarget(3);
-    const token = await at("Token", tokenAddr);
-    const opsAddr = await args.ops.getAddress();
-    const grants = await token.queryFilter(token.filters.AgentAdded(opsAddr));
-    const step1 = grants.length ? grants[0].blockNumber : null;
-    if (step1 !== null && Number(snap.block) > step1) {
+    const token = await at("Token", await args.governance.boundTarget(3));
+    const { scanLogs } = require("../demo/utils/HandoverScans");
+    const grants = await scanLogs(
+      token,
+      token.filters.AgentAdded(await args.ops.getAddress()),
+      args,
+    );
+    if (!grants.length) {
       throw new Error(
-        `${snapshotPath} was taken at block ${snap.block}, after step 1 began at block ${step1}: it is no preflight`,
+        `${snapshotPath}: step 1's first transaction (AgentAdded(ops) on VSC) not found from block ${cfg.fromBlock ?? 0}; cannot place the preflight`,
+      );
+    }
+    if (snap.block > grants[0].blockNumber) {
+      throw new Error(
+        `${snapshotPath} was taken at block ${snap.block}, after step 1 began at block ${grants[0].blockNumber}: it is no preflight`,
       );
     }
     args.snapshot = snap.snapshot;

@@ -307,9 +307,10 @@ describe("Handover CLI (scripts/handover.ts)", function () {
 
   it("refuses the accept phase when step 1 never ran (L-A)", async function () {
     snapshotFile();
+    // L-13: with no step 1 on chain the preflight cannot be placed.
     await refusedWithNoTx(
       "accept",
-      /accept phase: governance is not nominated on Token, GovernanceToken/,
+      /step 1's first transaction \(AgentAdded\(ops\) on VSC\) not found/,
     );
   });
 
@@ -318,7 +319,7 @@ describe("Handover CLI (scripts/handover.ts)", function () {
     await f.c.token.transferOwnership(f.govAddr);
     await refusedWithNoTx(
       "accept",
-      /not nominated on GovernanceToken, IdentityRegistry, ComplianceRules, OracleManager, DynamicListManager, InvestorTypeRegistry, EscrowWalletFactory, OnchainIDFactory, PrivacyManager, ZKVerifierIntegrated, VanguardGovernance;/,
+      /step 1's first transaction \(AgentAdded\(ops\) on VSC\) not found/,
     );
   });
 
@@ -451,5 +452,12 @@ describe("Handover CLI (scripts/handover.ts)", function () {
     await expect(runHandover(cfg, "accept", cfgPath)).to.be.rejectedWith(
       /after step 1 began at block/,
     );
+    // L-13: no NaN passes; a missing step-1 event cannot place it.
+    for (const bad of [{ chainId }, { chainId, block: "abc" }, { block: 1 }]) {
+      write(bad);
+      await expect(runHandover(cfg, "accept", cfgPath)).to.be.rejectedWith(
+        /"chainId" and "block" must be integers/,
+      );
+    }
   });
 });
