@@ -75,6 +75,11 @@ contract KeyManager is KeyManagerOwnerTransfer {
 
     // Configuration
     uint256 public constant DEFAULT_TIMELOCK = 24 hours;
+    /// @dev Keys per batchAddKeys / batchRemoveKeys call (D42).
+    uint256 public constant MAX_BATCH_SIZE = 50;
+
+    /// @dev A batch longer than MAX_BATCH_SIZE.
+    error BatchTooLarge(uint256 length);
 
     mapping(address => uint256) public customTimelocks;
 
@@ -220,7 +225,9 @@ contract KeyManager is KeyManagerOwnerTransfer {
 
     // Utility functions
 
-    /// @dev Add several keys at once (no timelock).
+    /// @dev Add several keys at once (no timelock): at most MAX_BATCH_SIZE,
+    ///      each through the identity's addKey, which caps every purpose at
+    ///      its MAX_KEYS_PER_PURPOSE (D42, Task 4.14).
     function batchAddKeys(
         address _identity,
         bytes32[] calldata _keys,
@@ -231,6 +238,7 @@ contract KeyManager is KeyManagerOwnerTransfer {
             _keys.length == _purposes.length && _purposes.length == _keyTypes.length,
             "KeyManager: Array length mismatch"
         );
+        if (_keys.length > MAX_BATCH_SIZE) revert BatchTooLarge(_keys.length);
 
         for (uint256 i = 0; i < _keys.length; i++) {
             require(
@@ -247,6 +255,7 @@ contract KeyManager is KeyManagerOwnerTransfer {
         uint256[] calldata _purposes
     ) external onlyIdentityManager(_identity) {
         require(_keys.length == _purposes.length, "KeyManager: Array length mismatch");
+        if (_keys.length > MAX_BATCH_SIZE) revert BatchTooLarge(_keys.length);
 
         for (uint256 i = 0; i < _keys.length; i++) {
             require(IOnchainID(_identity).removeKey(_keys[i], _purposes[i]), "KeyManager: Failed to remove key");

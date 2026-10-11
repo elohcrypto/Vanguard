@@ -14,11 +14,11 @@ const DAY = 24 * HOUR;
 const k = (a: string) => ethers.solidityPackedKeccak256(["address"], [a]);
 const LOCKED = "OnchainID: frozen by an approved recovery";
 
-async function setup() {
+async function setup(contract = "OnchainID") {
   const [owner, A, B, C, rogue, rescued, anyone, stranger, actionHolder] =
     await ethers.getSigners();
   const id = await (
-    await ethers.getContractFactory("OnchainID")
+    await ethers.getContractFactory(contract)
   ).deploy(owner.address);
   const idA = await id.getAddress();
   const km = await (await ethers.getContractFactory("KeyManager")).deploy();
@@ -370,11 +370,14 @@ describe("KeyManager recovery evicts and moves ownership (4.11, D38 c)", functio
   });
 
   it("a bloated MANAGEMENT list is evicted in batches before the owner moves", async function () {
-    const f = await setup();
-    // The rogue key bloats the list before any approval.
+    // addKey caps MANAGEMENT at 64 (D42), so the list is grown past the cap
+    // through the test-only subclass, as a list built before the cap: the
+    // only way continueKeyEviction is still reached (R-414-3).
+    const f = await setup("BloatedOnchainID");
     const extra = 250;
-    for (let i = 0; i < extra; i++) {
-      await f.id.connect(f.rogue).addKey(ethers.id(`bloat-${i}`), MGMT, 1);
+    const bloated = await ethers.getContractAt("BloatedOnchainID", f.idA);
+    for (let done = 0; done < extra; done += 90) {
+      await bloated.bloat(MGMT, Math.min(90, extra - done), done);
     }
     const t = await approved(f);
     const key = k(f.rescued.address);

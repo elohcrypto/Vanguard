@@ -51,6 +51,17 @@ abstract contract OnchainIDKeys is IOnchainID, Ownable2Step {
     // State variables
     mapping(bytes32 => Key) internal keys;
     mapping(uint256 => bytes32[]) internal keysByPurpose;
+    /// @dev position + 1 of an active key in keysByPurpose[its purpose];
+    ///      0: not listed. Makes _removeKey O(1) (Task 4.14, H-1): a
+    ///      purpose list bloated by a rogue key cannot make recovery's
+    ///      eviction walk exceed the block limit.
+    mapping(bytes32 => uint256) private _purposeIndex;
+
+    /// @notice Active keys kept per purpose through addKey (and so through
+    ///         KeyManager.batchAddKeys and rotations), D42. Not applied in
+    ///         _addKey: recovery's eviction and acceptOwnership add the
+    ///         recovered key whatever the list holds.
+    uint256 public constant MAX_KEYS_PER_PURPOSE = 64;
 
     uint256 private executionNonce;
     uint256 internal creationTime;
@@ -94,6 +105,8 @@ abstract contract OnchainIDKeys is IOnchainID, Ownable2Step {
     error AlreadyApproved();
     /// @dev addKey(MANAGEMENT) while a recovery is approved (Task 4.11).
     error ManagementAdditionsFrozen();
+    /// @dev The purpose already holds MAX_KEYS_PER_PURPOSE active keys.
+    error TooManyKeys(uint256 purpose);
 
     /**
      * @dev Who has already approved a given request. Approvals were counted
@@ -227,6 +240,7 @@ abstract contract OnchainIDKeys is IOnchainID, Ownable2Step {
         // Task 4.11: no MANAGEMENT key joins while a recovery is approved,
         // so its eviction runs against a fixed set.
         if (_purpose == MANAGEMENT_KEY && _managementAdditionsFrozen()) revert ManagementAdditionsFrozen();
+        if (keysByPurpose[_purpose].length >= MAX_KEYS_PER_PURPOSE) revert TooManyKeys(_purpose);
         return _addKey(_key, _purpose, _keyType);
     }
 
@@ -248,18 +262,23 @@ abstract contract OnchainIDKeys is IOnchainID, Ownable2Step {
         return true;
     }
 
-    /// @dev Revoke `_key` and drop it from keysByPurpose[_purpose].
+    /// @dev Revoke `_key` and drop it from keysByPurpose[_purpose]:
+    ///      swap-and-pop at its indexed position, O(1) whatever the list.
     function _removeKey(bytes32 _key, uint256 _purpose) internal {
         keys[_key].revokedAt = block.timestamp;
         removalNonces[_key]++;
 
-        bytes32[] storage purposeKeys = keysByPurpose[_purpose];
-        for (uint256 i = 0; i < purposeKeys.length; i++) {
-            if (purposeKeys[i] == _key) {
-                purposeKeys[i] = purposeKeys[purposeKeys.length - 1];
-                purposeKeys.pop();
-                break;
+        uint256 pos = _purposeIndex[_key];
+        if (pos != 0) {
+            bytes32[] storage purposeKeys = keysByPurpose[_purpose];
+            uint256 last = purposeKeys.length;
+            if (pos != last) {
+                bytes32 moved = purposeKeys[last - 1];
+                purposeKeys[pos - 1] = moved;
+                _purposeIndex[moved] = pos;
             }
+            purposeKeys.pop();
+            delete _purposeIndex[_key];
         }
 
         emit KeyRemoved(_key, _purpose, keys[_key].keyType);
@@ -423,6 +442,7 @@ abstract contract OnchainIDKeys is IOnchainID, Ownable2Step {
         keys[_key] = Key({purpose: _purpose, keyType: _keyType, key: _key, revokedAt: 0});
 
         keysByPurpose[_purpose].push(_key);
+        _purposeIndex[_key] = keysByPurpose[_purpose].length;
 
         emit KeyAdded(_key, _purpose, _keyType);
         return true;

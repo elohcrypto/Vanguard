@@ -126,8 +126,10 @@ abstract contract KeyManagerRecovery is ReentrancyGuard {
     uint256 public constant EXECUTION_WINDOW = 7 days;
     /// @dev From the approval to the owner transfer (D38 c).
     uint256 public constant OWNER_TRANSFER_TIMELOCK = 7 days;
-    /// @dev MANAGEMENT keys evicted per call (~50k gas each): a bloated key
-    ///      list is evicted over several calls (continueKeyEviction).
+    /// @dev MANAGEMENT keys evicted per call (~50k gas each). Above the
+    ///      identity's MAX_KEYS_PER_PURPOSE (64, D42), so a capped list is
+    ///      evicted in one call; continueKeyEviction stays for a list grown
+    ///      past the cap (acceptOwnership adds without it) or before it.
     uint256 public constant MAX_EVICTIONS_PER_CALL = 100;
 
     /// @dev Sender holds a MANAGEMENT key on `_identity`, and `_identity`
