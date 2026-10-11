@@ -3,6 +3,16 @@ import { ethers } from "hardhat";
 import { ageVoters, handoverFixture } from "../helpers/governanceFixture";
 import { attest } from "../helpers/kyc";
 import { runHandover } from "../../scripts/handover";
+import * as fs from "fs";
+import * as os from "os";
+import * as path from "path";
+
+// M-1: the full phase writes `<config>.snapshot.json`; keep it in a tempdir.
+const cfgPath = path.join(
+  fs.mkdtempSync(path.join(os.tmpdir(), "hcli-")),
+  "handover.json",
+);
+const snapPath = `${cfgPath}.snapshot.json`;
 
 const {
   castAcceptanceVotes,
@@ -54,14 +64,18 @@ describe("Handover CLI (scripts/handover.ts)", function () {
   });
   afterEach(function () {
     console.log = quiet;
+    fs.rmSync(snapPath, { force: true });
   });
 
-  it("the full phase completes", async function () {
+  it("the full phase completes and writes the preflight snapshot", async function () {
     // Review M-3: the scans start at the IdentityRegistry deploy block.
     cfg.fromBlock = (
       await f.c.identityRegistry.deploymentTransaction().wait()
     ).blockNumber;
-    await runHandover(cfg);
+    await runHandover(cfg, "full", cfgPath);
+    const snap = JSON.parse(fs.readFileSync(snapPath, "utf8"));
+    expect(snap.governance).to.equal(f.govAddr);
+    expect(Object.keys(snap.snapshot.sets)).to.include("Token agents");
     expect(await f.c.token.owner()).to.equal(f.govAddr);
     // 2F.5: both factories and the issuer moved; ops never got the issuer.
     expect(await f.c.escrowWalletFactory.owner()).to.equal(f.govAddr);
@@ -77,7 +91,7 @@ describe("Handover CLI (scripts/handover.ts)", function () {
   it("closes with warnings while a deployer-trusted issuer key vouches", async function () {
     const out: string[] = [];
     console.log = (m: string) => out.push(m);
-    await runHandover(cfg);
+    await runHandover(cfg, "full", cfgPath);
     expect(out).to.include(
       "\n✅ Handover complete: the deployer holds no power.",
     );
@@ -102,7 +116,7 @@ describe("Handover CLI (scripts/handover.ts)", function () {
     cfg.issuers = [await g.args.issuers[0].getAddress()];
     cfg.attestors = [Ax.toString()]; // Task 4.13: acknowledged, so warned
     out.length = 0;
-    await runHandover(cfg);
+    await runHandover(cfg, "full", cfgPath);
     expect(out).to.include("\n⚠️  Handover complete with warnings: see above.");
     expect(out.join("\n")).to.not.include("holds no power");
     expect(out.join("\n")).to.include("was trusted by the deployer");
@@ -116,7 +130,7 @@ describe("Handover CLI (scripts/handover.ts)", function () {
     );
     delete cfg.oracles;
     delete cfg.issuers;
-    await runHandover(cfg);
+    await runHandover(cfg, "full", cfgPath);
     expect(await wl.owner()).to.equal(f.ops.address);
     expect(await f.kycIssuer.owner()).to.equal(f.issuerAdmin.address);
   });
@@ -182,7 +196,7 @@ describe("Handover CLI (scripts/handover.ts)", function () {
     );
     expect(bad).to.have.length(1);
     const nonce = await ethers.provider.getTransactionCount(f.deployer.address);
-    const err = await runHandover(cfg).catch((e: Error) => e);
+    const err = await runHandover(cfg, "full", cfgPath).catch((e: Error) => e);
     expect((err as Error).message).to.equal(
       `Handover: ${codeHashRefusal(bad[0])}`,
     );
@@ -224,9 +238,23 @@ describe("Handover CLI (scripts/handover.ts)", function () {
     }
     expect(await c.oracleManager.owner()).to.equal(f.deployer.address);
     // A full re-run is refused: governance already owns Token.
-    await expect(runHandover(cfg)).to.be.rejectedWith(/does not own Token/);
-
-    await runHandover(cfg, "accept");
+    await expect(runHandover(cfg, "full", cfgPath)).to.be.rejectedWith(
+      /does not own Token/,
+    );
+    // M-1: without the full phase's snapshot file the accept phase refuses;
+    // the operator keeps the one the full phase wrote before it stopped.
+    await expect(runHandover(cfg, "accept", cfgPath)).to.be.rejectedWith(
+      /no preflight snapshot from the full phase/,
+    );
+    fs.writeFileSync(
+      snapPath,
+      JSON.stringify({
+        governance: govAddr,
+        block: 0,
+        snapshot: report.snapshot,
+      }),
+    );
+    await runHandover(cfg, "accept", cfgPath);
     expect(await c.oracleManager.owner()).to.equal(govAddr);
     expect(await reg.isComplianceOfficer(f.ops.address)).to.equal(true);
     expect(await reg.isComplianceOfficer(f.deployer.address)).to.equal(false);
@@ -235,7 +263,7 @@ describe("Handover CLI (scripts/handover.ts)", function () {
   it("refuses an unverified voter before any transaction", async function () {
     cfg.voters = [5, 3]; // 3 is the unverified stranger
     const nonce = await ethers.provider.getTransactionCount(f.deployer.address);
-    await expect(runHandover(cfg)).to.be.rejectedWith(
+    await expect(runHandover(cfg, "full", cfgPath)).to.be.rejectedWith(
       /voter 0x[0-9a-fA-F]+ is not verified/,
     );
     expect(
@@ -249,22 +277,30 @@ describe("Handover CLI (scripts/handover.ts)", function () {
     await vgt
       .connect(bob)
       .transfer(f.proposer.address, (await vgt.balanceOf(bob.address)) - 1n);
-    await expect(runHandover(cfg)).to.be.rejectedWith(
+    await expect(runHandover(cfg, "full", cfgPath)).to.be.rejectedWith(
       // Twelve plan contracts, votingCost 10 VGT each.
       /voter .* holds 0\.0+1 free VGT; 12 proposal\(s\) need 120\.0/,
     );
   });
 
-  /** runHandover(cfg, phase) rejects with `msg`; the deployer sends nothing. */
+  /** runHandover(cfg, phase, cfgPath) rejects with `msg`; the deployer sends nothing. */
   async function refusedWithNoTx(phase: string, msg: RegExp) {
     const nonce = await ethers.provider.getTransactionCount(f.deployer.address);
-    await expect(runHandover(cfg, phase)).to.be.rejectedWith(msg);
+    await expect(runHandover(cfg, phase, cfgPath)).to.be.rejectedWith(msg);
     expect(
       await ethers.provider.getTransactionCount(f.deployer.address),
     ).to.equal(nonce);
   }
 
+  /** M-1: the accept phase needs the full phase's snapshot file first. */
+  const snapshotFile = () =>
+    fs.writeFileSync(
+      snapPath,
+      JSON.stringify({ governance: f.govAddr, block: 0, snapshot: null }),
+    );
+
   it("refuses the accept phase when step 1 never ran (L-A)", async function () {
+    snapshotFile();
     await refusedWithNoTx(
       "accept",
       /accept phase: governance is not nominated on Token, GovernanceToken/,
@@ -272,6 +308,7 @@ describe("Handover CLI (scripts/handover.ts)", function () {
   });
 
   it("refuses the accept phase naming the contracts not nominated", async function () {
+    snapshotFile();
     await f.c.token.transferOwnership(f.govAddr);
     await refusedWithNoTx(
       "accept",

@@ -39,7 +39,10 @@ describe("Handover strays: roles (Task 4.13)", function () {
     const hit = failures.find((l: string) =>
       typeof line === "string" ? l === line : line.test(l),
     );
-    expect(hit, `completion line for ${line}`).to.not.equal(undefined);
+    expect(
+      hit,
+      `completion line for ${line}; failures: ${failures.join(" | ")}`,
+    ).to.not.equal(undefined);
   }
 
   it("a stray Token agent", async function () {
@@ -218,9 +221,10 @@ describe("Handover strays: roles (Task 4.13)", function () {
         a,
         await walletCodeHash("MultiSigWallet"),
       );
+      // M-2's owner line (unreadable owner) fires before the code line.
       await both(
         new RegExp(
-          `${a} is a ComplianceRules registrar or InvestorTypeRegistry officer whose runtime code is neither the compiled InvestorRequestManager nor EscrowWalletFactory`,
+          `registrar / officer contract ${a} is owned by nobody readable|${a} is a ComplianceRules registrar or InvestorTypeRegistry officer whose runtime code is neither`,
         ),
         `registrar / officer contract ${a} code matches the compiled InvestorRequestManager or EscrowWalletFactory`,
       );
@@ -239,9 +243,10 @@ describe("Handover strays: roles (Task 4.13)", function () {
       args.governanceToken = silenced(c.governanceToken);
       await both(
         new RegExp(
-          `GovernanceToken AgentAdded event scan found none of the holders it must see \\(${f.govAddr}\\)`,
+          `GovernanceToken AgentAdded event scan found none of the holders it must see \\(${f.govAddr};`,
         ),
-        /^GovernanceToken agents are exactly /,
+        // L-7: the whole roles section is one failing line at completion.
+        /^roles: GovernanceToken AgentAdded event scan found none of the holders it must see/,
       );
     });
 
@@ -447,19 +452,19 @@ describe("Handover strays: roles (Task 4.13)", function () {
 
     // Task 4.13: the factory a trusted escrow names is derived (M-2), as
     // is the registrar for MultiSigEscrowWallet; a null key hides nothing.
-    it("M-2: derives the escrow factory from a trusted escrow and the registrar", async function () {
-      const w = await trustedEscrow();
+    // R-413-12: null asserts absence; the registrar derives one, so refused.
+    it("M-2: a null escrow factory key is refused while the registrar derives one", async function () {
+      await trustedEscrow();
       const fAddr = await c.escrowWalletFactory.getAddress();
       args.escrowWalletFactory = null;
-      const steps: string[] = [];
-      await ceremony((m) => steps.push(m));
-      expect(await c.escrowWalletFactory.owner()).to.equal(f.govAddr);
-      expect(await c.governance.boundTarget(9)).to.equal(fAddr);
-      const { checks, warnings } = await assertHandoverComplete(args);
-      expect(checks.map((x: any) => x.label)).to.include(
-        "EscrowWalletFactory owned by governance, deployer holds no role",
+      await expect(handoverDeployerPowers(args)).to.be.rejectedWith(
+        new RegExp(
+          `config "escrowWalletFactory" is null \\(asserts none\\), but the ComplianceRules registrar for MultiSigEscrowWallet on VSC is ${fAddr}`,
+        ),
       );
-      expect(warnings.join("\n")).to.include(`escrow(s) ${w} were created`);
+      delete args.escrowWalletFactory;
+      await ceremony();
+      expect(await c.escrowWalletFactory.owner()).to.equal(f.govAddr);
     });
   });
 });

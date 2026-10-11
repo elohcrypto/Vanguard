@@ -369,12 +369,17 @@ describe("Handover: KeyManager (4.2)", function () {
     console.log = (m: string) => out.push(m);
     try {
       // Task 4.13: the factory pins kmAddr, so another address is refused.
-      await expect(runHandover(cfg)).to.be.rejectedWith(
+      const tmp = require("path").join(
+        require("os").tmpdir(),
+        `hkm-${Date.now()}.json`,
+      );
+      await expect(runHandover(cfg, "full", tmp)).to.be.rejectedWith(
         `config "keyManager" names ${f.stranger.address}, but OnchainIDFactory`,
       );
       cfg.keyManager = kmAddr;
       cfg.keyManagerIdentity = await identity.getAddress();
-      await runHandover(cfg);
+      await runHandover(cfg, "full", tmp);
+      require("fs").rmSync(`${tmp}.snapshot.json`, { force: true });
     } finally {
       console.log = quiet;
     }

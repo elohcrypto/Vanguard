@@ -327,7 +327,7 @@ describe("Handover completion check (table)", function () {
     await pm.connect(deployer).publishWhitelistRoot(ethers.toBeHex(7n, 32));
     await pm.connect(gov).setListOperator(ops.address);
     const before = await assertHandoverComplete(args);
-    expect(before.ok).to.equal(true);
+    expect(before.ok, before.failures.join(" | ")).to.equal(true);
     expect(before.warnings).to.include(
       `PrivacyManager whitelist root ${ethers.toBeHex(7n, 32)} (version 1) ${line}`,
     );
@@ -375,7 +375,7 @@ describe("Handover completion check (table)", function () {
     await reg.connect(gov).authorizeToken(await c.token.getAddress(), true);
     const line = `escrow fee wallet ${feeWallet.address} (factory ownerWallet) is not investorLimitExempt`;
     const before = await assertHandoverComplete(args);
-    expect(before.ok).to.equal(true);
+    expect(before.ok, before.failures.join(" | ")).to.equal(true);
     expect(before.warnings.join("\n")).to.include(line);
     await reg.connect(gov).setInvestorLimitExempt(feeWallet.address, true);
     const after = await assertHandoverComplete(args);

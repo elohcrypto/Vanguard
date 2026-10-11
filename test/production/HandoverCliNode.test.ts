@@ -28,9 +28,13 @@ describe("Handover CLI on a fresh node (Task 4.13)", function () {
     });
 
   before(async function () {
-    node = spawn("npx", ["hardhat", "node", "--port", String(port)], {
-      stdio: ["ignore", "pipe", "pipe"],
-    });
+    // M-5: the binary itself, in its own process group, so after() kills
+    // the node and not just an npx wrapper.
+    node = spawn(
+      path.join("node_modules", ".bin", "hardhat"),
+      ["node", "--port", String(port)],
+      { stdio: ["ignore", "pipe", "pipe"], detached: true },
+    );
     const up = async () => {
       const r = await fetch(rpc, {
         method: "POST",
@@ -54,8 +58,22 @@ describe("Handover CLI on a fresh node (Task 4.13)", function () {
     expect(d.status, `${d.stdout}\n${d.stderr}`).to.equal(0);
   });
 
-  after(function () {
-    if (node) node.kill("SIGTERM");
+  after(async function () {
+    if (node && node.pid) {
+      try {
+        process.kill(-node.pid, "SIGTERM");
+      } catch {
+        node.kill("SIGTERM");
+      }
+    }
+    // The port must be closed before the test ends (no orphan).
+    const closed = async () =>
+      (await fetch(rpc, { method: "POST", body: "{}" }).catch(() => null)) ===
+      null;
+    for (let i = 0; i < 30 && !(await closed()); i++) {
+      await new Promise((r) => setTimeout(r, 500));
+    }
+    expect(await closed(), `node still listening on ${rpc}`).to.equal(true);
     fs.rmSync(dir, { recursive: true, force: true });
   });
 

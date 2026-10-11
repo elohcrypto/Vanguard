@@ -97,8 +97,9 @@ describe("Handover: trusted-contract registrars (Task 4.3)", function () {
     });
   }
 
-  // Review L1: a deployer-owned contract with trust or type power.
-  it("fails completion on a deployer-owned compliance-officer contract", async function () {
+  // Review L1: a deployer-owned contract with trust or type power. Task
+  // 4.13 M-2 refuses it before step 1; here ops hands it away afterwards.
+  it("fails completion on a compliance-officer contract handed away by ops", async function () {
     const m = await (
       await ethers.getContractFactory("InvestorRequestManager")
     ).deploy(
@@ -109,10 +110,18 @@ describe("Handover: trusted-contract registrars (Task 4.3)", function () {
     );
     const mAddr = await m.getAddress();
     await f.c.investorTypeRegistry.setComplianceOfficer(mAddr, true);
+    await refused(
+      new RegExp(
+        `registrar / officer contract ${mAddr} is owned by ${f.deployer.address}, neither ops nor governance`,
+      ),
+    );
+    await m.transferOwnership(f.ops.address);
     await ceremony();
+    await m.connect(f.ops).transferOwnership(f.stranger.address);
     const { failures } = await assertHandoverComplete(f.args);
-    expect(failures).to.deep.equal([
-      `registrar / compliance-officer contracts not owned by ops or governance: ${mAddr} (owner ${f.deployer.address})`,
+    expect(failures).to.include.members([
+      `registrar / compliance-officer contracts not owned by ops or governance: ${mAddr} (owner ${f.stranger.address})`,
+      `registrar / officer contract ${mAddr} is owned by ops or governance`,
     ]);
   });
 
