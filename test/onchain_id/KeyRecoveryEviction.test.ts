@@ -17,9 +17,17 @@ const LOCKED = "OnchainID: frozen by an approved recovery";
 async function setup(contract = "OnchainID") {
   const [owner, A, B, C, rogue, rescued, anyone, stranger, actionHolder] =
     await ethers.getSigners();
-  const id = await (
-    await ethers.getContractFactory(contract)
-  ).deploy(owner.address);
+  // The test-only BloatedOnchainID deploys without an owner (initialize).
+  const F = await ethers.getContractFactory("OnchainID");
+  const id = F.attach(
+    await (
+      contract === "OnchainID"
+        ? await F.deploy(owner.address)
+        : await (await ethers.getContractFactory(contract)).deploy()
+    ).getAddress(),
+  ) as Awaited<ReturnType<typeof F.deploy>>;
+  if (contract !== "OnchainID")
+    await id.initialize(owner.address, k(owner.address));
   const idA = await id.getAddress();
   const km = await (await ethers.getContractFactory("KeyManager")).deploy();
   const kmA = await km.getAddress();

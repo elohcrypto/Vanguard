@@ -25,7 +25,21 @@ async function setup(threshold = 2) {
   await id.pinRecoveryManager(kmA);
   await id.addKey(k(rogue.address), MGMT, 1);
   await km.setupKeyRecovery(idA, [A.address, B.address, C.address], threshold);
-  return { owner, A, B, C, rogue, rescued, anyone, thief2, user, id, idA, km, kmA };
+  return {
+    owner,
+    A,
+    B,
+    C,
+    rogue,
+    rescued,
+    anyone,
+    thief2,
+    user,
+    id,
+    idA,
+    km,
+    kmA,
+  };
 }
 type F = Awaited<ReturnType<typeof setup>>;
 
@@ -46,9 +60,15 @@ describe("Recovery robustness (4.14): A2 probes and killed mutants", function ()
     await expect(f.km.connect(f.A).initiateKeyRecovery(f.idA, key))
       .to.emit(f.km, "KeyRecoveryInitiated")
       .withArgs(f.idA, key, f.A.address);
-    expect((await f.km.getRecoveryCandidate(f.idA, key)).approvalCount).to.equal(1);
-    expect(await f.km.hasApprovedRecovery(f.idA, key, f.A.address)).to.equal(true);
-    expect(await f.km.hasApprovedRecovery(f.idA, key, f.B.address)).to.equal(false);
+    expect(
+      (await f.km.getRecoveryCandidate(f.idA, key)).approvalCount,
+    ).to.equal(1);
+    expect(await f.km.hasApprovedRecovery(f.idA, key, f.A.address)).to.equal(
+      true,
+    );
+    expect(await f.km.hasApprovedRecovery(f.idA, key, f.B.address)).to.equal(
+      false,
+    );
     await expect(
       f.km.connect(f.A).approveKeyRecovery(f.idA, key),
     ).to.be.revertedWith("KeyManager: Already approved");
@@ -96,13 +116,17 @@ describe("Recovery robustness (4.14): A2 probes and killed mutants", function ()
     expect(await f.km.recoveryLocked(f.idA)).to.equal(false);
     // The agents re-open: new epoch, their candidate opened in it.
     const tx = f.km.connect(f.A).initiateKeyRecovery(f.idA, key);
-    await expect(tx).to.emit(f.km, "KeyRecoveryReopened").withArgs(f.idA, epoch + 1n);
+    await expect(tx)
+      .to.emit(f.km, "KeyRecoveryReopened")
+      .withArgs(f.idA, epoch + 1n);
     await expect(tx).to.emit(f.km, "KeyRecoveryInitiated");
     const r = await f.km.getKeyRecovery(f.idA);
     expect(r.completed).to.equal(false);
     expect(r.epoch).to.equal(epoch + 1n);
     expect(r.approvalCount).to.equal(1);
-    expect((await f.km.getRecoveryApproval(f.idA)).key).to.equal(ethers.ZeroHash);
+    expect((await f.km.getRecoveryApproval(f.idA)).key).to.equal(
+      ethers.ZeroHash,
+    );
     // The second recovery runs to the end.
     await f.km.connect(f.B).approveKeyRecovery(f.idA, key);
     const t2 = BigInt(await time.latest());
@@ -147,7 +171,9 @@ describe("Recovery robustness (4.14): A2 probes and killed mutants", function ()
     const f = await setup();
     // A second seating is pending 48h (R-411-16).
     await f.km.setupKeyRecovery(f.idA, [f.thief2.address], 1);
-    expect((await f.km.getPendingRecoverySetup(f.idA)).effectiveAt).to.not.equal(0);
+    expect(
+      (await f.km.getPendingRecoverySetup(f.idA)).effectiveAt,
+    ).to.not.equal(0);
     await expect(
       f.km.connect(f.anyone).dropStaleRecoverySetup(f.idA),
     ).to.be.revertedWithCustomError(f.km, "ReseatNotStale");
@@ -204,9 +230,14 @@ describe("Recovery robustness (4.14): A2 probes and killed mutants", function ()
 
   it("P10/L-A: a manager answering the word 2 is read as no, without reverting; 1 is yes (M16 killed)", async function () {
     const [owner, x] = await ethers.getSigners();
-    const id = await (await ethers.getContractFactory("OnchainID")).deploy(owner.address);
+    const id = await (
+      await ethers.getContractFactory("OnchainID")
+    ).deploy(owner.address);
     const idA = await id.getAddress();
-    const odd = await (await ethers.getContractFactory("OddRecoveryManager")).deploy(2);
+    const odd = await (
+      await ethers.getContractFactory("OddRecoveryManager")
+    ).deploy();
+    await odd.setWord(2);
     await id.pinRecoveryManager(await odd.getAddress());
     expect(await id.ownershipFrozen()).to.equal(false);
     await id.transferOwnership(x.address); // not frozen: no revert
@@ -231,11 +262,16 @@ describe("Recovery robustness (4.14): A2 probes and killed mutants", function ()
     const factory = await (
       await ethers.getContractFactory("OnchainIDFactory")
     ).deploy(owner.address, ethers.ZeroHash);
-    const registry = await (await ethers.getContractFactory("IdentityRegistry")).deploy();
+    const registry = await (
+      await ethers.getContractFactory("IdentityRegistry")
+    ).deploy();
     await factory.deployOnchainID(investor.address, ethers.randomBytes(32));
     const identityAddr = await factory.getIdentityByOwner(investor.address);
     await registry.registerIdentity(investor.address, identityAddr, 344);
-    const odd = await (await ethers.getContractFactory("OddRecoveryManager")).deploy(2);
+    const odd = await (
+      await ethers.getContractFactory("OddRecoveryManager")
+    ).deploy();
+    await odd.setWord(2);
     await registry.addTrustedIssuer(await odd.getAddress(), [1]);
     await registry.addClaimTopic(1);
     expect(await registry.isVerified(investor.address)).to.equal(false);
@@ -275,9 +311,7 @@ describe("Recovery robustness (4.14): A2 probes and killed mutants", function ()
     const [, , , , , , , , , actionHolder] = await ethers.getSigners();
     await f.id.addKey(k(actionHolder.address), ACTION, 1);
     for (const bad of [f.owner, f.rogue]) {
-      await expect(
-        f.km.setupKeyRecovery(f.idA, [f.A.address, bad.address], 1),
-      )
+      await expect(f.km.setupKeyRecovery(f.idA, [f.A.address, bad.address], 1))
         .to.be.revertedWithCustomError(f.km, "AgentControlsIdentity")
         .withArgs(bad.address);
     }

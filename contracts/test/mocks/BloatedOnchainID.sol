@@ -9,9 +9,9 @@ import {OnchainID} from "../../onchain_id/OnchainID.sol";
  *      grown past MAX_KEYS_PER_PURPOSE through the internal _addKey, as a
  *      list grown before the cap would be: tests prove recovery's eviction
  *      stays O(1) against it and that addKey refuses the 65th key.
+ *      Deployed without an owner: the test calls initialize().
  */
-contract BloatedOnchainID is OnchainID {
-    constructor(address _owner) OnchainID(_owner) {}
+contract BloatedOnchainID is OnchainID(address(0)) {
 
     /// @dev Adds `n` fresh keys of `purpose`, uncapped.
     function bloat(uint256 purpose, uint256 n, uint256 salt) external {

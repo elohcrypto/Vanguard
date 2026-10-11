@@ -18,10 +18,6 @@ interface IHookedIdentity {
 contract OddRecoveryManager {
     uint256 public word;
 
-    constructor(uint256 _word) {
-        word = _word;
-    }
-
     function setWord(uint256 _word) external {
         word = _word;
     }

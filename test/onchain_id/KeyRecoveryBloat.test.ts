@@ -19,9 +19,12 @@ const CHUNK = 90;
 
 async function setup(bloated: boolean) {
   const [owner, A, B, C, rogue, rescued, anyone] = await ethers.getSigners();
-  const id = await (
-    await ethers.getContractFactory(bloated ? "BloatedOnchainID" : "OnchainID")
-  ).deploy(owner.address);
+  const id = bloated
+    ? await (await ethers.getContractFactory("BloatedOnchainID")).deploy()
+    : await (
+        await ethers.getContractFactory("OnchainID")
+      ).deploy(owner.address);
+  if (bloated) await id.initialize(owner.address, k(owner.address));
   const idA = await id.getAddress();
   const km = await (await ethers.getContractFactory("KeyManager")).deploy();
   const kmA = await km.getAddress();
@@ -67,7 +70,9 @@ describe("Recovery against a bloated key list (4.14, H-1)", function () {
     // The owner transfer walks the same list and stays bounded too.
     await time.increase(5 * DAY);
     const t = await (
-      await f.km.connect(f.anyone).executeOwnerTransfer(f.idA, f.rescued.address)
+      await f.km
+        .connect(f.anyone)
+        .executeOwnerTransfer(f.idA, f.rescued.address)
     ).wait();
     expect(t!.gasUsed).to.be.lt(400_000n);
     await f.id.connect(f.rescued).acceptOwnership();
@@ -95,7 +100,8 @@ describe("Recovery against a bloated key list (4.14, H-1)", function () {
   it("addKey refuses the 65th key of a purpose; a removal frees a slot", async function () {
     const f = await setup(false);
     expect(await f.id.MAX_KEYS_PER_PURPOSE()).to.equal(64n);
-    for (let i = 0; i < 64; i++) await f.id.addKey(ethers.id(`a${i}`), ACTION, 1);
+    for (let i = 0; i < 64; i++)
+      await f.id.addKey(ethers.id(`a${i}`), ACTION, 1);
     await expect(f.id.addKey(ethers.id("a64"), ACTION, 1))
       .to.be.revertedWithCustomError(f.id, "TooManyKeys")
       .withArgs(ACTION);
@@ -118,14 +124,29 @@ describe("Recovery against a bloated key list (4.14, H-1)", function () {
     await expect(f.km.batchRemoveKeys(f.idA, keys, purposes))
       .to.be.revertedWithCustomError(f.km, "BatchTooLarge")
       .withArgs(51);
-    await f.km.batchAddKeys(f.idA, keys.slice(0, 50), purposes.slice(0, 50), types.slice(0, 50));
+    await f.km.batchAddKeys(
+      f.idA,
+      keys.slice(0, 50),
+      purposes.slice(0, 50),
+      types.slice(0, 50),
+    );
     const more = Array.from({ length: 15 }, (_, i) => ethers.id(`c${i}`));
     await expect(
-      f.km.batchAddKeys(f.idA, more, more.map(() => ACTION), more.map(() => 1)),
+      f.km.batchAddKeys(
+        f.idA,
+        more,
+        more.map(() => ACTION),
+        more.map(() => 1),
+      ),
     )
       .to.be.revertedWithCustomError(f.id, "TooManyKeys")
       .withArgs(ACTION);
-    await f.km.batchAddKeys(f.idA, more.slice(0, 14), more.slice(0, 14).map(() => ACTION), more.slice(0, 14).map(() => 1));
+    await f.km.batchAddKeys(
+      f.idA,
+      more.slice(0, 14),
+      more.slice(0, 14).map(() => ACTION),
+      more.slice(0, 14).map(() => 1),
+    );
     expect((await f.id.getKeysByPurpose(ACTION)).length).to.equal(64);
   });
 });
