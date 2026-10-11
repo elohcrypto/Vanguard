@@ -178,17 +178,22 @@ async function agentRoleOn(issuer, agents) {
  * refuses rather than reading an empty scan as "no governor".
  */
 async function registryGovernors(o, reg) {
-  const seen = uniq(
-    (await scanLogs(reg, reg.filters.GovernorUpdated(), o)).map(
-      (ev) => ev.args[0],
-    ),
-  );
+  const events = await scanLogs(reg, reg.filters.GovernorUpdated(), o);
+  const seen = uniq(events.map((ev) => ev.args[0]));
   const live = [];
   let weight = 0n;
   for (const g of seen) {
     if (!(await reg.isGovernor(g))) continue;
     live.push(g);
     weight += await reg.getGovernorWeight(g);
+  }
+  // N-2: every setGovernor bumps governorEpoch and emits one event, so a
+  // weight-0 stray (governors approve by head count) is caught by count.
+  const epoch = await reg.governorEpoch();
+  if (BigInt(events.length) !== epoch) {
+    fail(
+      `InvestorTypeRegistry GovernorUpdated event scan found ${events.length} event(s) while governorEpoch is ${epoch}: fromBlock, logChunk or the RPC is wrong; nothing can be concluded from it`,
+    );
   }
   const total = await reg.totalGovernorWeight();
   if (weight !== total) {

@@ -394,8 +394,11 @@ identity; and a code hash off the compiled artifact for every plan
 contract, list oracle, registrar and issuer (immutables masked). A scan
 that cannot find a holder known to be granted by event fails rather than
 passing as clean (R-413-6). Completion re-derives everything and compares
-it with the preflight snapshot: nothing may appear the ceremony did not
-grant. Demo option 83c acknowledges what the demo itself registered and
+it with the preflight snapshot (the CLI writes it next to the config with
+the chain id and the preflight block; the demo keeps it in state): nothing
+may appear the ceremony did not grant. Re-running the full phase refreshes
+the preflight, so a chain prepared between an aborted preflight and the
+re-run is judged by the re-run. Demo option 83c acknowledges what the demo itself registered and
 trusted, lists every stray the preflight refuses and offers to remove them
 as the deployer (answer `y`; the drive argument is `83c:y`).
 

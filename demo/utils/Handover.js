@@ -115,6 +115,7 @@ async function handoverDeployerPowers(o) {
   await preflightParams(o); // Task 4.13: floors, proposals, fee sink, pins
   // Task 4.13: what the preflight found; completion compares with it.
   report.snapshot = await snapshotFacts(o);
+  report.preflightBlock = await ethers.provider.getBlockNumber();
   given.snapshot = report.snapshot;
   preflightSnapshots.set(govAddr.toLowerCase(), report.snapshot);
   const ctx = { o, d, dAddr, govAddr, report, ok, log };

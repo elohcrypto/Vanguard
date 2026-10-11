@@ -322,14 +322,14 @@ describe("Handover strays: links and parameters (Task 4.13)", function () {
       expect(failures.join("\n")).to.match(re);
     });
 
-    it("an empty GovernorUpdated scan with a live governor is refused (M-3)", async function () {
-      await c.investorTypeRegistry.setGovernor(f.stranger.address, true, 1);
+    it("an empty GovernorUpdated scan with a weight-0 governor is refused (N-2)", async function () {
+      await c.investorTypeRegistry.setGovernor(f.stranger.address, true, 0);
       args.investorTypeRegistry = silenced(
         c.investorTypeRegistry,
         "GovernorUpdated",
       );
       const re =
-        /GovernorUpdated event scan found governors weighing 0 while totalGovernorWeight is 1/;
+        /GovernorUpdated event scan found 0 event\(s\) while governorEpoch is 1/;
       await expect(handoverDeployerPowers(args)).to.be.rejectedWith(re);
       const { failures } = await assertHandoverComplete(args);
       expect(failures.join("\n")).to.match(re);
@@ -404,5 +404,19 @@ describe("Handover strays: links and parameters (Task 4.13)", function () {
         'config "privacyManager" is null and governance derives none: the deployer keeps it if it exists; name it, or state in the runbook why it does not exist',
       );
     });
+  });
+
+  // L-12: with the in-process memory bypassed, no snapshot is a failing line.
+  it("completion fails without any preflight snapshot", async function () {
+    const { preflightSnapshots } = require("../../demo/utils/HandoverSnapshot");
+    await handoverDeployerPowers(args);
+    preflightSnapshots.delete(f.govAddr.toLowerCase());
+    const { failures } = await assertHandoverComplete({
+      ...args,
+      snapshot: undefined,
+    });
+    expect(failures).to.include(
+      "no preflight snapshot: nothing proves the chain did not change since step 1 (run the full phase, or pass the snapshot the full phase wrote)",
+    );
   });
 });

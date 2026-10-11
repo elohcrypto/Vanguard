@@ -250,7 +250,8 @@ describe("Handover CLI (scripts/handover.ts)", function () {
       snapPath,
       JSON.stringify({
         governance: govAddr,
-        block: 0,
+        chainId: 31337,
+        block: report.preflightBlock,
         snapshot: report.snapshot,
       }),
     );
@@ -296,7 +297,12 @@ describe("Handover CLI (scripts/handover.ts)", function () {
   const snapshotFile = () =>
     fs.writeFileSync(
       snapPath,
-      JSON.stringify({ governance: f.govAddr, block: 0, snapshot: null }),
+      JSON.stringify({
+        governance: f.govAddr,
+        chainId: 31337,
+        block: 0,
+        snapshot: null,
+      }),
     );
 
   it("refuses the accept phase when step 1 never ran (L-A)", async function () {
@@ -383,6 +389,67 @@ describe("Handover CLI (scripts/handover.ts)", function () {
     await refusedWithNoTx(
       "full",
       /voter 0x[0-9a-fA-F]+ does not control its identity .*"Wallet does not control its identity"\): the identity's owner must addKey/,
+    );
+  });
+
+  // R-413-12 through the JSON config (N-1): null must reach the ceremony.
+  it("refuses a null key the chain derives; an underivable null is never green", async function () {
+    await f.c.complianceRules.setPrivacyManager(
+      await f.c.token.getAddress(),
+      await f.c.privacyManager.getAddress(),
+    );
+    await f.c.complianceRules.setWhitelistMode(await f.c.token.getAddress(), 2);
+    cfg.zkVerifier = null;
+    await refusedWithNoTx(
+      "full",
+      /config "zkVerifier" is null \(asserts none\), but PrivacyManager .* zkVerifier\(\) is/,
+    );
+    cfg.zkVerifier = await f.c.zkVerifier.getAddress();
+    cfg.privacyManager = null;
+    await refusedWithNoTx(
+      "full",
+      /config "privacyManager" is null \(asserts none\), but ComplianceRules.privacyManager\(VSC\) is/,
+    );
+    // Unwired on a fresh fixture: both null complete, with the warning.
+    const g = await handoverFixture();
+    const b = async (k: string) => g.c[k].getAddress();
+    for (const k of Object.keys(g.c))
+      if (k in cfg && k !== "governance") cfg[k] = await b(k);
+    cfg.governance = g.govAddr;
+    cfg.oracles = [await g.args.oracles[0].getAddress()];
+    cfg.issuers = [await g.args.issuers[0].getAddress()];
+    cfg.privacyManager = null;
+    cfg.zkVerifier = null;
+    const out: string[] = [];
+    console.log = (m: string) => out.push(m);
+    await runHandover(cfg, "full", cfgPath);
+    expect(out).to.include("\n⚠️  Handover complete with warnings: see above.");
+    expect(out.join("\n")).to.not.include("holds no power");
+    expect(out.join("\n")).to.include(
+      'config "privacyManager" is null and governance derives none',
+    );
+  });
+
+  // L-9: the snapshot file names the chain and the preflight block.
+  it("the accept phase refuses a snapshot from another chain or after step 1", async function () {
+    const report = await handoverDeployerPowers(f.args);
+    const write = (o: object) =>
+      fs.writeFileSync(
+        snapPath,
+        JSON.stringify({
+          governance: f.govAddr,
+          snapshot: report.snapshot,
+          ...o,
+        }),
+      );
+    const chainId = Number((await ethers.provider.getNetwork()).chainId);
+    write({ chainId: chainId + 1, block: report.preflightBlock });
+    await expect(runHandover(cfg, "accept", cfgPath)).to.be.rejectedWith(
+      /was taken on chain/,
+    );
+    write({ chainId, block: await ethers.provider.getBlockNumber() });
+    await expect(runHandover(cfg, "accept", cfgPath)).to.be.rejectedWith(
+      /after step 1 began at block/,
     );
   });
 });

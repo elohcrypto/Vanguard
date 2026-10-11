@@ -28,6 +28,13 @@ describe("Handover CLI on a fresh node (Task 4.13)", function () {
     });
 
   before(async function () {
+    // Fail fast on a foreign node rather than deploying the fixture on it.
+    const busy = await fetch(rpc, { method: "POST", body: "{}" }).catch(
+      () => null,
+    );
+    if (busy) {
+      throw new Error(`port ${port} in use; set HANDOVER_TEST_PORT`);
+    }
     // M-5: the binary itself, in its own process group, so after() kills
     // the node and not just an npx wrapper.
     node = spawn(

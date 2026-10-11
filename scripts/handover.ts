@@ -21,9 +21,12 @@
  *   }
  *
  * The full phase writes `<config>.snapshot.json` (what the preflight
- * found, keyed by the governance address and the block of the preflight);
- * `HANDOVER_PHASE=accept` requires it, so the completion check can prove
- * nothing appeared since step 1 (M-1). A key set to `null` asserts the
+ * found, with the governance address, the chain id and the block the
+ * preflight read); `HANDOVER_PHASE=accept` requires it, refuses another
+ * chain or a block after step 1's first transaction, and the completion
+ * check then proves nothing appeared since step 1 (M-1, L-9). Re-running
+ * the full phase refreshes the preflight: a chain prepared between an
+ * aborted preflight and the re-run is judged by the re-run. A key set to `null` asserts the
  * contract does not exist: refused when governance derives one, a
  * residual warning when it cannot (R-413-12).
  *
@@ -219,7 +222,8 @@ export async function runHandover(
       : undefined,
   };
   for (const [k, name] of Object.entries(ARTIFACT)) {
-    if (cfg[k]) args[k] = await at(name, cfg[k]);
+    // R-413-12: null is an assertion of absence and must reach the ceremony.
+    if (k in cfg) args[k] = cfg[k] === null ? null : await at(name, cfg[k]);
   }
   // R-413-2: a contract unreachable from governance before step 3 binds it
   // must be stated (an address, or null for "not deployed") unless derived.
@@ -265,6 +269,24 @@ export async function runHandover(
         `${snapshotPath} was taken for governance ${snap.governance}, not ${cfg.governance}`,
       );
     }
+    // L-9: the same chain, and a preflight that preceded step 1 (the first
+    // AgentAdded(ops) on VSC is step 1's first transaction).
+    const chainId = Number((await ethers.provider.getNetwork()).chainId);
+    if (Number(snap.chainId) !== chainId) {
+      throw new Error(
+        `${snapshotPath} was taken on chain ${snap.chainId}, not ${chainId}`,
+      );
+    }
+    const tokenAddr = await args.governance.boundTarget(3);
+    const token = await at("Token", tokenAddr);
+    const opsAddr = await args.ops.getAddress();
+    const grants = await token.queryFilter(token.filters.AgentAdded(opsAddr));
+    const step1 = grants.length ? grants[0].blockNumber : null;
+    if (step1 !== null && Number(snap.block) > step1) {
+      throw new Error(
+        `${snapshotPath} was taken at block ${snap.block}, after step 1 began at block ${step1}: it is no preflight`,
+      );
+    }
     args.snapshot = snap.snapshot;
     console.log(`   snapshot: ${snapshotPath} (block ${snap.block})`);
     const o = await withBoundRegistry(
@@ -297,7 +319,8 @@ export async function runHandover(
       JSON.stringify(
         {
           governance: cfg.governance,
-          block: await ethers.provider.getBlockNumber(),
+          chainId: Number((await ethers.provider.getNetwork()).chainId),
+          block: report.preflightBlock, // L-9: the block the preflight read
           snapshot: report.snapshot,
         },
         null,
