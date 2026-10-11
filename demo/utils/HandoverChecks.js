@@ -7,11 +7,6 @@
  */
 
 const { ethers } = require("hardhat");
-const {
-  eligibleVotersNow,
-  voterAgeRefusal,
-  walletControlRefusal,
-} = require("./ChainTime");
 
 const plan = (key, proposalType, label, typeName, opts = {}) => ({
   key,
@@ -382,76 +377,6 @@ async function preflight(o, { acceptOnly = false } = {}) {
   return { governanceOwned };
 }
 
-/**
- * The proposer and every voter must be able to pay for `count` proposals
- * before step 1 sends anything: verified, not frozen, and enough free VGT
- * (proposalCreationCost each for the proposer, votingCost each per voter).
- */
-async function checkVoters(o, proposer, voters, count) {
-  if (count === 0) return;
-  const n = BigInt(count);
-  const pAddr = await addrOf(proposer);
-  const vAddrs = await Promise.all(voters.map(addrOf));
-  const dup = vAddrs.find((a, i) => vAddrs.findIndex((b) => same(a, b)) !== i);
-  if (dup) fail(`voter ${dup} is listed twice; each wallet votes once`);
-  // Quorum as on chain: votes * 10000 >= eligible (aged identities, D25) * quorum.
-  const eligible = await eligibleVotersNow(o.governance, o.identityRegistry);
-  for (const e of planFor(o)) {
-    const q = (await o.governance.proposalThresholds(e.proposalType))
-      .quorumPercentage;
-    if (BigInt(vAddrs.length) * 10000n < eligible * q) {
-      fail(
-        `${vAddrs.length} voter(s) cannot reach the ${e.typeName} quorum (${Number(q) / 100}% of ${eligible} registered identities old enough to vote); add voters`,
-      );
-    }
-  }
-  // A whitelist oracle on VGT gates the fee transfers of every party.
-  const wl = await o.complianceRules.whitelistOracle(
-    await addrOf(o.governanceToken),
-  );
-  const wlOracle = same(wl, ethers.ZeroAddress)
-    ? null
-    : await ethers.getContractAt(
-        ["function isWhitelisted(address) view returns (bool)"],
-        wl,
-      );
-  const need = [
-    [pAddr, "proposer", (await o.governance.proposalCreationCost()) * n],
-  ];
-  const vote = (await o.governance.votingCost()) * n;
-  for (const a of vAddrs) {
-    if (same(a, pAddr))
-      fail(
-        `voter ${a} is the proposer; a proposer cannot vote on its own proposal`,
-      );
-    need.push([a, "voter", vote]);
-  }
-  const vgt = o.governanceToken;
-  for (const [a, role, amount] of need) {
-    if (wlOracle && !(await wlOracle.isWhitelisted(a))) {
-      fail(
-        `${role} ${a} is not on the whitelist oracle bound to VGT (${wl}); its fee transfer would fail`,
-      );
-    }
-    if (!(await o.identityRegistry.isVerified(a))) {
-      fail(
-        `${role} ${a} is not verified in the IdentityRegistry; governance refuses its ${role === "voter" ? "vote" : "proposal"}`,
-      );
-    }
-    const why =
-      (await voterAgeRefusal(o.governance, o.identityRegistry, a)) ||
-      (await walletControlRefusal(o.identityRegistry, a));
-    if (why) fail(`${role} ${a} ${why}`);
-    if (await vgt.isFrozen(a)) fail(`${role} ${a} is frozen on VGT`);
-    const free = await vgt.getFreeBalance(a);
-    if (free < amount) {
-      fail(
-        `${role} ${a} holds ${ethers.formatEther(free)} free VGT; ${count} proposal(s) need ${ethers.formatEther(amount)}`,
-      );
-    }
-  }
-}
-
 module.exports = {
   ACCEPTANCE_PLAN,
   planFor,
@@ -464,7 +389,6 @@ module.exports = {
   listManagerOf,
   withBoundRegistry,
   preflight,
-  checkVoters,
   liveOnToken,
   MODE,
   vgtWhitelistMode,

@@ -22,7 +22,6 @@
  */
 
 const { ethers } = require("hardhat");
-const { advancePast } = require("./ChainTime");
 const {
   ACCEPTANCE_PLAN,
   planFor,
@@ -31,7 +30,6 @@ const {
   listManagerOf,
   withBoundRegistry,
   preflight,
-  checkVoters,
 } = require("./HandoverChecks");
 const {
   withDerivedPowers,
@@ -46,19 +44,16 @@ const { preflightPrivacy, privacySteps } = require("./HandoverPrivacy");
 const { preflightKeyManager } = require("./HandoverKeys");
 const { preflightRegistrars } = require("./HandoverRegistrars");
 const { preflightOracles, oracleSteps } = require("./HandoverOracles");
-
-const STATUS = [
-  "Pending",
-  "Active",
-  "Approved",
-  "Rejected",
-  "Executed",
-  "Cancelled",
-];
-const EXECUTED = 4;
+const {
+  proposeCall,
+  proposeAcceptOwnership,
+  castAcceptanceVotes,
+  settleProposal,
+  acceptAllByVote,
+  checkVoters,
+} = require("./HandoverVotes");
 
 const OWNABLE = new ethers.Interface([
-  "function acceptOwnership()",
   "function setComplianceOfficer(address,bool)",
   "function setGovernor(address,bool,uint256)",
 ]);
@@ -303,164 +298,6 @@ async function registryCall(ctx, step) {
   log(
     `   ⚠️  ${what}: governance owns the registry, queued as an InvestorTypeConfig proposal`,
   );
-}
-
-const vgtOf = async (g) =>
-  ethers.getContractAt("GovernanceToken", await g.governanceToken());
-
-/**
- * Create a proposal; returns its id. Approves the creation fee first. The
- * description is `${title} (${source})`: callers outside the ceremony name
- * themselves in `source`.
- */
-async function proposeCall(
-  governance,
-  proposer,
-  proposalType,
-  target,
-  callData,
-  title,
-  source = "handover ceremony",
-) {
-  const vgt = await vgtOf(governance);
-  const govAddr = await governance.getAddress();
-  await send(
-    vgt
-      .connect(proposer)
-      .approve(govAddr, await governance.proposalCreationCost()),
-  );
-  const before = await governance.proposalCount();
-  await send(
-    governance
-      .connect(proposer)
-      .createProposal(
-        proposalType,
-        title,
-        `${title} (${source})`,
-        await addrOf(target),
-        callData,
-      ),
-  );
-  const id = await governance.proposalCount();
-  check(id === before + 1n, `proposal for "${title}" was not created`);
-  return Number(id);
-}
-
-async function proposeAcceptOwnership(
-  governance,
-  proposer,
-  target,
-  proposalType,
-  label,
-) {
-  return proposeCall(
-    governance,
-    proposer,
-    proposalType,
-    target,
-    OWNABLE.encodeFunctionData("acceptOwnership"),
-    `Accept ownership of ${label}`,
-  );
-}
-
-async function castAcceptanceVotes(governance, proposalId, voters) {
-  const vgt = await vgtOf(governance);
-  const govAddr = await governance.getAddress();
-  const cost = await governance.votingCost();
-  for (const v of voters) {
-    await send(vgt.connect(v).approve(govAddr, cost));
-    await send(
-      governance.connect(v).castVote(proposalId, true, "Support handover"),
-    );
-  }
-}
-
-/**
- * Wait out voting and the execution delay, then execute. Throws (with
- * err.code "NOT_PASSED" or "NOT_EXECUTED") unless the proposal Executed.
- */
-async function settleProposal(
-  governance,
-  proposalId,
-  label = `proposal #${proposalId}`,
-) {
-  const [p] = await governance.getProposal(proposalId);
-  await advancePast(
-    p.executionTime > p.votingEnds ? p.executionTime : p.votingEnds,
-    `${label}: voting period + execution delay`,
-  );
-  const [, , , canExecute] = await governance.getProposal(proposalId);
-  const fail = (code, why) =>
-    Object.assign(
-      new Error(`Handover: proposal #${proposalId} (${label}) ${why}`),
-      { code },
-    );
-  if (!canExecute) throw fail("NOT_PASSED", "did not clear quorum/approval");
-  await send(governance.executeProposal(proposalId));
-  const [after] = await governance.getProposal(proposalId);
-  const status = Number(after.status);
-  if (status !== EXECUTED) {
-    throw fail("NOT_EXECUTED", `settled as ${STATUS[status]}, not Executed`);
-  }
-  return status;
-}
-
-/**
- * Step 4 for every ACCEPTANCE_PLAN contract nominated to governance, then
- * any queued registry proposals. `contracts` maps plan keys to contracts.
- */
-async function acceptAllByVote({
-  governance,
-  contracts,
-  proposer,
-  voters,
-  registryProposals = [],
-  log = console.log,
-}) {
-  const govAddr = await governance.getAddress();
-  // An unbound optional registry is left out (preflight warned about it).
-  contracts = await withBoundRegistry(contracts);
-  const vote = async (id, label) => {
-    await castAcceptanceVotes(governance, id, voters);
-    await settleProposal(governance, id, label);
-  };
-  for (const e of planFor(contracts)) {
-    const c = contracts[e.key];
-    check(c, `no contract given for ${e.label}`);
-    if (same(await c.owner(), govAddr)) {
-      log(`   ✅ ${e.label}: already owned by governance`);
-      continue;
-    }
-    check(
-      same(await c.pendingOwner(), govAddr),
-      `${e.label} has not nominated governance`,
-    );
-    const id = await proposeAcceptOwnership(
-      governance,
-      proposer,
-      c,
-      e.proposalType,
-      e.label,
-    );
-    await vote(id, e.label);
-    check(
-      same(await c.owner(), govAddr),
-      `${e.label} owner is not governance after the vote`,
-    );
-    log(`   ✅ ${e.label}: owned by governance (proposal #${id})`);
-  }
-  for (const r of registryProposals) {
-    const id = await proposeCall(
-      governance,
-      proposer,
-      r.proposalType,
-      r.target,
-      r.callData,
-      r.label,
-    );
-    await vote(id, r.label);
-    log(`   ✅ ${r.label} (proposal #${id})`);
-  }
 }
 
 module.exports = {
