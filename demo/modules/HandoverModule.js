@@ -204,9 +204,31 @@ class HandoverModule {
       );
       return false;
     }
+    const gov = this.state.getContract("vanguardGovernance");
+    const govAddr = (await gov.getAddress()).toLowerCase();
+    const reg = this.state.getContract("investorTypeRegistry");
+    const regAddr = reg ? (await reg.getAddress()).toLowerCase() : null;
+    const queued = [];
     for (const x of strays) {
+      const target = (await x.on.getAddress()).toLowerCase();
+      // L-8: governance already owns the registry (83b ran): a type-0 vote.
+      if (target === regAddr && (await reg.owner()).toLowerCase() === govAddr) {
+        queued.push({
+          label: `remove ${x.what}`,
+          proposalType: 0,
+          target: await x.on.getAddress(),
+          callData: x.on.interface.encodeFunctionData(x.fn, x.args),
+        });
+        console.log(`   🗳️  queued as an InvestorTypeConfig vote: ${x.what}`);
+        continue;
+      }
       await (await x.on.connect(this.state.signers[0])[x.fn](...x.args)).wait();
-      console.log(`   ✅ removed: ${x.what}`);
+      console.log(`   ✅ removed as the deployer: ${x.what}`);
+    }
+    if (queued.length) {
+      this.state.handoverRegistryProposals = queued;
+      await this._settleRegistryProposals(gov);
+      if ((this.state.handoverRegistryProposals || []).length) return false;
     }
     return true;
   }
@@ -293,6 +315,14 @@ class HandoverModule {
     displaySection("HANDOVER STEP 3: VERIFY THE DEPLOYER HOLDS NO POWER", "🔍");
     const args = await this._ceremonyArgs();
     if (!args) return;
+    // M-1: 83e compares with what 83c's preflight found; a demo restarted
+    // between them has no snapshot and cannot prove the chain stood still.
+    if (!args.snapshot) {
+      console.log(
+        "   ⛔ no preflight snapshot in this session: run 83c first (a restart loses it); nothing proves the chain did not change since step 1",
+      );
+      return;
+    }
     try {
       const { ok, checks, warnings, residual } =
         await assertHandoverComplete(args);

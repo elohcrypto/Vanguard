@@ -20,6 +20,13 @@
  *     "extraTrusted": ["0x.."]                // acknowledged trusted contracts
  *   }
  *
+ * The full phase writes `<config>.snapshot.json` (what the preflight
+ * found, keyed by the governance address and the block of the preflight);
+ * `HANDOVER_PHASE=accept` requires it, so the completion check can prove
+ * nothing appeared since step 1 (M-1). A key set to `null` asserts the
+ * contract does not exist: refused when governance derives one, a
+ * residual warning when it cannot (R-413-12).
+ *
  * The three acknowledgement lists default to empty: on a first handover
  * nothing is acknowledged and any registered node, trusted attestor key
  * or trusted contract outside governance and the registrars' wallets is
@@ -241,9 +248,25 @@ export async function runHandover(
     return n;
   };
 
+  const snapshotPath = `${path}.snapshot.json`;
   let registryProposals: any[];
   if (phase === "accept") {
     console.log("⏭️  HANDOVER_PHASE=accept: deployer steps skipped");
+    // M-1: the completion compares with what the full phase's preflight
+    // found; without that file nothing proves the chain stood still.
+    if (!fs.existsSync(snapshotPath)) {
+      throw new Error(
+        `${snapshotPath}: no preflight snapshot from the full phase; the accept phase cannot prove the chain did not change since step 1`,
+      );
+    }
+    const snap = JSON.parse(fs.readFileSync(snapshotPath, "utf8"));
+    if (String(snap.governance).toLowerCase() !== govAddr) {
+      throw new Error(
+        `${snapshotPath} was taken for governance ${snap.governance}, not ${cfg.governance}`,
+      );
+    }
+    args.snapshot = snap.snapshot;
+    console.log(`   snapshot: ${snapshotPath} (block ${snap.block})`);
     const o = await withBoundRegistry(
       await withDerivedContracts(args, console.log),
       console.log,
@@ -269,6 +292,19 @@ export async function runHandover(
     const report = await handoverDeployerPowers(args);
     registryProposals = report.registryProposals;
     args.snapshot = report.snapshot; // completion compares with preflight
+    fs.writeFileSync(
+      snapshotPath,
+      JSON.stringify(
+        {
+          governance: cfg.governance,
+          block: await ethers.provider.getBlockNumber(),
+          snapshot: report.snapshot,
+        },
+        null,
+        2,
+      ),
+    );
+    console.log(`   snapshot written: ${snapshotPath}`);
   }
 
   console.log("\n🏛️  Handover: governance accepts by vote");
