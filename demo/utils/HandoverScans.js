@@ -72,16 +72,15 @@ async function checkFromBlock(o, log = () => {}, extra = []) {
   ]
     .filter(([k]) => o[k])
     .map(([k, label]) => [o[k], label]);
+  const unproven = [];
   for (const [c, label] of [...scanned, ...extra]) {
     const a = await addrOf(c);
     let code;
     try {
       code = await ethers.provider.getCode(a, from - 1);
     } catch (e) {
-      log(
-        `   ⚠️  fromBlock ${from}: the RPC cannot serve historical code (${e.message.split("\n")[0]}); make sure it is a block before the ${label} deploy`,
-      );
-      return;
+      unproven.push(`${label} (${e.message.split("\n")[0]})`);
+      continue;
     }
     if (code !== "0x") {
       fail(
@@ -89,15 +88,36 @@ async function checkFromBlock(o, log = () => {}, extra = []) {
       );
     }
   }
+  // L-4: every scanned contract must be proven, or nothing is.
+  if (unproven.length) {
+    fail(
+      `fromBlock ${from}: the RPC cannot serve historical code for ${unproven.join("; ")}: use an archive RPC, or a fromBlock the RPC can prove precedes every deploy`,
+    );
+  }
+  void log;
 }
 
-/** Live holders of `role` on `f`, from RoleGranted events. */
-async function roleHolders(f, role, o) {
-  const seen = uniq(
+/**
+ * Live holders of `role` on `f`, from RoleGranted events plus `proven`
+ * candidates read directly; R-413-6: a proven candidate that holds the
+ * role must appear in the scan (every grant emits RoleGranted).
+ */
+async function roleHolders(f, role, o, proven = []) {
+  const hits = uniq(
     (await scanLogs(f, f.filters.RoleGranted(role), o)).map((ev) => ev.args[1]),
   );
   const live = [];
-  for (const a of seen) if (await f.hasRole(role, a)) live.push(a);
+  for (const a of uniq([...hits, ...proven])) {
+    if (await f.hasRole(role, a)) live.push(a);
+  }
+  const missed = live.filter(
+    (a) => proven.some((p) => same(p, a)) && !hits.some((h) => same(h, a)),
+  );
+  if (missed.length) {
+    fail(
+      `EscrowWalletFactory RoleGranted event scan found none of the holders it must see (${missed.join(", ")}): fromBlock, logChunk or the RPC is wrong; nothing can be concluded from it`,
+    );
+  }
   return live;
 }
 
@@ -107,9 +127,14 @@ async function escrowFactoryRoles(o) {
     "EscrowWalletFactory",
     await addrOf(o.escrowWalletFactory),
   );
+  // Proven candidates: the owner holds DEFAULT_ADMIN_ROLE (granted by
+  // event at construction and at every ownership transfer); the deployer
+  // (constructor) and ops (step 5) are granted ADMIN_ROLE by event.
+  const owner = await f.owner();
+  const [dAddr, ops] = await Promise.all([o.deployer, o.ops].map(addrOf));
   return {
-    admins: await roleHolders(f, await f.DEFAULT_ADMIN_ROLE(), o),
-    operators: await roleHolders(f, await f.ADMIN_ROLE(), o),
+    admins: await roleHolders(f, await f.DEFAULT_ADMIN_ROLE(), o, [owner]),
+    operators: await roleHolders(f, await f.ADMIN_ROLE(), o, [dAddr, ops]),
   };
 }
 

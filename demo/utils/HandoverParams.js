@@ -179,6 +179,36 @@ async function identityChecks(o) {
   ];
 }
 
+/** L-5: validity and cache periods, the factory fee, the claim topics. */
+async function periodLines(o) {
+  const lines = [];
+  if (o.privacyManager) {
+    lines.push([
+      `PrivacyManager proofValidityPeriod ${await o.privacyManager.proofValidityPeriod()}s`,
+      true,
+    ]);
+  }
+  if (o.zkVerifier) {
+    const ttl = await o.zkVerifier.proofCacheExpiry().catch(() => null);
+    lines.push([
+      `ZKVerifierIntegrated proofCacheExpiry ${ttl ?? "?"}s`,
+      ttl !== null,
+    ]);
+  }
+  if (o.onchainIDFactory) {
+    lines.push([
+      `OnchainIDFactory deploymentFee ${ethers.formatEther(await o.onchainIDFactory.deploymentFee())} ETH`,
+      true,
+    ]);
+  }
+  const topics = await o.identityRegistry.getClaimTopics();
+  lines.push([
+    `IdentityRegistry requires claim topics [${topics.join(", ")}] (none would verify everyone)`,
+    topics.length > 0,
+  ]);
+  return lines;
+}
+
 /** Informational: investor-type caps and cooldowns per type. */
 async function typeLines(o) {
   const reg = o.investorTypeRegistry;

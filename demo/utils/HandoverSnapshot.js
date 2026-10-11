@@ -11,6 +11,14 @@
  */
 
 const { addrOf, same } = require("./HandoverChecks");
+
+/**
+ * M-1: the snapshots this process took, by governance address. A caller
+ * that spread its arguments (the tests' `{ ...args }`) still gets its own
+ * preflight back; another process (HANDOVER_PHASE=accept, a demo
+ * restart) has nothing here and must pass the persisted snapshot.
+ */
+const preflightSnapshots = new Map();
 const { roleFacts } = require("./HandoverRoles");
 const { trustFacts } = require("./HandoverTrust");
 const { nodeFacts } = require("./HandoverNodes");
@@ -69,7 +77,9 @@ async function snapshotLines(o, snap) {
       : `every derived contract is the one the preflight found (${Object.keys(now.derived).length})`,
     moved.length === 0,
   ]);
+  const vsc = await addrOf(o.token);
   const grants = {
+    "InvestorTypeRegistry authorized tokens": [vsc],
     "Token agents": [ops],
     "GovernanceToken agents": [ops],
     "IdentityRegistry agents": [ops],
@@ -101,4 +111,4 @@ async function snapshotLines(o, snap) {
   return lines;
 }
 
-module.exports = { snapshotFacts, snapshotLines };
+module.exports = { preflightSnapshots, snapshotFacts, snapshotLines };

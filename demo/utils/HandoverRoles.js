@@ -34,33 +34,72 @@ const NONE = { live: [], hits: [] };
  * { live, hits }: the raw event hits (so a line can prove the scan ran)
  * plus `extra` candidates read directly, filtered by `isLive`.
  */
-async function scannedSet(c, filter, o, extra, isLive) {
+async function scannedSet(c, filter, o, extra, isLive, proven = [], what = "") {
   const hits = uniq((await scanLogs(c, filter, o)).map((ev) => ev.args[0]));
   const live = [];
   for (const a of uniq([...hits, ...extra])) if (await isLive(a)) live.push(a);
+  // R-413-6 (M-3): a `proven` candidate that is live was granted by event
+  // (never by a constructor), so it must appear in the scan.
+  const missed = live.filter(
+    (a) => proven.some((p) => same(p, a)) && !hits.some((h) => same(h, a)),
+  );
+  if (missed.length) {
+    fail(
+      `${what} event scan found none of the holders it must see (${missed.join(", ")}; scan hits ${hits.length}, live ${live.length}): fromBlock, logChunk or the RPC is wrong; nothing can be concluded from it`,
+    );
+  }
   return { live, hits };
 }
 
-/** Live agents of `c`: AgentAdded events plus `extra`, filtered by isAgent. */
-const liveAgents = (c, o, extra = []) =>
-  scannedSet(c, c.filters.AgentAdded(), o, extra, (a) => c.isAgent(a));
+/**
+ * Live agents of `c`: AgentAdded events plus `extra`, filtered by isAgent;
+ * `proven` are the extras granted by event (not the constructor's).
+ */
+const liveAgents = (c, o, extra = [], proven = [], what = "AgentAdded") =>
+  scannedSet(
+    c,
+    c.filters.AgentAdded(),
+    o,
+    extra,
+    (a) => c.isAgent(a),
+    proven,
+    what,
+  );
 
 /** Live compliance officers (the constructor's deployer emits no event). */
-const liveOfficers = (reg, o, extra = []) =>
-  scannedSet(reg, reg.filters.ComplianceOfficerUpdated(), o, extra, (a) =>
-    reg.isComplianceOfficer(a),
+const liveOfficers = (reg, o, extra = [], proven = []) =>
+  scannedSet(
+    reg,
+    reg.filters.ComplianceOfficerUpdated(),
+    o,
+    extra,
+    (a) => reg.isComplianceOfficer(a),
+    proven,
+    "InvestorTypeRegistry ComplianceOfficerUpdated",
   );
 
-/** Live authorized tokens (TokenAuthorized events plus `extra` read). */
+/** Live authorized tokens: every authorization emits, so extras are proven. */
 const liveAuthorized = (reg, o, extra = []) =>
-  scannedSet(reg, reg.filters.TokenAuthorized(), o, extra, (a) =>
-    reg.isTokenAuthorized(a),
+  scannedSet(
+    reg,
+    reg.filters.TokenAuthorized(),
+    o,
+    extra,
+    (a) => reg.isTokenAuthorized(a),
+    extra,
+    "InvestorTypeRegistry TokenAuthorized",
   );
 
-/** Live investorLimitExempt accounts (events plus `extra` read). */
+/** Live investorLimitExempt accounts: every exemption emits, extras proven. */
 const liveExempt = (reg, o, extra = []) =>
-  scannedSet(reg, reg.filters.InvestorLimitExemptionUpdated(), o, extra, (a) =>
-    reg.investorLimitExempt(a),
+  scannedSet(
+    reg,
+    reg.filters.InvestorLimitExemptionUpdated(),
+    o,
+    extra,
+    (a) => reg.investorLimitExempt(a),
+    extra,
+    "InvestorTypeRegistry InvestorLimitExemptionUpdated",
   );
 
 /** Live MANAGEMENT and CLAIM_SIGNER keys of an issuer: [{ hash, purpose }]. */
@@ -97,10 +136,28 @@ async function roleFacts(o) {
     govAddr,
     vsc,
     vgt,
-    vscAgents: await liveAgents(o.token, o, [dAddr, ops]),
-    vgtAgents: await liveAgents(o.governanceToken, o, [dAddr, ops, govAddr]),
-    regAgents: await liveAgents(o.identityRegistry, o, [dAddr, ops, vsc, vgt]),
-    officers: reg ? await liveOfficers(reg, o, [dAddr, ops]) : NONE,
+    vscAgents: await liveAgents(
+      o.token,
+      o,
+      [dAddr, ops],
+      [ops],
+      "Token AgentAdded",
+    ),
+    vgtAgents: await liveAgents(
+      o.governanceToken,
+      o,
+      [dAddr, ops, govAddr],
+      [ops, govAddr],
+      "GovernanceToken AgentAdded",
+    ),
+    regAgents: await liveAgents(
+      o.identityRegistry,
+      o,
+      [dAddr, ops, vsc, vgt],
+      [ops, vsc, vgt],
+      "IdentityRegistry AgentAdded",
+    ),
+    officers: reg ? await liveOfficers(reg, o, [dAddr, ops], [ops]) : NONE,
     governors: reg ? await registryGovernors(o, reg) : [],
     authorized: reg ? await liveAuthorized(reg, o, [vsc, vgt]) : NONE,
     exempt: reg ? (await liveExempt(reg, o, [dAddr, ops, ...fee])).live : [],

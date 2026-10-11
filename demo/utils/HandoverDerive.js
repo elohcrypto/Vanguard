@@ -180,10 +180,21 @@ async function withDerivedContracts(o, log = () => {}, { strict = true } = {}) {
   const issues = [];
   const d = await deriveContracts(o, strict ? null : issues);
   const out = { ...o, derivedFrom: {}, derivationIssues: issues };
+  // R-413-12: absent key = derive; address = assertion; null = assertion
+  // of absence, refused when the chain derives one and a residual warning
+  // (never "holds no power") when it is underivable.
+  out.nullAbsent = [];
   for (const key of Object.keys(ARTIFACT)) {
+    const isNull = key in o && o[key] === null;
     const given = o[key] == null ? null : await addrOf(o[key]);
     const derived = d[key];
     if (derived) out.derivedFrom[key] = derived.how;
+    if (isNull && derived) {
+      const msg = `config "${key}" is null (asserts none), but ${derived.how} is ${derived.addr}: the ceremony derives every contract from governance; drop the key or fix the chain`;
+      if (strict) fail(msg);
+      out.derivationIssues.push(msg);
+    }
+    if (isNull && !derived) out.nullAbsent.push(key);
     if (given && derived && !same(given, derived.addr)) {
       const msg = `config "${key}" names ${given}, but ${derived.how} is ${derived.addr}: the ceremony derives every contract from governance; drop the key or fix the chain`;
       if (strict) fail(msg);
@@ -284,7 +295,7 @@ async function linkChecks(o) {
     label: "GovernanceToken has no investorTypeRegistry (D56)",
     ok: same(vgtItr, ZERO),
     got: vgtItr,
-    fix: `a registry on VGT (${vgtItr}) lets its owner cooldown or cap every voter's fee transfer; the GovernanceToken owner must setInvestorTypeRegistry(0) first`,
+    fix: `a registry on VGT (${vgtItr}) lets its owner cooldown or cap every voter's fee transfer; Token.setInvestorTypeRegistry refuses zero, so redeploy VGT and governance`,
   });
   const vgtWl = await o.complianceRules.whitelistOracle(vgt);
   out.push({

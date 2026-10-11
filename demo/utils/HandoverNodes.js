@@ -45,6 +45,13 @@ async function nodeFacts(o) {
   const om = o.oracleManager;
   const live = await om.getRegisteredOracles();
   const regs = await scanLogs(om, om.filters.OracleRegistered(), o);
+  // R-413-6 (M-3): every live node was registered by event.
+  const missed = live.filter((a) => !regs.some((e) => same(e.args[0], a)));
+  if (missed.length) {
+    fail(
+      `OracleManager OracleRegistered event scan found none of the holders it must see (${missed.join(", ")}): fromBlock, logChunk or the RPC is wrong; nothing can be concluded from it`,
+    );
+  }
   const nodes = [];
   for (const addr of live) {
     const ev = regs.filter((e) => same(e.args[0], addr)).at(-1);

@@ -49,7 +49,7 @@ const { preflightRoles } = require("./HandoverRoles");
 const { preflightTrust } = require("./HandoverTrust");
 const { preflightNodes, nodeSteps } = require("./HandoverNodes");
 const { preflightParams, paramSteps } = require("./HandoverParams");
-const { snapshotFacts } = require("./HandoverSnapshot");
+const { snapshotFacts, preflightSnapshots } = require("./HandoverSnapshot");
 const { roleStrays } = require("./HandoverRoles");
 const { trustStrays } = require("./HandoverTrust");
 const { nodeStrays } = require("./HandoverNodes");
@@ -81,6 +81,7 @@ async function send(p) {
  * make because governance already owns the registry: settle them by vote.
  */
 async function handoverDeployerPowers(o) {
+  const given = o; // M-1: the caller's object carries the snapshot afterwards
   const log = o.log || console.log;
   // Task 4.13: every contract derived from governance; a config address
   // is an assertion (HandoverDerive.js).
@@ -114,6 +115,8 @@ async function handoverDeployerPowers(o) {
   await preflightParams(o); // Task 4.13: floors, proposals, fee sink, pins
   // Task 4.13: what the preflight found; completion compares with it.
   report.snapshot = await snapshotFacts(o);
+  given.snapshot = report.snapshot;
+  preflightSnapshots.set(govAddr.toLowerCase(), report.snapshot);
   const ctx = { o, d, dAddr, govAddr, report, ok, log };
   // Send, read back, assert, print.
   const apply = async (tx, readBack, msg) => {

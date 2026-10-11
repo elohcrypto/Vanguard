@@ -36,9 +36,12 @@ async function liveRegistrars(o, candidates = []) {
   if (!rules) fail("no ComplianceRules in the handover config");
   const known = await compiledWallets();
   const events = await scanLogs(rules, rules.filters.TrustedRegistrarSet(), o);
-  // R-413-6: `candidates` (the derived escrow factory) are read directly
-  // on VSC and VGT, independent of the scan.
-  const pairs = events.map((ev) => [ev.args[0], ev.args[1]]);
+  // R-413-6 (M-3): `candidates` (the derived escrow factory, every officer
+  // contract, every trusted contract's factory()) are read directly on
+  // VSC and VGT; a live registrar found only that way proves the scan
+  // missed it, and the ceremony refuses rather than trusting the scan.
+  const hits = events.map((ev) => [ev.args[0], ev.args[1]]);
+  const pairs = [...hits];
   for (const c of candidates) {
     for (const t of [o.token, o.governanceToken]) {
       if (t && c) pairs.push([await addrOf(t), await addrOf(c)]);
@@ -57,6 +60,14 @@ async function liveRegistrars(o, candidates = []) {
       wallet: known[hash] || null,
       hasCode: (await ethers.provider.getCode(registrar)) !== "0x",
     });
+  }
+  const missed = out.filter(
+    (r) => !hits.some(([t, a]) => same(t, r.token) && same(a, r.registrar)),
+  );
+  if (missed.length) {
+    fail(
+      `ComplianceRules TrustedRegistrarSet event scan found none of the holders it must see (${missed.map((r) => `${r.registrar} on ${r.token}`).join(", ")}): fromBlock, logChunk or the RPC is wrong; nothing can be concluded from it`,
+    );
   }
   return out;
 }

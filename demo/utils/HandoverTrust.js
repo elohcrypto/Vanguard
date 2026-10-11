@@ -50,18 +50,35 @@ async function registrarWallets(registrar, wallet, o) {
  * officer contract with the artifact its code matches (null: neither).
  */
 async function trustFacts(o) {
-  const registrars = await liveRegistrars(o, [o.escrowWalletFactory]);
+  // M-3: every officer contract and every trusted contract's factory()
+  // is a registrar candidate read directly, beside the escrow factory.
+  const reg0 = o.investorTypeRegistry;
+  const officerContracts = [];
+  if (reg0) {
+    for (const a of (await liveOfficers(reg0, o)).live) {
+      if ((await ethers.provider.getCode(a)) !== "0x") officerContracts.push(a);
+    }
+  }
+  const trusted = await liveTrustedContracts(o);
+  const factories = [];
+  for (const { account } of trusted) {
+    const f = await ethers.getContractAt(
+      ["function factory() view returns (address)"],
+      account,
+    );
+    const a = await f.factory().catch(() => null);
+    if (a && !same(a, ethers.ZeroAddress)) factories.push(a);
+  }
+  const registrars = await liveRegistrars(o, [
+    o.escrowWalletFactory,
+    ...officerContracts,
+    ...factories,
+  ]);
   const created = {};
   for (const r of registrars) {
     created[r.registrar] = await registrarWallets(r.registrar, r.wallet, o);
   }
-  const custody = registrars.map((r) => r.registrar);
-  const reg = o.investorTypeRegistry;
-  if (reg) {
-    for (const a of (await liveOfficers(reg, o)).live) {
-      if ((await ethers.provider.getCode(a)) !== "0x") custody.push(a);
-    }
-  }
+  const custody = [...registrars.map((r) => r.registrar), ...officerContracts];
   const kinds = [];
   for (const addr of uniq(custody)) {
     let kind = null;
@@ -83,8 +100,12 @@ async function trustFacts(o) {
  * [{ label, ok, fix, strays }] for the trusted contracts, the registrar
  * and officer-contract code, and the InvestorRequestManager immutables.
  */
-async function trustChecks(o, f = null) {
+async function trustChecks(o, f = null, pre = false) {
   f = f || (await trustFacts(o));
+  const [dAddr, planEscrow] = await Promise.all([
+    addrOf(o.deployer),
+    o.escrowWalletFactory ? addrOf(o.escrowWalletFactory) : null,
+  ]);
   const [vsc, vgt, govAddr, ops, reg] = await Promise.all(
     [o.token, o.governanceToken, o.governance, o.ops, o.identityRegistry].map(
       addrOf,
@@ -120,6 +141,31 @@ async function trustChecks(o, f = null) {
     })),
   });
   for (const { addr, kind } of f.custody) {
+    // M-2: ownership refused before step 1, not only at completion (the
+    // completion line stays in HandoverRegistrars.custodyOwnerLines).
+    const owner = await (
+      await ethers.getContractAt(
+        ["function owner() view returns (address)"],
+        addr,
+      )
+    )
+      .owner()
+      .catch(() => null);
+    // The plan's escrow factory is the deployer's until step 3 hands it over.
+    const plan =
+      pre &&
+      planEscrow &&
+      same(addr, planEscrow) &&
+      owner &&
+      same(owner, dAddr);
+    out.push({
+      label: `registrar / officer contract ${addr} is owned by ops or governance${pre ? " (the plan's escrow factory: the deployer, until step 3)" : ""}`,
+      ok:
+        Boolean(plan) ||
+        (Boolean(owner) && (same(owner, ops) || same(owner, govAddr))),
+      fix: `registrar / officer contract ${addr} is owned by ${owner ?? "nobody readable"}, neither ops nor governance: a deployer-owned InvestorRequestManager assigns investor types and creates trusted wallets after the handover; its owner must transferOwnership(ops) first`,
+      strays: [],
+    });
     out.push({
       label: `registrar / officer contract ${addr} code matches the compiled ${kind || "InvestorRequestManager or EscrowWalletFactory"}`,
       ok: Boolean(kind),
@@ -164,18 +210,23 @@ async function trustChecks(o, f = null) {
 
 /** Read-only, before the first transaction: refuse the first finding. */
 async function preflightTrust(o) {
-  for (const c of await trustChecks(o)) if (!c.ok) fail(c.fix);
+  for (const c of await trustChecks(o, null, true)) if (!c.ok) fail(c.fix);
 }
 
-/** Completion lines: [label, pass][]. */
-async function trustLines(o) {
+/** Completion lines: [label, pass][]; L-1: acknowledged accounts warn. */
+async function trustLines(o, warnings = [], residual = []) {
+  for (const a of o.extraTrusted || []) {
+    const w = `trusted contract ${await addrOf(a)} is acknowledged in extraTrusted: it skips every identity, whitelist and cap check on its token by the operator's say-so, not a registrar's`;
+    warnings.push(w);
+    residual.push(w);
+  }
   return (await trustChecks(o)).map((c) => [c.label, c.ok]);
 }
 
 /** The strays a ComplianceRules owner call removes. */
 async function trustStrays(o) {
   const out = [];
-  for (const c of await trustChecks(o)) out.push(...c.strays);
+  for (const c of await trustChecks(o, null, true)) out.push(...c.strays);
   return out;
 }
 

@@ -171,7 +171,12 @@ async function agentRoleOn(issuer, agents) {
   return null;
 }
 
-/** InvestorTypeRegistry governors today (from logs). */
+/**
+ * InvestorTypeRegistry governors today (from logs). R-413-6 (M-3): the
+ * registry has no enumerator, so the scan is proven by weight: the live
+ * governors' weights must sum to totalGovernorWeight, or the ceremony
+ * refuses rather than reading an empty scan as "no governor".
+ */
 async function registryGovernors(o, reg) {
   const seen = uniq(
     (await scanLogs(reg, reg.filters.GovernorUpdated(), o)).map(
@@ -179,7 +184,18 @@ async function registryGovernors(o, reg) {
     ),
   );
   const live = [];
-  for (const g of seen) if (await reg.isGovernor(g)) live.push(g);
+  let weight = 0n;
+  for (const g of seen) {
+    if (!(await reg.isGovernor(g))) continue;
+    live.push(g);
+    weight += await reg.getGovernorWeight(g);
+  }
+  const total = await reg.totalGovernorWeight();
+  if (weight !== total) {
+    fail(
+      `InvestorTypeRegistry GovernorUpdated event scan found governors weighing ${weight} while totalGovernorWeight is ${total}: fromBlock, logChunk or the RPC is wrong; nothing can be concluded from it`,
+    );
+  }
   return live;
 }
 

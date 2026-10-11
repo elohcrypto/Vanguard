@@ -42,7 +42,7 @@ const { roleLines } = require("./HandoverRoles");
 const { trustLines } = require("./HandoverTrust");
 const { nodeLines } = require("./HandoverNodes");
 const { paramLines } = require("./HandoverParams");
-const { snapshotLines } = require("./HandoverSnapshot");
+const { snapshotLines, preflightSnapshots } = require("./HandoverSnapshot");
 
 const ZERO = ethers.ZeroAddress;
 const EXEMPT_ABI = [
@@ -71,6 +71,31 @@ async function assertHandoverComplete(o) {
   // Warnings that mean the deployer still vouches (review B-L3).
   const residual = [];
   const add = (label, pass) => checks.push({ label, ok: Boolean(pass) });
+  // L-7: an R-413-6 proof that throws becomes a failing line here; any
+  // other error (RPC) still propagates.
+  const lines = async (name, p) => {
+    try {
+      for (const [label, pass] of await p) add(label, pass);
+    } catch (e) {
+      if (!/^Handover: /.test(e.message)) throw e;
+      add(`${name}: ${e.message.slice(10)}`, false);
+    }
+  };
+  // M-1: no snapshot, no proof the chain stood still since step 1 (this
+  // process's own preflight counts; another process must pass it in).
+  const snapshot = o.snapshot || preflightSnapshots.get(govAddr.toLowerCase());
+  if (!snapshot) {
+    add(
+      "no preflight snapshot: nothing proves the chain did not change since step 1 (run the full phase, or pass the snapshot the full phase wrote)",
+      false,
+    );
+  }
+  // R-413-12: a null key the chain cannot derive is a residual warning.
+  for (const key of o.nullAbsent || []) {
+    const w = `config "${key}" is null and governance derives none: the deployer keeps it if it exists; name it, or state in the runbook why it does not exist`;
+    warnings.push(w);
+    residual.push(w);
+  }
   for (const issue of o.derivationIssues) add(issue, false);
   if (!o.derivationIssues.length) {
     add(
@@ -78,9 +103,9 @@ async function assertHandoverComplete(o) {
       true,
     );
   }
-  for (const [label, pass] of await linkLines(o)) add(label, pass);
+  await lines("links", linkLines(o));
   // Task 4.13: exact role sets from the event scans (A1 H1).
-  for (const [label, pass] of await roleLines(o, warnings)) add(label, pass);
+  await lines("roles", roleLines(o, warnings));
   if (o.skippedRegistry) {
     add(
       "InvestorTypeRegistry is not live on Token or is owned by governance",
@@ -105,9 +130,7 @@ async function assertHandoverComplete(o) {
     );
   }
   // Review M-1: no role holder besides governance and ops survives.
-  for (const [label, pass] of await factoryRoleLines(o, govAddr, ops)) {
-    add(label, pass);
-  }
+  await lines("escrow factory roles", factoryRoleLines(o, govAddr, ops));
   for (const [label, pass] of await privacyLines(
     o,
     dAddr,
@@ -121,23 +144,20 @@ async function assertHandoverComplete(o) {
   // Task 4.2: KeyManager holds no power; the demo identity opted in.
   for (const [label, pass] of await keyManagerLines(o, dAddr)) add(label, pass);
   // Task 4.3: every trusted-contract registrar names compiled wallet code.
-  for (const [label, pass] of await registrarLines(o)) add(label, pass);
-  for (const [label, pass] of await custodyOwnerLines(o, dAddr, ops, govAddr))
-    add(label, pass);
+  await lines("registrars", registrarLines(o));
+  await lines("custody owners", custodyOwnerLines(o, dAddr, ops, govAddr));
   // Task 4.13: trusted contracts by registrar provenance; registrar code
   // and InvestorRequestManager immutables (B G-4/G-10, A1 M2).
-  for (const [label, pass] of await trustLines(o)) add(label, pass);
+  await lines("trust", trustLines(o, warnings, residual));
   // Task 4.4: the compiled engine serves the manager; ops is the operator.
   for (const [label, pass] of await oracleLines(o, dAddr, ops))
     add(label, pass);
   // Task 4.13: acknowledged nodes, provenance, designations, list oracles.
-  for (const [label, pass] of await nodeLines(o, dAddr, warnings, residual))
-    add(label, pass);
+  await lines("nodes", nodeLines(o, dAddr, warnings, residual));
   // Task 4.13: floors, open proposals, fee sink, attestors, root, pins.
-  for (const [label, pass] of await paramLines(o)) add(label, pass);
+  await lines("parameters", paramLines(o));
   // Task 4.13: re-derived and compared with the preflight snapshot.
-  for (const [label, pass] of await snapshotLines(o, o.snapshot))
-    add(label, pass);
+  await lines("snapshot", snapshotLines(o, snapshot));
   // Bound in governance, or the creator of a trusted escrow (review M-2),
   // but not named by the config: still checked.
   const d = o.derived;
@@ -183,26 +203,10 @@ async function assertHandoverComplete(o) {
       !(await rules.ruleAdministrators(vgt, dAddr)),
   );
   // Review B-L2: nor any other key the deployer ever authorized, on any token.
-  // R-413-6: step 1 made governance an administrator of both by event.
-  const extraAdmins = (
-    await liveRuleAdministrators(
-      o,
-      [dAddr],
-      [
-        [vsc, govAddr],
-        [vgt, govAddr],
-      ],
-    )
-  ).filter(({ account: a }) => !same(a, govAddr) && !same(a, ops));
-  for (const { token, account } of extraAdmins) {
-    add(
-      `${account} is still a ComplianceRules rule administrator on ${token} (neither governance nor ops)`,
-      false,
-    );
-  }
-  if (!extraAdmins.length) {
-    add("no ComplianceRules rule administrator but governance and ops", true);
-  }
+  await lines(
+    "rule administrators",
+    adminLines(o, dAddr, ops, govAddr, vsc, vgt),
+  );
   // Review B-M2: both tokens enforce the ComplianceRules governance owns.
   const mismatches = await complianceMismatches(o);
   add(
@@ -260,13 +264,20 @@ async function assertHandoverComplete(o) {
     }
     // L2: the registry's own proposal system holds nothing executable.
     if (typeof reg.isProposalOpen === "function") {
-      const others = (await registryGovernors(o, reg)).filter(
-        (g) => !same(g, govAddr),
-      );
-      const open = await openRegistryProposals(reg);
-      add(
-        "InvestorTypeRegistry: no governor but governance, no open proposal",
-        others.length === 0 && open.length === 0,
+      await lines(
+        "registry governance",
+        (async () => {
+          const others = (await registryGovernors(o, reg)).filter(
+            (g) => !same(g, govAddr),
+          );
+          const open = await openRegistryProposals(reg);
+          return [
+            [
+              "InvestorTypeRegistry: no governor but governance, no open proposal",
+              others.length === 0 && open.length === 0,
+            ],
+          ];
+        })(),
       );
     }
   }
@@ -295,17 +306,7 @@ async function assertHandoverComplete(o) {
   );
   // Residue from runs before 2E.1, when a wallet could be trusted. Every
   // live (token, account) pair from the token-indexed events (G5).
-  let clean = true;
-  for (const { account: a } of await liveTrustedContracts(o)) {
-    const code = await ethers.provider.getCode(a);
-    // An EIP-7702 delegation indicator (0xef0100 || address, 23 bytes) is a
-    // wallet, not a contract: treat it the same as no code.
-    const delegated = code.length === 48 && /^0xef0100/i.test(code);
-    if (code !== "0x" && !delegated) continue;
-    clean = false;
-    add(`trusted address ${a} is a wallet or delegated wallet`, false);
-  }
-  if (clean) add("every trusted contract has code", true);
+  await lines("trusted residue", residueLines(o));
   for (const issuer of o.issuers || []) {
     const label = await issuerLabel(issuer);
     // Review N-5: nor is it the pending owner (a planted nomination).
@@ -333,6 +334,45 @@ async function assertHandoverComplete(o) {
   await residueWarnings(o, dAddr, govAddr, warnings);
   const failures = checks.filter((c) => !c.ok).map((c) => c.label);
   return { ok: failures.length === 0, failures, checks, warnings, residual };
+}
+
+/** Review B-L2: rule administrators besides governance and ops, per token. */
+async function adminLines(o, dAddr, ops, govAddr, vsc, vgt) {
+  // R-413-6: step 1 made governance an administrator of both by event.
+  const extra = (
+    await liveRuleAdministrators(
+      o,
+      [dAddr],
+      [
+        [vsc, govAddr],
+        [vgt, govAddr],
+      ],
+    )
+  ).filter(({ account: a }) => !same(a, govAddr) && !same(a, ops));
+  const out = extra.map(({ token, account }) => [
+    `${account} is still a ComplianceRules rule administrator on ${token} (neither governance nor ops)`,
+    false,
+  ]);
+  if (!extra.length) {
+    out.push([
+      "no ComplianceRules rule administrator but governance and ops",
+      true,
+    ]);
+  }
+  return out;
+}
+
+/** Trusted accounts without code (a wallet or an EIP-7702 delegation). */
+async function residueLines(o) {
+  const out = [];
+  for (const { account: a } of await liveTrustedContracts(o)) {
+    const code = await ethers.provider.getCode(a);
+    const delegated = code.length === 48 && /^0xef0100/i.test(code);
+    if (code !== "0x" && !delegated) continue;
+    out.push([`trusted address ${a} is a wallet or delegated wallet`, false]);
+  }
+  if (!out.length) out.push(["every trusted contract has code", true]);
+  return out;
 }
 
 /**
