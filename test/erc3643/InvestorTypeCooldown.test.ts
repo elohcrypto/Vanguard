@@ -223,6 +223,16 @@ describe("Investor-type transfer cooldown (Task 4.10)", function () {
     await token.mint(alice.address, e("10"));
     await token.burn(alice.address, e("10"));
     expect(await types.lastTransferAt(alice.address)).to.equal(0n);
+    // The new wallet must control the identity (D41): an ACTION key.
+    await (
+      await ethers.getContractAt("OnchainID", ids[alice.address])
+    )
+      .connect(alice)
+      .addKey(
+        ethers.solidityPackedKeccak256(["address"], [fresh.address]),
+        2,
+        1,
+      );
     await token
       .connect(owner)
       .recoveryAddress(alice.address, fresh.address, ids[alice.address]);

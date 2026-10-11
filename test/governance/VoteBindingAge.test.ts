@@ -104,10 +104,10 @@ describe("Vote binding: minimum identity age", function () {
       { length: n },
       () => ethers.Wallet.createRandom().address,
     );
-    const ids = Array.from(
-      { length: n },
-      () => ethers.Wallet.createRandom().address,
-    );
+    // One OnchainID each, owned by the wallet (D41).
+    const OID = await ethers.getContractFactory("OnchainID");
+    const ids: string[] = [];
+    for (const w of wallets) ids.push(await (await OID.deploy(w)).getAddress());
     await ir.batchRegisterIdentity(
       wallets.slice(0, 50),
       ids.slice(0, 50),

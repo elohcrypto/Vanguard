@@ -180,6 +180,10 @@ describe("CustodyFlow: option 23 on the MultiSigWallet (Task 4.3)", function () 
     const id = await (
       await ethers.getContractFactory("OnchainID")
     ).deploy(deployer.address);
+    // The wallet holds an ACTION key on it (D41: it must control it).
+    await id
+      .connect(deployer)
+      .addKey(ethers.solidityPackedKeccak256(["address"], [other]), 2, 1);
     await idReg.registerIdentity(other, await id.getAddress(), 840);
     expect(await Custody.isKeylessPlaceholder(state, other)).to.equal(false);
     expect(

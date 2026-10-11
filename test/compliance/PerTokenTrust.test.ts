@@ -100,6 +100,11 @@ describe("ComplianceRules per-token trust and administrators (G5)", function () 
       const token = tok[recoverOn];
       await token.mint(alice.address, 100n);
       const stub = (await D("MockToken", "S", "S", 0)).target as string;
+      // The stub holds a key on Alice's identity, so the recovery reaches
+      // the compliance check (D41 would refuse it earlier otherwise).
+      await id
+        .connect(alice)
+        .addKey(ethers.solidityPackedKeccak256(["address"], [stub]), 2, 1);
       await rules.addTrustedContract(tok[trustOn].target, stub);
       // The cause is the trust elsewhere, not this token's own map or a list.
       expect(await rules.isTrustedOnAnyToken(stub)).to.equal(true);

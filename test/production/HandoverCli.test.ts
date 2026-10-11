@@ -372,13 +372,19 @@ describe("Handover CLI (scripts/handover.ts)", function () {
   it("refuses a voter whose wallet does not control its identity (review L-2)", async function () {
     // Verified, funded and aged, but the OnchainID is the deployer's and the
     // stranger holds no key on it: castVote would revert mid-ceremony.
-    const id = await (
-      await ethers.getContractFactory("OnchainID")
-    ).deploy(f.deployer.address);
+    const OID = await ethers.getContractFactory("OnchainID");
+    const id = await OID.deploy(f.deployer.address);
+    // registerIdentity refuses the binding outright (D41, 4.14); the agent's
+    // updateIdentity still re-binds, which is what the ceremony's own check
+    // must catch.
     await f.c.identityRegistry.registerIdentity(
       f.stranger.address,
-      await id.getAddress(),
+      await (await OID.deploy(f.stranger.address)).getAddress(),
       840,
+    );
+    await f.c.identityRegistry.updateIdentity(
+      f.stranger.address,
+      await id.getAddress(),
     );
     await attest(f.kycIssuer, f.deployer, await id.getAddress());
     await f.c.governanceToken.mint(

@@ -4,6 +4,7 @@ pragma solidity ^0.8.19;
 import "@openzeppelin/contracts/utils/structs/Checkpoints.sol";
 import "./RegistryVerification.sol";
 import "../compliance/interfaces/IComplianceRules.sol";
+import {IdentityControl} from "../onchain_id/IdentityControl.sol";
 
 /**
  * @title IdentityRegistry
@@ -54,6 +55,9 @@ contract IdentityRegistry is RegistryVerification {
     error IdentityNotRegistered(address wallet);
     /// @dev moveIdentity: the destination wallet is already registered.
     error WalletAlreadyHasIdentity(address wallet);
+    /// @dev The wallet neither owns the identity nor holds a MANAGEMENT or
+    ///      ACTION key on it (D41, IdentityControl).
+    error WalletDoesNotControlIdentity(address wallet, address identity);
 
     // Mapping from wallet address to country code
     mapping(address => uint16) private _countries;
@@ -125,6 +129,11 @@ contract IdentityRegistry is RegistryVerification {
         require(_identity != address(0), "Invalid identity address");
         require(_identities[_userAddress] == address(0), "Identity already registered");
         require(_walletOf[_identity] == address(0), "Identity already bound");
+        // D41: the wallet must own the identity or hold a MANAGEMENT or
+        // ACTION key on it (both registration paths come through here).
+        if (!IdentityControl.controls(_userAddress, _identity)) {
+            revert WalletDoesNotControlIdentity(_userAddress, _identity);
+        }
 
         if (address(_complianceRules) != address(0) && _tokenForJurisdiction != address(0)) {
             (bool isValid, string memory reason) = _complianceRules.validateJurisdiction(
@@ -175,6 +184,10 @@ contract IdentityRegistry is RegistryVerification {
         if (_identities[_toWallet] != address(0)) revert WalletAlreadyHasIdentity(_toWallet);
 
         address identityAddr = _identities[_fromWallet];
+        // D41: the new wallet must control the identity it is bound to.
+        if (!IdentityControl.controls(_toWallet, identityAddr)) {
+            revert WalletDoesNotControlIdentity(_toWallet, identityAddr);
+        }
         uint16 country = _countries[_fromWallet];
 
         _identities[_toWallet] = identityAddr;

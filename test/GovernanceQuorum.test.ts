@@ -117,7 +117,7 @@ describe("VanguardGovernance — quorum enforcement", () => {
   });
 
   it("IdentityRegistry maintains the eligible-voter count", async () => {
-    const [owner, a, b, idA, idB, idC] = await ethers.getSigners();
+    const [owner, a, b] = await ethers.getSigners();
     const ir = await (
       await ethers.getContractFactory("IdentityRegistry")
     ).deploy();
@@ -125,16 +125,20 @@ describe("VanguardGovernance — quorum enforcement", () => {
 
     expect(await ir.registeredIdentityCount()).to.equal(0n);
 
-    // Any non-zero address works as the identity here; the registry only
-    // requires it to be non-zero and not bound to another wallet.
-    await ir.registerIdentity(a.address, idA.address, 840);
+    // The identity must be one the wallet controls (D41): one OnchainID
+    // each, owned by the wallet.
+    const OID = await ethers.getContractFactory("OnchainID");
+    const idA = await (await OID.deploy(a.address)).getAddress();
+    const idB = await (await OID.deploy(b.address)).getAddress();
+    const idC = await (await OID.deploy(a.address)).getAddress();
+    await ir.registerIdentity(a.address, idA, 840);
     expect(await ir.registeredIdentityCount()).to.equal(1n);
 
-    await ir.registerIdentity(b.address, idB.address, 840);
+    await ir.registerIdentity(b.address, idB, 840);
     expect(await ir.registeredIdentityCount()).to.equal(2n);
 
     // updateIdentity replaces an entry — the count must NOT change.
-    await ir.updateIdentity(a.address, idC.address);
+    await ir.updateIdentity(a.address, idC);
     expect(await ir.registeredIdentityCount()).to.equal(2n);
 
     await ir.deleteIdentity(a.address);

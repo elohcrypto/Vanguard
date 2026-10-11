@@ -82,6 +82,12 @@ describe("Vote binding: one identity, one wallet, one vote", function () {
       const aliceId = await ir.identity(proposer.address);
       const born = await ir.identityRegisteredAt(aliceId);
       expect(born).to.be.greaterThan(0n);
+      // The destination holds a key on the identity (D41).
+      await (
+        await ethers.getContractAt("OnchainID", aliceId)
+      )
+        .connect(proposer)
+        .addKey(keyOf(stranger.address), ACTION_KEY, ECDSA);
       await ir.moveIdentity(proposer.address, stranger.address);
       expect(await ir.walletOf(aliceId)).to.equal(stranger.address);
       expect(await ir.identityRegisteredAt(aliceId)).to.equal(born);
@@ -96,20 +102,27 @@ describe("Vote binding: one identity, one wallet, one vote", function () {
     });
 
     it("keeps the identity-count history across register, delete and move", async function () {
-      const { ir, stranger, voters } = await setup();
+      const { ir, stranger, voters, factory, fresh } = await setup();
       const t0 = await time.latest();
       expect(await ir.registeredIdentityCountAt(t0)).to.equal(3n);
+      // Real identities the wallets control (D41).
       await ir.registerIdentity(
         stranger.address,
-        ethers.Wallet.createRandom().address,
+        await deployIdentity(factory, stranger.address),
         840,
       );
       const t1 = await time.latest();
       await time.increase(10);
-      await ir.moveIdentity(
-        voters[0].address,
-        ethers.Wallet.createRandom().address,
-      );
+      const moved = await fresh();
+      await (
+        await ethers.getContractAt(
+          "OnchainID",
+          await ir.identity(voters[0].address),
+        )
+      )
+        .connect(voters[0])
+        .addKey(keyOf(moved.address), ACTION_KEY, ECDSA);
+      await ir.moveIdentity(voters[0].address, moved.address);
       const t2 = await time.latest();
       await time.increase(10);
       await ir.deleteIdentity(stranger.address);
@@ -159,13 +172,37 @@ describe("Vote binding: one identity, one wallet, one vote", function () {
     });
 
     it("refuses a wallet holding no key on its identity (ops re-binds Alice's identity)", async function () {
-      const { gov, ir, ops, propose, proposer, voters, fresh, fund } =
-        await setup();
+      const f = await setup();
+      const { gov, ir, ops, propose, proposer, voters, fresh, fund } = f;
       const id = await propose(voters[0]);
       const opsWallet = await fresh();
-      // The registry agent moves Alice's verified, aged identity to its own
-      // wallet. The wallet is verified, but Alice never gave it a key.
-      await ir.connect(ops).moveIdentity(proposer.address, opsWallet.address);
+      const aliceId = await ir.identity(proposer.address);
+      // The registry agent tries to move Alice's verified, aged identity to
+      // its own wallet, which Alice never gave a key: the registry refuses
+      // the binding under the same rule governance votes by (D41, 4.14).
+      await expect(
+        ir.connect(ops).moveIdentity(proposer.address, opsWallet.address),
+      )
+        .to.be.revertedWithCustomError(ir, "WalletDoesNotControlIdentity")
+        .withArgs(opsWallet.address, aliceId);
+      expect(await ir.identity(proposer.address)).to.equal(aliceId);
+      expect(await ir.isVerified(opsWallet.address)).to.equal(false);
+      // Unbound, the wallet is not even verified: it cannot be funded or vote.
+      await expect(fund(opsWallet)).to.be.revertedWith("Identity not verified");
+      await expect(
+        gov.connect(opsWallet).castVote(id, true, ""),
+      ).to.be.revertedWith("Must be KYC/AML verified");
+      // The agent's updateIdentity still re-binds a registered wallet (not
+      // under D41); governance's own rule then refuses the vote.
+      await ir
+        .connect(ops)
+        .registerIdentity(
+          opsWallet.address,
+          await deployIdentity(f.factory, opsWallet.address),
+          840,
+        );
+      await ir.connect(ops).deleteIdentity(proposer.address);
+      await ir.connect(ops).updateIdentity(opsWallet.address, aliceId);
       expect(await ir.isVerified(opsWallet.address)).to.equal(true);
       await fund(opsWallet);
       await expect(
@@ -262,8 +299,10 @@ describe("Vote binding: one identity, one wallet, one vote", function () {
     it("a proposer swapped onto a spare aged identity cannot self-vote", async function () {
       const f = await setup();
       const { gov, ir, ops, propose, proposer } = f;
-      const { id: spare } = await kycId(f, proposer.address);
+      const { oid: spareOid, id: spare } = await kycId(f, proposer.address);
       const parked = ethers.Wallet.createRandom().address;
+      // The parked wallet holds a key on the spare identity (D41).
+      await spareOid.connect(proposer).addKey(keyOf(parked), ACTION_KEY, ECDSA);
       await ir.connect(ops).registerIdentity(parked, spare, 840);
       await ageVoters(gov);
       await ir.connect(ops).deleteIdentity(parked);

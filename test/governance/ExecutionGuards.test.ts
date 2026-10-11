@@ -58,10 +58,11 @@ describe("Execution gas floor (M1)", function () {
       { length: n },
       () => ethers.Wallet.createRandom().address,
     );
-    const ids = Array.from(
-      { length: n },
-      () => ethers.Wallet.createRandom().address,
-    );
+    // One OnchainID each, owned by the wallet (D41: the registry refuses a
+    // wallet that does not control its identity).
+    const OID = await ethers.getContractFactory("OnchainID");
+    const ids: string[] = [];
+    for (const w of ws) ids.push(await (await OID.deploy(w)).getAddress());
     const data = ir.interface.encodeFunctionData("batchRegisterIdentity", [
       ws,
       ids,

@@ -189,7 +189,9 @@ describe("KeyManager recovery guards (2F.2, M2, review F2/F3)", function () {
     expect((await km.keyRecoveries(idA)).initiatedAt).to.equal(0);
     await km.connect(C).initiateKeyRecovery(idA, k(good.address));
     expect((await km.getKeyRecovery(idA)).approvalCount).to.equal(1);
-    expect(await km.hasApprovedRecovery(idA, k(good.address), A.address)).to.equal(false);
+    expect(
+      await km.hasApprovedRecovery(idA, k(good.address), A.address),
+    ).to.equal(false);
     await time.increase(DAY2 + 1);
     await expect(
       km.connect(anyone).executeKeyRecovery(idA, k(good.address)),
@@ -270,15 +272,19 @@ describe("Recovered wallet votes after KeyManager recovery (2F.1 + 2F.2)", funct
       .connect(bob)
       .setupKeyRecovery(bobId, [agentA.address, agentB.address], 2);
 
-    // Bob loses his wallet; the token agent recovers onto newBob. The
-    // registry now binds newBob to Bob's identity, but the OnchainID's
-    // owner and keys are unchanged.
+    // Bob loses his wallet. The token agent cannot recover onto newBob yet:
+    // the registry binds only a wallet that controls the identity (D41),
+    // and newBob holds no key on Bob's OnchainID.
     await c.identityRegistry.addAgent(await c.token.getAddress());
-    await c.token.recoveryAddress(bob.address, newBob.address, bobId);
-    expect(await c.identityRegistry.identity(newBob.address)).to.equal(bobId);
-    await c.governanceToken.mint(newBob.address, ethers.parseEther("100"));
-    for (const w of [proposer, newBob])
-      await c.governanceToken.connect(w).approve(f.govAddr, ethers.MaxUint256);
+    await expect(c.token.recoveryAddress(bob.address, newBob.address, bobId))
+      .to.be.revertedWithCustomError(c.token, "WalletDoesNotControlIdentity")
+      .withArgs(newBob.address, bobId);
+    expect(await c.identityRegistry.identity(newBob.address)).to.equal(
+      ethers.ZeroAddress,
+    );
+    await c.governanceToken
+      .connect(proposer)
+      .approve(f.govAddr, ethers.MaxUint256);
 
     // The agents start recovery for newBob's key and wait out the timelock.
     await km.connect(agentA).initiateKeyRecovery(bobId, k(newBob.address));
@@ -292,13 +298,21 @@ describe("Recovered wallet votes after KeyManager recovery (2F.1 + 2F.2)", funct
     await gov.connect(proposer).createProposal(SYS, "t", "", f.govAddr, noop);
     const pid = await gov.proposalCount();
 
+    // Unbound, newBob is not verified: no vote.
     await expect(
       gov.connect(newBob).castVote(pid, true, ""),
-    ).to.be.revertedWith("Wallet does not control its identity");
+    ).to.be.revertedWith("Must be KYC/AML verified");
 
-    // KeyManager recovery adds newBob's key as MANAGEMENT on Bob's identity.
+    // KeyManager recovery adds newBob's key as MANAGEMENT on Bob's identity;
+    // only then does the token-side recovery bind newBob in the registry.
     await km.executeKeyRecovery(bobId, k(newBob.address));
     expect(await id.keyHasPurpose(k(newBob.address), MGMT)).to.equal(true);
+    await c.token.recoveryAddress(bob.address, newBob.address, bobId);
+    expect(await c.identityRegistry.identity(newBob.address)).to.equal(bobId);
+    await c.governanceToken.mint(newBob.address, ethers.parseEther("100"));
+    await c.governanceToken
+      .connect(newBob)
+      .approve(f.govAddr, ethers.MaxUint256);
 
     await expect(gov.connect(newBob).castVote(pid, true, "")).to.not.be
       .reverted;

@@ -8,6 +8,7 @@ import "./interfaces/IERC3643.sol";
 import "./interfaces/IIdentityRegistry.sol";
 import "./interfaces/ICompliance.sol";
 import "./interfaces/IInvestorTypeRegistry.sol";
+import {IdentityControl} from "../onchain_id/IdentityControl.sol";
 
 /**
  * @title ERC3643 Token
@@ -256,6 +257,13 @@ contract Token is IERC3643, ERC20, Ownable2Step, Pausable {
             && _identityRegistry.formerIdentity(_lostWallet) == _investorOnchainID;
         require(lostIdentity == _investorOnchainID || identityAlreadyMoved, "Invalid identity");
         require(newIdentity == address(0) || identityAlreadyMoved, "New wallet already has identity");
+        // D41: the new wallet must control the identity (owner, MANAGEMENT
+        // or ACTION key), so the asset-side recovery cannot land on a
+        // wallet the identity-side recovery does not know. Checked before
+        // any state moves; moveIdentity checks it again on its own path.
+        if (!IdentityControl.controls(_newWallet, _investorOnchainID)) {
+            revert WalletDoesNotControlIdentity(_newWallet, _investorOnchainID);
+        }
 
         uint256 balance = balanceOf(_lostWallet);
         uint256 frozenBalance = _frozenTokens[_lostWallet];
@@ -383,6 +391,8 @@ contract Token is IERC3643, ERC20, Ownable2Step, Pausable {
     event AgentAdded(address indexed agent);
     event AgentRemoved(address indexed agent);
     error ZeroAgent();
+    /// @dev recoveryAddress: the new wallet does not control the identity (D41).
+    error WalletDoesNotControlIdentity(address wallet, address identity);
 
     function addAgent(address _agent) external onlyOwner {
         if (_agent == address(0)) revert ZeroAgent();

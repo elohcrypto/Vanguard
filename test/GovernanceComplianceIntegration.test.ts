@@ -598,8 +598,11 @@ describe("Governance → ComplianceRules Integration Test", function () {
       // Flood the registry AFTER the vote is cast. With a live denominator
       // this would dilute turnout; with the snapshot it must not move.
       const signers = await ethers.getSigners();
+      const OID = await ethers.getContractFactory("OnchainID");
       for (const s of signers.slice(12, 18)) {
-        await identityRegistry.registerIdentity(s.address, s.address, 840);
+        // One OnchainID each: the wallet must control its identity (D41).
+        const sid = await (await OID.deploy(s.address)).getAddress();
+        await identityRegistry.registerIdentity(s.address, sid, 840);
       }
       expect(
         await identityRegistry.registeredIdentityCount(),

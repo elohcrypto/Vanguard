@@ -159,6 +159,13 @@ describe("GovernanceToken agent limits (D23)", function () {
     await idReg.addAgent(await vsc.getAddress()); // as deployed: moveIdentity
     await vsc.mint(v1.address, 100n);
     const v1Id = await idReg.identity(v1.address);
+    // Governance holds a key on v1's identity, so the recovery reaches the
+    // compliance check (D41 would refuse it earlier otherwise).
+    await (
+      await ethers.getContractAt("OnchainID", v1Id)
+    )
+      .connect(v1)
+      .addKey(ethers.solidityPackedKeccak256(["address"], [govAddr]), 2, 1);
     // G5: governance is trusted on VGT only, so VSC's own trusted check
     // passes; ComplianceRules.canReceive refuses an account trusted on any
     // token, and the whole recovery reverts.

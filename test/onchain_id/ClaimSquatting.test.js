@@ -361,7 +361,11 @@ describe("Claim-slot squatting (2F.2, H2)", function () {
         [await sign(issuerOwner, eoaId, KYC, d)],
       );
     expect(await kyc.hasValidClaim(eoaId, KYC)).to.equal(true);
-    await ir.registerIdentity(attacker.address, eoaId, 840);
+    // D41 (4.14): the registry refuses the binding itself, since no wallet
+    // controls an identity with no code; nothing is verified by it.
+    await expect(ir.registerIdentity(attacker.address, eoaId, 840))
+      .to.be.revertedWithCustomError(ir, "WalletDoesNotControlIdentity")
+      .withArgs(attacker.address, eoaId);
     expect(await ir.isVerified(attacker.address)).to.equal(false);
   });
 

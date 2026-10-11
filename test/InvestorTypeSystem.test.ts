@@ -59,32 +59,19 @@ describe("Investor Type System", function () {
       true,
     );
 
-    // Register identities for testing
-    await identityRegistry.registerIdentity(
-      normalInvestor.address,
-      normalInvestor.address,
-      1,
-    ); // US
-    await identityRegistry.registerIdentity(
-      retailInvestor.address,
-      retailInvestor.address,
-      1,
-    ); // US
-    await identityRegistry.registerIdentity(
-      accreditedInvestor.address,
-      accreditedInvestor.address,
-      1,
-    ); // US
-    await identityRegistry.registerIdentity(
-      institutionalInvestor.address,
-      institutionalInvestor.address,
-      1,
-    ); // US
-    await identityRegistry.registerIdentity(
-      recipient.address,
-      recipient.address,
-      1,
-    ); // US
+    // Register identities for testing: one OnchainID each, owned by the
+    // wallet, since a wallet must control its identity (D41). Country US.
+    const OID = await ethers.getContractFactory("OnchainID");
+    for (const w of [
+      normalInvestor,
+      retailInvestor,
+      accreditedInvestor,
+      institutionalInvestor,
+      recipient,
+    ]) {
+      const wid = await (await OID.deploy(w.address)).getAddress();
+      await identityRegistry.registerIdentity(w.address, wid, 1);
+    }
   });
 
   describe("InvestorTypeRegistry", function () {

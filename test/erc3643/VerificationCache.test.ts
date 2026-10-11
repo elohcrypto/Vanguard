@@ -256,7 +256,17 @@ describe("IdentityRegistry verification cache (Task 4.9)", function () {
     await registry.deleteIdentity(alice.address);
     expect(await registry.isVerified(alice.address)).to.equal(false);
 
-    // Recovery: the same person's identity, entry and all, follows the move.
+    // Recovery: the same person's identity, entry and all, follows the move
+    // (the new wallet holds a key on it, D41).
+    await (
+      await ethers.getContractAt("OnchainID", ids[bob.address])
+    )
+      .connect(bob)
+      .addKey(
+        ethers.solidityPackedKeccak256(["address"], [stranger.address]),
+        2,
+        1,
+      );
     await registry.moveIdentity(bob.address, stranger.address);
     expect(await registry.isVerified(bob.address)).to.equal(false);
     expect(await registry.isVerified(stranger.address)).to.equal(true);

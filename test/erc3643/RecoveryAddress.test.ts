@@ -55,9 +55,19 @@ describe("recoveryAddress", function () {
     await configureKyc(idReg, await kycIssuer.getAddress());
 
     const OID = await ethers.getContractFactory("OnchainID");
-    lostId = await (await OID.deploy(lost.address)).getAddress();
+    const lostIdC = await OID.deploy(lost.address);
+    lostId = await lostIdC.getAddress();
     await idReg.registerIdentity(lost.address, lostId, 840);
     await attest(kycIssuer, owner, lostId);
+    // The recovered wallet must control the identity (D41): the holder
+    // gave it an ACTION key before losing the old wallet.
+    await lostIdC
+      .connect(lost)
+      .addKey(
+        ethers.solidityPackedKeccak256(["address"], [fresh.address]),
+        2,
+        1,
+      );
     const otherId = await (await OID.deploy(other.address)).getAddress();
     await idReg.registerIdentity(other.address, otherId, 840);
     await attest(kycIssuer, owner, otherId);
@@ -256,9 +266,10 @@ describe("recoveryAddress", function () {
 
     it("refuses if the lost wallet has since been registered to someone else", async function () {
       const OID = await ethers.getContractFactory("OnchainID");
+      // Someone else's identity, which the wallet now controls (D41).
       await idReg.registerIdentity(
         lost.address,
-        await (await OID.deploy(owner.address)).getAddress(),
+        await (await OID.deploy(lost.address)).getAddress(),
         840,
       );
       await expect(
@@ -281,7 +292,8 @@ describe("recoveryAddress", function () {
 
     it("a recycled wallet does not keep the old identity's recovery claim", async function () {
       const OID = await ethers.getContractFactory("OnchainID");
-      const recycledId = await (await OID.deploy(owner.address)).getAddress();
+      // The new occupant's own identity (D41: it must control it).
+      const recycledId = await (await OID.deploy(lost.address)).getAddress();
       await idReg.registerIdentity(lost.address, recycledId, 840);
       await attest(kycIssuer, owner, recycledId);
       await vgt.mint(lost.address, E("1")); // the new occupant's money
