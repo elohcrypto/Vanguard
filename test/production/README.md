@@ -43,9 +43,11 @@ VERBOSE=true npx hardhat test test/production/ProductionSimulation.test.ts
 ### 2. Run Complete Production Test Suite
 
 ```bash
-# Run the integration and production-simulation suites and write a report.
-# The script shells out to `npx hardhat test ...` on the in-process network;
-# a --network flag on the outer command does not reach those runs.
+# Run the integration and production-simulation suites and write a JSON
+# summary to test-reports/production/. A thin local-only wrapper (plan v2
+# Task 4.13, D48): it refuses any network but hardhat/localhost, quotes its
+# test globs, deploys nothing and shells out to `npx hardhat test ...` on
+# the in-process network.
 npx hardhat run scripts/production/RunProductionTests.ts
 ```
 

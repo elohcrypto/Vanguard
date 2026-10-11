@@ -192,8 +192,10 @@ ALERT_WEBHOOK_URL=https://your-monitoring-service.com/webhook
 
 ### 1. Final Test Run
 ```bash
-# Run complete production test suite
-npx hardhat run scripts/production/RunProductionTests.ts --network mainnet
+# Run the production test set locally (the runner refuses any network
+# but hardhat/localhost and deploys nothing: a live-network rehearsal is
+# the deploy script below plus the handover ceremony, docs/TESTNET_DEMO.md)
+npx hardhat run scripts/production/RunProductionTests.ts
 
 # Verify all tests pass
 echo "✅ All tests must pass before proceeding"
