@@ -54,16 +54,13 @@ describe("Handover: PrivacyManager wired in ComplianceRules (3.4)", function () 
     await c.complianceRules.setWhitelistMode(token, mode);
   }
 
-  it("a wired, unbound PrivacyManager must be named; then it is bound and accepted", async function () {
+  // Task 4.13: a wired, unbound PrivacyManager is derived from
+  // ComplianceRules.privacyManager(token), then bound and accepted.
+  it("a wired, unbound PrivacyManager is derived, bound and accepted", async function () {
     await wire(vsc, pmAddr);
     expect(await c.governance.boundTarget(11)).to.equal(ethers.ZeroAddress);
     delete args.privacyManager;
-    await refused(
-      new RegExp(
-        `ComplianceRules wires PrivacyManager ${pmAddr} for VSC, which the config does not name: add "privacyManager"`,
-      ),
-    );
-    args.privacyManager = c.privacyManager;
+    delete args.zkVerifier;
     const report = await handoverDeployerPowers(args);
     await acceptAllByVote({
       governance: c.governance,
@@ -89,7 +86,7 @@ describe("Handover: PrivacyManager wired in ComplianceRules (3.4)", function () 
     args.privacyManager = other.pm;
     await refused(
       new RegExp(
-        `ComplianceRules wires PrivacyManager ${pmAddr} for VSC, which the config does not name \\(it names ${other.addr}\\)`,
+        `config "privacyManager" names ${other.addr}, but ComplianceRules.privacyManager\\(VSC\\) is ${pmAddr}`,
       ),
     );
   });
@@ -221,7 +218,7 @@ describe("Handover: PrivacyManager wired in ComplianceRules (3.4)", function () 
         complianceRules: c.complianceRules,
       }),
     ).to.be.rejectedWith(
-      `fromBlock ${block + 1} is after the ComplianceRules deploy (it has code at block ${block}): rule administrators added earlier would be missed; use a block before the ComplianceRules deploy`,
+      `fromBlock ${block + 1} is after the ComplianceRules deploy (it has code at block ${block}): grants and events before it would be missed; use a block before the ComplianceRules deploy`,
     );
     await checkFromBlock({
       fromBlock: block,

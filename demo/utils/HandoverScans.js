@@ -50,25 +50,31 @@ async function scanLogs(contract, filter, o) {
 }
 
 /**
- * Review M-3: the scans start at o.fromBlock, so a block after the
- * IdentityRegistry deploy misses agents (and governors, trusted contracts)
- * added before it; Task 3.9 review L2: likewise a block after the
- * ComplianceRules deploy misses rule administrators. Refused when either
- * already had code at fromBlock - 1; a warning when the RPC cannot serve
- * historical code.
+ * Review M-3: the scans start at o.fromBlock, so a block after a scanned
+ * contract's deploy misses what was granted before it (agents,
+ * governors, trusted contracts, rule administrators, nodes, attestors,
+ * proposals). Task 4.13: refused when ANY derived contract already had
+ * code at fromBlock - 1; a warning when the RPC cannot serve historical
+ * code. `extra` adds [contract|address, label] pairs (the registrars).
  */
-async function checkFromBlock(o, log = () => {}) {
+async function checkFromBlock(o, log = () => {}, extra = []) {
   const from = Number(o.fromBlock || 0);
   if (from <= 0) return;
-  for (const [c, label, missed] of [
-    [
-      o.identityRegistry,
-      "IdentityRegistry",
-      "agents, governors and trusted contracts",
-    ],
-    [o.complianceRules, "ComplianceRules", "rule administrators"],
-  ]) {
-    if (!c) continue;
+  const scanned = [
+    ["identityRegistry", "IdentityRegistry"],
+    ["complianceRules", "ComplianceRules"],
+    ["token", "Token"],
+    ["governanceToken", "GovernanceToken"],
+    ["investorTypeRegistry", "InvestorTypeRegistry"],
+    ["oracleManager", "OracleManager"],
+    ["escrowWalletFactory", "EscrowWalletFactory"],
+    ["onchainIDFactory", "OnchainIDFactory"],
+    ["privacyManager", "PrivacyManager"],
+    ["governance", "VanguardGovernance"],
+  ]
+    .filter(([k]) => o[k])
+    .map(([k, label]) => [o[k], label]);
+  for (const [c, label] of [...scanned, ...extra]) {
     const a = await addrOf(c);
     let code;
     try {
@@ -81,7 +87,7 @@ async function checkFromBlock(o, log = () => {}) {
     }
     if (code !== "0x") {
       fail(
-        `fromBlock ${from} is after the ${label} deploy (it has code at block ${from - 1}): ${missed} added earlier would be missed; use a block before the ${label} deploy`,
+        `fromBlock ${from} is after the ${label} deploy (it has code at block ${from - 1}): grants and events before it would be missed; use a block before the ${label} deploy`,
       );
     }
   }

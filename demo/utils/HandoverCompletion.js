@@ -37,6 +37,7 @@ const { privacyLines } = require("./HandoverPrivacy");
 const { keyManagerLines } = require("./HandoverKeys");
 const { registrarLines, custodyOwnerLines } = require("./HandoverRegistrars");
 const { oracleLines } = require("./HandoverOracles");
+const { withDerivedContracts, linkLines } = require("./HandoverDerive");
 
 const ZERO = ethers.ZeroAddress;
 const EXEMPT_ABI = [
@@ -52,6 +53,8 @@ const EXEMPT_ABI = [
  * vouches (review B-L3).
  */
 async function assertHandoverComplete(o) {
+  // Task 4.13: derived from governance; a config mismatch is a failing line.
+  o = await withDerivedContracts(o, () => {}, { strict: false });
   o = await withBoundRegistry(o);
   o = await withDerivedPowers(o, () => {}, { strict: false });
   const dAddr = await addrOf(o.deployer);
@@ -63,6 +66,14 @@ async function assertHandoverComplete(o) {
   // Warnings that mean the deployer still vouches (review B-L3).
   const residual = [];
   const add = (label, pass) => checks.push({ label, ok: Boolean(pass) });
+  for (const issue of o.derivationIssues) add(issue, false);
+  if (!o.derivationIssues.length) {
+    add(
+      `every plan contract is the one governance derives (${Object.keys(o.derivedFrom).length} derived)`,
+      true,
+    );
+  }
+  for (const [label, pass] of await linkLines(o)) add(label, pass);
   if (o.skippedRegistry) {
     add(
       "InvestorTypeRegistry is not live on Token or is owned by governance",

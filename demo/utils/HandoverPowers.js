@@ -101,11 +101,13 @@ async function derivePowers(o) {
 
 /**
  * `o` with `oracles` and `issuers` covering the derived set, recorded as
- * `o.derived`. Strict (the ceremony): refuses, before any transaction, a
- * config whose arrays omit a derived contract, or that does not name a
- * DynamicListManager or factory governance is bound to; warns on extras. A
- * config without the arrays takes the derived set. Not strict (the
- * completion check): the union, so every derived contract is checked.
+ * `o.derived`. Strict (the ceremony): a config list must cover the
+ * derived set (Task 4.13, R-413-3), refused before any transaction when
+ * it omits a derived contract; an extra one is handed over with a
+ * warning; a config without the list takes the derived set. Not strict
+ * (the completion check): the union, so every derived contract is
+ * checked. The factories, privacy pair and DynamicListManager are
+ * derived in HandoverDerive.js.
  */
 async function withDerivedPowers(o, log = () => {}, { strict = true } = {}) {
   const d = await derivePowers(o);
@@ -123,6 +125,8 @@ async function withDerivedPowers(o, log = () => {}, { strict = true } = {}) {
         `config "${key}" omits ${missing.join(", ")} (${what}): the deployer would keep it; list every one, or leave "${key}" out to use the set read from chain`,
       );
     }
+    // R-413-3: an extra (unbound) one is more than the chain requires;
+    // handed over with a warning, never hidden.
     for (const g of addrs) {
       if (strict && !d[key].some((a) => same(a, g))) {
         log(
@@ -136,31 +140,7 @@ async function withDerivedPowers(o, log = () => {}, { strict = true } = {}) {
     out[key] = [...given, ...extra];
   }
   if (!strict) return out;
-  if (d.privacy.conflict) fail(d.privacy.conflict);
-  const named = [
-    ["dynamicListManager", "DynamicListManager", d.dynamicListManager],
-    ...FACTORY_PLAN.map((e) => [e.key, e.label, d.factories[e.key]]),
-  ];
-  for (const [key, label, bound] of named) {
-    const given = o[key] && (await addrOf(o[key]));
-    if (bound && !(given && same(given, bound))) {
-      const why =
-        (key === "privacyManager" && d.privacy.wiredBy) ||
-        `governance is bound to ${label} ${bound}`;
-      const names = given ? ` (it names ${given})` : "";
-      fail(`${why}, which the config does not name${names}: add "${key}"`);
-    }
-  }
-  // Review M-2: a null key cannot hide a factory a trusted escrow names.
-  const escrowNamed =
-    o.escrowWalletFactory && (await addrOf(o.escrowWalletFactory));
-  for (const { factory, escrow } of d.escrowFactories) {
-    if (escrowNamed && same(escrowNamed, factory)) continue;
-    fail(
-      `trusted escrow ${escrow} was created by EscrowWalletFactory ${factory}, which the config does not name: add "escrowWalletFactory"`,
-    );
-  }
-  await checkFromBlock(o, log);
+  await checkFromBlock(out, log);
   return out;
 }
 

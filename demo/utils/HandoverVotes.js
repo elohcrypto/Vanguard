@@ -21,6 +21,7 @@ const {
   withBoundRegistry,
   fail,
 } = require("./HandoverChecks");
+const { withDerivedContracts } = require("./HandoverDerive");
 
 const STATUS = [
   "Pending",
@@ -155,8 +156,12 @@ async function acceptAllByVote({
   log = console.log,
 }) {
   const govAddr = await governance.getAddress();
-  // An unbound optional registry is left out (preflight warned about it).
-  contracts = await withBoundRegistry(contracts);
+  // Task 4.13: the plan contracts come from governance; a given one is
+  // an assertion. An unbound optional registry is left out (preflight
+  // warned about it).
+  contracts = await withBoundRegistry(
+    await withDerivedContracts({ ...contracts, governance }),
+  );
   const vote = async (id, label) => {
     await castAcceptanceVotes(governance, id, voters);
     await settleProposal(governance, id, label);

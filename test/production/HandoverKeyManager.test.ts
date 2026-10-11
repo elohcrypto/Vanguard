@@ -118,10 +118,13 @@ describe("Handover: KeyManager (4.2)", function () {
     await identity.connect(f.deployer).acceptOwnership();
     after = await assertHandoverComplete(args);
     expect(after.failures).to.deep.equal([idLine(idAddr, kmAddr)]);
-    // A look-alike (another contract) fails the code line.
+    // A look-alike named by the config fails the derivation line (4.13):
+    // the factory and the identity both pin the real KeyManager.
     const other = await f.c.token.getAddress();
     after = await assertHandoverComplete({ ...args, keyManager: other });
-    expect(after.failures).to.include(kmLine(other));
+    expect(after.failures.join("\n")).to.include(
+      `config "keyManager" names ${other}, but OnchainIDFactory ${facAddr} recoveryManager() is ${kmAddr}`,
+    );
   });
 
   it("without a keyManager key the ceremony adds no KeyManager line", async function () {
@@ -141,10 +144,19 @@ describe("Handover: KeyManager (4.2)", function () {
     expect(await f.c.token.isAgent(f.ops.address)).to.equal(true);
   });
 
+  // Task 4.13: with nothing pinning a KeyManager the config may still name
+  // one; what it names is then checked as before.
+  async function nothingPins() {
+    await f.c.onchainIDFactory.setRecoveryManager(ethers.ZeroAddress);
+    const o = { ...f.args };
+    delete o.keyManagerIdentity;
+    return o;
+  }
+
   it("preflight refuses a KeyManager with no code, before any transaction", async function () {
     const eoa = f.stranger.address;
     await expect(
-      handoverDeployerPowers({ ...args, keyManager: eoa }),
+      handoverDeployerPowers({ ...(await nothingPins()), keyManager: eoa }),
     ).to.be.rejectedWith(`Handover: keyManager ${eoa} has no code`);
     expect(await f.c.token.isAgent(f.ops.address)).to.equal(false);
   });
@@ -152,8 +164,19 @@ describe("Handover: KeyManager (4.2)", function () {
   it("preflight refuses code that is not the compiled KeyManager", async function () {
     const other = await f.c.oracleManager.getAddress();
     await expect(
-      handoverDeployerPowers({ ...args, keyManager: other }),
+      handoverDeployerPowers({ ...(await nothingPins()), keyManager: other }),
     ).to.be.rejectedWith(/is not the compiled KeyManager/);
+  });
+
+  it("refuses a config naming a KeyManager other than the pinned one (4.13)", async function () {
+    const other = await f.c.oracleManager.getAddress();
+    const err = await handoverDeployerPowers({
+      ...args,
+      keyManager: other,
+    }).catch((e: Error) => e);
+    expect((err as Error).message).to.equal(
+      `Handover: config "keyManager" names ${other}, but OnchainIDFactory ${await f.c.onchainIDFactory.getAddress()} recoveryManager() is ${kmAddr}: the ceremony derives every contract from governance; drop the key or fix the chain`,
+    );
   });
 
   it("preflight refuses a keyManagerIdentity with no code", async function () {
@@ -239,21 +262,48 @@ describe("Handover: KeyManager (4.2)", function () {
         await ethers.getContractFactory("OnchainIDFactory")
       ).deploy(f.deployer.address, evilHash);
       await fac.setRecoveryManager(evilA);
+      // Task 4.13: the ceremony derives the pinned manager and refuses its
+      // code before it reaches the factory's hash.
       const o = { ...f.args, onchainIDFactory: fac };
-      await refuses(o, /recoveryManagerCodeHash .* is neither zero nor/);
+      await refuses(
+        o,
+        new RegExp(
+          `KeyManager ${evilA} runtime code hash .* is not the compiled KeyManager`,
+        ),
+      );
       const r = await assertHandoverComplete(o);
-      expect(r.failures.join("\n")).to.match(/pins no recovery manager/);
+      expect(r.failures).to.include.members([
+        kmLine(evilA),
+        facLine(await fac.getAddress(), evilA),
+      ]);
     });
 
-    it("a factory pinning a recovery manager, keyManager omitted", async function () {
-      // beforeEach pinned kmAddr on the fixture factory.
-      await refuses(f.args, /pins recovery manager .* name it as keyManager/);
+    // Task 4.13: what the factory pins is the ceremony's KeyManager.
+    it("a factory pinning a recovery manager, keyManager omitted: derived", async function () {
+      await handoverDeployerPowers(f.args);
+      const r = await assertHandoverComplete(f.args);
+      expect(r.checks.map((c: any) => c.label)).to.include(kmLine(kmAddr));
     });
 
-    it("keyManagerIdentity named without keyManager", async function () {
+    // Task 4.13: the KeyManager is derived from what the factory and the
+    // identity pin; only an identity pinning nothing still needs the key.
+    it("keyManagerIdentity named without keyManager derives it; a pinless one is refused", async function () {
       const o = { ...args };
       delete o.keyManager;
-      await refuses(o, /keyManagerIdentity is named without keyManager/);
+      await handoverDeployerPowers(o);
+      expect(await f.c.token.isAgent(f.ops.address)).to.equal(true);
+      const r = await assertHandoverComplete(o);
+      expect(r.checks.map((c: any) => c.label)).to.include(kmLine(kmAddr));
+      const theirs = await (
+        await ethers.getContractFactory("OnchainID")
+      ).deploy(f.stranger.address);
+      await f.c.onchainIDFactory.setRecoveryManager(ethers.ZeroAddress);
+      await expect(
+        handoverDeployerPowers({
+          ...o,
+          keyManagerIdentity: await theirs.getAddress(),
+        }),
+      ).to.be.rejectedWith(/keyManagerIdentity is named without keyManager/);
     });
   });
 
@@ -316,8 +366,9 @@ describe("Handover: KeyManager (4.2)", function () {
     const out: string[] = [];
     console.log = (m: string) => out.push(m);
     try {
+      // Task 4.13: the factory pins kmAddr, so another address is refused.
       await expect(runHandover(cfg)).to.be.rejectedWith(
-        `keyManager ${f.stranger.address} has no code`,
+        `config "keyManager" names ${f.stranger.address}, but OnchainIDFactory`,
       );
       cfg.keyManager = kmAddr;
       cfg.keyManagerIdentity = await identity.getAddress();

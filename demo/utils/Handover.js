@@ -44,6 +44,7 @@ const { preflightPrivacy, privacySteps } = require("./HandoverPrivacy");
 const { preflightKeyManager } = require("./HandoverKeys");
 const { preflightRegistrars } = require("./HandoverRegistrars");
 const { preflightOracles, oracleSteps } = require("./HandoverOracles");
+const { withDerivedContracts, preflightLinks } = require("./HandoverDerive");
 const {
   proposeCall,
   proposeAcceptOwnership,
@@ -73,8 +74,11 @@ async function send(p) {
  */
 async function handoverDeployerPowers(o) {
   const log = o.log || console.log;
+  // Task 4.13: every contract derived from governance; a config address
+  // is an assertion (HandoverDerive.js).
+  o = await withDerivedContracts(o, log);
   o = await withBoundRegistry(o, log);
-  // Oracles and issuers bound on chain; refuses a config that omits one.
+  // Oracles and issuers bound on chain; a config list must equal that set.
   o = await withDerivedPowers(o, log);
   await checkIssuerAdmin(o);
   const d = o.deployer;
@@ -90,6 +94,7 @@ async function handoverDeployerPowers(o) {
 
   // Read-only; throws before any transaction when a precondition fails.
   const { governanceOwned } = await preflight(o);
+  await preflightLinks(o); // Task 4.13: A1 H2/H3, M1, D56
   await preflightPowers(o, { governanceOwned });
   await preflightPrivacy(o);
   await preflightKeyManager(o);
@@ -264,7 +269,7 @@ const registryProposal = async (reg, step) => ({
  * a partial run): every registry step whose `done()` does not hold yet.
  */
 async function pendingRegistryProposals(o) {
-  o = await withBoundRegistry(o);
+  o = await withBoundRegistry(await withDerivedContracts(o));
   const reg = o.investorTypeRegistry;
   if (!reg) return [];
   const steps = registrySteps(

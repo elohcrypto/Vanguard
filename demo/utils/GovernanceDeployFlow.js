@@ -114,6 +114,15 @@ async function deployGovernanceSystem(mod) {
     console.log("\n📝 Step 3: Setting VanguardGovernance as agent...");
     await (await govToken.addAgent(govAddr)).wait();
     console.log("   ✅ VanguardGovernance set as agent");
+    // W-1 (Task 4.13): VGT.recoveryAddress calls IdentityRegistry.
+    // moveIdentity, which is onlyAgent; the ceremony requires exactly
+    // {ops, VSC, VGT} as registry agents.
+    if (!(await identityRegistry.isAgent(govTokenAddr))) {
+      await (await identityRegistry.addAgent(govTokenAddr)).wait();
+      console.log(
+        "   ✅ VGT granted agent role on IdentityRegistry (recovery)",
+      );
+    }
 
     // Rule administrators are per token (Task 4.1, G5): governance may
     // set VSC's and VGT's jurisdiction rules by vote; the deployer keeps

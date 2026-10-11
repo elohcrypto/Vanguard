@@ -293,8 +293,9 @@ describe("Handover preflight and self-healing (plan 2E.2)", function () {
     );
   });
 
-  // Review M6: every preflight refusal has a failing test.
-  it("rejects a governance not bound to a plan contract", async function () {
+  // Review M6: every preflight refusal has a failing test. Task 4.13: a
+  // config address is an assertion against the contract governance derives.
+  it("rejects a config naming a Token other than the one governance is bound to", async function () {
     const other = await (
       await ethers.getContractFactory("Token")
     ).deploy(
@@ -304,7 +305,14 @@ describe("Handover preflight and self-healing (plan 2E.2)", function () {
       await c.complianceRules.getAddress(),
     );
     args.token = other;
-    await rejectsBeforeAnyTx(/governance is not bound to Token/);
+    await rejectsBeforeAnyTx(
+      new RegExp(
+        `config "token" names ${await other.getAddress()}, but governance.boundTarget\\(3\\) \\(TokenParameters\\) is ${await c.token.getAddress()}`,
+      ),
+    );
+    // The completion check reports the same mismatch instead of throwing.
+    const { failures } = await assertHandoverComplete(args);
+    expect(failures.join("\n")).to.include('config "token" names');
   });
 
   it("rejects an issuerAdmin that cannot sign when the deployer owns an issuer", async function () {
@@ -386,21 +394,49 @@ describe("Handover preflight and self-healing (plan 2E.2)", function () {
     await rejectsBeforeAnyTx(/bound to GovernanceToken: D23 forbids it/);
   });
 
-  const unboundRegistry = async () => {
+  const SKIP_LINE =
+    "InvestorTypeRegistry is not live on Token or is owned by governance";
+
+  // Task 4.13: the registry is derived from boundTarget(0); a config that
+  // names another one is refused as an assertion that failed.
+  it("refuses a config naming a registry other than the bound one", async function () {
     const reg2 = await (
       await ethers.getContractFactory("InvestorTypeRegistry")
     ).deploy();
     args.investorTypeRegistry = reg2;
-    c.investorTypeRegistry = reg2;
-    return reg2;
-  };
-  const SKIP_LINE =
-    "InvestorTypeRegistry is not live on Token or is owned by governance";
+    await rejectsBeforeAnyTx(
+      /config "investorTypeRegistry" names 0x[0-9a-fA-F]+, but governance.boundTarget\(0\) \(InvestorTypeConfig\) is/,
+    );
+  });
 
+  // A governance bound to no registry: a named one the Token does not
+  // enforce is left out with a warning (the pre-4.13 intent kept).
   it("leaves out an unbound registry the Token does not use, with a warning", async function () {
-    const reg2 = await unboundRegistry();
+    const reg2 = await (
+      await ethers.getContractFactory("InvestorTypeRegistry")
+    ).deploy();
+    const gov2 = await (
+      await ethers.getContractFactory("VanguardGovernance")
+    ).deploy(
+      vgtAddr,
+      await c.identityRegistry.getAddress(),
+      ethers.ZeroAddress,
+      await c.complianceRules.getAddress(),
+      await c.oracleManager.getAddress(),
+      await c.token.getAddress(),
+      1440,
+    );
+    const gov2Addr = await gov2.getAddress();
+    // gov2 takes the first governance's place on VGT and in the manager.
+    await c.governanceToken.removeAgent(govAddr);
+    await c.governanceToken.addAgent(gov2Addr);
+    await c.complianceRules.removeTrustedContract(vgtAddr, govAddr);
+    await c.complianceRules.addTrustedContract(vgtAddr, gov2Addr);
+    await gov2.setDynamicListManager(await c.dynamicListManager.getAddress());
     expect(await c.token.investorTypeRegistry()).to.equal(ethers.ZeroAddress);
     const steps: string[] = [];
+    args = { ...args, governance: gov2, investorTypeRegistry: reg2 };
+    c = { ...c, governance: gov2, investorTypeRegistry: reg2 };
     args.log = (m: string) => steps.push(m);
     await ceremony();
     expect(steps.join("\n")).to.match(
@@ -411,17 +447,24 @@ describe("Handover preflight and self-healing (plan 2E.2)", function () {
     expect(result.failures).to.deep.equal([]);
     const labels = result.checks.map((x: any) => x.label);
     expect(
-      labels.filter((l: string) => /InvestorTypeRegistry/.test(l)),
+      labels.filter((l: string) => /^InvestorTypeRegistry/.test(l)),
     ).to.deep.equal([SKIP_LINE]);
   });
 
-  it("refuses to leave out an unbound registry the Token enforces (M-A)", async function () {
-    const reg2 = await unboundRegistry();
+  // A1 H3 (Task 4.13): a deployer-owned registry live on the Token while
+  // governance is bound to another could halt VSC after the handover.
+  it("refuses a Token enforcing a registry governance is not bound to (A1 H3)", async function () {
+    const reg2 = await (
+      await ethers.getContractFactory("InvestorTypeRegistry")
+    ).deploy();
     await c.token.setInvestorTypeRegistry(await reg2.getAddress());
     await reg2.authorizeToken(await c.token.getAddress(), true);
-    expect((await check(SKIP_LINE)).ok).to.equal(false);
+    const line = `Token investorTypeRegistry() is none or ${await c.investorTypeRegistry.getAddress()} (the registry governance is bound to)`;
+    expect((await check(line)).ok).to.equal(false);
     await rejectsBeforeAnyTx(
-      /not bound to InvestorTypeRegistry .* which the Token enforces: redeploy governance/,
+      new RegExp(
+        `the Token enforces InvestorTypeRegistry ${await reg2.getAddress()}, which governance is not bound to \\(boundTarget\\(0\\) = ${await c.investorTypeRegistry.getAddress()}\\)`,
+      ),
     );
   });
 });

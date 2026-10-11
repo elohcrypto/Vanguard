@@ -110,6 +110,19 @@ export async function handoverFixture() {
   await governanceToken.addAgent(govAddr);
   await complianceRules.setTokenIdentityRegistry(vgtAddr, idRegAddr);
   await complianceRules.addTrustedContract(vgtAddr, govAddr);
+  // As the demo deploys (Task 4.13 parity): both tokens are registry
+  // agents (recoveryAddress calls moveIdentity, W-1), the registry reads
+  // the rules for jurisdiction checks, VSC's identity registry is wired.
+  for (const t of [await token.getAddress(), vgtAddr])
+    await identityRegistry.addAgent(t);
+  await identityRegistry.setComplianceRules(
+    rulesAddr,
+    await token.getAddress(),
+  );
+  await complianceRules.setTokenIdentityRegistry(
+    await token.getAddress(),
+    idRegAddr,
+  );
   // As the demo deploys: the escrow factory trusts its escrows (Task 4.3).
   await addRegistrar(
     complianceRules,

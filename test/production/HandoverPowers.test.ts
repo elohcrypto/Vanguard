@@ -140,13 +140,33 @@ describe("Handover power set from chain (plan 2F.5)", function () {
       expect(await c.escrowWalletFactory.owner()).to.equal(govAddr);
     });
 
-    it("refuses a config that omits a factory governance is bound to", async function () {
+    // Task 4.13: a bound factory the config omits is derived; one the
+    // config names wrongly is refused as a failed assertion.
+    it("derives a factory governance is bound to; refuses a config naming another", async function () {
       const e = c.escrowWalletFactory;
+      const eAddr = await e.getAddress();
       await e.transferOwnership(govAddr);
-      await c.governance.setEscrowWalletFactory(await e.getAddress());
-      delete args.escrowWalletFactory;
+      await c.governance.setEscrowWalletFactory(eAddr);
+      const other = await (
+        await ethers.getContractFactory("EscrowWalletFactory")
+      ).deploy(
+        await c.token.getAddress(),
+        f.feeWallet.address,
+        await c.identityRegistry.getAddress(),
+        await c.complianceRules.getAddress(),
+      );
+      args.escrowWalletFactory = other;
       await refused(
-        /bound to EscrowWalletFactory 0x[0-9a-fA-F]+, which the config does not name: add "escrowWalletFactory"/,
+        new RegExp(
+          `config "escrowWalletFactory" names ${await other.getAddress()}, but governance.boundTarget\\(9\\) \\(EscrowFactoryParameters\\) is ${eAddr}`,
+        ),
+      );
+      delete args.escrowWalletFactory;
+      await ceremony();
+      expect(await e.owner()).to.equal(govAddr);
+      const { checks } = await assertHandoverComplete(args);
+      expect(checks.map((x: any) => x.label)).to.include(
+        "EscrowWalletFactory owned by governance, deployer holds no role",
       );
     });
   });
@@ -228,22 +248,38 @@ describe("Handover power set from chain (plan 2F.5)", function () {
       );
     });
 
-    it("refuses a privacy contract governance is bound to but the config omits", async function () {
+    // Task 4.13: a bound privacy contract the config omits is derived
+    // (the verifier from PrivacyManager.zkVerifier()); a config naming
+    // another one is refused as a failed assertion.
+    it("derives a bound privacy pair the config omits; refuses another one named", async function () {
       const pm = c.privacyManager;
+      const pmAddr = await pm.getAddress();
       await pm.transferOwnership(govAddr);
-      await c.governance.setPrivacyManager(await pm.getAddress());
-      delete args.privacyManager;
+      await c.governance.setPrivacyManager(pmAddr);
+      const otherPm = await (
+        await ethers.getContractFactory("PrivacyManager")
+      ).deploy(await c.zkVerifier.getAddress());
+      args.privacyManager = otherPm;
       await refused(
-        /bound to PrivacyManager 0x[0-9a-fA-F]+, which the config does not name: add "privacyManager"/,
+        new RegExp(
+          `config "privacyManager" names ${await otherPm.getAddress()}, but governance.boundTarget\\(11\\) \\(PrivacyParameters\\) is ${pmAddr}`,
+        ),
       );
+      const otherZk = await (
+        await ethers.getContractFactory("ZKVerifierIntegrated")
+      ).deploy(false);
       args.privacyManager = pm;
-      const zk = c.zkVerifier;
-      await zk.transferOwnership(govAddr);
-      await c.governance.setZKVerifier(await zk.getAddress());
-      args.zkVerifier = null;
+      args.zkVerifier = otherZk;
       await refused(
-        /bound to ZKVerifierIntegrated 0x[0-9a-fA-F]+, which the config does not name: add "zkVerifier"/,
+        new RegExp(
+          `config "zkVerifier" names ${await otherZk.getAddress()}, but PrivacyManager ${pmAddr} zkVerifier\\(\\) is ${await c.zkVerifier.getAddress()}`,
+        ),
       );
+      delete args.privacyManager;
+      delete args.zkVerifier;
+      await ceremony();
+      expect(await pm.owner()).to.equal(govAddr);
+      expect(await c.zkVerifier.owner()).to.equal(govAddr);
     });
 
     it("refuses a PrivacyManager whose verifier the config does not name", async function () {
@@ -328,15 +364,21 @@ describe("Handover power set from chain (plan 2F.5)", function () {
       );
     });
 
-    it("M-2: refuses a null escrow factory key while a trusted escrow names one", async function () {
+    // Task 4.13: the factory a trusted escrow names is derived (M-2), as
+    // is the registrar for MultiSigEscrowWallet; a null key hides nothing.
+    it("M-2: derives the escrow factory from a trusted escrow and the registrar", async function () {
       const w = await trustedEscrow();
       const fAddr = await c.escrowWalletFactory.getAddress();
       args.escrowWalletFactory = null;
-      await refused(
-        new RegExp(
-          `trusted escrow ${w} was created by EscrowWalletFactory ${fAddr}, which the config does not name: add "escrowWalletFactory"`,
-        ),
+      const steps: string[] = [];
+      await ceremony((m) => steps.push(m));
+      expect(await c.escrowWalletFactory.owner()).to.equal(govAddr);
+      expect(await c.governance.boundTarget(9)).to.equal(fAddr);
+      const { checks, warnings } = await assertHandoverComplete(args);
+      expect(checks.map((x: any) => x.label)).to.include(
+        "EscrowWalletFactory owned by governance, deployer holds no role",
       );
+      expect(warnings.join("\n")).to.include(`escrow(s) ${w} were created`);
     });
 
     it("M-3: refuses a fromBlock after the IdentityRegistry deploy", async function () {
