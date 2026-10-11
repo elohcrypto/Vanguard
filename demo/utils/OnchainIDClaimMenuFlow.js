@@ -18,6 +18,7 @@ const {
   cacheVerification,
   KYC_TOPIC,
   AML_TOPIC,
+  issuerOwnerSigner,
 } = require("./Kyc");
 
 /**
@@ -265,16 +266,20 @@ async function demoClaimExpiry(mod) {
     }
     // AML is required too (Task 1R.3): without it isVerified() never
     // returns true regardless of the KYC claim below.
+    // Each issuer's current owner signs (Task 4.13: the deployer before
+    // the handover, the issuer admin after it).
+    const amlIssuer = mod.state.getContract("amlIssuer");
+    const kycIssuer = mod.state.getContract("kycIssuer");
     await attestAml(
-      mod.state.getContract("amlIssuer"),
-      mod.state.signers[3],
+      amlIssuer,
+      await issuerOwnerSigner(mod.state, amlIssuer),
       identity.address,
       "expiry-demo",
     );
-    const issueKyc = (label, validTo) =>
+    const issueKyc = async (label, validTo) =>
       attestKyc(
-        mod.state.getContract("kycIssuer"),
-        mod.state.signers[2],
+        kycIssuer,
+        await issuerOwnerSigner(mod.state, kycIssuer),
         identity.address,
         label,
         validTo,

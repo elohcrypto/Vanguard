@@ -11,7 +11,12 @@
 "use strict";
 
 const { displaySection, displayError } = require("./DisplayHelpers");
-const { attestAll, cacheVerification, signClaim } = require("./Kyc");
+const {
+  attestAll,
+  cacheVerification,
+  issuerOwnerSigner,
+  signClaim,
+} = require("./Kyc");
 const { ethers } = require("hardhat");
 
 /** Option 24: Create Normal Users */
@@ -111,8 +116,7 @@ async function createCompliantNormalUser(mod) {
     console.log(`   🆔 OnchainID Created: ${identityAddress}`);
 
     // Step 2 & 3: Issue KYC and AML claims on blockchain through the
-    // trusted ClaimIssuers (KYC issuer owner: signers[2], AML issuer
-    // owner: signers[3] — see ContractDeployer.js).
+    // trusted ClaimIssuers, each signed by its current owner (4.13).
     console.log("\n📝 Step 2: Issuing KYC claim on blockchain...");
     console.log("\n📝 Step 3: Issuing AML claim on blockchain...");
     const { kyc: receipt2, aml: receipt3 } = await attestAll(
@@ -275,7 +279,7 @@ async function createNonCompliantNormalUser(mod) {
     console.log(`   🆔 OnchainID Created: ${identityAddress}`);
 
     // Step 2: Issue REJECTED KYC claim on blockchain
-    // NOTE: KYC issuer uses signers[2] (from ContractDeployer.js)
+    // The KYC issuer's owner signs (4.13); never a fixed wallet.
     console.log("\n📝 Step 2: Issuing REJECTED KYC claim on blockchain...");
     const kycTopic = 1;
     const kycData = ethers.AbiCoder.defaultAbiCoder().encode(
@@ -284,7 +288,8 @@ async function createNonCompliantNormalUser(mod) {
     );
 
     const kycIssuer = mod.state.getContract("kycIssuer");
-    const kycSigner = mod.state.signers[2];
+    // Its current owner signs (Task 4.13): the deployer, then wallet 9.
+    const kycSigner = await issuerOwnerSigner(mod.state, kycIssuer);
     const kycSig = await signClaim(
       kycSigner,
       identityAddress,

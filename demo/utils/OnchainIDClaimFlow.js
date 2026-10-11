@@ -11,7 +11,13 @@
 
 const { markRevoked, updateStatus } = require("./OnchainIDClaimChain");
 const { displaySuccess, displayError } = require("./DisplayHelpers");
-const { attestAll, attestAml, cacheVerification, AML_TOPIC } = require("./Kyc");
+const {
+  attestAll,
+  attestAml,
+  cacheVerification,
+  issuerOwnerSigner,
+  AML_TOPIC,
+} = require("./Kyc");
 
 // ========== KYC CLAIM HELPER METHODS ==========
 
@@ -226,7 +232,7 @@ async function issueAMLClaimForIdentity(mod, identity) {
     const code = identity.countryCode ?? 0;
     const rc = await attestAml(
       amlIssuer,
-      mod.state.signers[3],
+      await issuerOwnerSigner(mod.state, amlIssuer), // its owner signs (4.13)
       identity.address,
       `country:${code}`,
     );

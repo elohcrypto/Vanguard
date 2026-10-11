@@ -172,8 +172,7 @@ async function createNormalUserForOnboarding(mod) {
     console.log(`   ⛽ Gas Used: ${receipt1.gasUsed.toLocaleString()}`);
 
     // Step 2 & 3: Issue KYC and AML claims through the trusted
-    // ClaimIssuers (KYC issuer owner: signers[2], AML issuer owner:
-    // signers[3] — see ContractDeployer.js).
+    // ClaimIssuers, each signed by its current owner (Task 4.13).
     console.log("\n📝 Step 2: Issuing KYC claim on blockchain...");
     console.log("\n📝 Step 3: Issuing AML claim on blockchain...");
     const { kyc: receipt2, aml: receipt3 } = await attestAll(

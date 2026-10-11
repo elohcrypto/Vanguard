@@ -100,12 +100,12 @@ class SignerManager {
       },
       {
         index: 2,
-        role: "KYC Issuer",
+        role: "KYC oracle node",
         address: this.state.signers[2]?.address,
       },
       {
         index: 3,
-        role: "AML Issuer",
+        role: "AML oracle node",
         address: this.state.signers[3]?.address,
       },
       {

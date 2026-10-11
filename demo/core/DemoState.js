@@ -226,7 +226,7 @@ class DemoState {
     /**
      * @property {Set} reservedSigners - Reserved signer indices (0-3, 9-11)
      * @description signers[0] = Platform owner, signers[1] = Fee wallet,
-     * signers[2] = KYC issuer, signers[3] = AML issuer; handover roles from
+     * signers[2] = KYC oracle node, signers[3] = AML oracle node; handover roles from
      * docs/TESTNET_DEMO.md: signers[9] = issuer admin, signers[10] = ops,
      * signers[11] = guardian (plan 2F.5, L11: onboarding never lands on them)
      * @type {Set<number>}
