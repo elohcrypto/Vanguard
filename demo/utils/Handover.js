@@ -47,6 +47,7 @@ const { preflightOracles, oracleSteps } = require("./HandoverOracles");
 const { withDerivedContracts, preflightLinks } = require("./HandoverDerive");
 const { preflightRoles } = require("./HandoverRoles");
 const { preflightTrust } = require("./HandoverTrust");
+const { preflightNodes, nodeSteps } = require("./HandoverNodes");
 const {
   proposeCall,
   proposeAcceptOwnership,
@@ -104,6 +105,7 @@ async function handoverDeployerPowers(o) {
   await preflightRegistrars(o); // Task 4.3
   await preflightTrust(o); // Task 4.13: trusted contracts by provenance
   await preflightOracles(o); // Task 4.4
+  await preflightNodes(o); // Task 4.13: nodes, designations, list oracles
   const ctx = { o, d, dAddr, govAddr, report, ok, log };
   // Send, read back, assert, print.
   const apply = async (tx, readBack, msg) => {
@@ -215,6 +217,7 @@ async function handoverDeployerPowers(o) {
   }
   await factorySteps(ctx);
   await privacySteps(ctx);
+  await nodeSteps(ctx); // Task 4.13: deployer-era emergency designations
   for (const step of regSteps.slice(1)) await registryCall(ctx, step);
 
   log("\n📝 Step 3: nominate governance as owner");

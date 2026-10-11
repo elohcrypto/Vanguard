@@ -1,0 +1,236 @@
+/**
+ * @fileoverview Handover ceremony, plan v2 Task 4.13 (A1 M3, B G-6/G-7,
+ * D50): the OracleManager's nodes and the list oracles.
+ *
+ * Consensus power stays with whoever holds the node keys, so every
+ * registered node must be acknowledged in the config's `oracleNodes`
+ * (empty on a first handover: production nodes are registered by vote
+ * after it); the deployer is never a node; an emergency designation (a
+ * node that may emergencyBlacklist anyone at once) must sit on an
+ * acknowledged node, and step 5 clears every designation the deployer
+ * era left while the deployer still owns the manager. The ceremony
+ * prints each node's provenance (who sent its OracleRegistered) as a
+ * residual warning when that was the deployer (D50: rotate by vote), and
+ * warns below ConsensusOracle.MIN_NODES. Each list oracle bound to VSC
+ * or VGT must carry the compiled WhitelistOracle or BlacklistOracle
+ * code, not be paused, require at least two consensus oracles and keep a
+ * sane maxVerdictAge; its manager link is HandoverDerive.js.
+ */
+
+const { ethers } = require("hardhat");
+const { addrOf, same, fail } = require("./HandoverChecks");
+const { scanLogs } = require("./HandoverScans");
+const {
+  pinChecks,
+  codeHashLabel,
+  codeHashRefusal,
+} = require("./HandoverCodeHash");
+
+const LIST_ABI = [
+  "function paused() view returns (bool)",
+  "function active() view returns (bool)",
+  "function maxVerdictAge() view returns (uint256)",
+  "function minimumConsensusOracles() view returns (uint8)",
+  "function oracleName() view returns (string)",
+];
+const MIN_CONSENSUS = 2;
+const list = (xs) => xs.join(", ");
+
+/**
+ * { nodes: [{ addr, name, registeredBy, block }], designated: [addr],
+ * minNodes }: the live node list and each node's designation are direct
+ * reads; the OracleRegistered scan adds provenance only.
+ */
+async function nodeFacts(o) {
+  const om = o.oracleManager;
+  const live = await om.getRegisteredOracles();
+  const regs = await scanLogs(om, om.filters.OracleRegistered(), o);
+  const nodes = [];
+  for (const addr of live) {
+    const ev = regs.filter((e) => same(e.args[0], addr)).at(-1);
+    const tx = ev && (await ethers.provider.getTransaction(ev.transactionHash));
+    nodes.push({
+      addr,
+      name: ev ? ev.args[1] : "?",
+      registeredBy: tx ? tx.from : null,
+      block: ev ? ev.blockNumber : null,
+    });
+  }
+  // R-413-6: a designation can only sit on a registered node
+  // (onlyRegistered), so every node is read directly; no scan to miss.
+  const designated = [];
+  for (const a of live) if (await om.isEmergencyOracle(a)) designated.push(a);
+  const engine = await ethers.getContractAt(
+    ["function MIN_NODES() view returns (uint256)"],
+    await om.consensusEngine(),
+  );
+  const minNodes = Number(await engine.MIN_NODES().catch(() => 2));
+  return { nodes, designated, minNodes };
+}
+
+/** [{ label, ok, fix, strays }] for the nodes and designations. */
+async function nodeChecks(o, f = null) {
+  f = f || (await nodeFacts(o));
+  const dAddr = await addrOf(o.deployer);
+  const ack = await Promise.all((o.oracleNodes || []).map(addrOf));
+  const live = f.nodes.map((n) => n.addr);
+  const stray = live.filter((a) => !ack.some((b) => same(a, b)));
+  const out = [];
+  out.push({
+    label: `the deployer ${dAddr} is not an OracleManager node`,
+    ok: !live.some((a) => same(a, dAddr)),
+    fix: `the deployer ${dAddr} is a registered OracleManager node: it would keep voting verdicts after the handover; the manager owner must removeOracle(deployer, ...) first`,
+    strays: [],
+  });
+  out.push({
+    label: `every registered OracleManager node is acknowledged in oracleNodes (${live.length} registered, ${ack.length} acknowledged)`,
+    ok: stray.length === 0,
+    fix: `OracleManager node(s) ${list(stray)} are registered but not acknowledged in the config's "oracleNodes": a node votes every whitelist and blacklist verdict; list each one the deployment stands behind, or have the manager owner removeOracle(node, ...) first`,
+    strays: stray.map((a) => ({
+      what: `OracleManager node ${a}`,
+      on: o.oracleManager,
+      fn: "removeOracle",
+      args: [a, "handover: not acknowledged"],
+    })),
+  });
+  const unack = f.designated.filter((a) => !ack.some((b) => same(a, b)));
+  out.push({
+    label: `every emergency designation sits on an acknowledged node (${f.designated.length} designated)`,
+    ok: unack.length === 0,
+    fix: `emergency designation on node(s) ${list(unack)}, which oracleNodes does not acknowledge: a designated node blacklists anyone at once (emergencyBlacklist); ops (the operator) or the manager owner must setEmergencyOracle(node, false) first`,
+    strays: unack.map((a) => ({
+      what: `OracleManager emergency designation of ${a}`,
+      on: o.oracleManager,
+      fn: "setEmergencyOracle",
+      args: [a, false],
+    })),
+  });
+  return out;
+}
+
+/** The list-oracle checks: [{ label, ok, fix }] plus the pins. */
+async function listOracleChecks(o) {
+  const out = [];
+  for (const oracle of o.oracles || []) {
+    const a = await addrOf(oracle);
+    const c = await ethers.getContractAt(LIST_ABI, a);
+    const name = await c.oracleName().catch(() => "");
+    const label = `list oracle ${a}${name ? ` (${name})` : ""}`;
+    let kind = null;
+    for (const n of ["WhitelistOracle", "BlacklistOracle"]) {
+      const [pin] = await pinChecks([{ label: n, addr: a, name: n }]);
+      if (pin.ok) kind = n;
+      if (!kind && n === "BlacklistOracle") {
+        out.push({
+          label: codeHashLabel({
+            ...pin,
+            name: "WhitelistOracle or BlacklistOracle",
+          }),
+          ok: false,
+          fix: codeHashRefusal({
+            ...pin,
+            name: "WhitelistOracle or BlacklistOracle",
+          }),
+        });
+      }
+    }
+    if (kind) {
+      out.push({
+        label: `${label} code matches the compiled ${kind}`,
+        ok: true,
+      });
+    }
+    const paused = await c.paused().catch(() => null);
+    const active = await c.active().catch(() => null);
+    out.push({
+      label: `${label} is not paused and is active`,
+      ok: paused === false && active === true,
+      fix: `${label} is ${paused ? "paused" : "inactive"}: a paused list freezes every verdict it holds (isBlacklisted keeps answering) and refuses updates; its owner must unpause() first`,
+    });
+    const min = await c.minimumConsensusOracles().catch(() => null);
+    out.push({
+      label: `${label} minimumConsensusOracles >= ${MIN_CONSENSUS} (${min})`,
+      ok: min !== null && Number(min) >= MIN_CONSENSUS,
+      fix: `${label} minimumConsensusOracles is ${min}: below ${MIN_CONSENSUS} one attestation would be a verdict; its owner must setMinimumConsensusOracles(${MIN_CONSENSUS}) first`,
+    });
+    const age = await c.maxVerdictAge().catch(() => null);
+    const sane = age !== null && age >= 3600n && age <= 30n * 86400n;
+    out.push({
+      label: `${label} maxVerdictAge is between 1 hour and 30 days (${age}s)`,
+      ok: sane,
+      fix: `${label} maxVerdictAge ${age}s is outside [1 hour, 30 days]; its owner must setMaxVerdictAge(...) first`,
+    });
+  }
+  return out;
+}
+
+/** Read-only, before the first transaction. */
+async function preflightNodes(o) {
+  for (const c of await nodeChecks(o)) if (!c.ok) fail(c.fix);
+  for (const c of await listOracleChecks(o)) if (!c.ok) fail(c.fix);
+}
+
+/**
+ * Step 5: clear every deployer-era emergency designation while the
+ * deployer still owns the manager (or is its operator); otherwise say
+ * who must (ops, the operator after step 2).
+ */
+async function nodeSteps({ o, d, dAddr, ok, log }) {
+  const om = o.oracleManager;
+  const { designated } = await nodeFacts(o);
+  if (!designated.length) return ok("no emergency designation to clear");
+  const may = same(await om.owner(), dAddr) || same(await om.operator(), dAddr);
+  for (const a of designated) {
+    if (!may) {
+      log(
+        `   ⚠️  emergency designation of ${a}: ops (the operator) must setEmergencyOracle(${a}, false)`,
+      );
+      continue;
+    }
+    await (await om.connect(d).setEmergencyOracle(a, false)).wait();
+    if (await om.isEmergencyOracle(a)) {
+      fail(`emergency designation of ${a} did not clear`);
+    }
+    ok(`emergency designation of node ${a} cleared (deployer era)`);
+  }
+}
+
+/**
+ * Completion lines plus the node warnings: provenance (residual when the
+ * deployer registered the node, D50) and the MIN_NODES floor.
+ */
+async function nodeLines(o, dAddr, warnings = [], residual = []) {
+  const f = await nodeFacts(o);
+  for (const n of f.nodes) {
+    if (n.registeredBy && same(n.registeredBy, dAddr)) {
+      const w = `OracleManager node ${n.addr} (${n.name}) was registered by the deployer at block ${n.block}: it votes with a key the deployer chose; rotate deployer-era nodes by an OracleParameters vote (D50)`;
+      warnings.push(w);
+      residual.push(w);
+    }
+  }
+  if (f.nodes.length < f.minNodes) {
+    warnings.push(
+      `OracleManager has ${f.nodes.length} registered node(s), below ConsensusOracle.MIN_NODES (${f.minNodes}): no query can open until governance registers more by vote`,
+    );
+  }
+  const lines = (await nodeChecks(o, f)).map((c) => [c.label, c.ok]);
+  for (const c of await listOracleChecks(o)) lines.push([c.label, c.ok]);
+  return lines;
+}
+
+/** The strays a manager owner call removes. */
+async function nodeStrays(o) {
+  const out = [];
+  for (const c of await nodeChecks(o)) out.push(...c.strays);
+  return out;
+}
+
+module.exports = {
+  nodeFacts,
+  nodeChecks,
+  listOracleChecks,
+  preflightNodes,
+  nodeSteps,
+  nodeLines,
+  nodeStrays,
+};
