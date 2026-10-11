@@ -46,6 +46,7 @@ const { preflightRegistrars } = require("./HandoverRegistrars");
 const { preflightOracles, oracleSteps } = require("./HandoverOracles");
 const { withDerivedContracts, preflightLinks } = require("./HandoverDerive");
 const { preflightRoles } = require("./HandoverRoles");
+const { preflightTrust } = require("./HandoverTrust");
 const {
   proposeCall,
   proposeAcceptOwnership,
@@ -101,6 +102,7 @@ async function handoverDeployerPowers(o) {
   await preflightPrivacy(o);
   await preflightKeyManager(o);
   await preflightRegistrars(o); // Task 4.3
+  await preflightTrust(o); // Task 4.13: trusted contracts by provenance
   await preflightOracles(o); // Task 4.4
   const ctx = { o, d, dAddr, govAddr, report, ok, log };
   // Send, read back, assert, print.

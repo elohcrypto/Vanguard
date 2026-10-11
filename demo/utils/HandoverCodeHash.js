@@ -40,6 +40,68 @@ async function codeHash(addr) {
   return ethers.keccak256(await ethers.provider.getCode(addr));
 }
 
+const rangeCache = new Map();
+/**
+ * Task 4.13: the byte ranges solc fills with immutables in `name`'s
+ * runtime code (the build info's immutableReferences; empty for a
+ * contract without immutables), cached per artifact.
+ */
+async function immutableRanges(name) {
+  if (rangeCache.has(name)) return rangeCache.get(name);
+  const art = await artifacts.readArtifact(name);
+  const info = await artifacts.getBuildInfo(
+    `${art.sourceName}:${art.contractName}`,
+  );
+  const refs =
+    info?.output.contracts[art.sourceName]?.[art.contractName]?.evm
+      ?.deployedBytecode?.immutableReferences || {};
+  const ranges = Object.values(refs).flat();
+  rangeCache.set(name, ranges);
+  return ranges;
+}
+
+/**
+ * keccak256 of `addr`'s runtime code with `name`'s immutable ranges
+ * zeroed, so it equals expectedHash(name) for an honest deployment
+ * whatever its constructor arguments were. The privacy pins above stay
+ * exact: ZKVerifierIntegrated's only immutable is testingMode, whose
+ * honest value is the artifact's zero (HandoverCodeHash.test.ts).
+ */
+async function maskedCodeHash(addr, name) {
+  const code = ethers.getBytes(await ethers.provider.getCode(addr));
+  for (const r of await immutableRanges(name)) {
+    if (r.start + r.length <= code.length) {
+      code.fill(0, r.start, r.start + r.length);
+    }
+  }
+  return ethers.keccak256(code);
+}
+
+/**
+ * Masked pins for [{ label, addr, name }] (an entry without an address
+ * is skipped): [{ label, addr, name, actual, expected, ok }], the shape
+ * codeHashLabel and codeHashRefusal print.
+ */
+async function pinChecks(entries) {
+  const out = [];
+  for (const { label, addr, name } of entries) {
+    if (!addr) continue;
+    const a = await addrOf(addr);
+    const hasCode = (await ethers.provider.getCode(a)) !== "0x";
+    const actual = hasCode ? await maskedCodeHash(a, name) : "0x(no code)";
+    const expected = await expectedHash(name);
+    out.push({
+      label,
+      addr: a,
+      name,
+      actual,
+      expected,
+      ok: actual === expected,
+    });
+  }
+  return out;
+}
+
 /**
  * One entry per pinned contract: { label, addr, name, actual, expected, ok }.
  * `pm` and each of `wrappers` may be a contract, an address or empty. A
@@ -121,6 +183,9 @@ module.exports = {
   VERIFIERS,
   codeHash,
   expectedHash,
+  immutableRanges,
+  maskedCodeHash,
+  pinChecks,
   codeHashChecks,
   codeHashLabel,
   codeHashRefusal,

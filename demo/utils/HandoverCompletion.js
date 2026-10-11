@@ -39,6 +39,7 @@ const { registrarLines, custodyOwnerLines } = require("./HandoverRegistrars");
 const { oracleLines } = require("./HandoverOracles");
 const { withDerivedContracts, linkLines } = require("./HandoverDerive");
 const { roleLines } = require("./HandoverRoles");
+const { trustLines } = require("./HandoverTrust");
 
 const ZERO = ethers.ZeroAddress;
 const EXEMPT_ABI = [
@@ -120,6 +121,9 @@ async function assertHandoverComplete(o) {
   for (const [label, pass] of await registrarLines(o)) add(label, pass);
   for (const [label, pass] of await custodyOwnerLines(o, dAddr, ops, govAddr))
     add(label, pass);
+  // Task 4.13: trusted contracts by registrar provenance; registrar code
+  // and InvestorRequestManager immutables (B G-4/G-10, A1 M2).
+  for (const [label, pass] of await trustLines(o)) add(label, pass);
   // Task 4.4: the compiled engine serves the manager; ops is the operator.
   for (const [label, pass] of await oracleLines(o, dAddr, ops))
     add(label, pass);

@@ -161,4 +161,69 @@ describe("Handover strays: roles (Task 4.13)", function () {
       `${label}: every live key is issuerAdmin's`,
     );
   });
+
+  // B G-4 / G-10, A1 M2: trust and custody.
+  describe("trust", function () {
+    it("a deployer-trusted contract, unless acknowledged in extraTrusted", async function () {
+      const stub = await (
+        await ethers.getContractFactory("MockTarget")
+      ).deploy();
+      const a = await stub.getAddress();
+      const vsc = await c.token.getAddress();
+      await c.complianceRules.addTrustedContract(vsc, a);
+      await both(
+        new RegExp(
+          `trusted contract\\(s\\) ${a} on VSC were not created by a live registrar and are not acknowledged in extraTrusted: .*removeTrustedContract`,
+        ),
+        /^every trusted contract is governance on VGT, a wallet a live registrar created, or acknowledged/,
+      );
+      args.extraTrusted = [a];
+      await handoverDeployerPowers(args);
+      const { checks } = await assertHandoverComplete(args);
+      expect(checks).to.deep.include({
+        label:
+          "every trusted contract is governance on VGT, a wallet a live registrar created, or acknowledged (2 live, 1 acknowledged)",
+        ok: true,
+      });
+    });
+
+    it("an InvestorRequestManager whose immutable bank is the deployer (A1 M2)", async function () {
+      const m = await (
+        await ethers.getContractFactory("InvestorRequestManager")
+      ).deploy(
+        f.deployer.address,
+        await c.token.getAddress(),
+        await c.investorTypeRegistry.getAddress(),
+        await c.identityRegistry.getAddress(),
+      );
+      await m.transferOwnership(f.ops.address);
+      const mAddr = await m.getAddress();
+      await c.investorTypeRegistry.setComplianceOfficer(mAddr, true);
+      await both(
+        new RegExp(
+          `InvestorRequestManager ${mAddr} bank\\(\\) is ${f.deployer.address}, not ops`,
+        ),
+        `InvestorRequestManager ${mAddr} bank() is ops (A1 M2: the bank co-signs every custody wallet and approves investor types): ${f.ops.address}`,
+      );
+    });
+
+    it("a registrar whose code is neither manager nor factory", async function () {
+      const stub = await (
+        await ethers.getContractFactory("MockTarget")
+      ).deploy();
+      const a = await stub.getAddress();
+      const { walletCodeHash } = require("../helpers/registrars");
+      await c.complianceRules.setTrustedRegistrar(
+        await c.token.getAddress(),
+        a,
+        await walletCodeHash("MultiSigWallet"),
+      );
+      await both(
+        new RegExp(
+          `${a} is a ComplianceRules registrar or InvestorTypeRegistry officer whose runtime code is neither the compiled InvestorRequestManager nor EscrowWalletFactory`,
+        ),
+        `registrar / officer contract ${a} code matches the compiled InvestorRequestManager or EscrowWalletFactory`,
+      );
+    });
+  });
 });
