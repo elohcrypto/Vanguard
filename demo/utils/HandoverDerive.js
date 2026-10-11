@@ -16,7 +16,7 @@
 
 const { ethers } = require("hardhat");
 const { ACCEPTANCE_PLAN, addrOf, same, fail } = require("./HandoverChecks");
-const { escrowFactoriesFromChain } = require("./HandoverScans");
+const { escrowFactoriesFromChain, checkFromBlock } = require("./HandoverScans");
 const { liveRegistrars } = require("./HandoverRegistrars");
 const { wiredPrivacy } = require("./HandoverPrivacy");
 
@@ -103,14 +103,23 @@ async function deriveContracts(o, issues = null) {
     complianceRules: await at("complianceRules"),
     token: await at("token"),
     governanceToken: await at("governanceToken"),
+    identityRegistry: await at("identityRegistry"),
+    oracleManager: await at("oracleManager"),
   };
+  // R-413-6: no scan before fromBlock is proven to precede the core.
+  await checkFromBlock(scanCtx, () => {});
   const vsc = d.token.addr;
-  const escrowRegistrars = (await liveRegistrars(scanCtx)).filter(
-    (r) => same(r.token, vsc) && r.wallet === "MultiSigEscrowWallet",
-  );
   const escrows = await escrowFactoriesFromChain(scanCtx);
+  const bound9 = await bound(9, "EscrowFactoryParameters");
+  const escrowRegistrars = (
+    await liveRegistrars(scanCtx, [
+      bound9[1],
+      ...escrows.map((e) => e.factory),
+      o.escrowWalletFactory,
+    ])
+  ).filter((r) => same(r.token, vsc) && r.wallet === "MultiSigEscrowWallet");
   d.escrowWalletFactory = pk("escrowWalletFactory", [
-    await bound(9, "EscrowFactoryParameters"),
+    bound9,
     ...escrowRegistrars.map((r) => [
       "the ComplianceRules registrar for MultiSigEscrowWallet on VSC",
       r.registrar,

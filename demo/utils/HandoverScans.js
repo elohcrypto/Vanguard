@@ -204,6 +204,20 @@ async function liveTrustedContracts(o) {
       });
     }
   }
+  // R-413-6: governance is trusted on VGT by event on every deploy path
+  // (D21), so a scan that does not find it has not run over the range.
+  const vgt = o.governanceToken && (await addrOf(o.governanceToken));
+  const gov = o.governance && (await addrOf(o.governance));
+  if (
+    vgt &&
+    gov &&
+    (await rules["isTrustedContract(address,address)"](vgt, gov)) &&
+    !added.some((ev) => same(ev.args[0], vgt) && same(ev.args[1], gov))
+  ) {
+    fail(
+      `ComplianceRules TrustedContractAdded event scan found none of the holders it must see (governance ${gov} on VGT): fromBlock, logChunk or the RPC is wrong; nothing can be concluded from it`,
+    );
+  }
   return out;
 }
 
@@ -234,13 +248,25 @@ async function deployerEscrows(factory, dAddr, o) {
  * clear its jurisdiction rule, which also lapses every private
  * jurisdiction record (Task 3.8).
  */
-async function liveRuleAdministrators(o, extra = []) {
+async function liveRuleAdministrators(o, extra = [], mustSee = []) {
   const rules = o.complianceRules;
   const events = await scanLogs(
     rules,
     rules.filters.RuleAdministratorUpdated(),
     o,
   );
+  // R-413-6: a live holder granted by event must appear in the scan.
+  const missed = [];
+  for (const [t, a] of mustSee) {
+    if (!(await rules.ruleAdministrators(t, a))) continue;
+    if (!events.some((ev) => same(ev.args[0], t) && same(ev.args[1], a)))
+      missed.push([t, a]);
+  }
+  if (missed.length) {
+    fail(
+      `ComplianceRules RuleAdministratorUpdated event scan found none of the holders it must see (${missed.map(([t, a]) => `${a} on ${t}`).join(", ")}): fromBlock, logChunk or the RPC is wrong; nothing can be concluded from it`,
+    );
+  }
   const named = [];
   for (const c of [o.token, o.governanceToken])
     if (c) named.push(await addrOf(c));

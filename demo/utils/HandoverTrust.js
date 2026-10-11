@@ -50,7 +50,7 @@ async function registrarWallets(registrar, wallet, o) {
  * officer contract with the artifact its code matches (null: neither).
  */
 async function trustFacts(o) {
-  const registrars = await liveRegistrars(o);
+  const registrars = await liveRegistrars(o, [o.escrowWalletFactory]);
   const created = {};
   for (const r of registrars) {
     created[r.registrar] = await registrarWallets(r.registrar, r.wallet, o);
@@ -58,7 +58,7 @@ async function trustFacts(o) {
   const custody = registrars.map((r) => r.registrar);
   const reg = o.investorTypeRegistry;
   if (reg) {
-    for (const a of await liveOfficers(reg, o)) {
+    for (const a of (await liveOfficers(reg, o)).live) {
       if ((await ethers.provider.getCode(a)) !== "0x") custody.push(a);
     }
   }

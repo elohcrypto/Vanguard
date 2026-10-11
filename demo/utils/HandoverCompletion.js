@@ -40,6 +40,7 @@ const { oracleLines } = require("./HandoverOracles");
 const { withDerivedContracts, linkLines } = require("./HandoverDerive");
 const { roleLines } = require("./HandoverRoles");
 const { trustLines } = require("./HandoverTrust");
+const { nodeLines } = require("./HandoverNodes");
 
 const ZERO = ethers.ZeroAddress;
 const EXEMPT_ABI = [
@@ -127,6 +128,9 @@ async function assertHandoverComplete(o) {
   // Task 4.4: the compiled engine serves the manager; ops is the operator.
   for (const [label, pass] of await oracleLines(o, dAddr, ops))
     add(label, pass);
+  // Task 4.13: acknowledged nodes, provenance, designations, list oracles.
+  for (const [label, pass] of await nodeLines(o, dAddr, warnings, residual))
+    add(label, pass);
   // Bound in governance, or the creator of a trusted escrow (review M-2),
   // but not named by the config: still checked.
   const d = o.derived;
@@ -172,9 +176,17 @@ async function assertHandoverComplete(o) {
       !(await rules.ruleAdministrators(vgt, dAddr)),
   );
   // Review B-L2: nor any other key the deployer ever authorized, on any token.
-  const extraAdmins = (await liveRuleAdministrators(o, [dAddr])).filter(
-    ({ account: a }) => !same(a, govAddr) && !same(a, ops),
-  );
+  // R-413-6: step 1 made governance an administrator of both by event.
+  const extraAdmins = (
+    await liveRuleAdministrators(
+      o,
+      [dAddr],
+      [
+        [vsc, govAddr],
+        [vgt, govAddr],
+      ],
+    )
+  ).filter(({ account: a }) => !same(a, govAddr) && !same(a, ops));
   for (const { token, account } of extraAdmins) {
     add(
       `${account} is still a ComplianceRules rule administrator on ${token} (neither governance nor ops)`,

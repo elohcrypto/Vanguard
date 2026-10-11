@@ -13,7 +13,7 @@
  */
 
 const { ethers } = require("hardhat");
-const { same, fail } = require("./HandoverChecks");
+const { addrOf, same, fail } = require("./HandoverChecks");
 const { scanLogs } = require("./HandoverScans");
 const { expectedHash } = require("./HandoverCodeHash");
 
@@ -30,15 +30,22 @@ async function compiledWallets() {
  * Every live (token, registrar) with its registered code hash, the
  * compiled wallet it matches (null: none) and whether it has code.
  */
-async function liveRegistrars(o) {
+async function liveRegistrars(o, candidates = []) {
   const rules = o.complianceRules;
   // A ceremony without ComplianceRules is a config error (review N1).
   if (!rules) fail("no ComplianceRules in the handover config");
   const known = await compiledWallets();
   const events = await scanLogs(rules, rules.filters.TrustedRegistrarSet(), o);
+  // R-413-6: `candidates` (the derived escrow factory) are read directly
+  // on VSC and VGT, independent of the scan.
+  const pairs = events.map((ev) => [ev.args[0], ev.args[1]]);
+  for (const c of candidates) {
+    for (const t of [o.token, o.governanceToken]) {
+      if (t && c) pairs.push([await addrOf(t), await addrOf(c)]);
+    }
+  }
   const out = [];
-  for (const ev of events) {
-    const [token, registrar] = [ev.args[0], ev.args[1]];
+  for (const [token, registrar] of pairs) {
     if (out.some((x) => same(x.token, token) && same(x.registrar, registrar)))
       continue;
     const hash = await rules.trustedRegistrars(token, registrar);

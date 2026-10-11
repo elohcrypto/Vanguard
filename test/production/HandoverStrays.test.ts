@@ -49,7 +49,7 @@ describe("Handover strays: roles (Task 4.13)", function () {
       new RegExp(
         `Token agent\\(s\\) ${s} besides the deployer and ops: .*removeAgent`,
       ),
-      `Token agents are exactly {${f.ops.address}}`,
+      `Token agents are exactly {${f.ops.address}} (AgentAdded scan)`,
     );
   });
 
@@ -60,7 +60,7 @@ describe("Handover strays: roles (Task 4.13)", function () {
       new RegExp(
         `GovernanceToken agent\\(s\\) ${s} besides the deployer, ops and governance`,
       ),
-      `GovernanceToken agents are exactly {${f.ops.address}, ${f.govAddr}}`,
+      `GovernanceToken agents are exactly {${f.ops.address}, ${f.govAddr}} (AgentAdded scan)`,
     );
   });
 
@@ -81,7 +81,7 @@ describe("Handover strays: roles (Task 4.13)", function () {
       new RegExp(
         `GovernanceToken is missing agent\\(s\\) ${f.govAddr}: .*addAgent`,
       ),
-      `GovernanceToken agents are exactly {${f.ops.address}, ${f.govAddr}}`,
+      `GovernanceToken agents are exactly {${f.ops.address}, ${f.govAddr}} (AgentAdded scan)`,
     );
     await c.governanceToken.addAgent(f.govAddr);
     const vgt = await c.governanceToken.getAddress();
@@ -99,7 +99,7 @@ describe("Handover strays: roles (Task 4.13)", function () {
       new RegExp(
         `compliance officer wallet\\(s\\) ${s} besides the deployer and ops: .*setComplianceOfficer\\(<wallet>, false\\)`,
       ),
-      "InvestorTypeRegistry compliance officers are ops and officer contracts only",
+      "InvestorTypeRegistry compliance officers are ops and officer contracts only (ComplianceOfficerUpdated scan)",
     );
   });
 
@@ -111,7 +111,7 @@ describe("Handover strays: roles (Task 4.13)", function () {
     await c.investorTypeRegistry.authorizeToken(p, true);
     await both(
       new RegExp(`InvestorTypeRegistry authorizes ${p} besides VSC`),
-      "InvestorTypeRegistry authorizes no token but VSC",
+      "InvestorTypeRegistry authorizes no token but VSC (TokenAuthorized scan)",
     );
   });
 
@@ -123,7 +123,7 @@ describe("Handover strays: roles (Task 4.13)", function () {
       new RegExp(
         `${label.replace(/[()]/g, "\\$&")} carries live CLAIM_SIGNER key ${planted} that is neither the deployer's nor issuerAdmin's`,
       ),
-      `${label}: every live key is issuerAdmin's`,
+      `${label}: owned by issuerAdmin and every live key is issuerAdmin's`,
     );
   });
 
@@ -149,7 +149,7 @@ describe("Handover strays: roles (Task 4.13)", function () {
     const label = `KYC Issuer (${await f.kycIssuer.getAddress()})`;
     const { checks } = await assertHandoverComplete(args);
     expect(checks).to.deep.include({
-      label: `${label}: every live key is issuerAdmin's`,
+      label: `${label}: owned by issuerAdmin and every live key is issuerAdmin's`,
       ok: true,
     });
     // issuerAdmin re-adds the deployer: the line fails again.
@@ -158,7 +158,7 @@ describe("Handover strays: roles (Task 4.13)", function () {
       .addIssuerKey(keyOf(f.stranger.address), 3, 1);
     const after = await assertHandoverComplete(args);
     expect(after.failures).to.include(
-      `${label}: every live key is issuerAdmin's`,
+      `${label}: owned by issuerAdmin and every live key is issuerAdmin's`,
     );
   });
 
@@ -224,6 +224,33 @@ describe("Handover strays: roles (Task 4.13)", function () {
         ),
         `registrar / officer contract ${a} code matches the compiled InvestorRequestManager or EscrowWalletFactory`,
       );
+    });
+  });
+
+  // R-413-6: a scan that returns nothing fails, never passes as clean.
+  describe("empty scans", function () {
+    const silenced = (real: any) =>
+      new Proxy(real, {
+        get: (t, p) =>
+          p === "queryFilter" ? async () => [] : Reflect.get(t, p),
+      });
+
+    it("an empty AgentAdded scan on VGT fails preflight and completion", async function () {
+      args.governanceToken = silenced(c.governanceToken);
+      await both(
+        new RegExp(
+          `GovernanceToken AgentAdded event scan found none of the holders it must see \\(${f.govAddr}\\)`,
+        ),
+        /^GovernanceToken agents are exactly /,
+      );
+    });
+
+    it("an empty TrustedContractAdded scan on ComplianceRules is refused in both phases", async function () {
+      args.complianceRules = silenced(c.complianceRules);
+      const re =
+        /TrustedContractAdded event scan found none of the holders it must see/;
+      await expect(handoverDeployerPowers(args)).to.be.rejectedWith(re);
+      await expect(assertHandoverComplete(args)).to.be.rejectedWith(re);
     });
   });
 });

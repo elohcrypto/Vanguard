@@ -265,9 +265,12 @@ describe("Handover preflight and self-healing (plan 2E.2)", function () {
         )
       ).ok,
     ).to.equal(false);
-    // A start block after the event finds nothing.
+    // Task 4.13 (R-413-6): a start block after the events is refused by
+    // the scan's own proof, never read as "nothing trusted".
     args.fromBlock = await ethers.provider.getBlockNumber();
-    expect((await check("every trusted contract has code")).ok).to.equal(true);
+    await expect(assertHandoverComplete(args)).to.be.rejectedWith(
+      /fromBlock \d+ is after the IdentityRegistry deploy/,
+    );
   });
 
   it("halves the log chunk on a range error; rethrows anything else (M4)", async function () {
