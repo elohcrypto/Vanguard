@@ -45,6 +45,7 @@ const { preflightKeyManager } = require("./HandoverKeys");
 const { preflightRegistrars } = require("./HandoverRegistrars");
 const { preflightOracles, oracleSteps } = require("./HandoverOracles");
 const { withDerivedContracts, preflightLinks } = require("./HandoverDerive");
+const { preflightRoles } = require("./HandoverRoles");
 const {
   proposeCall,
   proposeAcceptOwnership,
@@ -96,6 +97,7 @@ async function handoverDeployerPowers(o) {
   const { governanceOwned } = await preflight(o);
   await preflightLinks(o); // Task 4.13: A1 H2/H3, M1, D56
   await preflightPowers(o, { governanceOwned });
+  await preflightRoles(o); // Task 4.13: exact role sets (A1 H1)
   await preflightPrivacy(o);
   await preflightKeyManager(o);
   await preflightRegistrars(o); // Task 4.3

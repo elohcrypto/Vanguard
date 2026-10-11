@@ -38,6 +38,7 @@ const { keyManagerLines } = require("./HandoverKeys");
 const { registrarLines, custodyOwnerLines } = require("./HandoverRegistrars");
 const { oracleLines } = require("./HandoverOracles");
 const { withDerivedContracts, linkLines } = require("./HandoverDerive");
+const { roleLines } = require("./HandoverRoles");
 
 const ZERO = ethers.ZeroAddress;
 const EXEMPT_ABI = [
@@ -74,6 +75,8 @@ async function assertHandoverComplete(o) {
     );
   }
   for (const [label, pass] of await linkLines(o)) add(label, pass);
+  // Task 4.13: exact role sets from the event scans (A1 H1).
+  for (const [label, pass] of await roleLines(o, warnings)) add(label, pass);
   if (o.skippedRegistry) {
     add(
       "InvestorTypeRegistry is not live on Token or is owned by governance",
