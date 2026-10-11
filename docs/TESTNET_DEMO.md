@@ -855,8 +855,9 @@ Every print names each wallet's role.
   factory does for the identities it creates, and a re-seat of agents
   already seated waits 48 hours): a rogue MANAGEMENT key is planted (a fresh wallet nobody
   uses, standing for a stolen key), wallet 1 seats wallets 7 and 8 as
-  2-of-2 agents, they open and approve a candidate for wallet 6's key
-  (the receipt prints both opening times); the rogue key's cancel and
+  2-of-2 agents, wallet 7 opens a candidate for wallet 6's key (its own
+  approval, D39) and wallet 8 approves it (the receipt prints both
+  opening times); the rogue key's cancel and
   re-seat, the owner's cancel, re-seat and `deauthorizeManager` are each
   shown refused (⛔, the chain's reason) and so is an execution before
   48 hours; 48 hours after the approval the candidate executes and the
@@ -918,35 +919,50 @@ first seating is immediate, a re-seat of seated agents is pending for
 48 hours, the seated agents can veto it at their threshold
 (`vetoKeyRecoverySetup`), anyone applies it afterwards
 (`applyKeyRecoverySetup`), an approved recovery blocks it and an executed
-one drops it. An agent opens a candidate (`initiateKeyRecovery`); until
-the agents' approvals reach the threshold its initiator or the owner may
-cancel it, a MANAGEMENT key may not. A thief holding the owner key can
-race each approval from the mempool and cancel before the threshold;
-the agents' answer is to land their approvals together (one block, a
-private bundle). From the approval only the agents cancel it, at the
-same threshold, and the identity refuses its owner's `authorizeManager`,
-`deauthorizeManager` and `transferOwnership` (`ownershipFrozen`, asked of
-the recovery manager only) and any new MANAGEMENT key
-(`ManagementAdditionsFrozen`). 48 hours after the approval
-(`RECOVERY_TIMELOCK`), within 7 days, anyone executes it: the recovered
-key is added and every other MANAGEMENT key, the owner's included, is
-removed (ACTION, CLAIM and ENCRYPTION keys stay), 100 per call
-(`MAX_EVICTIONS_PER_CALL`), the rest through `continueKeyEviction` or the
-owner transfer's own batch. 7 days after the approval
+one drops it; neither the owner nor a current MANAGEMENT key can be
+seated as an agent (D53). An agent opens a candidate
+(`initiateKeyRecovery`), which counts as its approval (at threshold 1
+the open approves); none opens while another is approved. Until the
+approvals reach the threshold only its initiator may cancel it: not
+the owner (a stolen owner key raced every candidate: D39, R-414-1),
+not a MANAGEMENT key. From the approval only the agents cancel it, at
+the same threshold, and the identity refuses its owner's
+`authorizeManager`, `deauthorizeManager` and `transferOwnership`
+(`ownershipFrozen`, asked of the recovery manager only and read
+strictly: only the word 1 is yes), any new MANAGEMENT key
+(`ManagementAdditionsFrozen`) and every `acceptOwnership` but the
+recovery's own nominee's (`FrozenByRecovery`). 48 hours after the
+approval (`RECOVERY_TIMELOCK`), within 7 days, anyone executes it: the
+recovered key is added and every other MANAGEMENT key, the owner's
+included, is removed (ACTION, CLAIM and ENCRYPTION keys stay), 100 per
+call (`MAX_EVICTIONS_PER_CALL`, above the 64 keys a purpose `addKey`
+allows, so one call empties a capped list; `continueKeyEviction`
+remains for a list grown past the cap). 7 days after the approval
 (`OWNER_TRANSFER_TIMELOCK`) and before 14 days, someone (the recovered
 wallet, or anyone for it) must call `executeOwnerTransfer` and the
-recovered wallet must accept (`acceptOwnership`); if nobody does in that
-window the lock lifts and the old owner keeps the identity. Between the
-execution and the transfer the old owner keeps its other owner powers:
-it can remove claims and ACTION or CLAIM keys and remove the recovered
-key (the transfer restores it), but it cannot add a MANAGEMENT key, a
-manager or a new owner. On the recovered wallet's acceptance every other
-MANAGEMENT key is removed and every authorized manager but the recovery
-manager is de-authorized (one `ManagerDeauthorized` each). Agents at the
-threshold can therefore take the identity: choose agents you would trust
-with it. The owner sees the approval on chain and has the 48 hours to
-move assets through the issuer's `Token.recoveryAddress`, which stays the
-asset-side bound.
+recovered wallet must accept (`acceptOwnership`); if nobody does in
+that window the lock lifts, the old owner keeps the identity and an
+agent's next `initiateKeyRecovery` re-opens recovery
+(`KeyRecoveryReopened`, a new epoch; D52). Between the execution and
+the transfer the old owner keeps its other owner powers: it can remove
+claims and ACTION or CLAIM keys and remove the recovered key (the
+transfer restores it), but it cannot add a MANAGEMENT key, a manager
+or a new owner. On the recovered wallet's acceptance every other
+MANAGEMENT key is removed and every authorized manager but the
+recovery manager is de-authorized (one `ManagerDeauthorized` each);
+the thief's ACTION and CLAIM keys survive, so the recovered owner
+reviews `getKeysByPurpose(2)` and `getKeysByPurpose(3)` and removes
+what it does not know (D40). A re-seat applies only while its proposer
+still owns the identity; after an ordinary transfer it is stale
+(`StaleReseat`) and anyone drops it (`dropStaleRecoverySetup`). Agents
+at the threshold can therefore take the identity: choose agents you
+would trust with it. The owner sees the approval on chain and has the
+48 hours to move assets through the issuer's `Token.recoveryAddress`,
+which stays the asset-side bound; its new wallet must control the
+identity (own it or hold a MANAGEMENT or ACTION key on it, D41), as
+`IdentityRegistry.registerIdentity` and `moveIdentity` require of
+every wallet they bind; a holder without seated agents whose owner key
+is lost is burned and re-issued by the agent instead.
 
 Withdrawing the authorization pauses KeyManager's rotations and batches
 for the identity (it is refused while a recovery is approved); it does
