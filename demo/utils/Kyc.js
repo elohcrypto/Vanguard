@@ -116,12 +116,12 @@ async function attestAml(
 }
 
 /**
- * Issue both required claims (KYC + AML) on an identity, using the issuers
- * and signers the demo state already tracks. KYC issuer owner is signers[2]
- * and AML issuer owner is signers[3] (see
- * ContractDeployer.deployOnchainIDContracts). IdentityRegistry.isVerified()
- * requires every configured topic, so any wallet expected to verify needs
- * both claims, not just KYC.
+ * Issue both required claims (KYC + AML) on an identity, signed by each
+ * issuer's current owner among the demo signers: the deployer (wallet 0)
+ * before the handover ceremony, the issuer admin (wallet 9) after it
+ * (Task 4.13: every live issuer key is the owner's; no provider wallet
+ * holds one). IdentityRegistry.isVerified() requires every configured
+ * topic, so any wallet expected to verify needs both claims.
  *
  * @param {Object} state - DemoState instance (must have kycIssuer/amlIssuer
  *   contracts and signers registered).
@@ -132,21 +132,35 @@ async function attestAml(
  * @returns {Promise<{kyc: Object, aml: Object}>} The two transaction receipts.
  */
 async function attestAll(state, identityAddress, label, validTo) {
+  const kycIssuer = state.getContract("kycIssuer");
+  const amlIssuer = state.getContract("amlIssuer");
   const kyc = await attestKyc(
-    state.getContract("kycIssuer"),
-    state.signers[2],
+    kycIssuer,
+    await issuerOwnerSigner(state, kycIssuer),
     identityAddress,
     label,
     validTo,
   );
   const aml = await attestAml(
-    state.getContract("amlIssuer"),
-    state.signers[3],
+    amlIssuer,
+    await issuerOwnerSigner(state, amlIssuer),
     identityAddress,
     label,
     validTo,
   );
   return { kyc, aml };
+}
+
+/** The demo signer that owns `issuer`; throws when no loaded wallet does. */
+async function issuerOwnerSigner(state, issuer) {
+  const owner = (await issuer.owner()).toLowerCase();
+  const s = state.signers.find((x) => x.address.toLowerCase() === owner);
+  if (!s) {
+    throw new Error(
+      `issuer ${await issuer.getAddress()} is owned by ${owner}, not by a loaded demo wallet`,
+    );
+  }
+  return s;
 }
 
 /**
@@ -189,6 +203,7 @@ async function cacheVerification(state, wallet, log = console.log) {
 }
 
 module.exports = {
+  issuerOwnerSigner,
   signClaim,
   cacheVerification,
   attestKyc,

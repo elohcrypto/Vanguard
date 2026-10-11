@@ -54,8 +54,10 @@ async function deployOnchainIDContracts(mod) {
   // Deploy KYC Issuer
   displayProgress("Deploying KYC Issuer...");
   const ClaimIssuer = await ethers.getContractFactory("ClaimIssuer");
+  // Task 4.13: the deployer owns both issuers and hands them to the
+  // issuer admin (wallet 9) at the ceremony; it signs every claim before.
   const kycIssuer = await ClaimIssuer.deploy(
-    mod.state.signers[2].address,
+    mod.state.signers[0].address,
     "KYC Service",
     "KYC verification service",
   );
@@ -63,7 +65,7 @@ async function deployOnchainIDContracts(mod) {
   mod.state.setContract("kycIssuer", kycIssuer);
 
   await mod.logger.logContractDeployment("KYC_ClaimIssuer", kycIssuer, [
-    mod.state.signers[2].address,
+    mod.state.signers[0].address,
     "KYC Service",
     "KYC verification service",
   ]);
@@ -71,7 +73,7 @@ async function deployOnchainIDContracts(mod) {
   // Deploy AML Issuer
   displayProgress("Deploying AML Issuer...");
   const amlIssuer = await ClaimIssuer.deploy(
-    mod.state.signers[3].address,
+    mod.state.signers[0].address,
     "AML Service",
     "AML screening service",
   );
@@ -79,7 +81,7 @@ async function deployOnchainIDContracts(mod) {
   mod.state.setContract("amlIssuer", amlIssuer);
 
   await mod.logger.logContractDeployment("AML_ClaimIssuer", amlIssuer, [
-    mod.state.signers[3].address,
+    mod.state.signers[0].address,
     "AML Service",
     "AML screening service",
   ]);
