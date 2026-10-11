@@ -330,8 +330,10 @@ describe("Handover: KeyManager (4.2)", function () {
       signers,
       getContract: (k: string) => byKey[k] ?? null,
       keyLifecycle: { identity: await identity.getAddress() },
+      oracleConfig: new Map(),
+      attestorKey: null,
     };
-    const built = new HandoverModule(state, null, null)._ceremonyArgs();
+    const built = await new HandoverModule(state, null, null)._ceremonyArgs();
     expect(built.keyManager).to.equal(km);
     // Option 12's identity rides along, so the preflight checks it too.
     expect(built.keyManagerIdentity).to.equal(await identity.getAddress());

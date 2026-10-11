@@ -19,6 +19,7 @@ const {
   assertHandoverComplete,
 } = require("../demo/utils/Handover");
 const { advancePastVoterAge } = require("../demo/utils/ChainTime");
+const { attestorPublicKey } = require("./zk/attest");
 
 /** Wallet roles from docs/TESTNET_DEMO.md. */
 const OPS = 10;
@@ -117,8 +118,21 @@ async function runHandoverSmoke(state, failures) {
       `   ⚠️  IdentityRegistry deploy block not recorded: scanning from the ComplianceRules deploy (block ${fromBlock})`,
     );
   }
+  // Task 4.13 (R-413-10): the smoke acknowledges the three nodes option
+  // 31 registered (wallets 1-3) and the attestor key option 1 trusted;
+  // the officer wallet option 51 made is a stray the deployer removes.
+  const itr0 = c("investorTypeRegistry");
+  if (itr0 && (await itr0.isComplianceOfficer(s[1].address))) {
+    await (await itr0.setComplianceOfficer(s[1].address, false)).wait();
+  }
+  const attestorAx = state.attestorKey
+    ? (await attestorPublicKey(state.attestorKey)).Ax
+    : null;
   const args = {
     fromBlock,
+    oracleNodes: [1, 2, 3].map((i) => s[i].address),
+    attestors: attestorAx === null ? [] : [attestorAx.toString()],
+    extraTrusted: [],
     deployer: s[0],
     ops: s[OPS],
     guardian: s[GUARDIAN],
@@ -149,6 +163,7 @@ async function runHandoverSmoke(state, failures) {
   const log = (m) => lines.push(m);
   try {
     const report = await handoverDeployerPowers({ ...args, log });
+    args.snapshot = report.snapshot;
     const contracts = {};
     for (const e of ACCEPTANCE_PLAN) {
       contracts[e.key] = e.key === "governance" ? governance : args[e.key];
@@ -170,6 +185,41 @@ async function runHandoverSmoke(state, failures) {
 
   const result = await assertHandoverComplete(args);
   for (const f of result.failures) failures.push(`handover: ${f}`);
+  // Task 4.13: the residual warnings are exactly the deployer-era facts
+  // the smoke created: the root it published, the three attestor keys
+  // option 1 trusted, and the three nodes option 31 registered.
+  const expectRes = [
+    new RegExp(
+      `^PrivacyManager whitelist root ${root} \\(version \\d+\\) was published by the deployer`,
+    ),
+    ...["jurisdiction", "accreditation", "compliance"].map(
+      (n) =>
+        new RegExp(
+          `^PrivacyManager issuer key \\(Ax ${attestorAx}\\) for ${n} was trusted by the deployer`,
+        ),
+    ),
+    ...[1, 2, 3].map(
+      (i) =>
+        new RegExp(
+          `^OracleManager node ${s[i].address} \\(\\w+\\) was registered by the deployer at block \\d+`,
+        ),
+    ),
+  ];
+  const unmatched = result.residual.filter(
+    (w) => !expectRes.some((re) => re.test(w)),
+  );
+  const unmet = expectRes.filter(
+    (re) => !result.residual.some((w) => re.test(w)),
+  );
+  if (
+    unmatched.length ||
+    unmet.length ||
+    result.residual.length !== expectRes.length
+  ) {
+    failures.push(
+      `handover residual warnings differ from the expected ${expectRes.length}: unexpected [${unmatched.join(" | ")}], missing ${unmet.length}`,
+    );
+  }
   // 4.10: the registry governance now owns still authorizes VSC.
   const itr = c("investorTypeRegistry");
   if (itr && !(await itr.isTokenAuthorized(c("digitalToken").target)))

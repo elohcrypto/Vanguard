@@ -15,6 +15,7 @@ const {
 } = require("../utils/DisplayHelpers");
 const {
   ACCEPTANCE_PLAN,
+  findStrays,
   handoverDeployerPowers,
   proposeCall,
   proposeAcceptOwnership,
@@ -23,6 +24,7 @@ const {
   assertHandoverComplete,
 } = require("../utils/Handover");
 const { pickVoters } = require("../utils/VoterPicker");
+const { attestorPublicKey } = require("../../scripts/zk/attest");
 
 /** ACCEPTANCE_PLAN key -> DemoState contract key. */
 const STATE_KEY = {
@@ -55,8 +57,14 @@ class HandoverModule {
     this.promptUser = promptUser;
   }
 
-  /** Everything the ceremony reads from state; null (after a message) if incomplete. */
-  _ceremonyArgs() {
+  /**
+   * Everything the ceremony reads from state; null (after a message) if
+   * incomplete. Task 4.13 (R-413-9): the demo acknowledges what it
+   * created itself, the nodes options 31/32 registered (state.oracleConfig)
+   * and the attestor key option 1 trusted (state.attestorKey); anything
+   * else registered or trusted on chain is still refused.
+   */
+  async _ceremonyArgs() {
     const s = this.state;
     const missing = [
       ["vanguardGovernance", "74"],
@@ -91,8 +99,16 @@ class HandoverModule {
         `IdentityRegistry deploy block not recorded: scanning from the ComplianceRules deploy (block ${fromBlock}); a registry agent added before it would be missed`,
       );
     }
+    const oracleNodes = [...s.oracleConfig.values()].map((x) => x.address);
+    const attestors = s.attestorKey
+      ? [(await attestorPublicKey(s.attestorKey)).Ax.toString()]
+      : [];
     return {
       fromBlock,
+      oracleNodes,
+      attestors,
+      extraTrusted: [],
+      snapshot: s.handoverSnapshot,
       deployer: s.signers[0],
       ops,
       guardian,
@@ -130,7 +146,7 @@ class HandoverModule {
       "HANDOVER STEP 1: DEPLOYER GRANTS OPS/GUARDIAN, NOMINATES GOVERNANCE",
       "🔑",
     );
-    const args = this._ceremonyArgs();
+    const args = await this._ceremonyArgs();
     if (!args) return;
     console.log(`   Deployer: ${args.deployer.address} (wallet 0)`);
     console.log(`   Ops:      ${args.ops.address} (wallet ${OPS_INDEX})`);
@@ -141,9 +157,15 @@ class HandoverModule {
       `   Issuer admin: ${args.issuerAdmin.address} (wallet ${ISSUER_ADMIN_INDEX})`,
     );
     console.log(`   Governance: ${await args.governance.getAddress()}`);
+    console.log(
+      `   Acknowledged: ${args.oracleNodes.length} node(s), ${args.attestors.length} attestor key(s), ${args.extraTrusted.length} extra trusted`,
+    );
     try {
+      if (!(await this._removeStrays(args))) return;
       const report = await handoverDeployerPowers(args);
       displaySuccess("DEPLOYER POWERS HANDED OVER; GOVERNANCE NOMINATED");
+      // 83e compares the completion with what the preflight found.
+      this.state.handoverSnapshot = report.snapshot;
       // Governance owns the registry (83b ran first): 83d votes these.
       this.state.handoverRegistryProposals = report.registryProposals;
       for (const r of report.registryProposals) {
@@ -153,8 +175,40 @@ class HandoverModule {
         "   💡 Next: 83d (governance accepts by vote), then 83e (verify)",
       );
     } catch (error) {
-      displayError(`Handover step 1 failed: ${error.message}`);
+      // A preflight refusal is the gate working, not a failure (R-48-6).
+      if (/^Handover: /.test(error.message)) {
+        console.log(`   ⛔ Handover refused: ${error.message.slice(10)}`);
+      } else displayError(`Handover step 1 failed: ${error.message}`);
     }
+  }
+
+  /**
+   * Task 4.13 (R-413-4): the preflight refuses every stray grant; the
+   * demo, as the operator's console, lists them and offers to send the
+   * owner call for each as the deployer. Returns false when the operator
+   * declines (the preflight would refuse) or a removal fails.
+   */
+  async _removeStrays(args) {
+    const strays = await findStrays(args);
+    if (!strays.length) return true;
+    console.log(
+      `\n   ⛔ ${strays.length} stray grant(s) the preflight refuses:`,
+    );
+    for (const x of strays) console.log(`      - ${x.what}`);
+    const a = await this.promptUser(
+      `   Remove them now as the deployer (${strays.length} transaction(s))? (y/N): `,
+    );
+    if (!/^y(es)?$/i.test(a)) {
+      displayWarning(
+        "Left in place: 83c would be refused until they are removed",
+      );
+      return false;
+    }
+    for (const x of strays) {
+      await (await x.on.connect(this.state.signers[0])[x.fn](...x.args)).wait();
+      console.log(`   ✅ removed: ${x.what}`);
+    }
+    return true;
   }
 
   /** Option 83d */
@@ -237,7 +291,7 @@ class HandoverModule {
   /** Option 83e */
   async verifyHandover() {
     displaySection("HANDOVER STEP 3: VERIFY THE DEPLOYER HOLDS NO POWER", "🔍");
-    const args = this._ceremonyArgs();
+    const args = await this._ceremonyArgs();
     if (!args) return;
     try {
       const { ok, checks, warnings, residual } =
