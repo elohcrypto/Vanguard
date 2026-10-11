@@ -123,6 +123,7 @@ abstract contract KeyManagerRecovery is ReentrancyGuard {
         uint256 vetoes;
         uint256 round;
         mapping(address => uint256) vetoedRound;
+        address proposer; // the owner that proposed it; must still own (M-B)
     }
     mapping(address => PendingSetup) internal _pendingSetups;
     mapping(address => mapping(uint256 => mapping(bytes32 => RecoveryCandidate))) private _candidates;
@@ -380,6 +381,7 @@ abstract contract KeyManagerRecovery is ReentrancyGuard {
         p.threshold = 0;
         p.effectiveAt = 0;
         p.vetoes = 0;
+        p.proposer = address(0);
         p.round++;
     }
 

@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.20;
 
-import {KeyManagerRecovery, IManagedIdentity} from "./KeyManagerRecovery.sol";
+import {KeyManagerRecovery, IManagedIdentity, IOnchainID} from "./KeyManagerRecovery.sol";
 
 /**
  * @title KeyManagerRecoverySetup
@@ -13,6 +13,11 @@ import {KeyManagerRecovery, IManagedIdentity} from "./KeyManagerRecovery.sol";
  *      seated agents can veto it at their threshold, an approved recovery
  *      blocks it, and an executed recovery drops it. A thief holding the
  *      owner key therefore cannot replace the agents who would evict it.
+ *      A re-seat applies only while its proposer still owns the identity
+ *      (Task 4.14, M-B): an ordinary ownership transfer leaves it stale,
+ *      refused at apply and droppable by anyone. Neither the owner nor a
+ *      current MANAGEMENT key may be seated as an agent (D53): a stolen
+ *      owner key must not vote on its own eviction.
  */
 abstract contract KeyManagerRecoverySetup is KeyManagerRecovery {
     event KeyRecoverySetupPending(
@@ -26,6 +31,15 @@ abstract contract KeyManagerRecoverySetup is KeyManagerRecovery {
 
     error NoPendingSetup();
     error AlreadyVetoed();
+    /// @dev The pending re-seat's proposer no longer owns the identity.
+    error StaleReseat();
+    /// @dev The pending re-seat's proposer still owns the identity.
+    error ReseatNotStale();
+    /// @dev An agent that is the owner or holds a MANAGEMENT key (D53).
+    error AgentControlsIdentity(address agent);
+
+    /// @dev A stale re-seat was dropped (its proposer no longer owns).
+    event KeyRecoverySetupDropped(address indexed identity);
 
     /**
      * @dev Seat (first time) or propose to re-seat the agents. Owner only;
@@ -47,6 +61,7 @@ abstract contract KeyManagerRecoverySetup is KeyManagerRecovery {
             for (uint256 j = i + 1; j < _recoveryAgents.length; j++) {
                 require(_recoveryAgents[i] != _recoveryAgents[j], "KeyManager: Duplicate agent");
             }
+            _checkNotController(_identity, _recoveryAgents[i]);
         }
         if (_recoveries[_identity].recoveryAgents.length == 0) {
             _seat(_identity, _recoveryAgents, _threshold);
@@ -57,17 +72,28 @@ abstract contract KeyManagerRecoverySetup is KeyManagerRecovery {
         p.agents = _recoveryAgents;
         p.threshold = _threshold;
         p.effectiveAt = block.timestamp + RECOVERY_TIMELOCK;
+        p.proposer = msg.sender;
         emit KeyRecoverySetupPending(_identity, _recoveryAgents.length, _threshold, p.effectiveAt);
     }
 
+    /// @dev D53: the owner and MANAGEMENT keys are what recovery evicts.
+    function _checkNotController(address _identity, address _agent) private view {
+        if (
+            _agent == IManagedIdentity(_identity).owner() ||
+            IOnchainID(_identity).keyHasPurpose(keccak256(abi.encodePacked(_agent)), 1)
+        ) revert AgentControlsIdentity(_agent);
+    }
+
     /// @dev Anyone applies a pending re-seat RECOVERY_TIMELOCK after it was
-    ///      proposed, within EXECUTION_WINDOW, unless a recovery is approved.
+    ///      proposed, within EXECUTION_WINDOW, unless a recovery is approved
+    ///      or the identity changed hands since (StaleReseat, M-B).
     function applyKeyRecoverySetup(address _identity) external {
         PendingSetup storage p = _pendingSetups[_identity];
         if (p.effectiveAt == 0) revert NoPendingSetup();
         _checkWindow(p.effectiveAt);
         _checkPinned(_identity);
         if (recoveryLocked(_identity)) revert RecoveryLocked();
+        if (p.proposer != IManagedIdentity(_identity).owner()) revert StaleReseat();
         address[] memory agents = p.agents;
         uint256 threshold = p.threshold;
         _clearPendingSetup(p);
@@ -88,6 +114,16 @@ abstract contract KeyManagerRecoverySetup is KeyManagerRecovery {
         if (p.vetoes < recovery.threshold) return;
         _clearPendingSetup(p);
         emit KeyRecoverySetupVetoed(_identity);
+    }
+
+    /// @dev Anyone drops a pending re-seat whose proposer no longer owns
+    ///      the identity (an ordinary transfer happened since, M-B).
+    function dropStaleRecoverySetup(address _identity) external {
+        PendingSetup storage p = _pendingSetups[_identity];
+        if (p.effectiveAt == 0) revert NoPendingSetup();
+        if (p.proposer == IManagedIdentity(_identity).owner()) revert ReseatNotStale();
+        _clearPendingSetup(p);
+        emit KeyRecoverySetupDropped(_identity);
     }
 
     /// @dev The pending re-seat: agents, threshold, when it applies, vetoes.

@@ -103,7 +103,13 @@ abstract contract OnchainIDOwnership is OnchainIDKeys {
         address m = recoveryManager;
         if (m == address(0)) return false;
         (bool ok, bytes memory ret) = m.staticcall(abi.encodeCall(IRecoveryManager.recoveryLocked, (address(this))));
-        return ok && ret.length >= 32 && abi.decode(ret, (bool));
+        return ok && _isTrue(ret);
+    }
+
+    /// @dev Strict: exactly the word 1 is true; any other word (which
+    ///      abi.decode(ret, (bool)) would revert on) is false (4.14, L-A).
+    function _isTrue(bytes memory ret) private pure returns (bool) {
+        return ret.length >= 32 && abi.decode(ret, (uint256)) == 1;
     }
 
     function _checkNotFrozen() private view {
@@ -165,9 +171,10 @@ abstract contract OnchainIDOwnership is OnchainIDKeys {
      */
     function transferOwnershipByRecovery(address newOwner) external {
         if (msg.sender != recoveryManager || msg.sender == address(0)) revert NotRecoveryManager();
-        if (!IRecoveryManager(msg.sender).isRecoveryOwner(address(this), newOwner)) {
-            revert NoRecoveryForOwner(newOwner);
-        }
+        (bool ok, bytes memory ret) = msg.sender.staticcall(
+            abi.encodeCall(IRecoveryManager.isRecoveryOwner, (address(this), newOwner))
+        );
+        if (!ok || !_isTrue(ret)) revert NoRecoveryForOwner(newOwner);
         _inRecoveryProposal = true;
         super.transferOwnership(newOwner);
         _inRecoveryProposal = false;
@@ -185,7 +192,11 @@ abstract contract OnchainIDOwnership is OnchainIDKeys {
     ///      MANAGEMENT key is removed (bounded: none is expected, additions
     ///      stay frozen until here) and every authorized manager but the
     ///      recovery manager is de-authorized (the thief's managers go).
+    ///      While frozen only that pending owner accepts (4.14, M-C): a
+    ///      wallet the thief nominated earlier cannot take the identity and
+    ///      a MANAGEMENT key with it during the recovery.
     function acceptOwnership() public override {
+        if (msg.sender != _recoveryPendingOwner) _checkNotFrozen();
         address previous = owner();
         super.acceptOwnership();
         bytes32 newKey = keccak256(abi.encodePacked(msg.sender));

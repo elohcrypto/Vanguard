@@ -259,7 +259,9 @@ abstract contract RegistryVerification is IIdentityRegistry, Ownable2Step {
             (bool ok, bytes memory ret) = issuers[i].staticcall(
                 abi.encodeCall(IClaimIssuer.hasValidClaim, (id, topic))
             );
-            if (ok && ret.length >= 32 && abi.decode(ret, (bool))) return issuers[i];
+            // Strict: exactly the word 1 (abi.decode to bool would revert on
+            // any other word and fail the walk for everyone, 4.14 L-A).
+            if (ok && ret.length >= 32 && abi.decode(ret, (uint256)) == 1) return issuers[i];
         }
         return address(0);
     }
