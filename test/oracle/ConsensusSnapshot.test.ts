@@ -149,13 +149,26 @@ describe("Consensus snapshot: pausing never lowers the bar", function () {
     }
   });
 
-  it("no registered node: a query fails closed (NoRegisteredWeight)", async function () {
+  // Plan v2 Task 4.13 (D50): below MIN_NODES registered nodes a query is
+  // refused, so one node can never list or sanction anyone alone.
+  it("fewer than MIN_NODES registered nodes cannot open a query; two can", async function () {
     const empty = await (
       await ethers.getContractFactory("OracleManager")
     ).deploy();
     const engine = await bindEngine(empty);
+    expect(await engine.MIN_NODES()).to.equal(2);
+    await expect(empty.submitQuery(subject.address, WHITELIST, TIER3))
+      .to.be.revertedWithCustomError(engine, "TooFewNodes")
+      .withArgs(0, 2);
+    await empty.registerOracle(n1.address, "node", "", 500);
     await expect(
-      empty.submitQuery(subject.address, WHITELIST, TIER3),
-    ).to.be.revertedWithCustomError(engine, "NoRegisteredWeight");
+      empty.connect(n1).submitQuery(subject.address, WHITELIST, TIER3),
+    )
+      .to.be.revertedWithCustomError(engine, "TooFewNodes")
+      .withArgs(1, 2);
+    await empty.registerOracle(n2.address, "node", "", 500);
+    await expect(
+      empty.connect(n1).submitQuery(subject.address, WHITELIST, TIER3),
+    ).to.emit(engine, "ConsensusQueryCreated");
   });
 });

@@ -37,6 +37,9 @@ contract ConsensusOracle {
     error AlreadyVoted();
     /// @notice No registered node, so no weight to snapshot: fail closed.
     error NoRegisteredWeight();
+    /// @notice Fewer than MIN_NODES registered nodes: one node would
+    ///         resolve every query alone (bar = its own weight x 66%).
+    error TooFewNodes(uint256 registered, uint256 minimum);
     /// @notice The voter was not a registered node when the query opened.
     error NotInSnapshot();
     error InvalidThreshold();
@@ -62,6 +65,10 @@ contract ConsensusOracle {
     uint256 public constant MAX_ORACLE_WEIGHT = 1000;
     uint256 public constant MIN_EXPIRY = 10 minutes;
     uint256 public constant MAX_EXPIRY = 24 hours;
+    /// @notice Registered nodes a query needs to open (plan v2 Task 4.13,
+    ///         D50): with one node the bar is that node's own weight, so
+    ///         it would list or sanction anyone alone.
+    uint256 public constant MIN_NODES = 2;
 
     /// @notice The manager this engine serves; set once at construction.
     ///         Storage, not immutable: the runtime code then equals the
@@ -103,11 +110,13 @@ contract ConsensusOracle {
     }
 
     /// @notice Open `queryId`: snapshot every registered node's weight and
-    ///         freeze the bar (manager only). Bounded by MAX_ORACLES (100).
+    ///         freeze the bar (manager only). Bounded by MAX_ORACLES (100);
+    ///         refused below MIN_NODES registered nodes.
     function openQuery(bytes32 queryId) external onlyOracleManager {
         ConsensusQuery storage q = _queries[queryId];
         if (q.openedAt != 0) revert QueryExists();
         address[] memory nodes = oracleManager.getRegisteredOracles();
+        if (nodes.length < MIN_NODES) revert TooFewNodes(nodes.length, MIN_NODES);
         uint256 snapshot = 0;
         for (uint256 i = 0; i < nodes.length; i++) {
             uint256 w = weightOf(nodes[i]);

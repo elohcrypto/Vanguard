@@ -180,8 +180,8 @@ describe("Oracle Management System", function () {
     });
 
     it("Should submit and track queries", async function () {
-      // The engine snapshots the active weight: a query needs a node.
-      await oracleManager.registerOracle(oracle1.address, "O1", "", 500);
+      for (const o of [oracle1, oracle2])
+        await oracleManager.registerOracle(o.address, "O", "", 500); // D50
       // A whitelist query carries its tier (Task 4.12).
       const queryData = ethers.AbiCoder.defaultAbiCoder().encode(
         ["uint8"],
