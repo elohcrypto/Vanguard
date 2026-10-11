@@ -28,9 +28,11 @@ interface IManagedIdentity {
  *        recovery is approved or its owner transfer is pending; a re-seat
  *        of seated agents waits RECOVERY_TIMELOCK and the seated agents
  *        can veto it (KeyManagerRecoverySetup, R-411-16);
- *      - an agent opens a candidate; before the threshold of approvals is
- *        reached its initiator or the owner may cancel it; once reached
- *        (the APPROVAL) only the agents cancel it, by the same threshold;
+ *      - an agent opens a candidate, which is its approval (D39); before
+ *        the threshold of approvals is reached only its initiator may
+ *        cancel it (never the owner: a stolen owner key could race every
+ *        candidate); once reached (the APPROVAL) only the agents cancel
+ *        it, by the same threshold;
  *      - RECOVERY_TIMELOCK after the approval, within EXECUTION_WINDOW,
  *        anyone executes: the recovered key is added and every other
  *        MANAGEMENT key on the identity is removed (ACTION, CLAIM and
@@ -64,6 +66,9 @@ abstract contract KeyManagerRecovery is ReentrancyGuard {
     event KeyRecoveryCancelVote(address indexed identity, bytes32 indexed recoveryKey, address agent, uint256 votes);
     /// @dev A MANAGEMENT key removed by executeKeyRecovery.
     event KeyRecoveryKeyEvicted(address indexed identity, bytes32 indexed evictedKey, bytes32 indexed recoveryKey);
+    /// @dev An executed recovery whose owner transfer lapsed was re-opened
+    ///      by an agent (D52): a new epoch, the old recovery forgotten.
+    event KeyRecoveryReopened(address indexed identity, uint256 epoch);
 
     /// @dev Setup is the identity owner's (Task 4.11).
     error NotIdentityOwner();
@@ -75,6 +80,8 @@ abstract contract KeyManagerRecovery is ReentrancyGuard {
     error AnotherRecoveryApproved();
     /// @dev An approved candidate is cancelled by its agents only.
     error ApprovedRecoveryAgentsOnly();
+    /// @dev Before the threshold only the candidate's initiator cancels.
+    error NotInitiator();
     error AlreadyVotedToCancel();
     error EvictionFailed(bytes32 key);
     error IdentityNotAContract();
@@ -170,21 +177,27 @@ abstract contract KeyManagerRecovery is ReentrancyGuard {
     // Key recovery functions
 
     /**
-     * @dev Open a recovery candidate for `_newRecoveryKey`. Each candidate
-     *      has its own approvals and timelock, so an agent proposing another
-     *      key never erases or delays an honest candidate (2F.2 review, F2).
-     *      Re-initiating a pending candidate is refused, so its timelock
-     *      cannot be restarted.
+     * @dev Open a recovery candidate for `_newRecoveryKey`, which counts as
+     *      the opener's approval (D39): at threshold 1 the candidate is
+     *      approved in this call. Each candidate has its own approvals and
+     *      timelock, so an agent proposing another key never erases or
+     *      delays an honest candidate (2F.2 review, F2); none opens while
+     *      another is approved. Re-initiating a pending candidate is
+     *      refused, so its timelock cannot be restarted. After an executed
+     *      recovery whose owner transfer lapsed with the owner unmoved, an
+     *      agent re-opens recovery here (D52): new epoch, event.
      * @param _identity The OnchainID contract address
      * @param _newRecoveryKey The new recovery key to add
      */
     function initiateKeyRecovery(address _identity, bytes32 _newRecoveryKey) external {
         KeyRecovery storage recovery = _recoveries[_identity];
         require(recovery.recoveryAgents.length > 0, "KeyManager: Recovery not set up");
-        require(!recovery.completed, "KeyManager: Recovery already completed");
         require(_isRecoveryAgent(recovery, msg.sender), "KeyManager: Not a recovery agent");
         _checkPinned(_identity);
+        if (recovery.completed) _reopenIfLapsed(recovery, _identity);
+        require(!recovery.completed, "KeyManager: Recovery already completed");
         require(_newRecoveryKey != bytes32(0), "KeyManager: Invalid recovery key");
+        if (_liveApproval(recovery) && recovery.approvedKey != _newRecoveryKey) revert AnotherRecoveryApproved();
         RecoveryCandidate storage c = _candidates[_identity][recovery.epoch][_newRecoveryKey];
         // A candidate past its execution window is dead and may be re-opened.
         require(
@@ -193,14 +206,42 @@ abstract contract KeyManagerRecovery is ReentrancyGuard {
         );
 
         c.round++;
-        c.approvalCount = 0;
+        c.approvalCount = 1;
         c.cancelCount = 0;
         c.initiatedAt = block.timestamp;
         c.executionTime = block.timestamp + RECOVERY_TIMELOCK;
         c.initiator = msg.sender;
+        c.approvedRound[msg.sender] = c.round;
         recovery.lastKey = _newRecoveryKey;
 
         emit KeyRecoveryInitiated(_identity, _newRecoveryKey, msg.sender);
+        if (recovery.threshold == 1) _approve(recovery, c, _identity, _newRecoveryKey);
+    }
+
+    /// @dev D52: an executed recovery whose owner transfer window passed
+    ///      with owner() still not the recovered wallet is forgotten.
+    function _reopenIfLapsed(KeyRecovery storage recovery, address _identity) private {
+        if (block.timestamp <= recovery.approvedAt + OWNER_TRANSFER_TIMELOCK + EXECUTION_WINDOW) return;
+        if (keccak256(abi.encodePacked(IManagedIdentity(_identity).owner())) == recovery.approvedKey) return;
+        recovery.completed = false;
+        recovery.approvedKey = bytes32(0);
+        recovery.approvedAt = 0;
+        recovery.lastKey = bytes32(0);
+        recovery.epoch++;
+        emit KeyRecoveryReopened(_identity, recovery.epoch);
+    }
+
+    /// @dev The threshold is reached: both timelocks run from now.
+    function _approve(
+        KeyRecovery storage recovery,
+        RecoveryCandidate storage c,
+        address _identity,
+        bytes32 _key
+    ) private {
+        recovery.approvedKey = _key;
+        recovery.approvedAt = block.timestamp;
+        c.executionTime = block.timestamp + RECOVERY_TIMELOCK;
+        emit KeyRecoveryApproved(_identity, _key, c.executionTime, block.timestamp + OWNER_TRANSFER_TIMELOCK);
     }
 
     /**
@@ -226,23 +267,14 @@ abstract contract KeyManagerRecovery is ReentrancyGuard {
 
         c.approvedRound[msg.sender] = c.round;
         c.approvalCount++;
-        if (!approved && c.approvalCount >= recovery.threshold) {
-            recovery.approvedKey = _key;
-            recovery.approvedAt = block.timestamp;
-            c.executionTime = block.timestamp + RECOVERY_TIMELOCK;
-            emit KeyRecoveryApproved(
-                _identity,
-                _key,
-                c.executionTime,
-                block.timestamp + OWNER_TRANSFER_TIMELOCK
-            );
-        }
+        if (!approved && c.approvalCount >= recovery.threshold) _approve(recovery, c, _identity, _key);
     }
 
     /**
-     * @dev Cancel the candidate for `_key`. Before its approval: the agent
-     *      that opened it or the identity owner (a MANAGEMENT key no longer
-     *      may: it is what recovery defends against). Once approved: only
+     * @dev Cancel the candidate for `_key`. Before its approval: only the
+     *      agent that opened it (R-414-1, D39: the owner no longer may, a
+     *      stolen owner key raced every candidate; a MANAGEMENT key never
+     *      could, it is what recovery defends against). Once approved: only
      *      the agents, each voting once, cancelling at the threshold; the
      *      owner and MANAGEMENT keys are refused, so a stolen owner key or a
      *      rogue MANAGEMENT key cannot veto its own eviction. Other
@@ -261,11 +293,8 @@ abstract contract KeyManagerRecovery is ReentrancyGuard {
             if (c.cancelCount < recovery.threshold) return;
             recovery.approvedKey = bytes32(0);
             recovery.approvedAt = 0;
-        } else {
-            require(
-                msg.sender == c.initiator || msg.sender == IManagedIdentity(_identity).owner(),
-                "KeyManager: Not allowed to cancel recovery"
-            );
+        } else if (msg.sender != c.initiator) {
+            revert NotInitiator();
         }
         c.initiatedAt = 0;
         c.executionTime = 0;

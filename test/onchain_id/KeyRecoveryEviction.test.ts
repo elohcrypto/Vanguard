@@ -47,11 +47,10 @@ async function setup(contract = "OnchainID") {
   };
 }
 
-/** Opens and approves (2 of 3) a recovery onto `rescued`; returns the approval time. */
+/** Opens (A's approval, D39) and approves (B) a recovery onto `rescued`; returns the approval time. */
 async function approved(f: Awaited<ReturnType<typeof setup>>) {
   const key = k(f.rescued.address);
   await f.km.connect(f.A).initiateKeyRecovery(f.idA, key);
-  await f.km.connect(f.A).approveKeyRecovery(f.idA, key);
   await f.km.connect(f.B).approveKeyRecovery(f.idA, key);
   return BigInt(await time.latest());
 }
@@ -64,7 +63,6 @@ describe("KeyManager recovery evicts and moves ownership (4.11, D38 c)", functio
     const key = k(f.rescued.address);
     await f.km.connect(f.A).initiateKeyRecovery(f.idA, key);
     await time.increase(3 * DAY);
-    await f.km.connect(f.A).approveKeyRecovery(f.idA, key);
     await expect(f.km.connect(f.B).approveKeyRecovery(f.idA, key)).to.emit(
       f.km,
       "KeyRecoveryApproved",
@@ -84,29 +82,32 @@ describe("KeyManager recovery evicts and moves ownership (4.11, D38 c)", functio
 
   it("a rogue MANAGEMENT key can neither cancel nor re-seat an approved recovery", async function () {
     const f = await setup();
-    await approved(f);
     const key = k(f.rescued.address);
+    // Not even before an approval: a MANAGEMENT key cancels nothing (only
+    // the initiator does, D39). Opened first: none opens once approved.
+    await f.km.connect(f.C).initiateKeyRecovery(f.idA, ethers.id("other"));
+    await expect(
+      f.km.connect(f.rogue).cancelKeyRecovery(f.idA, ethers.id("other")),
+    ).to.be.revertedWithCustomError(f.km, "NotInitiator");
+    await approved(f);
     await expect(
       f.km.connect(f.rogue).cancelKeyRecovery(f.idA, key),
     ).to.be.revertedWithCustomError(f.km, "ApprovedRecoveryAgentsOnly");
     await expect(
       f.km.connect(f.rogue).setupKeyRecovery(f.idA, [f.rogue.address], 1),
     ).to.be.revertedWithCustomError(f.km, "NotIdentityOwner");
-    // Not even before an approval: a MANAGEMENT key cancels nothing.
-    await f.km.connect(f.C).initiateKeyRecovery(f.idA, ethers.id("other"));
-    await expect(
-      f.km.connect(f.rogue).cancelKeyRecovery(f.idA, ethers.id("other")),
-    ).to.be.revertedWith("KeyManager: Not allowed to cancel recovery");
   });
 
-  it("the owner cancels before the approval, not after; setup is locked after", async function () {
+  it("the owner cancels neither before nor after the approval (D39); the initiator before; setup is locked after", async function () {
     const f = await setup();
     const key = k(f.rescued.address);
     await f.km.connect(f.A).initiateKeyRecovery(f.idA, key);
-    await f.km.connect(f.A).approveKeyRecovery(f.idA, key);
-    await expect(f.km.connect(f.owner).cancelKeyRecovery(f.idA, key))
+    await expect(
+      f.km.connect(f.owner).cancelKeyRecovery(f.idA, key),
+    ).to.be.revertedWithCustomError(f.km, "NotInitiator");
+    await expect(f.km.connect(f.A).cancelKeyRecovery(f.idA, key))
       .to.emit(f.km, "KeyRecoveryCancelled")
-      .withArgs(f.idA, key, f.owner.address);
+      .withArgs(f.idA, key, f.A.address);
     await approved(f);
     await expect(
       f.km.connect(f.owner).cancelKeyRecovery(f.idA, key),
@@ -143,9 +144,9 @@ describe("KeyManager recovery evicts and moves ownership (4.11, D38 c)", functio
     const f = await setup();
     await approved(f);
     const other = ethers.id("other");
-    await f.km.connect(f.C).initiateKeyRecovery(f.idA, other);
+    // Opening is an approval (D39), so none opens while another is approved.
     await expect(
-      f.km.connect(f.C).approveKeyRecovery(f.idA, other),
+      f.km.connect(f.C).initiateKeyRecovery(f.idA, other),
     ).to.be.revertedWithCustomError(f.km, "AnotherRecoveryApproved");
   });
 
@@ -220,7 +221,6 @@ describe("KeyManager recovery evicts and moves ownership (4.11, D38 c)", functio
     const f = await setup();
     const key = k(f.actionHolder.address);
     await f.km.connect(f.A).initiateKeyRecovery(f.idA, key);
-    await f.km.connect(f.A).approveKeyRecovery(f.idA, key);
     await f.km.connect(f.B).approveKeyRecovery(f.idA, key);
     await time.increase(2 * DAY + 1);
     await f.km.connect(f.anyone).executeKeyRecovery(f.idA, key);

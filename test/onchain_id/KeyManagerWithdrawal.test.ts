@@ -36,7 +36,6 @@ describe("KeyManager withdrawal and execution window (4.2 M1)", function () {
     await km.setupKeyRecovery(idA, [a1.address, a2.address], 2);
     const evil = k(x.address);
     await km.connect(a1).initiateKeyRecovery(idA, evil);
-    await km.connect(a1).approveKeyRecovery(idA, evil);
     // Task 4.11 (R-411-17): recovery runs through the pinned recovery
     // manager, not authorizedManagers, so the owner (perhaps a thief)
     // cannot switch it off by withdrawing KeyManager.
@@ -72,15 +71,16 @@ describe("KeyManager withdrawal and execution window (4.2 M1)", function () {
   });
 
   it("re-authorized inside the window, a paused item runs: cancel is the stop", async function () {
-    const { a1, x, y, id, idA, km, kmA } = await setup();
-    await km.setupKeyRecovery(idA, [a1.address], 1);
+    const { a1, a2, x, y, id, idA, km, kmA } = await setup();
+    await km.setupKeyRecovery(idA, [a1.address, a2.address], 2);
     const key = k(x.address);
     await km.connect(a1).initiateKeyRecovery(idA, key);
-    // Paused before the approval (after it, deauthorizeManager is frozen).
+    // Paused before the approval (after it, deauthorizeManager is frozen;
+    // at threshold 1 the open itself would approve, D39).
     await id.deauthorizeManager(kmA);
     await time.increase(6 * DAY);
     await id.authorizeManager(kmA);
-    await km.connect(a1).approveKeyRecovery(idA, key);
+    await km.connect(a2).approveKeyRecovery(idA, key);
     await time.increase(2 * DAY + 1);
     await km.connect(y).executeKeyRecovery(idA, key);
     expect(await id.keyHasPurpose(key, MGMT)).to.equal(true);
@@ -116,34 +116,35 @@ describe("KeyManager withdrawal and execution window (4.2 M1)", function () {
     await km.setupKeyRecovery(idA, [a1.address, a2.address], 2);
     const key = k(x.address);
     await km.connect(a1).initiateKeyRecovery(idA, key);
-    await km.connect(a1).approveKeyRecovery(idA, key);
     await expect(
       km.connect(a2).initiateKeyRecovery(idA, key),
     ).to.be.revertedWith("KeyManager: Recovery already pending");
     await time.increase(10 * DAY);
     await km.connect(a2).initiateKeyRecovery(idA, key);
-    expect((await km.getRecoveryCandidate(idA, key)).approvalCount).to.equal(0);
+    // a2's own approval as the opener (D39); a1's stale one is gone.
+    expect((await km.getRecoveryCandidate(idA, key)).approvalCount).to.equal(1);
     expect(await km.hasApprovedRecovery(idA, key, a1.address)).to.equal(false);
-    await km.connect(a2).approveKeyRecovery(idA, key);
     await time.increase(2 * DAY + 1);
     await expect(km.connect(y).executeKeyRecovery(idA, key)).to.be.revertedWith(
       "KeyManager: Insufficient approvals",
     );
   });
 
-  it("while withdrawn, agents still open and approve (4.11); the holder cancels before the threshold", async function () {
+  it("while withdrawn, agents still open and approve (4.11); the holder never cancels (D39)", async function () {
     const { holder, a1, a2, x, idA, id, km, kmA } = await setup();
     await km.setupKeyRecovery(idA, [a1.address, a2.address], 2);
     const key = k(x.address);
     await km.connect(a1).initiateKeyRecovery(idA, key);
     await id.deauthorizeManager(kmA);
     await km.connect(a2).initiateKeyRecovery(idA, ethers.id("other"));
-    await km.connect(a2).approveKeyRecovery(idA, key);
-    await expect(km.connect(holder).cancelKeyRecovery(idA, key)).to.emit(
+    await expect(
+      km.connect(holder).cancelKeyRecovery(idA, key),
+    ).to.be.revertedWithCustomError(km, "NotInitiator");
+    await expect(km.connect(a2).approveKeyRecovery(idA, key)).to.emit(
       km,
-      "KeyRecoveryCancelled",
+      "KeyRecoveryApproved",
     );
-    expect((await km.getRecoveryCandidate(idA, key)).initiatedAt).to.equal(0);
+    expect((await km.getRecoveryCandidate(idA, key)).approvalCount).to.equal(2);
   });
 });
 

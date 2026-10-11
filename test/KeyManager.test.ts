@@ -774,14 +774,15 @@ describe("KeyManager", function () {
       });
 
       it("Should allow recovery agent to approve recovery", async function () {
+        // The opener's approval counted at open (D39): two with agent 2's.
         await keyManager
-          .connect(recoveryAgent1)
+          .connect(recoveryAgent2)
           .approveKeyRecovery(await onchainID.getAddress(), newRecoveryKey);
 
         const [, , approvalCount] = await keyManager.getKeyRecovery(
           await onchainID.getAddress(),
         );
-        expect(approvalCount).to.equal(1);
+        expect(approvalCount).to.equal(2);
       });
 
       it("Should reject approval by non-recovery agent", async function () {
@@ -793,13 +794,18 @@ describe("KeyManager", function () {
       });
 
       it("Should reject double approval by same agent", async function () {
-        await keyManager
-          .connect(recoveryAgent1)
-          .approveKeyRecovery(await onchainID.getAddress(), newRecoveryKey);
-
+        // The opener already approved by opening (D39).
         await expect(
           keyManager
             .connect(recoveryAgent1)
+            .approveKeyRecovery(await onchainID.getAddress(), newRecoveryKey),
+        ).to.be.revertedWith("KeyManager: Already approved");
+        await keyManager
+          .connect(recoveryAgent2)
+          .approveKeyRecovery(await onchainID.getAddress(), newRecoveryKey);
+        await expect(
+          keyManager
+            .connect(recoveryAgent2)
             .approveKeyRecovery(await onchainID.getAddress(), newRecoveryKey),
         ).to.be.revertedWith("KeyManager: Already approved");
       });
@@ -814,11 +820,6 @@ describe("KeyManager", function () {
         await keyManager
           .connect(recoveryAgent1)
           .initiateKeyRecovery(await onchainID.getAddress(), newRecoveryKey);
-
-        // Get sufficient approvals
-        await keyManager
-          .connect(recoveryAgent1)
-          .approveKeyRecovery(await onchainID.getAddress(), newRecoveryKey);
         await keyManager
           .connect(recoveryAgent2)
           .approveKeyRecovery(await onchainID.getAddress(), newRecoveryKey);
@@ -864,12 +865,10 @@ describe("KeyManager", function () {
           .setupKeyRecovery(await onchainID.getAddress(), recoveryAgents, 2);
 
         await keyManager
-          .connect(recoveryAgent1)
-          .initiateKeyRecovery(await onchainID.getAddress(), newRecoveryKey);
 
-        await keyManager
           .connect(recoveryAgent1)
-          .approveKeyRecovery(await onchainID.getAddress(), newRecoveryKey);
+
+          .initiateKeyRecovery(await onchainID.getAddress(), newRecoveryKey);
 
         // Fast forward time
         await ethers.provider.send("evm_increaseTime", [RECOVERY_TIMELOCK + 1]);
@@ -1067,11 +1066,6 @@ describe("KeyManager", function () {
       await keyManager
         .connect(recoveryAgent1)
         .initiateKeyRecovery(await onchainID.getAddress(), recoveryKey);
-
-      // 3. Get approvals
-      await keyManager
-        .connect(recoveryAgent1)
-        .approveKeyRecovery(await onchainID.getAddress(), recoveryKey);
       await keyManager
         .connect(recoveryAgent2)
         .approveKeyRecovery(await onchainID.getAddress(), recoveryKey);

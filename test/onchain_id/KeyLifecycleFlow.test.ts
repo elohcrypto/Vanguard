@@ -126,7 +126,11 @@ describe("Key lifecycle flow (demo options 12, 12a, 12b, 5)", function () {
     const id = await flow.demoIdentity(state, s[1]);
     const idAddr = await id.getAddress();
     await id.authorizeManager(kmAddr);
-    await km.connect(s[1]).setupKeyRecovery(idAddr, [s[7].address], 1);
+    // Two agents: at threshold 1 the open would approve (D39) and freeze
+    // the withdrawal below.
+    await km
+      .connect(s[1])
+      .setupKeyRecovery(idAddr, [s[7].address, s[8].address], 2);
     const key = k(s[6].address);
     await km.connect(s[7]).initiateKeyRecovery(idAddr, key);
     await id.deauthorizeManager(kmAddr);

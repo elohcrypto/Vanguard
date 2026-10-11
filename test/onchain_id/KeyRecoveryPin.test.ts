@@ -203,7 +203,6 @@ describe("Recovery manager pinned per identity (4.11 R-411-14/15)", function () 
     // The agents recover onto the rescued wallet.
     const key = k(f.rescued.address);
     await f.km.connect(f.A).initiateKeyRecovery(f.idA, key);
-    await f.km.connect(f.A).approveKeyRecovery(f.idA, key);
     await f.km.connect(f.B).approveKeyRecovery(f.idA, key);
     const t = BigInt(await time.latest());
     // Frozen now: no new manager, no withdrawal, no new MANAGEMENT key.
@@ -245,7 +244,6 @@ describe("Recovery manager pinned per identity (4.11 R-411-14/15)", function () 
     await f.km.connect(f.owner).setupKeyRecovery(f.idA, [f.A.address], 1);
     const key = k(f.rescued.address);
     await f.km.connect(f.A).initiateKeyRecovery(f.idA, key);
-    await f.km.connect(f.A).approveKeyRecovery(f.idA, key);
     await time.increase(7 * DAY);
     await f.km.executeKeyRecovery(f.idA, key);
     await f.km.executeOwnerTransfer(f.idA, f.rescued.address);
@@ -305,7 +303,6 @@ describe("A re-seat of seated agents waits 48h and can be vetoed (4.11 R-411-16)
     // The honest agents' candidate approves and executes.
     const key = k(f.rescued.address);
     await f.km.connect(f.A).initiateKeyRecovery(f.idA, key);
-    await f.km.connect(f.A).approveKeyRecovery(f.idA, key);
     await f.km.connect(f.B).approveKeyRecovery(f.idA, key);
     await time.increase(2 * DAY + 1);
     await f.km.executeKeyRecovery(f.idA, key);
@@ -318,7 +315,6 @@ describe("A re-seat of seated agents waits 48h and can be vetoed (4.11 R-411-16)
     await f.km.connect(f.owner).setupKeyRecovery(f.idA, [f.other.address], 1);
     const key = k(f.rescued.address);
     await f.km.connect(f.A).initiateKeyRecovery(f.idA, key);
-    await f.km.connect(f.A).approveKeyRecovery(f.idA, key);
     await time.increase(2 * DAY + 1);
     await expect(
       f.km.applyKeyRecoverySetup(f.idA),

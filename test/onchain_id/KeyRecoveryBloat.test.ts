@@ -32,10 +32,9 @@ async function setup(bloated: boolean) {
   return { owner, A, B, C, rogue, rescued, anyone, id, idA, km, kmA };
 }
 
-/** Opens and approves 2 of 3 onto `key`. */
+/** Opens (the opener's approval, D39) and approves 2 of 3 onto `key`. */
 async function approve(f: Awaited<ReturnType<typeof setup>>, key: string) {
   await f.km.connect(f.A).initiateKeyRecovery(f.idA, key);
-  await f.km.connect(f.A).approveKeyRecovery(f.idA, key);
   await f.km.connect(f.B).approveKeyRecovery(f.idA, key);
 }
 

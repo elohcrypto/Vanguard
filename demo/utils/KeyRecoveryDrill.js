@@ -5,7 +5,8 @@
  *
  * A rogue MANAGEMENT key is planted (a fresh key whose wallet nobody uses:
  * it stands for a stolen key). The owner sets up two agents; one opens a
- * candidate for the recovered wallet's key and both approve. From that
+ * candidate for the recovered wallet's key (its own approval, D39) and the
+ * other approves. From that
  * approval the rogue key and the owner cannot cancel, re-seat or withdraw
  * KeyManager (each refusal is read from the chain). RECOVERY_TIMELOCK
  * (48h) after the approval the candidate executes: every other MANAGEMENT
