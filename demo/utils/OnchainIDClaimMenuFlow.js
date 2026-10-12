@@ -185,46 +185,40 @@ async function reviewClaimStatusHistory(mod) {
     return;
   }
 
-  console.log("\n🆔 IDENTITY CLAIM STATUS:");
+  // Every status below is a chain read: the issuer's hasValidClaim (the
+  // identity's latest claim on the topic is live) and the registry's
+  // isVerified for the owner; the demo's own records give only the times.
+  const kycIssuer = mod.state.getContract("kycIssuer");
+  const amlIssuer = mod.state.getContract("amlIssuer");
+  const registry = mod.state.getContract("identityRegistry");
+  const live = (ok) => (ok ? "✅ LIVE" : "▫️ NONE");
+  let kycLive = 0;
+  let amlLive = 0;
+
+  console.log("\n🆔 IDENTITY CLAIM STATUS (chain reads):");
   console.log("=".repeat(70));
 
   for (const identity of mod.state.identities.values()) {
+    const kycOk = await kycIssuer.hasValidClaim(identity.address, KYC_TOPIC);
+    const amlOk = await amlIssuer.hasValidClaim(identity.address, AML_TOPIC);
+    if (kycOk) kycLive++;
+    if (amlOk) amlLive++;
     const kycClaim = mod.state.claims.get(`${identity.address}_KYC`);
     const amlClaim = mod.state.claims.get(`${identity.address}_AML`);
 
     console.log(`\n👤 Identity: ${identity.address}`);
     console.log(`   Owner: ${identity.owner}`);
-    console.log(`   Created: ${identity.createdAt}`);
-
-    // KYC Status
-    if (kycClaim) {
-      console.log(`   📋 KYC: ${kycClaim.status || "ISSUED"}`);
-      console.log(`      Issued: ${kycClaim.issuedAt}`);
-      if (kycClaim.countryCode) {
-        console.log(`      Country: ${kycClaim.countryCode}`);
-      }
-    } else {
-      console.log(`   📋 KYC: NOT_ISSUED`);
-    }
-
-    // AML Status
-    if (amlClaim) {
-      console.log(`   🔍 AML: ${amlClaim.status || "ISSUED"}`);
-      console.log(`      Issued: ${amlClaim.issuedAt}`);
-    } else {
-      console.log(`   🔍 AML: NOT_ISSUED`);
-    }
-  }
-
-  // The counts come from the issuers, not the local records above: an
-  // identity counts while its latest claim on the topic is live.
-  const kycIssuer = mod.state.getContract("kycIssuer");
-  const amlIssuer = mod.state.getContract("amlIssuer");
-  let kycLive = 0;
-  let amlLive = 0;
-  for (const identity of mod.state.identities.values()) {
-    if (await kycIssuer.hasValidClaim(identity.address, KYC_TOPIC)) kycLive++;
-    if (await amlIssuer.hasValidClaim(identity.address, AML_TOPIC)) amlLive++;
+    console.log(`   Created: ${identity.createdAt} (demo record)`);
+    console.log(
+      `   📋 KYC: ${live(kycOk)} (chain: kycIssuer.hasValidClaim)${kycClaim?.issuedAt ? `, last demo issue ${kycClaim.issuedAt}` : ""}`,
+    );
+    console.log(
+      `   🔍 AML: ${live(amlOk)} (chain: amlIssuer.hasValidClaim)${amlClaim?.issuedAt ? `, last demo issue ${amlClaim.issuedAt}` : ""}`,
+    );
+    const verified = await registry.isVerified(identity.owner);
+    console.log(
+      `   🪪 Owner verified: ${verified ? "✅ yes" : "▫️ no"} (chain: identityRegistry.isVerified)`,
+    );
   }
 
   console.log("\n" + "=".repeat(70));
