@@ -210,10 +210,10 @@ async function showInvestorTypeConfigurations(mod) {
       console.log(`   🚨 Large Transfer Threshold: ${thresholdDisplay}`);
 
       console.log(
-        `   📊 Enhanced Logging: ${config.enhancedLogging ? "✅ Enabled" : "❌ Disabled"}`,
+        `   📊 Enhanced Logging: ${config.enhancedLogging ? "✅ Enabled" : "▫️ Disabled"}`,
       );
       console.log(
-        `   🔐 Enhanced Privacy: ${config.enhancedPrivacy ? "✅ Enabled" : "❌ Disabled"}`,
+        `   🔐 Enhanced Privacy: ${config.enhancedPrivacy ? "✅ Enabled" : "▫️ Disabled"}`,
       );
     }
 

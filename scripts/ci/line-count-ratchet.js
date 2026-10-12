@@ -27,7 +27,7 @@ const ALLOW = {
   "test/FairVotingSystem.test.ts": 846,
   "test/governance/HardeningRound2.test.ts": 833,
   "docs/TECHNICAL_DEEP_DIVE.md": 831,
-  "test/production/ProductionSimulation.test.ts": 826,
+  "test/production/ProductionSimulation.test.ts": 825,
   "test/investor/InvestorOnboarding.test.ts": 754,
   "test/integration/OracleERC3643Integration.test.ts": 742,
   "test/GovernanceComplianceIntegration.test.ts": 714,

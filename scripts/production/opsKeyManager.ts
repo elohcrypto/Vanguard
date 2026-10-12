@@ -103,7 +103,11 @@ export async function configureKeyManager(
 export interface OpsKeyManagerResult {
   opsIdentity: string | null;
   authorized: boolean;
-  /** The call still to send, or null when it was sent. */
+  /**
+   * The calls still to send (the pin, the authorization, or both,
+   * "; "-joined), or null when nothing is pending (Task 4.16, review
+   * B L-5: a pending pin used to report nothing).
+   */
   pending: string | null;
 }
 
@@ -132,12 +136,20 @@ export async function authorizeKeyManagerOnOps(
     );
   }
   const id = await ethers.getContractAt("OnchainID", opsIdentity);
-  await pinOnOps(id, opsIdentity, keyManager, deployer, overrides);
+  const pinPending = await pinOnOps(
+    id,
+    opsIdentity,
+    keyManager,
+    deployer,
+    overrides,
+  );
+  const join = (...calls: (string | null)[]) =>
+    calls.filter(Boolean).join("; ") || null;
   if (await id.authorizedManagers(keyManager)) {
     console.log(
       `   KeyManager already authorized on ops identity ${opsIdentity}`,
     );
-    return { opsIdentity, authorized: true, pending: null };
+    return { opsIdentity, authorized: true, pending: join(pinPending) };
   }
   const owner = await id.owner();
   if (owner.toLowerCase() !== deployer.address.toLowerCase()) {
@@ -146,7 +158,11 @@ export async function authorizeKeyManagerOnOps(
       `   ⚠️  The deployer does not own ops identity ${opsIdentity}.`,
     );
     console.log(`   The ops key must send: ${pending}`);
-    return { opsIdentity, authorized: false, pending };
+    return {
+      opsIdentity,
+      authorized: false,
+      pending: join(pinPending, pending),
+    };
   }
   const signer = await ethers.getSigner(deployer.address);
   await (
@@ -156,21 +172,24 @@ export async function authorizeKeyManagerOnOps(
     throw new Error(`authorizeManager on ${opsIdentity} did not take effect`);
   }
   console.log(`   ✅ KeyManager authorized on ops identity ${opsIdentity}`);
-  return { opsIdentity, authorized: true, pending: null };
+  return { opsIdentity, authorized: true, pending: join(pinPending) };
 }
 
-/** Pins KeyManager on the ops identity, or prints the call (see above). */
+/**
+ * Pins KeyManager on the ops identity; returns the pin call still to send
+ * when another wallet owns the identity, else null (pinned, or was).
+ */
 async function pinOnOps(
   id: any,
   opsIdentity: string,
   keyManager: string,
   deployer: { address: string },
   overrides: Record<string, unknown>,
-): Promise<void> {
+): Promise<string | null> {
   const pinned: string = await id.recoveryManager();
   if (pinned.toLowerCase() === keyManager.toLowerCase()) {
     console.log(`   KeyManager already pinned on ops identity ${opsIdentity}`);
-    return;
+    return null;
   }
   if (pinned !== ethers.ZeroAddress) {
     throw new Error(
@@ -179,14 +198,14 @@ async function pinOnOps(
   }
   const owner: string = await id.owner();
   if (owner.toLowerCase() !== deployer.address.toLowerCase()) {
-    console.log(
-      `   The ops key must also send: OnchainID(${opsIdentity}).pinRecoveryManager(${keyManager}) from the identity owner ${owner}`,
-    );
-    return;
+    const pending = `OnchainID(${opsIdentity}).pinRecoveryManager(${keyManager}) from the identity owner ${owner}`;
+    console.log(`   The ops key must also send: ${pending}`);
+    return pending;
   }
   const signer = await ethers.getSigner(deployer.address);
   await (
     await id.connect(signer).pinRecoveryManager(keyManager, overrides)
   ).wait();
   console.log(`   ✅ KeyManager pinned as recovery manager on ${opsIdentity}`);
+  return null;
 }

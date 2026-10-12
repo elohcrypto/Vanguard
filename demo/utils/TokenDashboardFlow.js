@@ -19,7 +19,7 @@ async function showDashboard(mod) {
 
   const digitalToken = mod.state.getContract("digitalToken");
   if (!digitalToken) {
-    console.log("❌ ERC-3643 Digital Token system not deployed yet");
+    console.log("ℹ️  ERC-3643 Digital Token system not deployed yet");
     console.log("💡 Deploy the system first (option 21)");
     return;
   }
@@ -41,10 +41,10 @@ async function showDashboard(mod) {
       // Check if agent
       const isAgent = await digitalToken.isAgent(centralBank.address);
       console.log(
-        `   Minting Authority: ${isAgent ? "✅ ACTIVE" : "❌ INACTIVE"}`,
+        `   Minting Authority (token.isAgent): ${isAgent ? "✅ yes" : "⛔ no"}`,
       );
     } else {
-      console.log("   Status: ❌ NOT CREATED");
+      console.log("   Status: ℹ️  not created");
       console.log("   💡 Create token issuer (option 22)");
     }
 

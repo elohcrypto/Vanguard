@@ -139,7 +139,7 @@ async function showDashboard(mod) {
         `   Voting Power: ${isVerified ? "1 vote (equal)" : "0 votes (not verified)"}`,
       );
       console.log(
-        `   KYC/AML Status: ${isVerified ? "✅ Verified" : "❌ Not Verified"}`,
+        `   KYC/AML Status: ${isVerified ? "✅ Verified" : "▫️ Not Verified"}`,
       );
     }
   } catch (error) {

@@ -159,7 +159,7 @@ async function runCompleteTests(mod) {
       );
       for (const w of r.wallets)
         console.log(
-          `      ${w.ok ? "✅" : "⚠️ "} ${w.address} (actual type ${w.actual}, tested at the ${w.cap} caps)`,
+          `      ${w.ok ? "✅" : "⚠️ "} ${w.address} (type ${w.actual}, tested at its ${w.cap} caps)`,
         );
     };
     perWallet(

@@ -11,93 +11,58 @@
 
 const Flow = require("./OracleLifecycleFlow");
 
-/** Option 38: Integrate Oracles with Token */
+const MODE = ["OracleOnly", "ZkOnly", "Either"];
+
+/**
+ * Option 38: what the oracles decide for VSC, read from chain (R-48-6,
+ * Task 4.16): the oracles ComplianceRules binds for VSC and
+ * token.canTransfer for the demo wallets. Nothing is written here: option
+ * 31 binds the blacklist oracle, 38a the whitelist oracle (by vote after
+ * the handover).
+ */
 async function integrateWithToken(mod) {
-  console.log("\n🔗 INTEGRATE ORACLES WITH DIGITAL TOKEN");
+  console.log("\n🔗 ORACLES ON VSC (chain reads)");
   console.log("=".repeat(50));
 
   const digitalToken = mod.state.getContract("digitalToken");
-  if (!digitalToken) {
-    console.log(
-      "ℹ️  Please deploy Vanguard StableCoin System first (option 21)",
-    );
-    return;
-  }
-
-  const oracleManager = mod.state.getContract("oracleManager");
-  if (!oracleManager) {
-    console.log("ℹ️  Please deploy Oracle Management System first (option 31)");
+  const rules = mod.state.getContract("complianceRules");
+  if (!digitalToken || !rules) {
+    console.log("ℹ️  Deploy VSC and ComplianceRules first (option 21)");
     return;
   }
 
   try {
-    const tokenAddress = await digitalToken.getAddress();
-    console.log(`🪙 Digital Token: ${tokenAddress}`);
-    console.log("🔗 Integrating Oracle System with Vanguard StableCoin...");
-
-    // This demonstrates how oracles would integrate with token operations
-    console.log("\n📋 Integration Scenarios:");
-    console.log("1. 🔍 Pre-transfer Oracle Validation");
-    console.log("2. 📊 Real-time Compliance Monitoring");
-    console.log("3. 🚫 Oracle-based Transfer Blocking");
-    console.log("4. 📈 Compliance Score Integration");
-
-    console.log("\n🔍 PRE-TRANSFER ORACLE VALIDATION:");
-    console.log("   • Whitelist check before token transfer");
-    console.log("   • Blacklist verification");
-    console.log("   • Real-time AML screening");
-
-    // Simulate oracle validation for a transfer
-    const whitelistOracle = mod.state.getContract("whitelistOracle");
-    const blacklistOracle = mod.state.getContract("blacklistOracle");
-
-    if (mod.state.identities && mod.state.identities.size > 0) {
-      const firstIdentity = Array.from(mod.state.identities.values())[0];
-
-      console.log("\n🧪 TESTING ORACLE VALIDATION:");
-      console.log(`   Testing user: ${firstIdentity.owner}`);
-
-      // Check whitelist status
-      const isWhitelisted = await whitelistOracle.isWhitelisted(
-        firstIdentity.owner,
-      );
-      console.log(
-        `   📋 Whitelist Status: ${isWhitelisted ? "✅ APPROVED" : "❌ NOT APPROVED"}`,
-      );
-
-      // Check blacklist status
-      const isBlacklisted = await blacklistOracle.isBlacklisted(
-        firstIdentity.owner,
-      );
-      console.log(
-        `   🚫 Blacklist Status: ${isBlacklisted ? "❌ BLOCKED" : "✅ CLEAR"}`,
-      );
-
-      // Determine transfer eligibility
-      const transferEligible = isWhitelisted && !isBlacklisted;
-      console.log(
-        `   💸 Transfer Eligible: ${transferEligible ? "✅ YES" : "❌ NO"}`,
-      );
-
-      if (transferEligible) {
-        console.log(
-          "   🎉 User passes oracle validation - transfer would be allowed",
-        );
-      } else {
-        console.log(
-          "   🚫 User fails oracle validation - transfer would be blocked",
-        );
-      }
-    }
-
-    console.log("\n✅ ORACLE-DIGITAL TOKEN INTEGRATION COMPLETE!");
+    const vsc = await digitalToken.getAddress();
+    const bl = await rules.blacklistOracle(vsc);
+    const wl = await rules.whitelistOracle(vsc);
+    const mode = MODE[Number(await rules.whitelistMode(vsc))];
+    const none = "0x0000000000000000000000000000000000000000";
+    console.log(`🪙 VSC: ${vsc}`);
     console.log(
-      "🔗 Oracle system is now monitoring Vanguard StableCoin transactions",
+      `   rules.blacklistOracle(VSC) = ${bl}${bl === none ? " (none: no blacklist gate; option 31 binds it)" : " (a listed party is refused)"}`,
     );
-    console.log("📊 Real-time compliance validation active");
-    console.log("🛡️ Enhanced security through oracle consensus");
+    console.log(
+      `   rules.whitelistOracle(VSC) = ${wl}${wl === none ? " (none: no whitelist gate; option 38a binds it)" : ` (${mode}: an unlisted or tier-short party is refused)`}`,
+    );
+    console.log(`   rules.whitelistMode(VSC)   = ${mode}`);
+
+    console.log(
+      "\n💸 token.canTransfer(from, to, 1 wei) for the demo wallets:",
+    );
+    const wallets = mod.state.signers.slice(1, 5);
+    for (let i = 0; i < wallets.length; i++) {
+      const from = wallets[i].address;
+      const to = wallets[(i + 1) % wallets.length].address;
+      const ok = await digitalToken.canTransfer(from, to, 1n);
+      console.log(
+        `   ${from} -> ${to.slice(0, 10)}...: ${ok ? "✅ allowed" : "⛔ refused"}`,
+      );
+    }
+    console.log(
+      "\n💡 A refusal is the token's own verdict (identity, jurisdiction, oracles, caps, cooldown); options 17/20d and 29 read the parts",
+    );
   } catch (error) {
-    console.error("❌ Oracle integration failed:", error.message);
+    console.error("❌ Oracle reads failed:", error.message);
   }
 }
 

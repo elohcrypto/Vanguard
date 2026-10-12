@@ -339,55 +339,55 @@ async function testHoldingLimits(mod) {
     console.log("\n🧪 TESTING HOLDING LIMITS FOR EACH INVESTOR TYPE");
 
     const testUsers = mod.state.signers.slice(0, 4);
-    const investorTypes = [0, 1, 2, 3];
     const typeNames = ["Normal", "Retail", "Accredited", "Institutional"];
 
-    console.log("\n📊 HOLDING LIMIT TESTS:");
-    // Counted for option 59: a type holds when its within-cap amount is
-    // allowed and its over-cap amount blocked.
+    console.log(
+      "\n📊 HOLDING LIMIT TESTS (each wallet against its own type's cap):",
+    );
+    // Counted for option 59: a wallet holds when the registry allows the
+    // amount under its type's cap and refuses one over it; an exempt wallet
+    // (D22: treasury, fee wallets) has no cap and counts as holding.
     let checked = 0;
     let held = 0;
     const wallets = []; // per wallet, with its actual type (option 59)
 
-    for (let i = 0; i < testUsers.length; i++) {
-      const config = await investorTypeRegistry.getInvestorTypeConfig(
-        investorTypes[i],
+    for (const user of testUsers) {
+      const type = Number(
+        await investorTypeRegistry.getInvestorType(user.address),
       );
-      const maxHolding = config.maxHoldingAmount; // Already BigInt, keep as-is for ethers operations
-      const testAmount = maxHolding + ethers.parseEther("10000"); // BigInt + BigInt = OK
-
-      console.log(`\n${typeNames[i]} Investor (${testUsers[i].address}):`);
+      const exempt = await investorTypeRegistry.investorLimitExempt(
+        user.address,
+      );
+      const config = await investorTypeRegistry.getInvestorTypeConfig(type);
+      const maxHolding = config.maxHoldingAmount;
+      console.log(`\n${typeNames[type]} Investor (${user.address}):`);
       console.log(
-        `   📊 Max Holding Limit: ${ethers.formatEther(maxHolding)} VSC`,
+        `   📊 Max Holding Limit: ${ethers.formatEther(maxHolding)} VSC${exempt ? " (investorLimitExempt: no cap, D22)" : ""}`,
       );
-
-      // Test within limit (BigInt - BigInt = OK)
       const withinLimit = await investorTypeRegistry.canHoldAmount(
-        testUsers[i].address,
+        user.address,
         maxHolding - ethers.parseEther("5000"),
       );
-      console.log(
-        `   ✅ Holding within limit: ${withinLimit ? "ALLOWED" : "BLOCKED"}`,
-      );
-
-      // Test over limit
       const overLimit = await investorTypeRegistry.canHoldAmount(
-        testUsers[i].address,
-        testAmount,
+        user.address,
+        maxHolding + ethers.parseEther("10000"),
       );
       console.log(
-        `   ❌ Holding over limit: ${overLimit ? "ALLOWED" : "BLOCKED"}`,
+        `   ${withinLimit ? "✅" : "❌"} Holding within limit: ${withinLimit ? "ALLOWED" : "BLOCKED"}`,
       );
+      console.log(
+        exempt
+          ? `   ✅ Holding over limit: ${overLimit ? "ALLOWED (exempt)" : "BLOCKED despite the exemption"}`
+          : `   ${overLimit ? "❌" : "⛔"} Holding over limit: ${overLimit ? "ALLOWED (cap not enforced)" : "BLOCKED (expected)"}`,
+      );
+      const ok = withinLimit && (exempt ? overLimit : !overLimit);
       checked++;
-      if (withinLimit && !overLimit) held++;
+      if (ok) held++;
       wallets.push({
-        address: testUsers[i].address,
-        actual:
-          typeNames[
-            await investorTypeRegistry.getInvestorType(testUsers[i].address)
-          ],
-        cap: typeNames[i],
-        ok: withinLimit && !overLimit,
+        address: user.address,
+        actual: typeNames[type],
+        cap: typeNames[type],
+        ok,
       });
     }
 

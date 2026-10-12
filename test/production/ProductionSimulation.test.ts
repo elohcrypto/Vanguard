@@ -777,13 +777,12 @@ describe("🔐 Production deploy: KeyManager on the ops identity (4.2)", functio
     } finally {
       console.log = quiet;
     }
-    const pending = `OnchainID(${tAddr}).authorizeManager(${km}) from the identity owner ${opsKey.address}`;
+    const pending = `OnchainID(${tAddr}).pinRecoveryManager(${km}) from the identity owner ${opsKey.address}; OnchainID(${tAddr}).authorizeManager(${km}) from the identity owner ${opsKey.address}`;
     expect(r2).to.deep.equal({
       opsIdentity: tAddr,
       authorized: false,
       pending,
     });
-    expect(out.join("\n")).to.contain(`The ops key must send: ${pending}`);
     expect(out.join("\n")).to.contain(
       `The ops key must also send: OnchainID(${tAddr}).pinRecoveryManager(${km})`,
     );

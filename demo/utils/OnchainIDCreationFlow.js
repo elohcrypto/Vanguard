@@ -201,12 +201,16 @@ async function createUTXOWithCompliance(mod) {
   displaySection("CREATE UTXO WITH KYC/AML DATA", "💰");
 
   if (mod.state.identities.size === 0) {
-    displayError("Please create OnchainID first (option 3)");
+    console.log("ℹ️  Please create OnchainID first (option 3)");
     return;
   }
 
   try {
-    // Show available identities with their compliance status
+    // Eligibility is the registry's verdict (R-48-6): isVerified reads the
+    // KYC and AML claims off the identity; the demo record is shown beside it.
+    const registry = mod.state.getContract("identityRegistry");
+    const verified = async (owner) =>
+      registry ? registry.isVerified(owner) : false;
     console.log("\n🆔 Available Identities:");
     const identityArray = Array.from(mod.state.identities.values());
     let index = 0;
@@ -216,13 +220,13 @@ async function createUTXOWithCompliance(mod) {
       const amlClaim = mod.state.claims.get(`${identity.address}_AML`);
       const kycStatus = kycClaim ? kycClaim.status : "NOT_ISSUED";
       const amlStatus = amlClaim ? amlClaim.status : "NOT_ISSUED";
-      const utxoEligible = kycStatus === "ISSUED" && amlStatus === "ISSUED";
+      const utxoEligible = await verified(identity.owner);
 
       console.log(
         `   ${index}: ${identity.address} (Owner: ${identity.owner})`,
       );
       console.log(
-        `      KYC: ${kycStatus} | AML: ${amlStatus} | UTXO Eligible: ${utxoEligible ? "✅" : "❌"}`,
+        `      demo record KYC: ${kycStatus} | AML: ${amlStatus} | isVerified (chain): ${utxoEligible ? "✅ yes" : "⛔ no"}`,
       );
       index++;
     }
@@ -242,18 +246,22 @@ async function createUTXOWithCompliance(mod) {
     const amlClaim = mod.state.claims.get(`${selectedIdentity.address}_AML`);
     const kycStatus = kycClaim ? kycClaim.status : "NOT_ISSUED";
     const amlStatus = amlClaim ? amlClaim.status : "NOT_ISSUED";
-    const utxoEligible = kycStatus === "ISSUED" && amlStatus === "ISSUED";
+    const utxoEligible = await verified(selectedIdentity.owner);
 
     console.log(`\n🔍 COMPLIANCE CHECK FOR: ${selectedIdentity.address}`);
-    console.log(`📋 KYC Status: ${kycStatus}`);
-    console.log(`🔍 AML Status: ${amlStatus}`);
-    console.log(`💰 UTXO Eligible: ${utxoEligible ? "✅ YES" : "❌ NO"}`);
+    console.log(`📋 KYC Status (demo record): ${kycStatus}`);
+    console.log(`🔍 AML Status (demo record): ${amlStatus}`);
+    console.log(
+      `💰 UTXO Eligible (IdentityRegistry.isVerified): ${utxoEligible ? "✅ YES" : "⛔ NO"}`,
+    );
 
     if (!utxoEligible) {
-      console.log("\n❌ UTXO CREATION BLOCKED");
-      console.log("💡 Requirements for UTXO creation:");
-      console.log("   • KYC Status: ISSUED");
-      console.log("   • AML Status: ISSUED");
+      console.log(
+        "\n⛔ UTXO creation refused: the registry does not verify the owner",
+      );
+      console.log(
+        "💡 Requirements: registered (option 6), live KYC and AML claims (options 6, 7)",
+      );
       return;
     }
 
@@ -299,7 +307,7 @@ async function showUTXORecord(mod) {
   displaySection("VERIFY UTXO CONTAINS COMPLIANCE DATA", "🔍");
 
   if (!mod.state.utxos || mod.state.utxos.size === 0) {
-    displayError("No UTXOs found. Please create a UTXO first (option 9)");
+    console.log("ℹ️  No UTXOs found. Please create a UTXO first (option 9)");
     return;
   }
 

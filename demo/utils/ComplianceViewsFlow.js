@@ -86,7 +86,7 @@ async function showInvestorTypeLimits(mod) {
       const balance = await token.balanceOf(s.address);
       const hold = await registry.canHoldAmount(s.address, balance + amount);
       console.log(
-        `   ${s.address} (${TYPE_NAMES[type]}): send ${send ? "✅ ALLOWED" : "❌ BLOCKED (Transfer amount limit exceeded)"}, receive ${hold ? "✅ ALLOWED" : "❌ BLOCKED (Holding limit exceeded)"}`,
+        `   ${s.address} (${TYPE_NAMES[type]}): send ${send ? "✅ ALLOWED" : "⛔ BLOCKED (Transfer amount limit exceeded)"}, receive ${hold ? "✅ ALLOWED" : "⛔ BLOCKED (Holding limit exceeded)"}`,
       );
     }
     console.log(
@@ -177,7 +177,7 @@ async function testAllComplianceValidations(mod) {
           test.country,
         );
         console.log(
-          `   ${test.name} (${test.country}): ${isValid ? "✅ ALLOWED" : "❌ BLOCKED"} - ${reason}`,
+          `   ${test.name} (${test.country}): ${isValid ? "✅ ALLOWED" : "⛔ BLOCKED"} - ${reason}`,
         );
       } catch (error) {
         console.log(
@@ -197,7 +197,7 @@ async function testAllComplianceValidations(mod) {
         const type = Number(await registry.getInvestorType(s.address));
         const ok = await registry.canTransferAmount(s.address, amount);
         console.log(
-          `   ${TYPE_NAMES[type]} ${s.address} sending 10,000 VSC: ${ok ? "✅ ALLOWED" : "❌ BLOCKED - Transfer amount limit exceeded"}`,
+          `   ${TYPE_NAMES[type]} ${s.address} sending 10,000 VSC: ${ok ? "✅ ALLOWED" : "⛔ BLOCKED - Transfer amount limit exceeded"}`,
         );
       }
     }
