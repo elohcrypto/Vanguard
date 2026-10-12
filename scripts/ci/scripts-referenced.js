@@ -69,7 +69,7 @@ function commandText(f) {
 
 function isReferenced(s) {
   const stem = s.replace(/\.(js|ts|sh)$/, "");
-  const pathForm = new RegExp(`${esc(stem)}(?![\\w.-])|${esc(s)}`);
+  const pathForm = new RegExp(`${esc(stem)}(?![\\w.\\-/])|${esc(s)}`);
   const standalone = new RegExp(
     `(^|[\\s"'=:])${esc(path.basename(s))}(?=$|[\\s"'&;|)])`,
     "m",
