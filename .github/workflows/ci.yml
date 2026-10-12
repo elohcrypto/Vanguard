@@ -391,15 +391,17 @@ jobs:
       # deploys, 21/51/31/74 wire the ERC-3643, privacy, oracle and
       # governance layers, 24 and 75a onboard four verified VGT holders, 22
       # and 32, 83c passes the handover vote, 83d and 83e complete it.
-      # --strict fails on any demo-reported error line, and the log must
-      # carry "Handover complete". Measured 1:22 locally.
+      # --strict fails on a demo error line, a failed ceremony check, or
+      # the demo's own non-zero exit; the log must carry the success line
+      # and no "Handover incomplete". Measured 1:22 locally.
       - name: Strict demo drive (complete ceremony, 83c/83d/83e)
         run: |
           ./scripts/demo-drive.sh --strict --timeout 1500 --log /tmp/demo-drive.log \
             1 21 51 31 74 24:1:Alice 24:1:Bob 24:1:Carol 24:1:Dave \
             75a:4:1000:y 75a:5:1000:y 75a:6:1000:y 75a:7:1000:y 22 32 83c:y 83d 83e 0
-          if ! grep -q "Handover complete" /tmp/demo-drive.log; then
-            echo "::error::the drive did not reach 'Handover complete'"
+          if ! grep -qE '^\s+(✅|⚠️)\s+Handover complete' /tmp/demo-drive.log \
+            || grep -q "Handover incomplete" /tmp/demo-drive.log; then
+            echo "::error::the drive did not complete the handover"
             tail -40 /tmp/demo-drive.log
             exit 1
           fi

@@ -67,6 +67,10 @@
 #                    identities exist (options 23/24, or 3 + 6 + 7).
 #   Working order: 1 -> 21 -> 51 -> 74 -> 83b -> 0
 #
+# --strict fails the run on a line-start ❌, an indented ❌ inside the
+# handover ceremony's blocks, a "Handover incomplete" line, or a non-zero
+# exit of the demo itself.
+#
 # Exit codes: 0 ok | 1 demo error detected | 2 timeout | 3 bad usage/preconditions
 
 set -uo pipefail
@@ -78,7 +82,7 @@ MARK='[[?]] '
 MENU_Q='Select an option: '
 
 usage() {
-  sed -n '2,70p' "$0" | sed 's/^# \{0,1\}//'
+  sed -n '2,/^# Exit codes/p' "$0" | sed 's/^# \{0,1\}//'
   exit 3
 }
 
@@ -163,7 +167,8 @@ trap cleanup EXIT
 exec 9<>"$FIFO"
 HOLD_PID=""
 
-script -q -f -c "DEMO_PROMPT_MARK=1 npx hardhat run demo/index.js --network $NETWORK" "$RAW" < "$FIFO" > /dev/null 2>&1 &
+# -e: script(1) returns the demo's own exit status (without it, 0 always).
+script -q -e -f -c "DEMO_PROMPT_MARK=1 npx hardhat run demo/index.js --network $NETWORK" "$RAW" < "$FIFO" > /dev/null 2>&1 &
 DEMO_PID=$!
 
 # script -f flushes after each write, so the log grows as the demo speaks.
@@ -253,12 +258,25 @@ fi
 
 errs=$(grep -cE "^❌" "$LOG" 2>/dev/null | head -1)
 errs=${errs:-0}
+# The handover ceremony (83c/83d/83e) prints its failures INDENTED: a
+# failed check of 83e's completion, a contract governance did not take in
+# 83d. Indented ❌ elsewhere is often a boolean chain read ("❌ Can
+# Transfer: false" in option 26), so only the HANDOVER STEP blocks count
+# them (to the next menu prompt, the menu's own "0.  ❌ Exit" excluded),
+# and a "Handover incomplete" line counts wherever it is.
+handover=$(tr -d '\r' < "$LOG" | awk '
+  /HANDOVER STEP [0-9]+:/ { b = 1 }
+  /Select an option: / { b = 0 }
+  /Handover incomplete/ { n++; next }
+  b && /^[[:space:]]+❌/ && !/^[[:space:]]*0\.[[:space:]]+❌ Exit/ { n++ }
+  END { print n + 0 }')
+errs=$((errs + handover))
 
 echo
 echo "── summary ──"
 echo "  answers sent : $answered/${#ANS[@]}"
 echo "  demo exit    : $demo_rc"
-echo "  ❌ lines      : $errs"
+echo "  ❌ lines      : $errs ($handover in the handover ceremony)"
 echo "  log          : $LOG"
 
 # By default an ❌ line is reported but does not fail the run, because some are
@@ -268,12 +286,18 @@ echo "  log          : $LOG"
 if [[ $errs -gt 0 ]]; then
   echo
   echo "  demo-reported errors:"
-  grep -E "^❌" "$LOG" | sed 's/^/    /' | head -10
+  grep -E "^❌|^[[:space:]]+❌|Handover incomplete" "$LOG" | grep -vE "^[[:space:]]*0\.[[:space:]]+❌ Exit" | sed 's/^/    /' | head -10
   if [[ $STRICT -eq 1 ]]; then
     echo "✗ --strict: run had $errs demo error(s)" >&2
     exit 1
   fi
   echo "  (informational — pass --strict to fail on these)"
+fi
+
+# --strict also gates on the demo's own exit status (CF-7).
+if [[ $demo_rc -ne 0 && $STRICT -eq 1 ]]; then
+  echo "✗ --strict: the demo exited $demo_rc" >&2
+  exit 1
 fi
 
 [[ $fail -eq 0 ]] && echo "✓ demo ran to completion" || exit 1
