@@ -475,8 +475,8 @@ the voting period and the execution delay (`executeProposal`). VGT
 delegation is recorded, not counted (D12). Demo: 74 deploys, 75-75c
 fund, 76 proposes, 77 votes, 78 executes, 78a refunds, 79 waits, 80 is
 the dashboard, 82 runs one ComplianceRules proposal from creation to
-execution, 83b-83e are the handover ceremony (derived from governance, the
-one root; every stray grant refused). Rules: `docs/TESTNET_DEMO.md`.
+execution, 83b accepts the registry by vote, 83c-83e are the ceremony
+(from governance; 83c removes strays or refuses). Rules: `docs/TESTNET_DEMO.md`.
 
 ## Errors a user sees
 

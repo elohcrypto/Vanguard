@@ -9,16 +9,16 @@ the testnet itself.
 
 One BIP-39 mnemonic in `.env`; Hardhat derives twelve keys at
 `m/44'/60'/0'/0/N`. Index N is the same role on every network, so demo code
-that reads `signers[2]` means "the KYC issuer" whether the node is local or
+that reads `signers[2]` means "the AML oracle node" whether the node is local or
 Sepolia. Each role signs only its own transactions; the contracts' 26 access
 modifiers are what enforce the separation.
 
 | Index   | Role                                   | Signs                                                                                                                  |
 | ------- | -------------------------------------- | ---------------------------------------------------------------------------------------------------------------------- |
 | 0       | Platform owner, deployer, central bank | deploys, agent grants, treasury mints (investor-limit exempt, D22), governance ownership (until the handover ceremony) |
-| 1       | Fee wallet, compliance officer         | investor-type assignments                                                                                              |
-| 2       | KYC oracle node                        | oracle attestations (option 31)                                                                                        |
-| 3       | AML oracle node                        | oracle attestations; emergency designation (option 32)                                                                 |
+| 1       | Fee wallet, compliance officer         | investor-type assignments; KYC oracle node (registered by option 31)                                                   |
+| 2       | AML oracle node                        | oracle attestations (option 31); emergency designation (option 32)                                                     |
+| 3       | Compliance oracle node                 | oracle attestations (option 31)                                                                                        |
 | 4, 5    | Risk and fraud oracles                 | attestations                                                                                                           |
 | 6, 7, 8 | Investors Alice, Bob, Carol            | proposals, votes, transfers, escrow parties                                                                            |
 | 9       | Deliberately unverified; issuer admin  | rejection demonstrations; after the handover, owner of every claim issuer the deployer held (D25 b)                    |

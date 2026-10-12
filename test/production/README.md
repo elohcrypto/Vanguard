@@ -45,9 +45,9 @@ VERBOSE=true npx hardhat test test/production/ProductionSimulation.test.ts
 ```bash
 # Run the integration and production-simulation suites and write a JSON
 # summary to test-reports/production/. A thin local-only wrapper (plan v2
-# Task 4.13, D48): it refuses any network but hardhat/localhost, quotes its
-# test globs, deploys nothing and shells out to `npx hardhat test ...` on
-# the in-process network.
+# Task 4.13, D48): it refuses any network but hardhat/localhost, lists the
+# test/integration *.test.ts and *.test.js files with fs, deploys nothing and
+# runs `npx hardhat test <files>` on the in-process network.
 npx hardhat run scripts/production/RunProductionTests.ts
 ```
 
