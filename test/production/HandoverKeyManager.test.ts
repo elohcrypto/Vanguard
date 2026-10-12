@@ -32,15 +32,15 @@ describe("Handover: KeyManager (4.2)", function () {
 
   beforeEach(async function () {
     f = await handoverFixture();
-    km = await (await ethers.getContractFactory("KeyManager")).deploy();
+    // The fixture's KeyManager: the factory pins it on every identity it
+    // creates (Task 4.16), so the proposer's identity is pinned already.
+    km = f.keyManager;
     kmAddr = await km.getAddress();
     // The proposer's identity opted in, as demo option 12 does for wallet 1.
     const idAddr = await f.c.identityRegistry.identity(f.proposer.address);
     identity = await ethers.getContractAt("OnchainID", idAddr);
     await identity.connect(f.proposer).authorizeManager(kmAddr);
-    await identity.connect(f.proposer).pinRecoveryManager(kmAddr);
-    // Task 4.11 (R-411-19): the factory pins this KeyManager on new ones.
-    await f.c.onchainIDFactory.setRecoveryManager(kmAddr);
+    expect(await identity.recoveryManager()).to.equal(kmAddr);
     args = { ...f.args, keyManager: km, keyManagerIdentity: idAddr };
   });
 

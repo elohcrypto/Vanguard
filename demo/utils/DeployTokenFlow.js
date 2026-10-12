@@ -190,25 +190,22 @@ async function deployDigitalTokenSystem(mod) {
         `   ${connectedRegistry === investorTypeRegistryAddr ? "✅" : "❌"} Registry Connected: ${connectedRegistry === investorTypeRegistryAddr}`,
       );
 
-      // Show the actual on-chain limits
-      const normalConfig = await mod.state
-        .getContract("investorTypeRegistry")
-        .getInvestorTypeConfig(0);
-      const retailConfig = await mod.state
-        .getContract("investorTypeRegistry")
-        .getInvestorTypeConfig(1);
-
+      // The four per-transfer caps, read from the registry (R-47-2).
+      const registry = mod.state.getContract("investorTypeRegistry");
       console.log(
         "\n📊 ON-CHAIN TRANSFER LIMITS (Enforced by Smart Contract):",
       );
-      console.log(
-        `   👤 Normal Investor: ${ethers.formatEther(normalConfig.maxTransferAmount)} VSC`,
-      );
-      console.log(
-        `   🛒 Retail Investor: ${ethers.formatEther(retailConfig.maxTransferAmount)} VSC`,
-      );
-      console.log(`   💼 Accredited Investor: 50,000 VSC`);
-      console.log(`   🏛️ Institutional Investor: 500,000 VSC`);
+      for (const [t, label] of [
+        [0, "👤 Normal Investor"],
+        [1, "🛒 Retail Investor"],
+        [2, "💼 Accredited Investor"],
+        [3, "🏛️ Institutional Investor"],
+      ]) {
+        const c = await registry.getInvestorTypeConfig(t);
+        console.log(
+          `   ${label}: ${ethers.formatEther(c.maxTransferAmount)} VSC`,
+        );
+      }
 
       // Task 4.3: investor custody (option 23) on this token + registry.
       console.log("\n📝 Step 5: Investor custody (InvestorRequestManager)...");

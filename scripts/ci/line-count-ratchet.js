@@ -34,7 +34,7 @@ const ALLOW = {
   "test/OnchainID.test.ts": 697,
   "test/oracle/OracleManager.test.ts": 626,
   "test/GovernanceToken.test.ts": 623,
-  "test/production/ProductionEnvironment.ts": 573,
+  "test/production/ProductionEnvironment.ts": 572,
   "test/OnchainID.coverage.test.ts": 546,
   "test/OnchainIDFactory.test.ts": 537,
   "test/GovernanceTokenKYCRestriction.test.ts": 510,

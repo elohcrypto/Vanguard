@@ -372,3 +372,70 @@ describe("recoveryAddress", function () {
     expect(await token.balanceOf(stub)).to.equal(0n);
   });
 });
+
+/**
+ * Task 4.16 (W-1): GovernanceToken.recoveryAddress calls
+ * IdentityRegistry.moveIdentity as the token, so every deploy path grants
+ * VGT the registry agent role (the demo's option 74, the handover fixture);
+ * without it the recovery reverts and changes nothing.
+ */
+describe("GovernanceToken.recoveryAddress (W-1)", function () {
+  let owner: SignerWithAddress,
+    lost: SignerWithAddress,
+    fresh: SignerWithAddress;
+  let idReg: any, rules: any, vgt: any, lostId: string;
+  const E = (n: string) => ethers.parseEther(n);
+
+  beforeEach(async function () {
+    [owner, lost, fresh] = await ethers.getSigners();
+    idReg = await (
+      await ethers.getContractFactory("IdentityRegistry")
+    ).deploy();
+    rules = await (
+      await ethers.getContractFactory("ComplianceRules")
+    ).deploy(owner.address, [840], []);
+    vgt = await (
+      await ethers.getContractFactory("GovernanceToken")
+    ).deploy("VGT", "VGT", await idReg.getAddress(), await rules.getAddress());
+    await rules.setTokenIdentityRegistry(
+      await vgt.getAddress(),
+      await idReg.getAddress(),
+    );
+    await idReg.addAgent(owner.address);
+    const kycIssuer = await (
+      await ethers.getContractFactory("ClaimIssuer")
+    ).deploy(owner.address, "KYC Issuer", "d");
+    await configureKyc(idReg, await kycIssuer.getAddress());
+    const lostIdC = await (
+      await ethers.getContractFactory("OnchainID")
+    ).deploy(lost.address);
+    lostId = await lostIdC.getAddress();
+    await idReg.registerIdentity(lost.address, lostId, 840);
+    await attest(kycIssuer, owner, lostId);
+    await lostIdC
+      .connect(lost)
+      .addKey(
+        ethers.solidityPackedKeccak256(["address"], [fresh.address]),
+        2,
+        1,
+      );
+    await vgt.addAgent(owner.address);
+    await vgt.mint(lost.address, E("100"));
+  });
+
+  it("recovers VGT once the token is a registry agent, as every deploy path grants", async function () {
+    await idReg.addAgent(await vgt.getAddress());
+    await vgt.recoveryAddress(lost.address, fresh.address, lostId);
+    expect(await vgt.balanceOf(fresh.address)).to.equal(E("100"));
+    expect(await vgt.balanceOf(lost.address)).to.equal(0n);
+    expect(await idReg.identity(fresh.address)).to.equal(lostId);
+    expect(await idReg.isVerified(fresh.address)).to.equal(true);
+  });
+
+  it("reverts with nothing moved when VGT is not a registry agent", async function () {
+    await expect(vgt.recoveryAddress(lost.address, fresh.address, lostId)).to.be
+      .reverted;
+    expect(await vgt.balanceOf(lost.address)).to.equal(E("100"));
+    expect(await idReg.identity(lost.address)).to.equal(lostId);
+  });
+});

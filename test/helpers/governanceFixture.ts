@@ -25,8 +25,10 @@ export async function ageVoters(governance: any): Promise<void> {
  * proposer), bob 5 and carol 6 (the voters), issuerAdmin 7, the escrow
  * factory's fee wallet 8. Both factories (2F.5) and both privacy
  * contracts (3.3: a real-mode ZKVerifierIntegrated and the PrivacyManager
- * using it) are in the plan, unbound until the ceremony binds them. Shared by the handover preflight,
- * completion and CLI tests.
+ * using it) are in the plan, unbound until the ceremony binds them; the
+ * factory pins a KeyManager, the investor-type registry is live on VSC
+ * and custody is deployed (Task 4.16, W-2). Shared by the handover
+ * preflight, completion and CLI tests.
  */
 export async function handoverFixture() {
   const signers = await ethers.getSigners();
@@ -55,11 +57,15 @@ export async function handoverFixture() {
     "KYC",
   );
   await configureKyc(identityRegistry, await kycIssuer.getAddress());
-  // Task 4.11 (R-411-19): the factory accepts only the compiled KeyManager.
+  // Task 4.11 (R-411-19): the factory accepts only the compiled KeyManager;
+  // Task 4.16 (W-2): as the demo deploys, it pins that KeyManager on every
+  // identity it creates (the ceremony derives the KeyManager from the pin).
   const kmHash = ethers.keccak256(
     (await artifacts.readArtifact("KeyManager")).deployedBytecode,
   );
   const factory = await deploy("OnchainIDFactory", deployer.address, kmHash);
+  const keyManager = await deploy("KeyManager");
+  await factory.setRecoveryManager(await keyManager.getAddress());
   const governanceToken = await deploy(
     "GovernanceToken",
     "VGT",
@@ -133,6 +139,25 @@ export async function handoverFixture() {
   // As the demo deploys: the deployer administers both tokens' rules (G5).
   for (const t of [await token.getAddress(), vgtAddr])
     await complianceRules.setRuleAdministrator(t, deployer.address, true);
+  // Task 4.16 (W-2): as options 21/51 deploy, the investor-type registry is
+  // live on VSC and authorizes it (Task 4.10), and custody exists: the
+  // InvestorRequestManager (bank = ops) is VSC's registrar for the
+  // MultiSigWallet code hash, a compliance officer, owned by ops.
+  await investorTypeRegistry.authorizeToken(await token.getAddress(), true);
+  await token.setInvestorTypeRegistry(await investorTypeRegistry.getAddress());
+  const custody = await deploy(
+    "InvestorRequestManager",
+    ops.address,
+    await token.getAddress(),
+    await investorTypeRegistry.getAddress(),
+    idRegAddr,
+  );
+  await addRegistrar(complianceRules, token, custody, "MultiSigWallet");
+  await investorTypeRegistry.setComplianceOfficer(
+    await custody.getAddress(),
+    true,
+  );
+  await custody.transferOwnership(ops.address);
   for (const w of [alice, bob, carol]) {
     const id = await deployIdentity(factory, w.address);
     await identityRegistry.registerIdentity(w.address, id, 840);
@@ -175,5 +200,15 @@ export async function handoverFixture() {
     issuerAdmin,
     feeWallet,
   };
-  return { ...who, voters: [bob, carol], c, args, govAddr, factory, kycIssuer };
+  return {
+    ...who,
+    voters: [bob, carol],
+    c,
+    args,
+    govAddr,
+    factory,
+    kycIssuer,
+    keyManager,
+    custody,
+  };
 }

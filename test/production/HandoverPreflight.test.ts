@@ -412,9 +412,12 @@ describe("Handover preflight and self-healing (plan 2E.2)", function () {
     );
   });
 
-  // A governance bound to no registry: a named one the Token does not
-  // enforce is left out with a warning (the pre-4.13 intent kept).
-  it("leaves out an unbound registry the Token does not use, with a warning", async function () {
+  // A governance bound to no registry while the Token enforces one: the
+  // registry would stay the deployer's (every cap, every type), so the
+  // ceremony refuses (A1 H3) instead of leaving it out with a warning. The
+  // warning path (a named registry the Token does not enforce) needs a
+  // Token with none, which the fixture no longer deploys (Task 4.16).
+  it("refuses a governance bound to no registry while the Token enforces one", async function () {
     const reg2 = await (
       await ethers.getContractFactory("InvestorTypeRegistry")
     ).deploy();
@@ -436,22 +439,22 @@ describe("Handover preflight and self-healing (plan 2E.2)", function () {
     await c.complianceRules.removeTrustedContract(vgtAddr, govAddr);
     await c.complianceRules.addTrustedContract(vgtAddr, gov2Addr);
     await gov2.setDynamicListManager(await c.dynamicListManager.getAddress());
-    expect(await c.token.investorTypeRegistry()).to.equal(ethers.ZeroAddress);
+    const live = await c.token.investorTypeRegistry();
+    expect(live).to.equal(await c.investorTypeRegistry.getAddress());
     const steps: string[] = [];
     args = { ...args, governance: gov2, investorTypeRegistry: reg2 };
-    c = { ...c, governance: gov2, investorTypeRegistry: reg2 };
     args.log = (m: string) => steps.push(m);
-    await ceremony();
+    await expect(ceremony()).to.be.rejectedWith(
+      new RegExp(
+        `the Token enforces InvestorTypeRegistry ${live}, which governance is not bound to`,
+      ),
+    );
     expect(steps.join("\n")).to.match(
       /not bound to InvestorTypeRegistry .* left out of this handover/,
     );
+    // Nothing was sent: the deployer still owns everything.
+    expect(await c.token.owner()).to.equal(deployer.address);
     expect(await reg2.owner()).to.equal(deployer.address);
-    const result = await assertHandoverComplete(args);
-    expect(result.failures).to.deep.equal([]);
-    const labels = result.checks.map((x: any) => x.label);
-    expect(
-      labels.filter((l: string) => /^InvestorTypeRegistry/.test(l)),
-    ).to.deep.equal([SKIP_LINE]);
   });
 
   // A1 H3 (Task 4.13): a deployer-owned registry live on the Token while

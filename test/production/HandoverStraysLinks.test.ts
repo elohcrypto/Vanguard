@@ -169,12 +169,11 @@ describe("Handover strays: links and parameters (Task 4.13)", function () {
     });
 
     it("a pending owner on the demo identity", async function () {
-      const km = await (await ethers.getContractFactory("KeyManager")).deploy();
+      // The fixture's KeyManager, pinned by the factory at creation (4.16).
+      const km = f.keyManager;
       const idAddr = await c.identityRegistry.identity(f.proposer.address);
       const id = await ethers.getContractAt("OnchainID", idAddr);
       await id.connect(f.proposer).authorizeManager(await km.getAddress());
-      await id.connect(f.proposer).pinRecoveryManager(await km.getAddress());
-      await c.onchainIDFactory.setRecoveryManager(await km.getAddress());
       await id.connect(f.proposer).transferOwnership(f.stranger.address);
       args.keyManagerIdentity = idAddr;
       await both(

@@ -143,7 +143,7 @@ describe("Handover: trusted-contract registrars (Task 4.3)", function () {
     const { ok, checks } = await assertHandoverComplete(f.args);
     expect(ok).to.equal(true);
     expect(checks.map((x: any) => x.label)).to.include(
-      `every ComplianceRules registrar and compliance-officer contract (2) is owned by ops or governance, not the deployer ${f.deployer.address}`,
+      `every ComplianceRules registrar and compliance-officer contract (3) is owned by ops or governance, not the deployer ${f.deployer.address}`,
     );
   });
 

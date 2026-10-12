@@ -1,4 +1,4 @@
-import { ethers } from "hardhat";
+import { artifacts, ethers } from "hardhat";
 import { SignerWithAddress } from "@nomicfoundation/hardhat-ethers/signers";
 import {
   OnchainID,
@@ -110,33 +110,36 @@ export class ProductionEnvironment {
   private async deployContracts(): Promise<void> {
     console.log("📦 Deploying production contracts...");
 
-    // Deploy with realistic gas settings
-    // 10M fits the plain network's 12M block limit. Under
-    // solidity-coverage the instrumented OnchainIDFactory initcode is
-    // ~1.9x larger and 10M runs out. Hardhat also enforces a per-tx cap
-    // of 2^24 (16,777,216) gas, so the override cannot exceed that;
-    // `npm run test:coverage` sets DEPLOY_GAS_LIMIT=16000000 and the
-    // plain run keeps the real constraint.
+    // 10M fits the plain network's 12M block limit; under solidity-coverage
+    // the instrumented factory initcode is ~1.9x larger, so `npm run
+    // test:coverage` sets DEPLOY_GAS_LIMIT=16000000 (hardhat's per-tx cap
+    // is 2^24 = 16,777,216).
     const deployOptions = {
       gasPrice: this.networkConditions.gasPrice,
       gasLimit: Number(process.env.DEPLOY_GAS_LIMIT ?? 10000000),
     };
 
-    // 1. Deploy OnchainIDFactory
+    // 1. Deploy OnchainIDFactory, accepting only the compiled KeyManager as
+    //    recovery manager (Task 4.11; Task 4.16 W-2: as the demo deploys).
+    const kmHash = ethers.keccak256(
+      (await artifacts.readArtifact("KeyManager")).deployedBytecode,
+    );
     const FactoryFactory = await ethers.getContractFactory("OnchainIDFactory");
     this.factory = await FactoryFactory.deploy(
       this.admin.address,
-      ethers.ZeroHash,
+      kmHash,
       deployOptions,
     );
     await this.factory.waitForDeployment();
     console.log(`   Factory: ${await this.factory.getAddress()}`);
 
-    // 2. Deploy KeyManager
+    // 2. Deploy KeyManager; the factory pins it on every identity it creates.
     const KeyManagerFactory = await ethers.getContractFactory("KeyManager");
     this.keyManager = await KeyManagerFactory.deploy(deployOptions);
     await this.keyManager.waitForDeployment();
-    console.log(`   KeyManager: ${await this.keyManager.getAddress()}`);
+    const kmAddr = await this.keyManager.getAddress();
+    await this.factory.setRecoveryManager(kmAddr, deployOptions);
+    console.log(`   KeyManager: ${kmAddr} (pinned on the factory)`);
 
     // 3. Deploy KYC Issuer
     const ClaimIssuerFactory = await ethers.getContractFactory("ClaimIssuer");
@@ -192,13 +195,9 @@ export class ProductionEnvironment {
       .connect(this.admin)
       .setFeeRecipient(this.feeRecipient.address);
 
-    // Configure key manager (KeyManager uses constants for timelocks)
-    // DEFAULT_TIMELOCK = 24 hours and RECOVERY_TIMELOCK = 48 hours are built-in constants
-    // An identity's own MANAGEMENT key may set its timelock (setCustomTimelock)
-
-    // Configure IdentityRegistry: require KYC and AML claims from the
-    // deployed issuers before any wallet verifies. A registry with no
-    // required topics would verify anyone who registers.
+    // KeyManager timelocks are constants (24h default, 48h recovery; an
+    // identity's MANAGEMENT key may setCustomTimelock). IdentityRegistry:
+    // require the KYC and AML claims, else anyone registered would verify.
     await this.identityRegistry
       .connect(this.admin)
       .addTrustedIssuer(await this.kycIssuer.getAddress(), [
