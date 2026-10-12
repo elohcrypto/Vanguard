@@ -17,9 +17,24 @@ import { spawnSync } from "child_process";
 import * as fs from "fs";
 import * as path from "path";
 
-/** The production test set; globs are quoted so the shell never expands them. */
+/**
+ * Every *.test.ts / *.test.js under `dir`, sorted. Task 4.17 (BF-7):
+ * spawnSync passes no shell, so a glob reached hardhat literally and
+ * matched nothing; the list is expanded here instead.
+ */
+export function testFiles(dir: string): string[] {
+  const out: string[] = [];
+  for (const e of fs.readdirSync(dir, { withFileTypes: true })) {
+    const p = path.join(dir, e.name);
+    if (e.isDirectory()) out.push(...testFiles(p));
+    else if (/\.test\.(ts|js)$/.test(e.name)) out.push(p);
+  }
+  return out.sort();
+}
+
+/** The production test set. */
 const SUITES: Array<[string, string[]]> = [
-  ["Integration Tests", ["test/integration/**/*.test.ts"]],
+  ["Integration Tests", testFiles("test/integration")],
   ["Production Simulation", ["test/production/ProductionSimulation.test.ts"]],
 ];
 const LOCAL = new Set(["hardhat", "localhost"]);
