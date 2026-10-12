@@ -86,7 +86,11 @@ abstract contract KeyManagerRecoverySetup is KeyManagerRecovery {
 
     /// @dev D53: the owner and MANAGEMENT keys are what recovery evicts.
     function _checkNotController(address _identity, address _agent) private view {
+        // A2F-1 (Task 4.17): nor the identity itself (a MANAGEMENT key would
+        // vote as it through execute) nor this KeyManager.
         if (
+            _agent == _identity ||
+            _agent == address(this) ||
             _agent == IManagedIdentity(_identity).owner() ||
             IOnchainID(_identity).keyHasPurpose(keccak256(abi.encodePacked(_agent)), 1)
         ) revert AgentControlsIdentity(_agent);
