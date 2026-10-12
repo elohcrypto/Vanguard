@@ -921,50 +921,48 @@ first seating is immediate, a re-seat of seated agents is pending for
 (`applyKeyRecoverySetup`), an approved recovery blocks it and an executed
 one drops it; neither the owner nor a current MANAGEMENT key can be
 seated as an agent (D53). An agent opens a candidate
-(`initiateKeyRecovery`), which counts as its approval (at threshold 1
-the open approves); none opens while another is approved. Until the
-approvals reach the threshold only its initiator may cancel it: not
-the owner (a stolen owner key raced every candidate: D39, R-414-1),
-not a MANAGEMENT key. From the approval only the agents cancel it, at
-the same threshold, and the identity refuses its owner's
-`authorizeManager`, `deauthorizeManager` and `transferOwnership`
-(`ownershipFrozen`, asked of the recovery manager only and read
-strictly: only the word 1 is yes), any new MANAGEMENT key
-(`ManagementAdditionsFrozen`) and every `acceptOwnership` but the
-recovery's own nominee's (`FrozenByRecovery`). 48 hours after the
-approval (`RECOVERY_TIMELOCK`), within 7 days, anyone executes it: the
-recovered key is added and every other MANAGEMENT key, the owner's
-included, is removed (ACTION, CLAIM and ENCRYPTION keys stay), 100 per
-call (`MAX_EVICTIONS_PER_CALL`, above the 64 keys a purpose `addKey`
-allows, `MAX_KEYS_PER_PURPOSE`; KeyManager batches take at most 50 keys,
-`MAX_BATCH_SIZE`; so one call empties a capped list, and
-`continueKeyEviction` is reachable only on an identity deployed before
-the cap). 7 days after the approval
+(`initiateKeyRecovery`), which counts as its approval (at threshold 1 the
+open approves); none opens while another is approved. Until the approvals
+reach the threshold only its initiator may cancel it: not the owner (a
+stolen owner key raced every candidate: D39, R-414-1), not a MANAGEMENT
+key. From the approval only the agents cancel it, at the same threshold,
+and the identity refuses its owner's `authorizeManager`,
+`deauthorizeManager` and `transferOwnership` (`ownershipFrozen`, asked of
+the recovery manager only and read strictly: only the word 1 is yes), any
+new MANAGEMENT key (`ManagementAdditionsFrozen`) and every
+`acceptOwnership` but the recovery's own nominee's (`FrozenByRecovery`).
+48 hours after the approval (`RECOVERY_TIMELOCK`), within 7 days, anyone
+executes it: the recovered key is added and every other MANAGEMENT key,
+the owner's included, is removed (ACTION, CLAIM and ENCRYPTION keys
+stay), 100 per call (`MAX_EVICTIONS_PER_CALL`, above the 64 keys a
+purpose `addKey` allows, `MAX_KEYS_PER_PURPOSE`; KeyManager batches take
+at most 50 keys, `MAX_BATCH_SIZE`; `continueKeyEviction` is reachable
+only on an identity deployed before the cap). 7 days after the approval
 (`OWNER_TRANSFER_TIMELOCK`) and before 14 days, someone (the recovered
 wallet, or anyone for it) must call `executeOwnerTransfer` and the
-recovered wallet must accept (`acceptOwnership`); if nobody does in
-that window the lock lifts, the old owner keeps the identity and an
-agent's next `initiateKeyRecovery` re-opens recovery
-(`KeyRecoveryReopened`, a new epoch; D52). Between the execution and
-the transfer the old owner keeps its other owner powers: it can remove
-claims and ACTION or CLAIM keys and remove the recovered key (the
-transfer restores it), but it cannot add a MANAGEMENT key, a manager
-or a new owner. On the recovered wallet's acceptance every other
-MANAGEMENT key is removed and every authorized manager but the
-recovery manager is de-authorized (one `ManagerDeauthorized` each);
-the thief's ACTION and CLAIM keys survive, so the recovered owner
-reviews `getKeysByPurpose(2)` and `getKeysByPurpose(3)` and removes
-what it does not know (D40). A re-seat applies only while its proposer
-still owns the identity; after an ordinary transfer it is stale
-(`StaleReseat`) and anyone drops it (`dropStaleRecoverySetup`). Agents
-at the threshold can therefore take the identity: choose agents you
-would trust with it. The owner sees the approval on chain and has the
-48 hours to move assets through the issuer's `Token.recoveryAddress`,
-which stays the asset-side bound; its new wallet must control the
-identity (own it or hold a MANAGEMENT or ACTION key on it, D41), as
-`IdentityRegistry.registerIdentity` and `moveIdentity` require of
-every wallet they bind; a holder without seated agents whose owner key
-is lost is burned and re-issued by the agent instead.
+recovered wallet must accept (`acceptOwnership`); if nobody does in that
+window the lock lifts, the old owner keeps the identity and an agent's
+next `initiateKeyRecovery` re-opens recovery (`KeyRecoveryReopened`, a
+new epoch; D52). Between the execution and the transfer the old owner
+keeps its other owner powers: it can remove claims and ACTION or CLAIM
+keys and remove the recovered key (the transfer restores it), but it
+cannot add a MANAGEMENT key, a manager or a new owner. On the recovered
+wallet's acceptance every other MANAGEMENT key is removed and every
+authorized manager but the recovery manager is de-authorized (one
+`ManagerDeauthorized` each); the thief's ACTION and CLAIM keys survive,
+so the recovered owner reviews `getKeysByPurpose(2)` and
+`getKeysByPurpose(3)` and removes what it does not know (D40). A re-seat
+applies only while its proposer still owns the identity; after an
+ordinary transfer it is stale (`StaleReseat`) and anyone drops it
+(`dropStaleRecoverySetup`). Agents at the threshold can therefore take
+the identity: choose agents you would trust with it. The owner sees the
+approval on chain and has the 48 hours to move assets through the
+issuer's `Token.recoveryAddress`, which stays the asset-side bound; its
+new wallet must control the identity (own it or hold a MANAGEMENT or
+ACTION key on it, D41), as `IdentityRegistry.registerIdentity` and
+`moveIdentity` require of every wallet they bind; a holder without seated
+agents whose owner key is lost is burned and re-issued by the agent
+instead.
 
 Withdrawing the authorization pauses KeyManager's rotations and batches
 for the identity (it is refused while a recovery is approved); it does
