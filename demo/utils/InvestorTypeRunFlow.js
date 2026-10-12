@@ -33,57 +33,59 @@ async function testLargeTransferDetection(mod) {
     console.log("\n🧪 TESTING LARGE TRANSFER DETECTION FOR EACH TYPE");
 
     const testUsers = mod.state.signers.slice(0, 4);
-    const investorTypes = [0, 1, 2, 3];
     const typeNames = ["Normal", "Retail", "Accredited", "Institutional"];
 
     console.log(
       "\n📊 LARGE TRANSFER DETECTION (recorded: no transfer reads isLargeTransfer):",
     );
+    console.log(
+      "   Each wallet's type and threshold are chain reads (getInvestorType, getInvestorTypeConfig)",
+    );
 
-    // Counted for option 59: a type passes when the amount under its
-    // threshold is normal and the amount over it is large.
+    // Counted for option 59: a wallet passes when an amount at its own
+    // type's threshold is normal and one above it is large (amount > threshold).
     let checked = 0;
     let flagged = 0;
     const wallets = []; // per wallet, with its actual type (option 59)
-    for (let i = 0; i < testUsers.length; i++) {
-      const config = await investorTypeRegistry.getInvestorTypeConfig(
-        investorTypes[i],
+    for (const user of testUsers) {
+      const type = Number(
+        await investorTypeRegistry.getInvestorType(user.address),
       );
+      const config = await investorTypeRegistry.getInvestorTypeConfig(type);
       const threshold = config.largeTransferThreshold;
-      const normalAmount = threshold - ethers.parseEther("1000");
-      const largeAmount = threshold + ethers.parseEther("1000");
 
-      console.log(`\n${typeNames[i]} Investor (${testUsers[i].address}):`);
       console.log(
-        `   🚨 Large Transfer Threshold: ${ethers.formatEther(threshold)} VSC`,
+        `\n${typeNames[type]} Investor (${user.address}) (chain: getInvestorType = ${type}):`,
       );
+      if (threshold === ethers.MaxUint256) {
+        console.log("   ℹ️  No large-transfer threshold for this type (chain)");
+        continue;
+      }
+      console.log(
+        `   🚨 Large Transfer Threshold: ${ethers.formatEther(threshold)} VSC (chain: type ${type} config)`,
+      );
+      const largeAmount = threshold + ethers.parseEther("1");
 
-      // Test normal transfer
       const isNormalLarge = await investorTypeRegistry.isLargeTransfer(
-        testUsers[i].address,
-        normalAmount,
+        user.address,
+        threshold,
       );
       console.log(
-        `   📊 ${ethers.formatEther(normalAmount)} VSC: ${isNormalLarge ? "🚨 LARGE" : "✅ NORMAL"}`,
+        `   📊 ${ethers.formatEther(threshold)} VSC: ${isNormalLarge ? "🚨 LARGE" : "✅ NORMAL"} (chain: isLargeTransfer)`,
       );
-
-      // Test large transfer
       const isLarge = await investorTypeRegistry.isLargeTransfer(
-        testUsers[i].address,
+        user.address,
         largeAmount,
       );
       console.log(
-        `   📊 ${ethers.formatEther(largeAmount)} VSC: ${isLarge ? "🚨 LARGE" : "✅ NORMAL"}`,
+        `   📊 ${ethers.formatEther(largeAmount)} VSC: ${isLarge ? "🚨 LARGE" : "✅ NORMAL"} (chain: isLargeTransfer)`,
       );
       checked++;
       if (!isNormalLarge && isLarge) flagged++;
       wallets.push({
-        address: testUsers[i].address,
-        actual:
-          typeNames[
-            await investorTypeRegistry.getInvestorType(testUsers[i].address)
-          ],
-        cap: typeNames[i],
+        address: user.address,
+        actual: typeNames[type],
+        cap: typeNames[type],
         ok: !isNormalLarge && isLarge,
       });
     }
