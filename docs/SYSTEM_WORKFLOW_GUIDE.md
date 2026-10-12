@@ -221,11 +221,11 @@ rejection delists an entry at T or above (Task 4.12). Where a party
 passes the whitelist by its oracle entry (OracleOnly, or Either with a
 live entry), ComplianceRules requires the entry's tier to reach the
 party's `requiredWhitelistTier` in the token's InvestorTypeRegistry (D37
-= a, Task 4.10); in ZkOnly, or for a proof-bound party with no entry, no
-tier applies (a proof binding carries none). The whitelist oracle gates
-VSC only when bound to it in ComplianceRules (`setWhitelistOracle`), by
-the token's whitelist mode (below); the blacklist oracle bound with
-`setBlacklistOracle` gates every path.
+= a, Task 4.10); in ZkOnly no tier applies; in Either a proof-bound party with no
+entry passes only if its type needs tier 1 or it is exempt (D46 a: a proof carries no
+tier). The whitelist oracle gates VSC only when bound to it in ComplianceRules
+(`setWhitelistOracle`, which probes `whitelistStanding`, the one call transfers make), by
+the token's whitelist mode (below); the blacklist oracle (`setBlacklistOracle`) gates every path.
 
 ## Minting
 

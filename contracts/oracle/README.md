@@ -14,7 +14,10 @@ This directory contains oracle network management contracts for real-time compli
 - `WhitelistOracle.sol` - Whitelist entries; an approval lists at the
   tier its query was raised with or raises a lower entry to it, never
   lowers (Task 4.12); `addToWhitelist` (owner or list manager) names
-  its tier in the call and alone lowers one
+  its tier in the call and alone lowers one; `whitelistStanding` (live,
+  tier) is the one read ComplianceRules and the custody manager make
+  (Task 4.17), so an oracle without it cannot be bound and an older bound
+  one would revert every transfer: upgrades redeploy the list oracles
 - `BlacklistOracle.sol` - Blacklist entries; applies a resolved verdict;
   `emergencyBlacklist` needs the manager's emergency designation and an
   active node
