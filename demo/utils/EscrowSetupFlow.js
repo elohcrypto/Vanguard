@@ -18,7 +18,7 @@ const {
 } = require("./DisplayHelpers");
 const { registerRegistrar } = require("./GovernedCalls");
 const { retirePlaceholder } = require("./CustodyFlow");
-const { attestAll } = require("./Kyc");
+const { onboard } = require("./Onboard");
 const { ethers } = require("hardhat");
 
 /** Option 61: Deploy Enhanced Escrow System */
@@ -172,41 +172,11 @@ async function _ensureVerified(mod, address, label) {
     return;
   }
   console.log(`   📝 Onboarding ${label} ${address} as a verified investor...`);
-  // The registry's identity is the one isVerified() reads, so attest that
-  // one when the wallet is already registered (e.g. claims expired). The
-  // factory record is only a fallback: it is overwritten on every deploy.
-  let identityAddress = await identityRegistry.identity(address);
-  if (identityAddress === ethers.ZeroAddress) {
-    const factory = mod.state.getContract("onchainIDFactory");
-    identityAddress = await factory.getIdentityByOwner(address);
-    if (identityAddress === ethers.ZeroAddress) {
-      await (
-        await factory.deployOnchainID(address, ethers.randomBytes(32))
-      ).wait();
-      identityAddress = await factory.getIdentityByOwner(address);
-    }
-  }
-  await attestAll(mod.state, identityAddress, `escrow:${label}`);
-  if ((await identityRegistry.identity(address)) === ethers.ZeroAddress) {
-    const rules = mod.state.getContract("complianceRules");
-    const tokenAddr = await mod.state.getContract("digitalToken").getAddress();
-    const rule = await rules.getJurisdictionRule(tokenAddr);
-    const country =
-      rule.allowedCountries.length > 0 ? Number(rule.allowedCountries[0]) : 840;
-    const [countryOk, why] = await rules.validateJurisdiction(
-      tokenAddr,
-      country,
-    );
-    if (!countryOk) {
-      throw new Error(
-        `${label} ${address}: country ${country} refused by the jurisdiction rule (${why})`,
-      );
-    }
-    await (
-      await identityRegistry.registerIdentity(address, identityAddress, country)
-    ).wait();
-  }
-  if (!(await identityRegistry.isVerified(address))) {
+  // The demo's one onboarding path (Onboard.js, Task 4.16): the identity
+  // the registry reads (else the factory's, else a new one), the registry
+  // entry with the token's first allowed country, both claims, the cache.
+  const ob = await onboard(mod.state, address, { label: `escrow:${label}` });
+  if (!ob.verified) {
     throw new Error(`${label} ${address} could not be verified`);
   }
   console.log(`   ✅ ${label} is a verified investor (not a trusted contract)`);

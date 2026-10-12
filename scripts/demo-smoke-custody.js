@@ -11,7 +11,7 @@
  * Every assertion reads chain state; failures are pushed, never thrown.
  */
 const { ethers, artifacts } = require("hardhat");
-const { attestAll } = require("../demo/utils/Kyc");
+const { onboard } = require("../demo/utils/Onboard");
 const Custody = require("../demo/utils/CustodyFlow");
 
 const quiet = () => {};
@@ -45,15 +45,13 @@ async function runCustodySmoke(state, failures) {
     "the manager's bank and owner are not ops",
   );
 
-  // A fresh, verified Normal user (signer 13 is unused by the other legs).
+  // A fresh, verified Normal user (signer 13 is unused by the other legs),
+  // through the demo's one onboarding path (Task 4.16, L-6).
   const signer = state.signers[13];
-  const id = await (
-    await ethers.getContractFactory("OnchainID")
-  ).deploy(signer.address);
-  await (
-    await idReg.registerIdentity(signer.address, await id.getAddress(), 840)
-  ).wait();
-  await attestAll(state, await id.getAddress(), "custody-smoke");
+  await onboard(state, signer.address, {
+    country: 840,
+    label: "custody-smoke",
+  });
   const user = {
     name: "Custody smoke user",
     address: signer.address,

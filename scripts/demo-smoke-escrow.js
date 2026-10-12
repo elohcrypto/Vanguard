@@ -9,29 +9,30 @@
  */
 const { ethers } = require("hardhat");
 const { signShipmentProof } = require("../demo/utils/ShipmentProof");
-const { attestAll, cacheVerification } = require("../demo/utils/Kyc");
+const { cacheVerification } = require("../demo/utils/Kyc");
+const { onboard: onboardWallet } = require("../demo/utils/Onboard");
 const { walletCodeHash } = require("../demo/utils/GovernedCalls");
 const EscrowModule = require("../demo/modules/EscrowModule");
 const { EnhancedLogger } = require("../demo/logging");
 
 const e = ethers.parseEther;
 
+/** The demo's one onboarding path (Task 4.16, L-6), without the cache. */
 async function onboard(state, signer, tag) {
   const idReg = state.getContract("identityRegistry");
   if (await idReg.isVerified(signer.address)) return;
-  const id = await (
-    await ethers.getContractFactory("OnchainID")
-  ).deploy(signer.address);
-  await (
-    await idReg.registerIdentity(signer.address, await id.getAddress(), 840)
-  ).wait();
-  await attestAll(state, await id.getAddress(), `${tag}:${signer.address}`);
+  await onboardWallet(state, signer.address, {
+    country: 840,
+    label: `${tag}:${signer.address}`,
+    cache: false,
+  });
 }
 
 async function runEscrowSmoke(state, failures) {
   const signers = state.signers;
-  const [treasury, investor, payer, payee, investorWallet, ownerWallet] =
-    signers;
+  // Option 61 pays the owner fee to wallet 1 (EscrowSetupFlow.js).
+  const [treasury, investor, payer, payee, investorWallet] = signers;
+  const ownerWallet = signers[1];
   const token = state.getContract("digitalToken");
   const registry = state.getContract("investorTypeRegistry");
   const rules = state.getContract("complianceRules");
@@ -87,23 +88,35 @@ async function runEscrowSmoke(state, failures) {
       failures.push(`mint above the cap: wrong revert: ${why.slice(0, 120)}`);
   }
 
-  // 2. Escrow on the real token; mirrors /tmp proof of 2E.1.
-  const factory = await (
-    await ethers.getContractFactory("EscrowWalletFactory")
-  ).deploy(
-    await token.getAddress(),
-    ownerWallet.address,
-    await idReg.getAddress(),
-    await rules.getAddress(),
+  // 2. Escrow on the real token through option 61 itself (Task 4.16, L-4):
+  //    the factory, VSC's registrar for the MultiSigEscrowWallet code hash.
+  const quietEsc = new EscrowModule(
+    state,
+    new EnhancedLogger(),
+    async () => "",
   );
-  // Task 4.3: the factory is VSC's registrar and trusts each escrow itself.
-  await (
-    await rules.setTrustedRegistrar(
-      token.target,
-      factory.target,
-      await walletCodeHash("MultiSigEscrowWallet"),
-    )
-  ).wait();
+  const l61 = [];
+  const rl61 = console.log;
+  console.log = (...a) => l61.push(a.join(" "));
+  try {
+    await quietEsc.deployEscrowSystem();
+  } finally {
+    console.log = rl61;
+  }
+  const factory = state.getContract("escrowFactory");
+  if (!factory) {
+    failures.push(
+      `option 61 deployed no factory: ${l61.join(" | ").slice(0, 300)}`,
+    );
+    return;
+  }
+  if ((await factory.ownerWallet()) !== ownerWallet.address)
+    failures.push("option 61's factory does not pay the owner fee to wallet 1");
+  if (
+    (await rules.trustedRegistrars(token.target, factory.target)) !==
+    (await walletCodeHash("MultiSigEscrowWallet"))
+  )
+    failures.push("option 61 did not name the factory VSC's registrar (4.3)");
   await (
     await factory.registerInvestor(investor.address, investorWallet.address)
   ).wait();
@@ -136,7 +149,6 @@ async function runEscrowSmoke(state, failures) {
         await signShipmentProof(payee, wAddr, dataHash),
       )
   ).wait();
-  state.setContract("escrowFactory", factory);
   state.enhancedEscrowWallets.set("1", {
     paymentId: "1",
     walletAddress: wAddr,

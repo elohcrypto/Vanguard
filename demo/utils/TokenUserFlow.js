@@ -11,12 +11,8 @@
 "use strict";
 
 const { displaySection, displayError } = require("./DisplayHelpers");
-const {
-  attestAll,
-  cacheVerification,
-  issuerOwnerSigner,
-  signClaim,
-} = require("./Kyc");
+const { issuerOwnerSigner, signClaim } = require("./Kyc");
+const { onboard } = require("./Onboard");
 const { ethers } = require("hardhat");
 
 /** Option 24: Create Normal Users */
@@ -97,45 +93,6 @@ async function createCompliantNormalUser(mod) {
     console.log(`🆔 Address: ${signer.address}`);
     console.log(`📍 Signer Index: [${signerIndex}]`);
 
-    // Step 1: Create OnchainID on blockchain
-    console.log("\n📝 Step 1: Creating OnchainID on blockchain...");
-    const salt = ethers.randomBytes(32);
-    const onchainIDFactory = mod.state.getContract("onchainIDFactory");
-    const tx1 = await onchainIDFactory.deployOnchainID(signer.address, salt);
-    const receipt1 = await tx1.wait();
-    totalGasUsed += receipt1.gasUsed;
-
-    console.log(`   ✅ Transaction Hash: ${receipt1.hash}`);
-    console.log(`   🧱 Block Number: ${receipt1.blockNumber}`);
-    console.log(`   ⛽ Gas Used: ${receipt1.gasUsed.toLocaleString()}`);
-
-    // Get the created identity address
-    const identityAddress = await onchainIDFactory.getIdentityByOwner(
-      signer.address,
-    );
-    console.log(`   🆔 OnchainID Created: ${identityAddress}`);
-
-    // Step 2 & 3: Issue KYC and AML claims on blockchain through the
-    // trusted ClaimIssuers, each signed by its current owner (4.13).
-    console.log("\n📝 Step 2: Issuing KYC claim on blockchain...");
-    console.log("\n📝 Step 3: Issuing AML claim on blockchain...");
-    const { kyc: receipt2, aml: receipt3 } = await attestAll(
-      mod.state,
-      identityAddress,
-      `retail:${userName}`,
-    );
-    totalGasUsed += receipt2.gasUsed + receipt3.gasUsed;
-
-    console.log(`   ✅ Transaction Hash: ${receipt2.hash}`);
-    console.log(`   ⛽ Gas Used: ${receipt2.gasUsed.toLocaleString()}`);
-    console.log(`   ✅ Transaction Hash: ${receipt3.hash}`);
-    console.log(`   ⛽ Gas Used: ${receipt3.gasUsed.toLocaleString()}`);
-
-    // Step 4: Register in IdentityRegistry on blockchain
-    console.log(
-      "\n📝 Step 4: Registering in IdentityRegistry on blockchain...",
-    );
-
     // Get allowed country from ComplianceRules configuration
     let userCountry = 840; // Default: USA
     try {
@@ -156,28 +113,31 @@ async function createCompliantNormalUser(mod) {
       console.log(`   🌍 Using default country: ${userCountry} (USA)`);
     }
 
-    const identityRegistry = mod.state.getContract("identityRegistry");
-    const tx4 = await identityRegistry.registerIdentity(
-      signer.address,
-      identityAddress,
-      userCountry,
+    // Steps 1-4: the demo's one onboarding path (Onboard.js, Task 4.16):
+    // OnchainID through the factory (KeyManager pinned), the registry
+    // entry with the country, both claims, the verification cache.
+    console.log(
+      "\n📝 Steps 1-4: OnchainID, registry entry, KYC and AML claims, cache...",
     );
-    const receipt4 = await tx4.wait();
-    totalGasUsed += receipt4.gasUsed;
-
-    console.log(`   ✅ Transaction Hash: ${receipt4.hash}`);
-    console.log(`   ⛽ Gas Used: ${receipt4.gasUsed.toLocaleString()}`);
+    const ob = await onboard(mod.state, signer.address, {
+      country: userCountry,
+      label: `retail:${userName}`,
+      log: console.log,
+    });
+    const identityAddress = ob.identity;
+    totalGasUsed += ob.gasUsed;
+    console.log(
+      `   🆔 OnchainID ${ob.created ? "created" : "found"}: ${identityAddress}`,
+    );
+    for (const [step, rc] of Object.entries(ob.receipts)) {
+      console.log(
+        `   ✅ ${step}: tx ${rc.hash} (gas ${rc.gasUsed.toLocaleString()})`,
+      );
+    }
     console.log(`   🌍 Country Code: ${userCountry}`);
 
-    console.log("\n📝 Step 4b: Caching verification (refreshVerified)...");
-    const { receipt: receipt4b } = await cacheVerification(
-      mod.state,
-      signer.address,
-    );
-    totalGasUsed += receipt4b.gasUsed;
-
     // Verify registration on-chain
-    const isVerified = await identityRegistry.isVerified(signer.address);
+    const isVerified = ob.verified;
     console.log(
       `   ${isVerified ? "✅" : "❌"} Verified on-chain: ${isVerified}`,
     );

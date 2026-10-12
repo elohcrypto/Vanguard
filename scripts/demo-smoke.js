@@ -17,9 +17,8 @@
 const { ethers } = require("hardhat");
 const keys = require("./demo-smoke-keys");
 const DemoState = require("../demo/core/DemoState");
-const { attestAll } = require("../demo/utils/Kyc");
+const { onboard } = require("../demo/utils/Onboard");
 const { advancePastVoterAge } = require("../demo/utils/ChainTime");
-const { wireInvestorRegistry } = require("../demo/utils/InvestorTypeRules");
 const ContractDeployer = require("../demo/core/ContractDeployer");
 const { EnhancedLogger } = require("../demo/logging");
 
@@ -194,40 +193,43 @@ async function main() {
     async () => "n",
   );
 
-  // Deploy the InvestorTypeRegistry BEFORE governance, as option 51 precedes
-  // option 74 in the demo. VanguardGovernance binds each proposal type to the
-  // contract it governs at construction; a registry deployed afterwards is not
-  // the bound InvestorTypeConfig target and every proposal against it reverts
-  // TargetNotBoundToType.
-  const InvestorTypeRegistry = await ethers.getContractFactory(
-    "InvestorTypeRegistry",
+  // Option 51 itself (Task 4.16, L-4): the InvestorTypeRegistry BEFORE
+  // governance (VanguardGovernance binds boundTarget(0) at construction),
+  // wired into and authorizing VSC (2A.2/4.10), custody deployed (4.3).
+  const InvestorTypeModule = require("../demo/modules/InvestorTypeModule");
+  await captureLog(() =>
+    new InvestorTypeModule(
+      state,
+      new EnhancedLogger(),
+      async () => "",
+    ).deployInvestorTypeSystem(),
   );
-  const registry = await InvestorTypeRegistry.deploy();
-  await registry.waitForDeployment();
-  state.setContract("investorTypeRegistry", registry);
-
-  // 2A.2/4.3/4.10: wire, authorize and deploy custody as option 51 does.
-  if (token) {
-    const registryAddr = await registry.getAddress();
-    await wireInvestorRegistry(token, registry, () => {});
-    const wiredRegistry = await token.investorTypeRegistry();
-    if (wiredRegistry === ethers.ZeroAddress) {
-      failures.push(
-        "token.investorTypeRegistry() is zero after setInvestorTypeRegistry",
-      );
-    } else if (wiredRegistry.toLowerCase() !== registryAddr.toLowerCase()) {
-      failures.push(
-        `token.investorTypeRegistry() = ${wiredRegistry}, expected ${registryAddr}`,
-      );
-    }
-    await deployer.deployInvestorCustody(); // custody smoke: demo-smoke-escrow
+  const registry = state.getContract("investorTypeRegistry");
+  if (!registry) failures.push("option 51 registered no investorTypeRegistry");
+  const registryAddr = await registry.getAddress();
+  const wiredRegistry = await token.investorTypeRegistry();
+  if (wiredRegistry.toLowerCase() !== registryAddr.toLowerCase()) {
+    failures.push(
+      `token.investorTypeRegistry() = ${wiredRegistry}, expected ${registryAddr}`,
+    );
   }
+  if (!(await registry.isTokenAuthorized(await token.getAddress())))
+    failures.push("option 51 did not authorize VSC on its registry (4.10)");
+  if (!state.getContract("investorRequestManager"))
+    failures.push("option 51 deployed no custody (InvestorRequestManager)");
 
-  // D22 (a): the treasury (signer 0) and, for D26, demo-smoke-escrow.js's
-  // fee wallets (4, 5) are exempt from investor caps; owner only, so set
-  // before governance owns the registry. demo-smoke-escrow.js asserts both.
-  for (const w of [0, 4, 5].map((i) => state.signers[i].address))
+  // D22 (a): the treasury (signer 0) and, for D26, the escrow fee wallets
+  // (option 61's owner wallet 1, demo-smoke-escrow.js's 4 and 5) are exempt
+  // from investor caps; owner only, so set before governance owns the
+  // registry. demo-smoke-escrow.js asserts them.
+  for (const w of [0, 1, 4, 5].map((i) => state.signers[i].address))
     await (await registry.setInvestorLimitExempt(w, true)).wait();
+  // Option 51 makes wallet 1 a compliance officer, an EOA the ceremony
+  // refuses as a stray (R-413-4); the deployer removes it while it still
+  // owns the registry (83b hands the registry to governance below).
+  await (
+    await registry.setComplianceOfficer(state.signers[1].address, false)
+  ).wait();
 
   // D21: option 74 must not register governance as an identity, so the
   // quorum denominator is unchanged by deploying it.
@@ -308,14 +310,10 @@ async function main() {
 
     for (let i = 0; i < 4; i++) {
       const s = state.signers[i];
-      if (!(await idReg.isVerified(s.address))) {
-        // A real OnchainID is required: isVerified() reads claims off the
-        // identity contract, and registration alone no longer verifies.
-        // Both KYC and AML topics are required (Task 1R.3).
-        const id = await keys.deployPinned(state, s); // 4.11
-        await idReg.registerIdentity(s.address, await id.getAddress(), 840);
-        await attestAll(state, await id.getAddress(), `voter:${i}`);
-      }
+      // The demo's one onboarding path (Task 4.16, L-6): a factory-made,
+      // KeyManager-pinned OnchainID, both claims, the registry entry.
+      if (!(await idReg.isVerified(s.address)))
+        await onboard(state, s.address, { country: 840, label: `voter:${i}` });
       if ((await vgt.balanceOf(s.address)) < stake) {
         await vgt.distributeGovernanceTokens([s.address], [stake * 2n]);
       }
@@ -410,15 +408,11 @@ async function main() {
     const govAddr2 = await govC.getAddress();
     // Register + fund three investors so a proposal can pass.
     for (const sgn of [alice, bob, carol]) {
-      if (!(await idReg.isVerified(sgn.address))) {
-        const id = await keys.deployPinned(state, sgn); // 4.11
-        await idReg.registerIdentity(sgn.address, await id.getAddress(), 840);
-        await attestAll(
-          state,
-          await id.getAddress(),
-          `investor:${sgn.address}`,
-        );
-      }
+      if (!(await idReg.isVerified(sgn.address)))
+        await onboard(state, sgn.address, {
+          country: 840,
+          label: `investor:${sgn.address}`,
+        });
       if ((await vgt.balanceOf(sgn.address)) < ethers.parseEther("50"))
         await vgt.transfer(sgn.address, ethers.parseEther("100"));
       await vgt.connect(sgn).approve(govAddr2, ethers.MaxUint256);

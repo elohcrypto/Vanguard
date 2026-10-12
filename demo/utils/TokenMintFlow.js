@@ -10,7 +10,7 @@
 
 "use strict";
 
-const { attestAll } = require("./Kyc");
+const { onboard } = require("./Onboard");
 const { whitelistHints } = require("./WhitelistLiveFlow");
 const { ethers } = require("hardhat");
 
@@ -103,29 +103,15 @@ async function mintToCentralBank(mod, centralBank) {
         console.log(`   OnchainID: ${centralBank.onchainId}`);
         console.log(`   Country Code: ${countryCode}`);
 
-        try {
-          const tx = await identityRegistry.registerIdentity(
-            centralBank.address,
-            centralBank.onchainId,
-            countryCode,
-          );
-          await tx.wait();
-        } catch (registerError) {
-          // Already registered is fine here — the wallet may be
-          // missing only the KYC claim below, not the registration.
-          if (!/already registered/i.test(registerError.message)) {
-            throw registerError;
-          }
-        }
-
-        // Registration alone no longer verifies: attest the
-        // required KYC and AML claims through the trusted ClaimIssuers.
-        console.log(`\n📝 Attesting Central Bank KYC/AML claims...`);
-        await attestAll(
-          mod.state,
-          centralBank.onchainId,
-          "central-bank-repair",
-        );
+        // The demo's one onboarding path (Onboard.js, Task 4.16): the
+        // registry entry if missing, both claims through the trusted
+        // issuers (registration alone never verifies).
+        console.log(`\n📝 Repairing Central Bank registration and claims...`);
+        await onboard(mod.state, centralBank.address, {
+          country: countryCode,
+          label: "central-bank-repair",
+          cache: false,
+        });
 
         // Verify again
         const nowVerified = await identityRegistry.isVerified(

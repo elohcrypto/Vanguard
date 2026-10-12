@@ -14,7 +14,7 @@ const {
   displaySuccess,
   displayError,
 } = require("./DisplayHelpers");
-const { attestAll } = require("./Kyc");
+const { onboard } = require("./Onboard");
 const { ethers } = require("hardhat");
 
 /** Option 89: Quick Fix: Verify Existing Signer for Voting */
@@ -81,49 +81,24 @@ async function verifyExistingSigner(mod) {
     console.log(`\n🔧 Verifying Signer ${signerIndex}...`);
     console.log(`   Address: ${address}`);
 
-    // Step 1: Check if OnchainID exists
-    let identityAddress;
-    try {
-      identityAddress = await onchainIDFactory.getIdentityByOwner(address);
-
-      // Check if it's a zero address (means doesn't exist)
-      if (
-        identityAddress === ethers.ZeroAddress ||
-        identityAddress === "0x0000000000000000000000000000000000000000"
-      ) {
-        throw new Error("OnchainID not found");
-      }
-
-      console.log(`   ✅ OnchainID exists: ${identityAddress}`);
-    } catch (error) {
-      // Create OnchainID if it doesn't exist
-      console.log("   📝 Creating OnchainID...");
-      const salt = ethers.randomBytes(32);
-      const tx = await onchainIDFactory.deployOnchainID(address, salt);
-      await tx.wait();
-      identityAddress = await onchainIDFactory.getIdentityByOwner(address);
-      console.log(`   ✅ OnchainID created: ${identityAddress}`);
-    }
-
-    // Step 2 & 3: Issue KYC and AML claims through the trusted
-    // ClaimIssuers, the only path IdentityRegistry.isVerified() accepts.
-    console.log("   📝 Issuing KYC and AML claims...");
-    await attestAll(mod.state, identityAddress, `signer:${signerIndex}`);
-    console.log("   ✅ KYC claim issued");
-    console.log("   ✅ AML claim issued");
-
-    // Step 4: Register in IdentityRegistry
-    console.log("   📝 Registering in IdentityRegistry...");
-    const registerTx = await identityRegistry.registerIdentity(
-      address,
-      identityAddress,
-      840, // United States
+    // The demo's one onboarding path (Onboard.js, Task 4.16): the
+    // OnchainID (existing or new, through the factory), the registry
+    // entry (840), both claims through the trusted issuers, the cache.
+    console.log("   📝 OnchainID, registry entry, KYC and AML claims...");
+    const ob = await onboard(mod.state, address, {
+      country: 840,
+      label: `signer:${signerIndex}`,
+    });
+    const identityAddress = ob.identity;
+    console.log(
+      `   ✅ OnchainID ${ob.created ? "created" : "exists"}: ${identityAddress}`,
     );
-    await registerTx.wait();
-    console.log("   ✅ Registered in IdentityRegistry");
+    console.log(
+      `   ✅ ${ob.registered ? "Registered" : "Already registered"} in IdentityRegistry; KYC and AML claims issued`,
+    );
 
     // Verify registration
-    const isVerified = await identityRegistry.isVerified(address);
+    const isVerified = ob.verified;
 
     displaySuccess("SIGNER VERIFIED SUCCESSFULLY!");
     console.log("=".repeat(70));

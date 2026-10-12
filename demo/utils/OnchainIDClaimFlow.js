@@ -11,13 +11,8 @@
 
 const { markRevoked, updateStatus } = require("./OnchainIDClaimChain");
 const { displaySuccess, displayError } = require("./DisplayHelpers");
-const {
-  attestAll,
-  attestAml,
-  cacheVerification,
-  issuerOwnerSigner,
-  AML_TOPIC,
-} = require("./Kyc");
+const { attestAml, issuerOwnerSigner, AML_TOPIC } = require("./Kyc");
+const { onboard } = require("./Onboard");
 
 // ========== KYC CLAIM HELPER METHODS ==========
 
@@ -62,76 +57,46 @@ async function issueKYCClaimForIdentity(mod, identity) {
 
     console.log(`\n🔍 COMPLIANCE CHECK: Verifying country ${countryCode}...`);
 
-    // Step 2: Register identity with jurisdiction validation
+    // Steps 2-3: the demo's one onboarding path (Onboard.js, Task 4.16):
+    // the registry entry with the chosen country (the jurisdiction rule
+    // decides; an entry that exists is kept), then both claims through the
+    // trusted ClaimIssuers (a claim added directly on the OnchainID never
+    // verifies: isVerified() reads only issuer-signed claims, both topics,
+    // plan Task 1R.3), then the verification cache.
     const identityRegistry = mod.state.getContract("identityRegistry");
-    if (identityRegistry) {
-      try {
-        const existingIdentity = await identityRegistry.identity(
-          identity.owner,
-        );
-
-        if (existingIdentity === identity.address) {
-          console.log("\n⚠️  IDENTITY ALREADY REGISTERED");
-          console.log(`   Country Code: ${countryCode}`);
-          console.log(
-            `   ℹ️  Skipping registration, proceeding with KYC claim`,
-          );
-          identity.countryCode = countryCode;
-        } else {
-          console.log(
-            `\n📝 Registering identity with country code ${countryCode}...`,
-          );
-          await identityRegistry.registerIdentity(
-            identity.owner,
-            identity.address,
-            countryCode,
-          );
-
-          console.log("\n✅ IDENTITY REGISTERED SUCCESSFULLY!");
-          console.log(`   Country Code: ${countryCode}`);
-          console.log(`   ✅ Jurisdiction rules enforced`);
-          identity.countryCode = countryCode;
-        }
-      } catch (error) {
-        if (error.message.includes("already registered")) {
-          console.log("\n⚠️  IDENTITY ALREADY REGISTERED");
-          console.log(`   Country Code: ${countryCode}`);
-          console.log(`   ℹ️  Proceeding with KYC claim`);
-          identity.countryCode = countryCode;
-        } else if (
-          error.message.includes("Country not allowed") ||
-          error.message.includes("Country is blocked")
-        ) {
-          console.log("\n❌ IDENTITY REGISTRATION FAILED!");
-          console.log(`   Error: ${error.message}`);
-          console.log("\n💡 This means:");
-          console.log("   • User's country is BLOCKED by jurisdiction rules");
-          console.log("   • User's country is NOT in the allowed list");
-          console.log("   • User CANNOT participate in the system");
-          console.log("\n❌ KYC CLAIM NOT ISSUED - Country blocked");
-          return;
-        } else {
-          console.log("\n❌ IDENTITY REGISTRATION FAILED!");
-          console.log(`   Error: ${error.message}`);
-          console.log("\n❌ KYC CLAIM NOT ISSUED");
-          return;
-        }
-      }
-    }
-
-    // Step 3: Issue KYC and AML claims through the trusted ClaimIssuers.
-    // A claim added directly on the OnchainID with addClaim(...) does NOT
-    // verify — IdentityRegistry.isVerified() only accepts claims signed
-    // by a trusted issuer via ClaimIssuer.issueClaim, and it now requires
-    // both topics (plan Task 1R.3), so a KYC-only attestation here would
-    // leave the identity unverified.
-    console.log("\n📝 Issuing KYC and AML claims on-chain...");
-    await attestAll(mod.state, identity.address, `country:${countryCode}`);
-    if (
+    const registered =
       identityRegistry &&
-      (await identityRegistry.identity(identity.owner)) === identity.address
-    )
-      await cacheVerification(mod.state, identity.owner);
+      (await identityRegistry.identity(identity.owner)) !== ethers.ZeroAddress;
+    console.log(
+      registered
+        ? `\n⚠️  IDENTITY ALREADY REGISTERED: proceeding with the claims`
+        : `\n📝 Registering identity with country code ${countryCode}, then the claims...`,
+    );
+    try {
+      await onboard(mod.state, identity.owner, {
+        country: countryCode,
+        label: `country:${countryCode}`,
+        register: Boolean(identityRegistry),
+        cache: Boolean(identityRegistry),
+      });
+    } catch (error) {
+      if (
+        error.message.includes("Country not allowed") ||
+        error.message.includes("Country is blocked")
+      ) {
+        console.log("\n⛔ Registration refused by the jurisdiction rule");
+        console.log(`   ${error.message}`);
+        console.log(
+          "   The user's country is blocked or not allowed: no claim issued",
+        );
+        return;
+      }
+      throw error;
+    }
+    identity.countryCode = countryCode;
+    if (!registered && identityRegistry) {
+      console.log("✅ IDENTITY REGISTERED (jurisdiction rule passed)");
+    }
     const kycIssuerAddr = await mod.state.getContract("kycIssuer").getAddress();
 
     // Store claim in state

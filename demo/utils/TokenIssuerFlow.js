@@ -15,7 +15,7 @@ const {
   displaySuccess,
   displayError,
 } = require("./DisplayHelpers");
-const { attestAll } = require("./Kyc");
+const { onboard } = require("./Onboard");
 const { ethers } = require("hardhat");
 
 /** Option 21: Deploy ERC-3643 Vanguard StableCoin System */
@@ -133,47 +133,28 @@ async function createTokenIssuer(mod) {
       console.log(`💡 Using: ${centralBankCountry} - ${countryName}`);
     }
 
-    // Step 1: Create OnchainID on-chain
-    console.log("\n📝 Step 1: Creating OnchainID on blockchain...");
-    const salt = ethers.randomBytes(32);
-    const tx1 = await mod.state
-      .getContract("onchainIDFactory")
-      .deployOnchainID(signer.address, salt);
-    const receipt1 = await tx1.wait();
-    totalGasUsed += receipt1.gasUsed;
-
-    console.log(`   ✅ Transaction Hash: ${receipt1.hash}`);
-    console.log(`   🧱 Block Number: ${receipt1.blockNumber}`);
-    console.log(`   ⛽ Gas Used: ${receipt1.gasUsed.toLocaleString()}`);
-
-    const identityAddress = await mod.state
-      .getContract("onchainIDFactory")
-      .getIdentityByOwner(signer.address);
-    console.log(`   🆔 OnchainID Created: ${identityAddress}`);
-
-    // Step 2: Register in IdentityRegistry on-chain
+    // Steps 1-2: the demo's one onboarding path (Onboard.js, Task 4.16):
+    // OnchainID through the factory, the registry entry with the country,
+    // both claims through the trusted issuers (registration alone never
+    // verifies), the verification cache.
     console.log(
-      "\n📝 Step 2: Registering Central Bank in IdentityRegistry on blockchain...",
+      "\n📝 Steps 1-2: OnchainID, registry entry, KYC and AML claims on blockchain...",
     );
-    const tx2 = await mod.state
-      .getContract("identityRegistry")
-      .registerIdentity(signer.address, identityAddress, centralBankCountry);
-    const receipt2 = await tx2.wait();
-    totalGasUsed += receipt2.gasUsed;
-
-    console.log(`   ✅ Transaction Hash: ${receipt2.hash}`);
-    console.log(`   🧱 Block Number: ${receipt2.blockNumber}`);
-    console.log(`   ⛽ Gas Used: ${receipt2.gasUsed.toLocaleString()}`);
+    const ob = await onboard(mod.state, signer.address, {
+      country: centralBankCountry,
+      label: "central-bank",
+    });
+    const identityAddress = ob.identity;
+    totalGasUsed += ob.gasUsed;
+    console.log(
+      `   🆔 OnchainID ${ob.created ? "created" : "found"}: ${identityAddress}`,
+    );
+    for (const [step, rc] of Object.entries(ob.receipts)) {
+      console.log(
+        `   ✅ ${step}: tx ${rc.hash} (gas ${rc.gasUsed.toLocaleString()})`,
+      );
+    }
     console.log(`   🌍 Country Code: ${centralBankCountry} (${countryName})`);
-
-    // Registration alone no longer verifies: the required KYC and AML
-    // topics must both be attested through the trusted ClaimIssuers.
-    console.log(
-      "\n📝 Step 2b: Attesting Central Bank KYC/AML claims on blockchain...",
-    );
-    await attestAll(mod.state, identityAddress, "central-bank");
-    console.log("   ✅ KYC Claim Issued");
-    console.log("   ✅ AML Claim Issued");
 
     // Step 3: Add as agent to Token contract (allows minting)
     console.log("\n📝 Step 3: Granting minting authority on blockchain...");

@@ -20,6 +20,7 @@ const {
   AML_TOPIC,
   issuerOwnerSigner,
 } = require("./Kyc");
+const { onboard } = require("./Onboard");
 
 /**
  * Option 6: Manage KYC claims
@@ -261,9 +262,13 @@ async function demoClaimExpiry(mod) {
 
   try {
     const registry = mod.state.getContract("identityRegistry");
-    if ((await registry.identity(identity.owner)) === ethers.ZeroAddress) {
-      await registry.registerIdentity(identity.owner, identity.address, 840);
-    }
+    // The registry entry if missing (Onboard.js, Task 4.16); the claims
+    // below are this demo's own (a short-lived KYC claim).
+    await onboard(mod.state, identity.owner, {
+      country: 840,
+      attest: false,
+      cache: false,
+    });
     // AML is required too (Task 1R.3): without it isVerified() never
     // returns true regardless of the KYC claim below.
     // Each issuer's current owner signs (Task 4.13: the deployer before

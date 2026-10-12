@@ -52,8 +52,10 @@ const SYMBOLS = [
   "paymentEscrow",
   "refundManager",
   "demonstrateTransferRestrictions",
-  // Task 4.16: a DemoState method nothing called (review B L-1).
+  // Task 4.16: a DemoState method nothing called (review B L-1); the smoke's
+  // direct OnchainID deploy, replaced by the factory path (Onboard.js).
   "hasContract",
+  "deployPinned",
 ];
 
 const EXCLUDE = [

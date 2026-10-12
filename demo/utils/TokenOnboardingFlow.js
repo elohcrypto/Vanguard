@@ -11,7 +11,7 @@
 "use strict";
 
 const { displaySection, displayError } = require("./DisplayHelpers");
-const { attestAll, cacheVerification } = require("./Kyc");
+const { onboard } = require("./Onboard");
 const Custody = require("./CustodyFlow");
 const { ethers } = require("hardhat");
 
@@ -158,56 +158,28 @@ async function createNormalUserForOnboarding(mod) {
       }
     }
 
-    // Step 1: Create OnchainID
-    console.log("\n📝 Step 1: Creating OnchainID on blockchain...");
-    const salt = ethers.randomBytes(32);
-    const tx1 = await onchainIDFactory.deployOnchainID(signer.address, salt);
-    const receipt1 = await tx1.wait();
-    totalGasUsed += receipt1.gasUsed;
-
-    const identityAddress = await onchainIDFactory.getIdentityByOwner(
-      signer.address,
-    );
-    console.log(`   ✅ OnchainID Created: ${identityAddress}`);
-    console.log(`   ⛽ Gas Used: ${receipt1.gasUsed.toLocaleString()}`);
-
-    // Step 2 & 3: Issue KYC and AML claims through the trusted
-    // ClaimIssuers, each signed by its current owner (Task 4.13).
-    console.log("\n📝 Step 2: Issuing KYC claim on blockchain...");
-    console.log("\n📝 Step 3: Issuing AML claim on blockchain...");
-    const { kyc: receipt2, aml: receipt3 } = await attestAll(
-      mod.state,
-      identityAddress,
-      `normal:${userName}`,
-    );
-    totalGasUsed += receipt2.gasUsed + receipt3.gasUsed;
-    console.log(`   ✅ KYC Claim Issued`);
-    console.log(`   ⛽ Gas Used: ${receipt2.gasUsed.toLocaleString()}`);
-    console.log(`   ✅ AML Claim Issued`);
-    console.log(`   ⛽ Gas Used: ${receipt3.gasUsed.toLocaleString()}`);
-
-    // Step 4: Register in IdentityRegistry
+    // Steps 1-4: the demo's one onboarding path (Onboard.js, Task 4.16):
+    // OnchainID through the factory (KeyManager pinned), the registry
+    // entry with the country, both claims through the trusted issuers,
+    // the verification cache; every receipt read back.
     console.log(
-      "\n📝 Step 4: Registering in IdentityRegistry on blockchain...",
+      "\n📝 Steps 1-4: OnchainID, registry entry, KYC and AML claims, cache...",
     );
-    const identityRegistry = mod.state.getContract("identityRegistry");
-    const tx4 = await identityRegistry.registerIdentity(
-      signer.address,
-      identityAddress,
-      userCountry,
-    );
-    const receipt4 = await tx4.wait();
-    totalGasUsed += receipt4.gasUsed;
+    const ob = await onboard(mod.state, signer.address, {
+      country: userCountry,
+      label: `normal:${userName}`,
+      log: console.log,
+    });
+    const identityAddress = ob.identity;
+    totalGasUsed += ob.gasUsed;
     console.log(
-      `   ✅ Registered with country: ${userCountry} (${countryName})`,
+      `   ✅ OnchainID ${ob.created ? "created" : "found"}: ${identityAddress}`,
     );
-    console.log(`   ⛽ Gas Used: ${receipt4.gasUsed.toLocaleString()}`);
-    console.log("\n📝 Step 4b: Caching verification (refreshVerified)...");
-    const { receipt: receipt4b } = await cacheVerification(
-      mod.state,
-      signer.address,
+    console.log(
+      `   ✅ Registered with country: ${userCountry} (${countryName})${ob.registered ? "" : " (already)"}`,
     );
-    totalGasUsed += receipt4b.gasUsed;
+    console.log(`   ✅ KYC and AML claims issued through the trusted issuers`);
+    console.log(`   ⛽ Gas Used: ${ob.gasUsed.toLocaleString()}`);
 
     // Step 5: Assign NORMAL investor type
     console.log("\n📝 Step 5: Assigning NORMAL investor type on blockchain...");
