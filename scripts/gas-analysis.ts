@@ -54,7 +54,9 @@ function ratchet(measured: Record<string, bigint | undefined>): number {
       console.log(`::error::gas ratchet: ${s} rose beyond ${TOLERANCE}`);
       rises++;
     } else if (delta < -TOLERANCE) {
-      console.log(`::notice::gas ratchet: ${s} dropped: lower BASELINE in scripts/gas-analysis.ts`);
+      console.log(
+        `::notice::gas ratchet: ${s} dropped: lower BASELINE in scripts/gas-analysis.ts`,
+      );
     } else {
       console.log(`gas ratchet: ${s} within ${TOLERANCE}`);
     }

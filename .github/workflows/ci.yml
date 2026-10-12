@@ -6,7 +6,7 @@ name: CI
 # refs/pull/N/merge), so neither cancels the other. Tag pushes do not run.
 on:
   push:
-    branches: ['**']
+    branches: ["**"]
   pull_request:
 
 # The job only reads the repo and the actions cache.
@@ -52,7 +52,7 @@ jobs:
 
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
-          node-version: '22'
+          node-version: "22"
           cache: npm
 
       # Fails if package.json and package-lock.json disagree, which is the
@@ -246,7 +246,7 @@ jobs:
       # peak RSS (EDR native memory included), 15:26 wall, default heap.
       - name: Coverage ratchet (tests pass; no DROP in line coverage)
         env:
-          ZK_PROOFS: '0'
+          ZK_PROOFS: "0"
         run: |
           BASELINE=95
           if ! npm run test:coverage > coverage.log 2>&1; then
@@ -286,7 +286,7 @@ jobs:
       # job is read right here.
       - name: PrivacyManager branch gate (proof suites under coverage)
         env:
-          ZK_PROOFS: '1'
+          ZK_PROOFS: "1"
         run: |
           MIN=80
           if ! npm run test:coverage -- --testfiles 'test/privacy/**/*.{js,ts}' > coverage-zk.log 2>&1; then

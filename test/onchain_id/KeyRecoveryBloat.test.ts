@@ -26,7 +26,9 @@ const k = (a: string) => ethers.solidityPackedKeccak256(["address"], [a]);
 const COVERAGE = underCoverage();
 const JUNK = COVERAGE ? 70 : 5_000;
 const CHUNK = 90;
-const GAS_NOTE = COVERAGE ? " (coverage: 70 keys, gas printed, not bounded)" : "";
+const GAS_NOTE = COVERAGE
+  ? " (coverage: 70 keys, gas printed, not bounded)"
+  : "";
 
 async function setup(bloated: boolean) {
   const [owner, A, B, C, rogue, rescued, anyone] = await ethers.getSigners();
@@ -72,7 +74,9 @@ describe("Recovery against a bloated key list (4.14, H-1)", function () {
     const receipt = await (
       await f.km.connect(f.anyone).executeKeyRecovery(f.idA, key)
     ).wait();
-    console.log(`      executeKeyRecovery gasUsed ${receipt!.gasUsed} (${JUNK} keys)`);
+    console.log(
+      `      executeKeyRecovery gasUsed ${receipt!.gasUsed} (${JUNK} keys)`,
+    );
     if (!COVERAGE) expect(receipt!.gasUsed).to.be.lt(400_000n);
     expect(await f.id.keyHasPurpose(key, MGMT)).to.equal(true);
     expect(await f.id.keyHasPurpose(key, ACTION)).to.equal(false);
@@ -86,7 +90,9 @@ describe("Recovery against a bloated key list (4.14, H-1)", function () {
         .connect(f.anyone)
         .executeOwnerTransfer(f.idA, f.rescued.address)
     ).wait();
-    console.log(`      executeOwnerTransfer gasUsed ${t!.gasUsed} (${JUNK} keys)`);
+    console.log(
+      `      executeOwnerTransfer gasUsed ${t!.gasUsed} (${JUNK} keys)`,
+    );
     if (!COVERAGE) expect(t!.gasUsed).to.be.lt(400_000n);
     await f.id.connect(f.rescued).acceptOwnership();
     expect(await f.id.owner()).to.equal(f.rescued.address);

@@ -49,7 +49,11 @@ const SYMBOLS = [
   "demonstrateTransferRestrictions",
 ];
 
-const EXCLUDE = [":!.omc", ":!scripts/ci/deleted-names.js", ":!package-lock.json"];
+const EXCLUDE = [
+  ":!.omc",
+  ":!scripts/ci/deleted-names.js",
+  ":!package-lock.json",
+];
 
 function hits(args) {
   try {
@@ -77,7 +81,8 @@ for (const f of FILES) {
   for (const where of hits(["-F", "-e", f])) findings.push(`${f} in ${where}`);
 }
 for (const s of SYMBOLS) {
-  for (const where of hits(["-w", "-F", "-e", s])) findings.push(`${s} in ${where}`);
+  for (const where of hits(["-w", "-F", "-e", s]))
+    findings.push(`${s} in ${where}`);
 }
 
 if (findings.length) {
