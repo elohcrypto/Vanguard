@@ -112,4 +112,20 @@ describe("DynamicListManager removes lapsed entries", function () {
       dlm.removeFromWhitelist(user.address, 6, "again"),
     ).to.be.revertedWith("User not whitelisted");
   });
+
+  // Task 4.17 slice A (review C mutant O07).
+  it("setProofExpiryDuration refuses 0 and is the owner's", async function () {
+    const { dlm } = await wired();
+    const [, , , stranger] = await ethers.getSigners();
+    const before = await dlm.proofExpiryDuration();
+    await expect(dlm.setProofExpiryDuration(0)).to.be.revertedWith(
+      "Invalid duration",
+    );
+    await expect(dlm.connect(stranger).setProofExpiryDuration(HOUR))
+      .to.be.revertedWithCustomError(dlm, "OwnableUnauthorizedAccount")
+      .withArgs(stranger.address);
+    expect(await dlm.proofExpiryDuration()).to.equal(before);
+    await dlm.setProofExpiryDuration(HOUR);
+    expect(await dlm.proofExpiryDuration()).to.equal(HOUR);
+  });
 });

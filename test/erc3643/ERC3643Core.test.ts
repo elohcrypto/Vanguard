@@ -151,6 +151,19 @@ describe("ERC-3643 Core Implementation", function () {
           ),
       ).to.be.revertedWith("Not authorized agent");
     });
+
+    // Task 4.17 slice A (review C mutant R03).
+    it("refuses the zero wallet", async function () {
+      await expect(
+        identityRegistry
+          .connect(agent)
+          .registerIdentity(
+            ethers.ZeroAddress,
+            await investor1OnchainID.getAddress(),
+            COUNTRY_US,
+          ),
+      ).to.be.revertedWith("Invalid user address");
+    });
   });
 
   describe("Token Operations", function () {
@@ -294,6 +307,28 @@ describe("ERC-3643 Core Implementation", function () {
       expect(await token.getFreeBalance(investor1.address)).to.equal(
         ethers.parseEther("100"),
       );
+    });
+    // Task 4.17 slice A (review C mutants R07, R08). R08 is outcome-
+    // equivalent: without the require the subtraction underflows (panic
+    // 0x11), so only the exact reason tells the two apart.
+    it("burns only the free balance; unfreezes only what is frozen", async function () {
+      const E = ethers.parseEther;
+      await token.connect(agent).mint(investor1.address, E("1000"));
+      await token
+        .connect(agent)
+        .freezePartialTokens(investor1.address, E("600"));
+      await expect(
+        token.connect(agent).burn(investor1.address, E("401")),
+      ).to.be.revertedWith("Insufficient free balance");
+      await token.connect(agent).burn(investor1.address, E("400"));
+      expect(await token.balanceOf(investor1.address)).to.equal(E("600"));
+      await expect(
+        token.connect(agent).unfreezePartialTokens(investor1.address, E("601")),
+      ).to.be.revertedWith("Insufficient frozen tokens");
+      await token
+        .connect(agent)
+        .unfreezePartialTokens(investor1.address, E("600"));
+      expect(await token.frozenTokens(investor1.address)).to.equal(0n);
     });
   });
 

@@ -259,4 +259,28 @@ describe("List oracle guards (Task 4.15)", function () {
       expect(await BO.isBlacklisted(stranger.address)).to.equal(true);
     });
   });
+
+  // Task 4.17 slice A (review C mutants O05, O06).
+  describe("setter and removal refusals (Task 4.17)", function () {
+    it("setMinimumConsensusOracles refuses 0 on the blacklist oracle", async function () {
+      const before = await BO.minimumConsensusOracles();
+      await expect(BO.setMinimumConsensusOracles(0)).to.be.revertedWith(
+        "BlacklistOracle: Minimum must be greater than 0",
+      );
+      expect(await BO.minimumConsensusOracles()).to.equal(before);
+      await BO.setMinimumConsensusOracles(3);
+      expect(await BO.minimumConsensusOracles()).to.equal(3);
+    });
+
+    it("removeFromWhitelist refuses a subject that is not listed", async function () {
+      await expect(
+        WO.removeFromWhitelist(subject.address, "never listed"),
+      ).to.be.revertedWith("WhitelistOracle: Not whitelisted");
+      await WO.addToWhitelist(subject.address, 2, 0, "r");
+      await WO.removeFromWhitelist(subject.address, "done");
+      await expect(
+        WO.removeFromWhitelist(subject.address, "twice"),
+      ).to.be.revertedWith("WhitelistOracle: Not whitelisted");
+    });
+  });
 });

@@ -145,4 +145,17 @@ describe("OracleManager guards (Task 4.15)", function () {
       ),
     ).to.be.revertedWith("ConsensusOracle: Oracle manager is not a contract");
   });
+
+  // Task 4.17 slice A (review C mutant O04).
+  it("submitQuery takes query types 1-4 only", async function () {
+    const data = ethers.AbiCoder.defaultAbiCoder().encode(["uint256"], [2]);
+    for (const t of [0, 5])
+      await expect(
+        OM.connect(n1).submitQuery(stranger.address, t, data),
+      ).to.be.revertedWith("OracleManager: Invalid query type");
+    await expect(OM.connect(n1).submitQuery(stranger.address, 1, data)).to.emit(
+      CO,
+      "ConsensusQueryCreated",
+    );
+  });
 });

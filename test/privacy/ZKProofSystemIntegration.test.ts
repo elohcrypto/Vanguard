@@ -275,6 +275,29 @@ describe("🔐 Complete ZK Proof System Integration Tests", function () {
       ).to.be.revertedWithCustomError(factory, "TestingModeVerifier");
     });
 
+    // Task 4.17 slice A (review C mutant V01).
+    it("user settings take a validity period of 1 hour to 30 days only", async function () {
+      const settings = (period: number) => ({
+        enablePrivateWhitelist: true,
+        enablePrivateJurisdiction: true,
+        enablePrivateAccreditation: true,
+        enablePrivateCompliance: true,
+        proofValidityPeriod: period,
+      });
+      for (const bad of [3599, 30 * 86400 + 1])
+        await expect(
+          privacyManager.connect(user2).setUserPrivacySettings(settings(bad)),
+        ).to.be.revertedWith("PrivacyManager: Invalid proof validity period");
+      for (const ok of [3600, 30 * 86400])
+        await privacyManager
+          .connect(user2)
+          .setUserPrivacySettings(settings(ok));
+      expect(
+        (await privacyManager.getUserPrivacySettings(user2.address))
+          .proofValidityPeriod,
+      ).to.equal(30 * 86400);
+    });
+
     it("a fresh user has default settings and no private status", async function () {
       const settings = await privacyManager.getUserPrivacySettings(
         user1.address,

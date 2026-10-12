@@ -176,4 +176,20 @@ describe("GovernanceToken agent limits (D23)", function () {
     expect(await idReg.identity(govAddr)).to.equal(ethers.ZeroAddress);
     expect(await vsc.balanceOf(v1.address)).to.equal(100n);
   });
+
+  // Task 4.17 slice A (review C mutant G04).
+  it("distributeGovernanceTokens refuses arrays of different lengths", async function () {
+    const { vgt, v1, v2 } = await fixture();
+    const E = ethers.parseEther;
+    const before = await vgt.balanceOf(v1.address);
+    await expect(
+      vgt.distributeGovernanceTokens([v1.address], [E("1"), E("2")]),
+    ).to.be.revertedWith("Arrays length mismatch");
+    await expect(
+      vgt.distributeGovernanceTokens([v1.address, v2.address], [E("1")]),
+    ).to.be.revertedWith("Arrays length mismatch");
+    expect(await vgt.balanceOf(v1.address)).to.equal(before);
+    await vgt.distributeGovernanceTokens([v1.address], [E("1")]);
+    expect(await vgt.balanceOf(v1.address)).to.equal(before + E("1"));
+  });
 });

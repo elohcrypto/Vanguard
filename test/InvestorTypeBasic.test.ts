@@ -79,6 +79,39 @@ describe("Investor Type System - Basic Test", function () {
       ).to.equal(2);
     });
 
+    // Task 4.17 slice A (review C mutants R05, W16).
+    it("upgradeInvestorType refuses the same or a lower type", async function () {
+      const reg = investorTypeRegistry.connect(complianceOfficer);
+      await reg.upgradeInvestorType(normalInvestor.address, 2);
+      for (const t of [2, 1])
+        await expect(
+          reg.upgradeInvestorType(normalInvestor.address, t),
+        ).to.be.revertedWith("Not an upgrade");
+      expect(
+        await investorTypeRegistry.getInvestorType(normalInvestor.address),
+      ).to.equal(2);
+      await reg.upgradeInvestorType(normalInvestor.address, 3);
+    });
+
+    it("setComplianceOfficer is the owner's", async function () {
+      for (const who of [complianceOfficer, normalInvestor])
+        await expect(
+          investorTypeRegistry
+            .connect(who)
+            .setComplianceOfficer(accreditedInvestor.address, true),
+        )
+          .to.be.revertedWithCustomError(
+            investorTypeRegistry,
+            "OwnableUnauthorizedAccount",
+          )
+          .withArgs(who.address);
+      await expect(
+        investorTypeRegistry
+          .connect(accreditedInvestor)
+          .assignInvestorType(normalInvestor.address, 1),
+      ).to.be.revertedWith("Not authorized compliance officer");
+    });
+
     it("Should validate transfer amounts based on investor type", async function () {
       // Assign investor types
       await investorTypeRegistry
