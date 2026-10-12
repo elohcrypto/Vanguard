@@ -58,6 +58,20 @@ describe("Recovery manager pinned per identity (4.11 R-411-14/15)", function () 
     ).to.be.revertedWithCustomError(f.id, "RecoveryManagerAlreadyPinned");
   });
 
+  // Task 4.15 (C §3 M15): the manager future identities pin is the
+  // factory owner's choice, never a stranger's.
+  it("setRecoveryManager is the factory owner's (M15)", async function () {
+    const f = await factoryIdentity();
+    const km2 = await (await ethers.getContractFactory("KeyManager")).deploy();
+    for (const who of [f.owner, f.other])
+      await expect(
+        f.factory.connect(who).setRecoveryManager(await km2.getAddress()),
+      )
+        .to.be.revertedWithCustomError(f.factory, "OwnableUnauthorizedAccount")
+        .withArgs(who.address);
+    expect(await f.factory.recoveryManager()).to.equal(f.kmA);
+  });
+
   it("H-2: a creator that is not the owner cannot pin after the creating block (R-411-18)", async function () {
     const [creator, owner] = await ethers.getSigners();
     const id = await (

@@ -60,6 +60,39 @@ describe("ZKVerifierIntegrated - Phase 2 Features", function () {
       await zkVerifier.waitForDeployment();
     });
 
+    // Task 4.15 (C §2 ZKVerifierAdmin rows; C §3 N71).
+    it("setProofCacheExpiry is the owner's and bounded to [1 hour, 7 days] (N71)", async function () {
+      await expect(zkVerifier.connect(user1).setProofCacheExpiry(3600))
+        .to.be.revertedWithCustomError(zkVerifier, "OwnableUnauthorizedAccount")
+        .withArgs(user1.address);
+      for (const bad of [3599, 7 * 86400 + 1])
+        await expect(zkVerifier.setProofCacheExpiry(bad)).to.be.revertedWith(
+          "Invalid expiry time",
+        );
+      await zkVerifier.setProofCacheExpiry(7 * 86400);
+      expect(await zkVerifier.proofCacheExpiry()).to.equal(7 * 86400);
+    });
+
+    it("updateVerifier: the owner's, a non-zero contract, a known proof type (96-116)", async function () {
+      const real = await zkVerifier.whitelistVerifier();
+      await expect(zkVerifier.connect(user1).updateVerifier("whitelist", real))
+        .to.be.revertedWithCustomError(zkVerifier, "OwnableUnauthorizedAccount")
+        .withArgs(user1.address);
+      await expect(
+        zkVerifier.updateVerifier("whitelist", ethers.ZeroAddress),
+      ).to.be.revertedWith("ZKVerifierIntegrated: Invalid verifier address");
+      await expect(
+        zkVerifier.updateVerifier("whitelist", user1.address),
+      ).to.be.revertedWith("ZKVerifierIntegrated: Verifier is not a contract");
+      await expect(
+        zkVerifier.updateVerifier("membership", real),
+      ).to.be.revertedWith("ZKVerifierIntegrated: Invalid proof type");
+      await expect(zkVerifier.updateVerifier("blacklist", real))
+        .to.emit(zkVerifier, "VerifierUpdated")
+        .withArgs("blacklist", real);
+      expect(await zkVerifier.blacklistVerifier()).to.equal(real);
+    });
+
     it("should cache successful whitelist proof", async function () {
       // First verification
       const tx1 = await zkVerifier.verifyWhitelistMembership(

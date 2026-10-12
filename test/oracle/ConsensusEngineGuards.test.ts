@@ -55,6 +55,19 @@ describe("Consensus engine guards (2F.3 B)", function () {
       ).to.equal(true);
     });
 
+    // Task 4.15 (C §3 M8): with no registered node the threshold is
+    // never met (0 >= 0 would pass without the total check).
+    it("fails closed with no registered node (M8)", async function () {
+      const om = await (
+        await ethers.getContractFactory("OracleManager")
+      ).deploy();
+      const co = await bindEngine(om);
+      expect(await co.registeredWeight()).to.equal(0);
+      expect(await co.meetsThreshold(0)).to.equal(false);
+      expect(await co.meetsThreshold(1)).to.equal(false);
+      expect(await om.validateOracleConsensus([], [], h)).to.equal(false);
+    });
+
     it("false below threshold, on duplicates, mismatches and inactive signers", async function () {
       const s1 = await sig(n1);
       const s2 = await sig(n2);

@@ -102,4 +102,81 @@ describe("ComplianceRules fails closed without a bound registry", function () {
     expect(await asToken.canReceive.staticCall(bob.address)).to.equal(false);
     expect(await asToken.canReceive.staticCall(alice.address)).to.equal(true);
   });
+
+  // Task 4.15 (C §2 ComplianceRulesAdmin rows: N03 and the zero, code
+  // and mode checks around the per-token setters).
+  describe("admin setters", function () {
+    let t: string, r: string;
+    beforeEach(async function () {
+      t = await token.getAddress();
+      r = await idReg.getAddress();
+    });
+
+    it("setTokenIdentityRegistry is the owner's and refuses zero on both sides (N03)", async function () {
+      await expect(rules.connect(bob).setTokenIdentityRegistry(t, r))
+        .to.be.revertedWithCustomError(rules, "OwnableUnauthorizedAccount")
+        .withArgs(bob.address);
+      await expect(
+        rules.setTokenIdentityRegistry(ethers.ZeroAddress, r),
+      ).to.be.revertedWith("ComplianceRules: Invalid token address");
+      await expect(
+        rules.setTokenIdentityRegistry(t, ethers.ZeroAddress),
+      ).to.be.revertedWith(
+        "ComplianceRules: Invalid identity registry address",
+      );
+      expect(await rules.tokenIdentityRegistry(t)).to.equal(ethers.ZeroAddress);
+    });
+
+    it("the oracle, privacy, mode and administrator setters are the owner's", async function () {
+      const s = rules.connect(bob);
+      for (const call of [
+        async () => s.setBlacklistOracle(t, ethers.ZeroAddress),
+        async () => s.setWhitelistOracle(t, ethers.ZeroAddress),
+        async () => s.setPrivacyManager(t, ethers.ZeroAddress),
+        async () => s.setWhitelistMode(t, 0),
+        async () => s.setRuleAdministrator(t, bob.address, true),
+      ])
+        await expect(call())
+          .to.be.revertedWithCustomError(rules, "OwnableUnauthorizedAccount")
+          .withArgs(bob.address);
+    });
+
+    it("the setters refuse the zero token and an oracle with no code", async function () {
+      for (const call of [
+        async () =>
+          rules.setBlacklistOracle(ethers.ZeroAddress, ethers.ZeroAddress),
+        async () =>
+          rules.setWhitelistOracle(ethers.ZeroAddress, ethers.ZeroAddress),
+        async () =>
+          rules.setPrivacyManager(ethers.ZeroAddress, ethers.ZeroAddress),
+        async () => rules.setWhitelistMode(ethers.ZeroAddress, 0),
+      ])
+        await expect(call()).to.be.revertedWithCustomError(
+          rules,
+          "InvalidTokenAddress",
+        );
+      await expect(rules.setBlacklistOracle(t, bob.address))
+        .to.be.revertedWithCustomError(rules, "OracleNotAContract")
+        .withArgs(bob.address);
+      await expect(rules.setWhitelistOracle(t, bob.address))
+        .to.be.revertedWithCustomError(rules, "OracleNotAContract")
+        .withArgs(bob.address);
+      await expect(
+        rules.setRuleAdministrator(ethers.ZeroAddress, bob.address, true),
+      ).to.be.revertedWith("ComplianceRules: Invalid token address");
+      await expect(
+        rules.setRuleAdministrator(t, ethers.ZeroAddress, true),
+      ).to.be.revertedWith("ComplianceRules: Invalid administrator address");
+    });
+
+    it("ZkOnly and Either need a PrivacyManager: PrivacyManagerNotSet (173)", async function () {
+      for (const mode of [1, 2])
+        await expect(rules.setWhitelistMode(t, mode))
+          .to.be.revertedWithCustomError(rules, "PrivacyManagerNotSet")
+          .withArgs(t);
+      await expect(rules.setWhitelistMode(t, 0))
+        .to.emit(rules, "WhitelistModeSet")
+        .withArgs(t, 0);
+    });
+  });
 });

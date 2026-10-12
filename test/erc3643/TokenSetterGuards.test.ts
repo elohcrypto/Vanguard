@@ -113,4 +113,50 @@ describe("Token — dependency setter guards", () => {
     await expect(token.setInvestorTypeRegistry(await registry.getAddress())).to
       .not.be.reverted;
   });
+
+  // Task 4.15 (C §2: Token's onlyAgent and onlyOwner arms). The agent
+  // surface refuses a stranger; an agent that is not the owner passes, and
+  // so does the owner with its agent flag cleared (the modifier's second
+  // arm). The owner surface refuses an agent.
+  it("the agent surface refuses a stranger and takes both arms of onlyAgent", async () => {
+    const { token, owner } = await deployToken();
+    const [, agent, stranger, user] = await ethers.getSigners();
+    const NOT_AGENT = "Not authorized agent";
+    const s = token.connect(stranger);
+    for (const call of [
+      async () => s.mint(user.address, 1n),
+      async () => s.burn(user.address, 1n),
+      async () => s.setAddressFrozen(user.address, true),
+      async () => s.freezePartialTokens(user.address, 1n),
+      async () => s.unfreezePartialTokens(user.address, 1n),
+      async () =>
+        s.recoveryAddress(user.address, stranger.address, stranger.address),
+    ])
+      await expect(call()).to.be.revertedWith(NOT_AGENT);
+    await token.addAgent(agent.address);
+    await token.connect(agent).setAddressFrozen(user.address, true);
+    expect(await token.isFrozen(user.address)).to.equal(true);
+    await token.removeAgent(owner.address);
+    expect(await token.isAgent(owner.address)).to.equal(false);
+    await token.setAddressFrozen(user.address, false);
+    expect(await token.isFrozen(user.address)).to.equal(false);
+  });
+
+  it("the owner surface refuses an agent", async () => {
+    const { token, identityRegistry, compliance } = await deployToken();
+    const [, agent] = await ethers.getSigners();
+    await token.addAgent(agent.address);
+    const a = token.connect(agent);
+    for (const call of [
+      async () => a.addAgent(agent.address),
+      async () => a.removeAgent(agent.address),
+      async () => a.setGuardian(agent.address),
+      async () => a.setIdentityRegistry(await identityRegistry.getAddress()),
+      async () => a.setCompliance(await compliance.getAddress()),
+      async () => a.setInvestorTypeRegistry(await compliance.getAddress()),
+    ])
+      await expect(call())
+        .to.be.revertedWithCustomError(token, "OwnableUnauthorizedAccount")
+        .withArgs(agent.address);
+  });
 });
