@@ -731,9 +731,8 @@ describe("🏭 Production Simulation - OnchainID System", function () {
   });
 });
 
-// Plan v2 Task 4.2: scripts/production/DeployProduction.ts authorizes
-// KeyManager on the ops identity (OPS_IDENTITY) when the deployer owns it,
-// and otherwise prints the exact call the ops key must send.
+// Plan v2 Task 4.2: DeployProduction.ts authorizes KeyManager on the ops
+// identity (OPS_IDENTITY) when the deployer owns it, else prints the call.
 describe("🔐 Production deploy: KeyManager on the ops identity (4.2)", function () {
   it("authorizes a deployer-owned ops identity; prints the call for another owner", async function () {
     const {
@@ -764,10 +763,8 @@ describe("🔐 Production deploy: KeyManager on the ops identity (4.2)", functio
       pending: null,
     });
     expect(await ownOps.authorizedManagers(km)).to.equal(true);
-    // Task 4.11: the deploy pins KeyManager as its recovery manager.
-    expect(await ownOps.recoveryManager()).to.equal(km);
-
-    // An ops identity the ops key owns: nothing sent, the call is printed.
+    expect(await ownOps.recoveryManager()).to.equal(km); // pinned (4.11)
+    // An ops identity the ops key owns: nothing sent, both calls printed.
     const theirs = await OID.deploy(opsKey.address);
     const tAddr = await theirs.getAddress();
     console.log = (...a: unknown[]) => void out.push(a.join(" "));
@@ -783,6 +780,9 @@ describe("🔐 Production deploy: KeyManager on the ops identity (4.2)", functio
       authorized: false,
       pending,
     });
+    expect(out.join("\n")).to.contain(
+      `The ops key must send: OnchainID(${tAddr}).authorizeManager(${km}) from the identity owner ${opsKey.address}`,
+    );
     expect(out.join("\n")).to.contain(
       `The ops key must also send: OnchainID(${tAddr}).pinRecoveryManager(${km})`,
     );

@@ -397,9 +397,6 @@ describe("Handover preflight and self-healing (plan 2E.2)", function () {
     await rejectsBeforeAnyTx(/bound to GovernanceToken: D23 forbids it/);
   });
 
-  const SKIP_LINE =
-    "InvestorTypeRegistry is not live on Token or is owned by governance";
-
   // Task 4.13: the registry is derived from boundTarget(0); a config that
   // names another one is refused as an assertion that failed.
   it("refuses a config naming a registry other than the bound one", async function () {

@@ -40,6 +40,16 @@ describe("Investor Onboarding System", function () {
   const ACCREDITED_LOCK = ethers.parseEther("4000"); // Manager default: Normal cap / 2
   const INSTITUTIONAL_LOCK = ethers.parseEther("8000"); // Manager default: the Normal cap
 
+  /** The UnlockProposalCreated id of a proposeUnlock transaction. */
+  async function idOf(wallet: MultiSigWallet, tx: Promise<any>) {
+    const receipt = await (await tx).wait();
+    for (const log of receipt.logs) {
+      const parsed = wallet.interface.parseLog(log);
+      if (parsed?.name === "UnlockProposalCreated") return parsed.args[0];
+    }
+    throw new Error("no UnlockProposalCreated");
+  }
+
   beforeEach(async function () {
     [owner, bank, user, otherUser] = await ethers.getSigners();
 
@@ -252,13 +262,9 @@ describe("Investor Onboarding System", function () {
     });
 
     it("Should not allow non-user to lock tokens", async function () {
-      const lockAmount = ethers.parseEther("10000");
-
-      await token
-        .connect(user)
-        .approve(await multiSigWallet.getAddress(), lockAmount);
+      // Refused on the sender before any token movement.
       await expect(
-        multiSigWallet.connect(bank).lockTokens(lockAmount),
+        multiSigWallet.connect(bank).lockTokens(RETAIL_LOCK),
       ).to.be.revertedWith("Only user can lock tokens");
     });
 
@@ -270,13 +276,11 @@ describe("Investor Onboarding System", function () {
         .approve(await multiSigWallet.getAddress(), lockAmount);
       await multiSigWallet.connect(user).lockTokens(lockAmount);
 
-      const tx = await multiSigWallet
-        .connect(user)
-        .proposeUnlock(lockAmount, user.address, "Test unlock");
-      const receipt = await tx.wait();
-
-      // Check event was emitted
-      expect(receipt).to.not.be.null;
+      await expect(
+        multiSigWallet
+          .connect(user)
+          .proposeUnlock(lockAmount, user.address, "Test unlock"),
+      ).to.emit(multiSigWallet, "UnlockProposalCreated");
     });
 
     it("Should require both signatures to unlock", async function () {
@@ -287,26 +291,12 @@ describe("Investor Onboarding System", function () {
         .approve(await multiSigWallet.getAddress(), lockAmount);
       await multiSigWallet.connect(user).lockTokens(lockAmount);
 
-      const tx = await multiSigWallet
-        .connect(user)
-        .proposeUnlock(lockAmount, user.address, "Test unlock");
-      const receipt = await tx.wait();
-
-      // Get proposal ID from event
-      const event = receipt?.logs.find((log: any) => {
-        try {
-          return (
-            multiSigWallet.interface.parseLog(log)?.name ===
-            "UnlockProposalCreated"
-          );
-        } catch {
-          return false;
-        }
-      });
-
-      expect(event).to.not.be.undefined;
-      const parsedEvent = multiSigWallet.interface.parseLog(event!);
-      const proposalId = parsedEvent?.args[0];
+      const proposalId = await idOf(
+        multiSigWallet,
+        multiSigWallet
+          .connect(user)
+          .proposeUnlock(lockAmount, user.address, "Test unlock"),
+      );
 
       // User signs
       await multiSigWallet.connect(user).signUnlock(proposalId);
@@ -508,23 +498,12 @@ describe("Investor Onboarding System", function () {
       const userBalanceBefore = await token.balanceOf(user.address);
 
       // Create unlock proposal
-      const tx = await wallet
-        .connect(user)
-        .proposeUnlock(RETAIL_LOCK, user.address, "Downgrade to normal user");
-      const receipt = await tx.wait();
-
-      const event = receipt?.logs.find((log: any) => {
-        try {
-          return (
-            wallet.interface.parseLog(log)?.name === "UnlockProposalCreated"
-          );
-        } catch {
-          return false;
-        }
-      });
-
-      const parsedEvent = wallet.interface.parseLog(event!);
-      const proposalId = parsedEvent?.args[0];
+      const proposalId = await idOf(
+        wallet,
+        wallet
+          .connect(user)
+          .proposeUnlock(RETAIL_LOCK, user.address, "Downgrade to normal user"),
+      );
 
       // User signs
       await wallet.connect(user).signUnlock(proposalId);
@@ -564,16 +543,6 @@ describe("Investor Onboarding System", function () {
       await token.connect(user).approve(addr, amount);
       await wallet.connect(user).lockTokens(amount);
       return wallet;
-    }
-
-    /** Proposal id from the proposeUnlock receipt. */
-    async function proposalId(wallet: MultiSigWallet, tx: any) {
-      const receipt = await (await tx).wait();
-      for (const log of receipt.logs) {
-        const parsed = wallet.interface.parseLog(log);
-        if (parsed?.name === "UnlockProposalCreated") return parsed.args[0];
-      }
-      throw new Error("no UnlockProposalCreated");
     }
 
     /** otherUser becomes a verified identity (a lawful recipient). */
@@ -640,7 +609,7 @@ describe("Investor Onboarding System", function () {
     it("the bank alone cannot unlock", async function () {
       const wallet = await lockedWallet();
       const w = await wallet.getAddress();
-      const id = await proposalId(
+      const id = await idOf(
         wallet,
         wallet
           .connect(bank)
@@ -661,7 +630,7 @@ describe("Investor Onboarding System", function () {
     it("both signatures release to a verified recipient", async function () {
       await verifyOtherUser();
       const wallet = await lockedWallet();
-      const id = await proposalId(
+      const id = await idOf(
         wallet,
         wallet
           .connect(user)
@@ -674,6 +643,35 @@ describe("Investor Onboarding System", function () {
       expect(await token.balanceOf(otherUser.address)).to.equal(RETAIL_LOCK);
       expect(await token.balanceOf(await wallet.getAddress())).to.equal(0);
       expect(await wallet.lockedAmount()).to.equal(0);
+    });
+
+    it("the token's gate still decides at execution: claims revoked after the proposal", async function () {
+      await verifyOtherUser();
+      const wallet = await lockedWallet();
+      const id = await idOf(
+        wallet,
+        wallet
+          .connect(user)
+          .proposeUnlock(RETAIL_LOCK, otherUser.address, "release"),
+      );
+      await wallet.connect(user).signUnlock(id);
+      // Both claims revoked before the second signature: the recipient is
+      // no longer verified, so the trusted-path payout is refused.
+      const otherId = await identityRegistry.identity(otherUser.address);
+      for (const [issuer, topic] of [
+        [kycIssuer, REGISTRY_KYC_TOPIC],
+        [amlIssuer, REGISTRY_AML_TOPIC],
+      ] as const)
+        await issuer.revokeClaim(await issuer.latestClaimId(otherId, topic));
+      expect(await identityRegistry.isVerified(otherUser.address)).to.equal(
+        false,
+      );
+      await expect(wallet.connect(bank).signUnlock(id)).to.be.revertedWith(
+        "Compliance check failed",
+      );
+      expect(await token.balanceOf(await wallet.getAddress())).to.equal(
+        RETAIL_LOCK,
+      );
     });
 
     it("an unverified recipient is refused at the proposal (Task 4.16, A1 L4)", async function () {
@@ -708,7 +706,7 @@ describe("Investor Onboarding System", function () {
       await token.connect(user).transfer(w, fee);
       expect(await token.balanceOf(w)).to.equal(RETAIL_LOCK + fee);
       // The fee alone: the lock stays whole.
-      let id = await proposalId(
+      let id = await idOf(
         wallet,
         wallet.connect(user).proposeUnlock(fee, user.address, "fees"),
       );
@@ -725,7 +723,7 @@ describe("Investor Onboarding System", function () {
       await ethers.provider.send("evm_increaseTime", [3600]);
       await token.connect(user).transfer(w, fee);
       const part = ethers.parseEther("1000");
-      id = await proposalId(
+      id = await idOf(
         wallet,
         wallet.connect(bank).proposeUnlock(fee + part, user.address, "mix"),
       );
@@ -741,7 +739,7 @@ describe("Investor Onboarding System", function () {
       const burnt = ethers.parseEther("500");
       await token.burn(w, burnt);
       const left = RETAIL_LOCK - burnt;
-      const id = await proposalId(
+      const id = await idOf(
         wallet,
         wallet.connect(user).proposeUnlock(left, user.address, "rest"),
       );

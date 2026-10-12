@@ -28,7 +28,7 @@ const ALLOW = {
   "test/governance/HardeningRound2.test.ts": 833,
   "docs/TECHNICAL_DEEP_DIVE.md": 831,
   "test/production/ProductionSimulation.test.ts": 825,
-  "test/investor/InvestorOnboarding.test.ts": 754,
+  "test/investor/InvestorOnboarding.test.ts": 752,
   "test/integration/OracleERC3643Integration.test.ts": 742,
   "test/GovernanceComplianceIntegration.test.ts": 714,
   "test/OnchainID.test.ts": 697,
