@@ -19,6 +19,7 @@ describe("Enhanced Escrow System", function () {
   const INVESTOR_FEE = ethers.parseEther("30"); // 3%
   const OWNER_FEE = ethers.parseEther("20"); // 2%
   const TOTAL_AMOUNT = ethers.parseEther("1050"); // 1000 + 30 + 20
+  const UNAUTH = "AccessControlUnauthorizedAccount"; // OZ AccessControl
 
   // A shipment proof is bound to the escrow address, the chain and the data.
   // Signing the bare dataHash is no longer accepted: an unscoped signature
@@ -241,13 +242,12 @@ describe("Enhanced Escrow System", function () {
       expect(await wallet.investorFee()).to.equal(INVESTOR_FEE);
       expect(await wallet.ownerFee()).to.equal(OWNER_FEE);
     });
-
     it("Should only allow registered investors to create wallets", async function () {
       await expect(
         factory
           .connect(payer)
           .createEscrowWallet(payer.address, payee.address, PAYMENT_AMOUNT),
-      ).to.be.reverted;
+      ).to.be.revertedWithCustomError(factory, UNAUTH);
     });
 
     it("Should update investor statistics", async function () {
@@ -769,8 +769,8 @@ describe("Enhanced Escrow System", function () {
       await wallet.connect(investor).signAsInvestor(true);
       const p = await factory.getInvestorProfile(investor.address);
       expect(p.totalFeesEarned).to.equal(INVESTOR_FEE);
-      await expect(factory.updateInvestorFeesEarned(investor.address, 1n)).to.be
-        .revertedWithoutReason(); // an EOA caller has no paymentId() to decode
+      const call = factory.updateInvestorFeesEarned(investor.address, 1n);
+      await expect(call).to.be.revertedWithoutReason(); // EOA: no paymentId()
     });
 
     // Review L3: the ledger accepts only the wallet the factory recorded

@@ -64,6 +64,51 @@ describe("List oracle guards (Task 4.15)", function () {
       }
     });
 
+    // Round 2 (L5): the attestation entry is closed while inactive, before
+    // any signature is read; the blacklist batch checks its lengths.
+    it("provideAttestation refuses an inactive oracle: Oracle not active", async function () {
+      for (const [O, name] of [
+        [WO, "WhitelistOracle"],
+        [BO, "BlacklistOracle"],
+      ] as [any, string][]) {
+        await O.setActive(false);
+        await expect(
+          O.connect(node).provideAttestation(
+            subject.address,
+            ethers.id("q"),
+            true,
+            "0x",
+            "0x",
+          ),
+        ).to.be.revertedWith(`${name}: Oracle not active`);
+        await O.setActive(true);
+        await expect(
+          O.connect(node).provideAttestation(
+            subject.address,
+            ethers.id("q"),
+            true,
+            "0x",
+            "0x",
+          ),
+        ).to.not.be.revertedWith(`${name}: Oracle not active`);
+      }
+    });
+
+    it("batchAddToBlacklist is the owner's and checks the array lengths", async function () {
+      const s = [subject.address, stranger.address];
+      await expect(BO.connect(stranger).batchAddToBlacklist(s, [1, 1], 0, "r"))
+        .to.be.revertedWithCustomError(BO, "OwnableUnauthorizedAccount")
+        .withArgs(stranger.address);
+      await expect(BO.batchAddToBlacklist(s, [1], 0, "r")).to.be.revertedWith(
+        "BlacklistOracle: Array length mismatch",
+      );
+      await BO.batchAddToBlacklist(s, [1, 2], 0, "r");
+      expect((await BO.getBlacklistInfo(subject.address)).severity).to.equal(1);
+      expect((await BO.getBlacklistInfo(stranger.address)).severity).to.equal(
+        2,
+      );
+    });
+
     it("pause stops the oracle, unpause restores it; setActive flips the flag", async function () {
       for (const O of [WO, BO]) {
         const self = await O.getAddress();

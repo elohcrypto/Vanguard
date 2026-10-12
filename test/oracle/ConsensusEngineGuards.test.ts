@@ -114,6 +114,53 @@ describe("Consensus engine guards (2F.3 B)", function () {
     });
   });
 
+  // Round 2 (L5): the engine's own refusals. NoRegisteredWeight is
+  // unreachable: weightOf() never returns 0 (DEFAULT_ORACLE_WEIGHT 100
+  // when unset) and TooFewNodes fires first with no node; kept as
+  // defence in depth, mutation-confirmed.
+  describe("ConsensusOracle refusals", function () {
+    const query = async () => {
+      const rc = await (
+        await OM.connect(n1).submitQuery(subject.address, BLACKLIST, "0x")
+      ).wait();
+      return rc.logs
+        .map((l: any) => {
+          try {
+            return CO.interface.parseLog(l);
+          } catch {
+            return null;
+          }
+        })
+        .find((e: any) => e?.name === "ConsensusQueryCreated").args[0];
+    };
+
+    it("a vote on a query the engine never opened: UnknownQuery (re-bound engine)", async function () {
+      const q = await query();
+      const fresh = await bindEngine(OM); // strands the open query
+      await expect(
+        OM.connect(n1).submitResponse(q, true),
+      ).to.be.revertedWithCustomError(fresh, "UnknownQuery");
+    });
+
+    it("a vote after resolution: QueryResolved at the engine, QueryAlreadyResolved at the manager", async function () {
+      const q = await query();
+      for (const n of [n1, n2, n3]) await OM.connect(n).submitResponse(q, true);
+      expect((await OM.getQueryResolution(q))[0]).to.equal(true);
+      await expect(
+        OM.connect(n4).submitResponse(q, true),
+      ).to.be.revertedWithCustomError(OM, "QueryAlreadyResolved");
+      const om = await OM.getAddress();
+      await ethers.provider.send("hardhat_setBalance", [
+        om,
+        "0xde0b6b3a7640000",
+      ]);
+      const asManager = await ethers.getImpersonatedSigner(om);
+      await expect(
+        CO.connect(asManager).recordVote(q, n4.address, true),
+      ).to.be.revertedWithCustomError(CO, "QueryResolved");
+    });
+  });
+
   describe("OracleManager.setEmergencyOracle", function () {
     it("records the flag with an event; owner only; registered only", async function () {
       expect(await OM.isEmergencyOracle(n1.address)).to.equal(false);
@@ -123,10 +170,12 @@ describe("Consensus engine guards (2F.3 B)", function () {
       expect(await OM.isEmergencyOracle(n1.address)).to.equal(true);
       await OM.setEmergencyOracle(n1.address, false);
       expect(await OM.isEmergencyOracle(n1.address)).to.equal(false);
-      await expect(OM.connect(stranger).setEmergencyOracle(n1.address, true)).to
-        .be.reverted;
-      await expect(OM.setEmergencyOracle(stranger.address, true)).to.be
-        .reverted;
+      await expect(
+        OM.connect(stranger).setEmergencyOracle(n1.address, true),
+      ).to.be.revertedWithCustomError(OM, "NotOwnerOrOperator");
+      await expect(
+        OM.setEmergencyOracle(stranger.address, true),
+      ).to.be.revertedWith("OracleManager: Oracle not registered");
     });
 
     it("a removed oracle loses the flag", async function () {

@@ -19,16 +19,16 @@ const { describeUnlessCoverage } = require("../helpers/zkProofs") as {
  * 8547), never the lead's 8545. The fixture is deployed by
  * test/production/deployHandoverFixture.ts over the same RPC.
  *
- * Not under coverage (Task 4.15): the child `hardhat node` and `hardhat
- * run` compile the real build into artifacts/ over the instrumented one
- * (.solcover.js), after which every later suite deploys uninstrumented
- * code and the ceremony's code-hash pins fail; and the child node's
- * contracts are outside the collector anyway, so the suite measures
- * nothing there.
+ * Not under coverage (Task 4.15): the child `hardhat run` processes
+ * compile the real build into artifacts/ over the instrumented one
+ * (.solcover.js; the child `hardhat node` only watches), after which
+ * every later suite deploys uninstrumented code and the ceremony's
+ * code-hash pins fail; and the child node's contracts are outside the
+ * collector anyway, so the suite measures nothing there.
  */
 describeUnlessCoverage(
   "Handover CLI on a fresh node (Task 4.13)",
-  "its child hardhat processes recompile the real build over the instrumented artifacts",
+  "its child `hardhat run` processes recompile the real build over the instrumented artifacts",
   function () {
   this.timeout(600_000);
   const port = Number(process.env.HANDOVER_TEST_PORT || 8547);

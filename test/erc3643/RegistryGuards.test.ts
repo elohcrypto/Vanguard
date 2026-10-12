@@ -282,6 +282,40 @@ describe("Registry guards (2F.5)", function () {
       expect(await reg.identity(alice.address)).to.equal(idA);
     });
 
+    // Round 2 (L5): a registered wallet is not registered again, even to
+    // an identity it controls; setComplianceRules checks both addresses.
+    it("registerIdentity refuses a wallet already registered (130)", async function () {
+      const idA2 = await (
+        await ethers.getContractFactory("OnchainID")
+      ).deploy(alice.address);
+      await expect(
+        reg.registerIdentity(alice.address, await idA2.getAddress(), 840),
+      ).to.be.revertedWith("Identity already registered");
+      await expect(
+        reg.batchRegisterIdentity(
+          [alice.address],
+          [await idA2.getAddress()],
+          [840],
+        ),
+      ).to.be.revertedWith("Identity already registered");
+      expect(await reg.identity(alice.address)).to.equal(idA);
+    });
+
+    it("setComplianceRules refuses a zero or codeless rules address and a zero token (308-313)", async function () {
+      const self = await reg.getAddress();
+      await expect(
+        reg.setComplianceRules(ethers.ZeroAddress, self),
+      ).to.be.revertedWith("Invalid compliance rules address");
+      await expect(
+        reg.setComplianceRules(stranger.address, self),
+      ).to.be.revertedWith(
+        "IdentityRegistry: Compliance rules address is not a contract",
+      );
+      await expect(
+        reg.setComplianceRules(self, ethers.ZeroAddress),
+      ).to.be.revertedWith("Invalid token address");
+    });
+
     it("addAgent, removeAgent and setComplianceRules are the owner's; no zero agent", async function () {
       const s = reg.connect(stranger);
       for (const call of [
