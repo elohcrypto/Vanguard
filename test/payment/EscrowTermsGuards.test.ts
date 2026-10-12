@@ -186,7 +186,7 @@ describe("Escrow terms guards (Task 4.15)", function () {
       await expect(w.connect(payer).raiseDispute()).to.emit(w, "DisputeRaised");
     });
 
-    it("the factory refuses an escrow whose payer is its payee (E06)", async function () {
+    it("the factory refuses a bare role (A-1) and payer == payee (E06)", async function () {
       const reg = await (
         await ethers.getContractFactory("IdentityRegistry")
       ).deploy();
@@ -196,6 +196,13 @@ describe("Escrow terms guards (Task 4.15)", function () {
       const f = await (
         await ethers.getContractFactory("EscrowWalletFactory")
       ).deploy(tok, owner.address, reg.target, rules.target);
+      // Review A-1: INVESTOR_ROLE alone (no registration) is inert.
+      await f.grantRole(await f.INVESTOR_ROLE(), stranger.address);
+      await expect(
+        f
+          .connect(stranger)
+          .createEscrowWallet(payer.address, payee.address, 1n),
+      ).to.be.revertedWith("Not active investor");
       await f.registerInvestor(investor.address, investor.address);
       await expect(
         f
