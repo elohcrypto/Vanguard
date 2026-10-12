@@ -141,14 +141,17 @@ describe("Handover strays: links and parameters (Task 4.13)", function () {
       );
     });
 
-    it("a whitelist oracle on VGT (D56)", async function () {
-      await c.complianceRules.setWhitelistOracle(
-        vgt,
-        await args.oracles[0].getAddress(),
-      );
-      await both(
-        /a whitelist oracle on VGT .* setWhitelistOracle\(VGT, 0\)/,
-        "no whitelist oracle bound to GovernanceToken (D56)",
+    // D33 (b), Task 4.17: ComplianceRules refuses it for the recorded
+    // governance token; the D56 lines stay as defence in depth.
+    it("a whitelist oracle on VGT is refused by ComplianceRules (D56, D33 b)", async function () {
+      await expect(
+        c.complianceRules.setWhitelistOracle(
+          vgt,
+          await args.oracles[0].getAddress(),
+        ),
+      ).to.be.revertedWithCustomError(
+        c.complianceRules,
+        "GovernanceTokenWhitelist",
       );
     });
   });

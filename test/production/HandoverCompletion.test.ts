@@ -228,16 +228,6 @@ describe("Handover completion check (table)", function () {
         `VSC and VGT enforce ComplianceRules ${await c.complianceRules.getAddress()}`,
         () => c.token.connect(gov).setCompliance(otherRules),
       ],
-      // D33 (a): a ZK whitelist mode on VGT.
-      [
-        "GovernanceToken whitelist mode is OracleOnly (D33)",
-        async () => {
-          await c.complianceRules
-            .connect(gov)
-            .setPrivacyManager(vgtAddr, await pm.getAddress());
-          await c.complianceRules.connect(gov).setWhitelistMode(vgtAddr, 1);
-        },
-      ],
       ["deployer is not a Token agent", () => c.token.connect(gov).addAgent(d)],
       [
         "deployer is not a GovernanceToken agent",
@@ -293,6 +283,19 @@ describe("Handover completion check (table)", function () {
         },
       ],
     ];
+    // D33 (b): a ZK mode on VGT is refused by ComplianceRules itself.
+    await c.complianceRules
+      .connect(gov)
+      .setPrivacyManager(vgtAddr, await pm.getAddress());
+    await expect(
+      c.complianceRules.connect(gov).setWhitelistMode(vgtAddr, 1),
+    ).to.be.revertedWithCustomError(
+      c.complianceRules,
+      "GovernanceTokenWhitelist",
+    );
+    await c.complianceRules
+      .connect(gov)
+      .setPrivacyManager(vgtAddr, ethers.ZeroAddress);
     for (const [label, give] of breaks) {
       const snap = await network.provider.send("evm_snapshot", []);
       await give();

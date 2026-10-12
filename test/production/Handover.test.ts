@@ -177,6 +177,7 @@ describe("Deployer holds no power after handover (plan Task 0.3)", function () {
     await vgt.addAgent(govAddr);
     await complianceRules.setTokenIdentityRegistry(vgtAddr, idRegAddr);
     await complianceRules.addTrustedContract(vgtAddr, govAddr);
+    await complianceRules.setGovernanceToken(vgtAddr); // D33 b
     // Task 4.13 parity with the demo: both tokens are registry agents
     // (W-1), the registry reads the rules, VSC's registry is wired.
     const tokenAddr = await token.getAddress();

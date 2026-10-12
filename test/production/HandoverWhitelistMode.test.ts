@@ -94,7 +94,7 @@ describe("Handover: PrivacyManager wired in ComplianceRules (3.4)", function () 
   it("refuses two different PrivacyManagers wired for VSC and VGT", async function () {
     const other = await otherPm();
     await wire(vsc, pmAddr);
-    await wire(vgt, other.addr, 1);
+    await wire(vgt, other.addr, 0); // OracleOnly: D33 b refuses a ZK mode
     await refused(
       new RegExp(
         `ComplianceRules wires PrivacyManager ${pmAddr} for VSC, but ComplianceRules wires PrivacyManager ${other.addr} for VGT: one PrivacyManager per deployment`,
@@ -103,7 +103,7 @@ describe("Handover: PrivacyManager wired in ComplianceRules (3.4)", function () 
     // The completion check reports it rather than throwing.
     const { failures } = await assertHandoverComplete(args);
     expect(failures).to.include(
-      `ComplianceRules privacyManager for VGT: ${other.addr} (mode ZkOnly)`,
+      `ComplianceRules privacyManager for VGT: ${other.addr} (mode OracleOnly)`,
     );
   });
 
@@ -128,34 +128,37 @@ describe("Handover: PrivacyManager wired in ComplianceRules (3.4)", function () 
     );
   });
 
-  // D33 (a), Phase 3 review B-M1: with VGT in a ZK
-  // mode the preflight used to pass, the deployer steps ran and every
-  // fee-paying vote then reverted "Compliance check failed".
+  // D33 (a), Phase 3 review B-M1: with VGT in a ZK mode the preflight
+  // used to pass and every fee-paying vote then reverted. D33 (b), Task
+  // 4.17: ComplianceRules itself now refuses the mode for the recorded
+  // governance token; the preflight line stays as defence in depth.
   for (const [mode, name] of [
     [1, "ZkOnly"],
     [2, "Either"],
   ] as const) {
-    it(`refuses VGT in whitelist mode ${name} before Step 1 (D33)`, async function () {
-      await wire(vgt, pmAddr, mode);
-      const lines: string[] = [];
-      args.log = (m: string) => lines.push(m);
-      await refused(
-        new RegExp(
-          `GovernanceToken ${vgt} is in whitelist mode ${name}: D33 allows only OracleOnly on VGT .*setWhitelistMode\\(VGT, 0\\) \\(OracleOnly\\) before the ceremony`,
-        ),
-      );
-      expect(lines.join("\n")).to.not.include("Step 1");
-      expect(await c.token.isAgent(deployer.address)).to.equal(true);
-      expect(await c.token.isAgent(f.ops.address)).to.equal(false);
-      expect(await c.complianceRules.pendingOwner()).to.equal(
-        ethers.ZeroAddress,
-      );
-      // Back to OracleOnly, the same ceremony runs.
-      await c.complianceRules.setWhitelistMode(vgt, 0);
-      args.log = () => {};
+    it(`VGT in whitelist mode ${name} is refused by ComplianceRules (D33 b)`, async function () {
+      await c.complianceRules.setPrivacyManager(vgt, pmAddr);
+      await expect(c.complianceRules.setWhitelistMode(vgt, mode))
+        .to.be.revertedWithCustomError(
+          c.complianceRules,
+          "GovernanceTokenWhitelist",
+        )
+        .withArgs(vgt);
       await handoverDeployerPowers(args);
     });
   }
+
+  it("refuses a ComplianceRules that records no governance token (D33 b)", async function () {
+    const g = await handoverFixture({ recordGovernanceToken: false });
+    const v = await g.c.governanceToken.getAddress();
+    await expect(handoverDeployerPowers(g.args)).to.be.rejectedWith(
+      new RegExp(
+        `ComplianceRules records ${ethers.ZeroAddress} as the governance token, not VGT ${v}`,
+      ),
+    );
+    await g.c.complianceRules.setGovernanceToken(v);
+    await handoverDeployerPowers(g.args);
+  });
 
   // Review B-M2: a token that enforces another ComplianceRules.
   for (const key of ["token", "governanceToken"]) {

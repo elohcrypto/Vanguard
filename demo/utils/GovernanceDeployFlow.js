@@ -165,6 +165,14 @@ async function deployGovernanceSystem(mod) {
     console.log(
       "   ✅ VanguardGovernance trusted on VGT only (D21; per token, G5)",
     );
+    // D33 (b), Task 4.17: ComplianceRules records VGT as the governance
+    // token, so no vote can give it a ZK mode or a whitelist oracle.
+    if ((await complianceRules.governanceToken()) === ethers.ZeroAddress) {
+      await (await complianceRules.setGovernanceToken(govTokenAddr)).wait();
+    }
+    console.log(
+      "   ✅ ComplianceRules records VGT as the governance token: OracleOnly, no whitelist oracle (D33)",
+    );
     console.log(
       "   ℹ️  It has no identity of its own: it never counts in the quorum",
     );

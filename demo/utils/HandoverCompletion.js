@@ -254,6 +254,10 @@ async function assertHandoverComplete(o) {
     "GovernanceToken whitelist mode is OracleOnly (D33)",
     (await vgtWhitelistMode(o)) === "OracleOnly",
   );
+  add(
+    "ComplianceRules records VGT as the governance token (D33 b)",
+    same(await rules.governanceToken(), vgt),
+  );
   if (o.investorTypeRegistry) {
     const reg = o.investorTypeRegistry;
     add(

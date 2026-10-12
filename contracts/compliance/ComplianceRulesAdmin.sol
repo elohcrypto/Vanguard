@@ -75,6 +75,10 @@ abstract contract ComplianceRulesAdmin is IComplianceRules, ComplianceRulesTrust
     mapping(address => address) public whitelistOracle;
     mapping(address => WhitelistMode) public whitelistMode;
     mapping(address => address) public privacyManager;
+    /// @notice The governance token (D33 b): its whitelist is OracleOnly
+    ///         with no oracle, so no vote of type 1 can gate who votes.
+    ///         Recorded once by the owner (every deploy path does).
+    address public governanceToken;
 
     /// @dev Oracle gates are per token; the zero address is not a token.
     error InvalidTokenAddress();
@@ -90,11 +94,30 @@ abstract contract ComplianceRulesAdmin is IComplianceRules, ComplianceRulesTrust
     error PrivacyManagerNotSet(address token);
     /// @dev The token's mode reads the PrivacyManager: set OracleOnly first.
     error PrivacyManagerInUse(address token);
+    /// @dev The governance token is recorded once.
+    error GovernanceTokenAlreadySet(address token);
+    /// @dev The governance token takes OracleOnly and no whitelist oracle.
+    error GovernanceTokenWhitelist(address token);
 
     event BlacklistOracleSet(address indexed token, address indexed oracle);
     event WhitelistOracleSet(address indexed token, address indexed oracle);
     event PrivacyManagerSet(address indexed token, address indexed privacyManager);
     event WhitelistModeSet(address indexed token, WhitelistMode mode);
+    event GovernanceTokenSet(address indexed token);
+
+    /**
+     * @dev Record the governance token, once (D33 b, Task 4.17). Refused
+     *      while it has a mode other than OracleOnly or a whitelist oracle.
+     */
+    function setGovernanceToken(address token) external onlyOwner {
+        if (token == address(0)) revert InvalidTokenAddress();
+        if (governanceToken != address(0)) revert GovernanceTokenAlreadySet(governanceToken);
+        if (whitelistMode[token] != WhitelistMode.OracleOnly || whitelistOracle[token] != address(0)) {
+            revert GovernanceTokenWhitelist(token);
+        }
+        governanceToken = token;
+        emit GovernanceTokenSet(token);
+    }
 
     /**
      * @dev Point a token at a blacklist oracle, or pass address(0) to disable.
@@ -127,6 +150,7 @@ abstract contract ComplianceRulesAdmin is IComplianceRules, ComplianceRulesTrust
     function setWhitelistOracle(address token, address oracle) external onlyOwner {
         if (token == address(0)) revert InvalidTokenAddress();
         if (oracle != address(0) && oracle.code.length == 0) revert OracleNotAContract(oracle);
+        if (oracle != address(0) && token == governanceToken) revert GovernanceTokenWhitelist(token);
         // Same rationale as setBlacklistOracle: fail here, not on every transfer.
         if (oracle != address(0)) {
             (bool ok, bytes memory ret) = oracle.staticcall(
@@ -218,6 +242,7 @@ abstract contract ComplianceRulesAdmin is IComplianceRules, ComplianceRulesTrust
      */
     function setWhitelistMode(address token, WhitelistMode mode) external onlyOwner {
         if (token == address(0)) revert InvalidTokenAddress();
+        if (mode != WhitelistMode.OracleOnly && token == governanceToken) revert GovernanceTokenWhitelist(token);
         if (mode != WhitelistMode.OracleOnly && privacyManager[token] == address(0)) {
             revert PrivacyManagerNotSet(token);
         }

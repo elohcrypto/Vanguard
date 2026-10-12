@@ -30,7 +30,7 @@ export async function ageVoters(governance: any): Promise<void> {
  * and custody is deployed (Task 4.16, W-2). Shared by the handover
  * preflight, completion and CLI tests.
  */
-export async function handoverFixture() {
+export async function handoverFixture({ recordGovernanceToken = true } = {}) {
   const signers = await ethers.getSigners();
   const [deployer, ops, guardian, stranger, alice, bob, carol, issuerAdmin] =
     signers;
@@ -120,6 +120,7 @@ export async function handoverFixture() {
   await governanceToken.addAgent(govAddr);
   await complianceRules.setTokenIdentityRegistry(vgtAddr, idRegAddr);
   await complianceRules.addTrustedContract(vgtAddr, govAddr);
+  if (recordGovernanceToken) await complianceRules.setGovernanceToken(vgtAddr); // D33 b
   // As the demo deploys (Task 4.13 parity): both tokens are registry
   // agents (recoveryAddress calls moveIdentity, W-1), the registry reads
   // the rules for jurisdiction checks, VSC's identity registry is wired.

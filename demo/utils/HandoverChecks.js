@@ -250,6 +250,13 @@ async function preflight(o, { acceptOnly = false } = {}) {
   // Either every fee transfer needs a live whitelist binding, so the list
   // operator (ops after the handover) could halt governance by publishing
   // one root, and the acceptance votes below would revert halfway.
+  // D33 (b), Task 4.17: the contract itself holds VGT to OracleOnly.
+  const recorded = await o.complianceRules.governanceToken();
+  if (!same(recorded, vgtAddr)) {
+    fail(
+      `ComplianceRules records ${recorded} as the governance token, not VGT ${vgtAddr}: a type-1 vote could give VGT a ZK mode or a whitelist oracle; the ComplianceRules owner must setGovernanceToken(VGT) first (recorded once)`,
+    );
+  }
   const vgtMode = await vgtWhitelistMode(o);
   if (vgtMode === null) {
     fail(
