@@ -89,7 +89,7 @@ async function main(): Promise<DeploymentResult> {
     deploymentFee: ethers.parseEther("0.01"), // 0.01 ETH per identity
     feeRecipient: deployer.address,
     gasPrice: ethers.parseUnits("20", "gwei"), // 20 gwei
-    gasLimit: 10000000, // 10M; OnchainIDFactory alone needs more than 5M to deploy (pre-existing, unrelated to this change)
+    gasLimit: Number(process.env.DEPLOY_GAS_LIMIT ?? 10000000), // 10M; OnchainIDFactory needs >5M; test:coverage lifts it (instrumented initcode)
     // Hardhat's ephemeral in-memory network only mines a new block when a
     // transaction is sent, so waiting for more than 1 confirmation here
     // hangs forever (pre-existing, unrelated to this change; mirrors

@@ -247,28 +247,4 @@ describe("95% Test Coverage Verification", function () {
       );
     });
   });
-
-  describe("Coverage Summary", function () {
-    it("should provide coverage summary", async function () {
-      console.log("\\n📊 TEST COVERAGE SUMMARY");
-      console.log("========================");
-      console.log(
-        "✅ OnchainIDFactory Contract: Creation and management tested",
-      );
-      console.log("✅ ClaimIssuer Contract: Claim issuance tested");
-      console.log(
-        "✅ IdentityRegistry Contract: Registration and verification tested",
-      );
-      console.log("✅ Token Contract: Minting and basic operations tested");
-      console.log(
-        "✅ Error Handling: Authorization and validation errors tested",
-      );
-      console.log("✅ Integration: Complete workflow tested");
-      console.log("\\n🎯 ESTIMATED COVERAGE: >95%");
-      console.log("\\nTo verify exact coverage, run: npx hardhat coverage");
-
-      // This test always passes - it's for documentation
-      expect(true).to.be.true;
-    });
-  });
 });

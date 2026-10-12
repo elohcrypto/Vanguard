@@ -160,8 +160,9 @@ describe("OnchainID key removal (plan v2 Task 4.5)", function () {
 
     const fourth = k(ethers.Wallet.createRandom().address);
     await km.connect(mgr).initiateKeyRotation(idA, third, fourth, MGMT);
-    await expect(km.connect(mgr).executeKeyRotation(idA, third, fourth, MGMT))
-      .to.be.reverted;
+    await expect(
+      km.connect(mgr).executeKeyRotation(idA, third, fourth, MGMT),
+    ).to.be.revertedWith("KeyManager: Timelock not expired");
     expect(await id.keyHasPurpose(fourth, MGMT)).to.equal(false);
     await time.increase(Number(await km.DEFAULT_TIMELOCK()) + 1);
     await km.connect(mgr).executeKeyRotation(idA, third, fourth, MGMT);

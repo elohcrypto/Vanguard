@@ -12,4 +12,15 @@ function describeProofs(title, fn) {
   return describe(title, fn);
 }
 
-module.exports = { describeProofs, REASON };
+/**
+ * True inside `hardhat coverage` (solidity-coverage 0.8 sets this flag on
+ * the HRE before the tests run). Instrumented bytecode costs more gas, so
+ * an absolute gas bound measured on the real build is not a property of
+ * the instrumented one: the gas tests measure and print under coverage,
+ * and assert the bound only on the real build (Task 4.15, C L1).
+ */
+function underCoverage() {
+  return require("hardhat").__SOLIDITY_COVERAGE_RUNNING === true;
+}
+
+module.exports = { describeProofs, underCoverage, REASON };

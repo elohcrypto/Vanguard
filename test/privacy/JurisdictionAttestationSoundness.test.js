@@ -242,6 +242,25 @@ describeProofs("Jurisdiction attestation soundness (Task 3.7b)", function () {
       await expectTamperedRefused(f.zk, "verifyJurisdictionProof", r1);
     });
 
+    // Task 4.15 (C N72): PrivacyManager's own verifier gate. Without it a
+    // tampered proof with honest signals would bind (the wrapper is only
+    // consulted through this call), so the refusal is asserted here, on
+    // submitAttestationProof, and nothing is recorded for the wallet.
+    it("PrivacyManager refuses a tampered proof word: InvalidAttestationProof, nothing bound", async function () {
+      const w2 = f.wallets[2];
+      const bad = r2.proof.map((w, i) =>
+        i === 0 ? (BigInt(w) ^ 1n).toString() : w,
+      );
+      await expect(
+        f.pm.connect(w2).submitAttestationProof(f.id, bad, r2.signals),
+      ).to.be.revertedWithCustomError(f.pm, "InvalidAttestationProof");
+      const rec = await f.pm.attestationRecords(w2.address, f.id);
+      expect(rec.expiresAt).to.equal(0n);
+      expect(
+        await f.pm.validatePrivateJurisdiction.staticCall(w2.address),
+      ).to.equal(false);
+    });
+
     for (const [name, i] of [
       ["nullifier", 0],
       ["verifierContext", 4],

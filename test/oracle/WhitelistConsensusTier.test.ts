@@ -143,9 +143,16 @@ describe("Whitelist consensus tier (Task 4.12)", function () {
     });
 
     it("the tier rule is the whitelist's: other types keep their payloads", async function () {
-      await raise(stranger.address, "0x", n1, BLACKLIST);
-      await raise(stranger.address, "0x", n1, COMPLIANCE);
-      await raise(stranger.address, coder.encode(["string"], ["x"]), n1, 3);
+      const free = coder.encode(["string"], ["x"]);
+      for (const [type, data] of [
+        [BLACKLIST, "0x"],
+        [COMPLIANCE, "0x"],
+        [3, free],
+      ] as [number, string][]) {
+        const q = await raise(stranger.address, data, n1, type);
+        expect(await OM.getQueryData(q)).to.equal(data);
+        expect((await OM.queries(q)).queryType).to.equal(type);
+      }
     });
   });
 

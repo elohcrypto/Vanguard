@@ -133,7 +133,11 @@ describe("Recovery manager pinned per identity (4.11 R-411-14/15)", function () 
         await ethers.getContractFactory("OnchainID")
       )
         .connect(creator)
-        .deploy(owner.address, { ...fee(30), gasLimit: 8_000_000 });
+        .deploy(owner.address, {
+          ...fee(30),
+          // Instrumented initcode needs more (test:coverage sets 16M).
+          gasLimit: Number(process.env.DEPLOY_GAS_LIMIT ?? 8_000_000),
+        });
       const byStranger = await id
         .connect(stranger)
         .pinRecoveryManager(await evil.getAddress(), fee(20));

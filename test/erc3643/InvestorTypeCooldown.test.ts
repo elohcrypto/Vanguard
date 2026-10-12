@@ -334,7 +334,7 @@ describe("Investor-type transfer cooldown (Task 4.10)", function () {
   });
 
   it("a token without a registry has no cooldown and writes no clock", async function () {
-    const { alice, bob, registry, rules } = await deploy();
+    const { alice, bob, registry, rules, types } = await deploy();
     const plain = await (
       await ethers.getContractFactory("Token")
     ).deploy("P", "P", registry.target, rules.target);
@@ -342,6 +342,9 @@ describe("Investor-type transfer cooldown (Task 4.10)", function () {
     await plain.mint(alice.address, 10n);
     await agree(plain, alice, bob.address);
     await agree(plain, alice, bob.address);
+    // Two back-to-back transfers passed, and nothing stamped the clock.
+    expect(await plain.investorTypeRegistry()).to.equal(ethers.ZeroAddress);
+    expect(await types.lastTransferAt(alice.address)).to.equal(0n);
   });
 
   async function impersonate(addr: string) {

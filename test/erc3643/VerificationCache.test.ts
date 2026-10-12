@@ -1,6 +1,9 @@
 import { expect } from "chai";
 import { ethers, network } from "hardhat";
 import { time } from "@nomicfoundation/hardhat-network-helpers";
+const { underCoverage } = require("../helpers/zkProofs") as {
+  underCoverage: () => boolean;
+};
 import {
   attest,
   configureKyc,
@@ -333,6 +336,10 @@ describe("IdentityRegistry verification cache (Task 4.9)", function () {
     await registry.refreshVerified(alice.address);
     await registry.refreshVerified(bob.address);
     const d = await measure(registry);
+    console.log(`      gas: A ${a}; refreshed transfer ${d} (A +${d - a})`);
+    // Instrumented bytecode pays more per branch: under coverage the
+    // figure is measured and printed, the bound is the real build's.
+    if (underCoverage()) return;
     expect(d - a).to.be.lte(40000n);
   });
 
@@ -382,8 +389,12 @@ describe("IdentityRegistry verification cache (Task 4.9)", function () {
     );
     // D17 budget after the sender's first transfer; the registry side
     // (caps, cooldown, clock) measured 29,336 over D after the review fixes.
+    // Bounded both ways: below 20,000 the registry stopped doing its work
+    // (a dropped clock write or cap read passes a one-sided bound).
+    if (underCoverage()) return; // instrumented build: measured, not bounded
     expect(e - a).to.be.lte(40000n);
     expect(e - d).to.be.lte(30000n);
+    expect(e - d).to.be.gte(20000n);
   });
 
   it("only positives are cached: a failing refresh does not stop a later attestation verifying", async function () {

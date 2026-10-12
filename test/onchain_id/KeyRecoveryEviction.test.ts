@@ -268,8 +268,11 @@ describe("KeyManager recovery evicts and moves ownership (4.11, D38 c)", functio
       .to.emit(f.id, "RecoveryOwnerProposed")
       .withArgs(f.kmA, f.rescued.address);
     expect(await f.id.pendingOwner()).to.equal(f.rescued.address);
-    // The old owner can neither accept nor re-transfer.
-    await expect(f.id.connect(f.owner).acceptOwnership()).to.be.reverted;
+    // The old owner can neither accept nor re-transfer: not the nominee,
+    // so the freeze is checked first (4.14 M-C).
+    await expect(
+      f.id.connect(f.owner).acceptOwnership(),
+    ).to.be.revertedWithCustomError(f.id, "FrozenByRecovery");
     await expect(
       f.id.connect(f.owner).transferOwnership(f.owner.address),
     ).to.be.revertedWithCustomError(f.id, "FrozenByRecovery");

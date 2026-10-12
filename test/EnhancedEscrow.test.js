@@ -770,7 +770,7 @@ describe("Enhanced Escrow System", function () {
       const p = await factory.getInvestorProfile(investor.address);
       expect(p.totalFeesEarned).to.equal(INVESTOR_FEE);
       await expect(factory.updateInvestorFeesEarned(investor.address, 1n)).to.be
-        .reverted; // only a wallet the factory created
+        .revertedWithoutReason(); // an EOA caller has no paymentId() to decode
     });
 
     // Review L3: the ledger accepts only the wallet the factory recorded
@@ -778,7 +778,7 @@ describe("Enhanced Escrow System", function () {
     it("refuses a stranger in updateInvestorFeesEarned", async function () {
       await expect(
         factory.connect(payer).updateInvestorFeesEarned(investor.address, 1n),
-      ).to.be.reverted; // an EOA has no paymentId()
+      ).to.be.revertedWithoutReason(); // an EOA has no paymentId() to decode
       const W = await ethers.getContractFactory("MultiSigEscrowWallet");
       const fake = await W.deploy(
         1, // the id of the factory's real escrow
