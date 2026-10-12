@@ -2,6 +2,12 @@ import { expect } from "chai";
 import { ethers } from "hardhat";
 import { attest, configureKyc } from "../helpers/kyc";
 import { addRegistrar } from "../helpers/registrars";
+import {
+  T,
+  deployCustody,
+  lockedRequest,
+  setNormalCaps,
+} from "../helpers/custody";
 
 /**
  * Task 4.16 (D45, review A1 L2/L4, Q7 c): custody locks fit the Normal
@@ -9,96 +15,9 @@ import { addRegistrar } from "../helpers/registrars";
  * strands the user behind the new type's whitelist tier; an unlock pays
  * only the user or a verified, non-trusted wallet.
  */
-/** A config with the Normal (type 0) caps changed, every other field kept. */
-async function setNormalCaps(types: any, transfer: bigint, holding: bigint) {
-  const c = await types.getInvestorTypeConfig(0);
-  await types.updateInvestorTypeConfig(0, {
-    maxTransferAmount: transfer,
-    maxHoldingAmount: holding,
-    requiredWhitelistTier: c.requiredWhitelistTier,
-    transferCooldownMinutes: c.transferCooldownMinutes,
-    largeTransferThreshold: c.largeTransferThreshold,
-    enhancedLogging: c.enhancedLogging,
-    enhancedPrivacy: c.enhancedPrivacy,
-  });
-}
-
 describe("Custody caps, tier and unlock recipient (Task 4.16)", function () {
   const e = ethers.parseEther;
-  const T = { Normal: 0, Retail: 1, Accredited: 2, Institutional: 3 };
-
-  async function deploy() {
-    const [owner, bank, user, other, stranger] = await ethers.getSigners();
-    const deployC = async (name: string, ...a: unknown[]) =>
-      (await ethers.getContractFactory(name)).deploy(...a) as Promise<any>;
-    const registry = await deployC("IdentityRegistry");
-    const issuer = await deployC("ClaimIssuer", owner.address, "KYC", "d");
-    await configureKyc(registry, await issuer.getAddress());
-    const OnchainID = await ethers.getContractFactory("OnchainID");
-    const verify = async (w: { address: string }) => {
-      const id = await OnchainID.deploy(w.address);
-      await registry.registerIdentity(w.address, id.target, 840);
-      await attest(issuer, owner, id.target as string);
-    };
-    for (const w of [user, other]) await verify(w);
-    const rules = await deployC("ComplianceRules", owner.address, [840], []);
-    const token = await deployC(
-      "Token",
-      "VSC",
-      "VSC",
-      registry.target,
-      rules.target,
-    );
-    await rules.setTokenIdentityRegistry(token.target, registry.target);
-    const types = await deployC("InvestorTypeRegistry");
-    await token.setInvestorTypeRegistry(types.target);
-    await types.authorizeToken(token.target, true);
-    const m = await deployC(
-      "InvestorRequestManager",
-      bank.address,
-      token.target,
-      types.target,
-      registry.target,
-    );
-    await addRegistrar(rules, token, m, "MultiSigWallet");
-    await types.setComplianceOfficer(m.target, true);
-    const om = await deployC("OracleManager");
-    const wl = await deployC("WhitelistOracle", om.target, "WL", "d");
-    const normal = await types.getInvestorTypeConfig(T.Normal);
-    const cap =
-      normal.maxTransferAmount < normal.maxHoldingAmount
-        ? normal.maxTransferAmount
-        : normal.maxHoldingAmount;
-    return {
-      owner,
-      bank,
-      user,
-      other,
-      stranger,
-      registry,
-      rules,
-      token,
-      types,
-      m,
-      wl,
-      cap,
-      verify,
-    };
-  }
-
-  /** Request `type`, the bank's wallet, the user's lock, confirmed. */
-  async function lockedRequest(f: any, type: number) {
-    const { m, bank, user, token } = f;
-    await m.connect(user).requestInvestorStatus(type);
-    await m.connect(bank).createMultiSigWallet(user.address);
-    const w = (await m.requests(user.address)).multiSigWallet;
-    const lock = (await m.requests(user.address)).requiredLockAmount;
-    await token.connect(user).approve(w, lock);
-    const wallet = await ethers.getContractAt("MultiSigWallet", w);
-    await wallet.connect(user).lockTokens(lock);
-    await m.connect(user).confirmTokensLocked();
-    return { wallet, lock };
-  }
+  const deploy = deployCustody;
 
   it("the constructor defaults are cap/4, cap/2, cap of the Normal type", async function () {
     const { m, cap } = await deploy();
