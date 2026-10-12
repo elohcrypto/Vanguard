@@ -37,6 +37,10 @@ export async function handoverFixture() {
   const feeWallet = signers[8];
   const deploy = async (name: string, ...a: any[]): Promise<any> =>
     (await ethers.getContractFactory(name)).deploy(...a);
+  // As demo option 1 records deployStartBlock: the ceremony's event scans
+  // start at the fixture's first deploy, not at block 0, so they do not
+  // grow with the chain history of every test run before this one.
+  const fromBlock = (await ethers.provider.getBlockNumber()) + 1;
 
   const identityRegistry = await deploy("IdentityRegistry");
   const complianceRules = await deploy(
@@ -189,6 +193,7 @@ export async function handoverFixture() {
     issuerAdmin,
     oracles: [whitelistOracle],
     issuers: [kycIssuer],
+    fromBlock,
     log: () => {},
   };
   const who = {

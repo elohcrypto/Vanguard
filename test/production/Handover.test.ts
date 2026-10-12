@@ -50,6 +50,7 @@ describe("Deployer holds no power after handover (plan Task 0.3)", function () {
   let kycIssuer: any;
   let investor: SignerWithAddress;
   let identityAddr: string;
+  let fromBlock: number;
 
   async function handover(): Promise<void> {
     await handoverDeployerPowers({
@@ -66,6 +67,7 @@ describe("Deployer holds no power after handover (plan Task 0.3)", function () {
       dynamicListManager,
       investorTypeRegistry,
       issuers: [kycIssuer],
+      fromBlock,
       log: () => {},
     });
     const contracts: Record<string, any> = {
@@ -101,6 +103,8 @@ describe("Deployer holds no power after handover (plan Task 0.3)", function () {
     proposer = alice;
     voters = [bob, carol];
 
+    // The ceremony's log scans start at this test's first deploy.
+    fromBlock = (await ethers.provider.getBlockNumber()) + 1;
     identityRegistry = await (
       await ethers.getContractFactory("IdentityRegistry")
     ).deploy();

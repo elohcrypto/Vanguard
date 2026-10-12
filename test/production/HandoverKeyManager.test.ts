@@ -328,6 +328,7 @@ describe("Handover: KeyManager (4.2)", function () {
     signers[11] = f.guardian;
     const state = {
       signers,
+      deployStartBlock: f.args.fromBlock, // as option 1 records it
       getContract: (k: string) => byKey[k] ?? null,
       keyLifecycle: { identity: await identity.getAddress() },
       oracleConfig: new Map(),
@@ -357,6 +358,7 @@ describe("Handover: KeyManager (4.2)", function () {
       privacyManager: await a("privacyManager"),
       zkVerifier: await a("zkVerifier"),
       keyManager: f.stranger.address,
+      fromBlock: f.args.fromBlock,
       logChunk: 100,
       ops: 1,
       guardian: 2,

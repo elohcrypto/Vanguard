@@ -51,6 +51,7 @@ describe("Handover CLI (scripts/handover.ts)", function () {
       zkVerifier: await a("zkVerifier"),
       oracles: [await f.args.oracles[0].getAddress()],
       issuers: [await f.args.issuers[0].getAddress()],
+      fromBlock: f.args.fromBlock,
       logChunk: 100,
       // Signer order from handoverFixture.
       ops: 1,
