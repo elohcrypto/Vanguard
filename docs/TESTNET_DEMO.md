@@ -382,7 +382,7 @@ an unacknowledged node, the deployer as a node, an emergency designation on an u
 node (step 5 clears the rest), a paused list oracle or one below two consensus oracles;
 `minVoterAge` under 7 days, an open proposal targeting a plan contract, a factory `feeRecipient`
 other than the deployer or ops (step 5 sets ops, D54), an escrow factory fee wallet that is
-neither ops, a `feeWallets` entry nor an exempt treasury (step 5 moves the deployer's to ops),
+neither ops nor a `feeWallets` entry (step 5 moves the deployer's to ops), a trusted escrow the deployer arbitrates,
 an escrow `INVESTOR_ROLE` without an active registration (step 5 deactivates the deployer's;
 Task 4.17), an unacknowledged attestor key, a root published by a stranger, a pending re-seat on
 the demo identity; and a code hash off the compiled artifact for every plan contract, list

@@ -8,15 +8,23 @@
  * its registration, or revokes a bare grant, while it still manages the
  * factory) and never after; a holder without an active registration (a
  * bare grantRole: inert, but a stray) is refused. The factory's fee
- * wallet (ownerWallet) follows the D54 rule: ops, a wallet the config
- * lists in feeWallets, or an acknowledged treasury (investorLimitExempt
- * on the registry the Token enforces, D22), never the deployer; step 5
- * moves a deployer fee wallet to ops (R-417-2).
+ * wallet (ownerWallet) follows the D54 rule: ops or a wallet the config
+ * lists in feeWallets (the operator's explicit acknowledgement), never
+ * the deployer; step 5 moves a deployer fee wallet to ops (R-417-2 as
+ * replaced: an exemption is no acknowledgement, the deployer grants it).
+ * An escrow ComplianceRules trusts whose investor (its arbiter:
+ * signAsInvestor, resolveDispute, manualRefund) is the deployer is
+ * refused: settle it before the ceremony (review B-5).
  */
 
 const { ethers } = require("hardhat");
 const { addrOf, same, fail } = require("./HandoverChecks");
-const { roleHolders, scanLogs, uniq } = require("./HandoverScans");
+const {
+  roleHolders,
+  scanLogs,
+  uniq,
+  liveTrustedContracts,
+} = require("./HandoverScans");
 
 /** The factory, its INVESTOR_ROLE holders and its active investors. */
 async function escrowFacts(o) {
@@ -49,15 +57,31 @@ async function escrowFacts(o) {
 
 const has = (xs, a) => xs.some((x) => same(x, a));
 
-/** D22: exempt on the registry the Token enforces (a treasury mark). */
-async function treasury(o, a) {
-  const itr = await o.token.investorTypeRegistry();
-  if (same(itr, ethers.ZeroAddress)) return false;
-  const reg = await ethers.getContractAt(
-    ["function investorLimitExempt(address) view returns (bool)"],
-    itr,
-  );
-  return reg.investorLimitExempt(a);
+/** Trusted contracts whose investor() is the deployer (escrows). */
+async function deployerArbitrates(o, dAddr) {
+  const out = [];
+  for (const { account } of await liveTrustedContracts(o)) {
+    if (out.some((a) => same(a, account))) continue;
+    if ((await ethers.provider.getCode(account)) === "0x") continue;
+    const w = await ethers.getContractAt(
+      ["function investor() view returns (address)"],
+      account,
+    );
+    let investor;
+    try {
+      investor = await w.investor();
+    } catch (e) {
+      // No investor(): not an escrow (a revert or undecodable data).
+      const none =
+        e.code === "CALL_EXCEPTION" ||
+        e.code === "BAD_DATA" ||
+        /revert/i.test(e.message);
+      if (none) continue;
+      throw e;
+    }
+    if (same(investor, dAddr)) out.push(account);
+  }
+  return out;
 }
 
 /** [{ label, ok, fix }]; `pre`: before step 5, the deployer's are allowed. */
@@ -73,8 +97,19 @@ async function escrowChecks(o, pre) {
   const wallet = await f.ownerWallet();
   const feeOk = same(wallet, dAddr)
     ? pre && same(await f.owner(), dAddr)
-    : has(fee, wallet) || (await treasury(o, wallet));
+    : has(fee, wallet);
+  const arbitrated = await deployerArbitrates(o, dAddr);
   return [
+    {
+      label: `no escrow ComplianceRules trusts is arbitrated by the deployer`,
+      ok: arbitrated.length === 0,
+      fix: arbitrated
+        .map(
+          (x) =>
+            `the deployer arbitrates escrow ${x}: settle it before the ceremony (as investor it signs releases and refunds and resolves disputes of an escrow ComplianceRules trusts on VSC)`,
+        )
+        .join("; "),
+    },
     {
       label: `EscrowWalletFactory INVESTOR_ROLE held only by active registered investors (${active.length})`,
       ok: bare.length === 0,
@@ -88,7 +123,7 @@ async function escrowChecks(o, pre) {
       fix: `the deployer ${dAddr} holds EscrowWalletFactory INVESTOR_ROLE or an active registration${pre ? " but no longer manages the factory" : ""}: it creates escrows ComplianceRules trusts on VSC and signs their releases; ${pre ? "governance must deactivateInvestor(deployer) by vote first" : "deactivateInvestor(deployer)"}`,
     },
     {
-      label: `EscrowWalletFactory fee wallet ${wallet} is ops, listed in feeWallets or an exempt treasury, never the deployer (D54)${pre ? "; the deployer's moves to ops in step 5" : ""}`,
+      label: `EscrowWalletFactory fee wallet ${wallet} is ops or listed in feeWallets, never the deployer (D54)${pre ? "; the deployer's moves to ops in step 5" : ""}`,
       ok: feeOk,
       fix: `EscrowWalletFactory ownerWallet is ${wallet}: platform fees would flow to ${same(wallet, dAddr) ? "the deployer" : "a key the ceremony does not hand over"}; the factory owner must setOwnerWallet(ops) first, or list it in "feeWallets"`,
     },
