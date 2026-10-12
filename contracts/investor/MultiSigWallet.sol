@@ -10,6 +10,13 @@ import {IIdentityRegistry} from "../erc3643/interfaces/IIdentityRegistry.sol";
 /// @dev Read-only slice of ComplianceRules: trusted-contract status on a token.
 interface ITrustedContractView {
     function isTrustedContract(address token, address account) external view returns (bool);
+
+    function blacklistOracle(address token) external view returns (address);
+}
+
+/// @dev Read-only slice of BlacklistOracle.
+interface IBlacklistStatusView {
+    function isBlacklisted(address subject) external view returns (bool);
 }
 
 /**
@@ -54,6 +61,10 @@ contract MultiSigWallet is Ownable, ReentrancyGuard {
     ///      a trusted contract (that move would skip the owner's checks).
     error RecipientTrusted(address recipient);
     error RecipientNotVerified(address recipient);
+    /// @dev D58 (a): a payout to another wallet needs the user in good standing.
+    error UserNotVerified(address user);
+    error UserFrozen(address user);
+    error UserBlacklisted(address user);
 
     // Events
     event TokensLocked(address indexed user, uint256 amount, uint256 timestamp);
@@ -189,6 +200,21 @@ contract MultiSigWallet is Ownable, ReentrancyGuard {
      * @dev Execute unlock proposal (internal)
      * @param proposalId Proposal ID to execute
      */
+    /**
+     * @dev D58 (a), Task 4.17: at execution, a recipient other than the
+     *      user needs the user verified, not frozen and not on the token's
+     *      blacklist oracle, so a sanctioned, de-registered or frozen
+     *      holder cannot leave through a third party with the bank. Read
+     *      from the token's own registry and rules at execution time.
+     */
+    function _requireUserInGoodStanding() private view {
+        IERC3643 t = IERC3643(token);
+        if (!IIdentityRegistry(t.identityRegistry()).isVerified(user)) revert UserNotVerified(user);
+        if (t.isFrozen(user)) revert UserFrozen(user);
+        address bl = ITrustedContractView(t.compliance()).blacklistOracle(token);
+        if (bl != address(0) && IBlacklistStatusView(bl).isBlacklisted(user)) revert UserBlacklisted(user);
+    }
+
     function _executeUnlock(bytes32 proposalId) private nonReentrant {
         UnlockProposal storage proposal = proposals[proposalId];
         
@@ -197,6 +223,7 @@ contract MultiSigWallet is Ownable, ReentrancyGuard {
         require(!proposal.executed, "Already executed");
         uint256 held = IERC20(token).balanceOf(address(this));
         require(proposal.amount <= held, "Insufficient wallet balance");
+        if (proposal.recipient != user) _requireUserInGoodStanding();
         
         // Mark as executed
         proposal.executed = true;

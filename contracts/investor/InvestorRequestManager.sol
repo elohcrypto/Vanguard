@@ -217,7 +217,11 @@ contract InvestorRequestManager is Ownable, ReentrancyGuard {
         if (wl == address(0) || rules.whitelistMode(token) == 1) return; // none, or ZkOnly
         (bool live, uint8 tier) = IWhitelistEntryView(wl).whitelistStanding(user);
         if (!live) return;
-        uint8 required = _liveTypes().getInvestorTypeConfig(requestedType).requiredWhitelistTier;
+        IInvestorTypeRegistry types = _liveTypes();
+        // A1F-5 (Task 4.17): an exempt wallet has no tier rule on the
+        // transfer path (ComplianceRules._tierMet), so none here either.
+        if (types.investorLimitExempt(user)) return;
+        uint8 required = types.getInvestorTypeConfig(requestedType).requiredWhitelistTier;
         if (tier < required) revert TierBelowNewType(tier, required);
     }
     
