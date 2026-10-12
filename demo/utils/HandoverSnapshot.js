@@ -7,7 +7,8 @@
  * key, governance as rule administrator). A deployer that prepares the
  * chain between the preflight and step 4 (it still owns everything until
  * the votes) is therefore caught even where the exact-set lines would
- * tolerate the newcomer.
+ * tolerate the newcomer. Window activity that leaves no end state (a
+ * grant revoked again, a mint, a freeze) is HandoverWindow.js's (4.17).
  */
 
 const { addrOf, same } = require("./HandoverChecks");

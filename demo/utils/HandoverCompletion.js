@@ -45,6 +45,7 @@ const { nodeLines } = require("./HandoverNodes");
 const { paramLines } = require("./HandoverParams");
 const { snapshotLines, preflightSnapshots } = require("./HandoverSnapshot");
 const { escrowLines } = require("./HandoverEscrow");
+const { windowLines } = require("./HandoverWindow");
 
 const ZERO = ethers.ZeroAddress;
 const EXEMPT_ABI = [
@@ -162,7 +163,8 @@ async function assertHandoverComplete(o) {
   await lines("parameters", paramLines(o));
   // Task 4.13: re-derived and compared with the preflight snapshot.
   await lines("snapshot", snapshotLines(o, snapshot));
-  // Task 4.17: escrow investors and fee wallet (BF-1, BF-2).
+  // Task 4.17: window activity (BF-3); escrow investors, fee wallet (BF-1/2).
+  await lines("window", windowLines(o, snapshot));
   await lines("escrow", escrowLines(o));
   // Bound in governance, or the creator of a trusted escrow (review M-2),
   // but not named by the config: still checked.

@@ -52,6 +52,7 @@ const { preflightNodes, nodeSteps } = require("./HandoverNodes");
 const { preflightParams, paramSteps } = require("./HandoverParams");
 const { snapshotFacts, preflightSnapshots } = require("./HandoverSnapshot");
 const { preflightEscrow } = require("./HandoverEscrow");
+const { recordingSigner } = require("./HandoverWindow");
 const { roleStrays } = require("./HandoverRoles");
 const { trustStrays } = require("./HandoverTrust");
 const { nodeStrays } = require("./HandoverNodes");
@@ -92,7 +93,7 @@ async function handoverDeployerPowers(o) {
   // Oracles and issuers bound on chain; a config list must equal that set.
   o = await withDerivedPowers(o, log);
   await checkIssuerAdmin(o);
-  const d = o.deployer;
+  let d = o.deployer;
   const dAddr = await addrOf(d);
   const ops = await addrOf(o.ops);
   const guardian = await addrOf(o.guardian);
@@ -123,6 +124,12 @@ async function handoverDeployerPowers(o) {
   report.preflightBlock = await ethers.provider.getBlockNumber();
   given.snapshot = report.snapshot;
   preflightSnapshots.set(govAddr.toLowerCase(), report.snapshot);
+  // Task 4.17 (BF-3): every transaction the ceremony sends from here is
+  // recorded; completion refuses window activity that is not among them.
+  report.snapshot.block = report.preflightBlock;
+  report.snapshot.ceremonyTxs = [];
+  d = recordingSigner(d, report.snapshot.ceremonyTxs);
+  o = { ...o, deployer: d };
   const ctx = { o, d, dAddr, govAddr, report, ok, log };
   // Send, read back, assert, print.
   const apply = async (tx, readBack, msg) => {

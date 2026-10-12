@@ -357,49 +357,44 @@ its own (Task 4.4, "Oracle nodes and consensus" below).
 
 Outside the demo, `HANDOVER_CONFIG=<path.json> npx hardhat run
 scripts/handover.ts --network <net>` runs the same ceremony and exits
-non-zero on any failure. Since Task 4.13 the JSON has one root: the
-`governance` address; every other contract is derived from it (its bound
-targets and VGT, the tokens' registry and rules, the rules' oracles,
-registrars and wired PrivacyManager, the registry's issuers, the manager's
-engine and nodes, the factory's KeyManager). It also holds the wallet
-indices `ops`, `guardian`, `issuerAdmin`, `proposer` and `voters`, the
-optional `fromBlock` (a block before option 1's first deploy; refused when
-any scanned contract already had code) and `logChunk`, the optional
-`keyManagerIdentity` and `feeWallets`, and three acknowledgement lists,
-empty by default: `oracleNodes` (every registered consensus node), `attestors`
-(the Ax of every trusted attestor key) and `extraTrusted` (trusted contracts
-that are neither governance on VGT nor a wallet a live registrar created).
-An address key of an older config is an assertion, refused when it differs
-from the derivation (R-413-1); `escrowWalletFactory`, `onchainIDFactory`,
-`privacyManager` and `zkVerifier` must still be stated (an address, or
-`null`) while governance cannot derive them, before step 3 binds them
-(R-413-2); any other key is refused. `HANDOVER_PHASE=accept` resumes a
-partial run. The preflight (and 83e, as failing lines) also refuses, from
-the event scans: any agent but the deployer, ops, governance (VGT) and the
-tokens (registry), a missing governance or token agent; any
-InvestorTypeRegistry officer wallet but ops, a token other than VSC
-authorized, a registry or whitelist oracle on VGT (D56), a Token enforcing
-a registry governance is not bound to; a key on any issuer held by ops, the
-guardian, governance, a registry agent or an oracle node; a trusted contract
-outside governance on VGT, a live registrar's wallets and `extraTrusted`;
-a registrar or officer contract whose code is not the compiled
-InvestorRequestManager or EscrowWalletFactory, or whose immutable bank is
-not ops; an unacknowledged node, the deployer as a node, an emergency
-designation on an unacknowledged node (step 5 clears the rest), a paused
-list oracle or one below two consensus oracles; `minVoterAge` under 7 days,
-an open proposal targeting a plan contract, a factory `feeRecipient` other
-than the deployer or ops (step 5 sets ops, D54), an unacknowledged attestor
-key, a root published by a stranger, a pending re-seat on the demo
-identity; and a code hash off the compiled artifact for every plan
-contract, list oracle, registrar and issuer (immutables masked). A scan
-that cannot find a holder known to be granted by event fails rather than
-passing as clean (R-413-6). Completion re-derives everything and compares
-it with the preflight snapshot (the CLI writes it next to the config with
-the chain id and the preflight block; the demo keeps it in state): nothing
-may appear the ceremony did not grant. Re-running the full phase refreshes
-the preflight, so a chain prepared between an aborted preflight and the
-re-run is judged by the re-run. Demo option 83c acknowledges what the demo itself registered and
-trusted, lists every stray the preflight refuses and offers to remove them
+non-zero on any failure. Since Task 4.13 the JSON has one root: the `governance` address; every
+other contract is derived from it (its bound targets and VGT, the tokens' registry and rules,
+the rules' oracles, registrars and wired PrivacyManager, the registry's issuers, the manager's
+engine and nodes, the factory's KeyManager). It also holds the wallet indices `ops`, `guardian`,
+`issuerAdmin`, `proposer` and `voters`, the optional `fromBlock` (a block before option 1's
+first deploy; refused when any scanned contract already had code) and `logChunk`, the optional
+`keyManagerIdentity` and `feeWallets`, and three acknowledgement lists, empty by default:
+`oracleNodes` (every registered consensus node), `attestors` (the Ax of every trusted attestor
+key) and `extraTrusted` (trusted contracts that are neither governance on VGT nor a wallet a
+live registrar created). An address key of an older config is an assertion, refused when it
+differs from the derivation (R-413-1); `escrowWalletFactory`, `onchainIDFactory`,
+`privacyManager` and `zkVerifier` must still be stated (an address, or `null`) while governance
+cannot derive them, before step 3 binds them (R-413-2); any other key is refused.
+`HANDOVER_PHASE=accept` resumes a partial run. The preflight (and 83e, as failing lines) also
+refuses, from the event scans: any agent but the deployer, ops, governance (VGT) and the tokens
+(registry), a missing governance or token agent; any InvestorTypeRegistry officer wallet but
+ops, a token other than VSC authorized, a registry or whitelist oracle on VGT (D56), a Token
+enforcing a registry governance is not bound to; a key on any issuer held by ops, the guardian,
+governance, a registry agent or an oracle node; a trusted contract outside governance on VGT, a
+live registrar's wallets and `extraTrusted`; a registrar or officer contract whose code is not
+the compiled InvestorRequestManager or EscrowWalletFactory, or whose immutable bank is not ops;
+an unacknowledged node, the deployer as a node, an emergency designation on an unacknowledged
+node (step 5 clears the rest), a paused list oracle or one below two consensus oracles;
+`minVoterAge` under 7 days, an open proposal targeting a plan contract, a factory `feeRecipient`
+other than the deployer or ops (step 5 sets ops, D54), an escrow factory fee wallet that is
+neither ops, a `feeWallets` entry nor an exempt treasury (step 5 moves the deployer's to ops),
+an escrow `INVESTOR_ROLE` without an active registration (step 5 deactivates the deployer's;
+Task 4.17), an unacknowledged attestor key, a root published by a stranger, a pending re-seat on
+the demo identity; and a code hash off the compiled artifact for every plan contract, list
+oracle, registrar and issuer (immutables masked). A scan that cannot find a holder known to be
+granted by event fails rather than passing as clean (R-413-6). Completion re-derives everything
+and compares it with the preflight snapshot (the CLI writes it next to the config with the chain
+id and the preflight block; the demo keeps it in state): nothing may appear the ceremony did not
+grant, and every grant, mint, identity registration, freeze and rule-administrator event after
+the preflight must come from a ceremony transaction, ops or a vote, even if revoked since (Task
+4.17). Re-running the full phase refreshes the preflight, so a chain prepared between an aborted
+preflight and the re-run is judged by the re-run. Demo option 83c acknowledges what the demo
+itself registered and trusted, lists every stray the preflight refuses and offers to remove them
 as the deployer (answer `y`; the drive argument is `83c:y`).
 
 ### Runbook rules for the ceremony and after (plan 2F)

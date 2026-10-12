@@ -20,7 +20,7 @@ const EXEMPT = [/^contracts\/privacy\/verifiers\//];
 // Allowlist, measured at aa65de8 (2026-10-12, the start of Task 4.15).
 const ALLOW = {
   "test/EnhancedEscrow.test.js": 1575,
-  "docs/TESTNET_DEMO.md": 1184,
+  "docs/TESTNET_DEMO.md": 1179,
   "test/KeyManager.test.ts": 1087,
   "test/integration/OracleIntegration.test.ts": 884,
   "test/ClaimIssuer.test.ts": 880,

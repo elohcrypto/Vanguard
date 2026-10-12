@@ -356,9 +356,15 @@ describe("Handover power set from chain (plan 2F.5)", function () {
       // Contract side: accepting ownership revoked every other admin.
       expect(await e.hasRole(DA, stranger.address)).to.equal(false);
       const { failures, checks } = await assertHandoverComplete(args);
-      expect(failures).to.deep.equal([
+      // Task 4.17 (BF-3): both window grants are refused by name too.
+      expect(failures[0]).to.equal(
         "EscrowWalletFactory ADMIN_ROLE held only by ops",
-      ]);
+      );
+      expect(failures.slice(1)).to.have.lengthOf(2);
+      for (const l of failures.slice(1))
+        expect(l).to.match(
+          /^EscrowWalletFactory RoleGranted at block \d+ sent by/,
+        );
       expect(checks.map((x: any) => x.label)).to.include(
         "EscrowWalletFactory DEFAULT_ADMIN_ROLE held only by governance",
       );
