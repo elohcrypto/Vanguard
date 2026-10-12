@@ -6,13 +6,21 @@
  * pins the KeyManager it is set to, Task 4.11), the KYC and AML claims
  * through the trusted ClaimIssuers (Kyc.attestAll), the registry entry
  * with its country, and the verification cache (Task 4.9). A step whose
- * result already exists is skipped, so a re-run repairs instead of
- * failing. Options 6, 11, 22, 23, 24, 62 and 89 and the smokes call this
- * instead of each keeping its own copy of the steps.
+ * result already exists is skipped (a claim the issuer still holds live,
+ * a cache entry not yet lapsed), so a re-run repairs instead of failing
+ * and a second call sends nothing. Options 6, 11, 22, 23, 24, 62 and 89
+ * and the smokes call this instead of each keeping its own copy.
  */
 
 const { ethers } = require("hardhat");
-const { attestAll, cacheVerification } = require("./Kyc");
+const {
+  attestKyc,
+  attestAml,
+  cacheVerification,
+  issuerOwnerSigner,
+  KYC_TOPIC,
+  AML_TOPIC,
+} = require("./Kyc");
 
 const ZERO = ethers.ZeroAddress;
 const same = (a, b) => a.toLowerCase() === b.toLowerCase();
@@ -50,14 +58,19 @@ async function registryAgent(state) {
  * @param {number} [opts.country] - Registry country; default: the token's
  *   first allowed country, else 840.
  * @param {string} [opts.label] - Folded into the claim data.
- * @param {boolean} [opts.attest=true] - Issue the KYC and AML claims.
+ * @param {boolean} [opts.attest=true] - Issue each claim the issuer does
+ *   not hold live for the identity (revoked or expired counts as missing).
+ * @param {number} [opts.renewWithin=0] - Also re-issue a live claim that
+ *   expires within this many seconds (the renew window; 0: none).
  * @param {boolean} [opts.register=true] - Register in the IdentityRegistry.
- * @param {boolean} [opts.cache=true] - refreshVerified after registering.
- * @param {number} [opts.validTo] - Claim expiry (Kyc.attestAll default).
+ * @param {boolean} [opts.cache=true] - refreshVerified after registering,
+ *   unless the registry's cache entry for the identity is still live.
+ * @param {number} [opts.validTo] - Claim expiry (Kyc.attestKyc default).
  * @param {Function} [opts.log] - Printer for the cache step; silent by default.
  * @returns {Promise<Object>} { identity, created, registered, attested,
- *   cached, verified, gasUsed, receipts: { deploy, kyc, aml, register,
- *   cache } } where every flag says whether this call did the step.
+ *   cached, verified, gasUsed, receipts: { deploy, register, kyc, aml,
+ *   cache } } where every flag says whether this call did the step and
+ *   receipts holds only the transactions it sent.
  */
 async function onboard(state, address, opts = {}) {
   const factory = state.getContract("onchainIDFactory");
@@ -110,31 +123,43 @@ async function onboard(state, address, opts = {}) {
     }
   }
 
-  // 3. Both claims, through the trusted issuers (the only verifying path).
+  // 3. Each claim the issuer does not hold live (revoked, expired, or
+  //    expiring inside the renew window), through the trusted issuers:
+  //    the only path IdentityRegistry.isVerified() accepts.
   let attested = false;
   if (opts.attest !== false) {
-    const { kyc, aml } = await attestAll(
-      state,
-      identity,
-      opts.label || `onboard:${address}`,
-      opts.validTo,
-    );
-    take("kyc", kyc);
-    take("aml", aml);
-    attested = true;
+    const now = (await ethers.provider.getBlock("latest")).timestamp;
+    const label = opts.label || `onboard:${address}`;
+    for (const [key, topic, attest] of [
+      ["kyc", KYC_TOPIC, attestKyc],
+      ["aml", AML_TOPIC, attestAml],
+    ]) {
+      const issuer = state.getContract(`${key}Issuer`);
+      if (await claimLive(issuer, identity, topic, now, opts.renewWithin)) {
+        continue;
+      }
+      const signer = await issuerOwnerSigner(state, issuer);
+      take(key, await attest(issuer, signer, identity, label, opts.validTo));
+      attested = true;
+    }
   }
 
-  // 4. The verification cache (Task 4.9), once registered.
+  // 4. The verification cache (Task 4.9), once registered, unless the
+  //    registry's entry for the identity is still live.
   let cached = false;
   if (
     opts.cache !== false &&
     registry &&
     !same(await registry.identity(address), ZERO)
   ) {
-    const { receipt } = await cacheVerification(state, address, log);
-    if (receipt) {
-      take("cache", receipt);
-      cached = true;
+    const [, until] = await registry.verifiedUntil(identity);
+    const now = (await ethers.provider.getBlock("latest")).timestamp;
+    if (Number(until) <= now) {
+      const { receipt } = await cacheVerification(state, address, log);
+      if (receipt) {
+        take("cache", receipt);
+        cached = true;
+      }
     }
   }
 
@@ -151,4 +176,17 @@ async function onboard(state, address, opts = {}) {
   };
 }
 
-module.exports = { onboard, defaultCountry, registryAgent };
+/**
+ * Whether `issuer` holds a live claim on (identity, topic) that does not
+ * expire within `renewWithin` seconds of `now` (0: any live claim counts).
+ */
+async function claimLive(issuer, identity, topic, now, renewWithin = 0) {
+  if (!(await issuer.hasValidClaim(identity, topic))) return false;
+  if (!renewWithin) return true;
+  const claim = await issuer.issuedClaims(
+    await issuer.latestClaimId(identity, topic),
+  );
+  return claim.validTo === 0n || Number(claim.validTo) - now > renewWithin;
+}
+
+module.exports = { onboard, defaultCountry, registryAgent, claimLive };

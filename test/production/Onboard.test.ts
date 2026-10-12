@@ -1,6 +1,7 @@
 import { expect } from "chai";
 import { ethers } from "hardhat";
 import { handoverFixture } from "../helpers/governanceFixture";
+import { time } from "@nomicfoundation/hardhat-network-helpers";
 
 const { onboard } = require("../../demo/utils/Onboard");
 
@@ -56,12 +57,50 @@ describe("Onboard.onboard (Task 4.16)", function () {
     expect(await f.c.identityRegistry.identity(stranger.address)).to.equal(
       r.identity,
     );
-    const again = await onboard(state, stranger.address, {
-      label: "t",
-      attest: false,
+    // A second call with defaults sends nothing: the claims are live, the
+    // cache entry has not lapsed (review L-4).
+    const claimId = await f.kycIssuer.latestClaimId(r.identity, 6);
+    const validTo = (await f.kycIssuer.issuedClaims(claimId)).validTo;
+    const again = await onboard(state, stranger.address, { label: "t" });
+    expect(again).to.include({
+      created: false,
+      registered: false,
+      attested: false,
+      cached: false,
+      verified: true,
     });
-    expect(again).to.include({ created: false, registered: false });
+    expect(Object.keys(again.receipts)).to.deep.equal([]);
+    expect(again.gasUsed).to.equal(0n);
     expect(again.identity).to.equal(r.identity);
+    expect(await f.kycIssuer.latestClaimId(r.identity, 6)).to.equal(claimId);
+    expect((await f.kycIssuer.issuedClaims(claimId)).validTo).to.equal(validTo);
+  });
+
+  it("re-issues only a lapsed claim, and inside a named renew window", async function () {
+    const r = await onboard(state, stranger.address, { label: "t" });
+    const kycId = await f.kycIssuer.latestClaimId(r.identity, 6);
+    const validTo0 = (await f.kycIssuer.issuedClaims(kycId)).validTo;
+    await time.increase(60);
+    // Inside a renew window (here 400 days) the one-year claims are renewed:
+    // the issuer's claim id is deterministic, so validTo moves instead.
+    const renewed = await onboard(state, stranger.address, {
+      label: "t",
+      renewWithin: 400 * 24 * 3600,
+    });
+    expect(Object.keys(renewed.receipts).sort()).to.deep.equal(["aml", "kyc"]);
+    expect((await f.kycIssuer.issuedClaims(kycId)).validTo).to.be.gt(validTo0);
+    // Past expiry both claims and the cache lapse: all three are re-sent.
+    await time.increase(366 * 24 * 3600);
+    expect(await f.c.identityRegistry.isVerified(stranger.address)).to.equal(
+      false,
+    );
+    const after = await onboard(state, stranger.address, { label: "t" });
+    expect(Object.keys(after.receipts).sort()).to.deep.equal([
+      "aml",
+      "cache",
+      "kyc",
+    ]);
+    expect(after).to.include({ attested: true, cached: true, verified: true });
   });
 
   it("uses the token's first allowed country by default and the given one otherwise", async function () {
