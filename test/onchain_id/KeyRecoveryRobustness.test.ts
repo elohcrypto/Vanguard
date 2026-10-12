@@ -358,6 +358,19 @@ describe("Recovery robustness (4.14): A2 probes and killed mutants", function ()
     ]);
   });
 
+  it("a properly completed recovery never re-opens (G12 killed)", async function () {
+    const f = await setup();
+    const t = await executed(f);
+    await time.setNextBlockTimestamp(t + 7n * BigInt(DAY));
+    await f.km.connect(f.anyone).executeOwnerTransfer(f.idA, f.rescued.address);
+    await f.id.connect(f.rescued).acceptOwnership();
+    await time.increase(30 * DAY);
+    await expect(
+      f.km.connect(f.A).initiateKeyRecovery(f.idA, k(f.user.address)),
+    ).to.be.revertedWith("KeyManager: Recovery already completed");
+    expect((await f.km.getKeyRecovery(f.idA)).completed).to.equal(true);
+  });
+
   it("M17: a second executeKeyRecovery is refused", async function () {
     const f = await setup();
     const key = k(f.rescued.address);

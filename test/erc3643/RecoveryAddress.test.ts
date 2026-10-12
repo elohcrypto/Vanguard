@@ -244,6 +244,33 @@ describe("recoveryAddress", function () {
       await token.recoveryAddress(lost.address, fresh.address, lostId); // first token moves the identity
     });
 
+    it("refuses the second token once the wallet lost control: the token's own check, moveIdentity skipped", async function () {
+      // The identity already moved, so recoveryAddress never calls the
+      // registry's moveIdentity: the refusal below can only be Token's.
+      const oid = await ethers.getContractAt("OnchainID", lostId);
+      await oid
+        .connect(lost)
+        .removeKey(
+          ethers.solidityPackedKeccak256(["address"], [fresh.address]),
+          2,
+        );
+      await expect(vgt.recoveryAddress(lost.address, fresh.address, lostId))
+        .to.be.revertedWithCustomError(vgt, "WalletDoesNotControlIdentity")
+        .withArgs(fresh.address, lostId);
+      expect(await vgt.balanceOf(lost.address)).to.equal(E("50"));
+      expect(await idReg.identity(fresh.address)).to.equal(lostId);
+      // Control restored, the sibling recovery runs.
+      await oid
+        .connect(lost)
+        .addKey(
+          ethers.solidityPackedKeccak256(["address"], [fresh.address]),
+          2,
+          1,
+        );
+      await vgt.recoveryAddress(lost.address, fresh.address, lostId);
+      expect(await vgt.balanceOf(fresh.address)).to.equal(E("50"));
+    });
+
     it("still recovers the second token, even if the new wallet already holds some", async function () {
       await vgt.mint(fresh.address, E("5")); // the new wallet is already in use for this token
       await vgt.freezePartialTokens(lost.address, E("20"));
