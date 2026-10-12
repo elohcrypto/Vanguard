@@ -406,6 +406,16 @@ jobs:
             exit 1
           fi
 
+      # Task 4.17: five regression drives (4.8 OnchainID and token
+      # options, 4.16 option 1a, the Q9 fill-then-bind and the glyph
+      # list), each on a fresh chain (hardhat_reset of the smoke's node,
+      # the last step to use it) with its needles. 10:59 locally, so about
+      # 16-22 min on a runner.
+      - name: Regression demo drives
+        env:
+          DEMO_RPC_URL: http://127.0.0.1:8545
+        run: ./scripts/ci/regression-drives.sh
+
       # Blocks on critical (currently 0).
       - name: Audit dependencies (critical blocks)
         run: npm audit --audit-level=critical
