@@ -86,6 +86,14 @@ async function send(p) {
 async function handoverDeployerPowers(o) {
   const given = o; // M-1: the caller's object carries the snapshot afterwards
   const log = o.log || console.log;
+  // Task 4.17 (review B-1, B-3): the window starts here, before any
+  // read: the block and the deployer's nonce at it. Completion scans the
+  // events after this block and counts the deployer's transactions.
+  const preflightBlock = await ethers.provider.getBlockNumber();
+  const preflightNonce = await ethers.provider.getTransactionCount(
+    await addrOf(o.deployer),
+    preflightBlock,
+  );
   // Task 4.13: every contract derived from governance; a config address
   // is an assertion (HandoverDerive.js).
   o = await withDerivedContracts(o, log);
@@ -120,15 +128,14 @@ async function handoverDeployerPowers(o) {
   await preflightParams(o); // Task 4.13: floors, proposals, fee sink, pins
   await preflightEscrow(o); // Task 4.17: escrow investors, fee wallet
   // Task 4.13: what the preflight found; completion compares with it.
-  // Task 4.17: the block is read first, so a block mined while the
-  // snapshot reads falls inside the window the completion scans.
-  report.preflightBlock = await ethers.provider.getBlockNumber();
+  report.preflightBlock = preflightBlock;
   report.snapshot = await snapshotFacts(o);
   given.snapshot = report.snapshot;
   preflightSnapshots.set(govAddr.toLowerCase(), report.snapshot);
   // Task 4.17 (BF-3): every transaction the ceremony sends from here is
   // recorded; completion refuses window activity that is not among them.
-  report.snapshot.block = report.preflightBlock;
+  report.snapshot.block = preflightBlock;
+  report.snapshot.nonce = preflightNonce;
   report.snapshot.ceremonyTxs = [];
   d = recordingSigner(d, report.snapshot.ceremonyTxs);
   o = { ...o, deployer: d };

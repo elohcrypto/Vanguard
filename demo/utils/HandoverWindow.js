@@ -16,7 +16,9 @@
  * ceremony transaction, from ops, from a vote (a transaction to
  * governance that executed a proposal) or, for a trusted contract, from
  * a call to a registrar of that token, or it is refused, even when the
- * power it granted was revoked since. The scan proves itself (R-413-6):
+ * power it granted was revoked since. The deployer's own transactions
+ * are bounded by its nonce: every one since the preflight block must be
+ * a recorded ceremony transaction (review B-1). The scan proves itself (R-413-6):
  * every watched event in the ceremony's own receipts must be found, so
  * an RPC or range that returns nothing fails instead of passing clean.
  */
@@ -173,12 +175,13 @@ async function windowLines(o, snap) {
   if (!snap) return [];
   if (
     !Number.isInteger(snap.block) ||
+    !Number.isInteger(snap.nonce) ||
     !Array.isArray(snap.ceremonyTxs) ||
     snap.ceremonyTxs.length === 0
   ) {
     return [
       [
-        "the preflight snapshot records no preflight block and ceremony transactions: activity in the voting window cannot be attributed (re-run the full phase)",
+        "the preflight snapshot records no preflight block, deployer nonce and ceremony transactions: activity in the voting window cannot be attributed (re-run the full phase)",
         false,
       ],
     ];
@@ -246,6 +249,38 @@ async function windowLines(o, snap) {
       mustSee++;
       if (!found.has(`${h}:${log.index}`)) missed.push(`${h}#${log.index}`);
     }
+  }
+  // Review B-1: whatever the deployer did leaves a nonce. Every one of
+  // its transactions since the preflight must be a ceremony transaction
+  // (settings with no watched event included: setCompliance and back).
+  // A VGT holder's own vote (create, vote, execute, settle, refund) is
+  // the one thing the deployer may do in the window besides the ceremony:
+  // a transaction to governance that emitted a voting event.
+  const g = o.governance;
+  const votes = new Set();
+  for (const e of [
+    "ProposalCreated",
+    "VoteCast",
+    "ProposalExecuted",
+    "ProposalExecutionFailed",
+    "ProposalRejected",
+    "ProposalCancelled",
+    "RefundClaimed",
+  ]) {
+    for (const ev of await scanLogs(g, g.filters[e](), scope)) {
+      const h = ev.transactionHash.toLowerCase();
+      if (ours.has(h) || votes.has(h)) continue;
+      const { tx } = await receiptOf(cache, h);
+      if (same(tx.from, dAddr) && same(tx.to || ZERO, gov)) votes.add(h);
+    }
+  }
+  const sent =
+    (await ethers.provider.getTransactionCount(dAddr, end)) - snap.nonce;
+  if (sent !== ours.size + votes.size) {
+    lines.push([
+      `deployer sent ${sent - ours.size - votes.size} transaction(s) in the voting window that the ceremony did not send (${sent} since the preflight block ${snap.block}: ${ours.size} recorded, ${votes.size} votes)`,
+      false,
+    ]);
   }
   if (missed.length) {
     lines.push([

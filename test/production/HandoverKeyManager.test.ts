@@ -105,7 +105,8 @@ describe("Handover: KeyManager (4.2)", function () {
       .connect(f.proposer)
       .setupKeyRecovery(idAddr, [f.stranger.address], 1);
     await time.increase(48 * 3600 + 1);
-    await km.applyKeyRecoverySetup(idAddr);
+    // Anyone applies; not the deployer (its nonce is the window's, 4.17).
+    await km.connect(f.stranger).applyKeyRecoverySetup(idAddr);
     expect((await assertHandoverComplete(args)).failures).to.deep.equal([]);
     // ... or authorizes another manager besides KeyManager ...
     await identity.connect(f.proposer).authorizeManager(f.stranger.address);
@@ -117,7 +118,10 @@ describe("Handover: KeyManager (4.2)", function () {
     await identity.connect(f.proposer).transferOwnership(f.deployer.address);
     await identity.connect(f.deployer).acceptOwnership();
     after = await assertHandoverComplete(args);
-    expect(after.failures).to.deep.equal([idLine(idAddr, kmAddr)]);
+    // The acceptance is also a deployer transaction in the window (4.17).
+    expect(after.failures).to.have.lengthOf(2);
+    expect(after.failures[0]).to.equal(idLine(idAddr, kmAddr));
+    expect(after.failures[1]).to.match(/^deployer sent 1 transaction\(s\)/);
     // A look-alike named by the config fails the derivation line (4.13):
     // the factory and the identity both pin the real KeyManager.
     const other = await f.c.token.getAddress();

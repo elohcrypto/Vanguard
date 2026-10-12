@@ -17,6 +17,9 @@ describe("Handover: escrow investors, fee wallet and the voting window (4.17)", 
   const WINDOW = (label: string) =>
     new RegExp(`^${label} at block \\d+ sent by ${f.deployer.address}`);
 
+  const NONCE =
+    /^deployer sent [1-9]\d* transaction\(s\) in the voting window that the ceremony did not send/;
+
   beforeEach(async function () {
     f = await handoverFixture();
     ({ c, args } = f);
@@ -127,7 +130,7 @@ describe("Handover: escrow investors, fee wallet and the voting window (4.17)", 
       WINDOW("EscrowWalletFactory RoleGranted"),
       /^deployer holds no EscrowWalletFactory INVESTOR_ROLE and no active registration$/,
       new RegExp(
-        `^EscrowWalletFactory fee wallet ${f.deployer.address} is ops, listed in feeWallets or an exempt treasury, never the deployer`,
+        `^EscrowWalletFactory fee wallet ${f.deployer.address} is ops or listed in feeWallets, never the deployer`,
       ),
     );
   });
@@ -212,7 +215,7 @@ describe("Handover: escrow investors, fee wallet and the voting window (4.17)", 
     expect(ceremonyTxs.length).to.be.greaterThan(10);
     args.snapshot = bare;
     await failsWith(
-      /^the preflight snapshot records no preflight block and ceremony transactions/,
+      /^the preflight snapshot records no preflight block, deployer nonce and ceremony transactions/,
     );
   });
 
@@ -258,6 +261,113 @@ describe("Handover: escrow investors, fee wallet and the voting window (4.17)", 
     await c.token.connect(f.ops).mint(f.voters[0].address, E("5"));
     await c.token.connect(f.deployer).burn(f.voters[0].address, E("5"));
     const r = await failsWith(WINDOW("VSC burn"));
-    expect(r.failures).to.have.lengthOf(2); // the burn, the live agent
+    // The burn, the live agent, the deployer's untracked transaction.
+    expect(r.failures).to.have.lengthOf(3);
+    expect(r.failures.some((l: string) => NONCE.test(l))).to.equal(true);
+  });
+
+  // Review of 4.17 slice B (X1-X6): what the event scan alone missed.
+  /** Run `act` once, inside the first getBlockNumber called under `where`. */
+  function hookOnce(where: string, act: () => Promise<void>) {
+    const p: any = ethers.provider;
+    const orig = p.getBlockNumber.bind(p);
+    let done = false;
+    p.getBlockNumber = async () => {
+      if (!done && (new Error().stack || "").includes(where)) {
+        done = true;
+        await act();
+      }
+      return orig();
+    };
+    return () => {
+      p.getBlockNumber = orig;
+      return done;
+    };
+  }
+  async function mintByDeployer(to: string, amt: bigint) {
+    const t = c.token.connect(f.deployer);
+    await t.addAgent(f.deployer.address);
+    await t.mint(to, amt);
+    await t.removeAgent(f.deployer.address);
+  }
+
+  it("X1: a compliance swap and back in the window is refused by the deployer's nonce", async function () {
+    await mintByDeployer(f.voters[0].address, E("100"));
+    const report = await steps();
+    const yes = await (
+      await ethers.getContractFactory("YesCompliance")
+    ).deploy();
+    const rules = await c.complianceRules.getAddress();
+    await c.token.connect(f.deployer).setCompliance(yes.target);
+    await c.token.connect(f.voters[0]).transfer(f.stranger.address, E("10"));
+    await c.token.connect(f.deployer).setCompliance(rules);
+    await accept(report);
+    expect(await c.token.balanceOf(f.stranger.address)).to.equal(E("10"));
+    await failsWith(NONCE);
+  });
+
+  it("X2/X3: a deployer mint while the preflight or the snapshot reads is refused", async function () {
+    for (const where of ["snapshotFacts", "preflightEscrow"]) {
+      const g = await handoverFixture();
+      ({ c, args } = g);
+      f = g;
+      const un = hookOnce(where, () =>
+        mintByDeployer(f.voters[0].address, E("7")),
+      );
+      let report;
+      try {
+        report = await steps();
+      } finally {
+        expect(un(), where).to.equal(true);
+      }
+      await accept(report);
+      await failsWith(WINDOW("VSC mint"), NONCE);
+    }
+  });
+
+  it("X4: an escrow the deployer arbitrates is refused before step 1", async function () {
+    const e = c.escrowWalletFactory;
+    await e.registerInvestor(f.deployer.address, f.feeWallet.address);
+    await e
+      .connect(f.deployer)
+      .createEscrowWallet(f.voters[0].address, f.voters[1].address, E("1"));
+    const w = await e.getWalletAddress(1);
+    await refusedAt(
+      new RegExp(
+        `the deployer arbitrates escrow ${w}: settle it before the ceremony`,
+      ),
+    );
+  });
+
+  it("X5: an escrow the deployer creates during step 5 is refused", async function () {
+    const e = c.escrowWalletFactory;
+    await e.registerInvestor(f.deployer.address, f.feeWallet.address);
+    const un = hookOnce("escrowSteps", async () => {
+      await e
+        .connect(f.deployer)
+        .createEscrowWallet(f.voters[0].address, f.voters[1].address, E("1"));
+    });
+    let report;
+    try {
+      report = await steps();
+    } finally {
+      expect(un()).to.equal(true);
+    }
+    await accept(report);
+    await failsWith(
+      NONCE,
+      /^no escrow ComplianceRules trusts is arbitrated by the deployer$/,
+    );
+  });
+
+  it("X6: an exempt wallet is no acknowledged fee wallet (R-417-2 replaced)", async function () {
+    await c.investorTypeRegistry.setInvestorLimitExempt(
+      f.stranger.address,
+      true,
+    );
+    await c.escrowWalletFactory.setOwnerWallet(f.stranger.address);
+    await refusedAt(
+      new RegExp(`EscrowWalletFactory ownerWallet is ${f.stranger.address}`),
+    );
   });
 });

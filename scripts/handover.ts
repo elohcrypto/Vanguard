@@ -263,6 +263,10 @@ export async function runHandover(
         `${snapshotPath}: no preflight snapshot from the full phase; the accept phase cannot prove the chain did not change since step 1`,
       );
     }
+    // Residual (review B-6, same trust as M-1): the file is the full
+    // phase's word. Its ceremonyTxs, block and nonce bound the voting
+    // window; an operator who edits it can launder a deployer transaction
+    // into the ceremony's. Keep it with the run's records.
     const snap = JSON.parse(fs.readFileSync(snapshotPath, "utf8"));
     if (String(snap.governance).toLowerCase() !== govAddr) {
       throw new Error(

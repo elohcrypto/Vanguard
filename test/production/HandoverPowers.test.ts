@@ -188,13 +188,13 @@ describe("Handover power set from chain (plan 2F.5)", function () {
         await zk.getAddress(),
       );
       expect(await pm.listOperator()).to.equal(ops.address);
-      // After it, the deployer cannot publish a root or swap a verifier.
-      await expect(pm.publishWhitelistRoot(root)).to.be.revertedWithCustomError(
-        pm,
-        "NotListOperator",
-      );
+      // After it, the deployer cannot publish a root or swap a verifier
+      // (read-only: a sent attempt is a window transaction, Task 4.17).
       await expect(
-        zk.updateVerifier("whitelist", await zk.getAddress()),
+        pm.publishWhitelistRoot.staticCall(root),
+      ).to.be.revertedWithCustomError(pm, "NotListOperator");
+      await expect(
+        zk.updateVerifier.staticCall("whitelist", await zk.getAddress()),
       ).to.be.revertedWithCustomError(zk, "OwnableUnauthorizedAccount");
       await pm.connect(ops).publishWhitelistRoot(root);
       const { checks, failures } = await assertHandoverComplete(args);
@@ -360,11 +360,15 @@ describe("Handover power set from chain (plan 2F.5)", function () {
       expect(failures[0]).to.equal(
         "EscrowWalletFactory ADMIN_ROLE held only by ops",
       );
-      expect(failures.slice(1)).to.have.lengthOf(2);
-      for (const l of failures.slice(1))
+      // ... and the deployer's two untracked transactions (its nonce).
+      expect(failures).to.have.lengthOf(4);
+      for (const l of failures.slice(1, 3))
         expect(l).to.match(
           /^EscrowWalletFactory RoleGranted at block \d+ sent by/,
         );
+      expect(failures[3]).to.match(
+        /^deployer sent 2 transaction\(s\) in the voting window/,
+      );
       expect(checks.map((x: any) => x.label)).to.include(
         "EscrowWalletFactory DEFAULT_ADMIN_ROLE held only by governance",
       );
