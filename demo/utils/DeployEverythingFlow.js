@@ -25,35 +25,34 @@ const {
  *
  * WHY A SEPARATE METHOD
  * ---------------------
- * `deployAllContracts()` despite its name deploys only the BASE layer
- * (OnchainID factory, issuers, identity registry, oracles). The digital
- * token, compliance rules, investor types and governance each live behind
- * their own menu option, and they depend on each other in a specific order
- * that the menu does not state.
+ * `deployAllContracts()` (menu 1) deploys only the BASE layer: OnchainID
+ * factory, issuers, ERC-3643 registries and the privacy pair. The token,
+ * the oracles, the investor types and governance each live behind their
+ * own menu option, and they depend on each other in an order the menu
+ * does not state.
  *
  * THE ORDER, AND WHY (verified by running the menu, not inferred)
  * ---------------------------------------------------------------
- *   1. deployAllContracts       (menu 1)  OnchainID contracts + ERC-3643
- *                                         registries -> `identityRegistry`,
- *                                         privacy pair -> `privacyManager`
- *   2. deployDigitalTokenSystem (menu 21) -> `digitalToken`, and deploys
+ *   1. deployAllContracts       (menu 1)  OnchainID + registries ->
+ *                                         `identityRegistry`, privacy pair
+ *   2. deployDigitalTokenSystem (menu 21) -> `digitalToken`; deploys
  *                                         `complianceRules` itself if absent
- *   3. investor type registry   (menu 51) -> `investorTypeRegistry`
- *   4. governance               (menu 74) REQUIRES identityRegistry AND
- *                                         complianceRules
- *                                         (GovernanceModule.js:80-85)
+ *   3. deployOracleSystem       (menu 31) -> `oracleManager`, list oracles,
+ *                                         ConsensusOracle; binds the
+ *                                         blacklist oracle to VSC (needs 21)
+ *   4. investor type registry   (menu 51) -> `investorTypeRegistry`
+ *   5. governance               (menu 74) REQUIRES identityRegistry AND
+ *                                         complianceRules, and binds the
+ *                                         OracleManager and the registry
+ *                                         at construction: deployed last
  *
- * The trap: `deployAllContracts` does NOT register `complianceRules` (that
- * happens in `deployComplianceRulesWithConfig`, line ~318). So `1` then `74`
- * fails with "Deploy ERC-3643 system first (option 21)". Step 2 satisfies it
- * — not because option 21 is magic, but because deployDigitalTokenSystem
+ * Step 3 is D57 (Task 4.16): governance binds boundTarget(2) to the
+ * OracleManager it is constructed with, so a stack deployed without the
+ * oracles could never govern or hand them over (83c refused). Step 2
  * deploys ComplianceRules on demand with DEFAULT_ALLOWED_COUNTRIES /
- * DEFAULT_BLOCKED_COUNTRIES (DeployDefaults.js).
- *
- * Menu option 13 is NOT required. It deploys the same contract but prompts
- * for country lists; chaining it here with empty lists would leave the
- * one-click path with no blocked jurisdictions at all — more permissive than
- * the normal menu route. Verified: `1 21 51 74` completes with zero errors.
+ * DEFAULT_BLOCKED_COUNTRIES (DeployDefaults.js); menu option 13 is not
+ * used here because it prompts for country lists, and chaining it with
+ * empty lists would leave the one-click path with no blocked jurisdiction.
  *
  * Every step below is prompt-free (verified), so this runs unattended.
  *
@@ -77,8 +76,10 @@ async function deployEverything(mod, modules) {
   console.log(
     `      blacklist: ${DEFAULT_BLOCKED_COUNTRIES.length} countries incl. Russia (643)`,
   );
-  console.log("   3. Investor Type Registry");
-  console.log("   4. Governance (nominates itself as registry owner)");
+  console.log("   3. Oracle system (manager, list oracles, consensus engine;");
+  console.log("      the blacklist oracle gates VSC)");
+  console.log("   4. Investor Type Registry");
+  console.log("   5. Governance (bound to every contract above)");
   console.log("");
 
   const steps = [
@@ -97,6 +98,13 @@ async function deployEverything(mod, modules) {
       name: "ERC-3643 token + ComplianceRules",
       run: () => mod.deployDigitalTokenSystem(),
       expect: "digitalToken",
+    },
+    {
+      // D57: after the token (the blacklist binding needs it), before
+      // governance (which binds the OracleManager at construction).
+      name: "Oracle system",
+      run: () => mod.deployOracleSystem(),
+      expect: "oracleManager",
     },
     {
       name: "Investor Type Registry",
@@ -183,12 +191,13 @@ function _reportDeploySummary(mod, done, steps, reached) {
     console.log(
       "   • Options 6 and 7 — KYC/AML claims for any still unverified",
     );
-    console.log("   • Option 75 — distribute VGT so they can pay vote fees");
+    console.log("   • Option 75a — mint VGT so they can pay vote fees");
     console.log(
-      "   • Option 83b — governance accepts registry ownership by vote",
+      "   • Options 83c, 83d, 83e — the handover ceremony (deployer out,",
     );
+    console.log("      governance accepts every contract by vote, verify)");
     console.log(
-      "\n   ℹ️  83b needs at least 2 KYC/AML-verified signers holding VGT.",
+      "\n   ℹ️  83d needs at least 2 KYC/AML-verified signers holding VGT.",
     );
     console.log(
       "      A fresh deploy registers only the governance contract itself.",
