@@ -95,7 +95,7 @@ describe("Recovery robustness (4.14): A2 probes and killed mutants", function ()
       for (const t of [0, 1]) {
         await expect(
           f.km.setupKeyRecovery(f.idA, agents, t),
-        ).to.be.revertedWith("KeyManager: Threshold below 2");
+        ).to.be.revertedWithCustomError(f.km, "ThresholdBelowTwo");
       }
       if (!seated) await f.km.setupKeyRecovery(f.idA, agents, 2);
     }

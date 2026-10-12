@@ -277,10 +277,10 @@ describe("List oracle guards (Task 4.15)", function () {
       const long = "r".repeat(257);
       await expect(
         WO.addToWhitelist(subject.address, 2, 0, long),
-      ).to.be.revertedWith("WhitelistOracle: Reason too long");
+      ).to.be.revertedWithCustomError(WO, "ReasonTooLong");
       await expect(
         WO.batchAddToWhitelist([subject.address], [2], 0, long),
-      ).to.be.revertedWith("WhitelistOracle: Reason too long");
+      ).to.be.revertedWithCustomError(WO, "ReasonTooLong");
       await WO.addToWhitelist(subject.address, 2, 0, "r".repeat(256));
       await WO.batchAddToWhitelist([stranger.address], [3], 0, "r".repeat(256));
       expect(await WO.whitelistStanding(subject.address)).to.deep.equal([

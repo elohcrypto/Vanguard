@@ -210,7 +210,7 @@ describe("Selector denylist (L5)", function () {
           proposer.address,
         ]),
       ),
-    ).to.be.revertedWith("Governance ownership not transferable by vote");
+    ).to.be.revertedWithCustomError(gov, "GovernanceOwnershipByVote");
     expect(await gov.proposalCount()).to.equal(0n);
     await propose(
       SYS,

@@ -72,6 +72,8 @@ abstract contract KeyManagerRecovery is ReentrancyGuard {
 
     /// @dev Setup is the identity owner's (Task 4.11).
     error NotIdentityOwner();
+    /// @dev D59 (a): a seat or re-seat needs two agents.
+    error ThresholdBelowTwo();
     /// @dev Setup while a recovery is approved or its owner transfer pends.
     error RecoveryLocked();
     /// @dev The candidate's window has passed: re-initiate it.

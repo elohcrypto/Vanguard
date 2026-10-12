@@ -62,7 +62,7 @@ abstract contract KeyManagerRecoverySetup is KeyManagerRecovery {
         // D59 (a), Task 4.17: since D39 an agent's open is its approval, so
         // one agent key alone would move the identity; seats and re-seats
         // (both proposed here) need two.
-        require(_threshold >= 2, "KeyManager: Threshold below 2");
+        if (_threshold < 2) revert ThresholdBelowTwo();
         require(_threshold <= _recoveryAgents.length, "KeyManager: Invalid threshold");
         // A duplicate would let one agent count twice (2F.2 review, F3).
         for (uint256 i = 0; i < _recoveryAgents.length; i++) {

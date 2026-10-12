@@ -112,6 +112,8 @@ abstract contract GovernanceProposals is GovernanceConfig, ReentrancyGuard {
     ///         type has no bound target. Thresholds are chosen by type, so an
     ///         unbound target let any action run under the weakest tier.
     error TargetNotBoundToType(ProposalType proposalType, address target);
+    /// @dev D55: no SystemParameters vote transfers governance itself.
+    error GovernanceOwnershipByVote();
 
     /**
      * @dev Create a new proposal
@@ -276,7 +278,7 @@ abstract contract GovernanceProposals is GovernanceConfig, ReentrancyGuard {
         // D55 (b), Task 4.17: the SystemParameters row targets governance
         // itself; a vote must not hand governance's own ownership to a key.
         if (proposalType == ProposalType.SystemParameters) {
-            require(sel != SEL_TRANSFER_OWNERSHIP, "Governance ownership not transferable by vote");
+            if (sel == SEL_TRANSFER_OWNERSHIP) revert GovernanceOwnershipByVote();
         }
         if (proposalType == ProposalType.ListUpdate) {
             require(

@@ -14,6 +14,8 @@ contract WhitelistOracle is ListOracleBase {
     /// @notice The resolved whitelist query carries no tier in 1..5 (the
     ///         manager refuses one at submit; Task 4.12).
     error InvalidQueryTier();
+    /// @dev A1F-3: a listing reason is at most MAX_REASON_LENGTH bytes.
+    error ReasonTooLong();
 
     struct WhitelistEntry {
         bool isWhitelisted;
@@ -164,7 +166,7 @@ contract WhitelistOracle is ListOracleBase {
     ) external onlyOwnerOrListManager {
         require(_subject != address(0), "WhitelistOracle: Invalid subject");
         require(_tier >= MIN_TIER && _tier <= MAX_TIER, "WhitelistOracle: Invalid tier");
-        require(bytes(_reason).length <= MAX_REASON_LENGTH, "WhitelistOracle: Reason too long");
+        if (bytes(_reason).length > MAX_REASON_LENGTH) revert ReasonTooLong();
 
         uint256 expiryTime = _expiry(_duration);
 
@@ -346,7 +348,7 @@ contract WhitelistOracle is ListOracleBase {
         string calldata _reason
     ) external onlyOwner {
         require(_subjects.length == _tiers.length, "WhitelistOracle: Array length mismatch");
-        require(bytes(_reason).length <= MAX_REASON_LENGTH, "WhitelistOracle: Reason too long");
+        if (bytes(_reason).length > MAX_REASON_LENGTH) revert ReasonTooLong();
 
         for (uint256 i = 0; i < _subjects.length; i++) {
             require(_subjects[i] != address(0), "WhitelistOracle: Invalid subject");

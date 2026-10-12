@@ -707,7 +707,7 @@ describe("KeyManager", function () {
         for (const t of [0, 1]) {
           await expect(
             km.setupKeyRecovery(idA, recoveryAgents, t),
-          ).to.be.revertedWith("KeyManager: Threshold below 2");
+          ).to.be.revertedWithCustomError(km, "ThresholdBelowTwo");
         }
         await expect(
           km.setupKeyRecovery(idA, recoveryAgents, 4), // > agents length
