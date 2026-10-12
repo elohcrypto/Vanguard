@@ -326,8 +326,12 @@ async function runHandoverSmoke(state, failures) {
       () => opsVgt.recoveryAddress.staticCall(voter, govAddr, voterId),
     ],
     [
+      // Since Task 4.14 (D41) the new wallet must control the identity, and
+      // governance holds no key on a voter's, so that refusal comes first;
+      // the any-token trust guard behind it is pinned by the tests that give
+      // the contract a key (GovernanceAgentLimits P1, PerTokenTrust G5).
       "VSC recoveryAddress(voter, governance)",
-      /^Recovery blocked by compliance$/,
+      /WalletDoesNotControlIdentity|^Recovery blocked by compliance$/,
       () => opsVsc.recoveryAddress.staticCall(voter, govAddr, voterId),
     ],
   ];
