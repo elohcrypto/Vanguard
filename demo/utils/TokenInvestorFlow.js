@@ -250,7 +250,12 @@ async function approveInvestorRequest(mod) {
     console.log(`📋 New Type: ${selectedUser.type}`);
     console.log(`🔐 Multi-Sig Wallet: ${selectedUser.multiSigWallet.address}`);
   } catch (error) {
-    console.error("❌ Approval failed:", error.message);
+    // Q7 c (Task 4.16): a chain rule refusing, not a demo failure.
+    if (/TierBelowNewType/.test(error.message)) {
+      console.log(
+        "⛔ Approval refused (chain rule, Q7 c): whitelist tier below the requested type's; raise it (option 33 -> 2) first",
+      );
+    } else console.error("❌ Approval failed:", error.message);
   }
 }
 

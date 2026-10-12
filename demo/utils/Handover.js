@@ -45,6 +45,7 @@ const { preflightKeyManager } = require("./HandoverKeys");
 const { preflightRegistrars } = require("./HandoverRegistrars");
 const { preflightOracles, oracleSteps } = require("./HandoverOracles");
 const { withDerivedContracts, preflightLinks } = require("./HandoverDerive");
+const { preflightHolders } = require("./HandoverHolders");
 const { preflightRoles } = require("./HandoverRoles");
 const { preflightTrust } = require("./HandoverTrust");
 const { preflightNodes, nodeSteps } = require("./HandoverNodes");
@@ -103,6 +104,8 @@ async function handoverDeployerPowers(o) {
 
   // Read-only; throws before any transaction when a precondition fails.
   const { governanceOwned } = await preflight(o);
+  // Task 4.16 (D47): a whitelist oracle bound to VSC must list every holder.
+  await preflightHolders(o, (w) => log(`   ⚠️  ${w}`));
   await preflightLinks(o); // Task 4.13: A1 H2/H3, M1, D56
   await preflightPowers(o, { governanceOwned });
   await preflightRoles(o); // Task 4.13: exact role sets (A1 H1)

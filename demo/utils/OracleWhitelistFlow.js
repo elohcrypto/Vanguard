@@ -9,6 +9,8 @@
 
 "use strict";
 
+const { listSigner, listedHolders } = require("./WhitelistBindFlow");
+
 /** Option 33: Manage Oracle Whitelist */
 async function manageWhitelist(mod) {
   console.log("\n📋 MANAGE ORACLE WHITELIST (ACCESS APPROVAL)");
@@ -131,17 +133,24 @@ async function upgradeWhitelistTier(mod) {
 
   const whitelistOracle = mod.state.getContract("whitelistOracle");
 
-  // Show available identities
-  if (!mod.state.identities || mod.state.identities.size === 0) {
+  // Candidates: the demo's identities (options 3, 12, 22) and, Task 4.16
+  // (D47), every VSC holder the oracle lists (from chain; option 23's
+  // users are never in state.identities).
+  const identityArray = Array.from(mod.state.identities?.values() || []);
+  for (const h of await listedHolders(mod.state)) {
+    if (!identityArray.some((i) => i.owner === h)) {
+      identityArray.push({ owner: h, address: "(VSC holder)" });
+    }
+  }
+  if (identityArray.length === 0) {
     console.log(
-      "ℹ️  No OnchainID identities found. Please create identities first (option 3)",
+      "ℹ️  No OnchainID identities or listed VSC holders found (options 3, 23, 38a)",
     );
     return;
   }
 
   console.log("🆔 Available Identities:");
   let index = 0;
-  const identityArray = Array.from(mod.state.identities.values());
   const seenAddresses = new Set();
   const uniqueIdentities = [];
 
@@ -197,12 +206,21 @@ async function upgradeWhitelistTier(mod) {
 
   const durationSeconds = parseInt(duration) * 24 * 60 * 60;
 
-  const tx = await whitelistOracle.addToWhitelist(
-    selectedIdentity.owner,
-    parseInt(newTier),
-    durationSeconds,
-    reason,
-  );
+  // The oracle's owner or list manager signs: the deployer before the
+  // handover, ops after it (Task 4.16).
+  const signer = await listSigner(mod.state, whitelistOracle);
+  if (!signer) {
+    console.log("⛔ No loaded wallet owns or manages the whitelist oracle");
+    return;
+  }
+  const tx = await whitelistOracle
+    .connect(signer)
+    .addToWhitelist(
+      selectedIdentity.owner,
+      parseInt(newTier),
+      durationSeconds,
+      reason,
+    );
   const receipt = await tx.wait();
 
   console.log("\n✅ WHITELIST TIER UPGRADED!");

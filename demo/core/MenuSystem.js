@@ -225,6 +225,9 @@ class MenuSystem {
         case "38":
           await oracle.integrateWithToken();
           break;
+        case "38a":
+          await oracle.bindWhitelistToToken();
+          break;
         case "39":
           await oracle.showDashboard();
           break;

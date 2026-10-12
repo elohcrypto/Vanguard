@@ -36,6 +36,7 @@ const {
 const { privacyLines } = require("./HandoverPrivacy");
 const { keyManagerLines } = require("./HandoverKeys");
 const { registrarLines, custodyOwnerLines } = require("./HandoverRegistrars");
+const { holderLines } = require("./HandoverHolders");
 const { oracleLines } = require("./HandoverOracles");
 const { withDerivedContracts, linkLines } = require("./HandoverDerive");
 const { roleLines } = require("./HandoverRoles");
@@ -146,6 +147,8 @@ async function assertHandoverComplete(o) {
   // Task 4.3: every trusted-contract registrar names compiled wallet code.
   await lines("registrars", registrarLines(o));
   await lines("custody owners", custodyOwnerLines(o, dAddr, ops, govAddr));
+  // Task 4.16 (D47): every VSC holder listed at its tier, or no oracle.
+  await lines("holders", holderLines(o, warnings));
   // Task 4.13: trusted contracts by registrar provenance; registrar code
   // and InvestorRequestManager immutables (B G-4/G-10, A1 M2).
   await lines("trust", trustLines(o, warnings, residual));

@@ -1,0 +1,163 @@
+/**
+ * @fileoverview Task 4.16 (D47): the VSC holders and their standing on the
+ * whitelist oracle bound to VSC. A whitelist oracle in OracleOnly refuses
+ * every unlisted holder (default-deny) and, with an investor-type registry
+ * live on the token, every holder listed below its type's tier (R-410-6);
+ * in Either an unlisted holder may still pass by a proof binding, a short
+ * live entry refuses in both modes. The ceremony's preflight refuses the
+ * holders a bind would freeze and warns on the rest; the completion prints
+ * the standing; demo option 38a fills the oracle before it binds. Trusted
+ * contracts skip the whitelist (the human counterparty is checked) and
+ * are left out of the holder set.
+ */
+
+const { ethers } = require("hardhat");
+const { addrOf, same, fail, MODE } = require("./HandoverChecks");
+const { scanLogs } = require("./HandoverScans");
+
+const ZERO = ethers.ZeroAddress;
+const WL_ABI = [
+  "function isWhitelisted(address) view returns (bool)",
+  "function getWhitelistInfo(address) view returns (bool, uint256, uint256, uint8, string, address[])",
+];
+const REG_ABI = [
+  "function getRequiredWhitelistTier(address) view returns (uint8)",
+  "function investorLimitExempt(address) view returns (bool)",
+];
+
+/**
+ * Every address that holds VSC now and is not a trusted contract on it,
+ * from the Transfer scan (mints included) since o.fromBlock.
+ */
+async function vscHolders(o) {
+  const token = o.token;
+  const vsc = await addrOf(token);
+  const seen = new Set();
+  const out = [];
+  for (const ev of await scanLogs(token, token.filters.Transfer(), o)) {
+    const to = ethers.getAddress(ev.args[1]);
+    if (same(to, ZERO) || seen.has(to)) continue;
+    seen.add(to);
+    if ((await token.balanceOf(to)) === 0n) continue;
+    if (await o.complianceRules["isTrustedContract(address,address)"](vsc, to))
+      continue;
+    out.push(to);
+  }
+  return out;
+}
+
+/**
+ * The holders' standing on `oracle` (the one bound to VSC by default):
+ * { mode, oracle, holders: [{ address, listed, tier, required, exempt,
+ * ok }] }, or null when no oracle is bound and none is given. `required`
+ * is the holder's investor type's tier (0 with no registry live on the
+ * token); `ok` is listed and, unless exempt, tier >= required.
+ */
+async function holderStanding(o, oracle) {
+  const vsc = await addrOf(o.token);
+  const rules = o.complianceRules;
+  const wl = oracle ? await addrOf(oracle) : await rules.whitelistOracle(vsc);
+  if (same(wl, ZERO)) return null;
+  const mode = MODE[Number(await rules.whitelistMode(vsc))];
+  const list = await ethers.getContractAt(WL_ABI, wl);
+  const regAddr = await o.token.investorTypeRegistry();
+  const reg = same(regAddr, ZERO)
+    ? null
+    : await ethers.getContractAt(REG_ABI, regAddr);
+  const holders = [];
+  for (const address of await vscHolders(o)) {
+    const info = await list.getWhitelistInfo(address);
+    const listed = Boolean(info[0]);
+    const tier = Number(info[3]);
+    const required = reg
+      ? Number(await reg.getRequiredWhitelistTier(address))
+      : 0;
+    const exempt = reg ? await reg.investorLimitExempt(address) : false;
+    holders.push({
+      address,
+      listed,
+      tier,
+      required,
+      exempt,
+      ok: listed && (exempt || tier >= required),
+    });
+  }
+  return { mode, oracle: wl, holders };
+}
+
+const addrs = (hs) => hs.map((h) => h.address).join(", ");
+
+/**
+ * D47: read-only, before the ceremony's first transaction. With a
+ * whitelist oracle bound to VSC: in OracleOnly an unlisted holder is
+ * refused (the bind would freeze it and after the handover only ops can
+ * list it); a holder listed below its type's tier is refused in OracleOnly
+ * and Either alike (R-410-6); in Either an unlisted holder is a warning
+ * (it may pass by a proof binding). ZkOnly reads no entry. Returns the
+ * standing, or null when no oracle is bound.
+ */
+async function preflightHolders(o, warn = () => {}) {
+  const s = await holderStanding(o);
+  if (!s || s.mode === "ZkOnly") return s;
+  const unlisted = s.holders.filter((h) => !h.listed);
+  const short = s.holders.filter((h) => h.listed && !h.ok);
+  if (unlisted.length && s.mode === "OracleOnly") {
+    fail(
+      `whitelist oracle ${s.oracle} is bound to VSC in OracleOnly and ${unlisted.length} current holder(s) are not listed (${addrs(unlisted)}): every transfer of theirs is refused, and after the handover only ops can list them; list them first (demo option 38a lists every holder at its tier) or unbind the oracle (setWhitelistOracle(VSC, 0))`,
+    );
+  }
+  if (short.length) {
+    fail(
+      `whitelist oracle ${s.oracle} lists ${short.length} VSC holder(s) below the tier their investor type requires (${short.map((h) => `${h.address} tier ${h.tier} < ${h.required}`).join(", ")}): R-410-6 refuses their transfers; raise the entries (option 33 -> 2) first`,
+    );
+  }
+  if (unlisted.length) {
+    warn(
+      `whitelist oracle ${s.oracle} is bound to VSC in Either and ${unlisted.length} holder(s) are not listed (${addrs(unlisted)}): they pass only by a live PrivacyManager binding`,
+    );
+  }
+  return s;
+}
+
+/**
+ * Completion lines: the standing of every holder on the bound oracle (a
+ * failing line in OracleOnly for an unlisted holder, in both modes for a
+ * short entry), or the one line that no oracle is bound.
+ */
+async function holderLines(o, warnings) {
+  const s = await holderStanding(o);
+  if (!s) {
+    return [
+      [
+        "no whitelist oracle bound to VSC: the investor-type tier rule is inert until a ComplianceRules vote binds one (D47)",
+        true,
+      ],
+    ];
+  }
+  if (s.mode === "ZkOnly") {
+    return [
+      [
+        `VSC in ZkOnly: the bound whitelist oracle ${s.oracle} is not read`,
+        true,
+      ],
+    ];
+  }
+  const unlisted = s.holders.filter((h) => !h.listed);
+  const short = s.holders.filter((h) => h.listed && !h.ok);
+  if (s.mode === "Either" && unlisted.length) {
+    warnings.push(
+      `${unlisted.length} VSC holder(s) not listed on ${s.oracle} (Either): ${addrs(unlisted)} pass only by a proof binding`,
+    );
+  }
+  const bad = s.mode === "OracleOnly" ? [...unlisted, ...short] : short;
+  return [
+    [
+      bad.length
+        ? `whitelist oracle ${s.oracle} (${s.mode}) refuses ${bad.length} of ${s.holders.length} VSC holder(s): ${bad.map((h) => `${h.address} (${h.listed ? `tier ${h.tier} < ${h.required}` : "unlisted"})`).join(", ")}`
+        : `every one of ${s.holders.length} VSC holder(s) is listed at its tier on the bound whitelist oracle ${s.oracle} (${s.mode})`,
+      bad.length === 0,
+    ],
+  ];
+}
+
+module.exports = { vscHolders, holderStanding, preflightHolders, holderLines };

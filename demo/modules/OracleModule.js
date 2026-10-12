@@ -11,6 +11,7 @@ const whitelist = require("../utils/OracleWhitelistFlow");
 const blacklist = require("../utils/OracleBlacklistFlow");
 const reputation = require("../utils/OracleReputationFlow");
 const dashboard = require("../utils/OracleDashboardFlow");
+const bind = require("../utils/WhitelistBindFlow");
 
 /**
  * @class OracleModule
@@ -130,6 +131,11 @@ class OracleModule {
   /** Option 38: Integrate Oracles with Token */
   async integrateWithToken() {
     return dashboard.integrateWithToken(this);
+  }
+
+  /** Option 38a: fill the whitelist oracle for every VSC holder, bind it (D47) */
+  async bindWhitelistToToken() {
+    return bind.bindWhitelistToToken(this);
   }
 
   /** Option 39: Oracle System Dashboard */

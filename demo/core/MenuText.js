@@ -83,6 +83,9 @@ function displayMenu(mod) {
   console.log("36. Oracle Reputation Management");
   console.log("37. Oracle Consensus Operations");
   console.log("38. Integrate Oracles with Vanguard StableCoin");
+  console.log(
+    "38a. Bind the whitelist oracle to VSC: list every holder at its tier, then setWhitelistOracle (by vote after the handover)",
+  );
   console.log("39. Oracle System Dashboard");
   console.log("40. Test Complete Oracle Integration");
   console.log("");

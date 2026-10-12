@@ -18,6 +18,7 @@ const { voterAgeRefusal } = require("./ChainTime");
 const { ethers } = require("hardhat");
 const { createOracleParametersProposal } = require("./OracleProposal");
 const { createPrivacyProposal } = require("./PrivacyProposal");
+const { bindProposal } = require("./WhitelistBindFlow");
 
 /**
  * Proposal type names in ProposalType enum order.
@@ -379,10 +380,13 @@ async function _createComplianceRulesProposal(mod) {
   console.log("1. Update jurisdiction rules (allowed/blocked countries)");
   console.log("2. Clear the token's jurisdiction rule (default rule applies)");
   console.log(
+    "3. Bind the whitelist oracle to VSC (setWhitelistOracle; D47, holders listed first: 38a)",
+  );
+  console.log(
     "   (Investor limits are InvestorTypeConfig votes, type 0: Task 4.1)",
   );
 
-  const actionChoice = await mod.promptUser("Select action (1-2): ");
+  const actionChoice = await mod.promptUser("Select action (1-3): ");
 
   const complianceRules = mod.state.getContract("complianceRules");
   let title, description, callData;
@@ -428,6 +432,15 @@ async function _createComplianceRulesProposal(mod) {
         [tokenAddress],
       );
       break;
+
+    case "3": {
+      // Task 4.16 (D47): a type-1 proposal passes _requireAllowedSelector;
+      // the holder preflight refuses a bind that would freeze a holder.
+      const built = await bindProposal(mod);
+      if (!built) return;
+      ({ title, description, callData } = built);
+      break;
+    }
 
     default:
       displayError("Invalid choice");

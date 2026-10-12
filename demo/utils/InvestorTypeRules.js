@@ -155,6 +155,11 @@ async function printTiers(state, log = console.log) {
   const oracle = bound
     ? await ethers.getContractAt("WhitelistOracle", wl)
     : null;
+  // Task 4.16 (D47): with an oracle bound, every VSC holder's standing.
+  if (oracle && mode !== "ZkOnly") {
+    const { printStanding } = require("./WhitelistBindFlow");
+    await printStanding(state, log);
+  }
   log("\n👤 Demo wallets:");
   for (const s of state.signers.slice(1, 5)) {
     const type = Number(await registry.getInvestorType(s.address));
