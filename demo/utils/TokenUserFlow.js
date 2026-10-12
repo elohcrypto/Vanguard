@@ -270,7 +270,7 @@ async function createNonCompliantNormalUser(mod) {
 
     console.log(`   ✅ Transaction Hash: ${receipt2.hash}`);
     console.log(`   ⛽ Gas Used: ${receipt2.gasUsed.toLocaleString()}`);
-    console.log(`   ❌ KYC Status: REJECTED`);
+    console.log(`   ⛔ KYC Status: REJECTED (expected: a non-compliant user)`);
 
     // Note: Do NOT register in IdentityRegistry - non-compliant users are not verified
 
@@ -365,7 +365,7 @@ async function viewAllNormalUsers(mod) {
   console.log("\n📊 NORMAL USER SUMMARY:");
   console.log(`   Total Users: ${mod.state.normalUsers.size}`);
   console.log(`   ✅ Compliant: ${compliantCount}`);
-  console.log(`   ❌ Non-Compliant: ${nonCompliantCount}`);
+  console.log(`   🚫 Non-Compliant: ${nonCompliantCount}`);
   console.log(
     "\n💡 Only compliant users can receive Vanguard StableCoin from investors",
   );
