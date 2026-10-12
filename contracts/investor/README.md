@@ -97,9 +97,9 @@ Manages the complete investor onboarding workflow.
 
 | Investor Type | Lock Amount | Transfer Limit | Holding Limit |
 |--------------|-------------|----------------|---------------|
-| **Retail** | 10,000 VSC | 8,000 VSC | 50,000 VSC |
-| **Accredited** | 100,000 VSC | 50,000 VSC | 500,000 VSC |
-| **Institutional** | 1,000,000 VSC | 500,000 VSC | 5,000,000 VSC |
+| **Retail** | 2,000 VSC (Normal cap / 4) | 8,000 VSC | 50,000 VSC |
+| **Accredited** | 4,000 VSC (Normal cap / 2) | 50,000 VSC | 500,000 VSC |
+| **Institutional** | 8,000 VSC (the Normal cap) | 500,000 VSC | 5,000,000 VSC |
 
 ## 🔒 Security Features
 
@@ -186,10 +186,11 @@ multiSigWallet.signUnlock(proposalId);
 
 ### Update Lock Requirements
 ```solidity
-// Owner updates lock requirement for Retail investors
+// Owner updates lock requirement for Retail investors: at most the Normal
+// type's cap of the registry the token applies (LockAboveNormalCap).
 investorRequestManager.updateLockRequirement(
     InvestorType.Retail,
-    15_000 * 10**18  // New amount: 15,000 tokens
+    6_000 * 10**18  // New amount: 6,000 tokens
 );
 ```
 
