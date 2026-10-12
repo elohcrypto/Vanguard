@@ -143,11 +143,10 @@ contract KeyManager is KeyManagerOwnerTransfer {
             "KeyManager: Initiator no longer a manager"
         );
 
-        // Add new key first
-        require(IOnchainID(_identity).addKey(_newKey, _purpose, 1), "KeyManager: Failed to add new key");
-
-        // Remove old key
+        // Remove first, then add: a rotation at MAX_KEYS_PER_PURPOSE keeps
+        // the count (review N-3); the call is atomic either way.
         require(IOnchainID(_identity).removeKey(_oldKey, _purpose), "KeyManager: Failed to remove old key");
+        require(IOnchainID(_identity).addKey(_newKey, _purpose, 1), "KeyManager: Failed to add new key");
 
         rotation.completed = true;
 

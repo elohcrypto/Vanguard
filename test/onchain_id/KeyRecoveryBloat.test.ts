@@ -112,6 +112,22 @@ describe("Recovery against a bloated key list (4.14, H-1)", function () {
     expect((await f.id.getKeysByPurpose(ACTION)).length).to.equal(64);
   });
 
+  it("a rotation at the cap succeeds and the count stays 64 (N-3)", async function () {
+    const f = await setup(false);
+    for (let i = 0; i < 64; i++)
+      await f.id.addKey(ethers.id(`r${i}`), ACTION, 1);
+    const oldKey = ethers.id("r63");
+    const newKey = ethers.id("r64");
+    await f.km.initiateKeyRotation(f.idA, oldKey, newKey, ACTION);
+    await time.increase(DAY + 1);
+    await f.km
+      .connect(f.anyone)
+      .executeKeyRotation(f.idA, oldKey, newKey, ACTION);
+    expect(await f.id.keyHasPurpose(newKey, ACTION)).to.equal(true);
+    expect(await f.id.keyHasPurpose(oldKey, ACTION)).to.equal(false);
+    expect((await f.id.getKeysByPurpose(ACTION)).length).to.equal(64);
+  });
+
   it("KeyManager batches are capped at 50 and inherit the per-purpose cap", async function () {
     const f = await setup(false);
     expect(await f.km.MAX_BATCH_SIZE()).to.equal(50n);
