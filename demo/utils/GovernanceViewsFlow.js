@@ -100,7 +100,7 @@ async function showDashboard(mod) {
     console.log("\n👥 USER BALANCES & VOTING POWER:");
     console.log("=".repeat(70));
     console.log(
-      "💡 Signer 0 = Contract Owner (received initial VGT supply for distribution)",
+      "💡 Roles below are chain reads (owner(), ownerWallet(), the oracle manager's registry), not the demo's signer plan",
     );
     console.log("");
 
@@ -112,20 +112,8 @@ async function showDashboard(mod) {
         mod.state.signers[i].address,
       );
 
-      // Determine role
-      let role = "";
-      if (i === 0) {
-        role = " (Contract Owner - Token Distributor)";
-      } else if (i === 1) {
-        role = " (Owner Fee Wallet)";
-      } else if (i === 2) {
-        role = " (KYC Issuer)";
-      } else if (i === 3) {
-        role = " (AML Issuer)";
-      } else {
-        role = " (Regular User)";
-      }
-
+      const roles = await _chainRoles(mod.state, mod.state.signers[i].address);
+      const role = ` (chain: ${roles.length ? roles.join(", ") : "no role read"})`;
       console.log(`\nSigner ${i}${role}:`);
       console.log(`   VGT Balance: ${ethers.formatEther(balance)} VGT`);
       // D12 (b): delegation is recorded on VGT, never counted by castVote.
@@ -145,6 +133,34 @@ async function showDashboard(mod) {
   } catch (error) {
     displayError(`Dashboard error: ${error.message}`);
   }
+}
+
+/**
+ * The roles the chain records for `addr` (option 80): contract owners, the
+ * escrow factory's fee wallet, oracle registrations and the emergency flag.
+ */
+async function _chainRoles(state, addr) {
+  const roles = [];
+  const same = (a) => a.toLowerCase() === addr.toLowerCase();
+  for (const [key, label] of [
+    ["digitalToken", "VSC owner"],
+    ["governanceToken", "VGT owner"],
+    ["vanguardGovernance", "governance owner"],
+    ["kycIssuer", "KYC issuer owner"],
+    ["amlIssuer", "AML issuer owner"],
+  ]) {
+    const c = state.getContract(key);
+    if (c && same(await c.owner())) roles.push(label);
+  }
+  const factory = state.getContract("escrowFactory");
+  if (factory && same(await factory.ownerWallet()))
+    roles.push("escrow fee wallet");
+  const om = state.getContract("oracleManager");
+  if (om && (await om.isRegisteredOracle(addr))) {
+    roles.push(`oracle node ${await om.getOracleName(addr)}`);
+    if (await om.isEmergencyOracle(addr)) roles.push("emergency oracle");
+  }
+  return roles;
 }
 
 /** Option 81: Test Compliance Enforcement */
