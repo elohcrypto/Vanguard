@@ -8,7 +8,7 @@ pragma solidity ^0.8.20;
  *      swaps a token's compliance to it and back inside the voting window.
  */
 contract YesCompliance {
-    fallback(bytes calldata) external returns (bytes memory) {
+    fallback(bytes calldata) external payable returns (bytes memory) {
         return abi.encode(uint256(1));
     }
 }
