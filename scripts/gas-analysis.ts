@@ -31,13 +31,15 @@ const NO_COUNTRIES: number[] = [];
 // drop prints a notice so the baseline can be lowered. The hard gate is
 // the in-test bound (VerificationCache.test.ts: E <= A + 40,000), which
 // this never replaces.
+// Task 4.17 (D43 a): B, C and refresh +2,272 per issuer checked (the
+// issuer's isActive read in isClaimValid; D, E use the cache).
 const BASELINE: Record<string, bigint> = {
   A: 96_902n,
-  B: 142_596n,
-  C: 174_138n,
+  B: 144_868n,
+  C: 178_682n,
   D: 105_896n,
   E: 135_232n,
-  refresh: 100_131n,
+  refresh: 104_403n,
 };
 const TOLERANCE = 1_500n;
 

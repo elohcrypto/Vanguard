@@ -300,13 +300,16 @@ contract ClaimIssuer is IClaimIssuer, ClaimIssuerKeys, ReentrancyGuard {
     }
 
     /**
-     * @dev Check if a claim is valid (not revoked and not expired)
+     * @dev Check if a claim is valid (not revoked and not expired), and
+     *      the issuer active: D43 (a), setActive(false) suspends reliance
+     *      on every claim it issued, reversibly (setActive(true)).
      * @param _claimId The claim ID
      * @return valid True if the claim is valid
      */
     function isClaimValid(bytes32 _claimId) public view returns (bool valid) {
         IssuedClaim storage claim = issuedClaims[_claimId];
         return
+            isActive &&
             claim.identity != address(0) &&
             !claim.revoked &&
             (claim.validTo == 0 || claim.validTo > block.timestamp);
