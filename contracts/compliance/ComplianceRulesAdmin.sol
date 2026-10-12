@@ -149,22 +149,41 @@ abstract contract ComplianceRulesAdmin is IComplianceRules, ComplianceRulesTrust
     /**
      * @dev True when `ret` is a canonically encoded
      *      (bool, uint256, uint256, uint8, string, address[]): a six-word
-     *      head whose tier word fits a uint8, the string at 0xc0 and the
-     *      array right after the padded string. A 5-tuple without the
-     *      tier puts its string length where the array's offset belongs,
-     *      so it fails. A tail outside `ret` reverts in the decode: still
-     *      at configuration, never on a transfer.
+     *      head (bool word 0 or 1, tier word within uint8, string offset
+     *      0xc0, array offset right after the padded string), the string
+     *      data and the array length word inside `ret`, a sane array length
+     *      with every element inside `ret` and every address word clean.
+     *      Every malformed shape returns false (so the setter reverts
+     *      OracleIncompatible, never a bare panic); only then the full
+     *      decode runs. Words beyond the array are not read: a trailing
+     *      extra word passes here as it does in the transfer-time decode.
+     *      A 5-tuple without the tier puts its string length where the
+     *      array offset belongs, so it fails the array-offset test.
      */
     function _isWhitelistInfoShape(bytes memory ret) private pure returns (bool) {
         if (ret.length < 8 * 32) return false;
-        (, , , uint256 tier, uint256 strOffset, uint256 arrOffset, uint256 strLen, ) = abi.decode(
+        (uint256 flag, , , uint256 tier, uint256 strOffset, uint256 arrOffset, uint256 strLen, ) = abi.decode(
             ret,
             (uint256, uint256, uint256, uint256, uint256, uint256, uint256, uint256)
         );
-        if (tier > type(uint8).max || strOffset != 0xc0) return false;
-        if (arrOffset != 0xe0 + ((strLen + 31) / 32) * 32) return false;
+        if (flag > 1 || tier > type(uint8).max || strOffset != 0xc0) return false;
+        if (strLen > ret.length || 0xe0 + strLen > ret.length) return false;
+        uint256 arrAt = 0xe0 + ((strLen + 31) / 32) * 32;
+        if (arrOffset != arrAt || arrAt + 32 > ret.length) return false;
+        uint256 arrLen = _word(ret, arrAt);
+        if (arrLen > type(uint32).max || arrAt + 32 + arrLen * 32 > ret.length) return false;
+        for (uint256 i = 0; i < arrLen; i++) {
+            if (_word(ret, arrAt + 32 + i * 32) >> 160 != 0) return false;
+        }
         abi.decode(ret, (bool, uint256, uint256, uint8, string, address[]));
         return true;
+    }
+
+    /// @dev The 32-byte word of `b` at byte offset `off` (caller bounds it).
+    function _word(bytes memory b, uint256 off) private pure returns (uint256 w) {
+        for (uint256 i = 0; i < 32; i++) {
+            w = (w << 8) | uint8(b[off + i]);
+        }
     }
 
     /**
