@@ -273,6 +273,11 @@ abstract contract GovernanceProposals is GovernanceConfig, ReentrancyGuard {
                 sel != SEL_BURN_SELF,
             "Selector not allowed"
         );
+        // D55 (b), Task 4.17: the SystemParameters row targets governance
+        // itself; a vote must not hand governance's own ownership to a key.
+        if (proposalType == ProposalType.SystemParameters) {
+            require(sel != SEL_TRANSFER_OWNERSHIP, "Governance ownership not transferable by vote");
+        }
         if (proposalType == ProposalType.ListUpdate) {
             require(
                 sel == SEL_ADD_WHITELIST ||

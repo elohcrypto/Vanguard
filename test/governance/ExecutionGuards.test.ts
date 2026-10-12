@@ -197,6 +197,29 @@ describe("Selector denylist (L5)", function () {
     expect(await gov.proposalCount()).to.equal(0n);
   });
 
+  // D55 (b), Task 4.17: the SystemParameters row cannot hand
+  // governance's own ownership away; its other setters still pass.
+  it("SystemParameters refuses transferOwnership of governance itself (D55)", async function () {
+    const { gov, propose, proposer } = await setup();
+    const SYS = 4; // ProposalType.SystemParameters
+    await expect(
+      propose(
+        SYS,
+        gov,
+        gov.interface.encodeFunctionData("transferOwnership", [
+          proposer.address,
+        ]),
+      ),
+    ).to.be.revertedWith("Governance ownership not transferable by vote");
+    expect(await gov.proposalCount()).to.equal(0n);
+    await propose(
+      SYS,
+      gov,
+      gov.interface.encodeFunctionData("setVotingCost", [1n]),
+    );
+    expect(await gov.proposalCount()).to.equal(1n);
+  });
+
   it("M-2: VGT distributeGovernanceTokens and burn(uint256) are refused at creation", async function () {
     const { c, gov, propose, proposer, govAddr } = await setup();
     const vgt = c.governanceToken;
