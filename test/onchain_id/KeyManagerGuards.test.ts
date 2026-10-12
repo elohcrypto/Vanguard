@@ -230,6 +230,12 @@ describe("KeyManager rotation guards (2F.2, M3)", function () {
     await km
       .connect(holder)
       .cancelKeyRotation(idA, k(holder.address), k(good.address), MGMT);
+    // Task 4.17 slice A (review C mutant K11): nothing left to cancel.
+    await expect(
+      km
+        .connect(holder)
+        .cancelKeyRotation(idA, k(holder.address), k(good.address), MGMT),
+    ).to.be.revertedWith("KeyManager: No pending rotation");
     await time.increase(24 * 3600 + 1);
     await expect(
       km
@@ -250,6 +256,66 @@ describe("KeyManager rotation guards (2F.2, M3)", function () {
       .executeKeyRotation(idA, k(m1.address), k(good.address), MGMT);
     expect(await id.keyHasPurpose(k(good.address), MGMT)).to.equal(true);
     expect(await id.keyHasPurpose(k(m1.address), MGMT)).to.equal(false);
+    // A completed rotation is not pending either (K11).
+    await expect(
+      km
+        .connect(good)
+        .cancelKeyRotation(idA, k(m1.address), k(good.address), MGMT),
+    ).to.be.revertedWith("KeyManager: No pending rotation");
+  });
+});
+
+// Task 4.17 slice A (review A2 A2F-2, A2F-3): the two recovery boundaries
+// no test held. A direct transferOwnership voids a lapsed recovery's
+// nominee, so a later ordinary nomination of the same wallet is ordinary
+// (OnchainIDOwnership.transferOwnership's clear); a lapsed owner transfer
+// re-opens strictly after approvedAt + 7d + 7d, not at it (D52).
+describe("Recovery boundaries (Task 4.17)", function () {
+  const DAY = 24 * 3600;
+
+  /** Approved and executed recovery to `good`, owner transfer proposed. */
+  async function proposed() {
+    const f = await setup();
+    const K = k(f.good.address);
+    await f.km.connect(f.A).initiateKeyRecovery(f.idA, K);
+    await f.km.connect(f.B).approveKeyRecovery(f.idA, K);
+    const approvedAt = (await f.km.getRecoveryApproval(f.idA)).approvedAt;
+    await time.increase(2 * DAY + 1);
+    await f.km.executeKeyRecovery(f.idA, K);
+    return { ...f, K, approvedAt };
+  }
+
+  it("transferOwnership voids a lapsed recovery nominee: the next acceptance is ordinary (A2F-2)", async function () {
+    const f = await proposed();
+    await time.increase(5 * DAY);
+    await f.km.executeOwnerTransfer(f.idA, f.good.address);
+    await time.increase(8 * DAY); // the transfer lapsed
+    expect(await f.id.ownershipFrozen()).to.equal(false);
+    // The holder adds a key and a manager, then nominates `good` itself.
+    await f.id.connect(f.holder).addKey(k(f.m1.address), MGMT, 1);
+    await f.id.connect(f.holder).authorizeManager(f.m1.address);
+    await f.id.connect(f.holder).transferOwnership(f.anyone.address);
+    await f.id.connect(f.holder).transferOwnership(f.good.address);
+    await f.id.connect(f.good).acceptOwnership();
+    expect(await f.id.owner()).to.equal(f.good.address);
+    // Ordinary: other keys and managers survive for the new owner to audit.
+    expect(await f.id.keyHasPurpose(k(f.m1.address), MGMT)).to.equal(true);
+    expect(await f.id.authorizedManagers(f.m1.address)).to.equal(true);
+  });
+
+  it("a lapsed owner transfer re-opens after approvedAt + 14 days, not at it (A2F-3)", async function () {
+    const f = await proposed();
+    const T = f.approvedAt + BigInt(14 * DAY);
+    const K2 = k(f.evil.address);
+    await time.setNextBlockTimestamp(T);
+    await expect(
+      f.km.connect(f.C).initiateKeyRecovery(f.idA, K2),
+    ).to.be.revertedWith("KeyManager: Recovery already completed");
+    const epoch = (await f.km.getKeyRecovery(f.idA)).epoch;
+    await time.setNextBlockTimestamp(T + 1n);
+    await expect(f.km.connect(f.C).initiateKeyRecovery(f.idA, K2))
+      .to.emit(f.km, "KeyRecoveryReopened")
+      .withArgs(f.idA, epoch + 1n);
   });
 });
 
