@@ -143,9 +143,7 @@ abstract contract GovernanceProposals is GovernanceConfig, ReentrancyGuard {
         // governance's own ownership to a key. acceptOwnership by
         // governance is harmless: it only completes a nomination its
         // owner made, and once governance owns itself no vote can make one.
-        if (target == address(this) && bytes4(callData[:4]) == SEL_TRANSFER_OWNERSHIP) {
-            revert GovernanceOwnershipByVote();
-        }
+        if (target == address(this)) _requireNotSelfTargeting(callData);
         if (proposalType == ProposalType.ListUpdate) _requireGovernedListManager(target);
 
         // Check proposer has enough tokens for creation cost
@@ -267,6 +265,23 @@ abstract contract GovernanceProposals is GovernanceConfig, ReentrancyGuard {
         require(_controls(wallet, id), "Wallet does not control its identity");
         uint64 registeredAt = identityRegistry.identityRegisteredAt(id);
         require(registeredAt != 0 && registeredAt <= cutoff, "Identity too new to vote");
+    }
+
+    /// @dev A proposal on governance itself: never transferOwnership, and
+    ///      never a binding setter naming governance (review I-5: refused at
+    ///      creation; the setters refuse it at execution too).
+    function _requireNotSelfTargeting(bytes calldata callData) private view {
+        bytes4 sel = bytes4(callData[:4]);
+        if (sel == SEL_TRANSFER_OWNERSHIP) revert GovernanceOwnershipByVote();
+        if (
+            (sel == this.setDynamicListManager.selector ||
+                sel == this.setEscrowWalletFactory.selector ||
+                sel == this.setOnchainIDFactory.selector ||
+                sel == this.setPrivacyManager.selector ||
+                sel == this.setZKVerifier.selector) &&
+            callData.length >= 36 &&
+            abi.decode(callData[4:36], (address)) == address(this)
+        ) revert GovernanceSelfBinding();
     }
 
     /// @dev Selector denylist on every type; ListUpdate is an allowlist.

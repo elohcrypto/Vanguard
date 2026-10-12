@@ -246,12 +246,18 @@ describe("Selector denylist (L5)", function () {
     );
     await gov.executeProposal(self);
     expect(await gov.owner()).to.equal(govAddr);
-    const bind = await passed(
-      SYS,
-      gov,
-      gov.interface.encodeFunctionData("setPrivacyManager", [govAddr]),
-    );
-    await gov.executeProposal(bind).catch(() => {});
+    // Review I-5: a binding vote naming governance is refused at creation.
+    for (const fn of [
+      "setDynamicListManager",
+      "setEscrowWalletFactory",
+      "setOnchainIDFactory",
+      "setPrivacyManager",
+      "setZKVerifier",
+    ])
+      await expect(
+        propose(SYS, gov, gov.interface.encodeFunctionData(fn, [govAddr])),
+        fn,
+      ).to.be.revertedWithCustomError(gov, "GovernanceSelfBinding");
     expect(await gov.boundTarget(11)).to.not.equal(govAddr);
     await expect(
       propose(
