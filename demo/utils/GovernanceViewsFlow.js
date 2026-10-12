@@ -168,155 +168,217 @@ async function testComplianceEnforcement(mod) {
     console.log("\n📊 TESTING COMPLIANCE ENFORCEMENT...");
     console.log("=".repeat(70));
 
-    // Get verified and unverified users
+    // The test's two users: wallet 1 (verified by option 61 or 89:1) and
+    // wallet 9 (issuerAdmin, never onboarded). Every line below is a chain
+    // read or a receipt (R-48-6): a prerequisite this run does not meet
+    // is said so (ℹ️, not run), never reported as a failure.
+    const deployer = mod.state.signers[0];
     const verifiedUser = mod.state.signers[1];
-    const unverifiedUser = mod.state.signers[9]; // Assuming signer 9 is not verified
-
-    // Check verification status
+    const unverifiedUser = mod.state.signers[9];
     const identityRegistry = mod.state.getContract("identityRegistry");
     const isVerified1 = await identityRegistry.isVerified(verifiedUser.address);
     const isVerified9 = await identityRegistry.isVerified(
       unverifiedUser.address,
     );
+    const senderOk = await identityRegistry.isVerified(deployer.address);
+    const vsc = ethers.parseEther("1000");
+    const vscBal = await digitalToken.balanceOf(deployer.address);
+    const results = {};
 
-    console.log("\n👤 USER VERIFICATION STATUS:");
+    console.log("\n👤 USER VERIFICATION STATUS (chain):");
     console.log(
-      `   Verified User (${verifiedUser.address.slice(0, 10)}...): ${isVerified1 ? "✅ VERIFIED" : "❌ NOT VERIFIED"}`,
+      `   Wallet 1, the verified user (${verifiedUser.address.slice(0, 10)}...): ${isVerified1 ? "✅ VERIFIED" : "ℹ️  NOT VERIFIED (prerequisite: option 61 or 89:1 onboards it)"}`,
     );
     console.log(
-      `   Unverified User (${unverifiedUser.address.slice(0, 10)}...): ${isVerified9 ? "❌ VERIFIED" : "✅ NOT VERIFIED"}`,
+      `   Wallet 9, the unverified user (${unverifiedUser.address.slice(0, 10)}...): ${isVerified9 ? "ℹ️  VERIFIED (prerequisite: the blocked tests need it unverified)" : "✅ NOT VERIFIED"}`,
     );
+    const need1 = isVerified1 ? [] : ["wallet 1 is not KYC/AML verified"];
+    const need9 = isVerified9 ? ["wallet 9 is verified: nothing to block"] : [];
+    const needSender = [
+      ...(senderOk ? [] : ["the deployer (wallet 0) is not verified"]),
+      ...(vscBal >= vsc ? [] : ["the deployer holds under 1000 VSC"]),
+    ].map((m) => `${m} (options 22 and 25 onboard and fund the issuer)`);
+    const reasonOf = (e) => e.reason ?? e.shortMessage ?? e.message;
 
-    // Test VSC Transfer Control
     console.log("\n" + "=".repeat(70));
     console.log("PART 1: VSC TRANSFER CONTROL");
     console.log("=".repeat(70));
+    await _step(
+      "TEST 1.1: VSC transfer to verified user",
+      [...needSender, ...need1],
+      async () => {
+        await (await digitalToken.transfer(verifiedUser.address, vsc)).wait();
+        const balance = await digitalToken.balanceOf(verifiedUser.address);
+        console.log(`   ✅ SUCCESS: Transferred 1000 VSC to verified user`);
+        console.log(`   Balance: ${ethers.formatEther(balance)} VSC`);
+      },
+      results,
+      "vscAllowed",
+    );
+    await _step(
+      "TEST 1.2: VSC transfer to unverified user (should FAIL)",
+      [...needSender, ...need9],
+      () =>
+        _expectRefusal(
+          digitalToken.transfer(unverifiedUser.address, vsc),
+          reasonOf,
+        ),
+      results,
+      "vscBlocked",
+    );
 
-    console.log("\n🧪 TEST 1.1: VSC transfer to verified user");
-    try {
-      const tx1 = await digitalToken.transfer(
-        verifiedUser.address,
-        ethers.parseEther("1000"),
-      );
-      await tx1.wait();
-      const balance = await digitalToken.balanceOf(verifiedUser.address);
-      console.log(`   ✅ SUCCESS: Transferred 1000 VSC to verified user`);
-      console.log(`   Balance: ${ethers.formatEther(balance)} VSC`);
-    } catch (error) {
-      console.log(`   ❌ FAILED: ${error.message}`);
-    }
-
-    console.log("\n🧪 TEST 1.2: VSC transfer to unverified user (should FAIL)");
-    try {
-      const tx2 = await digitalToken.transfer(
-        unverifiedUser.address,
-        ethers.parseEther("1000"),
-      );
-      await tx2.wait();
-      console.log(`   ❌ UNEXPECTED: Transfer succeeded (should have failed)`);
-    } catch (error) {
-      console.log(`   ✅ SUCCESS: Transfer BLOCKED by ComplianceRules`);
-      console.log(
-        `   Reason: ${error.message.includes("Transfer not allowed") ? "Transfer not allowed" : "Compliance check failed"}`,
-      );
-    }
-
-    // Test VGT Transfer Control
     console.log("\n" + "=".repeat(70));
     console.log("PART 2: VGT TRANSFER CONTROL");
     console.log("=".repeat(70));
+    const vgt = ethers.parseEther("5000");
+    const canDistribute =
+      (await governanceToken.owner()).toLowerCase() ===
+        deployer.address.toLowerCase() ||
+      (await governanceToken.isAgent(deployer.address));
+    const needVgt = [
+      ...(canDistribute ? [] : ["the deployer is neither VGT owner nor agent"]),
+      ...((await governanceToken.balanceOf(deployer.address)) >= vgt
+        ? []
+        : ["the deployer holds under 5000 VGT (option 75a mints)"]),
+    ];
+    await _step(
+      "TEST 2.1: VGT distribution to verified user",
+      [...needVgt, ...need1],
+      async () => {
+        await (
+          await governanceToken.distributeGovernanceTokens(
+            [verifiedUser.address],
+            [vgt],
+          )
+        ).wait();
+        const balance = await governanceToken.balanceOf(verifiedUser.address);
+        console.log(`   ✅ SUCCESS: Distributed 5000 VGT to verified user`);
+        console.log(`   Balance: ${ethers.formatEther(balance)} VGT`);
+      },
+      results,
+      "vgtAllowed",
+    );
+    const vgtBal1 = await governanceToken.balanceOf(verifiedUser.address);
+    await _step(
+      "TEST 2.2: VGT transfer to unverified user (should FAIL)",
+      [
+        ...need1,
+        ...(vgtBal1 >= ethers.parseEther("100")
+          ? []
+          : ["wallet 1 holds under 100 VGT"]),
+        ...need9,
+      ],
+      () =>
+        _expectRefusal(
+          governanceToken
+            .connect(verifiedUser)
+            .transfer(unverifiedUser.address, ethers.parseEther("100")),
+          reasonOf,
+        ),
+      results,
+      "vgtBlocked",
+    );
 
-    console.log("\n🧪 TEST 2.1: VGT distribution to verified user");
-    try {
-      const tx3 = await governanceToken.distributeGovernanceTokens(
-        [verifiedUser.address],
-        [ethers.parseEther("5000")],
-      );
-      await tx3.wait();
-      const balance = await governanceToken.balanceOf(verifiedUser.address);
-      console.log(`   ✅ SUCCESS: Distributed 5000 VGT to verified user`);
-      console.log(`   Balance: ${ethers.formatEther(balance)} VGT`);
-    } catch (error) {
-      console.log(`   ❌ FAILED: ${error.message}`);
-    }
-
-    console.log("\n🧪 TEST 2.2: VGT transfer to unverified user (should FAIL)");
-    try {
-      const vgtWithSigner = governanceToken.connect(verifiedUser);
-      const tx4 = await vgtWithSigner.transfer(
-        unverifiedUser.address,
-        ethers.parseEther("100"),
-      );
-      await tx4.wait();
-      console.log(`   ❌ UNEXPECTED: Transfer succeeded (should have failed)`);
-    } catch (error) {
-      console.log(`   ✅ SUCCESS: Transfer BLOCKED by ComplianceRules`);
-      console.log(
-        `   Reason: ${error.message.includes("Transfer not allowed") ? "Transfer not allowed" : "Compliance check failed"}`,
-      );
-    }
-
-    // Test VGT Voting Control
     console.log("\n" + "=".repeat(70));
     console.log("PART 3: VGT VOTING CONTROL");
     console.log("=".repeat(70));
-
-    // Voting eligibility is NOT a token balance. castVote requires:
-    //   identityRegistry.isVerified(msg.sender)         — the real gate
-    //   balanceOf(msg.sender) >= votingCost             — the fee
-    // Each verified voter then counts as exactly 1 vote. TEST 3.2 reads
-    // isVerified, not a balance: the unverified user also holds 0 VGT
-    // (TEST 2.2 blocked the transfer), and a balance check would pass for
-    // that reason alone even if castVote stopped checking isVerified.
+    // Voting eligibility is NOT a token balance. castVote requires
+    // identityRegistry.isVerified(msg.sender) (the real gate) and a balance
+    // covering votingCost (the fee); each verified voter counts as 1 vote.
+    // TEST 3.2 reads isVerified, not a balance: the unverified user holds
+    // 0 VGT too, so a balance check would pass for that reason alone.
     const governanceForVoting = mod.state.getContract("vanguardGovernance");
     const votingFee = governanceForVoting
       ? await governanceForVoting.votingCost()
       : 0n;
-
-    const verifiedOk = await identityRegistry.isVerified(verifiedUser.address);
     const verifiedBal = await governanceToken.balanceOf(verifiedUser.address);
-    const unverifiedOk = await identityRegistry.isVerified(
-      unverifiedUser.address,
-    );
     const unverifiedBal = await governanceToken.balanceOf(
       unverifiedUser.address,
     );
-
     console.log(
       `\n   Voting fee: ${ethers.formatEther(votingFee)} VGT per vote`,
     );
-
     console.log("\n🧪 TEST 3.1: Verified user may vote");
-    console.log(`   KYC/AML verified: ${verifiedOk ? "✅ yes" : "❌ no"}`);
     console.log(
-      `   Can pay fee: ${verifiedBal >= votingFee ? "✅ yes" : "❌ no"} (${ethers.formatEther(verifiedBal)} VGT)`,
+      `   KYC/AML verified: ${isVerified1 ? "✅ yes" : "ℹ️  no (prerequisite)"}`,
     );
     console.log(
-      `   ${verifiedOk && verifiedBal >= votingFee ? "✅ CAN vote — worth 1 vote" : "❌ CANNOT vote"}`,
+      `   Can pay fee: ${verifiedBal >= votingFee ? "✅ yes" : "ℹ️  no (prerequisite)"} (${ethers.formatEther(verifiedBal)} VGT)`,
     );
-
+    const canVote = isVerified1 && verifiedBal >= votingFee;
+    console.log(
+      `   ${canVote ? "✅ CAN vote — worth 1 vote" : "ℹ️  CANNOT vote this run: a prerequisite above is missing"}`,
+    );
+    results.vote = canVote ? "proven" : "skipped";
     console.log("\n🧪 TEST 3.2: Unverified user is blocked by verification");
     console.log(
-      `   KYC/AML verified: ${unverifiedOk ? "❌ yes (unexpected)" : "✅ no"}`,
+      `   KYC/AML verified: ${isVerified9 ? "ℹ️  yes (prerequisite: wallet 9 should stay unverified)" : "✅ no"}`,
     );
     console.log(`   VGT balance: ${ethers.formatEther(unverifiedBal)} VGT`);
     console.log(
-      `   ${!unverifiedOk ? "✅ CANNOT vote — blocked by isVerified, independent of balance" : "❌ verification gate not working"}`,
+      `   ${isVerified9 ? "ℹ️  nothing to block this run" : "✅ CANNOT vote — blocked by isVerified, independent of balance"}`,
     );
+    results.voteBlocked = isVerified9 ? "skipped" : "proven";
 
-    // Summary
+    // Summary: what this run proved, from the receipts and reads above.
     console.log("\n" + "=".repeat(70));
-    displaySuccess("COMPLIANCE ENFORCEMENT TEST COMPLETE!");
+    const glyph = { proven: "✅", skipped: "ℹ️ ", failed: "❌" };
+    const word = { proven: "proven", skipped: "not run", failed: "FAILED" };
+    const failed = Object.values(results).includes("failed");
+    if (failed) displayError("COMPLIANCE ENFORCEMENT TEST: a step FAILED");
+    else displaySuccess("COMPLIANCE ENFORCEMENT TEST COMPLETE");
     console.log("=".repeat(70));
-    console.log("\n✅ PROVEN:");
-    console.log("   1. ✅ VSC transfers controlled by ComplianceRules");
-    console.log("   2. ✅ VGT transfers controlled by ComplianceRules");
-    console.log("   3. ✅ VGT voting controlled (must hold VGT)");
-    console.log("   4. ✅ Only KYC/AML verified users can hold tokens");
-    console.log("   5. ✅ Unverified users CANNOT participate");
+    console.log("\n📋 THIS RUN:");
+    for (const [key, label] of [
+      ["vscAllowed", "VSC transfer to a verified user allowed"],
+      ["vscBlocked", "VSC transfer to an unverified user refused"],
+      ["vgtAllowed", "VGT distribution to a verified user allowed"],
+      ["vgtBlocked", "VGT transfer to an unverified user refused"],
+      ["vote", "verified user may vote (isVerified and the fee)"],
+      ["voteBlocked", "unverified user cannot vote (isVerified)"],
+    ]) {
+      const r = results[key];
+      console.log(`   ${glyph[r]} ${label}: ${word[r]}`);
+    }
   } catch (error) {
     displayError(`Test failed: ${error.message}`);
   }
+}
+
+/**
+ * Run one test step when every prerequisite holds; otherwise say which is
+ * missing (ℹ️, not run). A throw from `fn` is a real failure (❌).
+ * @private
+ */
+async function _step(label, missing, fn, results, key) {
+  console.log(`\n🧪 ${label}`);
+  if (missing.length) {
+    for (const m of missing) console.log(`   ℹ️  Not run: ${m}`);
+    results[key] = "skipped";
+    return;
+  }
+  try {
+    await fn();
+    results[key] = "proven";
+  } catch (error) {
+    console.log(`   ❌ FAILED: ${error.message}`);
+    results[key] = "failed";
+  }
+}
+
+/** `tx` must revert; its reason is printed. A success is a real failure. */
+async function _expectRefusal(tx, reasonOf) {
+  let receipt = null;
+  try {
+    receipt = await (await tx).wait();
+  } catch (error) {
+    console.log(`   ✅ SUCCESS: Transfer BLOCKED by ComplianceRules`);
+    console.log(`   Reason: ${reasonOf(error)}`);
+    return;
+  }
+  throw new Error(
+    `transfer succeeded (tx ${receipt.hash}): the gate did not refuse`,
+  );
 }
 
 module.exports = { showDashboard, testComplianceEnforcement };
