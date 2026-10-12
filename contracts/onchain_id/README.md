@@ -50,7 +50,11 @@ This directory contains OnchainID implementation contracts following ERC-734 and
   (`vetoKeyRecoverySetup`), anyone applies it afterwards
   (`applyKeyRecoverySetup`), an approved recovery blocks it and an executed
   one drops it; neither the owner nor a current MANAGEMENT key can be
-  seated as an agent (D53). An agent opens a candidate
+  seated as an agent, open or approve (D53, checked at every vote: an
+  agent that gains control later is refused, R-414-10). A new owner who
+  takes over by an ordinary transfer re-seats the agents: after a
+  completed recovery the old agents can re-open once the transfer window
+  passes if `owner()` is not the recovered key. An agent opens a candidate
   (`initiateKeyRecovery`), which counts as its approval (at threshold 1
   the open approves); none opens while another is approved. Until the
   approvals reach the threshold only its initiator may cancel it: not
@@ -61,13 +65,16 @@ This directory contains OnchainID implementation contracts following ERC-734 and
   (`ownershipFrozen`, asked of the recovery manager only and read
   strictly: only the word 1 is yes), any new MANAGEMENT key
   (`ManagementAdditionsFrozen`) and every `acceptOwnership` but the
-  recovery's own nominee's (`FrozenByRecovery`). 48 hours after the
+  nominee the manager still names (`FrozenByRecovery`; a nominee of a
+  lapsed recovery is frozen too, R-414-12). 48 hours after the
   approval (`RECOVERY_TIMELOCK`), within 7 days, anyone executes it: the
   recovered key is added and every other MANAGEMENT key, the owner's
   included, is removed (ACTION, CLAIM and ENCRYPTION keys stay), 100 per
   call (`MAX_EVICTIONS_PER_CALL`, above the 64 keys a purpose `addKey`
-  allows, so one call empties a capped list; `continueKeyEviction`
-  remains for a list grown past the cap). 7 days after the approval
+  allows, so one call empties a capped list: `acceptOwnership` pushes
+  MANAGEMENT to at most 65, never past it, so `continueKeyEviction` is
+  reachable only on an identity deployed before the cap). 7 days after
+  the approval
   (`OWNER_TRANSFER_TIMELOCK`) and before 14 days, someone (the recovered
   wallet, or anyone for it) must call `executeOwnerTransfer` and the
   recovered wallet must accept (`acceptOwnership`); if nobody does in
@@ -99,8 +106,10 @@ This directory contains OnchainID implementation contracts following ERC-734 and
   by the agent instead.
 - `addKey` keeps at most 64 active keys a purpose (`MAX_KEYS_PER_PURPOSE`,
   D42; rotations and `batchAddKeys` go through it, a batch holds at most
-  50, `MAX_BATCH_SIZE`); removal is O(1) through a position index, so no
-  list a rogue key grows can make recovery's eviction exceed a block.
+  50, `MAX_BATCH_SIZE`; a rotation removes the old key before adding the
+  new one, so it succeeds at the cap); removal is O(1) through a position
+  index, so no list a rogue key grows can make recovery's eviction exceed
+  a block.
 - `removeKey` is the management action: KeyManager rotations and batches
   use it, and it is the only path for a key nobody can sign for (an
   RSA-type or passphrase key).

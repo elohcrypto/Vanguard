@@ -936,8 +936,10 @@ approval (`RECOVERY_TIMELOCK`), within 7 days, anyone executes it: the
 recovered key is added and every other MANAGEMENT key, the owner's
 included, is removed (ACTION, CLAIM and ENCRYPTION keys stay), 100 per
 call (`MAX_EVICTIONS_PER_CALL`, above the 64 keys a purpose `addKey`
-allows, so one call empties a capped list; `continueKeyEviction`
-remains for a list grown past the cap). 7 days after the approval
+allows, `MAX_KEYS_PER_PURPOSE`; KeyManager batches take at most 50 keys,
+`MAX_BATCH_SIZE`; so one call empties a capped list, and
+`continueKeyEviction` is reachable only on an identity deployed before
+the cap). 7 days after the approval
 (`OWNER_TRANSFER_TIMELOCK`) and before 14 days, someone (the recovered
 wallet, or anyone for it) must call `executeOwnerTransfer` and the
 recovered wallet must accept (`acceptOwnership`); if nobody does in
