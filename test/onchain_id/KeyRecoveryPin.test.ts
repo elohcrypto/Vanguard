@@ -171,7 +171,7 @@ describe("Recovery manager pinned per identity (4.11 R-411-14/15)", function () 
   });
 
   it("a directly deployed identity has no recovery until pinned; a stranger cannot pin", async function () {
-    const [owner, stranger, A] = await ethers.getSigners();
+    const [owner, stranger, A, B] = await ethers.getSigners();
     const id = await (
       await ethers.getContractFactory("OnchainID")
     ).deploy(owner.address);
@@ -180,7 +180,7 @@ describe("Recovery manager pinned per identity (4.11 R-411-14/15)", function () 
     expect(await id.recoveryManager()).to.equal(ethers.ZeroAddress);
     expect(await id.ownershipFrozen()).to.equal(false);
     await expect(
-      km.setupKeyRecovery(idA, [A.address], 1),
+      km.setupKeyRecovery(idA, [A.address, B.address], 2),
     ).to.be.revertedWithCustomError(km, "NotRecoveryManager");
     await expect(
       id.connect(stranger).pinRecoveryManager(await km.getAddress()),
@@ -189,7 +189,7 @@ describe("Recovery manager pinned per identity (4.11 R-411-14/15)", function () 
       id.pinRecoveryManager(stranger.address),
     ).to.be.revertedWithCustomError(id, "NotAContract");
     await id.pinRecoveryManager(await km.getAddress());
-    await km.setupKeyRecovery(idA, [A.address], 1);
+    await km.setupKeyRecovery(idA, [A.address, B.address], 2);
   });
 
   it("P1: a stolen owner's manager can never move ownership or evict; recovery wins", async function () {
@@ -259,9 +259,12 @@ describe("Recovery manager pinned per identity (4.11 R-411-14/15)", function () 
     const f = await factoryIdentity();
     await f.id.connect(f.owner).authorizeManager(f.kmA);
     await f.id.connect(f.owner).authorizeManager(f.anyone.address);
-    await f.km.connect(f.owner).setupKeyRecovery(f.idA, [f.A.address], 1);
+    await f.km
+      .connect(f.owner)
+      .setupKeyRecovery(f.idA, [f.A.address, f.B.address], 2);
     const key = k(f.rescued.address);
     await f.km.connect(f.A).initiateKeyRecovery(f.idA, key);
+    await f.km.connect(f.B).approveKeyRecovery(f.idA, key);
     await time.increase(7 * DAY);
     await f.km.executeKeyRecovery(f.idA, key);
     await f.km.executeOwnerTransfer(f.idA, f.rescued.address);
@@ -294,7 +297,9 @@ describe("A re-seat of seated agents waits 48h and can be vetoed (4.11 R-411-16)
       .setupKeyRecovery(f.idA, [f.A.address, f.B.address], 2);
     const thief = f.other;
     await expect(
-      f.km.connect(f.owner).setupKeyRecovery(f.idA, [thief.address], 1),
+      f.km
+        .connect(f.owner)
+        .setupKeyRecovery(f.idA, [thief.address, f.anyone.address], 2),
     ).to.emit(f.km, "KeyRecoverySetupPending");
     expect((await f.km.getKeyRecovery(f.idA)).recoveryAgents).to.deep.equal([
       f.A.address,
@@ -329,10 +334,15 @@ describe("A re-seat of seated agents waits 48h and can be vetoed (4.11 R-411-16)
 
   it("an approved recovery blocks a pending re-seat, and its execution drops it", async function () {
     const f = await factoryIdentity();
-    await f.km.connect(f.owner).setupKeyRecovery(f.idA, [f.A.address], 1);
-    await f.km.connect(f.owner).setupKeyRecovery(f.idA, [f.other.address], 1);
+    await f.km
+      .connect(f.owner)
+      .setupKeyRecovery(f.idA, [f.A.address, f.B.address], 2);
+    await f.km
+      .connect(f.owner)
+      .setupKeyRecovery(f.idA, [f.other.address, f.anyone.address], 2);
     const key = k(f.rescued.address);
     await f.km.connect(f.A).initiateKeyRecovery(f.idA, key);
+    await f.km.connect(f.B).approveKeyRecovery(f.idA, key);
     await time.increase(2 * DAY + 1);
     await expect(
       f.km.applyKeyRecoverySetup(f.idA),
@@ -345,8 +355,12 @@ describe("A re-seat of seated agents waits 48h and can be vetoed (4.11 R-411-16)
 
   it("an honest owner's re-seat applies after 48h when nobody vetoes", async function () {
     const f = await factoryIdentity();
-    await f.km.connect(f.owner).setupKeyRecovery(f.idA, [f.A.address], 1);
-    await f.km.connect(f.owner).setupKeyRecovery(f.idA, [f.B.address], 1);
+    await f.km
+      .connect(f.owner)
+      .setupKeyRecovery(f.idA, [f.A.address, f.other.address], 2);
+    await f.km
+      .connect(f.owner)
+      .setupKeyRecovery(f.idA, [f.B.address, f.anyone.address], 2);
     await time.increase(2 * DAY + 1);
     await expect(f.km.connect(f.anyone).applyKeyRecoverySetup(f.idA)).to.emit(
       f.km,
@@ -354,6 +368,7 @@ describe("A re-seat of seated agents waits 48h and can be vetoed (4.11 R-411-16)
     );
     expect((await f.km.getKeyRecovery(f.idA)).recoveryAgents).to.deep.equal([
       f.B.address,
+      f.anyone.address,
     ]);
   });
 });

@@ -701,18 +701,16 @@ describe("KeyManager", function () {
       });
 
       it("Should reject setup with invalid threshold", async function () {
+        const idA = await onchainID.getAddress();
+        const km = keyManager.connect(identity);
+        // D59 (a): one agent key alone may never move the identity.
+        for (const t of [0, 1]) {
+          await expect(
+            km.setupKeyRecovery(idA, recoveryAgents, t),
+          ).to.be.revertedWith("KeyManager: Threshold below 2");
+        }
         await expect(
-          keyManager
-            .connect(identity)
-            .setupKeyRecovery(await onchainID.getAddress(), recoveryAgents, 0),
-        ).to.be.revertedWith("KeyManager: Invalid threshold");
-
-        await expect(
-          keyManager.connect(identity).setupKeyRecovery(
-            await onchainID.getAddress(),
-            recoveryAgents,
-            4, // > agents length
-          ),
+          km.setupKeyRecovery(idA, recoveryAgents, 4), // > agents length
         ).to.be.revertedWith("KeyManager: Invalid threshold");
       });
     });

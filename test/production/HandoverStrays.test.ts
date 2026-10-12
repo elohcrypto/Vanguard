@@ -375,10 +375,10 @@ describe("Handover strays: roles (Task 4.13)", function () {
       await id.connect(f.proposer).authorizeManager(await km.getAddress());
       await km
         .connect(f.proposer)
-        .setupKeyRecovery(idAddr, [f.stranger.address], 1);
+        .setupKeyRecovery(idAddr, [f.stranger.address, f.voters[0].address], 2);
       await km
         .connect(f.proposer)
-        .setupKeyRecovery(idAddr, [f.guardian.address], 1);
+        .setupKeyRecovery(idAddr, [f.guardian.address, f.voters[1].address], 2);
       args.keyManagerIdentity = idAddr;
       await both(
         /has a pending recovery re-seat/,

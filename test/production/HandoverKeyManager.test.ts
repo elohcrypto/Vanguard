@@ -97,13 +97,13 @@ describe("Handover: KeyManager (4.2)", function () {
     // ... or seats the deployer as a recovery agent (Task 4.11) ...
     await km
       .connect(f.proposer)
-      .setupKeyRecovery(idAddr, [f.deployer.address], 1);
+      .setupKeyRecovery(idAddr, [f.deployer.address, f.voters[0].address], 2);
     after = await assertHandoverComplete(args);
     expect(after.failures).to.deep.equal([idLine(idAddr, kmAddr)]);
     // The re-seat waits 48h (R-411-16), then applies.
     await km
       .connect(f.proposer)
-      .setupKeyRecovery(idAddr, [f.stranger.address], 1);
+      .setupKeyRecovery(idAddr, [f.stranger.address, f.voters[0].address], 2);
     await time.increase(48 * 3600 + 1);
     // Anyone applies; not the deployer (its nonce is the window's, 4.17).
     await km.connect(f.stranger).applyKeyRecoverySetup(idAddr);
@@ -211,7 +211,11 @@ describe("Handover: KeyManager (4.2)", function () {
     it("one where the deployer is a recovery agent (4.11)", async function () {
       await km
         .connect(f.proposer)
-        .setupKeyRecovery(await identity.getAddress(), [f.deployer.address], 1);
+        .setupKeyRecovery(
+          await identity.getAddress(),
+          [f.deployer.address, f.stranger.address],
+          2,
+        );
       await refuses(args, /the deployer is still recovery agent/);
     });
 

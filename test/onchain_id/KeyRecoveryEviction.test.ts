@@ -102,7 +102,9 @@ describe("KeyManager recovery evicts and moves ownership (4.11, D38 c)", functio
       f.km.connect(f.rogue).cancelKeyRecovery(f.idA, key),
     ).to.be.revertedWithCustomError(f.km, "ApprovedRecoveryAgentsOnly");
     await expect(
-      f.km.connect(f.rogue).setupKeyRecovery(f.idA, [f.rogue.address], 1),
+      f.km
+        .connect(f.rogue)
+        .setupKeyRecovery(f.idA, [f.rogue.address, f.anyone.address], 2),
     ).to.be.revertedWithCustomError(f.km, "NotIdentityOwner");
   });
 
@@ -121,7 +123,9 @@ describe("KeyManager recovery evicts and moves ownership (4.11, D38 c)", functio
       f.km.connect(f.owner).cancelKeyRecovery(f.idA, key),
     ).to.be.revertedWithCustomError(f.km, "ApprovedRecoveryAgentsOnly");
     await expect(
-      f.km.connect(f.owner).setupKeyRecovery(f.idA, [f.C.address], 1),
+      f.km
+        .connect(f.owner)
+        .setupKeyRecovery(f.idA, [f.C.address, f.anyone.address], 2),
     ).to.be.revertedWithCustomError(f.km, "RecoveryLocked");
   });
 
@@ -145,7 +149,7 @@ describe("KeyManager recovery evicts and moves ownership (4.11, D38 c)", functio
       f.km.connect(f.anyone).executeKeyRecovery(f.idA, key),
     ).to.be.revertedWith("KeyManager: Recovery not initiated");
     // The owner may re-seat again.
-    await f.km.setupKeyRecovery(f.idA, [f.A.address], 1);
+    await f.km.setupKeyRecovery(f.idA, [f.A.address, f.B.address], 2);
   });
 
   it("one candidate is approved at a time", async function () {
@@ -289,7 +293,9 @@ describe("KeyManager recovery evicts and moves ownership (4.11, D38 c)", functio
       f.id.connect(f.owner).transferOwnership(f.owner.address),
     ).to.be.revertedWithCustomError(f.id, "OwnableUnauthorizedAccount");
     // The new owner holds every owner power again.
-    await f.km.connect(f.rescued).setupKeyRecovery(f.idA, [f.A.address], 1);
+    await f.km
+      .connect(f.rescued)
+      .setupKeyRecovery(f.idA, [f.A.address, f.B.address], 2);
     await f.id.connect(f.rescued).deauthorizeManager(f.kmA);
   });
 
@@ -358,7 +364,9 @@ describe("KeyManager recovery evicts and moves ownership (4.11, D38 c)", functio
   it("only the owner sets up recovery; an EOA manager does not freeze ownership", async function () {
     const f = await setup();
     await expect(
-      f.km.connect(f.rogue).setupKeyRecovery(f.idA, [f.rogue.address], 1),
+      f.km
+        .connect(f.rogue)
+        .setupKeyRecovery(f.idA, [f.rogue.address, f.anyone.address], 2),
     ).to.be.revertedWithCustomError(f.km, "NotIdentityOwner");
     await f.id.authorizeManager(f.stranger.address);
     expect(await f.id.ownershipFrozen()).to.equal(false);

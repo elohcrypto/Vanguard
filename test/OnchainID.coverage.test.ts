@@ -226,28 +226,23 @@ describe("OnchainID System - Coverage Tests", function () {
       // identity holds no compliance store of its own, Task 4.5)
       expect(await claimIssuer.hasValidClaim(identityAddress, 6)).to.be.true;
 
-      // 6. Set up key recovery
-      // Authorize KeyManager for the deployed identity
-      const deployedIdentity = await ethers.getContractAt(
-        "OnchainID",
-        identityAddress,
-      );
-      await deployedIdentity
-        .connect(user1)
-        .authorizeManager(await keyManager.getAddress());
-      await deployedIdentity
-        .connect(user1)
-        .pinRecoveryManager(await keyManager.getAddress());
-
+      // 6. Set up key recovery: authorize and pin KeyManager, seat 2-of-2
+      const kmA = await keyManager.getAddress();
+      await identity.connect(user1).authorizeManager(kmA);
+      await identity.connect(user1).pinRecoveryManager(kmA);
+      const agents = [recoveryAgent.address, user2.address];
       await keyManager
         .connect(user1)
-        .setupKeyRecovery(identityAddress, [recoveryAgent.address], 1);
+        .setupKeyRecovery(identityAddress, agents, 2);
 
       // 7. Test recovery process
       const recoveryKey = TestHelpers.generateKey("recovery-key");
       await keyManager
         .connect(recoveryAgent)
         .initiateKeyRecovery(identityAddress, recoveryKey);
+      await keyManager
+        .connect(user2)
+        .approveKeyRecovery(identityAddress, recoveryKey);
 
       // Fast forward time
       await TestHelpers.fastForwardTime(

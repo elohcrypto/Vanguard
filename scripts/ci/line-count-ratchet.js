@@ -21,7 +21,7 @@ const EXEMPT = [/^contracts\/privacy\/verifiers\//];
 const ALLOW = {
   "test/EnhancedEscrow.test.js": 1575,
   "docs/TESTNET_DEMO.md": 1179,
-  "test/KeyManager.test.ts": 1087,
+  "test/KeyManager.test.ts": 1085,
   "test/integration/OracleIntegration.test.ts": 884,
   "test/ClaimIssuer.test.ts": 880,
   "test/FairVotingSystem.test.ts": 846,
@@ -35,7 +35,7 @@ const ALLOW = {
   "test/oracle/OracleManager.test.ts": 626,
   "test/GovernanceToken.test.ts": 623,
   "test/production/ProductionEnvironment.ts": 572,
-  "test/OnchainID.coverage.test.ts": 546,
+  "test/OnchainID.coverage.test.ts": 541,
   "test/OnchainIDFactory.test.ts": 537,
   "test/governance/QuorumIntegrity.test.ts": 509,
 };

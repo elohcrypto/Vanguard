@@ -24,7 +24,13 @@ async function setup(threshold = 2) {
   await id.authorizeManager(kmA);
   await id.pinRecoveryManager(kmA);
   await id.addKey(k(rogue.address), MGMT, 1);
-  await km.setupKeyRecovery(idA, [A.address, B.address, C.address], threshold);
+  // threshold 0: left unseated (D59 refuses below 2; see P3).
+  if (threshold)
+    await km.setupKeyRecovery(
+      idA,
+      [A.address, B.address, C.address],
+      threshold,
+    );
   return {
     owner,
     A,
@@ -81,11 +87,25 @@ describe("Recovery robustness (4.14): A2 probes and killed mutants", function ()
     expect((await f.km.getRecoveryApproval(f.idA)).locked).to.equal(true);
   });
 
-  it("P3: at threshold 1 the open approves and locks in one transaction", async function () {
-    const f = await setup(1);
+  it("P3: threshold 1 is refused (D59); at 2 the second agent's approval approves and locks", async function () {
+    const f = await setup(0);
+    const agents = [f.A.address, f.B.address, f.C.address];
+    // Neither a first seat nor a re-seat below 2: one key never moves it.
+    for (const seated of [false, true]) {
+      for (const t of [0, 1]) {
+        await expect(
+          f.km.setupKeyRecovery(f.idA, agents, t),
+        ).to.be.revertedWith("KeyManager: Threshold below 2");
+      }
+      if (!seated) await f.km.setupKeyRecovery(f.idA, agents, 2);
+    }
     const key = k(f.rescued.address);
-    const tx = f.km.connect(f.C).initiateKeyRecovery(f.idA, key);
-    await expect(tx).to.emit(f.km, "KeyRecoveryInitiated");
+    const open = f.km.connect(f.C).initiateKeyRecovery(f.idA, key);
+    await expect(open).to.emit(f.km, "KeyRecoveryInitiated");
+    await expect(open).to.not.emit(f.km, "KeyRecoveryApproved");
+    expect((await f.km.getRecoveryApproval(f.idA)).locked).to.equal(false);
+    expect(await f.id.ownershipFrozen()).to.equal(false);
+    const tx = f.km.connect(f.A).approveKeyRecovery(f.idA, key);
     await expect(tx).to.emit(f.km, "KeyRecoveryApproved");
     const t = BigInt(await time.latest());
     const a = await f.km.getRecoveryApproval(f.idA);
@@ -170,7 +190,11 @@ describe("Recovery robustness (4.14): A2 probes and killed mutants", function ()
   it("P4: a re-seat proposed by a previous owner is stale after an ordinary transfer; anyone drops it (M-B)", async function () {
     const f = await setup();
     // A second seating is pending 48h (R-411-16).
-    await f.km.setupKeyRecovery(f.idA, [f.thief2.address], 1);
+    await f.km.setupKeyRecovery(
+      f.idA,
+      [f.thief2.address, f.rescued.address],
+      2,
+    );
     expect(
       (await f.km.getPendingRecoverySetup(f.idA)).effectiveAt,
     ).to.not.equal(0);
@@ -197,11 +221,14 @@ describe("Recovery robustness (4.14): A2 probes and killed mutants", function ()
       f.B.address,
       f.C.address,
     ]);
-    await f.km.connect(f.user).setupKeyRecovery(f.idA, [f.anyone.address], 1);
+    await f.km
+      .connect(f.user)
+      .setupKeyRecovery(f.idA, [f.anyone.address, f.rescued.address], 2);
     await time.increase(2 * DAY + 1);
     await f.km.connect(f.anyone).applyKeyRecoverySetup(f.idA);
     expect((await f.km.getKeyRecovery(f.idA)).recoveryAgents).to.deep.equal([
       f.anyone.address,
+      f.rescued.address,
     ]);
   });
 
@@ -394,7 +421,7 @@ describe("Recovery robustness (4.14): A2 probes and killed mutants", function ()
 
   it("L-2: a re-seat whose proposed agent gained MANAGEMENT meanwhile is refused at apply", async function () {
     const f = await setup();
-    await f.km.setupKeyRecovery(f.idA, [f.user.address, f.anyone.address], 1);
+    await f.km.setupKeyRecovery(f.idA, [f.user.address, f.anyone.address], 2);
     await f.id.addKey(k(f.user.address), MGMT, 1);
     await time.increase(2 * DAY + 1);
     await expect(f.km.connect(f.anyone).applyKeyRecoverySetup(f.idA))
@@ -453,11 +480,11 @@ describe("Recovery robustness (4.14): A2 probes and killed mutants", function ()
     const [, , , , , , , , , actionHolder] = await ethers.getSigners();
     await f.id.addKey(k(actionHolder.address), ACTION, 1);
     for (const bad of [f.owner, f.rogue]) {
-      await expect(f.km.setupKeyRecovery(f.idA, [f.A.address, bad.address], 1))
+      await expect(f.km.setupKeyRecovery(f.idA, [f.A.address, bad.address], 2))
         .to.be.revertedWithCustomError(f.km, "AgentControlsIdentity")
         .withArgs(bad.address);
     }
-    await f.km.setupKeyRecovery(f.idA, [f.A.address, actionHolder.address], 1);
+    await f.km.setupKeyRecovery(f.idA, [f.A.address, actionHolder.address], 2);
     expect((await f.km.getPendingRecoverySetup(f.idA)).agents).to.deep.equal([
       f.A.address,
       actionHolder.address,
