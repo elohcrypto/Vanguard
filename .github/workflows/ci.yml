@@ -345,6 +345,13 @@ jobs:
       # 34 -> 29 on 2026-10-04 (CI run 37176125602 at a56b24d; a local
       # `npm audit` agrees): advisories withdrawn or re-scored upstream on an
       # unchanged tree, so the baseline follows the count down.
+      # 29 -> 28 on 2026-10-12: CI run 38131143635 at fd258df failed the
+      # critical step on a new handlebars advisory (4.0.0 - 4.7.9 under
+      # solidity-coverage -> sc-istanbul, dev only; three GHSA entries,
+      # JavaScript injection in compile). `npm audit fix` (non-breaking)
+      # took handlebars 4.7.10, pbkdf2 3.1.7, http-cache-semantics 4.3.0
+      # and added the optional fsevents 2.3.3 entry: critical 1 -> 0,
+      # highs 29 -> 28 (http-cache-semantics), moderate 11 -> 10.
       # The count is checked against the live advisory database, so a newly
       # published advisory in an unchanged dependency reddens every branch
       # at once; raise BASELINE with the advisory recorded here.
@@ -353,7 +360,7 @@ jobs:
       # introduced high is caught while the known backlog stays visible.
       - name: Audit ratchet (no NEW high vulnerabilities)
         run: |
-          BASELINE=29
+          BASELINE=28
           count=$(npm audit --json 2>/dev/null \
             | node -e "let s='';process.stdin.on('data',d=>s+=d).on('end',()=>{
                 console.log(JSON.parse(s).metadata.vulnerabilities.high)})")
