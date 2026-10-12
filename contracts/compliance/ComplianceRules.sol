@@ -108,8 +108,8 @@ contract ComplianceRules is ComplianceRulesAdmin, IComplianceHooks {
         if (mode != WhitelistMode.ZkOnly) {
             address wlOracle = whitelistOracle[token];
             if (wlOracle != address(0)) {
-                IWhitelistOracleView wl = IWhitelistOracleView(wlOracle);
-                if (wl.isWhitelisted(party)) return _tierMet(token, wl, party);
+                (bool live, uint8 tier) = IWhitelistOracleView(wlOracle).whitelistStanding(party);
+                if (live) return _tierMet(token, tier, party);
                 if (mode == WhitelistMode.OracleOnly) return false;
                 // Either, unlisted (D46 a): a proof binding carries no tier,
                 // so it serves only a type whose required tier is 1.
@@ -136,11 +136,11 @@ contract ComplianceRules is ComplianceRulesAdmin, IComplianceHooks {
     function whitelistTierAllows(address token, address party) external view returns (bool) {
         address wlOracle = whitelistOracle[token];
         if (whitelistMode[token] == WhitelistMode.ZkOnly || wlOracle == address(0)) return true;
-        IWhitelistOracleView wl = IWhitelistOracleView(wlOracle);
-        if (!wl.isWhitelisted(party)) {
+        (bool live, uint8 tier) = IWhitelistOracleView(wlOracle).whitelistStanding(party);
+        if (!live) {
             return whitelistMode[token] == WhitelistMode.OracleOnly || _proofServes(token, party);
         }
-        return _tierMet(token, wl, party);
+        return _tierMet(token, tier, party);
     }
 
     /// @dev D46 (a): a proof binding (no tier) serves a party whose type
@@ -156,10 +156,9 @@ contract ComplianceRules is ComplianceRulesAdmin, IComplianceHooks {
     ///      tier. No rule when the token applies no investor-type registry
     ///      (Token.investorTypeRegistry() is zero, or the token is not a
     ///      Token) or the party is investorLimitExempt (D22, as for the caps).
-    function _tierMet(address token, IWhitelistOracleView wlOracle, address party) private view returns (bool) {
+    function _tierMet(address token, uint8 tier, address party) private view returns (bool) {
         IInvestorTypeRegistry types = _typesOf(token);
         if (address(types) == address(0) || types.investorLimitExempt(party)) return true;
-        (, , , uint8 tier, , ) = wlOracle.getWhitelistInfo(party);
         return tier >= types.getRequiredWhitelistTier(party);
     }
 

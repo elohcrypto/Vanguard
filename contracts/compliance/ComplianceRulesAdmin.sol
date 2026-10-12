@@ -12,12 +12,9 @@ interface IBlacklistOracleView {
 
 /// @dev Read-only slice of WhitelistOracle. Same rationale as above.
 interface IWhitelistOracleView {
-    function isWhitelisted(address subject) external view returns (bool);
-
-    /// @dev The entry's tier is the fourth field (Task 4.10 tier rule).
-    function getWhitelistInfo(
-        address subject
-    ) external view returns (bool, uint256, uint256, uint8 tier, string memory, address[] memory);
+    /// @dev The transfer path's one read (A1F-3, Task 4.17): live and the
+    ///      entry's tier (the Task 4.10 tier rule), no reason copied.
+    function whitelistStanding(address subject) external view returns (bool live, uint8 tier);
 }
 
 /// @dev Read-only slice of Token: the investor-type registry it applies.
@@ -151,63 +148,21 @@ abstract contract ComplianceRulesAdmin is IComplianceRules, ComplianceRulesTrust
         if (token == address(0)) revert InvalidTokenAddress();
         if (oracle != address(0) && oracle.code.length == 0) revert OracleNotAContract(oracle);
         if (oracle != address(0) && token == governanceToken) revert GovernanceTokenWhitelist(token);
-        // Same rationale as setBlacklistOracle: fail here, not on every transfer.
+        // Same rationale as setBlacklistOracle: fail here, not on every
+        // transfer. The transfer path reads whitelistStanding only (A1F-3),
+        // so that is the shape probed: two words, a bool word (0 or 1) and a
+        // tier word within uint8; a missing function, a short return or a
+        // dirty word is OracleIncompatible, never a bare decode revert.
         if (oracle != address(0)) {
             (bool ok, bytes memory ret) = oracle.staticcall(
-                abi.encodeWithSelector(IWhitelistOracleView.isWhitelisted.selector, address(this))
+                abi.encodeWithSelector(IWhitelistOracleView.whitelistStanding.selector, address(this))
             );
-            if (!ok || ret.length != 32) revert OracleIncompatible(oracle);
-            // The tier rule (Task 4.10) decodes getWhitelistInfo as the
-            // 6-tuple; an oracle returning the pre-4.10 5-tuple (no tier)
-            // would make every transfer revert without a reason (2F:
-            // fail at configuration). Refuse any other shape here.
-            (ok, ret) = oracle.staticcall(
-                abi.encodeWithSelector(IWhitelistOracleView.getWhitelistInfo.selector, address(this))
-            );
-            if (!ok || !_isWhitelistInfoShape(ret)) revert OracleIncompatible(oracle);
+            if (!ok || ret.length < 64) revert OracleIncompatible(oracle);
+            (uint256 live, uint256 tier) = abi.decode(ret, (uint256, uint256));
+            if (live > 1 || tier > type(uint8).max) revert OracleIncompatible(oracle);
         }
         whitelistOracle[token] = oracle;
         emit WhitelistOracleSet(token, oracle);
-    }
-
-    /**
-     * @dev True when `ret` is a canonically encoded
-     *      (bool, uint256, uint256, uint8, string, address[]): a six-word
-     *      head (bool word 0 or 1, tier word within uint8, string offset
-     *      0xc0, array offset right after the padded string), the string
-     *      data and the array length word inside `ret`, a sane array length
-     *      with every element inside `ret` and every address word clean.
-     *      Every malformed shape returns false (so the setter reverts
-     *      OracleIncompatible, never a bare panic); only then the full
-     *      decode runs. Words beyond the array are not read: a trailing
-     *      extra word passes here as it does in the transfer-time decode.
-     *      A 5-tuple without the tier puts its string length where the
-     *      array offset belongs, so it fails the array-offset test.
-     */
-    function _isWhitelistInfoShape(bytes memory ret) private pure returns (bool) {
-        if (ret.length < 8 * 32) return false;
-        (uint256 flag, , , uint256 tier, uint256 strOffset, uint256 arrOffset, uint256 strLen, ) = abi.decode(
-            ret,
-            (uint256, uint256, uint256, uint256, uint256, uint256, uint256, uint256)
-        );
-        if (flag > 1 || tier > type(uint8).max || strOffset != 0xc0) return false;
-        if (strLen > ret.length || 0xe0 + strLen > ret.length) return false;
-        uint256 arrAt = 0xe0 + ((strLen + 31) / 32) * 32;
-        if (arrOffset != arrAt || arrAt + 32 > ret.length) return false;
-        uint256 arrLen = _word(ret, arrAt);
-        if (arrLen > type(uint32).max || arrAt + 32 + arrLen * 32 > ret.length) return false;
-        for (uint256 i = 0; i < arrLen; i++) {
-            if (_word(ret, arrAt + 32 + i * 32) >> 160 != 0) return false;
-        }
-        abi.decode(ret, (bool, uint256, uint256, uint8, string, address[]));
-        return true;
-    }
-
-    /// @dev The 32-byte word of `b` at byte offset `off` (caller bounds it).
-    function _word(bytes memory b, uint256 off) private pure returns (uint256 w) {
-        for (uint256 i = 0; i < 32; i++) {
-            w = (w << 8) | uint8(b[off + i]);
-        }
     }
 
     /**

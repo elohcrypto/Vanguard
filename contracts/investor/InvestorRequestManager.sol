@@ -21,13 +21,10 @@ interface IRulesWhitelistView {
     function whitelistMode(address token) external view returns (uint8);
 }
 
-/// @dev Read-only slice of WhitelistOracle (the 6-tuple, Task 4.10).
+/// @dev Read-only slice of WhitelistOracle: the lean standing ComplianceRules
+///      reads too (A1F-3, Task 4.17).
 interface IWhitelistEntryView {
-    function isWhitelisted(address subject) external view returns (bool);
-
-    function getWhitelistInfo(
-        address subject
-    ) external view returns (bool, uint256, uint256, uint8 tier, string memory, address[] memory);
+    function whitelistStanding(address subject) external view returns (bool live, uint8 tier);
 }
 
 /**
@@ -218,8 +215,8 @@ contract InvestorRequestManager is Ownable, ReentrancyGuard {
         IRulesWhitelistView rules = IRulesWhitelistView(IERC3643(token).compliance());
         address wl = rules.whitelistOracle(token);
         if (wl == address(0) || rules.whitelistMode(token) == 1) return; // none, or ZkOnly
-        if (!IWhitelistEntryView(wl).isWhitelisted(user)) return;
-        (, , , uint8 tier, , ) = IWhitelistEntryView(wl).getWhitelistInfo(user);
+        (bool live, uint8 tier) = IWhitelistEntryView(wl).whitelistStanding(user);
+        if (!live) return;
         uint8 required = _liveTypes().getInvestorTypeConfig(requestedType).requiredWhitelistTier;
         if (tier < required) revert TierBelowNewType(tier, required);
     }

@@ -272,6 +272,27 @@ describe("List oracle guards (Task 4.15)", function () {
       expect(await BO.minimumConsensusOracles()).to.equal(3);
     });
 
+    // Task 4.17 (A1F-3): a reason is a label; at most 256 bytes.
+    it("addToWhitelist and its batch refuse a reason over 256 bytes", async function () {
+      const long = "r".repeat(257);
+      await expect(
+        WO.addToWhitelist(subject.address, 2, 0, long),
+      ).to.be.revertedWith("WhitelistOracle: Reason too long");
+      await expect(
+        WO.batchAddToWhitelist([subject.address], [2], 0, long),
+      ).to.be.revertedWith("WhitelistOracle: Reason too long");
+      await WO.addToWhitelist(subject.address, 2, 0, "r".repeat(256));
+      await WO.batchAddToWhitelist([stranger.address], [3], 0, "r".repeat(256));
+      expect(await WO.whitelistStanding(subject.address)).to.deep.equal([
+        true,
+        2n,
+      ]);
+      expect(await WO.whitelistStanding(stranger.address)).to.deep.equal([
+        true,
+        3n,
+      ]);
+    });
+
     it("removeFromWhitelist refuses a subject that is not listed", async function () {
       await expect(
         WO.removeFromWhitelist(subject.address, "never listed"),

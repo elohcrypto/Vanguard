@@ -41,6 +41,8 @@ contract WhitelistOracle is ListOracleBase {
 
     // Whitelist configuration
     uint256 public constant DEFAULT_WHITELIST_DURATION = 365 days;
+    /// @notice A1F-3 (Task 4.17): a listing reason is a label, not a document.
+    uint256 public constant MAX_REASON_LENGTH = 256;
     uint256 public constant MIN_TIER = 1;
     uint256 public constant MAX_TIER = 5;
     uint8 public minimumConsensusOracles = 3;
@@ -162,6 +164,7 @@ contract WhitelistOracle is ListOracleBase {
     ) external onlyOwnerOrListManager {
         require(_subject != address(0), "WhitelistOracle: Invalid subject");
         require(_tier >= MIN_TIER && _tier <= MAX_TIER, "WhitelistOracle: Invalid tier");
+        require(bytes(_reason).length <= MAX_REASON_LENGTH, "WhitelistOracle: Reason too long");
 
         uint256 expiryTime = _expiry(_duration);
 
@@ -222,8 +225,22 @@ contract WhitelistOracle is ListOracleBase {
      * @dev Check if address is whitelisted
      */
     function isWhitelisted(address _subject) external view returns (bool) {
-        WhitelistEntry memory entry = whitelistEntries[_subject];
-        return entry.isWhitelisted && (entry.expiryTime == 0 || block.timestamp < entry.expiryTime);
+        (bool live, ) = _standing(_subject);
+        return live;
+    }
+
+    /**
+     * @notice The transfer path's read (A1F-3, Task 4.17): live and tier,
+     *         from storage, without copying the reason or the attestors.
+     */
+    function whitelistStanding(address _subject) external view returns (bool live, uint8 tier) {
+        return _standing(_subject);
+    }
+
+    function _standing(address _subject) private view returns (bool live, uint8 tier) {
+        WhitelistEntry storage entry = whitelistEntries[_subject];
+        live = entry.isWhitelisted && (entry.expiryTime == 0 || block.timestamp < entry.expiryTime);
+        tier = entry.tier;
     }
 
     /**
@@ -329,6 +346,7 @@ contract WhitelistOracle is ListOracleBase {
         string calldata _reason
     ) external onlyOwner {
         require(_subjects.length == _tiers.length, "WhitelistOracle: Array length mismatch");
+        require(bytes(_reason).length <= MAX_REASON_LENGTH, "WhitelistOracle: Reason too long");
 
         for (uint256 i = 0; i < _subjects.length; i++) {
             require(_subjects[i] != address(0), "WhitelistOracle: Invalid subject");

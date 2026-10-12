@@ -57,9 +57,10 @@ describe("Whitelist oracle shape at setWhitelistOracle (Task 4.16)", function ()
     };
   }
 
-  it("refuses an oracle whose getWhitelistInfo has no tier (5-tuple)", async function () {
+  // Task 4.17 (A1F-3): the probe reads whitelistStanding, the one call
+  // the transfer path makes; a pre-4.17 oracle lacks it.
+  it("refuses an oracle without whitelistStanding (a 5-tuple oracle)", async function () {
     const { rules, token, short, wl } = await deploy();
-    // It answers isWhitelisted, as the first probe requires.
     expect(await short.isWhitelisted(rules.target)).to.equal(false);
     await expect(rules.setWhitelistOracle(token.target, short.target))
       .to.be.revertedWithCustomError(rules, "OracleIncompatible")
@@ -106,16 +107,16 @@ describe("Whitelist oracle shape at setWhitelistOracle (Task 4.16)", function ()
 });
 
 /**
- * Review L-1 (Task 4.16 round 2): every malformed getWhitelistInfo return
- * is OracleIncompatible at the setter, never a bare panic from the decode.
- * RawWhitelistOracle returns the stored bytes verbatim.
+ * Review L-1 (Task 4.16 round 2), as reshaped by Task 4.17 (A1F-3): every
+ * malformed whitelistStanding return is OracleIncompatible at the setter,
+ * never a bare revert from the decode. RawWhitelistOracle returns the
+ * stored bytes verbatim for any call.
  */
 describe("Whitelist oracle shape: malformed returns (L-1)", function () {
   const coder = ethers.AbiCoder.defaultAbiCoder();
-  const TYPES = ["bool", "uint256", "uint256", "uint8", "string", "address[]"];
 
   async function deploy() {
-    const [owner, alice] = await ethers.getSigners();
+    const [owner] = await ethers.getSigners();
     const deployC = async (name: string, ...a: unknown[]) =>
       (await ethers.getContractFactory(name)).deploy(...a) as Promise<any>;
     const registry = await deployC("IdentityRegistry");
@@ -128,33 +129,18 @@ describe("Whitelist oracle shape: malformed returns (L-1)", function () {
       rules.target,
     );
     const raw = await deployC("RawWhitelistOracle");
-    const good = coder.encode(TYPES, [true, 1, 0, 3, "kyc", [alice.address]]);
-    return { rules, token, raw, good, alice };
+    const good = coder.encode(["bool", "uint8"], [true, 3]);
+    return { rules, token, raw, good };
   }
 
-  /** `hex` with the 32-byte word at `wordIndex` replaced by `value`. */
-  const withWord = (hex: string, wordIndex: number, value: bigint) =>
-    hex.slice(0, 2 + wordIndex * 64) +
-    ethers.toBeHex(value, 32).slice(2) +
-    hex.slice(2 + (wordIndex + 1) * 64);
-
-  it("refuses a bool word of 2, a truncated string, a short array, a dirty address, absurd lengths", async function () {
+  it("refuses a bool word of 2, a tier word above 255 and a short return", async function () {
     const { rules, token, raw, good } = await deploy();
-    // Words: 0 bool, 1 ts, 2 expiry, 3 tier, 4 str offset, 5 arr offset,
-    // 6 strLen, 7 string data, 8 arrLen, 9 the one address.
     const shapes: [string, string][] = [
-      ["bool word of 2", withWord(good, 0, 2n)],
-      // Task 4.17 (review A1 A1F-7): a tier word above uint8.
-      ["tier word 256", withWord(good, 3, 256n)],
-      [
-        "string length 100 with no data",
-        withWord(good, 6, 100n).slice(0, 2 + 7 * 64),
-      ],
-      ["array length 2 with one element word", withWord(good, 8, 2n)],
-      ["dirty address word", withWord(good, 9, (1n << 200n) | 0xabcdn)],
-      ["array length 2^200", withWord(good, 8, 1n << 200n)],
-      // Would overflow (strLen + 31) without the string bound: a bare panic.
-      ["string length 2^256 - 5", withWord(good, 6, (1n << 256n) - 5n)],
+      ["bool word of 2", coder.encode(["uint256", "uint256"], [2, 3])],
+      // Review A1 A1F-7: a tier word above uint8.
+      ["tier word 256", coder.encode(["uint256", "uint256"], [1, 256])],
+      ["one word", good.slice(0, 2 + 64)],
+      ["empty", "0x"],
     ];
     for (const [what, hex] of shapes) {
       await raw.setRaw(hex);
@@ -167,14 +153,13 @@ describe("Whitelist oracle shape: malformed returns (L-1)", function () {
     );
   });
 
-  it("accepts the canonical 6-tuple and, like the transfer-time decode, an extra trailing word", async function () {
+  it("accepts the canonical pair and, like the transfer-time decode, an extra trailing word", async function () {
     const { rules, token, raw, good } = await deploy();
     await raw.setRaw(good);
     await expect(rules.setWhitelistOracle(token.target, raw.target))
       .to.emit(rules, "WhitelistOracleSet")
       .withArgs(token.target, raw.target);
     await rules.setWhitelistOracle(token.target, ethers.ZeroAddress);
-    // A word past the array is never read by abi.decode either way.
     await raw.setRaw(good + ethers.toBeHex(7n, 32).slice(2));
     await expect(rules.setWhitelistOracle(token.target, raw.target)).to.emit(
       rules,
