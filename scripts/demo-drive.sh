@@ -263,12 +263,16 @@ errs=${errs:-0}
 # 83d. Indented ❌ elsewhere is often a boolean chain read ("❌ Can
 # Transfer: false" in option 26), so only the HANDOVER STEP blocks count
 # them (to the next menu prompt, the menu's own "0.  ❌ Exit" excluded),
-# and a "Handover incomplete" line counts wherever it is.
+# and a "Handover incomplete" line counts wherever it is. An indented ⛔
+# (a step refusing to run, e.g. 83e without 83c's snapshot) counts in
+# steps 2 and 3 only: step 1 (83c) prints "⛔ N stray grant(s) the
+# preflight refuses" before it offers to remove them, an expected prompt.
 handover=$(tr -d '\r' < "$LOG" | awk '
-  /HANDOVER STEP [0-9]+:/ { b = 1 }
+  /HANDOVER STEP [0-9]+:/ { b = 1; s = ($0 ~ /HANDOVER STEP 1:/) ? 1 : 2 }
   /Select an option: / { b = 0 }
   /Handover incomplete/ { n++; next }
   b && /^[[:space:]]+❌/ && !/^[[:space:]]*0\.[[:space:]]+❌ Exit/ { n++ }
+  b && s == 2 && /^[[:space:]]+⛔/ { n++ }
   END { print n + 0 }')
 errs=$((errs + handover))
 
