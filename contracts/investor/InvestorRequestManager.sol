@@ -181,8 +181,9 @@ contract InvestorRequestManager is Ownable, ReentrancyGuard {
     /**
      * @dev R-416-15 (fail closed): the type this manager assigns lives in
      *      its immutable registry; once the token applies another one the
-     *      manager would approve into a registry the token never reads.
-     *      Requests and approvals refuse instead.
+     *      manager would approve into a registry the token never reads, or
+     *      set a lock by that registry's caps. Requests, approvals and lock
+     *      updates refuse instead.
      */
     function _requireSameRegistry() private view {
         IInvestorTypeRegistry live = _liveTypes();
@@ -375,6 +376,9 @@ contract InvestorRequestManager is Ownable, ReentrancyGuard {
     ) external onlyOwner {
         require(investorType != IInvestorTypeRegistry.InvestorType.Normal, "Cannot set for Normal type");
         require(newAmount > 0, "Amount must be greater than 0");
+        // R-416-15 extended: a lock set against another registry's cap would
+        // outlive the divergence; the manager is inert for setters too.
+        _requireSameRegistry();
         uint256 cap = _lockCap();
         if (newAmount > cap) revert LockAboveNormalCap(newAmount, cap);
         

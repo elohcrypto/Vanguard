@@ -9,6 +9,20 @@ import { addRegistrar } from "../helpers/registrars";
  * strands the user behind the new type's whitelist tier; an unlock pays
  * only the user or a verified, non-trusted wallet.
  */
+/** A config with the Normal (type 0) caps changed, every other field kept. */
+async function setNormalCaps(types: any, transfer: bigint, holding: bigint) {
+  const c = await types.getInvestorTypeConfig(0);
+  await types.updateInvestorTypeConfig(0, {
+    maxTransferAmount: transfer,
+    maxHoldingAmount: holding,
+    requiredWhitelistTier: c.requiredWhitelistTier,
+    transferCooldownMinutes: c.transferCooldownMinutes,
+    largeTransferThreshold: c.largeTransferThreshold,
+    enhancedLogging: c.enhancedLogging,
+    enhancedPrivacy: c.enhancedPrivacy,
+  });
+}
+
 describe("Custody caps, tier and unlock recipient (Task 4.16)", function () {
   const e = ethers.parseEther;
   const T = { Normal: 0, Retail: 1, Accredited: 2, Institutional: 3 };
@@ -72,20 +86,6 @@ describe("Custody caps, tier and unlock recipient (Task 4.16)", function () {
     };
   }
 
-  /** A config with the Normal caps changed, every other field kept. */
-  async function setNormalCaps(types: any, transfer: bigint, holding: bigint) {
-    const c = await types.getInvestorTypeConfig(T.Normal);
-    await types.updateInvestorTypeConfig(T.Normal, {
-      maxTransferAmount: transfer,
-      maxHoldingAmount: holding,
-      requiredWhitelistTier: c.requiredWhitelistTier,
-      transferCooldownMinutes: c.transferCooldownMinutes,
-      largeTransferThreshold: c.largeTransferThreshold,
-      enhancedLogging: c.enhancedLogging,
-      enhancedPrivacy: c.enhancedPrivacy,
-    });
-  }
-
   /** Request `type`, the bank's wallet, the user's lock, confirmed. */
   async function lockedRequest(f: any, type: number) {
     const { m, bank, user, token } = f;
@@ -130,17 +130,6 @@ describe("Custody caps, tier and unlock recipient (Task 4.16)", function () {
       m.updateLockRequirement(T.Retail, e("3001")),
     ).to.be.revertedWithCustomError(m, "LockAboveNormalCap");
     await m.updateLockRequirement(T.Retail, e("3000"));
-    // The token's live registry decides, not the manager's immutable one.
-    const other = await (
-      await ethers.getContractFactory("InvestorTypeRegistry")
-    ).deploy();
-    await setNormalCaps(other, e("500"), e("500"));
-    await other.authorizeToken(token.target, true);
-    await token.setInvestorTypeRegistry(other.target);
-    await expect(
-      m.updateLockRequirement(T.Retail, e("501")),
-    ).to.be.revertedWithCustomError(m, "LockAboveNormalCap");
-    await m.updateLockRequirement(T.Retail, e("500"));
     // A token with no registry of its own: the manager's bounds it.
     const bare = await (
       await ethers.getContractFactory("Token")
@@ -158,6 +147,13 @@ describe("Custody caps, tier and unlock recipient (Task 4.16)", function () {
       m2.updateLockRequirement(T.Retail, e("3001")),
     ).to.be.revertedWithCustomError(m2, "LockAboveNormalCap");
     await m2.updateLockRequirement(T.Retail, e("3000"));
+    // Read at call time from the bound registry: a cap raised after the
+    // manager's construction admits a larger lock.
+    await setNormalCaps(types, e("20000"), e("20000"));
+    await m.updateLockRequirement(T.Retail, e("20000"));
+    await expect(
+      m.updateLockRequirement(T.Retail, e("20001")),
+    ).to.be.revertedWithCustomError(m, "LockAboveNormalCap");
   });
 
   it("approveRequest refuses while the user's live entry is below the new type's tier (Q7 c)", async function () {
@@ -336,9 +332,22 @@ describe("Custody: registry fallback and divergence (Task 4.16 round 2)", functi
     await expect(m.connect(f.other).requestInvestorStatus(T.Retail))
       .to.be.revertedWithCustomError(m, "RegistryDiverged")
       .withArgs(other.target, types.target);
-    // Pointed back: the approval goes through.
+    // L-7: a lock set by the other registry's caps (500k here) would
+    // outlive the divergence; the setter refuses too, before its cap check.
+    await setNormalCaps(other, e("500000"), e("500000"));
+    await expect(m.updateLockRequirement(T.Retail, e("400000")))
+      .to.be.revertedWithCustomError(m, "RegistryDiverged")
+      .withArgs(other.target, types.target);
+    expect(await m.lockRequirements(T.Retail)).to.equal(lock);
+    // Pointed back: the approval goes through and the setter works under
+    // the bound registry's cap (8,000), still refusing above it.
     await token.setInvestorTypeRegistry(types.target);
     await m.connect(bank).approveRequest(user.address);
     expect(await types.getInvestorType(user.address)).to.equal(T.Retail);
+    await expect(
+      m.updateLockRequirement(T.Retail, e("400000")),
+    ).to.be.revertedWithCustomError(m, "LockAboveNormalCap");
+    await m.updateLockRequirement(T.Retail, e("8000"));
+    expect(await m.lockRequirements(T.Retail)).to.equal(e("8000"));
   });
 });
