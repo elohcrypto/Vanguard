@@ -90,9 +90,13 @@ This directory contains OnchainID implementation contracts following ERC-734 and
   48 hours to move assets through the issuer's `Token.recoveryAddress`,
   which stays the asset-side bound; its new wallet must control the
   identity (own it or hold a MANAGEMENT or ACTION key on it, D41), as
-  `IdentityRegistry.registerIdentity` and `moveIdentity` require of
-  every wallet they bind; a holder without seated agents whose owner key
-  is lost is burned and re-issued by the agent instead.
+  every registry binding requires (`registerIdentity`,
+  `batchRegisterIdentity`, `updateIdentity`, `moveIdentity`). Control
+  is checked when the wallet is bound; a wallet may lose it afterwards
+  (its key removed, the identity transferred) and keeps its entry, and
+  governance refuses such a wallet at vote time (R-414-11). A holder
+  without seated agents whose owner key is lost is burned and re-issued
+  by the agent instead.
 - `addKey` keeps at most 64 active keys a purpose (`MAX_KEYS_PER_PURPOSE`,
   D42; rotations and `batchAddKeys` go through it, a batch holds at most
   50, `MAX_BATCH_SIZE`); removal is O(1) through a position index, so no

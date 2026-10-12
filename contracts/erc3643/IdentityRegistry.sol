@@ -236,6 +236,11 @@ contract IdentityRegistry is RegistryVerification {
         address oldIdentity = _identities[_userAddress];
         if (_identity != oldIdentity) {
             require(_walletOf[_identity] == address(0), "Identity already bound");
+            // D41 (R-414-11): every binding path checks control at binding
+            // time; control lost later is governance's to refuse at the vote.
+            if (!IdentityControl.controls(_userAddress, _identity)) {
+                revert WalletDoesNotControlIdentity(_userAddress, _identity);
+            }
             delete _walletOf[oldIdentity];
             _bindIdentity(_userAddress, _identity);
         }

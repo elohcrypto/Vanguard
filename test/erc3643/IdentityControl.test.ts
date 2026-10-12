@@ -95,6 +95,27 @@ describe("Wallets bound to an identity must control it (4.14, D41)", function ()
     expect(await idReg.identity(stranger.address)).to.equal(lostId);
   });
 
+  it("updateIdentity: owner, MANAGEMENT and ACTION pass; a stranger is refused (R-414-11)", async function () {
+    const OID = await ethers.getContractFactory("OnchainID");
+    const cases: [string, (c: any) => Promise<void>][] = [
+      ["owner", async () => {}],
+      ["MANAGEMENT", async (c) => c.addKey(k(lost.address), MGMT, 1)],
+      ["ACTION", async (c) => c.addKey(k(lost.address), ACTION, 1)],
+    ];
+    for (const [how, grant] of cases) {
+      const c = await OID.deploy(
+        how === "owner" ? lost.address : other.address,
+      );
+      await grant(c.connect(other));
+      await idReg.updateIdentity(lost.address, await c.getAddress());
+      expect(await idReg.identity(lost.address)).to.equal(await c.getAddress());
+    }
+    const foreign = await (await OID.deploy(other.address)).getAddress();
+    await expect(idReg.updateIdentity(lost.address, foreign))
+      .to.be.revertedWithCustomError(idReg, "WalletDoesNotControlIdentity")
+      .withArgs(lost.address, foreign);
+  });
+
   it("registerIdentity and batchRegisterIdentity refuse a wallet that does not control the identity, or an identity with no code", async function () {
     const otherIdC = await (
       await ethers.getContractFactory("OnchainID")

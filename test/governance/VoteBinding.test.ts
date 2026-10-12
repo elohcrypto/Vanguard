@@ -63,14 +63,15 @@ describe("Vote binding: one identity, one wallet, one vote", function () {
     });
 
     it("updateIdentity refuses an identity bound elsewhere and frees the old one", async function () {
-      const { ir, proposer, voters } = await setup();
+      const { ir, proposer, voters, factory } = await setup();
       const [bob] = voters;
       const aliceId = await ir.identity(proposer.address);
       const bobId = await ir.identity(bob.address);
       await expect(ir.updateIdentity(bob.address, aliceId)).to.be.revertedWith(
         "Identity already bound",
       );
-      const other = ethers.Wallet.createRandom().address;
+      // An identity Bob controls (D41 holds on updateIdentity too).
+      const other = await deployIdentity(factory, bob.address);
       await ir.updateIdentity(bob.address, other);
       expect(await ir.walletOf(other)).to.equal(bob.address);
       expect(await ir.walletOf(bobId)).to.equal(ethers.ZeroAddress);
@@ -192,19 +193,20 @@ describe("Vote binding: one identity, one wallet, one vote", function () {
       await expect(
         gov.connect(opsWallet).castVote(id, true, ""),
       ).to.be.revertedWith("Must be KYC/AML verified");
-      // The agent's updateIdentity still re-binds a registered wallet (not
-      // under D41); governance's own rule then refuses the vote.
-      await ir
-        .connect(ops)
-        .registerIdentity(
-          opsWallet.address,
-          await deployIdentity(f.factory, opsWallet.address),
-          840,
-        );
-      await ir.connect(ops).deleteIdentity(proposer.address);
-      await ir.connect(ops).updateIdentity(opsWallet.address, aliceId);
+      // The realistic case: bound WITH control (Alice gave the wallet an
+      // ACTION key), then control is lost (Alice removes it). Binding-time
+      // rule (R-414-11): the registry keeps the entry, governance refuses.
+      const oid = await ethers.getContractAt("OnchainID", aliceId);
+      await oid
+        .connect(proposer)
+        .addKey(keyOf(opsWallet.address), ACTION_KEY, ECDSA);
+      await ir.connect(ops).moveIdentity(proposer.address, opsWallet.address);
       expect(await ir.isVerified(opsWallet.address)).to.equal(true);
       await fund(opsWallet);
+      await oid
+        .connect(proposer)
+        .removeKey(keyOf(opsWallet.address), ACTION_KEY);
+      expect(await ir.identity(opsWallet.address)).to.equal(aliceId);
       await expect(
         gov.connect(opsWallet).castVote(id, true, ""),
       ).to.be.revertedWith("Wallet does not control its identity");
