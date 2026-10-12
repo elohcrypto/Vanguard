@@ -161,11 +161,40 @@ async function identityChecks(o) {
   );
   const [, , effectiveAt] = await km.getPendingRecoverySetup(id);
   const idc = await ethers.getContractAt(
-    ["function pendingOwner() view returns (address)"],
+    [
+      "function pendingOwner() view returns (address)",
+      "function owner() view returns (address)",
+    ],
     id,
   );
   const pending = await idc.pendingOwner().catch(() => ZERO);
+  // Review R2-2 (Task 4.17): a timelocked rotation or recovery set up
+  // before the preflight fires in the window with no deployer transaction.
+  const rotations = [];
+  for (const ev of await scanLogs(km, km.filters.KeyRotationInitiated(id), o)) {
+    const [, oldKey, newKey, purpose] = ev.args;
+    const rid = ethers.solidityPackedKeccak256(
+      ["address", "bytes32", "bytes32", "uint256"],
+      [id, oldKey, newKey, purpose],
+    );
+    const r = await km.keyRotations(id, rid);
+    if (r.initiatedAt > 0n && !r.completed) rotations.push(rid);
+  }
+  const rec = await km.getKeyRecovery(id);
+  const approval = await km.getRecoveryApproval(id);
+  const ownerKey = ethers.solidityPackedKeccak256(
+    ["address"],
+    [await idc.owner().catch(() => ZERO)],
+  );
+  const recovering =
+    (rec.lastKey !== ethers.ZeroHash && !rec.completed) ||
+    (approval.key !== ethers.ZeroHash && approval.key !== ownerKey);
   return [
+    {
+      label: `demo identity ${id} has no pending KeyManager rotation or recovery`,
+      ok: rotations.length === 0 && !recovering,
+      fix: `demo identity ${id} has ${rotations.length ? `pending KeyManager rotation(s) ${rotations.join(", ")}` : "a pending KeyManager recovery or owner transfer"}: a timelocked action anyone executes would land in the voting window with no deployer transaction; its owner must cancel it (cancelKeyRotation, the agents cancelKeyRecovery) or let it complete first`,
+    },
     {
       label: `demo identity ${id} has no pending recovery re-seat`,
       ok: effectiveAt === 0n,

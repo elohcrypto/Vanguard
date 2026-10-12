@@ -219,6 +219,25 @@ describe("Handover: KeyManager (4.2)", function () {
       await refuses(args, /the deployer is still recovery agent/);
     });
 
+    // Review R2-2 (Task 4.17): timelocked actions anyone executes.
+    it("one with a pending rotation or recovery (R2-2)", async function () {
+      const idA = await identity.getAddress();
+      const k = (a: string) => ethers.solidityPackedKeccak256(["address"], [a]);
+      const [oldK, newK] = [k(f.proposer.address), k(f.voters[1].address)];
+      await km.connect(f.proposer).initiateKeyRotation(idA, oldK, newK, 1);
+      await refuses(args, /has pending KeyManager rotation\(s\)/);
+      await km.connect(f.proposer).cancelKeyRotation(idA, oldK, newK, 1);
+      const [a1, a2] = [f.stranger, f.voters[0]];
+      await km
+        .connect(f.proposer)
+        .setupKeyRecovery(idA, [a1.address, a2.address], 2);
+      await km.connect(a1).initiateKeyRecovery(idA, k(f.voters[1].address));
+      await refuses(
+        args,
+        /has a pending KeyManager recovery or owner transfer/,
+      );
+    });
+
     it("one where the deployer holds a MANAGEMENT key", async function () {
       await identity.connect(f.proposer).addKey(dKey(), 1, 1);
       await refuses(args, /the deployer is still MANAGEMENT key/);
