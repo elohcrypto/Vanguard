@@ -108,9 +108,12 @@ class HandoverModule {
       oracleNodes,
       attestors,
       extraTrusted: [],
-      // Task 4.17 (D54): the owner fee wallet options 1 and 60 give the
-      // escrow factory (EscrowSetupFlow: wallet 1), acknowledged.
-      feeWallets: s.signers[1] ? [s.signers[1].address] : [],
+      // Task 4.17 (D54): the owner fee wallet option 60 gives the escrow
+      // factory (EscrowSetupFlow: wallet 1), acknowledged when it exists.
+      feeWallets:
+        s.getContract("escrowFactory") && s.signers[1]
+          ? [s.signers[1].address]
+          : [],
       snapshot: s.handoverSnapshot,
       deployer: s.signers[0],
       ops,
