@@ -265,15 +265,6 @@ class DemoState {
   setContract(name, contract) {
     this.contracts[name] = contract;
   }
-
-  /**
-   * Check if a contract exists
-   * @param {string} name - Contract name
-   * @returns {boolean} True if contract exists
-   */
-  hasContract(name) {
-    return this.contracts[name] !== undefined;
-  }
 }
 
 module.exports = DemoState;

@@ -33,6 +33,11 @@ const FILES = [
   "MockComplianceRegistry.sol",
   "PAYMENT_PROTOCOL_DESIGN.md",
   "SECURITY_UPGRADE.md",
+  // Task 4.16: two interfaces no contract imported, a demo helper no flow
+  // required (review B L-1).
+  "IMultiSigWallet.sol",
+  "IInvestorRequestManager.sol",
+  "ValidationHelpers.js",
 ];
 const SYMBOLS = [
   // Task 4.1 (1a198ee): ComplianceRules' inert rule store.
@@ -47,6 +52,8 @@ const SYMBOLS = [
   "paymentEscrow",
   "refundManager",
   "demonstrateTransferRestrictions",
+  // Task 4.16: a DemoState method nothing called (review B L-1).
+  "hasContract",
 ];
 
 const EXCLUDE = [
