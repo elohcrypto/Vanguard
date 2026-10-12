@@ -264,10 +264,11 @@ describe("Recovered wallet votes after KeyManager recovery (2F.1 + 2F.2)", funct
 
     const bobId = await c.identityRegistry.identity(bob.address);
     const id = await ethers.getContractAt("OnchainID", bobId);
-    const km = await (await ethers.getContractFactory("KeyManager")).deploy();
+    // The fixture's KeyManager, pinned by the factory at creation (4.16);
     // Bob opted in to recovery before losing his wallet.
+    const km = f.keyManager;
+    expect(await id.recoveryManager()).to.equal(await km.getAddress());
     await id.connect(bob).authorizeManager(await km.getAddress());
-    await id.connect(bob).pinRecoveryManager(await km.getAddress());
     await km
       .connect(bob)
       .setupKeyRecovery(bobId, [agentA.address, agentB.address], 2);
