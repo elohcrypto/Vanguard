@@ -36,9 +36,9 @@ describe("Investor Onboarding System", function () {
   let user: SignerWithAddress;
   let otherUser: SignerWithAddress;
 
-  const RETAIL_LOCK = ethers.parseEther("10000"); // Matches InvestorRequestManager default
-  const ACCREDITED_LOCK = ethers.parseEther("100000"); // Matches InvestorRequestManager default
-  const INSTITUTIONAL_LOCK = ethers.parseEther("1000000"); // Matches InvestorRequestManager default
+  const RETAIL_LOCK = ethers.parseEther("2000"); // Manager default: Normal cap / 4
+  const ACCREDITED_LOCK = ethers.parseEther("4000"); // Manager default: Normal cap / 2
+  const INSTITUTIONAL_LOCK = ethers.parseEther("8000"); // Manager default: the Normal cap
 
   beforeEach(async function () {
     [owner, bank, user, otherUser] = await ethers.getSigners();
@@ -644,7 +644,7 @@ describe("Investor Onboarding System", function () {
         wallet,
         wallet
           .connect(bank)
-          .proposeUnlock(RETAIL_LOCK, bank.address, "bank alone"),
+          .proposeUnlock(RETAIL_LOCK, user.address, "bank alone"),
       );
       await wallet.connect(bank).signUnlock(id);
       await expect(wallet.connect(bank).signUnlock(id)).to.be.revertedWith(
@@ -676,15 +676,10 @@ describe("Investor Onboarding System", function () {
       expect(await wallet.lockedAmount()).to.equal(0);
     });
 
-    it("an unverified recipient is refused by the token's gate", async function () {
+    it("an unverified recipient is refused at the proposal (Task 4.16, A1 L4)", async function () {
       const wallet = await lockedWallet();
-      const id = await proposalId(
-        wallet,
-        wallet
-          .connect(user)
-          .proposeUnlock(RETAIL_LOCK, otherUser.address, "to a stranger"),
-      );
-      await wallet.connect(user).signUnlock(id);
+      // The token's gate would refuse the payout (trusted path: the human
+      // counterparty is checked); the wallet refuses the proposal first.
       expect(
         await token.canTransfer(
           await wallet.getAddress(),
@@ -692,10 +687,11 @@ describe("Investor Onboarding System", function () {
           RETAIL_LOCK,
         ),
       ).to.equal(false);
-      // Trusted path: ComplianceRules checks the human counterparty.
-      await expect(wallet.connect(bank).signUnlock(id)).to.be.revertedWith(
-        "Compliance check failed",
-      );
+      await expect(
+        wallet
+          .connect(user)
+          .proposeUnlock(RETAIL_LOCK, otherUser.address, "to a stranger"),
+      ).to.be.revertedWithCustomError(wallet, "RecipientNotVerified");
       expect(await token.balanceOf(await wallet.getAddress())).to.equal(
         RETAIL_LOCK,
       );
@@ -742,7 +738,7 @@ describe("Investor Onboarding System", function () {
     it("a lock reduced below the holdings by an agent burn still pays out", async function () {
       const wallet = await lockedWallet();
       const w = await wallet.getAddress();
-      const burnt = ethers.parseEther("4000");
+      const burnt = ethers.parseEther("500");
       await token.burn(w, burnt);
       const left = RETAIL_LOCK - burnt;
       const id = await proposalId(

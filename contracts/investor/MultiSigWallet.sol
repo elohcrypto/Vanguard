@@ -4,6 +4,13 @@ pragma solidity ^0.8.19;
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import "@openzeppelin/contracts/access/Ownable.sol";
 import "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
+import {IERC3643} from "../erc3643/interfaces/IERC3643.sol";
+import {IIdentityRegistry} from "../erc3643/interfaces/IIdentityRegistry.sol";
+
+/// @dev Read-only slice of ComplianceRules: trusted-contract status on a token.
+interface ITrustedContractView {
+    function isTrustedContract(address token, address account) external view returns (bool);
+}
 
 /**
  * @title MultiSigWallet
@@ -43,6 +50,11 @@ contract MultiSigWallet is Ownable, ReentrancyGuard {
     // Proposal counter
     uint256 private _proposalCounter;
     
+    /// @dev Review A1 L4: an unlock pays the user or a verified person, never
+    ///      a trusted contract (that move would skip the owner's checks).
+    error RecipientTrusted(address recipient);
+    error RecipientNotVerified(address recipient);
+
     // Events
     event TokensLocked(address indexed user, uint256 amount, uint256 timestamp);
     event UnlockProposalCreated(bytes32 indexed proposalId, address indexed proposer, uint256 amount, string reason);
@@ -104,6 +116,17 @@ contract MultiSigWallet is Ownable, ReentrancyGuard {
         require(amount > 0 && amount <= IERC20(token).balanceOf(address(this)), "Invalid amount");
         require(recipient != address(0), "Invalid recipient");
         require(bytes(reason).length > 0, "Reason required");
+        // Review A1 L4 (Task 4.16): the recipient is the user, or a wallet
+        // the token's gate checks as a person: verified, and not a trusted
+        // contract (a trusted-to-trusted move skips the beneficial owner's
+        // checks). The token's own registry and rules decide, read now.
+        if (recipient != user) {
+            IERC3643 t = IERC3643(token);
+            if (ITrustedContractView(t.compliance()).isTrustedContract(token, recipient)) {
+                revert RecipientTrusted(recipient);
+            }
+            if (!IIdentityRegistry(t.identityRegistry()).isVerified(recipient)) revert RecipientNotVerified(recipient);
+        }
         
         // Generate unique proposal ID
         _proposalCounter++;

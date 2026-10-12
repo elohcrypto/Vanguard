@@ -9,6 +9,27 @@ import "../erc3643/interfaces/IERC3643.sol";
 import "../compliance/interfaces/ITrustedContracts.sol";
 import "./MultiSigWallet.sol";
 
+/// @dev Read-only slice of Token: the investor-type registry it applies.
+interface ITokenTypesView {
+    function investorTypeRegistry() external view returns (address);
+}
+
+/// @dev Read-only slice of ComplianceRules: the token's whitelist source.
+interface IRulesWhitelistView {
+    function whitelistOracle(address token) external view returns (address);
+
+    function whitelistMode(address token) external view returns (uint8);
+}
+
+/// @dev Read-only slice of WhitelistOracle (the 6-tuple, Task 4.10).
+interface IWhitelistEntryView {
+    function isWhitelisted(address subject) external view returns (bool);
+
+    function getWhitelistInfo(
+        address subject
+    ) external view returns (bool, uint256, uint256, uint8 tier, string memory, address[] memory);
+}
+
 /**
  * @title InvestorRequestManager
  * @dev Manages investor status requests with multi-sig wallet token locking
@@ -51,6 +72,11 @@ contract InvestorRequestManager is Ownable, ReentrancyGuard {
     address[] public allRequests;
     mapping(address => bool) public hasActiveRequest;
     
+    /// @dev D45: a lock no Normal holder could transfer or hold is unusable.
+    error LockAboveNormalCap(uint256 amount, uint256 cap);
+    /// @dev Q7 c: the user's live whitelist entry is below the new type's tier.
+    error TierBelowNewType(uint8 tier, uint8 required);
+
     // Events
     event InvestorRequestCreated(
         address indexed user,
@@ -121,12 +147,60 @@ contract InvestorRequestManager is Ownable, ReentrancyGuard {
     }
     
     /**
-     * @dev Initialize default lock requirements for each investor type
+     * @dev Default lock requirements (Task 4.16, D45): a quarter, a half
+     *      and the whole of the Normal cap, so a Normal holder can lock
+     *      any of them in one transfer and hold it. The business amounts
+     *      are set later with updateLockRequirement, under the same cap.
      */
     function _initializeLockRequirements() private {
-        lockRequirements[IInvestorTypeRegistry.InvestorType.Retail] = 10_000 * 10**18;        // 10,000 tokens
-        lockRequirements[IInvestorTypeRegistry.InvestorType.Accredited] = 100_000 * 10**18;   // 100,000 tokens
-        lockRequirements[IInvestorTypeRegistry.InvestorType.Institutional] = 1_000_000 * 10**18; // 1,000,000 tokens
+        uint256 cap = _lockCap();
+        lockRequirements[IInvestorTypeRegistry.InvestorType.Retail] = cap / 4;
+        lockRequirements[IInvestorTypeRegistry.InvestorType.Accredited] = cap / 2;
+        lockRequirements[IInvestorTypeRegistry.InvestorType.Institutional] = cap;
+    }
+
+    /**
+     * @dev The investor-type registry the token applies now (R-410-2), or
+     *      this manager's when the token names none. Read at call time: a
+     *      lock is checked against the caps that gate the lock transfer.
+     */
+    function _liveTypes() private view returns (IInvestorTypeRegistry) {
+        address live = ITokenTypesView(token).investorTypeRegistry();
+        return live == address(0) ? investorRegistry : IInvestorTypeRegistry(live);
+    }
+
+    /**
+     * @dev The largest lock a Normal holder can make on the token: the
+     *      smaller of the Normal type's per-transfer and holding caps
+     *      (review A1 L2: 10k/100k/1M defaults above the 8k/50k caps made
+     *      every request unlockable with the registry wired).
+     */
+    function _lockCap() private view returns (uint256) {
+        IInvestorTypeRegistry.InvestorTypeConfig memory normal = _liveTypes().getInvestorTypeConfig(
+            IInvestorTypeRegistry.InvestorType.Normal
+        );
+        return
+            normal.maxTransferAmount < normal.maxHoldingAmount
+                ? normal.maxTransferAmount
+                : normal.maxHoldingAmount;
+    }
+
+    /**
+     * @dev Q7 c (Task 4.16): the requested type's required whitelist tier
+     *      must not refuse the user on the token's current whitelist
+     *      oracle, or approval would strand the user (R-410-6, refused
+     *      everywhere including the unlock). Active only once an oracle
+     *      is bound and read (not ZkOnly) and the user has a live entry;
+     *      with no entry the whitelist, not the tier, decides.
+     */
+    function _requireTierReachable(address user, IInvestorTypeRegistry.InvestorType requestedType) private view {
+        IRulesWhitelistView rules = IRulesWhitelistView(IERC3643(token).compliance());
+        address wl = rules.whitelistOracle(token);
+        if (wl == address(0) || rules.whitelistMode(token) == 1) return; // none, or ZkOnly
+        if (!IWhitelistEntryView(wl).isWhitelisted(user)) return;
+        (, , , uint8 tier, , ) = IWhitelistEntryView(wl).getWhitelistInfo(user);
+        uint8 required = _liveTypes().getInvestorTypeConfig(requestedType).requiredWhitelistTier;
+        if (tier < required) revert TierBelowNewType(tier, required);
     }
     
     /**
@@ -230,6 +304,7 @@ contract InvestorRequestManager is Ownable, ReentrancyGuard {
         // Verify tokens still locked
         MultiSigWallet wallet = MultiSigWallet(request.multiSigWallet);
         require(wallet.getLockedBalance() >= request.requiredLockAmount, "Tokens no longer locked");
+        _requireTierReachable(user, request.requestedType);
         
         // Assign investor type
         investorRegistry.assignInvestorType(user, request.requestedType);
@@ -278,6 +353,8 @@ contract InvestorRequestManager is Ownable, ReentrancyGuard {
     ) external onlyOwner {
         require(investorType != IInvestorTypeRegistry.InvestorType.Normal, "Cannot set for Normal type");
         require(newAmount > 0, "Amount must be greater than 0");
+        uint256 cap = _lockCap();
+        if (newAmount > cap) revert LockAboveNormalCap(newAmount, cap);
         
         uint256 oldAmount = lockRequirements[investorType];
         lockRequirements[investorType] = newAmount;

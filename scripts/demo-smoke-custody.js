@@ -107,7 +107,7 @@ async function runCustodySmoke(state, failures) {
   // The bank alone: a proposal it signs twice moves nothing.
   const w = await ethers.getContractAt("MultiSigWallet", wAddr);
   const rc = await (
-    await w.connect(ops).proposeUnlock(lock, ops.address, "bank alone")
+    await w.connect(ops).proposeUnlock(lock, signer.address, "bank alone")
   ).wait();
   const pid = rc.logs
     .map((l) => {
