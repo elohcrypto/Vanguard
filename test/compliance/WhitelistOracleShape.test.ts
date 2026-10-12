@@ -144,6 +144,8 @@ describe("Whitelist oracle shape: malformed returns (L-1)", function () {
     // 6 strLen, 7 string data, 8 arrLen, 9 the one address.
     const shapes: [string, string][] = [
       ["bool word of 2", withWord(good, 0, 2n)],
+      // Task 4.17 (review A1 A1F-7): a tier word above uint8.
+      ["tier word 256", withWord(good, 3, 256n)],
       [
         "string length 100 with no data",
         withWord(good, 6, 100n).slice(0, 2 + 7 * 64),
