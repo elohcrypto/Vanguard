@@ -143,32 +143,32 @@ purpose)` (identity, key, purpose, the key's removal nonce and chain id,
   block or by its owner. The pin is final and outlives ownership transfers, so
   a new owner checks `recoveryManager()` first and, after an ordinary transfer,
   re-seats the agents. The owner seats up to ten agents and a threshold
-  (`setupKeyRecovery`); the owner and MANAGEMENT keys are refused as agents at
-  seating and at every open or approve (D53); a re-seat waits 48 hours, the
-  seated agents can veto it, an approved recovery blocks it and it applies only
-  while its proposer still owns the identity (else `StaleReseat`; anyone drops
-  it, `dropStaleRecoverySetup`). An agent's open is its approval (D39); before
-  the threshold only the initiator cancels, never the owner; after, only the
-  agents cancel, at the threshold, and the owner's `authorizeManager`,
-  `deauthorizeManager`, `transferOwnership`, any new MANAGEMENT key and any
-  `acceptOwnership` but the nominee the manager still names are refused. 48
-  hours after the approval, within 7 days, anyone executes: the recovered key
-  is added and every other MANAGEMENT key is removed in one call (64 keys a
-  purpose, D42; O(1) removal). From 7 to 14 days after the approval someone
-  must call `executeOwnerTransfer` and the recovered wallet must accept, or the
-  lock lifts, the old owner keeps the identity and an agent's next open
-  re-opens recovery (D52). Until the transfer the old owner can still remove
-  claims, ACTION or CLAIM keys and the recovered key (restored by the
-  transfer). The acceptance removes every other MANAGEMENT key and every
-  manager but the recovery manager; the thief's ACTION and CLAIM keys survive,
-  so the recovered owner reviews `getKeysByPurpose(2|3)` (D40). Agents at the
-  threshold can take the identity: choose them as you would an heir; the owner
-  has the 48 hours to move assets through the issuer's `Token.recoveryAddress`.
-  Every registry binding (register, batch, update, move, token recovery)
-  requires the wallet to control the identity then (owner, MANAGEMENT or ACTION
-  key: D41); control lost later keeps the entry and governance refuses the
-  vote. A holder without seated agents whose owner key is lost is burned and
-  re-issued by the agent. Demo options 12 and 5 -> 2.
+  (`setupKeyRecovery`); MANAGEMENT keys are refused as agents at seating and
+  re-seat apply, the owner at every vote as well (D53); a re-seat waits 48
+  hours, the seated agents can veto it, an approved recovery blocks it and it
+  applies only while its proposer still owns the identity (else `StaleReseat`;
+  anyone drops it, `dropStaleRecoverySetup`). An agent's open is its approval
+  (D39); before the threshold only the initiator cancels, never the owner;
+  after, only the agents cancel, at the threshold, and the owner's
+  `authorizeManager`, `deauthorizeManager`, `transferOwnership`, any new
+  MANAGEMENT key and any `acceptOwnership` but the nominee the manager still
+  names are refused. 48 hours after the approval, within 7 days, anyone
+  executes: the recovered key is added and every other MANAGEMENT key is
+  removed in one call (64 keys a purpose, D42; O(1) removal). From 7 to 14 days
+  after the approval someone must call `executeOwnerTransfer` and the recovered
+  wallet must accept, or the lock lifts, the old owner keeps the identity and
+  an agent's next open re-opens recovery (D52). Until the transfer the old
+  owner can still remove claims, ACTION or CLAIM keys and the recovered key
+  (restored by the transfer). The acceptance removes every other MANAGEMENT key
+  and every manager but the recovery manager; the thief's ACTION and CLAIM keys
+  survive, so the recovered owner reviews `getKeysByPurpose(2|3)` (D40). Agents
+  at the threshold can take the identity: choose them as you would an heir; the
+  owner has the 48 hours to move assets through the issuer's
+  `Token.recoveryAddress`. Every registry binding (register, batch, update,
+  move, token recovery) requires the wallet to control the identity then
+  (owner, MANAGEMENT or ACTION key: D41); control lost later keeps the entry
+  and governance refuses the vote. A holder without seated agents whose owner
+  key is lost is burned and re-issued by the agent. Demo options 12 and 5 -> 2.
 - **Batch and multi-signature keys**: `batchAddKeys` and `batchRemoveKeys`
   write several keys in one call; `addMultiSigKey` records an N-of-M
   signer set that `signMultiSigOperation` and `checkMultiSigThreshold`

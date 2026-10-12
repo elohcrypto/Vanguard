@@ -50,8 +50,10 @@ This directory contains OnchainID implementation contracts following ERC-734 and
   (`vetoKeyRecoverySetup`), anyone applies it afterwards
   (`applyKeyRecoverySetup`), an approved recovery blocks it and an executed
   one drops it; neither the owner nor a current MANAGEMENT key can be
-  seated as an agent, open or approve (D53, checked at every vote: an
-  agent that gains control later is refused, R-414-10). A new owner who
+  seated as an agent, at seating or at re-seat apply, and the owner is
+  refused at every open or approve (D53, R-414-10; a MANAGEMENT key is
+  not refused at the vote: a rogue key could force one onto every agent
+  and stall recovery, and holding one makes nobody an agent). A new owner who
   takes over by an ordinary transfer re-seats the agents: after a
   completed recovery the old agents can re-open once the transfer window
   passes if `owner()` is not the recovered key. An agent opens a candidate
@@ -66,7 +68,9 @@ This directory contains OnchainID implementation contracts following ERC-734 and
   strictly: only the word 1 is yes), any new MANAGEMENT key
   (`ManagementAdditionsFrozen`) and every `acceptOwnership` but the
   nominee the manager still names (`FrozenByRecovery`; a nominee of a
-  lapsed recovery is frozen too, R-414-12). 48 hours after the
+  lapsed recovery is frozen too, R-414-12, but may still accept while
+  the identity is unfrozen until the owner nominates someone else by
+  `transferOwnership` or the agents re-open). 48 hours after the
   approval (`RECOVERY_TIMELOCK`), within 7 days, anyone executes it: the
   recovered key is added and every other MANAGEMENT key, the owner's
   included, is removed (ACTION, CLAIM and ENCRYPTION keys stay), 100 per
