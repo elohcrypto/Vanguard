@@ -312,10 +312,69 @@ describe("Recovery robustness (4.14): A2 probes and killed mutants", function ()
     await expect(f.id.connect(k1).acceptOwnership()).to.be.reverted;
   });
 
-  it("L-2: an agent given MANAGEMENT later can neither open nor approve (R-414-10)", async function () {
+  it("an agent given MANAGEMENT later still opens and approves (R-414-10, M-R2-1)", async function () {
     const f = await setup();
     const key = k(f.rescued.address);
     await f.id.addKey(k(f.A.address), MGMT, 1);
+    await f.km.connect(f.A).initiateKeyRecovery(f.idA, key);
+    expect(await f.km.hasApprovedRecovery(f.idA, key, f.A.address)).to.equal(
+      true,
+    );
+    await f.id.addKey(k(f.B.address), MGMT, 1);
+    await expect(f.km.connect(f.B).approveKeyRecovery(f.idA, key)).to.emit(
+      f.km,
+      "KeyRecoveryApproved",
+    );
+  });
+
+  it("b5: a rogue key forcing MANAGEMENT onto every agent cannot stall the vote (M-R2-1)", async function () {
+    const f = await setup();
+    const key = k(f.rescued.address);
+    // ERC-734 addKey needs no consent from the holder: the rogue key makes
+    // A, B and C MANAGEMENT keys before any approval.
+    for (const a of [f.A, f.B, f.C])
+      await f.id.connect(f.rogue).addKey(k(a.address), MGMT, 1);
+    for (const a of [f.A, f.B, f.C])
+      expect(await f.id.keyHasPurpose(k(a.address), MGMT)).to.equal(true);
+    // No agent removes its forced key: the open counts and B's approval
+    // reaches the threshold and freezes the identity.
+    await f.km.connect(f.A).initiateKeyRecovery(f.idA, key);
+    await expect(f.km.connect(f.B).approveKeyRecovery(f.idA, key)).to.emit(
+      f.km,
+      "KeyRecoveryApproved",
+    );
+    expect(await f.id.ownershipFrozen()).to.equal(true);
+    await expect(
+      f.id.connect(f.rogue).addKey(ethers.id("more"), MGMT, 1),
+    ).to.be.revertedWithCustomError(f.id, "ManagementAdditionsFrozen");
+  });
+
+  it("N-R2-2: an agent that is the candidate opens the re-open after a lapse with its own MANAGEMENT key", async function () {
+    const f = await setup();
+    const key = k(f.B.address);
+    const t = await executed(f, key); // A opens onto B's key, B approves
+    expect(await f.id.keyHasPurpose(key, MGMT)).to.equal(true);
+    await time.setNextBlockTimestamp(t + 14n * BigInt(DAY) + 1n);
+    // B holds MANAGEMENT (the recovered key) and still votes: no removeKey.
+    await expect(f.km.connect(f.B).initiateKeyRecovery(f.idA, key)).to.emit(
+      f.km,
+      "KeyRecoveryReopened",
+    );
+    await f.km.connect(f.A).approveKeyRecovery(f.idA, key);
+    const t2 = BigInt(await time.latest());
+    await time.increase(2 * DAY + 1);
+    await f.km.connect(f.anyone).executeKeyRecovery(f.idA, key);
+    await time.setNextBlockTimestamp(t2 + 7n * BigInt(DAY));
+    await f.km.connect(f.anyone).executeOwnerTransfer(f.idA, f.B.address);
+    await f.id.connect(f.B).acceptOwnership();
+    expect(await f.id.owner()).to.equal(f.B.address);
+  });
+
+  it("L-2: an agent that became owner by an ordinary transfer can neither open nor approve", async function () {
+    const f = await setup();
+    const key = k(f.rescued.address);
+    await f.id.transferOwnership(f.A.address);
+    await f.id.connect(f.A).acceptOwnership();
     await expect(f.km.connect(f.A).initiateKeyRecovery(f.idA, key))
       .to.be.revertedWithCustomError(f.km, "AgentControlsIdentity")
       .withArgs(f.A.address);
@@ -323,23 +382,10 @@ describe("Recovery robustness (4.14): A2 probes and killed mutants", function ()
     await expect(f.km.connect(f.A).approveKeyRecovery(f.idA, key))
       .to.be.revertedWithCustomError(f.km, "AgentControlsIdentity")
       .withArgs(f.A.address);
-    // The two agents without control still reach the threshold.
     await expect(f.km.connect(f.C).approveKeyRecovery(f.idA, key)).to.emit(
       f.km,
       "KeyRecoveryApproved",
     );
-  });
-
-  it("L-2: an agent that became owner by an ordinary transfer cannot open", async function () {
-    const f = await setup();
-    await f.id.transferOwnership(f.A.address);
-    await f.id.connect(f.A).acceptOwnership();
-    await expect(
-      f.km.connect(f.A).initiateKeyRecovery(f.idA, k(f.rescued.address)),
-    )
-      .to.be.revertedWithCustomError(f.km, "AgentControlsIdentity")
-      .withArgs(f.A.address);
-    await f.km.connect(f.B).initiateKeyRecovery(f.idA, k(f.rescued.address));
   });
 
   it("L-2: a re-seat whose proposed agent gained MANAGEMENT meanwhile is refused at apply", async function () {

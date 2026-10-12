@@ -176,9 +176,11 @@ abstract contract KeyManagerRecovery is ReentrancyGuard {
         require(IOnchainID(_identity).keyHasPurpose(senderKey, 1), "KeyManager: Not identity manager");
     }
 
-    /// @dev Reverts if `_agent` owns the identity or holds a MANAGEMENT key
-    ///      (D53, R-414-10): checked at seating and at every vote.
-    function _checkNotController(address _identity, address _agent) internal view virtual;
+    /// @dev Reverts if the caller owns the identity (D53, R-414-10): a
+    ///      stolen owner key must not vote on its own eviction. MANAGEMENT
+    ///      keys are refused at seating and re-seat apply only (the setup
+    ///      half): a rogue key can force MANAGEMENT onto every agent.
+    function _checkNotOwner(address _identity) internal view virtual;
     // Key recovery functions
 
     /**
@@ -198,7 +200,7 @@ abstract contract KeyManagerRecovery is ReentrancyGuard {
         KeyRecovery storage recovery = _recoveries[_identity];
         require(recovery.recoveryAgents.length > 0, "KeyManager: Recovery not set up");
         require(_isRecoveryAgent(recovery, msg.sender), "KeyManager: Not a recovery agent");
-        _checkNotController(_identity, msg.sender);
+        _checkNotOwner(_identity);
         _checkPinned(_identity);
         if (recovery.completed) _reopenIfLapsed(recovery, _identity);
         require(!recovery.completed, "KeyManager: Recovery already completed");
@@ -265,7 +267,7 @@ abstract contract KeyManagerRecovery is ReentrancyGuard {
         RecoveryCandidate storage c = _candidates[_identity][recovery.epoch][_key];
         require(c.initiatedAt > 0, "KeyManager: Recovery not initiated");
         require(_isRecoveryAgent(recovery, msg.sender), "KeyManager: Not a recovery agent");
-        _checkNotController(_identity, msg.sender);
+        _checkNotOwner(_identity);
         _checkPinned(_identity);
         require(c.approvedRound[msg.sender] != c.round, "KeyManager: Already approved");
         if (block.timestamp > c.executionTime + EXECUTION_WINDOW) revert CandidateExpired();

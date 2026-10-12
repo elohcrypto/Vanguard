@@ -16,9 +16,12 @@ import {KeyManagerRecovery, IManagedIdentity, IOnchainID} from "./KeyManagerReco
  *      A re-seat applies only while its proposer still owns the identity
  *      (Task 4.14, M-B): an ordinary ownership transfer leaves it stale,
  *      refused at apply and droppable by anyone. Neither the owner nor a
- *      current MANAGEMENT key may be seated as an agent, open or approve
- *      a candidate (D53, R-414-10): a stolen owner key must not vote on
- *      its own eviction, however it came by the key.
+ *      current MANAGEMENT key may be seated as an agent, at seating or at
+ *      re-seat apply, and the owner may not open or approve a candidate
+ *      (D53, R-414-10): a stolen owner key must not vote on its own
+ *      eviction. A MANAGEMENT key is not refused at the vote: a rogue key
+ *      could force one onto every agent (addKey needs no consent) and
+ *      stall recovery, while holding one makes nobody an agent.
  */
 abstract contract KeyManagerRecoverySetup is KeyManagerRecovery {
     event KeyRecoverySetupPending(
@@ -78,11 +81,16 @@ abstract contract KeyManagerRecoverySetup is KeyManagerRecovery {
     }
 
     /// @dev D53: the owner and MANAGEMENT keys are what recovery evicts.
-    function _checkNotController(address _identity, address _agent) internal view override {
+    function _checkNotController(address _identity, address _agent) private view {
         if (
             _agent == IManagedIdentity(_identity).owner() ||
             IOnchainID(_identity).keyHasPurpose(keccak256(abi.encodePacked(_agent)), 1)
         ) revert AgentControlsIdentity(_agent);
+    }
+
+    /// @dev R-414-10 (review M-R2-1): at a vote only the owner is refused.
+    function _checkNotOwner(address _identity) internal view override {
+        if (msg.sender == IManagedIdentity(_identity).owner()) revert AgentControlsIdentity(msg.sender);
     }
 
     /// @dev Anyone applies a pending re-seat RECOVERY_TIMELOCK after it was
