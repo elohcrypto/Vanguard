@@ -9,9 +9,15 @@
 
 "use strict";
 
+const { ethers } = require("hardhat");
 const { markRevoked, updateStatus } = require("./OnchainIDClaimChain");
 const { displaySuccess, displayError } = require("./DisplayHelpers");
-const { attestAml, issuerOwnerSigner, AML_TOPIC } = require("./Kyc");
+const {
+  attestAml,
+  cacheVerification,
+  issuerOwnerSigner,
+  AML_TOPIC,
+} = require("./Kyc");
 const { onboard } = require("./Onboard");
 
 // ========== KYC CLAIM HELPER METHODS ==========
