@@ -90,8 +90,9 @@ contract ComplianceRules is ComplianceRulesAdmin, IComplianceHooks {
      *      entry (OracleOnly, or Either with a live entry), the entry's tier
      *      must reach its investor type's requiredWhitelistTier, so every
      *      caller above applies it to the same parties. Not applicable in
-     *      ZkOnly, nor to a party that passes Either by a proof binding with
-     *      no live entry: a proof binding carries no tier.
+     *      ZkOnly. In Either with an oracle set, a party with no live entry
+     *      passes by a proof binding only when its type requires tier 1
+     *      (D46 a, Task 4.17): a proof binding carries no tier.
      */
     function _whitelistAllows(address token, address from, address to) internal view returns (bool) {
         return _whitelisted(token, from) && _whitelisted(token, to);
@@ -110,6 +111,9 @@ contract ComplianceRules is ComplianceRulesAdmin, IComplianceHooks {
                 IWhitelistOracleView wl = IWhitelistOracleView(wlOracle);
                 if (wl.isWhitelisted(party)) return _tierMet(token, wl, party);
                 if (mode == WhitelistMode.OracleOnly) return false;
+                // Either, unlisted (D46 a): a proof binding carries no tier,
+                // so it serves only a type whose required tier is 1.
+                if (!_proofServes(token, party)) return false;
             } else if (mode == WhitelistMode.OracleOnly) {
                 return true;
             }
@@ -122,18 +126,30 @@ contract ComplianceRules is ComplianceRulesAdmin, IComplianceHooks {
      *         `token`: false only when the token's mode is OracleOnly or
      *         Either, its whitelist oracle holds a live entry for the party,
      *         and that entry's tier is below the tier the party's investor
-     *         type requires in the token's investor-type registry. True
-     *         (not applicable) in ZkOnly and for a party with no live entry,
-     *         such as one that passes Either by its proof binding: a proof
-     *         binding carries no tier. Lets a reader name the cause of a
+     *         type requires in the token's investor-type registry, or (D46 a)
+     *         the mode is Either, the party has no live entry and its type
+     *         requires a tier above 1 (a proof binding carries no tier).
+     *         True (not applicable) in ZkOnly and, in OracleOnly, for a
+     *         party with no live entry (the whitelist itself refuses it). Lets a reader name the cause of a
      *         "Compliance check failed" refusal.
      */
     function whitelistTierAllows(address token, address party) external view returns (bool) {
         address wlOracle = whitelistOracle[token];
         if (whitelistMode[token] == WhitelistMode.ZkOnly || wlOracle == address(0)) return true;
         IWhitelistOracleView wl = IWhitelistOracleView(wlOracle);
-        if (!wl.isWhitelisted(party)) return true;
+        if (!wl.isWhitelisted(party)) {
+            return whitelistMode[token] == WhitelistMode.OracleOnly || _proofServes(token, party);
+        }
         return _tierMet(token, wl, party);
+    }
+
+    /// @dev D46 (a): a proof binding (no tier) serves a party whose type
+    ///      requires tier 1 at most; no rule without a registry or for an
+    ///      investorLimitExempt party, as in _tierMet.
+    function _proofServes(address token, address party) private view returns (bool) {
+        IInvestorTypeRegistry types = _typesOf(token);
+        if (address(types) == address(0) || types.investorLimitExempt(party)) return true;
+        return types.getRequiredWhitelistTier(party) <= 1;
     }
 
     /// @dev The party's oracle entry tier meets its investor type's required

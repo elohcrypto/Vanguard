@@ -131,14 +131,16 @@ describe("Investor-type whitelist tier (Task 4.10)", function () {
     await token.connect(alice).transfer(carol.address, 1n);
   });
 
-  it("Either: a proof-bound party with no entry has no tier; a live short entry refuses", async function () {
+  // D46 (a), Task 4.17: a proof binding carries no tier, so it alone no
+  // longer serves Accredited (tier 3); a listing at the tier does.
+  it("Either: a proof-bound party with no entry is refused above tier 1; a live short entry refuses", async function () {
     const { alice, carol, rules, token, wl, binder, tierOk, can, list } =
       await deploy();
     await rules.setWhitelistMode(token.target, M.Either);
     await binder.setBound(alice.address, true);
     await wl.removeFromWhitelist(alice.address, "zk only");
-    expect(await tierOk(alice.address)).to.equal(true);
-    expect(await can(alice.address, carol.address)).to.equal(true);
+    expect(await tierOk(alice.address)).to.equal(false);
+    expect(await can(alice.address, carol.address)).to.equal(false);
 
     await list(alice.address, 2); // a live entry below Accredited's 3
     expect(await tierOk(alice.address)).to.equal(false);
@@ -157,9 +159,12 @@ describe("Investor-type whitelist tier (Task 4.10)", function () {
     await time.increase(120);
     expect(await wl.isWhitelisted(alice.address)).to.equal(false);
     expect((await wl.getWhitelistInfo(alice.address))[3]).to.equal(1n);
-    expect(await tierOk(alice.address)).to.equal(true);
-    expect(await can(alice.address, carol.address)).to.equal(true);
-    await token.connect(alice).transfer(carol.address, 1n);
+    // D46 (a): counting as none, the proof alone refuses Accredited.
+    expect(await tierOk(alice.address)).to.equal(false);
+    expect(await can(alice.address, carol.address)).to.equal(false);
+    await expect(
+      token.connect(alice).transfer(carol.address, 1n),
+    ).to.be.revertedWith("Compliance check failed");
   });
 
   it("D26 trusted path: the human's tier is checked, the contract's is not", async function () {
