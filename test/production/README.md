@@ -64,6 +64,7 @@ npx hardhat run scripts/production/DeployProduction.ts --network sepolia
 ## 🧪 Test Scenarios
 
 ### 1. Enterprise Corporate Onboarding
+
 - Multi-role key management (CEO, CFO, Compliance Officer)
 - Enhanced KYC with corporate data structures
 - AML compliance verification
@@ -71,6 +72,7 @@ npx hardhat run scripts/production/DeployProduction.ts --network sepolia
 - Regulatory compliance framework setup
 
 ### 2. Individual User Journey
+
 - Real cryptographic signature verification
 - Biometric simulation and verification
 - Multi-signature wallet operations
@@ -78,6 +80,7 @@ npx hardhat run scripts/production/DeployProduction.ts --network sepolia
 - Personal identity compliance
 
 ### 3. Institutional Investor Workflow
+
 - Advanced compliance requirements
 - Accreditation verification
 - High-value transaction security
@@ -85,6 +88,7 @@ npx hardhat run scripts/production/DeployProduction.ts --network sepolia
 - Regulatory reporting compliance
 
 ### 4. Emergency Recovery Scenarios
+
 - Multi-party key recovery coordination
 - Timelock security mechanisms
 - Recovery agent consensus
@@ -92,6 +96,7 @@ npx hardhat run scripts/production/DeployProduction.ts --network sepolia
 - Identity restoration procedures
 
 ### 5. Network Stress Testing
+
 - High gas price scenarios
 - Network congestion simulation
 - Transaction batching optimization
@@ -99,6 +104,7 @@ npx hardhat run scripts/production/DeployProduction.ts --network sepolia
 - Block confirmation delays
 
 ### 6. Security Stress Testing
+
 - Multi-vector attack simulation
 - Replay attack resistance
 - Time-based attack prevention
@@ -110,18 +116,21 @@ npx hardhat run scripts/production/DeployProduction.ts --network sepolia
 The production tests measure and validate:
 
 ### Gas Usage
+
 - Identity deployment: < 3M gas
 - Key addition: < 200K gas
 - Claim issuance: < 300K gas
 - Recovery operations: < 500K gas
 
 ### Transaction Costs (at 20 gwei, $2000 ETH)
+
 - Identity creation: ~$1.20
 - Key management: ~$0.08
 - Claim operations: ~$0.12
 - Recovery procedures: ~$0.20
 
 ### Performance Thresholds
+
 - Deployment time: < 60 seconds
 - Key operations: < 5 seconds
 - Claim verification: < 2 seconds
@@ -136,20 +145,20 @@ The system supports multiple network configurations:
 ```typescript
 // Mainnet production config
 const mainnetConfig = {
-    deploymentFee: "0.01", // 0.01 ETH
-    recoveryTimelock: 48 * 60 * 60, // 48 hours
-    keyRotationTimelock: 24 * 60 * 60, // 24 hours
-    maxGasPrice: "100", // 100 gwei max
-    minConfirmations: 3
+  deploymentFee: "0.01", // 0.01 ETH
+  recoveryTimelock: 48 * 60 * 60, // 48 hours
+  keyRotationTimelock: 24 * 60 * 60, // 24 hours
+  maxGasPrice: "100", // 100 gwei max
+  minConfirmations: 3,
 };
 
 // Testnet config (faster for testing)
 const testnetConfig = {
-    deploymentFee: "0.001", // 0.001 ETH
-    recoveryTimelock: 10 * 60, // 10 minutes
-    keyRotationTimelock: 5 * 60, // 5 minutes
-    maxGasPrice: "50", // 50 gwei max
-    minConfirmations: 1
+  deploymentFee: "0.001", // 0.001 ETH
+  recoveryTimelock: 10 * 60, // 10 minutes
+  keyRotationTimelock: 5 * 60, // 5 minutes
+  maxGasPrice: "50", // 50 gwei max
+  minConfirmations: 1,
 };
 ```
 
@@ -177,6 +186,7 @@ export KEY_ROTATION_TIMELOCK=86400 # 24 hours
 The production test suite generates comprehensive reports:
 
 ### JSON Report
+
 ```json
 {
   "timestamp": "2024-01-15T10:30:00.000Z",
@@ -198,7 +208,9 @@ The production test suite generates comprehensive reports:
 ```
 
 ### HTML Report
+
 Interactive HTML report with:
+
 - Visual test results
 - Gas usage charts
 - Performance metrics
@@ -208,18 +220,21 @@ Interactive HTML report with:
 ## 🛡️ Security Validation
 
 ### Cryptographic Security
+
 - ✅ ECDSA signature verification
 - ✅ Message hash integrity
 - ✅ Replay attack resistance
 - ✅ Signature forgery protection
 
 ### Access Control
+
 - ✅ Role-based permissions
 - ✅ Multi-signature requirements
 - ✅ Timelock mechanisms
 - ✅ Recovery procedures
 
 ### Attack Resistance
+
 - ✅ Unauthorized key addition
 - ✅ Fake claim injection
 - ✅ Ownership hijacking
@@ -228,6 +243,7 @@ Interactive HTML report with:
 ## 🚨 Emergency Procedures
 
 ### Key Compromise Response
+
 1. **Detection**: Monitor for suspicious activities
 2. **Isolation**: Prevent further unauthorized access
 3. **Recovery**: Initiate multi-party recovery process
@@ -235,6 +251,7 @@ Interactive HTML report with:
 5. **Verification**: Validate system integrity
 
 ### System Recovery
+
 1. **Assessment**: Evaluate system state
 2. **Coordination**: Engage recovery agents
 3. **Execution**: Perform recovery operations
@@ -257,6 +274,7 @@ Before mainnet deployment, ensure:
 ## 🔍 Monitoring and Observability
 
 ### Key Metrics to Monitor
+
 - Transaction success rates
 - Gas usage patterns
 - Response times
@@ -264,6 +282,7 @@ Before mainnet deployment, ensure:
 - Security events
 
 ### Alerting Thresholds
+
 - Gas price > 100 gwei
 - Transaction failure rate > 1%
 - Response time > 30 seconds

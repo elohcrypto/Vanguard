@@ -7,26 +7,31 @@ This comprehensive checklist ensures the OnchainID system is production-ready be
 ### ✅ Code Quality & Testing
 
 - [ ] **Unit Tests**: All unit tests pass (100% success rate)
+
   ```bash
   npx hardhat test test/unit/**/*.test.ts
   ```
 
 - [ ] **Integration Tests**: All integration tests pass
+
   ```bash
   npx hardhat test test/integration/**/*.test.ts
   ```
 
 - [ ] **Production Simulation**: Complete production simulation passes
+
   ```bash
   npx hardhat test test/production/ProductionSimulation.test.ts
   ```
 
 - [ ] **Security Tests**: All security tests pass
+
   ```bash
   npx hardhat test test/security/**/*.test.ts
   ```
 
 - [ ] **Performance Tests**: Performance benchmarks met
+
   ```bash
   npx hardhat test test/performance/**/*.test.ts
   ```
@@ -90,6 +95,7 @@ This comprehensive checklist ensures the OnchainID system is production-ready be
   - [ ] Fallback providers configured
 
 - [ ] **Deployment Scripts**: Production deployment tested
+
   ```bash
   OPS_IDENTITY=<ops OnchainID> npx hardhat run scripts/production/DeployProduction.ts --network sepolia
   ```
@@ -153,18 +159,19 @@ This comprehensive checklist ensures the OnchainID system is production-ready be
 ## 🔧 Production Configuration Validation
 
 ### Network Settings
+
 ```typescript
 const PRODUCTION_CONFIG = {
   // Core settings
   deploymentFee: "0.01", // 0.01 ETH
   feeRecipient: "0x...", // Production fee recipient
-  
+
   // Security settings
   recoveryTimelock: 48 * 60 * 60, // 48 hours
   keyRotationTimelock: 24 * 60 * 60, // 24 hours
   maxGasPrice: "100", // 100 gwei maximum
   minConfirmations: 3, // 3 block confirmations
-  
+
   // Performance settings
   gasLimit: 5000000, // 5M gas limit
   batchSize: 10, // Transaction batching
@@ -173,6 +180,7 @@ const PRODUCTION_CONFIG = {
 ```
 
 ### Environment Variables
+
 ```bash
 # Network configuration
 MAINNET_RPC_URL=https://mainnet.infura.io/v3/YOUR_PROJECT_ID
@@ -191,6 +199,7 @@ ALERT_WEBHOOK_URL=https://your-monitoring-service.com/webhook
 ## 🚨 Final Pre-Deployment Steps
 
 ### 1. Final Test Run
+
 ```bash
 # Run the production test set on the in-process network (the runner lists
 # the integration test files with fs, refuses any network but
@@ -203,6 +212,7 @@ echo "✅ All tests must pass before proceeding"
 ```
 
 ### 2. Gas Price Check
+
 ```bash
 # Check current mainnet gas prices
 curl -s "https://api.etherscan.io/api?module=gastracker&action=gasoracle&apikey=YOUR_API_KEY"
@@ -212,12 +222,14 @@ echo "⛽ Current gas price should be < 50 gwei for deployment"
 ```
 
 ### 3. Final Security Review
+
 - [ ] Review all contract addresses
 - [ ] Verify deployer account balance
 - [ ] Confirm multi-signature setup
 - [ ] Validate recovery agent addresses
 
 ### 4. Deployment Execution
+
 ```bash
 # Deploy to mainnet (FINAL STEP)
 npx hardhat run scripts/production/DeployProduction.ts --network mainnet
@@ -229,18 +241,21 @@ npx hardhat verify --network mainnet FACTORY_ADDRESS "CONSTRUCTOR_ARGS"
 ## 📊 Post-Deployment Validation
 
 ### Immediate Checks (0-1 hour)
+
 - [ ] All contracts deployed successfully
 - [ ] Contract verification completed on Etherscan
 - [ ] Basic functionality tests pass
 - [ ] Monitoring systems active
 
 ### Short-term Validation (1-24 hours)
+
 - [ ] First identity deployments successful
 - [ ] Gas usage within expected ranges
 - [ ] No security alerts triggered
 - [ ] Performance metrics normal
 
 ### Long-term Monitoring (24+ hours)
+
 - [ ] System stability confirmed
 - [ ] User adoption metrics tracked
 - [ ] Cost analysis completed
@@ -251,12 +266,14 @@ npx hardhat verify --network mainnet FACTORY_ADDRESS "CONSTRUCTOR_ARGS"
 If issues are discovered post-deployment:
 
 ### Immediate Actions
+
 1. **Pause Operations**: Use emergency pause if available
 2. **Assess Impact**: Determine scope of the issue
 3. **Communicate**: Notify stakeholders immediately
 4. **Document**: Record all relevant information
 
 ### Recovery Options
+
 1. **Hot Fix**: Deploy corrected contracts if possible
 2. **Migration**: Move to new contract system
 3. **Rollback**: Revert to previous stable version
@@ -276,16 +293,19 @@ Before mainnet deployment, obtain sign-off from:
 ## 📞 Emergency Contacts
 
 ### Technical Team
+
 - **Lead Developer**: [contact info]
 - **Security Engineer**: [contact info]
 - **DevOps Engineer**: [contact info]
 
 ### Business Team
+
 - **Product Manager**: [contact info]
 - **Legal Counsel**: [contact info]
 - **Executive Sponsor**: [contact info]
 
 ### External Partners
+
 - **Security Auditor**: [contact info]
 - **Infrastructure Provider**: [contact info]
 - **Legal Advisor**: [contact info]
@@ -300,17 +320,19 @@ Before mainnet deployment, obtain sign-off from:
 **Required Pass Rate**: 100%
 **Estimated Completion Time**: 2-4 weeks
 
-**Final Approval**: 
+**Final Approval**:
+
 - [ ] All checklist items completed ✅
 - [ ] All stakeholders have signed off ✅
 - [ ] Emergency procedures are in place ✅
 - [ ] Monitoring systems are active ✅
 
-**Deployment Authorization**: 
+**Deployment Authorization**:
+
 - [ ] **GO/NO-GO Decision**: ✅ GO / ❌ NO-GO
 - [ ] **Authorized By**: [Name, Title, Date]
 - [ ] **Deployment Date**: [Scheduled Date/Time]
 
 ---
 
-*This checklist should be reviewed and updated regularly to reflect current best practices and lessons learned from previous deployments.*
+_This checklist should be reviewed and updated regularly to reflect current best practices and lessons learned from previous deployments._
