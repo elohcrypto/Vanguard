@@ -279,6 +279,39 @@ describe("Recovery robustness (4.14): A2 probes and killed mutants", function ()
     expect(await registry.isVerified(investor.address)).to.equal(true);
   });
 
+  it("L-1: a lapsed recovery's nominee cannot accept during a later recovery's freeze (R-414-12)", async function () {
+    const f = await setup();
+    const k1 = f.rescued;
+    const k2 = f.user;
+    const t = await executed(f, k(k1.address));
+    await time.setNextBlockTimestamp(t + 7n * BigInt(DAY));
+    await f.km.connect(f.anyone).executeOwnerTransfer(f.idA, k1.address);
+    expect(await f.id.pendingOwner()).to.equal(k1.address);
+    // Nobody accepts; the window lapses; the agents re-open onto K2.
+    await time.setNextBlockTimestamp(t + 14n * BigInt(DAY) + 1n);
+    await expect(
+      f.km.connect(f.A).initiateKeyRecovery(f.idA, k(k2.address)),
+    ).to.emit(f.km, "KeyRecoveryReopened");
+    await f.km.connect(f.B).approveKeyRecovery(f.idA, k(k2.address));
+    const t2 = BigInt(await time.latest());
+    expect(await f.id.ownershipFrozen()).to.equal(true);
+    // K1 is still Ownable2Step's pending owner, but no longer the
+    // recovery's nominee: the freeze holds against it.
+    await expect(
+      f.id.connect(k1).acceptOwnership(),
+    ).to.be.revertedWithCustomError(f.id, "FrozenByRecovery");
+    expect(await f.id.owner()).to.equal(f.owner.address);
+    // K2's recovery completes.
+    await time.increase(2 * DAY + 1);
+    await f.km.connect(f.anyone).executeKeyRecovery(f.idA, k(k2.address));
+    await time.setNextBlockTimestamp(t2 + 7n * BigInt(DAY));
+    await f.km.connect(f.anyone).executeOwnerTransfer(f.idA, k2.address);
+    await f.id.connect(k2).acceptOwnership();
+    expect(await f.id.owner()).to.equal(k2.address);
+    expect(await f.id.getKeysByPurpose(MGMT)).to.deep.equal([k(k2.address)]);
+    await expect(f.id.connect(k1).acceptOwnership()).to.be.reverted;
+  });
+
   it("M17: a second executeKeyRecovery is refused", async function () {
     const f = await setup();
     const key = k(f.rescued.address);

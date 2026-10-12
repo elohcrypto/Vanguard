@@ -192,11 +192,13 @@ abstract contract OnchainIDOwnership is OnchainIDKeys {
     ///      MANAGEMENT key is removed (bounded: none is expected, additions
     ///      stay frozen until here) and every authorized manager but the
     ///      recovery manager is de-authorized (the thief's managers go).
-    ///      While frozen only that pending owner accepts (4.14, M-C): a
-    ///      wallet the thief nominated earlier cannot take the identity and
-    ///      a MANAGEMENT key with it during the recovery.
+    ///      While frozen only that pending owner accepts (4.14, M-C), and
+    ///      only while the pinned manager still names it (R-414-12): a
+    ///      wallet the thief nominated earlier, or the nominee of a lapsed
+    ///      recovery, cannot take the identity and a MANAGEMENT key with it
+    ///      during a recovery.
     function acceptOwnership() public override {
-        if (msg.sender != _recoveryPendingOwner) _checkNotFrozen();
+        if (!_recoveryNominee(msg.sender)) _checkNotFrozen();
         address previous = owner();
         super.acceptOwnership();
         bytes32 newKey = keccak256(abi.encodePacked(msg.sender));
@@ -217,6 +219,17 @@ abstract contract OnchainIDOwnership is OnchainIDKeys {
                 if (m != recoveryManager) _deauthorize(m);
             }
         }
+    }
+
+    /// @dev `who` is the recovery's pending owner and the pinned manager
+    ///      still reports its transfer due (isRecoveryOwner, strict,
+    ///      window-bounded): a lapsed nominee is not one.
+    function _recoveryNominee(address who) private view returns (bool) {
+        if (who != _recoveryPendingOwner) return false;
+        (bool ok, bytes memory ret) = recoveryManager.staticcall(
+            abi.encodeCall(IRecoveryManager.isRecoveryOwner, (address(this), who))
+        );
+        return ok && _isTrue(ret);
     }
 
     /**
