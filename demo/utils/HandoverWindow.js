@@ -253,7 +253,8 @@ async function windowLines(o, snap) {
   // Review B-1: whatever the deployer did leaves a nonce. Every one of
   // its transactions since the preflight must be a ceremony transaction
   // (settings with no watched event included: setCompliance and back).
-  // A VGT holder's own vote (create, vote, execute, settle, refund) is
+  // A VGT holder's own vote (create, vote, execute, settle, refund, and
+  // the VGT approval that pays for it) is
   // the one thing the deployer may do in the window besides the ceremony:
   // a transaction to governance that emitted a voting event.
   const g = o.governance;
@@ -273,6 +274,21 @@ async function windowLines(o, snap) {
       const { tx } = await receiptOf(cache, h);
       if (same(tx.from, dAddr) && same(tx.to || ZERO, gov)) votes.add(h);
     }
+  }
+  // Paying the vote: the deployer's VGT approve(governance), as a
+  // proposer's or voter's (demo option 83d proposes as wallet 0).
+  const vgt = o.governanceToken;
+  const APPROVE = vgt.interface.getFunction("approve").selector;
+  for (const ev of await scanLogs(
+    vgt,
+    vgt.filters.Approval(dAddr, gov),
+    scope,
+  )) {
+    const h = ev.transactionHash.toLowerCase();
+    if (ours.has(h) || votes.has(h)) continue;
+    const { tx } = await receiptOf(cache, h);
+    if (same(tx.to || ZERO, await addrOf(vgt)) && tx.data.startsWith(APPROVE))
+      votes.add(h);
   }
   const sent =
     (await ethers.provider.getTransactionCount(dAddr, end)) - snap.nonce;

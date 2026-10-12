@@ -209,6 +209,8 @@ describe("Handover: escrow investors, fee wallet and the voting window (4.17)", 
     const report = await steps();
     await c.token.connect(f.ops).freezePartialTokens(f.voters[0].address, 0n);
     await c.token.connect(f.ops).setAddressFrozen(f.stranger.address, true);
+    // The deployer paying for a vote (option 83d proposes as wallet 0).
+    await c.governanceToken.connect(f.deployer).approve(f.govAddr, 1n);
     await accept(report);
     expect((await H.assertHandoverComplete(args)).failures).to.deep.equal([]);
     const { ceremonyTxs, ...bare } = args.snapshot;
