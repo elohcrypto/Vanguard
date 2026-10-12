@@ -56,7 +56,7 @@ describe("Handover: escrow investors, fee wallet and the voting window (4.17)", 
     const labels = r.checks.map((x: any) => x.label);
     expect(
       labels.some((l: string) =>
-        /^every grant, mint, identity registration, freeze and rule-administrator event since the preflight \(block \d+, \d+ events\) came from the ceremony, ops or a vote$/.test(
+        /^every grant, mint, identity registration, freeze and rule-administrator event since the preflight \(blocks \d+-\d+, \d+ events, [1-9]\d* of them the ceremony's\) came from the ceremony, ops or a vote$/.test(
           l,
         ),
       ),
@@ -214,5 +214,50 @@ describe("Handover: escrow investors, fee wallet and the voting window (4.17)", 
     await failsWith(
       /^the preflight snapshot records no preflight block and ceremony transactions/,
     );
+  });
+
+  // Review of slice B (lead, 2026-10-12): the scan must not pass on an
+  // RPC that returns nothing, must reach the last chunk, and compares
+  // addresses case-insensitively like the rest of the ceremony.
+  it("an RPC that drops one filter's logs fails the window line (R-413-6)", async function () {
+    const report = await steps();
+    await accept(report);
+    const p: any = ethers.provider;
+    const real = p.getLogs.bind(p);
+    const agentAdded = c.token.interface.getEvent("AgentAdded").topicHash;
+    const vsc = (await c.token.getAddress()).toLowerCase();
+    p.getLogs = async (flt: any) => {
+      const t0 = (await flt).topics?.[0];
+      const addr = String((await flt).address || "").toLowerCase();
+      return addr === vsc && t0 === agentAdded ? [] : real(flt);
+    };
+    try {
+      await failsWith(
+        /^voting-window event scan found none of the ceremony events it must see/,
+      );
+    } finally {
+      p.getLogs = real;
+    }
+  });
+
+  it("an event in the last one-block chunk is refused; mixed-case acknowledgements pass", async function () {
+    args.feeWallets = [f.feeWallet.address.toLowerCase()];
+    args.logChunk = 1;
+    const report = await steps();
+    await accept(report);
+    expect((await H.assertHandoverComplete(args)).failures).to.deep.equal([]);
+    // Governance (impersonated: a vote) seats the deployer as an agent
+    // after the votes; its burn is the newest block the completion reads.
+    await ethers.provider.send("hardhat_impersonateAccount", [f.govAddr]);
+    await ethers.provider.send("hardhat_setBalance", [
+      f.govAddr,
+      "0xDE0B6B3A7640000",
+    ]);
+    const gov = await ethers.getSigner(f.govAddr);
+    await c.token.connect(gov).addAgent(f.deployer.address);
+    await c.token.connect(f.ops).mint(f.voters[0].address, E("5"));
+    await c.token.connect(f.deployer).burn(f.voters[0].address, E("5"));
+    const r = await failsWith(WINDOW("VSC burn"));
+    expect(r.failures).to.have.lengthOf(2); // the burn, the live agent
   });
 });

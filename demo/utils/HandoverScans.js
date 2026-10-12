@@ -25,13 +25,17 @@ function uniq(list) {
 }
 
 /**
- * Every `filter` event of `contract` from o.fromBlock to the latest block.
+ * Every `filter` event of `contract` from o.fromBlock to o.toBlock, or
+ * the latest block.
  * Public RPCs cap the eth_getLogs block range, so a range error halves the
  * chunk (floor 100) and retries; any other error is rethrown.
  */
 async function scanLogs(contract, filter, o) {
   let chunk = o.logChunk || 5000;
-  const latest = await ethers.provider.getBlockNumber();
+  // Task 4.17: a caller may pin the range's end (o.toBlock).
+  const latest = Number.isInteger(o.toBlock)
+    ? o.toBlock
+    : await ethers.provider.getBlockNumber();
   const found = [];
   for (let b = o.fromBlock || 0; b <= latest;) {
     const to = Math.min(b + chunk - 1, latest);

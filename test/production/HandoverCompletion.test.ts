@@ -314,29 +314,34 @@ describe("Handover completion check (table)", function () {
   }
 
   // Review 3.3 LOW-3: a deployer-published root is a warning, not a failure.
+  // Task 4.17: published before the ceremony (in the voting window the
+  // deployer's publication is refused, HandoverWindow.test.ts).
   it("warns while the current whitelist root was published by the deployer", async function () {
-    const { deployer, ops } = f;
-    const gov = await govSigner();
-    const pm = c.privacyManager;
     const line =
       "was published by the deployer: republish as ops so deployer-era bindings lapse";
     expect(
       (await assertHandoverComplete(args)).warnings.join("\n"),
     ).to.not.include(line);
-    await pm.connect(gov).setListOperator(deployer.address);
-    await pm.connect(deployer).publishWhitelistRoot(ethers.toBeHex(7n, 32));
-    await pm.connect(gov).setListOperator(ops.address);
-    const before = await assertHandoverComplete(args);
+    const g = await handoverFixture();
+    const pm = g.c.privacyManager;
+    await pm.connect(g.deployer).publishWhitelistRoot(ethers.toBeHex(7n, 32));
+    const report = await handoverDeployerPowers(g.args);
+    await acceptAllByVote({
+      governance: g.c.governance,
+      contracts: g.c,
+      proposer: g.proposer,
+      voters: g.voters,
+      registryProposals: report.registryProposals,
+      log: () => {},
+    });
+    const before = await assertHandoverComplete(g.args);
     expect(before.ok, before.failures.join(" | ")).to.equal(true);
     expect(before.warnings).to.include(
       `PrivacyManager whitelist root ${ethers.toBeHex(7n, 32)} (version 1) ${line}`,
     );
-    await pm.connect(ops).publishWhitelistRoot(ethers.toBeHex(8n, 32));
-    const after = await assertHandoverComplete(args);
+    await pm.connect(g.ops).publishWhitelistRoot(ethers.toBeHex(8n, 32));
+    const after = await assertHandoverComplete(g.args);
     expect(after.warnings.join("\n")).to.not.include(line);
-    await network.provider.send("hardhat_stopImpersonatingAccount", [
-      f.govAddr,
-    ]);
   });
 
   // Review 3.3 LOW-4: governance owns PrivacyManager; step 5 says so.

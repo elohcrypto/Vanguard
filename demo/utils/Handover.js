@@ -120,8 +120,10 @@ async function handoverDeployerPowers(o) {
   await preflightParams(o); // Task 4.13: floors, proposals, fee sink, pins
   await preflightEscrow(o); // Task 4.17: escrow investors, fee wallet
   // Task 4.13: what the preflight found; completion compares with it.
-  report.snapshot = await snapshotFacts(o);
+  // Task 4.17: the block is read first, so a block mined while the
+  // snapshot reads falls inside the window the completion scans.
   report.preflightBlock = await ethers.provider.getBlockNumber();
+  report.snapshot = await snapshotFacts(o);
   given.snapshot = report.snapshot;
   preflightSnapshots.set(govAddr.toLowerCase(), report.snapshot);
   // Task 4.17 (BF-3): every transaction the ceremony sends from here is

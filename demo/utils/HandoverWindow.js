@@ -6,12 +6,19 @@
  * itself; a temporary registry agent that registers or freezes) passes
  * an end-state comparison. The ceremony therefore records the hash of
  * every transaction it sends after the preflight (a recording signer),
- * and completion scans every grant, mint, identity registration, freeze
- * and rule-administrator event after the preflight block: each must come
- * from a ceremony transaction, from ops, from a governance vote
- * (executeProposal) or, for a trusted contract, from a registrar's own
- * call (createMultiSigWallet, createEscrowWallet), or it is refused, even
- * when the power it granted was revoked since.
+ * and completion scans, from the preflight block to one pinned end
+ * block, every grant (agents, guardians, officers, governors, exemptions,
+ * authorized tokens, registrars, trusted contracts, escrow roles and
+ * investors, nodes and emergency designations, attestors, the list
+ * operator, issuer keys), mint, burn, recovery, identity registration,
+ * removal or country change, investor-type assignment, freeze, root
+ * publication and rule-administrator event. Each must come from a
+ * ceremony transaction, from ops, from a vote (a transaction to
+ * governance that executed a proposal) or, for a trusted contract, from
+ * a call to a registrar of that token, or it is refused, even when the
+ * power it granted was revoked since. The scan proves itself (R-413-6):
+ * every watched event in the ceremony's own receipts must be found, so
+ * an RPC or range that returns nothing fails instead of passing clean.
  */
 
 const { ethers } = require("hardhat");
@@ -19,17 +26,13 @@ const { addrOf, same } = require("./HandoverChecks");
 const { scanLogs } = require("./HandoverScans");
 
 const ZERO = ethers.ZeroAddress;
-const EXECUTE = ethers
-  .id("executeProposal(uint256)")
-  .slice(0, 10)
-  .toLowerCase();
-const ROLE_ABI = [
+const EXTRA_ABI = [
   "event RoleGranted(bytes32 indexed role, address indexed account, address indexed sender)",
   "event InvestorRegistered(address indexed investor, address indexed walletAddress)",
-];
-const ISSUER_ABI = [
   "event IssuerKeyAdded(bytes32 indexed key, uint256 indexed purpose)",
+  "event ProposalExecuted(uint256 indexed proposalId)",
 ];
+const EXTRA = new ethers.Interface(EXTRA_ABI);
 
 /**
  * `signer` that records the hash of every transaction it sends in
@@ -56,87 +59,110 @@ function recordingSigner(signer, hashes) {
 /** [contract, label, filter] for every watched event kind. */
 async function watched(o) {
   const out = [];
-  const add = (c, label, filter) => c && out.push([c, label, filter]);
+  const add = (c, label, name, ...args) => {
+    if (!c) return;
+    if (!c.filters[name]) throw new Error(`Handover: ${label}: no ${name}`);
+    out.push([c, `${label} ${name}`, c.filters[name](...args)]);
+  };
+  const at = async (x) => ethers.getContractAt(EXTRA_ABI, await addrOf(x));
   for (const [c, l] of [
     [o.token, "VSC"],
     [o.governanceToken, "VGT"],
   ]) {
-    add(c, `${l} AgentAdded`, c.filters.AgentAdded());
-    add(c, `${l} mint`, c.filters.Transfer(ZERO));
-    add(c, `${l} AddressFrozen`, c.filters.AddressFrozen());
-    add(c, `${l} TokensFrozen`, c.filters.TokensFrozen());
-    add(c, `${l} TokensUnfrozen`, c.filters.TokensUnfrozen());
-  }
-  const reg = o.identityRegistry;
-  add(reg, "IdentityRegistry AgentAdded", reg.filters.AgentAdded());
-  add(reg, "IdentityRegistry IdentityStored", reg.filters.IdentityStored());
-  add(reg, "IdentityRegistry IdentityModified", reg.filters.IdentityModified());
-  const itr = o.investorTypeRegistry;
-  if (itr) {
     for (const e of [
-      "ComplianceOfficerUpdated",
-      "GovernorUpdated",
-      "InvestorLimitExemptionUpdated",
-      "TokenAuthorized",
+      "AgentAdded",
+      "GuardianUpdated",
+      "AddressFrozen",
+      "TokensFrozen",
+      "TokensUnfrozen",
+      "RecoverySuccess",
     ])
-      add(itr, `InvestorTypeRegistry ${e}`, itr.filters[e]());
+      add(c, l, e);
+    out.push([c, `${l} mint`, c.filters.Transfer(ZERO)]);
+    out.push([c, `${l} burn`, c.filters.Transfer(null, ZERO)]);
   }
-  const rules = o.complianceRules;
+  for (const e of [
+    "AgentAdded",
+    "IdentityStored",
+    "IdentityModified",
+    "IdentityRemoved",
+    "CountryUpdated",
+  ])
+    add(o.identityRegistry, "IdentityRegistry", e);
+  for (const e of [
+    "ComplianceOfficerUpdated",
+    "GovernorUpdated",
+    "InvestorLimitExemptionUpdated",
+    "TokenAuthorized",
+    "InvestorTypeAssigned",
+    "InvestorTypeUpgraded",
+    "InvestorTypeDowngraded",
+  ])
+    add(o.investorTypeRegistry, "InvestorTypeRegistry", e);
   for (const e of [
     "RuleAdministratorUpdated",
     "TrustedContractAdded",
     "TrustedRegistrarSet",
   ])
-    add(rules, `ComplianceRules ${e}`, rules.filters[e]());
+    add(o.complianceRules, "ComplianceRules", e);
   if (o.escrowWalletFactory) {
-    const f = await ethers.getContractAt(
-      ROLE_ABI,
-      await addrOf(o.escrowWalletFactory),
-    );
-    add(f, "EscrowWalletFactory RoleGranted", f.filters.RoleGranted());
-    add(
-      f,
-      "EscrowWalletFactory InvestorRegistered",
-      f.filters.InvestorRegistered(),
-    );
+    const f = await at(o.escrowWalletFactory);
+    add(f, "EscrowWalletFactory", "RoleGranted");
+    add(f, "EscrowWalletFactory", "InvestorRegistered");
   }
-  const om = o.oracleManager;
-  add(om, "OracleManager OracleRegistered", om.filters.OracleRegistered());
-  if (o.privacyManager) {
-    const pm = o.privacyManager;
-    add(
-      pm,
-      "PrivacyManager TrustedAttestorSet",
-      pm.filters.TrustedAttestorSet(),
-    );
-    add(
-      pm,
-      "PrivacyManager ListOperatorUpdated",
-      pm.filters.ListOperatorUpdated(),
-    );
-  }
-  for (const issuer of o.issuers || []) {
-    const c = await ethers.getContractAt(ISSUER_ABI, await addrOf(issuer));
-    add(
-      c,
-      `issuer ${await addrOf(issuer)} IssuerKeyAdded`,
-      c.filters.IssuerKeyAdded(),
-    );
-  }
+  add(o.oracleManager, "OracleManager", "OracleRegistered");
+  add(o.oracleManager, "OracleManager", "EmergencyOracleSet");
+  for (const e of [
+    "TrustedAttestorSet",
+    "ListOperatorUpdated",
+    "WhitelistRootPublished",
+  ])
+    add(o.privacyManager, "PrivacyManager", e);
+  for (const issuer of o.issuers || [])
+    add(await at(issuer), `issuer ${await addrOf(issuer)}`, "IssuerKeyAdded");
   return out;
 }
 
-/** The registrars of ComplianceRules (their own calls may add trust). */
-async function registrars(o) {
-  const rules = o.complianceRules;
-  const out = [];
-  for (const ev of await scanLogs(
-    rules,
-    rules.filters.TrustedRegistrarSet(),
-    o,
-  ))
-    out.push(ev.args[1]);
-  return out;
+/** True when `log` (address, topics) matches `c` and `filter`. */
+async function matches(log, c, filter) {
+  if (!same(log.address, await addrOf(c))) return false;
+  const want = await filter.getTopicFilter();
+  return want.every(
+    (t, i) =>
+      t === null ||
+      (log.topics[i] || "").toLowerCase() === String(t).toLowerCase(),
+  );
+}
+
+/** Receipt of `h` (cached), refusing a transaction the RPC cannot serve. */
+async function receiptOf(cache, h) {
+  if (!cache.has(h)) {
+    const [tx, rc] = await Promise.all([
+      ethers.provider.getTransaction(h),
+      ethers.provider.getTransactionReceipt(h),
+    ]);
+    if (!tx || !rc) {
+      throw new Error(
+        `Handover: transaction ${h} is unknown to the RPC: nothing can be concluded about the voting window`,
+      );
+    }
+    cache.set(h, { tx, rc });
+  }
+  return cache.get(h);
+}
+
+/**
+ * A call to a registrar of `token` at the event's block: the last
+ * TrustedRegistrarSet for (token, to) at or before it named a code hash.
+ */
+function registrarCall(sets, token, to, block) {
+  const last = sets
+    .filter(
+      (e) =>
+        same(e.args[0], token) && same(e.args[1], to) && e.blockNumber <= block,
+    )
+    .at(-1);
+  return Boolean(last) && last.args[2] !== ethers.ZeroHash;
 }
 
 /**
@@ -145,7 +171,11 @@ async function registrars(o) {
  */
 async function windowLines(o, snap) {
   if (!snap) return [];
-  if (!Number.isInteger(snap.block) || !Array.isArray(snap.ceremonyTxs)) {
+  if (
+    !Number.isInteger(snap.block) ||
+    !Array.isArray(snap.ceremonyTxs) ||
+    snap.ceremonyTxs.length === 0
+  ) {
     return [
       [
         "the preflight snapshot records no preflight block and ceremony transactions: activity in the voting window cannot be attributed (re-run the full phase)",
@@ -155,26 +185,35 @@ async function windowLines(o, snap) {
   }
   const ours = new Set(snap.ceremonyTxs.map((h) => h.toLowerCase()));
   const [ops, gov] = await Promise.all([o.ops, o.governance].map(addrOf));
-  const regs = await registrars(o);
-  const scope = { ...o, fromBlock: snap.block + 1 };
+  const rules = o.complianceRules;
+  const end = await ethers.provider.getBlockNumber();
+  const regSets = await scanLogs(rules, rules.filters.TrustedRegistrarSet(), {
+    ...o,
+    toBlock: end,
+  });
+  const scope = { ...o, fromBlock: snap.block + 1, toBlock: end };
+  const executed = EXTRA.getEvent("ProposalExecuted").topicHash;
+  const cache = new Map();
+  const kinds = await watched(o);
+  const found = new Set();
   const lines = [];
-  const seen = new Map();
-  let n = 0;
-  for (const [c, label, filter] of await watched(o)) {
+  for (const [c, label, filter] of kinds) {
     for (const ev of await scanLogs(c, filter, scope)) {
-      n++;
       const h = ev.transactionHash.toLowerCase();
+      found.add(`${h}:${ev.index}`);
       if (ours.has(h)) continue;
-      if (!seen.has(h)) seen.set(h, await ethers.provider.getTransaction(h));
-      const tx = seen.get(h);
+      const { tx, rc } = await receiptOf(cache, h);
       const to = tx.to || ZERO;
       // Governance signs nothing itself; a dev node impersonating it
       // stands for a vote (R-417-4).
       if (same(tx.from, ops) || same(tx.from, gov)) continue;
-      if (same(to, gov) && tx.data.toLowerCase().startsWith(EXECUTE)) continue;
+      const vote =
+        same(to, gov) &&
+        rc.logs.some((l) => same(l.address, gov) && l.topics[0] === executed);
+      if (vote) continue;
       if (
         label === "ComplianceRules TrustedContractAdded" &&
-        regs.some((r) => same(r, to))
+        registrarCall(regSets, ev.args[0], to, ev.blockNumber)
       )
         continue;
       lines.push([
@@ -183,9 +222,40 @@ async function windowLines(o, snap) {
       ]);
     }
   }
+  // R-413-6: every watched event in the ceremony's own receipts must be
+  // in the scan, or the scan (range, chunk, RPC) proves nothing.
+  const missed = [];
+  let mustSee = 0;
+  const dAddr = await addrOf(o.deployer);
+  for (const h of ours) {
+    const { tx, rc } = await receiptOf(cache, h);
+    if (rc.blockNumber <= snap.block || rc.blockNumber > end) {
+      missed.push(`${h} (block ${rc.blockNumber} outside the window)`);
+      continue;
+    }
+    if (!same(tx.from, dAddr)) {
+      missed.push(`${h} (sent by ${tx.from}, not the deployer)`);
+      continue;
+    }
+    for (const log of rc.logs) {
+      let hit = false;
+      for (const [c, , filter] of kinds) {
+        if (await matches(log, c, filter)) hit = true;
+      }
+      if (!hit) continue;
+      mustSee++;
+      if (!found.has(`${h}:${log.index}`)) missed.push(`${h}#${log.index}`);
+    }
+  }
+  if (missed.length) {
+    lines.push([
+      `voting-window event scan found none of the ceremony events it must see (${missed.join(", ")}): fromBlock, logChunk or the RPC is wrong; nothing can be concluded from it`,
+      false,
+    ]);
+  }
   if (!lines.length) {
     lines.push([
-      `every grant, mint, identity registration, freeze and rule-administrator event since the preflight (block ${snap.block}, ${n} events) came from the ceremony, ops or a vote`,
+      `every grant, mint, identity registration, freeze and rule-administrator event since the preflight (blocks ${snap.block + 1}-${end}, ${found.size} events, ${mustSee} of them the ceremony's) came from the ceremony, ops or a vote`,
       true,
     ]);
   }
