@@ -4,10 +4,13 @@
 // above 500 lines. Hand-written means every git-tracked file under
 // contracts/ (minus the generated verifiers), demo/, scripts/, test/ and
 // docs/. The files that were already at or above 500 when the gate was
-// written are allowlisted with their line count then, shrink-only: an
-// allowlisted file may not grow, and once it drops under 500 its entry
-// must go (the gate says so). Tests and docs on the list are split in
-// Phase 5. Exits 1 on any finding; `node scripts/ci/line-count-ratchet.js`.
+// written are allowlisted with their line count then, shrink-only: the
+// cap follows the file down. An allowlisted file may not grow past its
+// cap; when it shrinks the entry must be lowered to the new count in the
+// same commit (so it cannot regrow unnoticed), and once it drops under
+// 500 the entry must go. Both say so. Tests and docs on the list are
+// split in Phase 5. Exits 1 on any finding;
+// `node scripts/ci/line-count-ratchet.js`.
 const { execFileSync } = require("child_process");
 const fs = require("fs");
 
@@ -63,6 +66,8 @@ for (const file of tracked) {
       findings.push(
         `${file}: ${n} lines, now under ${LIMIT}: remove it from ALLOW`,
       );
+    } else if (n < cap) {
+      findings.push(`${file}: ${n} lines, lower ALLOW to ${n}`);
     }
   } else if (n >= LIMIT) {
     findings.push(`${file}: ${n} lines (limit ${LIMIT}, not allowlisted)`);

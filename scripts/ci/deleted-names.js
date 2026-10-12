@@ -64,8 +64,16 @@ function hits(args) {
   }
 }
 
+const tracked = execFileSync("git", ["ls-files", "-z"], { encoding: "utf8" })
+  .split("\0")
+  .filter(Boolean);
+
 const findings = [];
 for (const f of FILES) {
+  // The file itself, under any directory.
+  for (const t of tracked) {
+    if (t.endsWith("/" + f) || t === f) findings.push(`${f} tracked as ${t}`);
+  }
   for (const where of hits(["-F", "-e", f])) findings.push(`${f} in ${where}`);
 }
 for (const s of SYMBOLS) {
