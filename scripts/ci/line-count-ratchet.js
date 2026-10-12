@@ -1,9 +1,10 @@
 #!/usr/bin/env node
 "use strict";
-// Phase 4 exit row (plan v2 Task 4.15, D49): no hand-written file at or
-// above 500 lines. Hand-written means every git-tracked file under
-// contracts/ (minus the generated verifiers), demo/, scripts/, test/ and
-// docs/. The files that were already at or above 500 when the gate was
+// Phase 4 exit row (plan v2 Task 4.15, D49; every file since Task 4.17,
+// CF-6): no hand-written file at or above 500 lines. Hand-written means
+// every git-tracked file but the EXEMPT ones below: root files, .github/,
+// utils/, circuits/ sources, contracts/, demo/, scripts/, test/, docs/.
+// The files that were already at or above 500 when the gate was
 // written are allowlisted with their line count then, shrink-only: the
 // cap follows the file down. An allowlisted file may not grow past its
 // cap; when it shrinks the entry must be lowered to the new count in the
@@ -15,8 +16,14 @@ const { execFileSync } = require("child_process");
 const fs = require("fs");
 
 const LIMIT = 500;
-const ROOTS = ["contracts/", "demo/", "scripts/", "test/", "docs/"];
-const EXEMPT = [/^contracts\/privacy\/verifiers\//];
+// Not hand-written, so not counted. Kept short on purpose: a file goes
+// here only when a tool writes it.
+const EXEMPT = [
+  /^contracts\/privacy\/verifiers\//, // snarkjs-generated PLONK verifiers
+  /^package-lock\.json$/, // npm writes it
+  // binary or build output, none tracked today (circuit keys, wasm, images)
+  /\.(zkey|ptau|wasm|r1cs|sym|png|jpe?g|gif|ico|pdf)$/i,
+];
 // Allowlist, measured at aa65de8 (2026-10-12, the start of Task 4.15).
 const ALLOW = {
   "test/EnhancedEscrow.test.js": 1575,
@@ -46,11 +53,14 @@ function lineCount(file) {
   return text.split("\n").length - (text.endsWith("\n") ? 1 : 0);
 }
 
-const tracked = execFileSync("git", ["ls-files", "-z", ...ROOTS], {
-  encoding: "utf8",
-})
+// A tracked file with a NUL byte is binary whatever its name: exempt too.
+const isBinary = (f) => fs.readFileSync(f).includes(0);
+const tracked = execFileSync("git", ["ls-files", "-z"], { encoding: "utf8" })
   .split("\0")
-  .filter((f) => f && !EXEMPT.some((re) => re.test(f)));
+  .filter(
+    (f) =>
+      f && fs.existsSync(f) && !EXEMPT.some((re) => re.test(f)) && !isBinary(f),
+  );
 
 const findings = [];
 const seen = new Set();
@@ -83,6 +93,6 @@ if (findings.length) {
   process.exit(1);
 }
 console.log(
-  `line-count ratchet: ${scanned} files under ${ROOTS.join(" ")}, ` +
+  `line-count ratchet: ${scanned} tracked files (${EXEMPT.length} exempt patterns), ` +
     `${Object.keys(ALLOW).length} allowlisted (shrink-only), none at or above ${LIMIT}`,
 );
