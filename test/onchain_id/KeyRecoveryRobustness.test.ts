@@ -312,6 +312,52 @@ describe("Recovery robustness (4.14): A2 probes and killed mutants", function ()
     await expect(f.id.connect(k1).acceptOwnership()).to.be.reverted;
   });
 
+  it("L-2: an agent given MANAGEMENT later can neither open nor approve (R-414-10)", async function () {
+    const f = await setup();
+    const key = k(f.rescued.address);
+    await f.id.addKey(k(f.A.address), MGMT, 1);
+    await expect(f.km.connect(f.A).initiateKeyRecovery(f.idA, key))
+      .to.be.revertedWithCustomError(f.km, "AgentControlsIdentity")
+      .withArgs(f.A.address);
+    await f.km.connect(f.B).initiateKeyRecovery(f.idA, key);
+    await expect(f.km.connect(f.A).approveKeyRecovery(f.idA, key))
+      .to.be.revertedWithCustomError(f.km, "AgentControlsIdentity")
+      .withArgs(f.A.address);
+    // The two agents without control still reach the threshold.
+    await expect(f.km.connect(f.C).approveKeyRecovery(f.idA, key)).to.emit(
+      f.km,
+      "KeyRecoveryApproved",
+    );
+  });
+
+  it("L-2: an agent that became owner by an ordinary transfer cannot open", async function () {
+    const f = await setup();
+    await f.id.transferOwnership(f.A.address);
+    await f.id.connect(f.A).acceptOwnership();
+    await expect(
+      f.km.connect(f.A).initiateKeyRecovery(f.idA, k(f.rescued.address)),
+    )
+      .to.be.revertedWithCustomError(f.km, "AgentControlsIdentity")
+      .withArgs(f.A.address);
+    await f.km.connect(f.B).initiateKeyRecovery(f.idA, k(f.rescued.address));
+  });
+
+  it("L-2: a re-seat whose proposed agent gained MANAGEMENT meanwhile is refused at apply", async function () {
+    const f = await setup();
+    await f.km.setupKeyRecovery(f.idA, [f.user.address, f.anyone.address], 1);
+    await f.id.addKey(k(f.user.address), MGMT, 1);
+    await time.increase(2 * DAY + 1);
+    await expect(f.km.connect(f.anyone).applyKeyRecoverySetup(f.idA))
+      .to.be.revertedWithCustomError(f.km, "AgentControlsIdentity")
+      .withArgs(f.user.address);
+    await f.id.removeKey(k(f.user.address), MGMT);
+    await f.km.connect(f.anyone).applyKeyRecoverySetup(f.idA);
+    expect((await f.km.getKeyRecovery(f.idA)).recoveryAgents).to.deep.equal([
+      f.user.address,
+      f.anyone.address,
+    ]);
+  });
+
   it("M17: a second executeKeyRecovery is refused", async function () {
     const f = await setup();
     const key = k(f.rescued.address);

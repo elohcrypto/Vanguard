@@ -16,8 +16,9 @@ import {KeyManagerRecovery, IManagedIdentity, IOnchainID} from "./KeyManagerReco
  *      A re-seat applies only while its proposer still owns the identity
  *      (Task 4.14, M-B): an ordinary ownership transfer leaves it stale,
  *      refused at apply and droppable by anyone. Neither the owner nor a
- *      current MANAGEMENT key may be seated as an agent (D53): a stolen
- *      owner key must not vote on its own eviction.
+ *      current MANAGEMENT key may be seated as an agent, open or approve
+ *      a candidate (D53, R-414-10): a stolen owner key must not vote on
+ *      its own eviction, however it came by the key.
  */
 abstract contract KeyManagerRecoverySetup is KeyManagerRecovery {
     event KeyRecoverySetupPending(
@@ -77,7 +78,7 @@ abstract contract KeyManagerRecoverySetup is KeyManagerRecovery {
     }
 
     /// @dev D53: the owner and MANAGEMENT keys are what recovery evicts.
-    function _checkNotController(address _identity, address _agent) private view {
+    function _checkNotController(address _identity, address _agent) internal view override {
         if (
             _agent == IManagedIdentity(_identity).owner() ||
             IOnchainID(_identity).keyHasPurpose(keccak256(abi.encodePacked(_agent)), 1)
@@ -95,6 +96,8 @@ abstract contract KeyManagerRecoverySetup is KeyManagerRecovery {
         if (recoveryLocked(_identity)) revert RecoveryLocked();
         if (p.proposer != IManagedIdentity(_identity).owner()) revert StaleReseat();
         address[] memory agents = p.agents;
+        // An agent that gained control during the 48 hours is refused too.
+        for (uint256 i = 0; i < agents.length; i++) _checkNotController(_identity, agents[i]);
         uint256 threshold = p.threshold;
         _clearPendingSetup(p);
         _seat(_identity, agents, threshold);
