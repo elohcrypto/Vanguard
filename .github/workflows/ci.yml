@@ -113,9 +113,9 @@ jobs:
       # refuses a name Phase 3 or 4 removed. Each exits 1 on a finding.
       - name: Phase 4 exit gates (line count, scripts, deleted names)
         run: |
-          node scripts/ci/line-count-ratchet.js
-          node scripts/ci/scripts-referenced.js
-          node scripts/ci/deleted-names.js
+          node scripts/ci/line-count-ratchet.js \
+            && node scripts/ci/scripts-referenced.js \
+            && node scripts/ci/deleted-names.js
 
       - name: Compile contracts
         run: npx hardhat compile
@@ -251,11 +251,13 @@ jobs:
           BASELINE=95
           if ! npm run test:coverage > coverage.log 2>&1; then
             echo "::error::the instrumented test run failed; see coverage.log"
-            grep -E '^\s+[0-9]+ (passing|failing|pending)$|^\s+[0-9]+\) ' coverage.log | head -40
+            grep -E '^\s+[0-9]+ (passing|failing|pending)|^\s+[0-9]+\) ' coverage.log | head -40 || true
             tail -20 coverage.log
             exit 1
           fi
-          grep -E '^\s+[0-9]+ (passing|failing|pending)$' coverage.log
+          # Informational: mocha's "N passing (10m)" carries a suffix, and a
+          # run with no pending or failing line is the normal case.
+          grep -E '^\s+[0-9]+ (passing|failing|pending)' coverage.log || true
           lines=$(grep -E '^All files' coverage.log | awk -F'|' '{gsub(/ /,"",$5); print $5}')
           echo "line coverage: ${lines:-<none>}% (baseline $BASELINE)"
           if [ -z "$lines" ]; then
@@ -279,7 +281,7 @@ jobs:
       # 12:00 locally), asserting PrivacyManager's branch
       # figure from that run's coverage.json. A step rather than a parallel
       # job: a job would repeat npm ci, the circom build, the ptau cache and
-      # setup:zk to save wall-clock time this job has under the 90-minute
+      # setup:zk to save wall-clock time this job has under the 120-minute
       # guard (45-57 min before 4.15), and a second coverage.json in the same
       # job is read right here.
       - name: PrivacyManager branch gate (proof suites under coverage)
@@ -289,11 +291,11 @@ jobs:
           MIN=80
           if ! npm run test:coverage -- --testfiles 'test/privacy/**/*.{js,ts}' > coverage-zk.log 2>&1; then
             echo "::error::the instrumented proof suites failed; see coverage-zk.log"
-            grep -E '^\s+[0-9]+ (passing|failing|pending)$|^\s+[0-9]+\) ' coverage-zk.log | head -40
+            grep -E '^\s+[0-9]+ (passing|failing|pending)|^\s+[0-9]+\) ' coverage-zk.log | head -40 || true
             tail -20 coverage-zk.log
             exit 1
           fi
-          grep -E '^\s+[0-9]+ (passing|failing|pending)$' coverage-zk.log
+          grep -E '^\s+[0-9]+ (passing|failing|pending)' coverage-zk.log || true
           pct=$(node -e '
             const c = require("./coverage.json");
             const k = Object.keys(c).find((f) => f.endsWith("contracts/privacy/PrivacyManager.sol"));
