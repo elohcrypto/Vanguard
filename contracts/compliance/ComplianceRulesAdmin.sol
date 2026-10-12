@@ -133,9 +133,38 @@ abstract contract ComplianceRulesAdmin is IComplianceRules, ComplianceRulesTrust
                 abi.encodeWithSelector(IWhitelistOracleView.isWhitelisted.selector, address(this))
             );
             if (!ok || ret.length != 32) revert OracleIncompatible(oracle);
+            // The tier rule (Task 4.10) decodes getWhitelistInfo as the
+            // 6-tuple; an oracle returning the pre-4.10 5-tuple (no tier)
+            // would make every transfer revert without a reason (2F:
+            // fail at configuration). Refuse any other shape here.
+            (ok, ret) = oracle.staticcall(
+                abi.encodeWithSelector(IWhitelistOracleView.getWhitelistInfo.selector, address(this))
+            );
+            if (!ok || !_isWhitelistInfoShape(ret)) revert OracleIncompatible(oracle);
         }
         whitelistOracle[token] = oracle;
         emit WhitelistOracleSet(token, oracle);
+    }
+
+    /**
+     * @dev True when `ret` is a canonically encoded
+     *      (bool, uint256, uint256, uint8, string, address[]): a six-word
+     *      head whose tier word fits a uint8, the string at 0xc0 and the
+     *      array right after the padded string. A 5-tuple without the
+     *      tier puts its string length where the array's offset belongs,
+     *      so it fails. A tail outside `ret` reverts in the decode: still
+     *      at configuration, never on a transfer.
+     */
+    function _isWhitelistInfoShape(bytes memory ret) private pure returns (bool) {
+        if (ret.length < 8 * 32) return false;
+        (, , , uint256 tier, uint256 strOffset, uint256 arrOffset, uint256 strLen, ) = abi.decode(
+            ret,
+            (uint256, uint256, uint256, uint256, uint256, uint256, uint256, uint256)
+        );
+        if (tier > type(uint8).max || strOffset != 0xc0) return false;
+        if (arrOffset != 0xe0 + ((strLen + 31) / 32) * 32) return false;
+        abi.decode(ret, (bool, uint256, uint256, uint8, string, address[]));
+        return true;
     }
 
     /**
