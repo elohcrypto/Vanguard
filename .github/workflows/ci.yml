@@ -103,19 +103,20 @@ jobs:
       - name: Audit setter/constructor guards
         run: node scripts/audit-setter-guards.js
 
-      # Phase 4 exit row (plan v2 Task 4.15, D49), three gates on the
+      # Phase 4 exit row (plan v2 Task 4.15, D49; 4.17), four gates on the
       # checkout alone, each a script under scripts/ci/: the line-count
-      # ratchet keeps every hand-written file (contracts/ minus the
-      # generated verifiers, demo/, scripts/, test/, docs/) under 500 lines
-      # with a shrink-only allowlist of the 20 files at or above it at
-      # aa65de8 (tests and docs, split in Phase 5); the scripts gate refuses
-      # a file under scripts/ nothing references; the deleted-names gate
-      # refuses a name Phase 3 or 4 removed. Each exits 1 on a finding.
-      - name: Phase 4 exit gates (line count, scripts, deleted names)
+      # ratchet keeps every tracked hand-written file under 500 lines with
+      # a shrink-only allowlist (tests and docs, split in Phase 5); the
+      # scripts gate refuses a scripts/ file no root reaches; the
+      # deleted-names gate refuses a name Phase 3 or 4 removed; the
+      # free-identifier gate refuses a name demo/ or scripts/ uses but
+      # never declares. Each exits 1 on a finding.
+      - name: Phase 4 exit gates (line count, scripts, names, free ids)
         run: |
           node scripts/ci/line-count-ratchet.js \
             && node scripts/ci/scripts-referenced.js \
-            && node scripts/ci/deleted-names.js
+            && node scripts/ci/deleted-names.js \
+            && node scripts/ci/free-identifiers.js
 
       - name: Compile contracts
         run: npx hardhat compile
