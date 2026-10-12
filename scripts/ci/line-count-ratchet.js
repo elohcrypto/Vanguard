@@ -37,7 +37,6 @@ const ALLOW = {
   "test/production/ProductionEnvironment.ts": 572,
   "test/OnchainID.coverage.test.ts": 546,
   "test/OnchainIDFactory.test.ts": 537,
-  "test/GovernanceTokenKYCRestriction.test.ts": 510,
   "test/governance/QuorumIntegrity.test.ts": 509,
 };
 

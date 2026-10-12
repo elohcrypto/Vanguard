@@ -247,16 +247,13 @@ describe("Governance Token KYC/AML Restriction Test", function () {
       ).to.equal(false);
 
       console.log("\n📊 Attempting to distribute governance tokens...");
-      try {
-        await governanceToken.distributeGovernanceTokens(
+      await expect(
+        governanceToken.distributeGovernanceTokens(
           [unverifiedUser.address],
           [VGT(10000)],
-        );
-        expect.fail("Should have reverted");
-      } catch (error: any) {
-        expect(error.message).to.include("Recipient not verified");
-        console.log("   ✅ Distribution REJECTED as expected");
-      }
+        ),
+      ).to.be.revertedWith("Recipient not verified");
+      console.log("   ✅ Distribution REJECTED as expected");
 
       const balance = await governanceToken.balanceOf(unverifiedUser.address);
       expect(balance).to.equal(0);
@@ -418,41 +415,31 @@ describe("Governance Token KYC/AML Restriction Test", function () {
       console.log("   ✅ CAN vote in governance");
 
       console.log("\n2️⃣  Unverified User (KYC ❌ + AML ❌)");
-      try {
-        await governanceToken.distributeGovernanceTokens(
+      await expect(
+        governanceToken.distributeGovernanceTokens(
           [unverifiedUser.address],
           [VGT(1000)],
-        );
-        console.log("   ❌ TEST FAILED - Should not receive VGT");
-        expect.fail("Should have reverted");
-      } catch (e) {
-        console.log("   ✅ CANNOT receive VGT");
-        console.log("   ✅ CANNOT vote in governance");
-      }
+        ),
+      ).to.be.revertedWith("Recipient not verified");
+      console.log("   ✅ CANNOT receive VGT, so CANNOT vote in governance");
 
       console.log("\n3️⃣  KYC-Only User (KYC ✅ + AML ❌)");
-      try {
-        await governanceToken.distributeGovernanceTokens(
+      await expect(
+        governanceToken.distributeGovernanceTokens(
           [kycOnlyUser.address],
           [VGT(1000)],
-        );
-        console.log("   ❌ TEST FAILED - Should not receive VGT");
-        expect.fail("Should have reverted");
-      } catch (e) {
-        console.log("   ✅ CANNOT receive VGT (missing AML)");
-      }
+        ),
+      ).to.be.revertedWith("Recipient not verified");
+      console.log("   ✅ CANNOT receive VGT (missing AML)");
 
       console.log("\n4️⃣  AML-Only User (KYC ❌ + AML ✅)");
-      try {
-        await governanceToken.distributeGovernanceTokens(
+      await expect(
+        governanceToken.distributeGovernanceTokens(
           [amlOnlyUser.address],
           [VGT(1000)],
-        );
-        console.log("   ❌ TEST FAILED - Should not receive VGT");
-        expect.fail("Should have reverted");
-      } catch (e) {
-        console.log("   ✅ CANNOT receive VGT (missing KYC)");
-      }
+        ),
+      ).to.be.revertedWith("Recipient not verified");
+      console.log("   ✅ CANNOT receive VGT (missing KYC)");
 
       console.log("\n" + "=".repeat(70));
       console.log("PART 2: MINTING/DISTRIBUTION RESTRICTIONS");
@@ -465,15 +452,12 @@ describe("Governance Token KYC/AML Restriction Test", function () {
       console.log("   ✅ Owner CAN mint/distribute VGT");
 
       console.log("\n6️⃣  Non-Owner Attempting to Mint");
-      try {
-        await governanceToken
+      await expect(
+        governanceToken
           .connect(verifiedUser)
-          .distributeGovernanceTokens([verifiedUser2.address], [VGT(1000)]);
-        console.log("   ❌ TEST FAILED - Non-owner should not mint");
-        expect.fail("Should have reverted");
-      } catch (e) {
-        console.log("   ✅ Non-owner CANNOT mint/distribute VGT");
-      }
+          .distributeGovernanceTokens([verifiedUser2.address], [VGT(1000)]),
+      ).to.be.revertedWith("Not authorized agent");
+      console.log("   ✅ Non-owner CANNOT mint/distribute VGT");
 
       console.log("\n" + "=".repeat(70));
       console.log("PART 3: TRANSFER RESTRICTIONS");
@@ -486,15 +470,12 @@ describe("Governance Token KYC/AML Restriction Test", function () {
       console.log("   ✅ Transfer to verified address ALLOWED");
 
       console.log("\n8️⃣  Transfer to Unverified Address");
-      try {
-        await governanceToken
+      await expect(
+        governanceToken
           .connect(verifiedUser)
-          .transfer(unverifiedUser.address, VGT(100));
-        console.log("   ❌ TEST FAILED - Should not transfer to unverified");
-        expect.fail("Should have reverted");
-      } catch (e) {
-        console.log("   ✅ Transfer to unverified address BLOCKED");
-      }
+          .transfer(unverifiedUser.address, VGT(100)),
+      ).to.be.revertedWith("Recipient not verified");
+      console.log("   ✅ Transfer to unverified address BLOCKED");
 
       console.log("\n" + "=".repeat(70));
       console.log("🎉 ALL TESTS PASSED!");
