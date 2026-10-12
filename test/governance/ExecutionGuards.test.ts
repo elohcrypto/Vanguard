@@ -220,6 +220,51 @@ describe("Selector denylist (L5)", function () {
     expect(await gov.proposalCount()).to.equal(1n);
   });
 
+  // Review C-1 (Task 4.17): the two-vote bypass. A binding setter
+  // refuses governance itself, and no row's vote may transferOwnership
+  // on governance.
+  it("no row binds governance itself; no vote transfers governance (C-1)", async function () {
+    const { gov, propose, passed, proposer, govAddr } = await setup();
+    for (const fn of [
+      "setDynamicListManager",
+      "setEscrowWalletFactory",
+      "setOnchainIDFactory",
+      "setPrivacyManager",
+      "setZKVerifier",
+    ])
+      await expect((gov as any)[fn](govAddr), fn).to.be.revertedWithCustomError(
+        gov,
+        "GovernanceSelfBinding",
+      );
+    // Governance owns itself (as after the ceremony), then the probe.
+    await gov.transferOwnership(govAddr);
+    const SYS = 4;
+    const self = await passed(
+      SYS,
+      gov,
+      gov.interface.encodeFunctionData("acceptOwnership"),
+    );
+    await gov.executeProposal(self);
+    expect(await gov.owner()).to.equal(govAddr);
+    const bind = await passed(
+      SYS,
+      gov,
+      gov.interface.encodeFunctionData("setPrivacyManager", [govAddr]),
+    );
+    await gov.executeProposal(bind).catch(() => {});
+    expect(await gov.boundTarget(11)).to.not.equal(govAddr);
+    await expect(
+      propose(
+        11,
+        gov,
+        gov.interface.encodeFunctionData("transferOwnership", [
+          proposer.address,
+        ]),
+      ),
+    ).to.be.revertedWithCustomError(gov, "TargetNotBoundToType");
+    expect(await gov.owner()).to.equal(govAddr);
+  });
+
   it("M-2: VGT distributeGovernanceTokens and burn(uint256) are refused at creation", async function () {
     const { c, gov, propose, proposer, govAddr } = await setup();
     const vgt = c.governanceToken;

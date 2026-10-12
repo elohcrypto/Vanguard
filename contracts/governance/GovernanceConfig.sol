@@ -147,6 +147,9 @@ abstract contract GovernanceConfig is Ownable2Step {
     error CostOutOfRange(uint256 requested, uint256 max);
     error TimeScaleOutOfRange(uint256 requested);
     error VoterAgeOutOfRange(uint256 requested, uint256 min, uint256 max);
+    /// @dev D55 (review C-1, Task 4.17): no row is bound to governance itself,
+    ///      or that row's vote could call governance (transferOwnership).
+    error GovernanceSelfBinding();
 
     constructor(uint256 _timeScale) {
         // Divides every voting period and execution delay. 1 on mainnet.
@@ -318,6 +321,7 @@ abstract contract GovernanceConfig is Ownable2Step {
      * @param _dynamicListManager DynamicListManager contract address
      */
     function setDynamicListManager(address _dynamicListManager) external onlyOwner {
+        if (_dynamicListManager == address(this)) revert GovernanceSelfBinding();
         require(_dynamicListManager != address(0), "Invalid address");
         dynamicListManager = _dynamicListManager;
     }
@@ -326,24 +330,28 @@ abstract contract GovernanceConfig is Ownable2Step {
     ///         governance (pendingOwner or owner is this contract) can be
     ///         bound, as a ListUpdate needs a manager that reports governance.
     function setEscrowWalletFactory(address factory) external onlyOwner {
+        if (factory == address(this)) revert GovernanceSelfBinding();
         _requireHandedToGovernance(factory);
         escrowWalletFactory = factory;
     }
 
     /// @notice Bind IdentityFactoryParameters; same rule as the escrow factory.
     function setOnchainIDFactory(address factory) external onlyOwner {
+        if (factory == address(this)) revert GovernanceSelfBinding();
         _requireHandedToGovernance(factory);
         onchainIDFactory = factory;
     }
 
     /// @notice Bind PrivacyParameters; same rule as the factories.
     function setPrivacyManager(address manager) external onlyOwner {
+        if (manager == address(this)) revert GovernanceSelfBinding();
         _requireHandedToGovernance(manager);
         privacyManager = manager;
     }
 
     /// @notice Bind VerifierParameters; same rule as the factories.
     function setZKVerifier(address verifier) external onlyOwner {
+        if (verifier == address(this)) revert GovernanceSelfBinding();
         _requireHandedToGovernance(verifier);
         zkVerifier = verifier;
     }

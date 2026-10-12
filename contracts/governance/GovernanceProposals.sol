@@ -139,6 +139,13 @@ abstract contract GovernanceProposals is GovernanceConfig, ReentrancyGuard {
             revert TargetNotBoundToType(proposalType, target);
         }
         _requireAllowedSelector(proposalType, callData);
+        // D55, Task 4.17 (review C-1): on every row, a vote never hands
+        // governance's own ownership to a key. acceptOwnership by
+        // governance is harmless: it only completes a nomination its
+        // owner made, and once governance owns itself no vote can make one.
+        if (target == address(this) && bytes4(callData[:4]) == SEL_TRANSFER_OWNERSHIP) {
+            revert GovernanceOwnershipByVote();
+        }
         if (proposalType == ProposalType.ListUpdate) _requireGovernedListManager(target);
 
         // Check proposer has enough tokens for creation cost
@@ -275,11 +282,6 @@ abstract contract GovernanceProposals is GovernanceConfig, ReentrancyGuard {
                 sel != SEL_BURN_SELF,
             "Selector not allowed"
         );
-        // D55 (b), Task 4.17: the SystemParameters row targets governance
-        // itself; a vote must not hand governance's own ownership to a key.
-        if (proposalType == ProposalType.SystemParameters) {
-            if (sel == SEL_TRANSFER_OWNERSHIP) revert GovernanceOwnershipByVote();
-        }
         if (proposalType == ProposalType.ListUpdate) {
             require(
                 sel == SEL_ADD_WHITELIST ||
