@@ -3,6 +3,9 @@ import { spawn, spawnSync } from "child_process";
 import * as fs from "fs";
 import * as os from "os";
 import * as path from "path";
+const { describeUnlessCoverage } = require("../helpers/zkProofs") as {
+  describeUnlessCoverage: (t: string, r: string, f: () => void) => void;
+};
 
 /**
  * Plan v2 Task 4.13: scripts/handover.ts on a fresh node, as an operator
@@ -11,8 +14,18 @@ import * as path from "path";
  * refused. The node is this test's own (HANDOVER_TEST_PORT, default
  * 8547), never the lead's 8545. The fixture is deployed by
  * test/production/deployHandoverFixture.ts over the same RPC.
+ *
+ * Not under coverage (Task 4.15): the child `hardhat node` and `hardhat
+ * run` compile the real build into artifacts/ over the instrumented one
+ * (.solcover.js), after which every later suite deploys uninstrumented
+ * code and the ceremony's code-hash pins fail; and the child node's
+ * contracts are outside the collector anyway, so the suite measures
+ * nothing there.
  */
-describe("Handover CLI on a fresh node (Task 4.13)", function () {
+describeUnlessCoverage(
+  "Handover CLI on a fresh node (Task 4.13)",
+  "its child hardhat processes recompile the real build over the instrumented artifacts",
+  function () {
   this.timeout(600_000);
   const port = Number(process.env.HANDOVER_TEST_PORT || 8547);
   const rpc = `http://127.0.0.1:${port}`;
@@ -125,4 +138,5 @@ describe("Handover CLI on a fresh node (Task 4.13)", function () {
     expect(u.status).to.equal(1);
     expect(`${u.stdout}${u.stderr}`).to.include('unknown key "treasury"');
   });
-});
+  },
+);

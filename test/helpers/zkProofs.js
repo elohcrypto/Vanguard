@@ -23,4 +23,21 @@ function underCoverage() {
   return require("hardhat").__SOLIDITY_COVERAGE_RUNNING === true;
 }
 
-module.exports = { describeProofs, underCoverage, REASON };
+/**
+ * `describe`, or `describe.skip` with `reason` in the title under
+ * coverage: for a suite that cannot run instrumented (it prints why; a
+ * silent skip would hide a dropped suite).
+ */
+function describeUnlessCoverage(title, reason, fn) {
+  if (underCoverage()) {
+    return describe.skip(`${title} (skipped under coverage: ${reason})`, fn);
+  }
+  return describe(title, fn);
+}
+
+module.exports = {
+  describeProofs,
+  describeUnlessCoverage,
+  underCoverage,
+  REASON,
+};

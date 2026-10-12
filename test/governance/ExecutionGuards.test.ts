@@ -2,10 +2,23 @@ import { expect } from "chai";
 import { ethers, network } from "hardhat";
 import { time } from "@nomicfoundation/hardhat-network-helpers";
 import { handoverFixture } from "../helpers/governanceFixture";
+const { underCoverage } = require("../helpers/zkProofs") as {
+  underCoverage: () => boolean;
+};
 
 // Plan 2F.1 (M1, L5). Review probes probe-b P2 / probe-b2 (a stranger
 // under-gasses executeProposal so a PASSED proposal settles Rejected) and
 // probe-b4 (a passed VGT transfer drains other proposals' deposits).
+//
+// Task 4.15: under coverage every executed step is traced off-chain, so
+// a single call's memory grows with its gas; the 40- and 35-wallet
+// batches executed in full (4M+ gas, more instrumented) are the suite's
+// largest traces and overflow CI's 4 GB heap. The gas bounds are the
+// real build's: under coverage the exact-estimate case runs with 20
+// wallets and prints the estimate instead of bounding it, and the
+// under-gassed case keeps its 35-wallet revert (a 3.1M-gas trace) but
+// leaves the 12M completion to `hardhat test`, printing why.
+const COVERAGE = underCoverage();
 const RULES = 1; // ProposalType.ComplianceRules
 const LIST = 6; // ProposalType.ListUpdate
 const IRP = 7; // ProposalType.IdentityRegistryParameters
@@ -107,13 +120,15 @@ describe("Execution gas floor (M1)", function () {
   // Review 2F.1 L-1: about 98.5k gas per wallet, so a 40-wallet batch needs
   // more than the floor. eth_estimateGas used to return the gasUsed of a
   // 12M run, at which the target ran out and the proposal settled Rejected.
-  it("L-1: a 40-wallet batch executes at exactly estimateGas", async function () {
-    const { gov, stranger, ir, ws, id, status } = await heavyProposal(40);
+  const N40 = COVERAGE ? 20 : 40;
+  it(`L-1: a ${N40}-wallet batch executes at exactly estimateGas${COVERAGE ? " (coverage: 20 wallets, estimate printed, not bounded)" : ""}`, async function () {
+    const { gov, stranger, ir, ws, id, status } = await heavyProposal(N40);
     const est = await gov.connect(stranger).executeProposal.estimateGas(id);
-    expect(est).to.be.greaterThan(4_000_000n);
+    console.log(`      executeProposal estimateGas ${est} (${N40} wallets)`);
+    if (!COVERAGE) expect(est).to.be.greaterThan(4_000_000n);
     await gov.connect(stranger).executeProposal(id, { gasLimit: est });
     expect(await status(id)).to.equal(EXECUTED);
-    expect(await ir.identity(ws[39])).to.not.equal(ethers.ZeroAddress);
+    expect(await ir.identity(ws[N40 - 1])).to.not.equal(ethers.ZeroAddress);
   });
 
   it("L-1: a 35-wallet batch under-gassed above the floor reverts and stays Active", async function () {
@@ -122,6 +137,12 @@ describe("Execution gas floor (M1)", function () {
       gov.connect(stranger).executeProposal(id, { gasLimit: 3_100_000 }),
     ).to.be.revertedWithCustomError(gov, "InsufficientExecutionGas");
     expect(await status(id)).to.equal(ACTIVE);
+    if (COVERAGE) {
+      console.log(
+        "      coverage: the 12M completion of the 35-wallet batch runs under `hardhat test` only (trace too large instrumented)",
+      );
+      return;
+    }
     await gov.connect(stranger).executeProposal(id, { gasLimit: 12_000_000 });
     expect(await status(id)).to.equal(EXECUTED);
     expect(await ir.identity(ws[34])).to.not.equal(ethers.ZeroAddress);

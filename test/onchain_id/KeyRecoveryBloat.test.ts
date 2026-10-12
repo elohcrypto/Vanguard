@@ -1,6 +1,9 @@
 import { expect } from "chai";
 import { ethers } from "hardhat";
 import { time } from "@nomicfoundation/hardhat-network-helpers";
+const { underCoverage } = require("../helpers/zkProofs") as {
+  underCoverage: () => boolean;
+};
 
 // Plan v2 Task 4.14 (A2 H-1, D42): a purpose list a rogue key bloated
 // cannot block recovery. _removeKey is O(1) through a position index,
@@ -8,14 +11,22 @@ import { time } from "@nomicfoundation/hardhat-network-helpers";
 // internal _addKey (eviction, acceptOwnership) stays uncapped, so the
 // bloat below is built through a test-only subclass, as a list grown
 // before the cap would be. Every fact is read from the chain.
+//
+// Task 4.15: under coverage (instrumented bytecode, every step traced
+// off-chain) the 5,000-key scenario is one of the suite's largest traces
+// and its gas bound is the real build's, not the instrumented one's: the
+// same path runs with 70 keys (past the 64 cap, the candidate through
+// addRaw) and the gas is printed, not bounded. `hardhat test` keeps 5,000.
 
 const MGMT = 1;
 const ACTION = 2;
 const HOUR = 3600;
 const DAY = 24 * HOUR;
 const k = (a: string) => ethers.solidityPackedKeccak256(["address"], [a]);
-const JUNK = 5_000;
+const COVERAGE = underCoverage();
+const JUNK = COVERAGE ? 70 : 5_000;
 const CHUNK = 90;
+const GAS_NOTE = COVERAGE ? " (coverage: 70 keys, gas printed, not bounded)" : "";
 
 async function setup(bloated: boolean) {
   const [owner, A, B, C, rogue, rescued, anyone] = await ethers.getSigners();
@@ -44,7 +55,7 @@ async function approve(f: Awaited<ReturnType<typeof setup>>, key: string) {
 describe("Recovery against a bloated key list (4.14, H-1)", function () {
   this.timeout(600_000);
 
-  it("executeKeyRecovery stays under 400k gas with 5,000 ACTION keys and the candidate at the tail", async function () {
+  it(`executeKeyRecovery stays under 400k gas with ${JUNK} ACTION keys and the candidate at the tail${GAS_NOTE}`, async function () {
     const f = await setup(true);
     const bloated = await ethers.getContractAt("BloatedOnchainID", f.idA);
     for (let done = 0; done < JUNK; done += CHUNK) {
@@ -61,7 +72,8 @@ describe("Recovery against a bloated key list (4.14, H-1)", function () {
     const receipt = await (
       await f.km.connect(f.anyone).executeKeyRecovery(f.idA, key)
     ).wait();
-    expect(receipt!.gasUsed).to.be.lt(400_000n);
+    console.log(`      executeKeyRecovery gasUsed ${receipt!.gasUsed} (${JUNK} keys)`);
+    if (!COVERAGE) expect(receipt!.gasUsed).to.be.lt(400_000n);
     expect(await f.id.keyHasPurpose(key, MGMT)).to.equal(true);
     expect(await f.id.keyHasPurpose(key, ACTION)).to.equal(false);
     expect(await f.id.keyHasPurpose(k(f.rogue.address), MGMT)).to.equal(false);
@@ -74,7 +86,8 @@ describe("Recovery against a bloated key list (4.14, H-1)", function () {
         .connect(f.anyone)
         .executeOwnerTransfer(f.idA, f.rescued.address)
     ).wait();
-    expect(t!.gasUsed).to.be.lt(400_000n);
+    console.log(`      executeOwnerTransfer gasUsed ${t!.gasUsed} (${JUNK} keys)`);
+    if (!COVERAGE) expect(t!.gasUsed).to.be.lt(400_000n);
     await f.id.connect(f.rescued).acceptOwnership();
     expect(await f.id.owner()).to.equal(f.rescued.address);
   });
