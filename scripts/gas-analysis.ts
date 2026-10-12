@@ -24,6 +24,42 @@ const MINT_AMOUNT = ethers.parseEther("1000");
 const TRANSFER_AMOUNT = ethers.parseEther("10");
 const NO_COUNTRIES: number[] = [];
 
+// Task 4.15: a recorded-baseline ratchet. The figures below are this
+// script's output at aa65de8 (2026-10-12); a build differs from the last
+// by a few hundred gas, so a move beyond TOLERANCE is a change in the
+// transfer path. A rise fails the run (CI runs this after the tests); a
+// drop prints a notice so the baseline can be lowered. The hard gate is
+// the in-test bound (VerificationCache.test.ts: E <= A + 40,000), which
+// this never replaces.
+const BASELINE: Record<string, bigint> = {
+  A: 96_902n,
+  B: 142_596n,
+  C: 174_138n,
+  D: 105_896n,
+  E: 135_232n,
+  refresh: 100_131n,
+};
+const TOLERANCE = 1_500n;
+
+/** Compares `measured` with BASELINE; returns the number of rises. */
+function ratchet(measured: Record<string, bigint>): number {
+  let rises = 0;
+  for (const [name, base] of Object.entries(BASELINE)) {
+    const got = measured[name];
+    const delta = got - base;
+    const s = `${name}: ${got} (baseline ${base}, ${delta >= 0n ? "+" : ""}${delta})`;
+    if (delta > TOLERANCE) {
+      console.log(`::error::gas ratchet: ${s} rose beyond ${TOLERANCE}`);
+      rises++;
+    } else if (delta < -TOLERANCE) {
+      console.log(`::notice::gas ratchet: ${s} dropped: lower BASELINE in scripts/gas-analysis.ts`);
+    } else {
+      console.log(`gas ratchet: ${s} within ${TOLERANCE}`);
+    }
+  }
+  return rises;
+}
+
 interface ScenarioResult {
   name: string;
   transferGasUsed: bigint;
@@ -345,6 +381,19 @@ async function main() {
       `E: ${results[4].firstTransferGasUsed} ` +
       `(+${results[4].firstTransferGasUsed - results[3].firstTransferGasUsed})`,
   );
+
+  console.log();
+  const rises = ratchet({
+    A: base,
+    B: results[1].transferGasUsed,
+    C: results[2].transferGasUsed,
+    D: results[3].transferGasUsed,
+    E: results[4].transferGasUsed,
+    refresh: results[3].refreshGasUsed ?? 0n,
+  });
+  if (rises > 0) {
+    throw new Error(`${rises} scenario(s) rose beyond the recorded baseline`);
+  }
 }
 
 main()

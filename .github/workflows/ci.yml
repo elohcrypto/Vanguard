@@ -33,9 +33,12 @@ jobs:
     # the real-proof CLI tests (3.5) add ~3 min on 2 vCPU. Run 37099152276
     # took 41 min at a 369 s local suite (tests 13 min, coverage 24 min);
     # the local suite is 631 s since Task 3.7b, and coverage skips the
-    # real-proof suites (ZK_PROOFS=0). This limit is a hang guard, not a
-    # pace target.
-    timeout-minutes: 90
+    # real-proof suites (ZK_PROOFS=0). 45-57 min per run before Task 4.15,
+    # which adds the exit gates and the gas ratchet (~1 min), the strict
+    # demo drive (1:22 locally) and the ZK_PROOFS=1 privacy coverage run
+    # (12:00 locally, proving-bound, slower on 2 vCPU):
+    # about 20-25 min more. This limit is a hang guard, not a pace target.
+    timeout-minutes: 120
 
     steps:
       # Actions are pinned by commit SHA and updated by hand (no Dependabot
@@ -99,6 +102,20 @@ jobs:
       # Runs before the build so a structural regression fails fast and cheap.
       - name: Audit setter/constructor guards
         run: node scripts/audit-setter-guards.js
+
+      # Phase 4 exit row (plan v2 Task 4.15, D49), three gates on the
+      # checkout alone, each a script under scripts/ci/: the line-count
+      # ratchet keeps every hand-written file (contracts/ minus the
+      # generated verifiers, demo/, scripts/, test/, docs/) under 500 lines
+      # with a shrink-only allowlist of the 20 files at or above it at
+      # aa65de8 (tests and docs, split in Phase 5); the scripts gate refuses
+      # a file under scripts/ nothing references; the deleted-names gate
+      # refuses a name Phase 3 or 4 removed. Each exits 1 on a finding.
+      - name: Phase 4 exit gates (line count, scripts, deleted names)
+        run: |
+          node scripts/ci/line-count-ratchet.js
+          node scripts/ci/scripts-referenced.js
+          node scripts/ci/deleted-names.js
 
       - name: Compile contracts
         run: npx hardhat compile
@@ -197,24 +214,48 @@ jobs:
       - name: Run tests
         run: npm test
 
-      # Coverage ratchet. Baseline 90: measured at 88.55% lines on CI at
-      # 19d75cb, 89.1% at 2e05e97, 89.17% at 15f26f3, 90.7% at c0e73fc
-      # (2026-10-04, run 37168472912; earlier baselines 63.73% -> 65 -> 84
-      # -> 86 -> 88 -> 90, each raised after the notice fired).
-      # Fails only when the number DROPS below BASELINE; notices when it climbs
-      # 2+ points so the baseline can be raised. The plugin compiles instrumented
-      # bytecode into artifacts/; nothing else may compile in this tree while it
-      # runs, which is why this step follows "Run tests" rather than sharing it.
-      # DEPLOY_GAS_LIMIT (set by the npm script) lifts one hard-coded 10M deploy
-      # cap that instrumented initcode exceeds. ZK_PROOFS=0 skips the
-      # real-proof suites (test/helpers/zkProofs.js): "Run tests" above
-      # proves everything, coverage measures contract lines.
-      - name: Coverage ratchet (no DROP in line coverage)
+      # Task 4.15: the transfer-gas table (scripts/gas-analysis.ts) as a
+      # recorded-baseline ratchet on the in-process network: a scenario more
+      # than 1,500 gas above its recorded figure fails, a drop prints a
+      # notice. The hard gate stays the in-test bound (VerificationCache:
+      # E <= A + 40,000).
+      - name: Gas ratchet (transfer gas table)
+        run: npm run gas:claims
+
+      # Coverage ratchet. Baseline 95 (Task 4.15, Q11 b): measured at
+      # 96.48% lines locally at the 4.15 tree on
+      # 2026-10-12 (earlier baselines 63.73% -> 65 -> 84 -> 86 -> 88 -> 90,
+      # 90.7% at c0e73fc, 95.33% at aa65de8 with three failures hidden).
+      # The run itself is a gate: a failing test fails the step (no
+      # `|| true`; three permanent failures and, since 4.13, a corrupted
+      # run hid behind it). Fails when the number DROPS below BASELINE;
+      # notices when it climbs 2+ points. The plugin compiles instrumented
+      # bytecode into artifacts/; nothing else may compile in this tree
+      # while it runs, which is why this step follows "Run tests" and why
+      # test/production/HandoverCliNode (child hardhat processes) skips
+      # itself under coverage. DEPLOY_GAS_LIMIT (set by the npm script)
+      # lifts the hard-coded deploy caps instrumented initcode exceeds.
+      # ZK_PROOFS=0 skips the PLONK-proving suites (test/helpers/zkProofs.js),
+      # all but ZKSystemIntegration, which proves under ZK=0 too: "Run
+      # tests" above proves everything, this run measures contract lines,
+      # and the PrivacyManager gate below measures the proof suites. Memory:
+      # every executed step is traced, so one call's trace grows with its
+      # gas; the 5,000-key recovery and the 40-wallet governance batch
+      # overflowed the 4 GB heap (run 38199623932) and run small under
+      # coverage. Measured locally after that: 7.6 GB
+      # peak RSS (EDR native memory included), 15:26 wall, default heap.
+      - name: Coverage ratchet (tests pass; no DROP in line coverage)
         env:
           ZK_PROOFS: '0'
         run: |
-          BASELINE=90
-          npm run test:coverage > coverage.log 2>&1 || true
+          BASELINE=95
+          if ! npm run test:coverage > coverage.log 2>&1; then
+            echo "::error::the instrumented test run failed; see coverage.log"
+            grep -E '^\s+[0-9]+ (passing|failing|pending)$|^\s+[0-9]+\) ' coverage.log | head -40
+            tail -20 coverage.log
+            exit 1
+          fi
+          grep -E '^\s+[0-9]+ (passing|failing|pending)$' coverage.log
           lines=$(grep -E '^All files' coverage.log | awk -F'|' '{gsub(/ /,"",$5); print $5}')
           echo "line coverage: ${lines:-<none>}% (baseline $BASELINE)"
           if [ -z "$lines" ]; then
@@ -228,6 +269,42 @@ jobs:
           fi
           if [ "$(printf '%s\n' "$lines" "$((BASELINE+2))" | sort -g | head -1)" = "$((BASELINE+2))" ]; then
             echo "::notice::line coverage ${lines}% is 2+ points above baseline — raise BASELINE in ci.yml."
+          fi
+
+      # Phase 5 gate (80% branches) for PrivacyManager, measured with the
+      # proof suites (Task 4.15): its attestation and binding guards run only
+      # on real PLONK proofs, so the ZK=0 run above sees about 53% of its
+      # branches and the real figure needs ZK_PROOFS=1. A second instrumented
+      # run of the privacy suites alone (proving dominates; about
+      # 12:00 locally), asserting PrivacyManager's branch
+      # figure from that run's coverage.json. A step rather than a parallel
+      # job: a job would repeat npm ci, the circom build, the ptau cache and
+      # setup:zk to save wall-clock time this job has under the 90-minute
+      # guard (45-57 min before 4.15), and a second coverage.json in the same
+      # job is read right here.
+      - name: PrivacyManager branch gate (proof suites under coverage)
+        env:
+          ZK_PROOFS: '1'
+        run: |
+          MIN=80
+          if ! npm run test:coverage -- --testfiles 'test/privacy/**/*.{js,ts}' > coverage-zk.log 2>&1; then
+            echo "::error::the instrumented proof suites failed; see coverage-zk.log"
+            grep -E '^\s+[0-9]+ (passing|failing|pending)$|^\s+[0-9]+\) ' coverage-zk.log | head -40
+            tail -20 coverage-zk.log
+            exit 1
+          fi
+          grep -E '^\s+[0-9]+ (passing|failing|pending)$' coverage-zk.log
+          pct=$(node -e '
+            const c = require("./coverage.json");
+            const k = Object.keys(c).find((f) => f.endsWith("contracts/privacy/PrivacyManager.sol"));
+            if (!k) { console.error("PrivacyManager.sol not in coverage.json"); process.exit(1); }
+            let hit = 0, total = 0;
+            for (const arms of Object.values(c[k].b)) { total += arms.length; hit += arms.filter((n) => n > 0).length; }
+            console.log(((100 * hit) / total).toFixed(2));')
+          echo "PrivacyManager branches with proofs: ${pct}% (minimum $MIN)"
+          if [ "$(printf '%s\n' "$pct" "$MIN" | sort -g | head -1)" != "$MIN" ]; then
+            echo "::error::PrivacyManager branch coverage ${pct}% is below ${MIN}%."
+            exit 1
           fi
 
       # The demo wires contracts together the way an operator would — a path the
@@ -296,6 +373,24 @@ jobs:
           done
           if [ "$before" != "false false" ] || [ "$after" != "true true" ]; then
             echo "::error::expected 'false false' before and 'true true' after the binding"
+            exit 1
+          fi
+
+      # Task 4.15 (Q11 c): one strict drive of the interactive demo through
+      # the complete ceremony on the smoke's node, still running: option 1
+      # deploys, 21/51/31/74 wire the ERC-3643, privacy, oracle and
+      # governance layers, 24 and 75a onboard four verified VGT holders, 22
+      # and 32, 83c passes the handover vote, 83d and 83e complete it.
+      # --strict fails on any demo-reported error line, and the log must
+      # carry "Handover complete". Measured 1:22 locally.
+      - name: Strict demo drive (complete ceremony, 83c/83d/83e)
+        run: |
+          ./scripts/demo-drive.sh --strict --timeout 1500 --log /tmp/demo-drive.log \
+            1 21 51 31 74 24:1:Alice 24:1:Bob 24:1:Carol 24:1:Dave \
+            75a:4:1000:y 75a:5:1000:y 75a:6:1000:y 75a:7:1000:y 22 32 83c:y 83d 83e 0
+          if ! grep -q "Handover complete" /tmp/demo-drive.log; then
+            echo "::error::the drive did not reach 'Handover complete'"
+            tail -40 /tmp/demo-drive.log
             exit 1
           fi
 
