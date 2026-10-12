@@ -9,6 +9,7 @@ import { attest, deployIdentity } from "../helpers/kyc";
 // a vote 4-2) and probe-b P1 (ops outvoted every honest holder) as tests.
 const SYS = 4; // ProposalType.SystemParameters
 const ACTION_KEY = 2;
+const MANAGEMENT_KEY = 1;
 const ECDSA = 1;
 const keyOf = (a: string) =>
   ethers.keccak256(ethers.solidityPacked(["address"], [a]));
@@ -46,6 +47,71 @@ describe("Vote binding: one identity, one wallet, one vote", function () {
       c.governanceToken.connect(ops).mint(w.address, ethers.parseEther("100"));
     return { ...f, gov, ir, propose, fresh, fund };
   }
+
+  describe("control rule agreement: registry and governance (4.14 N-5)", function () {
+    it("owner, MANAGEMENT and ACTION bind and vote; a stranger, a no-code and a word-2 identity are refused by the one library", async function () {
+      const f = await setup();
+      const { gov, ir, deployer, fresh, fund, kycIssuer, factory, voters } = f;
+      const OID = await ethers.getContractFactory("OnchainID");
+      const keyed = async (purpose: number, w: string) => {
+        const o = await OID.deploy(voters[1].address);
+        await o.connect(voters[1]).addKey(keyOf(w), purpose, ECDSA);
+        return o.getAddress();
+      };
+      // Three controllers: the registry binds them and governance counts them.
+      const controllers = [];
+      for (const grant of [
+        (w: string) => deployIdentity(factory, w),
+        (w: string) => keyed(MANAGEMENT_KEY, w),
+        (w: string) => keyed(ACTION_KEY, w),
+      ]) {
+        const w = await fresh();
+        const wid = await grant(w.address);
+        await ir.registerIdentity(w.address, wid, 840);
+        await attest(kycIssuer, deployer, wid);
+        await fund(w);
+        controllers.push(w);
+      }
+      // A stranger: refused by the registry at binding; bound once it holds
+      // a key, refused by governance once the key is gone.
+      const o = await OID.deploy(voters[1].address);
+      const oA = await o.getAddress();
+      const stranger = await fresh();
+      await expect(ir.registerIdentity(stranger.address, oA, 840))
+        .to.be.revertedWithCustomError(ir, "WalletDoesNotControlIdentity")
+        .withArgs(stranger.address, oA);
+      await o
+        .connect(voters[1])
+        .addKey(keyOf(stranger.address), ACTION_KEY, ECDSA);
+      await ir.registerIdentity(stranger.address, oA, 840);
+      await attest(kycIssuer, deployer, oA);
+      await fund(stranger);
+      await ageVoters(gov);
+      const id = await f.propose();
+      for (const w of controllers) await gov.connect(w).castVote(id, true, "");
+      await o.connect(voters[1]).removeKey(keyOf(stranger.address), ACTION_KEY);
+      await expect(
+        gov.connect(stranger).castVote(id, true, ""),
+      ).to.be.revertedWith("Wallet does not control its identity");
+      expect((await gov.getProposal(id))[0].votesFor).to.equal(3n);
+      // No code, and an identity answering the raw word 2: "no control",
+      // never a decoder revert. Governance reads the same library; such a
+      // wallet can never be bound, so its vote path is unreachable.
+      const odd = await (
+        await ethers.getContractFactory("OddRecoveryManager")
+      ).deploy();
+      await odd.setWord(2);
+      for (const bad of [
+        ethers.Wallet.createRandom().address,
+        await odd.getAddress(),
+      ]) {
+        const x = await fresh();
+        await expect(ir.registerIdentity(x.address, bad, 840))
+          .to.be.revertedWithCustomError(ir, "WalletDoesNotControlIdentity")
+          .withArgs(x.address, bad);
+      }
+    });
+  });
 
   describe("registry: one identity, one wallet", function () {
     it("refuses a second wallet on an identity already bound (probe A1)", async function () {

@@ -3,7 +3,7 @@ pragma solidity ^0.8.20;
 
 import "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
 import "./GovernanceConfig.sol";
-import "../onchain_id/interfaces/IERC734.sol";
+import {IdentityControl} from "../onchain_id/IdentityControl.sol";
 
 /// @dev The one DynamicListManager getter governance checks before a
 ///      ListUpdate proposal: the manager must report this governance.
@@ -308,20 +308,12 @@ abstract contract GovernanceProposals is GovernanceConfig, ReentrancyGuard {
         }
     }
 
-    /// @dev Fails closed: no code, or a call that reverts, is "no control".
+    /// @dev The one control rule (IdentityControl, D41 / D25 b): owner or a
+    ///      MANAGEMENT or ACTION key; fails closed on no code, a revert or a
+    ///      malformed word (the former try/returns copy reverted in the
+    ///      decoder on a word other than 0/1, review N-5).
     function _controls(address wallet, address id) private view returns (bool) {
-        if (id.code.length == 0) return false;
-        try Ownable(id).owner() returns (address o) {
-            if (o == wallet) return true;
-        } catch {}
-        bytes32 key = keccak256(abi.encodePacked(wallet));
-        try IERC734(id).keyHasPurpose(key, 1) returns (bool ok) {
-            if (ok) return true;
-        } catch {}
-        try IERC734(id).keyHasPurpose(key, 2) returns (bool ok) {
-            if (ok) return true;
-        } catch {}
-        return false;
+        return IdentityControl.controls(wallet, id);
     }
 
     /**
