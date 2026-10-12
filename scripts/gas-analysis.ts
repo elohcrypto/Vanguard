@@ -42,10 +42,12 @@ const BASELINE: Record<string, bigint> = {
 const TOLERANCE = 1_500n;
 
 /** Compares `measured` with BASELINE; returns the number of rises. */
-function ratchet(measured: Record<string, bigint>): number {
+function ratchet(measured: Record<string, bigint | undefined>): number {
   let rises = 0;
   for (const [name, base] of Object.entries(BASELINE)) {
     const got = measured[name];
+    // A lost measurement is an error, never a "drop" notice.
+    if (got === undefined) throw new Error(`gas ratchet: ${name} not measured`);
     const delta = got - base;
     const s = `${name}: ${got} (baseline ${base}, ${delta >= 0n ? "+" : ""}${delta})`;
     if (delta > TOLERANCE) {
@@ -389,7 +391,7 @@ async function main() {
     C: results[2].transferGasUsed,
     D: results[3].transferGasUsed,
     E: results[4].transferGasUsed,
-    refresh: results[3].refreshGasUsed ?? 0n,
+    refresh: results[3].refreshGasUsed,
   });
   if (rises > 0) {
     throw new Error(`${rises} scenario(s) rose beyond the recorded baseline`);
