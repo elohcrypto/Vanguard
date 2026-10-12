@@ -34,6 +34,7 @@ const LIST_ABI = [
   "function oracleName() view returns (string)",
 ];
 const MIN_CONSENSUS = 2;
+const ZERO = ethers.ZeroAddress;
 const list = (xs) => xs.join(", ");
 
 /**
@@ -171,10 +172,54 @@ async function listOracleChecks(o) {
   return out;
 }
 
+/**
+ * Task 4.17 (review B PB5): the oracles the DynamicListManager writes.
+ * Each must be the oracle of its kind ComplianceRules binds to VSC, or,
+ * when none of that kind is bound, an oracle the ceremony hands to ops
+ * (listed in `oracles` before step 2, owned by ops after it). Otherwise a
+ * list vote lands on an oracle no token reads, or one the deployer keeps.
+ */
+async function listTargetChecks(o, pre) {
+  const dlm = o.dynamicListManager;
+  if (!dlm) return [];
+  const vsc = await addrOf(o.token);
+  const ops = await addrOf(o.ops);
+  const handed = await Promise.all((o.oracles || []).map(addrOf));
+  const out = [];
+  for (const [kind, getter] of [
+    ["whitelist", "whitelistOracle"],
+    ["blacklist", "blacklistOracle"],
+  ]) {
+    const target = await dlm[getter]();
+    if (same(target, ZERO)) continue;
+    const bound = await o.complianceRules[getter](vsc);
+    const owner = await (
+      await ethers.getContractAt(
+        ["function owner() view returns (address)"],
+        target,
+      )
+    )
+      .owner()
+      .catch(() => ZERO);
+    const ok = !same(bound, ZERO)
+      ? same(bound, target)
+      : pre
+        ? handed.some((h) => same(h, target))
+        : same(owner, ops);
+    out.push({
+      label: `DynamicListManager ${kind} oracle ${target} is the one ComplianceRules binds to VSC, or (none bound) one handed to ops`,
+      ok,
+      fix: `DynamicListManager writes ${kind} oracle ${target}, but ComplianceRules binds ${same(bound, ZERO) ? "none to VSC and the ceremony does not hand it to ops (owner " + owner + ")" : bound + " to VSC"}: list votes would land where no token reads, or on an oracle the deployer keeps; its owner must setOracles(...) to the bound oracles first`,
+    });
+  }
+  return out;
+}
+
 /** Read-only, before the first transaction. */
 async function preflightNodes(o) {
   for (const c of await nodeChecks(o)) if (!c.ok) fail(c.fix);
   for (const c of await listOracleChecks(o)) if (!c.ok) fail(c.fix);
+  for (const c of await listTargetChecks(o, true)) if (!c.ok) fail(c.fix);
 }
 
 /**
@@ -222,6 +267,7 @@ async function nodeLines(o, dAddr, warnings = [], residual = []) {
   }
   const lines = (await nodeChecks(o, f)).map((c) => [c.label, c.ok]);
   for (const c of await listOracleChecks(o)) lines.push([c.label, c.ok]);
+  for (const c of await listTargetChecks(o, false)) lines.push([c.label, c.ok]);
   return lines;
 }
 
