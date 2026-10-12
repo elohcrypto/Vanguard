@@ -246,3 +246,99 @@ describe("Custody caps, tier and unlock recipient (Task 4.16)", function () {
     expect(await m.hasActiveRequest(user.address)).to.equal(true);
   });
 });
+
+/**
+ * Round 2 (review L-2, L-3; R-416-15): a token without the registry getter
+ * falls back to the manager's immutable registry, and a token that applies
+ * another registry makes requests and approvals fail closed.
+ */
+describe("Custody: registry fallback and divergence (Task 4.16 round 2)", function () {
+  const e = ethers.parseEther;
+  const T = { Normal: 0, Retail: 1 };
+
+  async function deploy() {
+    const [owner, bank, user, other] = await ethers.getSigners();
+    const deployC = async (name: string, ...a: unknown[]) =>
+      (await ethers.getContractFactory(name)).deploy(...a) as Promise<any>;
+    const registry = await deployC("IdentityRegistry");
+    const issuer = await deployC("ClaimIssuer", owner.address, "KYC", "d");
+    await configureKyc(registry, await issuer.getAddress());
+    const id = await (
+      await ethers.getContractFactory("OnchainID")
+    ).deploy(user.address);
+    await registry.registerIdentity(user.address, id.target, 840);
+    await attest(issuer, owner, id.target as string);
+    const rules = await deployC("ComplianceRules", owner.address, [840], []);
+    const token = await deployC(
+      "Token",
+      "VSC",
+      "VSC",
+      registry.target,
+      rules.target,
+    );
+    await rules.setTokenIdentityRegistry(token.target, registry.target);
+    const types = await deployC("InvestorTypeRegistry");
+    await token.setInvestorTypeRegistry(types.target);
+    await types.authorizeToken(token.target, true);
+    const m = await deployC(
+      "InvestorRequestManager",
+      bank.address,
+      token.target,
+      types.target,
+      registry.target,
+    );
+    await addRegistrar(rules, token, m, "MultiSigWallet");
+    await types.setComplianceOfficer(m.target, true);
+    return { owner, bank, user, other, registry, rules, token, types, m };
+  }
+
+  it("a token without investorTypeRegistry() falls back to the manager's registry (L-2)", async function () {
+    const { bank, registry, types } = await deploy();
+    const mock = await (
+      await ethers.getContractFactory("MockToken")
+    ).deploy("M", "M", 0);
+    const m = await (
+      await ethers.getContractFactory("InvestorRequestManager")
+    ).deploy(bank.address, mock.target, types.target, registry.target);
+    const cap = (await types.getInvestorTypeConfig(T.Normal)).maxTransferAmount;
+    expect(await m.lockRequirements(T.Retail)).to.equal(cap / 4n);
+    await expect(
+      m.updateLockRequirement(T.Retail, cap + 1n),
+    ).to.be.revertedWithCustomError(m, "LockAboveNormalCap");
+    await m.updateLockRequirement(T.Retail, cap);
+  });
+
+  it("a token applying another registry: request and approval refuse RegistryDiverged (L-3)", async function () {
+    const f = await deploy();
+    const { bank, user, token, types, m } = f;
+    await token.mint(user.address, e("8000"));
+    // A request made while the registries agree, then the token moves.
+    await m.connect(user).requestInvestorStatus(T.Retail);
+    await m.connect(bank).createMultiSigWallet(user.address);
+    const w = (await m.requests(user.address)).multiSigWallet;
+    const lock = (await m.requests(user.address)).requiredLockAmount;
+    await token.connect(user).approve(w, lock);
+    await (
+      await ethers.getContractAt("MultiSigWallet", w)
+    )
+      .connect(user)
+      .lockTokens(lock);
+    await m.connect(user).confirmTokensLocked();
+    const other = await (
+      await ethers.getContractFactory("InvestorTypeRegistry")
+    ).deploy();
+    await other.authorizeToken(token.target, true);
+    await token.setInvestorTypeRegistry(other.target);
+    await expect(m.connect(bank).approveRequest(user.address))
+      .to.be.revertedWithCustomError(m, "RegistryDiverged")
+      .withArgs(other.target, types.target);
+    expect(await types.getInvestorType(user.address)).to.equal(T.Normal);
+    await expect(m.connect(f.other).requestInvestorStatus(T.Retail))
+      .to.be.revertedWithCustomError(m, "RegistryDiverged")
+      .withArgs(other.target, types.target);
+    // Pointed back: the approval goes through.
+    await token.setInvestorTypeRegistry(types.target);
+    await m.connect(bank).approveRequest(user.address);
+    expect(await types.getInvestorType(user.address)).to.equal(T.Retail);
+  });
+});

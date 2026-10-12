@@ -76,6 +76,8 @@ contract InvestorRequestManager is Ownable, ReentrancyGuard {
     error LockAboveNormalCap(uint256 amount, uint256 cap);
     /// @dev Q7 c: the user's live whitelist entry is below the new type's tier.
     error TierBelowNewType(uint8 tier, uint8 required);
+    /// @dev R-416-15: the token applies a registry other than this manager's.
+    error RegistryDiverged(address live, address bound);
 
     // Events
     event InvestorRequestCreated(
@@ -161,12 +163,30 @@ contract InvestorRequestManager is Ownable, ReentrancyGuard {
 
     /**
      * @dev The investor-type registry the token applies now (R-410-2), or
-     *      this manager's when the token names none. Read at call time: a
-     *      lock is checked against the caps that gate the lock transfer.
+     *      this manager's when the token names none, has no such getter or
+     *      is not a contract (as ComplianceRules._typesOf falls back). Read
+     *      at call time: a lock is checked against the caps that gate the
+     *      lock transfer. A registry refuses zero caps, so the cap read
+     *      here is never zero.
      */
     function _liveTypes() private view returns (IInvestorTypeRegistry) {
-        address live = ITokenTypesView(token).investorTypeRegistry();
-        return live == address(0) ? investorRegistry : IInvestorTypeRegistry(live);
+        if (token.code.length == 0) return investorRegistry;
+        try ITokenTypesView(token).investorTypeRegistry() returns (address live) {
+            return live == address(0) ? investorRegistry : IInvestorTypeRegistry(live);
+        } catch {
+            return investorRegistry;
+        }
+    }
+
+    /**
+     * @dev R-416-15 (fail closed): the type this manager assigns lives in
+     *      its immutable registry; once the token applies another one the
+     *      manager would approve into a registry the token never reads.
+     *      Requests and approvals refuse instead.
+     */
+    function _requireSameRegistry() private view {
+        IInvestorTypeRegistry live = _liveTypes();
+        if (live != investorRegistry) revert RegistryDiverged(address(live), address(investorRegistry));
     }
 
     /**
@@ -211,6 +231,7 @@ contract InvestorRequestManager is Ownable, ReentrancyGuard {
         require(requestedType != IInvestorTypeRegistry.InvestorType.Normal, "Cannot request Normal type");
         require(uint8(requestedType) <= uint8(IInvestorTypeRegistry.InvestorType.Institutional), "Invalid investor type");
         require(!hasActiveRequest[msg.sender], "Active request already exists");
+        _requireSameRegistry();
         
         // Verify KYC/AML compliance
         require(identityRegistry.isVerified(msg.sender), "KYC/AML verification required");
@@ -304,6 +325,7 @@ contract InvestorRequestManager is Ownable, ReentrancyGuard {
         // Verify tokens still locked
         MultiSigWallet wallet = MultiSigWallet(request.multiSigWallet);
         require(wallet.getLockedBalance() >= request.requiredLockAmount, "Tokens no longer locked");
+        _requireSameRegistry();
         _requireTierReachable(user, request.requestedType);
         
         // Assign investor type
