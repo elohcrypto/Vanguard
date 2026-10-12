@@ -285,9 +285,10 @@ contract WhitelistOracle is ListOracleBase {
             emit WhitelistUpdated(_subject, true, tier, expiryTime, "Oracle consensus approval");
             correctAttestations++;
         } else if (consensusResult && entry.tier < tier) {
-            // Raise only; the consensus grant lasts no longer than a fresh one.
+            // Raise only; a dated grant lasts no longer than a fresh one, a
+            // permanent entry stays permanent (D51 b).
             uint256 cap = block.timestamp + DEFAULT_WHITELIST_DURATION;
-            if (entry.expiryTime == 0 || entry.expiryTime > cap) entry.expiryTime = cap;
+            if (entry.expiryTime != 0 && entry.expiryTime > cap) entry.expiryTime = cap;
             entry.tier = tier;
             entry.timestamp = block.timestamp;
             entry.reason = "Oracle consensus tier raise";

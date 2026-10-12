@@ -115,8 +115,9 @@ describe("Whitelist consensus raises only (Task 4.12, R-412-7/8)", function () {
     });
   });
 
-  describe("L-1: a raise caps the expiry at a fresh listing's", function () {
-    it("a no-expiry tier-1 entry raised to 4 lasts DEFAULT_WHITELIST_DURATION", async function () {
+  describe("L-1: a raise caps a dated expiry at a fresh listing's", function () {
+    // D51 (b), Task 4.17: a permanent entry keeps its expiry on a raise.
+    it("a no-expiry tier-1 entry raised to 4 stays permanent (D51 b)", async function () {
       await WO.connect(lm).addToWhitelist(who, 1, NO_EXPIRY, "restricted");
       expect((await info())[2]).to.equal(0n);
       await time.increase(60);
@@ -124,7 +125,9 @@ describe("Whitelist consensus raises only (Task 4.12, R-412-7/8)", function () {
       await apply(q, true);
       const i = await info();
       expect([i[0], Number(i[3])]).to.deep.equal([true, 4]);
-      expect(i[2]).to.equal(i[1] + YEAR); // set in the raising block
+      expect(i[2]).to.equal(0n);
+      await time.increase(YEAR + 1n);
+      expect(await WO.isWhitelisted(who)).to.equal(true);
     });
 
     it("a finite expiry later than the cap is capped too", async function () {
