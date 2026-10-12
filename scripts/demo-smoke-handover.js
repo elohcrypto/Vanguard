@@ -133,6 +133,8 @@ async function runHandoverSmoke(state, failures) {
     oracleNodes: [1, 2, 3].map((i) => s[i].address),
     attestors: attestorAx === null ? [] : [attestorAx.toString()],
     extraTrusted: [],
+    // Task 4.17 (D54): the escrow leg's owner fee wallet (wallet 1).
+    feeWallets: [s[1].address],
     deployer: s[0],
     ops: s[OPS],
     guardian: s[GUARDIAN],

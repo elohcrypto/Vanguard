@@ -37,6 +37,8 @@ async function main(): Promise<void> {
     proposer: 4,
     voters: [5, 6],
     logChunk: 100,
+    // The escrow factory's fee wallet, acknowledged (Task 4.17, D54).
+    feeWallets: [f.feeWallet.address],
     oracleNodes: [],
     attestors: [],
     extraTrusted: [],

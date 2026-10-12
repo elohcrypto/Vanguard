@@ -53,6 +53,8 @@ describe("Handover CLI (scripts/handover.ts)", function () {
       issuers: [await f.args.issuers[0].getAddress()],
       fromBlock: f.args.fromBlock,
       logChunk: 100,
+      // The escrow factory's fee wallet, acknowledged (Task 4.17, D54).
+      feeWallets: [f.feeWallet.address],
       // Signer order from handoverFixture.
       ops: 1,
       guardian: 2,

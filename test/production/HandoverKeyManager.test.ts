@@ -323,6 +323,7 @@ describe("Handover: KeyManager (4.2)", function () {
     };
     const signers: any[] = [];
     signers[0] = f.deployer;
+    signers[1] = f.feeWallet; // the escrow fee wallet slot (D54)
     signers[9] = f.issuerAdmin;
     signers[10] = f.ops;
     signers[11] = f.guardian;
@@ -360,6 +361,7 @@ describe("Handover: KeyManager (4.2)", function () {
       keyManager: f.stranger.address,
       fromBlock: f.args.fromBlock,
       logChunk: 100,
+      feeWallets: [f.feeWallet.address],
       ops: 1,
       guardian: 2,
       issuerAdmin: 7,

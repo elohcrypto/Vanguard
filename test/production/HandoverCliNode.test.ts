@@ -107,6 +107,7 @@ describeUnlessCoverage(
         [
           "attestors",
           "extraTrusted",
+          "feeWallets",
           "governance",
           "guardian",
           "issuerAdmin",

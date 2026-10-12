@@ -51,6 +51,7 @@ const { preflightTrust } = require("./HandoverTrust");
 const { preflightNodes, nodeSteps } = require("./HandoverNodes");
 const { preflightParams, paramSteps } = require("./HandoverParams");
 const { snapshotFacts, preflightSnapshots } = require("./HandoverSnapshot");
+const { preflightEscrow } = require("./HandoverEscrow");
 const { roleStrays } = require("./HandoverRoles");
 const { trustStrays } = require("./HandoverTrust");
 const { nodeStrays } = require("./HandoverNodes");
@@ -116,6 +117,7 @@ async function handoverDeployerPowers(o) {
   await preflightOracles(o); // Task 4.4
   await preflightNodes(o); // Task 4.13: nodes, designations, list oracles
   await preflightParams(o); // Task 4.13: floors, proposals, fee sink, pins
+  await preflightEscrow(o); // Task 4.17: escrow investors, fee wallet
   // Task 4.13: what the preflight found; completion compares with it.
   report.snapshot = await snapshotFacts(o);
   report.preflightBlock = await ethers.provider.getBlockNumber();

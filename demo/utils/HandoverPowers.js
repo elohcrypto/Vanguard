@@ -25,6 +25,7 @@ const {
   preflightFactoryRoles,
   escrowFactoriesFromChain,
 } = require("./HandoverScans");
+const { escrowSteps } = require("./HandoverEscrow");
 const { wiredPrivacy } = require("./HandoverPrivacy");
 
 const ZERO = ethers.ZeroAddress;
@@ -412,6 +413,8 @@ async function factorySteps({ o, d, dAddr, ok, log }) {
       );
     }
   }
+  // Task 4.17 (BF-1, BF-2): while the deployer still manages it.
+  await escrowSteps({ o, d, ok });
   if (await f.hasRole(ADMIN, dAddr)) {
     await send(f.connect(d).renounceRole(ADMIN, dAddr));
     check(
