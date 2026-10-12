@@ -433,8 +433,9 @@ describe("GovernanceToken.recoveryAddress (W-1)", function () {
   });
 
   it("reverts with nothing moved when VGT is not a registry agent", async function () {
-    await expect(vgt.recoveryAddress(lost.address, fresh.address, lostId)).to.be
-      .reverted;
+    await expect(
+      vgt.recoveryAddress(lost.address, fresh.address, lostId),
+    ).to.be.revertedWith("Not authorized agent");
     expect(await vgt.balanceOf(lost.address)).to.equal(E("100"));
     expect(await idReg.identity(lost.address)).to.equal(lostId);
   });

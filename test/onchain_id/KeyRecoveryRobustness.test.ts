@@ -225,7 +225,9 @@ describe("Recovery robustness (4.14): A2 probes and killed mutants", function ()
     expect(await f.id.ownershipFrozen()).to.equal(true);
     await f.id.connect(f.rescued).acceptOwnership();
     expect(await f.id.owner()).to.equal(f.rescued.address);
-    await expect(f.id.connect(f.thief2).acceptOwnership()).to.be.reverted;
+    await expect(f.id.connect(f.thief2).acceptOwnership())
+      .to.be.revertedWithCustomError(f.id, "OwnableUnauthorizedAccount")
+      .withArgs(f.thief2.address);
   });
 
   it("P10/L-A: a manager answering the word 2 is read as no, without reverting; 1 is yes (M16 killed)", async function () {
@@ -309,7 +311,9 @@ describe("Recovery robustness (4.14): A2 probes and killed mutants", function ()
     await f.id.connect(k2).acceptOwnership();
     expect(await f.id.owner()).to.equal(k2.address);
     expect(await f.id.getKeysByPurpose(MGMT)).to.deep.equal([k(k2.address)]);
-    await expect(f.id.connect(k1).acceptOwnership()).to.be.reverted;
+    await expect(f.id.connect(k1).acceptOwnership())
+      .to.be.revertedWithCustomError(f.id, "OwnableUnauthorizedAccount")
+      .withArgs(k1.address);
   });
 
   it("an agent given MANAGEMENT later still opens and approves (R-414-10, M-R2-1)", async function () {
