@@ -4,7 +4,11 @@ import * as fs from "fs";
 import * as os from "os";
 import * as path from "path";
 const { describeUnlessCoverage } = require("../helpers/zkProofs") as {
-  describeUnlessCoverage: (t: string, r: string, f: () => void) => void;
+  describeUnlessCoverage: (
+    title: string,
+    reason: string,
+    fn: (this: Mocha.Suite) => void,
+  ) => void;
 };
 
 /**

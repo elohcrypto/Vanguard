@@ -64,8 +64,8 @@ describe("Voting and config guards (Task 4.15)", function () {
   it("a verified holder short of the voting cost: Insufficient tokens for voting (210)", async function () {
     const { gov, propose, bob, ops, c } = await setup();
     const id = await propose();
-    const cost = await gov.votingCost();
-    const bal = await c.governanceToken.balanceOf(bob.address);
+    const cost: bigint = await gov.votingCost();
+    const bal: bigint = await c.governanceToken.balanceOf(bob.address);
     await c.governanceToken
       .connect(ops)
       ["burn(address,uint256)"](bob.address, bal - cost + 1n);
