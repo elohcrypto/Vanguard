@@ -96,6 +96,27 @@ describe("Handover: VSC holders on the bound whitelist oracle (Task 4.16)", func
     expect(label).to.include("ZkOnly");
   });
 
+  // Task 4.17 (review C-2, D46 a): a proof carries no tier, so an
+  // unlisted Retail holder in Either is stuck; refused by name.
+  it("Either: an unlisted holder whose type needs tier 2 is refused; exempt passes", async function () {
+    await rules.setWhitelistOracle(token.target, ethers.ZeroAddress);
+    await token.mint(bob.address, e("10"));
+    await rules.setWhitelistOracle(token.target, wl.target);
+    await wl.addToWhitelist(alice.address, 1, 0, "kyc");
+    await rules.setPrivacyManager(token.target, f.c.privacyManager.target);
+    await rules.setWhitelistMode(token.target, 2); // Either
+    const itr = f.c.investorTypeRegistry;
+    await itr.assignInvestorType(bob.address, 1); // Retail: tier 2
+    const line = `unlisted holder ${bob.address} of type Retail needs tier 2 in Either: list it before the ceremony`;
+    await expect(preflightHolders(o, warn)).to.be.rejectedWith(line);
+    expect(await holderLines(o, [])).to.deep.include([line, false]);
+    await itr.setInvestorLimitExempt(bob.address, true);
+    await preflightHolders(o, warn);
+    expect((await holderLines(o, [])).every(([, ok]: any) => ok)).to.equal(
+      true,
+    );
+  });
+
   it("no oracle bound: one informational line; trusted contracts are not holders", async function () {
     await rules.setWhitelistOracle(token.target, ethers.ZeroAddress);
     expect(await preflightHolders(o, warn)).to.equal(null);
