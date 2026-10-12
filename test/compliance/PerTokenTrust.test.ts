@@ -102,7 +102,7 @@ describe("ComplianceRules per-token trust and administrators (G5)", function () 
       const stub = (await D("MockToken", "S", "S", 0)).target as string;
       // The stub holds a key on Alice's identity, so the recovery reaches
       // the compliance check (D41 would refuse it earlier otherwise).
-      await id
+      await (id as any)
         .connect(alice)
         .addKey(ethers.solidityPackedKeccak256(["address"], [stub]), 2, 1);
       await rules.addTrustedContract(tok[trustOn].target, stub);
