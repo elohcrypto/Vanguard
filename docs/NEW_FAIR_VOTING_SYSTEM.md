@@ -103,8 +103,8 @@ Settlement does **not** push VGT back. It records what each participant is
 owed, and each one pulls it:
 
 ```solidity
-function claimRefund(uint256 proposalId) external            // once, after settlement
-function getClaimableRefund(uint256 proposalId, address a) external view returns (uint256)
+function claimRefund(uint256 proposalId) external            // once per identity, after settlement
+function getClaimableRefund(uint256 proposalId, address identity) external view returns (uint256)
 ```
 
 Only Rejected and Cancelled proposals have anything to claim; a passed
@@ -354,10 +354,10 @@ mapping(uint256 => address[]) private _proposalVoters;
 - `setProposalCreationCost()` - Update creation cost
 - `setVotingCost()` - Update voting cost (bounded, emits `VotingCostUpdated`)
 - `cancelProposal()` - Owner-only; settles like a rejection, deposits become claimable
-- `claimRefund()` - Pull your own deposit from a Rejected or Cancelled proposal (once)
-- `getClaimableRefund()` - View what an address may still claim from a proposal
+- `claimRefund()` - Pull your identity's deposit from a Rejected or Cancelled proposal (once; the wallet must be bound to and control the identity, so a recovered wallet claims and the lost one cannot)
+- `getClaimableRefund()` - View what an identity may still claim from a proposal
 - `getLockedTokens()` - View total locked while Active (zero after settlement)
-- `getVoterLockedTokens()` - View one participant's locked or still-claimable amount
+- `getVoterLockedTokens()` - View one identity's locked or still-claimable amount
 
 ---
 

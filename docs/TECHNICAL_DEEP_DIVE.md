@@ -577,10 +577,9 @@ The listings below are condensed from `contracts/governance/`: `castVote` lives
 in `GovernanceProposals.sol`, `executeProposal`, `_settleWithRefund` and
 `claimRefund` in `VanguardGovernance.sol` (one deployed contract, split by
 inheritance in Task 4.8).
-An earlier version of this section showed code that never existed in the
-repo (a `Succeeded` status, an `executionWindow`, `ParameterChange` and
-`UpgradeContract` types, `forVotes++`); it is replaced here with the shape
-that is actually deployed.
+An earlier version of this section showed code that never existed in the repo (a
+`Succeeded` status, an `executionWindow`, `ParameterChange` and `UpgradeContract`
+types, `forVotes++`); it is replaced here with the shape actually deployed.
 
 **1 Person = 1 Vote Mechanism (one vote per identity, plan 2F.1 / D25):**
 
@@ -672,17 +671,18 @@ function executeProposal(uint256 proposalId) external nonReentrant {
 ```solidity
 // Settlement only records; no transfer, so it cannot be blocked.
 function _settleWithRefund(uint256 proposalId, ProposalStatus terminal) internal {
-    _proposals[proposalId].status = terminal;
-    _lockedTokens[proposalId] = 0;                 // per-person amounts stay as the claim ledger
+    _proposals[proposalId].status = terminal; _lockedTokens[proposalId] = 0; // per-identity amounts stay
 }
 
-// Each participant pulls their own deposit, once, after settlement.
+// Deposits are per identity (Task 5.2, Q6): a wallet bound to and controlling it pulls, once.
 function claimRefund(uint256 proposalId) external nonReentrant {
     ProposalStatus s = _proposals[proposalId].status;
     require(s == ProposalStatus.Rejected || s == ProposalStatus.Cancelled, "Proposal not settled");
-    uint256 amount = _voterLockedTokens[proposalId][msg.sender];
+    address id = identityRegistry.identity(msg.sender);
+    uint256 amount = id == address(0) ? 0 : _voterLockedTokens[proposalId][id];
     require(amount > 0, "Nothing to claim");
-    _voterLockedTokens[proposalId][msg.sender] = 0;
+    require(_controls(msg.sender, id), "Wallet does not control its identity");
+    _voterLockedTokens[proposalId][id] = 0;
     require(governanceToken.transfer(msg.sender, amount), "Refund transfer failed");
     emit RefundClaimed(proposalId, msg.sender, amount);
 }
