@@ -47,7 +47,10 @@ if [ "${1:-}" = "--from" ]; then
   LOG=${2:?--from <log> <timings>}
   TIMINGS=${3:?--from <log> <timings>}
   run=0
+  # A replayed log passes only if mocha summarised it with no failure:
+  # a crash log with no "N passing" line is a failed run.
   grep -qE '^\s+[0-9]+ failing' "$LOG" && run=1
+  grep -qE '^\s+[0-9]+ passing' "$LOG" || run=1
 else
   rm -f "$TIMINGS"
   run=0
@@ -64,7 +67,7 @@ if [ "$run" -ne 0 ]; then
   tail -20 "$LOG"
   exit 1
 fi
-[ "$slow" -eq 0 ] || { echo "::error::a test ran near its mocha timeout (above)"; exit 1; }
+[ "$slow" -eq 0 ] || { echo "::error::the near-timeout guard failed (above)"; exit 1; }
 lines=$(grep -E '^All files' "$LOG" | awk -F'|' '{gsub(/ /,"",$5); print $5}')
 echo "line coverage: ${lines:-<none>}% (baseline $BASELINE)"
 if [ -z "$lines" ]; then
