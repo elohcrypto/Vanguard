@@ -133,4 +133,25 @@ describe("Issuer and identity carry-overs (Task 5.2)", function () {
       });
     }
   });
+
+  const keyOf = (a: string) =>
+    ethers.keccak256(ethers.solidityPacked(["address"], [a]));
+
+  describe("N-5: only the deployer initializes", function () {
+    it("a front-run initialize is refused; the deployer's goes through", async function () {
+      const [deployer, holder, attacker] = await ethers.getSigners();
+      const id = await (
+        await ethers.getContractFactory("OnchainID")
+      ).deploy(ethers.ZeroAddress);
+      await expect(
+        id
+          .connect(attacker)
+          .initialize(attacker.address, keyOf(attacker.address)),
+      ).to.be.revertedWith("OnchainID: Only the deployer initializes");
+      await id
+        .connect(deployer)
+        .initialize(holder.address, keyOf(holder.address));
+      expect(await id.owner()).to.equal(holder.address);
+    });
+  });
 });

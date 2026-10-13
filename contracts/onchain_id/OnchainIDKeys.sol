@@ -66,6 +66,13 @@ abstract contract OnchainIDKeys is IOnchainID, Ownable2Step {
     uint256 private executionNonce;
     uint256 internal creationTime;
     bool private initialized;
+    /// @dev The deployer. It alone may initialize (N-5, Task 5.2) and, in
+    ///      the creating block, pin the recovery manager or add the
+    ///      creation key (OnchainIDOwnership).
+    address internal immutable CREATOR = msg.sender;
+    /// @dev The creator may pin only in the creating transaction's block
+    ///      (R-411-18): a deployer that is not the owner cannot pin later.
+    uint256 internal immutable CREATED_AT = block.number;
 
     mapping(uint256 => ExecutionRequest) private executionRequests;
     /// @notice How many times each key has been removed. Part of the
@@ -188,10 +195,13 @@ abstract contract OnchainIDKeys is IOnchainID, Ownable2Step {
     }
 
     /**
-     * @dev Initialize function (for factory pattern)
+     * @dev Initialize an identity deployed without an owner, once, by its
+     *      deployer only: a front-runner could otherwise take a directly
+     *      deployed OnchainID(address(0)) (N-5, Task 5.2).
      */
     function initialize(address _owner, bytes32 _managementKey) external {
         require(!initialized, "OnchainID: Already initialized");
+        require(msg.sender == CREATOR, "OnchainID: Only the deployer initializes");
         require(_owner != address(0), "OnchainID: Invalid owner");
         initialized = true;
         _transferOwnership(_owner);

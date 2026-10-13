@@ -59,10 +59,6 @@ abstract contract OnchainIDOwnership is OnchainIDKeys {
     /// @dev The one contract recovery runs through; zero: no recovery.
     address public recoveryManager;
 
-    address private immutable CREATOR = msg.sender;
-    /// @dev The creator may pin only in the creating transaction's block
-    ///      (R-411-18): a deployer that is not the owner cannot pin later.
-    uint256 private immutable CREATED_AT = block.number;
     /// @dev The authorized managers, listable (getManagers).
     address[] private _managers;
     /// @dev Pending owner proposed by a recovery; its acceptance evicts.
