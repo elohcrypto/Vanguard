@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
 #
-# Regression drives of the interactive demo (Task 4.17): five strict
-# drives through scripts/demo-drive.sh, each with the needles that pin
-# what it exists to show. One PASS/FAIL line per drive; exits 1 when any
-# drive fails.
+# Regression drives of the interactive demo (Task 4.17; the sixth since
+# Task 5.10): six strict drives through scripts/demo-drive.sh, each with
+# the needles that pin what it exists to show. One PASS/FAIL line per
+# drive; exits 1 when any drive fails.
 #
 #   onchainid  4.8 OnchainID claim options (2-11): a revoked claim reads
 #              "claim revoked (not valid on chain)"
@@ -16,6 +16,11 @@
 #              rule, Q7 c)") and approved after option 33 raises it
 #   glyph      4.16 glyph list: no error glyph but the menu's own Exit
 #              line, and the VSC whitelist oracle read
+#   escrowdlm  5.10: the ceremony with an EscrowWalletFactory (61) and a
+#              DynamicListManager (84) deployed, so the handover moves
+#              both to governance by vote and the verifier reads each
+#              back as governance-owned (the deployer keeps no factory
+#              role)
 #
 # Every ceremony drive (one carrying 83e) must print the success line
 # (`^\s+(✅|⚠️)\s+Handover complete`) and no "Handover incomplete".
@@ -131,5 +136,15 @@ menu=$(count '0\.  ❌ Exit')
 [[ "${glyphs:-0}" -eq "${menu:-0}" ]] \
   || REASONS+=("$((glyphs - menu)) error glyph(s) besides the menu's Exit")
 verdict glyph
+
+drive escrowdlm 1 21 51 31 74 61 84 "${CEREMONY_VOTERS[@]}" 22 32 83c:y \
+  83d 83e 0
+need "$(count 'VanguardGovernance owns EscrowWalletFactory')" 1 "factory vote"
+need "$(count 'VanguardGovernance owns DynamicListManager')" 1 "list manager vote"
+need "$(count 'EscrowWalletFactory owned by governance, deployer holds no role')" 1 \
+  "factory verified"
+need "$(count 'DynamicListManager owned by governance')" 1 "list manager verified"
+ceremony
+verdict escrowdlm
 
 exit $failed
