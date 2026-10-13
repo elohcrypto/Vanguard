@@ -36,6 +36,9 @@ abstract contract ListOracleBase is IOracle, Ownable2Step, ReentrancyGuard, Paus
     /// @notice Fewer distinct nodes voted the verdict's way than
     ///         minimumConsensusOracles (Task 5.1, N11).
     error TooFewVoters(uint256 voters, uint256 minimum);
+    /// @notice minimumConsensusOracles below MIN_CONSENSUS_ORACLES (Task 5.1
+    ///         review I4: one voter would be a verdict).
+    error MinimumBelowFloor(uint8 minimum, uint8 floor);
     using ECDSA for bytes32;
 
     // State variables
@@ -67,9 +70,10 @@ abstract contract ListOracleBase is IOracle, Ownable2Step, ReentrancyGuard, Paus
     /// @notice Distinct nodes that must have voted a verdict's way before
     ///         this oracle applies it (Task 5.1, N11; the handover floors it
     ///         at 2). The engine's MIN_NODES and single-node refusal are the
-    ///         engine floor; this is the per-oracle one. Set by the owner
-    ///         (each oracle's setMinimumConsensusOracles).
+    ///         engine floor; this is the per-oracle one. Set by the owner,
+    ///         never below MIN_CONSENSUS_ORACLES.
     uint8 public minimumConsensusOracles = 2;
+    uint8 public constant MIN_CONSENSUS_ORACLES = 2;
 
     string public oracleName;
     string public oracleDescription;
@@ -105,6 +109,13 @@ abstract contract ListOracleBase is IOracle, Ownable2Step, ReentrancyGuard, Paus
         if (_maxAge < MIN_VERDICT_AGE || _maxAge > MAX_VERDICT_AGE) revert InvalidVerdictAge();
         emit MaxVerdictAgeUpdated(maxVerdictAge, _maxAge);
         maxVerdictAge = _maxAge;
+    }
+
+    /// @notice Owner sets how many distinct nodes must have voted a
+    ///         verdict's way; at least MIN_CONSENSUS_ORACLES (I4).
+    function setMinimumConsensusOracles(uint8 _minimum) external onlyOwner {
+        if (_minimum < MIN_CONSENSUS_ORACLES) revert MinimumBelowFloor(_minimum, MIN_CONSENSUS_ORACLES);
+        minimumConsensusOracles = _minimum;
     }
 
     /**

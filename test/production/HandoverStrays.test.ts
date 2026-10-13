@@ -1,5 +1,5 @@
 import { expect } from "chai";
-import { ethers } from "hardhat";
+import { ethers, network } from "hardhat";
 import { handoverFixture } from "../helpers/governanceFixture";
 
 const {
@@ -318,6 +318,21 @@ describe("Handover strays: roles (Task 4.13)", function () {
       expect(await c.oracleManager.isEmergencyOracle(node)).to.equal(false);
     });
 
+    /** Write `to` into the slot that holds minimumConsensusOracles. */
+    async function forceMinimumConsensus(oracle: any, to: number) {
+      const a = await oracle.getAddress();
+      const word = (n: number) => ethers.toBeHex(n, 32);
+      for (let slot = 0; slot < 100; slot++) {
+        const at = ethers.toBeHex(slot, 32);
+        const v = await ethers.provider.getStorage(a, at);
+        if (v !== word(2)) continue;
+        await network.provider.send("hardhat_setStorageAt", [a, at, word(to)]);
+        if (Number(await oracle.minimumConsensusOracles()) === to) return;
+        await network.provider.send("hardhat_setStorageAt", [a, at, v]);
+      }
+      throw new Error("minimumConsensusOracles slot not found");
+    }
+
     it("a paused list oracle, and one requiring a single consensus oracle", async function () {
       const [wl] = args.oracles;
       await wl.emergencyPause();
@@ -326,7 +341,9 @@ describe("Handover strays: roles (Task 4.13)", function () {
         /is not paused and is active$/,
       );
       await wl.unpause();
-      await wl.setMinimumConsensusOracles(1);
+      // The setter refuses below 2 since Task 5.1 (review I4); the row
+      // stays for a list oracle whose storage says otherwise.
+      await forceMinimumConsensus(wl, 1);
       await both(
         /minimumConsensusOracles is 1: below 2/,
         /minimumConsensusOracles >= 2 \(1\)$/,

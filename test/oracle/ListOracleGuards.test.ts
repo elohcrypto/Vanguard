@@ -262,14 +262,21 @@ describe("List oracle guards (Task 4.15)", function () {
 
   // Task 4.17 slice A (review C mutants O05, O06).
   describe("setter and removal refusals (Task 4.17)", function () {
-    it("setMinimumConsensusOracles refuses 0 on the blacklist oracle", async function () {
-      const before = await BO.minimumConsensusOracles();
-      await expect(BO.setMinimumConsensusOracles(0)).to.be.revertedWith(
-        "BlacklistOracle: Minimum must be greater than 0",
-      );
-      expect(await BO.minimumConsensusOracles()).to.equal(before);
-      await BO.setMinimumConsensusOracles(3);
-      expect(await BO.minimumConsensusOracles()).to.equal(3);
+    // Task 5.1 review I4: the floor is 2 in the contract, not only in the
+    // ceremony; one place (ListOracleBase) for both list oracles.
+    it("setMinimumConsensusOracles refuses 0 and 1 on both list oracles", async function () {
+      for (const O of [WO, BO]) {
+        expect(await O.minimumConsensusOracles()).to.equal(2);
+        for (const bad of [0, 1])
+          await expect(O.setMinimumConsensusOracles(bad))
+            .to.be.revertedWithCustomError(O, "MinimumBelowFloor")
+            .withArgs(bad, 2);
+        expect(await O.minimumConsensusOracles()).to.equal(2);
+        await O.setMinimumConsensusOracles(3);
+        expect(await O.minimumConsensusOracles()).to.equal(3);
+        await O.setMinimumConsensusOracles(2);
+        expect(await O.minimumConsensusOracles()).to.equal(2);
+      }
     });
 
     // Task 4.17 (A1F-3): a reason is a label; at most 256 bytes.

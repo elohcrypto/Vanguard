@@ -384,14 +384,6 @@ contract BlacklistOracle is ListOracleBase {
     }
 
     /**
-     * @dev Set minimum consensus oracles required
-     */
-    function setMinimumConsensusOracles(uint8 _minimum) external onlyOwner {
-        require(_minimum > 0, "BlacklistOracle: Minimum must be greater than 0");
-        minimumConsensusOracles = _minimum;
-    }
-
-    /**
      * @dev Batch add addresses to blacklist
      */
     function batchAddToBlacklist(

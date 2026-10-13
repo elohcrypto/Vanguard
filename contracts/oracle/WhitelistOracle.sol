@@ -330,14 +330,6 @@ contract WhitelistOracle is ListOracleBase {
     }
 
     /**
-     * @dev Set minimum consensus oracles required
-     */
-    function setMinimumConsensusOracles(uint8 _minimum) external onlyOwner {
-        require(_minimum > 0, "WhitelistOracle: Minimum must be greater than 0");
-        minimumConsensusOracles = _minimum;
-    }
-
-    /**
      * @dev Batch add addresses to whitelist
      */
     function batchAddToWhitelist(
