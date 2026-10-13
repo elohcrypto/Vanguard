@@ -138,14 +138,17 @@ describe("Issuer and identity carry-overs (Task 5.2)", function () {
     ethers.keccak256(ethers.solidityPacked(["address"], [a]));
 
   describe("N-4: deployOnchainIDWithKey adds the key", function () {
-    it("a factory identity holds the given management key", async function () {
+    it("a factory identity holds the key its owner named", async function () {
       const [owner, holder, stranger] = await ethers.getSigners();
       const fac = await (
         await ethers.getContractFactory("OnchainIDFactory")
       ).deploy(owner.address, ethers.ZeroHash);
+      // The holder names a second wallet of its own (here: stranger's).
       const key = keyOf(stranger.address);
       const salt = ethers.id("n4");
-      await fac.deployOnchainIDWithKey(holder.address, key, salt);
+      await fac
+        .connect(holder)
+        .deployOnchainIDWithKey(holder.address, key, salt);
       const id = await ethers.getContractAt(
         "OnchainID",
         await fac.saltToIdentity(salt),
@@ -154,11 +157,13 @@ describe("Issuer and identity carry-overs (Task 5.2)", function () {
       expect(await id.keyHasPurpose(keyOf(holder.address), 1)).to.equal(true);
       expect(await id.getKeysByPurpose(1)).to.have.length(2);
       // The owner's own key as the "extra" key is not a second entry.
-      await fac.deployOnchainIDWithKey(
-        stranger.address,
-        keyOf(stranger.address),
-        ethers.id("n4b"),
-      );
+      await fac
+        .connect(stranger)
+        .deployOnchainIDWithKey(
+          stranger.address,
+          keyOf(stranger.address),
+          ethers.id("n4b"),
+        );
       const id2 = await ethers.getContractAt(
         "OnchainID",
         await fac.saltToIdentity(ethers.id("n4b")),
@@ -168,6 +173,39 @@ describe("Issuer and identity carry-overs (Task 5.2)", function () {
       await expect(
         id.connect(stranger).addCreationKey(ethers.id("k")),
       ).to.be.revertedWithCustomError(id, "NotCreator");
+    });
+
+    it("M-1: only the owner names a key; the front-run (P1) fails", async function () {
+      const [owner, victim, attacker] = await ethers.getSigners();
+      const fac = await (
+        await ethers.getContractFactory("OnchainIDFactory")
+      ).deploy(owner.address, ethers.ZeroHash);
+      const salt = ethers.id("victim-salt");
+      const predicted = await fac.computeOnchainIDAddress(victim.address, salt);
+      // Neither a stranger nor the factory owner installs a key on an
+      // identity owned by someone else.
+      for (const who of [attacker, owner]) {
+        await expect(
+          fac
+            .connect(who)
+            .deployOnchainIDWithKey(
+              victim.address,
+              keyOf(attacker.address),
+              salt,
+            ),
+        ).to.be.revertedWithCustomError(fac, "OnlyOwnerNamesKey");
+      }
+      // The victim's own deploy lands at its predicted address, with its
+      // key only.
+      await fac.connect(victim).deployOnchainID(victim.address, salt);
+      expect(await fac.saltToIdentity(salt)).to.equal(predicted);
+      const id = await ethers.getContractAt("OnchainID", predicted);
+      expect(await id.keyHasPurpose(keyOf(attacker.address), 1)).to.equal(
+        false,
+      );
+      expect(await id.getKeysByPurpose(1)).to.deep.equal([
+        keyOf(victim.address),
+      ]);
     });
 
     it("a stranger in the creating block cannot add a creation key", async function () {

@@ -181,7 +181,7 @@ describe("OnchainIDFactory identity map (2F.2, L7)", function () {
           k(attacker.address),
           ethers.id("b"),
         ),
-    ).to.be.revertedWith(msg);
+    ).to.be.revertedWithCustomError(f, "OnlyOwnerNamesKey"); // 5.2 M-1
     await expect(
       f
         .connect(attacker)

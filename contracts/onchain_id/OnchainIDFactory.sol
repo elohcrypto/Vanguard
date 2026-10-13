@@ -54,6 +54,7 @@ contract OnchainIDFactory is Ownable2Step {
     uint256 public constant FEE_CALL_GAS = 50_000;
 
     error NoFeesPending();
+    error OnlyOwnerNamesKey();
     error InvalidFeeDestination();
     event FeeDeferred(address indexed recipient, uint256 amount);
     event FeesWithdrawn(address indexed recipient, address indexed to, uint256 amount);
@@ -124,6 +125,11 @@ contract OnchainIDFactory is Ownable2Step {
         bytes32 _salt
     ) external payable whenNotPaused returns (address identity) {
         require(_owner != address(0), "OnchainIDFactory: Invalid owner");
+        // Task 5.2 review M-1: only the owner names an extra MANAGEMENT key
+        // for its own identity. The CREATE2 address does not depend on the
+        // key, so anyone else could pre-empt the owner's deployOnchainID at
+        // its predicted address with a key of their own.
+        if (msg.sender != _owner) revert OnlyOwnerNamesKey();
         _checkReplace(_owner);
         require(_managementKey != bytes32(0), "OnchainIDFactory: Invalid management key");
         require(msg.value >= deploymentFee, "OnchainIDFactory: Insufficient fee");
