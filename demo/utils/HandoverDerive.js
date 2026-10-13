@@ -19,6 +19,7 @@ const { ACCEPTANCE_PLAN, addrOf, same, fail } = require("./HandoverChecks");
 const { escrowFactoriesFromChain, checkFromBlock } = require("./HandoverScans");
 const { liveRegistrars } = require("./HandoverRegistrars");
 const { wiredPrivacy } = require("./HandoverPrivacy");
+const { pinChecks, codeHashRefusal } = require("./HandoverCodeHash");
 
 const ZERO = ethers.ZeroAddress;
 const ARTIFACT = {
@@ -150,7 +151,19 @@ async function deriveContracts(o, issues = null) {
   const facAddr =
     d.onchainIDFactory?.addr ||
     (o.onchainIDFactory ? await addrOf(o.onchainIDFactory) : null);
-  if (facAddr) {
+  // R-411-20 (Task 5.2): recoveryManager() is read only from a factory
+  // whose code is the compiled OnchainIDFactory; a tampered one is
+  // refused here by name (planPins pins it again at preflight/completion).
+  const [facPin] = facAddr
+    ? await pinChecks([
+        { label: "OnchainIDFactory", addr: facAddr, name: "OnchainIDFactory" },
+      ])
+    : [];
+  if (facPin && !facPin.ok) {
+    const msg = `${codeHashRefusal(facPin)}; its recoveryManager() is not read`;
+    if (!issues) fail(msg);
+    issues.push(msg);
+  } else if (facAddr) {
     const f = await ethers.getContractAt(RM_ABI, facAddr);
     km.push([
       `OnchainIDFactory ${facAddr} recoveryManager()`,
