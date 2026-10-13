@@ -2,6 +2,9 @@ import { expect } from "chai";
 import { ethers } from "hardhat";
 import { SignerWithAddress } from "@nomicfoundation/hardhat-ethers/signers";
 import { KYC_TOPIC, attest } from "../helpers/kyc";
+const { underCoverage } = require("../helpers/zkProofs") as {
+  underCoverage: () => boolean;
+};
 
 // Plan v2 Task 5.1, A2F-5: the claim walk staticcalled each trusted issuer
 // with all the gas left and copied the whole return data, so an issuer
@@ -50,8 +53,11 @@ describe("Task 5.1: bounded trusted-issuer calls", function () {
     const [usedVt] = await probe.cost(await good.getAddress(), vt);
     console.log(`      hasValidClaim ${used} gas, claimValidTo ${usedVt} gas, stipend ${stipend}`);
     expect(ok).to.equal(true);
-    expect(stipend).to.be.gte(used * 3n);
-    expect(stipend).to.be.gte(usedVt * 3n);
+    // Instrumented (coverage) ClaimIssuer costs more: measured, and it must
+    // still fit the stipend, but the 3x bound is the plain build's.
+    const factor = underCoverage() ? 1n : 3n;
+    expect(stipend).to.be.gte(used * factor);
+    expect(stipend).to.be.gte(usedVt * factor);
   });
 
   for (const [mode, what] of [
