@@ -122,6 +122,12 @@ const config: HardhatUserConfig = {
   },
   mocha: {
     timeout: 60000,
+    // CI's coverage runs set MOCHA_TIMINGS: a root hook records every
+    // passing test's duration and own timeout there, for the
+    // near-timeout guard (scripts/ci/mocha-log.js durations).
+    ...(process.env.MOCHA_TIMINGS
+      ? { rootHooks: require("./scripts/ci/mocha-log.js").mochaHooks }
+      : {}),
   },
 };
 

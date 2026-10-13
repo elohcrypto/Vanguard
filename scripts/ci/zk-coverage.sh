@@ -6,19 +6,35 @@
 # figure needs ZK_PROOFS=1. An instrumented run of test/privacy/ alone
 # (proving dominates; about 12:00 locally). The run is a gate: a failing
 # test fails it. Leaves coverage.json for scripts/ci/branch-floors.js
-# (run "proofs"), which asserts PrivacyManager's branch floor. A failed
-# run prints mocha's failure blocks, as scripts/ci/coverage-ratchet.sh.
+# (run "proofs"), which asserts PrivacyManager's branch floor. Failure
+# blocks and the near-timeout guard as in scripts/ci/coverage-ratchet.sh.
 #
-# USAGE  scripts/ci/zk-coverage.sh   (exit 1 on a failing run)
+# USAGE  scripts/ci/zk-coverage.sh   (exit 1 on a failing or slow run)
+#        scripts/ci/zk-coverage.sh --from <log> <timings>
 
 set -uo pipefail
 cd "$(dirname "$0")/../.."
 LOG=coverage-zk.log
-if ! ZK_PROOFS=1 npm run test:coverage -- --testfiles 'test/privacy/**/*.{js,ts}' > "$LOG" 2>&1; then
+TIMINGS=coverage-zk-timings.log
+if [ "${1:-}" = "--from" ]; then
+  LOG=${2:?--from <log> <timings>}
+  TIMINGS=${3:?--from <log> <timings>}
+  run=0
+  grep -qE '^\s+[0-9]+ failing' "$LOG" && run=1
+else
+  rm -f "$TIMINGS"
+  run=0
+  ZK_PROOFS=1 MOCHA_TIMINGS="$PWD/$TIMINGS" npm run test:coverage -- \
+    --testfiles 'test/privacy/**/*.{js,ts}' > "$LOG" 2>&1 || run=$?
+fi
+grep -E '^\s+[0-9]+ (passing|failing|pending)' "$LOG" || true
+slow=0
+node scripts/ci/mocha-log.js durations "$TIMINGS" || slow=1
+if [ "$run" -ne 0 ]; then
   echo "::error::the instrumented proof suites failed; see $LOG"
   node scripts/ci/mocha-log.js failures "$LOG" 200
   tail -20 "$LOG"
   exit 1
 fi
-grep -E '^\s+[0-9]+ (passing|failing|pending)' "$LOG" || true
+[ "$slow" -eq 0 ] || { echo "::error::a test ran near its mocha timeout (above)"; exit 1; }
 exit 0

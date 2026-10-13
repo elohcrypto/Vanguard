@@ -26,27 +26,45 @@
 # small under coverage. Measured locally after that: 7.6 GB peak RSS
 # (EDR native memory included), 15:26 wall, default heap.
 #
-# A failed run prints mocha's failure blocks (message and stack, capped
-# at 200 lines) rather than only titles; CI uploads the full log on
-# failure.
+# A failed run prints mocha's failure blocks (message and stack, capped)
+# rather than only titles; CI uploads the full log on failure. Every run
+# also passes the near-timeout guard (scripts/ci/mocha-log.js
+# durations): a test over 75% of its own mocha timeout fails, over 50%
+# warns, and the slowest 10 are printed.
 #
 # Leaves coverage.json for scripts/ci/branch-floors.js (run "contracts").
 #
 # USAGE  scripts/ci/coverage-ratchet.sh   (exit 1 on a finding)
+#        scripts/ci/coverage-ratchet.sh --from <log> <timings>
+#          checks a saved run's log and timings without running it
 
 set -uo pipefail
 cd "$(dirname "$0")/../.."
 BASELINE=95
 LOG=coverage.log
-if ! ZK_PROOFS=0 npm run test:coverage > "$LOG" 2>&1; then
+TIMINGS=coverage-timings.log
+if [ "${1:-}" = "--from" ]; then
+  LOG=${2:?--from <log> <timings>}
+  TIMINGS=${3:?--from <log> <timings>}
+  run=0
+  grep -qE '^\s+[0-9]+ failing' "$LOG" && run=1
+else
+  rm -f "$TIMINGS"
+  run=0
+  ZK_PROOFS=0 MOCHA_TIMINGS="$PWD/$TIMINGS" npm run test:coverage > "$LOG" 2>&1 || run=$?
+fi
+# Informational: mocha's "N passing (10m)" carries a suffix, and a run
+# with no pending or failing line is the normal case.
+grep -E '^\s+[0-9]+ (passing|failing|pending)' "$LOG" || true
+slow=0
+node scripts/ci/mocha-log.js durations "$TIMINGS" || slow=1
+if [ "$run" -ne 0 ]; then
   echo "::error::the instrumented test run failed; see $LOG"
   node scripts/ci/mocha-log.js failures "$LOG" 200
   tail -20 "$LOG"
   exit 1
 fi
-# Informational: mocha's "N passing (10m)" carries a suffix, and a run
-# with no pending or failing line is the normal case.
-grep -E '^\s+[0-9]+ (passing|failing|pending)' "$LOG" || true
+[ "$slow" -eq 0 ] || { echo "::error::a test ran near its mocha timeout (above)"; exit 1; }
 lines=$(grep -E '^All files' "$LOG" | awk -F'|' '{gsub(/ /,"",$5); print $5}')
 echo "line coverage: ${lines:-<none>}% (baseline $BASELINE)"
 if [ -z "$lines" ]; then

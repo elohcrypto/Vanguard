@@ -188,18 +188,21 @@ jobs:
       # ZKSystemIntegration proves under ZK_PROOFS=0 too.
       - name: Build and verify ZK circuits
         run: scripts/ci/zk-circuits.sh
-      # Baseline 95 lines; the run itself is a gate (no `|| true`).
+      # Baseline 95 lines; the run itself is a gate (no `|| true`); a test
+      # over 75% of its mocha timeout fails it (scripts/ci/mocha-log.js).
       - name: Coverage ratchet (tests pass; no DROP in line coverage)
         run: scripts/ci/coverage-ratchet.sh
       # Per-contract floors (scripts/ci/branch-floors.json), this run's json.
       - name: Branch floors (contract run)
         run: node scripts/ci/branch-floors.js contracts coverage.json
-      - name: Upload coverage log (on failure)
+      - name: Upload coverage logs (on failure)
         if: failure()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
-          name: coverage-log
-          path: coverage.log
+          name: coverage-logs
+          path: |
+            coverage.log
+            coverage-timings.log
           retention-days: 7
 
   zk-coverage:
@@ -234,12 +237,14 @@ jobs:
         run: scripts/ci/zk-coverage.sh
       - name: PrivacyManager branch gate (proof run floors)
         run: node scripts/ci/branch-floors.js proofs coverage.json
-      - name: Upload proof coverage log (on failure)
+      - name: Upload proof coverage logs (on failure)
         if: failure()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
-          name: zk-coverage-log
-          path: coverage-zk.log
+          name: zk-coverage-logs
+          path: |
+            coverage-zk.log
+            coverage-zk-timings.log
           retention-days: 7
 
   # The smoke's node serves every later step of this job, in order: the
