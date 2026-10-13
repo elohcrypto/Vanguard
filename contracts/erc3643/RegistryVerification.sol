@@ -4,6 +4,7 @@ pragma solidity ^0.8.19;
 import "@openzeppelin/contracts/access/Ownable2Step.sol";
 import "./interfaces/IIdentityRegistry.sol";
 import "../onchain_id/interfaces/IClaimIssuer.sol";
+import {BoundedStaticCall} from "./BoundedStaticCall.sol";
 
 /**
  * @title RegistryVerification
@@ -61,6 +62,12 @@ abstract contract RegistryVerification is IIdentityRegistry, Ownable2Step {
 
     // ponytail: bounded loop in isVerified. Raise if a topic needs more issuers.
     uint256 public constant MAX_TRUSTED_ISSUERS_PER_TOPIC = 8;
+
+    /// @notice Gas each trusted-issuer call gets (A2F-5, Task 5.1): the
+    ///         deepest honest ClaimIssuer.hasValidClaim measured 14,314 gas
+    ///         (cold account and slots, IssuerCallBound.test.ts), plus 2x,
+    ///         rounded up. A call needing more counts as "no claim".
+    uint256 public constant ISSUER_CALL_GAS = 45_000;
 
     /// @notice Longest a cached verification lives without a refresh.
     uint256 public constant VERIFIED_TTL = 24 hours;
@@ -129,9 +136,10 @@ abstract contract RegistryVerification is IIdentityRegistry, Ownable2Step {
         return (0, 0);
     }
 
-    /// @dev A refresh starved of gas (an issuer call runs out) can clear a
-    ///      true entry; the next isVerified then walks. It never produces a
-    ///      false positive: a failed issuer call counts as "no claim".
+    /// @dev A refresh sent with too little gas for an issuer's stipend
+    ///      reverts (BoundedStaticCall.StipendUnavailable, Task 5.1) rather
+    ///      than clear a true entry. It never produces a false positive: a
+    ///      failed issuer call counts as "no claim".
     function _refresh(address id) private returns (bool ok) {
         uint64 until;
         (ok, until) = _walk(id, true);
@@ -250,31 +258,32 @@ abstract contract RegistryVerification is IIdentityRegistry, Ownable2Step {
      *      it for `id`, or address(0). Asks the issuers, never the identity's
      *      claim list: anyone may add claims naming themselves to an identity
      *      (OnchainID.addClaim), so that list cannot decide verification
-     *      (2F.2, H2). A low-level staticcall: an issuer that reverts or
-     *      returns short data counts as "no claim", never reverts here.
+     *      (2F.2, H2). A bounded staticcall (A2F-5, Task 5.1): ISSUER_CALL_GAS
+     *      and one word of return data, so an issuer that reverts, burns
+     *      gas, returns short data or a megabyte counts as "no claim" and
+     *      the next issuer is asked; it never reverts the walk.
      */
     function _acceptingIssuer(address id, uint256 topic) private view returns (address) {
         address[] storage issuers = _trustedIssuersForTopic[topic];
+        bytes memory call = abi.encodeCall(IClaimIssuer.hasValidClaim, (id, topic));
         for (uint256 i = 0; i < issuers.length; i++) {
-            (bool ok, bytes memory ret) = issuers[i].staticcall(
-                abi.encodeCall(IClaimIssuer.hasValidClaim, (id, topic))
-            );
-            // Strict: exactly the word 1 (abi.decode to bool would revert on
-            // any other word and fail the walk for everyone, 4.14 L-A).
-            if (ok && ret.length >= 32 && abi.decode(ret, (uint256)) == 1) return issuers[i];
+            (bool ok, uint256 word) = BoundedStaticCall.word(issuers[i], call, ISSUER_CALL_GAS);
+            // Strict: exactly the word 1 (any other word is "no", 4.14 L-A).
+            if (ok && word == 1) return issuers[i];
         }
         return address(0);
     }
 
     /**
      * @dev validTo of the issuer's latest claim on (id, topic) through
-     *      IClaimIssuer.claimValidTo (0 = no expiry). An issuer without that
-     *      view returns 1: a past expiry, so the walk is never cached.
+     *      IClaimIssuer.claimValidTo (0 = no expiry), bounded as above. An
+     *      issuer without that view, or one that fails it, returns 1: a
+     *      past expiry, so the walk is never cached.
      */
     function _claimValidTo(address issuer, address id, uint256 topic) private view returns (uint256) {
-        (bool ok, bytes memory ret) = issuer.staticcall(abi.encodeCall(IClaimIssuer.claimValidTo, (id, topic)));
-        if (!ok || ret.length < 32) return 1;
-        return abi.decode(ret, (uint256));
+        bytes memory call = abi.encodeCall(IClaimIssuer.claimValidTo, (id, topic));
+        (bool ok, uint256 word) = BoundedStaticCall.word(issuer, call, ISSUER_CALL_GAS);
+        return ok ? word : 1;
     }
 
     function _removeFromList(uint256[] storage list, uint256 value) private {
