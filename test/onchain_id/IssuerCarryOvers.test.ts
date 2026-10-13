@@ -198,4 +198,37 @@ describe("Issuer and identity carry-overs (Task 5.2)", function () {
       expect(await id.owner()).to.equal(holder.address);
     });
   });
+
+  describe("N-6: one rule for both claim adders", function () {
+    const args = (issuer: string) =>
+      [KYC, 1, issuer, "0x", ethers.toUtf8Bytes("x"), ""] as const;
+    const batch = (issuer: string) =>
+      [[KYC], [1], [issuer], ["0x"], [ethers.toUtf8Bytes("x")], [""]] as const;
+
+    it("an authorized manager adds by both paths; a stranger by neither", async function () {
+      const { holder, stranger, id, kycAddr } = await setup();
+      const [manager] = await ethers.getSigners();
+      const msg = "OnchainID: Not authorized to add claim";
+      await expect(
+        id.connect(stranger).addClaim(...args(kycAddr)),
+      ).to.be.revertedWith(msg);
+      await expect(
+        id.connect(stranger).batchAddClaims(...batch(kycAddr)),
+      ).to.be.revertedWith(msg);
+      await id.connect(holder).authorizeManager(manager.address);
+      await id.connect(manager).addClaim(...args(kycAddr));
+      await id
+        .connect(manager)
+        .batchAddClaims(...batch(ethers.Wallet.createRandom().address));
+      expect(await id.getClaimIdsByTopic(KYC)).to.have.length(2);
+      // A de-authorized manager loses both.
+      await id.connect(holder).deauthorizeManager(manager.address);
+      await expect(
+        id.connect(manager).addClaim(...args(holder.address)),
+      ).to.be.revertedWith(msg);
+      await expect(
+        id.connect(manager).batchAddClaims(...batch(holder.address)),
+      ).to.be.revertedWith(msg);
+    });
+  });
 });

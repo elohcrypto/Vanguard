@@ -97,18 +97,7 @@ contract OnchainID is OnchainIDOwnership {
         bytes calldata _data,
         string calldata _uri
     ) external override returns (bytes32 claimRequestId) {
-        // `msg.sender == _issuer` is how a ClaimIssuer contract writes its
-        // claim here (ClaimIssuer.issueClaim). It also lets ANY caller add a
-        // claim naming itself as issuer. That only grows this identity's
-        // lists: IdentityRegistry.isVerified asks the trusted issuers
-        // (ClaimIssuer.hasValidClaim) and never reads these lists (2F.2, H2).
-        require(
-            msg.sender == owner() ||
-                keyHasPurpose(keccak256(abi.encodePacked(msg.sender)), MANAGEMENT_KEY) ||
-                keyHasPurpose(keccak256(abi.encodePacked(msg.sender)), CLAIM_SIGNER_KEY) ||
-                msg.sender == _issuer,
-            "OnchainID: Not authorized to add claim"
-        );
+        _requireMayAddClaim(_issuer);
         return _storeClaim(_topic, _scheme, _issuer, _signature, _data, _uri);
     }
 
@@ -164,21 +153,33 @@ contract OnchainID is OnchainIDOwnership {
         claimRequestIds = new uint256[](_topics.length);
 
         for (uint256 i = 0; i < _topics.length; i++) {
-            // Check authorization for each claim
-            require(
-                msg.sender == owner() ||
-                    keyHasPurpose(keccak256(abi.encodePacked(msg.sender)), MANAGEMENT_KEY) ||
-                    keyHasPurpose(keccak256(abi.encodePacked(msg.sender)), CLAIM_SIGNER_KEY) ||
-                    msg.sender == _issuers[i] ||
-                    authorizedManagers[msg.sender],
-                "OnchainID: Not authorized to add claim"
-            );
+            _requireMayAddClaim(_issuers[i]);
 
             claimRequestIds[i] = claimRequestNonce++;
             _storeClaim(_topics[i], _schemes[i], _issuers[i], _signatures[i], _data[i], _uris[i]);
         }
 
         return claimRequestIds;
+    }
+
+    /// @dev The one rule for adding a claim, single and batch (N-6, Task
+    ///      5.2): the owner, a MANAGEMENT or CLAIM_SIGNER key, an authorized
+    ///      manager (it holds MANAGEMENT powers, onlyManagementKey), or the
+    ///      named issuer itself. `msg.sender == _issuer` is how a ClaimIssuer
+    ///      writes its claim here; it also lets ANY caller add a claim naming
+    ///      itself as issuer. That only grows this identity's lists:
+    ///      IdentityRegistry.isVerified asks the trusted issuers
+    ///      (ClaimIssuer.hasValidClaim) and never reads them (2F.2, H2).
+    function _requireMayAddClaim(address _issuer) private view {
+        bytes32 sender = keccak256(abi.encodePacked(msg.sender));
+        require(
+            msg.sender == owner() ||
+                keyHasPurpose(sender, MANAGEMENT_KEY) ||
+                keyHasPurpose(sender, CLAIM_SIGNER_KEY) ||
+                authorizedManagers[msg.sender] ||
+                msg.sender == _issuer,
+            "OnchainID: Not authorized to add claim"
+        );
     }
 
     /// @dev Store or update a claim. An id already present is updated in
