@@ -55,6 +55,12 @@ contract ClaimIssuer is IClaimIssuer, ClaimIssuerKeys, ReentrancyGuard {
     mapping(address => mapping(uint256 => bytes32)) public latestClaimId;
 
     bytes32[] public allClaims;
+    /// @notice keccak256 of every signature whose claim was revoked: it
+    ///         never issues again (Task 5.2 review). A renewal is a new
+    ///         signature over new fields (a later validTo).
+    mapping(bytes32 => bool) public revokedSignature;
+
+    error SignatureRevoked();
 
     /**
      * @dev Constructor
@@ -154,6 +160,7 @@ contract ClaimIssuer is IClaimIssuer, ClaimIssuerKeys, ReentrancyGuard {
         require(_identity != address(0), "ClaimIssuer: Invalid identity");
         require(_data.length > 0, "ClaimIssuer: Empty claim data");
         _requireTrustedSignature(claimDigest(_identity, _topic, _scheme, _data, _uri, _validTo), _signature);
+        if (revokedSignature[keccak256(_signature)]) revert SignatureRevoked();
 
         claimId = keccak256(abi.encodePacked(address(this), _identity, _topic, _data));
         issuedClaims[claimId] = IssuedClaim({
@@ -190,6 +197,7 @@ contract ClaimIssuer is IClaimIssuer, ClaimIssuerKeys, ReentrancyGuard {
         IssuedClaim storage claim = issuedClaims[_claimId];
         claim.revoked = true;
         claim.revokedAt = block.timestamp;
+        revokedSignature[keccak256(claim.signature)] = true;
 
         // Remove our copy from the identity: OnchainID ids are
         // keccak256(issuer, topic, data), and an issuer may remove its own.
