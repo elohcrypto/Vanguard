@@ -131,6 +131,32 @@ describe("Handover: trusted-contract registrars (Task 4.3)", function () {
     ]);
   });
 
+  // Task 5.1 review L3: the preflight refuses a stray nominee too.
+  it("refuses an officer contract with a pending owner before any transaction", async function () {
+    const m = await (
+      await ethers.getContractFactory("InvestorRequestManager")
+    ).deploy(
+      f.ops.address,
+      vsc,
+      await f.c.investorTypeRegistry.getAddress(),
+      await f.c.identityRegistry.getAddress(),
+    );
+    const mAddr = await m.getAddress();
+    await m.transferOwnership(f.ops.address);
+    await m.connect(f.ops).acceptOwnership();
+    await f.c.investorTypeRegistry.setComplianceOfficer(mAddr, true);
+    await m.connect(f.ops).transferOwnership(f.stranger.address);
+    await refused(
+      new RegExp(
+        `registrar / officer contract ${mAddr} has pending owner ${f.stranger.address}, neither ops nor governance`,
+      ),
+    );
+    // A nomination of governance is allowed (it accepts by vote).
+    await m.connect(f.ops).transferOwnership(await f.c.governance.getAddress());
+    await ceremony();
+    expect(await m.owner()).to.equal(f.ops.address);
+  });
+
   it("passes the owner line when ops owns the officer contract", async function () {
     const m = await (
       await ethers.getContractFactory("InvestorRequestManager")

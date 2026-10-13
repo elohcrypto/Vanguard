@@ -166,6 +166,25 @@ async function trustChecks(o, f = null, pre = false) {
       fix: `registrar / officer contract ${addr} is owned by ${owner ?? "nobody readable"}, neither ops nor governance: a deployer-owned InvestorRequestManager assigns investor types and creates trusted wallets after the handover; its owner must transferOwnership(ops) and ops acceptOwnership() first`,
       strays: [],
     });
+    if (pre) {
+      // Task 5.1 review L3: a nominee other than ops or governance could
+      // accept after the handover (completion: HandoverRegistrars). A
+      // contract without pendingOwner is one-step: nothing pending.
+      const pending = await (
+        await ethers.getContractAt(
+          ["function pendingOwner() view returns (address)"],
+          addr,
+        )
+      )
+        .pendingOwner()
+        .catch(() => ethers.ZeroAddress);
+      out.push({
+        label: `registrar / officer contract ${addr} has no pending owner other than ops or governance`,
+        ok: [ethers.ZeroAddress, ops, govAddr].some((x) => same(pending, x)),
+        fix: `registrar / officer contract ${addr} has pending owner ${pending}, neither ops nor governance: it could accept ownership after the handover; its owner must transferOwnership(${ethers.ZeroAddress}) to cancel the nomination first`,
+        strays: [],
+      });
+    }
     out.push({
       label: `registrar / officer contract ${addr} code matches the compiled ${kind || "InvestorRequestManager or EscrowWalletFactory"}`,
       ok: Boolean(kind),
