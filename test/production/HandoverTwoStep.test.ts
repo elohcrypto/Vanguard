@@ -105,4 +105,27 @@ describe("Handover: two-step oracle ownership and node weight shares (Task 5.1)"
     expect(fail.ok).to.equal(false);
     expect(fail.label).to.include(`${nodes[0]} 467 (70%)`);
   });
+
+  // Task 5.1 review I5: an engine that does not answer fails the row.
+  it("an unreadable node weight fails the weight-share row", async function () {
+    const nodes = (await ethers.getSigners())
+      .slice(9, 12)
+      .map((s) => s.address);
+    for (const n of nodes)
+      await f.c.oracleManager.registerOracle(n, "node", "", 500);
+    f.args.oracleNodes = nodes;
+    await ceremony();
+    const stub = await (
+      await ethers.getContractFactory("WeightlessEngine")
+    ).deploy();
+    await network.provider.send("hardhat_setCode", [
+      await f.c.oracleManager.consensusEngine(),
+      await ethers.provider.getCode(await stub.getAddress()),
+    ]);
+    const row = (await assertHandoverComplete(f.args)).checks.find((x: any) =>
+      x.label.startsWith("no OracleManager node alone reaches the"),
+    );
+    expect(row.ok).to.equal(false);
+    expect(row.label).to.include("the 66% bar; weight shares: unreadable");
+  });
 });

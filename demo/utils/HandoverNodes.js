@@ -79,9 +79,11 @@ async function nodeFacts(o) {
     await om.consensusEngine(),
   );
   const minNodes = Number(await engine.MIN_NODES().catch(() => 2));
+  // Task 5.1 review I5: an unreadable weight or bar is null, and fails
+  // the weight-share row rather than reading as 0.
   for (const n of nodes)
-    n.weight = await engine.weightOf(n.addr).catch(() => 0n);
-  const threshold = await engine.consensusThreshold().catch(() => 0n);
+    n.weight = await engine.weightOf(n.addr).catch(() => null);
+  const threshold = await engine.consensusThreshold().catch(() => null);
   return { nodes, designated, minNodes, threshold };
 }
 
@@ -91,6 +93,11 @@ async function nodeFacts(o) {
  * every query: SingleNodeQuorum).
  */
 function weightShares(f) {
+  const unreadable = f.nodes
+    .filter((n) => n.weight === null)
+    .map((n) => n.addr);
+  if (unreadable.length || f.threshold === null)
+    return { shares: [], heavy: { weight: null }, alone: null, unreadable };
   const total = f.nodes.reduce((t, n) => t + n.weight, 0n);
   const pct = (w) => (total ? Number((w * 1000n) / total) / 10 : 0);
   const heavy = f.nodes.reduce((m, n) => (n.weight > m.weight ? n : m), {
@@ -104,6 +111,7 @@ function weightShares(f) {
       f.nodes.length >= f.minNodes &&
       total > 0n &&
       heavy.weight * 100n >= total * f.threshold,
+    unreadable,
   };
 }
 
@@ -134,9 +142,12 @@ async function nodeChecks(o, f = null) {
   });
   const w = weightShares(f);
   out.push({
-    label: `no OracleManager node alone reaches the ${f.threshold}% bar; weight shares: ${list(w.shares) || "none"}`,
-    ok: !w.alone,
-    fix: `OracleManager node ${w.heavy.addr} holds ${w.heavy.weight} of the registered weight, at or above the ${f.threshold}% bar alone: the engine opens no query (SingleNodeQuorum); the manager owner must setOracleWeight(...) so no node reaches the bar alone first`,
+    label: `no OracleManager node alone reaches the ${f.threshold}% bar; weight shares: ${list(w.shares) || (w.alone === null ? "unreadable" : "none")}`,
+    ok: w.alone === false,
+    fix:
+      w.alone === null
+        ? `the ConsensusOracle engine did not answer weightOf (${list(w.unreadable) || "no node"}) or consensusThreshold (${f.threshold ?? "unreadable"}): no node's weight share can be checked; bind a working engine first`
+        : `OracleManager node ${w.heavy.addr} holds ${w.heavy.weight} of the registered weight, at or above the ${f.threshold}% bar alone: the engine opens no query (SingleNodeQuorum); the manager owner must setOracleWeight(...) so no node reaches the bar alone first`,
     strays: [],
   });
   const unack = f.designated.filter((a) => !ack.some((b) => same(a, b)));
