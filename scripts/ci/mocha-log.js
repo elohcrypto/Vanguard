@@ -49,19 +49,44 @@ function install() {
   const run = mocha.Runnable.prototype.run;
   mocha.Runnable.prototype.run = function (fn) {
     return run.call(this, (err, ...rest) => {
-      if (!err && typeof this.duration === "number") {
-        const rec = {
-          kind: this.type === "hook" ? "hook" : "test",
-          title: this.fullTitle(),
-          file: this.file && path.relative(process.cwd(), this.file),
-          ms: this.duration,
-          timeout: this.timeout(),
-        };
-        fs.appendFileSync(out, JSON.stringify(rec) + "\n");
+      // A recorder failure must never stop mocha (fn is always called:
+      // without it the next runnable is never scheduled and the run
+      // ends silently with exit 0) and must always fail the process.
+      try {
+        if (!err && typeof this.duration === "number") {
+          const rec = {
+            kind: this.type === "hook" ? "hook" : "test",
+            title: this.fullTitle(),
+            file: this.file && path.relative(process.cwd(), this.file),
+            ms: this.duration,
+            timeout: this.timeout(),
+          };
+          fs.appendFileSync(out, JSON.stringify(rec) + "\n");
+        }
+      } catch (e) {
+        recorderFailed(e);
       }
       return fn(err, ...rest);
     });
   };
+}
+
+let failure = null;
+/**
+ * First recorder error: print it once and make the process exit 1. The
+ * exit code is forced in an 'exit' listener because hardhat's test task
+ * sets process.exitCode to the failure count after mocha ends, which
+ * would overwrite an earlier value.
+ */
+function recorderFailed(e) {
+  if (failure) return;
+  failure = e;
+  console.error(
+    `::error::mocha-log: recording to ${out} failed: ${e && e.message}`,
+  );
+  process.on("exit", () => {
+    if (!process.exitCode) process.exitCode = 1;
+  });
 }
 
 /** Root hooks: the first one installs the recorder. */

@@ -47,10 +47,7 @@ if [ "${1:-}" = "--from" ]; then
   LOG=${2:?--from <log> <timings>}
   TIMINGS=${3:?--from <log> <timings>}
   run=0
-  # A replayed log passes only if mocha summarised it with no failure:
-  # a crash log with no "N passing" line is a failed run.
   grep -qE '^\s+[0-9]+ failing' "$LOG" && run=1
-  grep -qE '^\s+[0-9]+ passing' "$LOG" || run=1
 else
   rm -f "$TIMINGS"
   run=0
@@ -59,6 +56,12 @@ fi
 # Informational: mocha's "N passing (10m)" carries a suffix, and a run
 # with no pending or failing line is the normal case.
 grep -E '^\s+[0-9]+ (passing|failing|pending)' "$LOG" || true
+# A run (or a replayed log) passes only if mocha summarised it: a crash,
+# or a mocha that stalled and let hardhat exit 0, leaves no "N passing".
+if ! grep -qE '^\s+[0-9]+ passing' "$LOG"; then
+  echo "::error::no mocha summary in $LOG: the run stopped before mocha finished"
+  run=1
+fi
 slow=0
 node scripts/ci/mocha-log.js durations "$TIMINGS" || slow=1
 if [ "$run" -ne 0 ]; then
