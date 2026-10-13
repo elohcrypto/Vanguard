@@ -134,4 +134,42 @@ describe("Task 5.1: request locks after a Normal cap cut", function () {
     await f.m.connect(f.bank).approveRequest(f.user.address);
     expect(await f.types.getInvestorType(f.user.address)).to.equal(T.Retail);
   });
+
+  describe("MultiSigWallet's own read of the cap", function () {
+    async function wallet() {
+      const [, bank, user] = await ethers.getSigners();
+      const tok = await (
+        await ethers.getContractFactory("MockTypedToken")
+      ).deploy();
+      const w = await (
+        await ethers.getContractFactory("MultiSigWallet")
+      ).deploy(bank.address, user.address, await tok.getAddress());
+      await tok.mint(user.address, 10n ** 30n);
+      await tok.connect(user).approve(await w.getAddress(), 10n ** 30n);
+      return { tok, w: w.connect(user) };
+    }
+
+    it("a token whose investor-type registry is unset applies no cap", async function () {
+      const { w } = await wallet();
+      await w.lockTokens(10n ** 30n);
+      expect(await w.getLockedBalance()).to.equal(10n ** 30n);
+    });
+
+    it("the cap is the registry's smaller Normal cap, read at the lock", async function () {
+      const { tok, w } = await wallet();
+      const types = await (
+        await ethers.getContractFactory("InvestorTypeRegistry")
+      ).deploy();
+      await tok.setInvestorTypeRegistry(await types.getAddress());
+      await setNormalCaps(types, 700n, 500n);
+      await expect(w.lockTokens(501n))
+        .to.be.revertedWithCustomError(w, "LockAboveNormalCap")
+        .withArgs(501n, 500n);
+      await setNormalCaps(types, 400n, 500n);
+      await expect(w.lockTokens(401n))
+        .to.be.revertedWithCustomError(w, "LockAboveNormalCap")
+        .withArgs(401n, 400n);
+      await w.lockTokens(400n);
+    });
+  });
 });
