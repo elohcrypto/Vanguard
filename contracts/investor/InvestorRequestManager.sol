@@ -204,6 +204,19 @@ contract InvestorRequestManager is Ownable, ReentrancyGuard {
     }
 
     /**
+     * @dev A1F-6 (Task 5.1): a request's lock must still fit the Normal
+     *      cap now. A cut of the registry's Normal cap after the request
+     *      was made leaves a lock no Normal holder can make or hold; every
+     *      forward step refuses it by name, and only rejectRequest (and
+     *      updateLockRequirement, for later requests) stay open, so the
+     *      request can always be moved off.
+     */
+    function _requireLockWithinCap(uint256 amount) private view {
+        uint256 cap = _lockCap();
+        if (amount > cap) revert LockAboveNormalCap(amount, cap);
+    }
+
+    /**
      * @dev Q7 c (Task 4.16): the requested type's required whitelist tier
      *      must not refuse the user on the token's current whitelist
      *      oracle, or approval would strand the user (R-410-6, refused
@@ -245,6 +258,7 @@ contract InvestorRequestManager is Ownable, ReentrancyGuard {
         // Get required lock amount
         uint256 requiredAmount = lockRequirements[requestedType];
         require(requiredAmount > 0, "Lock requirement not set");
+        _requireLockWithinCap(requiredAmount);
         
         // Create request
         requests[msg.sender] = InvestorRequest({
@@ -274,6 +288,7 @@ contract InvestorRequestManager is Ownable, ReentrancyGuard {
         InvestorRequest storage request = requests[user];
         require(request.status == RequestStatus.Pending, "Invalid request status");
         require(request.multiSigWallet == address(0), "Wallet already created");
+        _requireLockWithinCap(request.requiredLockAmount);
         
         // Deploy new MultiSigWallet
         MultiSigWallet wallet = new MultiSigWallet(bank, user, token);
@@ -307,6 +322,7 @@ contract InvestorRequestManager is Ownable, ReentrancyGuard {
         uint256 lockedAmount = wallet.getLockedBalance();
         
         require(lockedAmount >= request.requiredLockAmount, "Insufficient tokens locked");
+        _requireLockWithinCap(request.requiredLockAmount);
         
         // Update status
         request.status = RequestStatus.TokensLocked;
@@ -328,6 +344,7 @@ contract InvestorRequestManager is Ownable, ReentrancyGuard {
         MultiSigWallet wallet = MultiSigWallet(request.multiSigWallet);
         require(wallet.getLockedBalance() >= request.requiredLockAmount, "Tokens no longer locked");
         _requireSameRegistry();
+        _requireLockWithinCap(request.requiredLockAmount);
         _requireTierReachable(user, request.requestedType);
         
         // Assign investor type
@@ -380,8 +397,7 @@ contract InvestorRequestManager is Ownable, ReentrancyGuard {
         // R-416-15 extended: a lock set against another registry's cap would
         // outlive the divergence; the manager is inert for setters too.
         _requireSameRegistry();
-        uint256 cap = _lockCap();
-        if (newAmount > cap) revert LockAboveNormalCap(newAmount, cap);
+        _requireLockWithinCap(newAmount);
         
         uint256 oldAmount = lockRequirements[investorType];
         lockRequirements[investorType] = newAmount;
