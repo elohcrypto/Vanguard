@@ -17,6 +17,7 @@ const BURN = 1;
 const BOMB = 2;
 const BURN_VALID_TO = 3;
 const BOMB_VALID_TO = 4;
+const WIDE = 5; // "yes" plus 64 KB, within the stipend
 
 describe("Task 5.1: bounded trusted-issuer calls", function () {
   let owner: SignerWithAddress, user: SignerWithAddress;
@@ -149,6 +150,25 @@ describe("Task 5.1: bounded trusted-issuer calls", function () {
       // An EOA returns nothing; a call to it succeeds.
       const [ok, w] = await probe.word(user.address, hasValid(idA), 30_000);
       expect([ok, w]).to.deep.equal([false, 0n]);
+    });
+
+    it("reads one word of a 64 KB answer: the caller pays for none of the rest", async function () {
+      const wide = await (
+        await ethers.getContractFactory("HostileIssuer")
+      ).deploy(WIDE);
+      const [ok, w, used] = await probe.wordCost(
+        await wide.getAddress(),
+        hasValid(idA),
+        45_000,
+      );
+      expect([ok, w]).to.deep.equal([true, 1n]);
+      // The callee's own 64 KB (2,048 words) costs it 3n + n^2/512 =
+      // 14,336 gas. Copying it to the caller would cost that again plus
+      // 3 gas a word (20,480): the bound sits between the two.
+      const words = 2048n;
+      const expand = 3n * words + (words * words) / 512n;
+      expect(used).to.be.gt(expand);
+      expect(used).to.be.lt(expand + 10_000n);
     });
 
     it("refuses to run with less gas than the stipend needs", async function () {

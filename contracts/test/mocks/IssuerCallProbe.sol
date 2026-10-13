@@ -19,4 +19,15 @@ contract IssuerCallProbe {
     function word(address target, bytes calldata data, uint256 stipend) external view returns (bool, uint256) {
         return BoundedStaticCall.word(target, data, stipend);
     }
+
+    /// @dev word() plus the gas it used, callee included.
+    function wordCost(
+        address target,
+        bytes calldata data,
+        uint256 stipend
+    ) external view returns (bool ok, uint256 w, uint256 used) {
+        uint256 g = gasleft();
+        (ok, w) = BoundedStaticCall.word(target, data, stipend);
+        used = g - gasleft();
+    }
 }
