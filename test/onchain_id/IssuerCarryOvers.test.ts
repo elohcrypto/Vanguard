@@ -29,7 +29,9 @@ describe("Issuer and identity carry-overs (Task 5.2)", function () {
     it("a batch-issued claim is on the identity", async function () {
       const { issuerOwner, kyc, kycAddr, id, idAddr } = await setup();
       const d = ethers.toUtf8Bytes("B1");
-      const sig = await signClaim(issuerOwner, idAddr, KYC, d, { uri: "u" });
+      const sig = await signClaim(issuerOwner, kyc, idAddr, KYC, d, {
+        uri: "u",
+      });
       await kyc
         .connect(issuerOwner)
         .batchIssueClaims([idAddr], [KYC], [1], [d], ["u"], [0], [sig]);
@@ -50,8 +52,8 @@ describe("Issuer and identity carry-overs (Task 5.2)", function () {
       const badAddr = await bad.getAddress();
       const d = ethers.toUtf8Bytes("B2");
       const sigs = [
-        await signClaim(issuerOwner, idAddr, KYC, d),
-        await signClaim(issuerOwner, badAddr, KYC, d),
+        await signClaim(issuerOwner, kyc, idAddr, KYC, d),
+        await signClaim(issuerOwner, kyc, badAddr, KYC, d),
       ];
       await expect(
         kyc
@@ -83,11 +85,21 @@ describe("Issuer and identity carry-overs (Task 5.2)", function () {
     ];
 
     it("the signers' digest is ClaimIssuer.claimDigest", async function () {
-      const { kyc, idAddr } = await setup();
+      const { kyc, kycAddr, idAddr } = await setup();
+      const { chainId } = await ethers.provider.getNetwork();
       const local = ethers.keccak256(
         ethers.AbiCoder.defaultAbiCoder().encode(
-          ["address", "uint256", "uint256", "bytes", "string", "uint256"],
-          [idAddr, KYC, 1, d, "ipfs://a", 4102444800],
+          [
+            "uint256",
+            "address",
+            "address",
+            "uint256",
+            "uint256",
+            "bytes",
+            "string",
+            "uint256",
+          ],
+          [chainId, kycAddr, idAddr, KYC, 1, d, "ipfs://a", 4102444800],
         ),
       );
       expect(
@@ -102,7 +114,7 @@ describe("Issuer and identity carry-overs (Task 5.2)", function () {
     for (const [field, edit] of edits) {
       it(`a claim with an edited ${field} is refused on every path`, async function () {
         const { issuerOwner, kyc, idAddr } = await setup();
-        const sig = await signClaim(issuerOwner, idAddr, KYC, d, signed);
+        const sig = await signClaim(issuerOwner, kyc, idAddr, KYC, d, signed);
         const f = { ...signed, ...edit } as typeof signed;
         const args = [f.scheme, d, f.uri, f.validTo] as const;
         const msg = "ClaimIssuer: Signer does not have claim signer key";
@@ -303,6 +315,58 @@ describe("Issuer and identity carry-overs (Task 5.2)", function () {
       await expect(
         id.connect(manager).batchAddClaims(...batch(holder.address)),
       ).to.be.revertedWith(msg);
+    });
+  });
+
+  describe("L-1: a signature is bound to one issuer on one chain", function () {
+    const d = ethers.toUtf8Bytes("KYC_OK");
+    it("a signature made for issuer A is refused at issuer B", async function () {
+      const [, ownerA, ownerB, holder, k] = await ethers.getSigners();
+      const CI = await ethers.getContractFactory("ClaimIssuer");
+      const A = await CI.deploy(ownerA.address, "A", "a");
+      const B = await CI.deploy(ownerB.address, "B", "b");
+      await A.connect(ownerA).addIssuerKey(keyOf(k.address), 3, 1);
+      await B.connect(ownerB).addIssuerKey(keyOf(k.address), 3, 1);
+      const idAddr = await (
+        await (
+          await ethers.getContractFactory("OnchainID")
+        ).deploy(holder.address)
+      ).getAddress();
+      const sig = await signClaim(k, A, idAddr, KYC, d);
+      await A.connect(k).issueClaim(idAddr, KYC, 1, d, "", 0, sig);
+      await expect(
+        B.connect(k).issueClaim(idAddr, KYC, 1, d, "", 0, sig),
+      ).to.be.revertedWith(
+        "ClaimIssuer: Signer does not have claim signer key",
+      );
+      expect(await B.verifyClaim(idAddr, KYC, 1, d, "", 0, sig)).to.equal(
+        false,
+      );
+      expect(await A.hasValidClaim(idAddr, KYC)).to.equal(true);
+      expect(await B.hasValidClaim(idAddr, KYC)).to.equal(false);
+    });
+
+    it("a signature made for another chain id is refused", async function () {
+      // The chain is varied in the signed digest: the same issuer, fields
+      // and key, signed for chain 1; this chain is hardhat's 31337.
+      const { issuerOwner, kyc, idAddr } = await setup();
+      const { chainId } = await ethers.provider.getNetwork();
+      expect(chainId).to.not.equal(1n);
+      const other = await signClaim(issuerOwner, kyc, idAddr, KYC, d, {
+        chainId: 1,
+      });
+      await expect(
+        kyc.connect(issuerOwner).issueClaim(idAddr, KYC, 1, d, "", 0, other),
+      ).to.be.revertedWith(
+        "ClaimIssuer: Signer does not have claim signer key",
+      );
+      expect(await kyc.verifyClaim(idAddr, KYC, 1, d, "", 0, other)).to.equal(
+        false,
+      );
+      const here = await signClaim(issuerOwner, kyc, idAddr, KYC, d, {
+        chainId,
+      });
+      await kyc.connect(issuerOwner).issueClaim(idAddr, KYC, 1, d, "", 0, here);
     });
   });
 });

@@ -363,7 +363,13 @@ describe("ClaimIssuer key handover (plan 2B.4)", function () {
   });
 
   it("a deployer-signed claim submitted by ops is rejected", async function () {
-    const sig = await signClaim(deployer, identityAddr, KYC_TOPIC, KYC_DATA);
+    const sig = await signClaim(
+      deployer,
+      kycIssuer,
+      identityAddr,
+      KYC_TOPIC,
+      KYC_DATA,
+    );
     await expect(
       kycIssuer
         .connect(ops)

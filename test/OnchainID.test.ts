@@ -18,7 +18,7 @@ async function issueVia(
     await ethers.getContractFactory("ClaimIssuer")
   ).deploy(signer.address, "KYC", "kyc");
   for (const topic of topics) {
-    const sig = await signClaim(signer, identity, topic, data);
+    const sig = await signClaim(signer, iss, identity, topic, data);
     await iss.connect(signer).issueClaim(identity, topic, 1, data, "", 0, sig);
   }
   return iss.getAddress();

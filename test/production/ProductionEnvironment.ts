@@ -396,7 +396,7 @@ export class ProductionEnvironment {
     const validTo = block!.timestamp + this.config.claimValidityPeriod;
     const scheme = this.config.ecdsaScheme;
     const f = { scheme, uri, validTo };
-    const sig = await signClaim(signer, identity, topic, data, f);
+    const sig = await signClaim(signer, issuer, identity, topic, data, f);
     await issuer
       .connect(signer)
       .issueClaim(identity, topic, scheme, data, uri, validTo, sig, {

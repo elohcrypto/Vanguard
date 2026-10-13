@@ -38,7 +38,9 @@ describe("Claim-slot squatting (2F.2, H2)", function () {
   });
 
   async function issue(data = DATA, validTo = 0) {
-    const sig = await sign(issuerOwner, idAddr, KYC, data, { validTo });
+    const sig = await sign(issuerOwner, kycAddr, idAddr, KYC, data, {
+      validTo,
+    });
     return kyc
       .connect(issuerOwner)
       .issueClaim(idAddr, KYC, 1, data, "", validTo, sig);
@@ -226,7 +228,7 @@ describe("Claim-slot squatting (2F.2, H2)", function () {
     );
   async function issueOn(topic, data) {
     const d = ethers.toUtf8Bytes(data);
-    const sig = await sign(issuerOwner, idAddr, topic, d);
+    const sig = await sign(issuerOwner, kycAddr, idAddr, topic, d);
     return kyc.connect(issuerOwner).issueClaim(idAddr, topic, 1, d, "", 0, sig);
   }
 
@@ -289,7 +291,7 @@ describe("Claim-slot squatting (2F.2, H2)", function () {
   it("batch-issued claims verify and revoke by the same rule", async function () {
     const mk = async (s) => {
       const d = ethers.toUtf8Bytes(s);
-      return [d, await sign(issuerOwner, idAddr, KYC, d)];
+      return [d, await sign(issuerOwner, kycAddr, idAddr, KYC, d)];
     };
     const [d1, s1] = await mk("B1");
     const [d2, s2] = await mk("B2");
@@ -357,7 +359,7 @@ describe("Claim-slot squatting (2F.2, H2)", function () {
           [d],
           [""],
           [0],
-          [await sign(issuerOwner, eoaId, KYC, d)],
+          [await sign(issuerOwner, kycAddr, eoaId, KYC, d)],
         ),
     ).to.be.reverted;
     expect(await kyc.hasValidClaim(eoaId, KYC)).to.equal(false);

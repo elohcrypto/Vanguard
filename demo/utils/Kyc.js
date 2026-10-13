@@ -33,28 +33,43 @@ async function defaultValidTo() {
 
 /**
  * Sign a claim the way ClaimIssuer.issueClaim/verifyClaim expect: EIP-191
- * over ClaimIssuer.claimDigest, keccak256(abi.encode(identity, topic,
- * scheme, data, uri, validTo)) (Task 5.2, L-D: every recorded field is
- * signed, validTo included).
+ * over ClaimIssuer.claimDigest, keccak256(abi.encode(chainId, issuer,
+ * identity, topic, scheme, data, uri, validTo)) (Task 5.2: every recorded
+ * field is signed, bound to one issuer on one chain). The one off-chain
+ * builder of the digest; test/helpers/kyc.ts signs through it.
  *
  * @param {Object} signer - Signer holding the issuer's management/claim-signer key.
+ * @param {Object|string} issuer - The ClaimIssuer (contract or address) it is for.
  * @param {string} identityAddress - The OnchainID contract address.
  * @param {number} topic - Claim topic.
  * @param {Uint8Array} data - Claim data bytes.
- * @param {Object} [fields] - { scheme = 1, uri = "", validTo = 0 }, as issued.
+ * @param {Object} [fields] - { scheme = 1, uri = "", validTo = 0, chainId }
+ *   as issued; chainId defaults to the signer's network.
  * @returns {Promise<string>} The 65-byte signature, hex.
  */
 async function signClaim(
   signer,
+  issuer,
   identityAddress,
   topic,
   data,
-  { scheme = 1, uri = "", validTo = 0 } = {},
+  { scheme = 1, uri = "", validTo = 0, chainId } = {},
 ) {
+  const chain = chainId ?? (await signer.provider.getNetwork()).chainId;
+  const at = typeof issuer === "string" ? issuer : await issuer.getAddress();
   const hash = ethers.keccak256(
     ethers.AbiCoder.defaultAbiCoder().encode(
-      ["address", "uint256", "uint256", "bytes", "string", "uint256"],
-      [identityAddress, topic, scheme, data, uri, validTo],
+      [
+        "uint256",
+        "address",
+        "address",
+        "uint256",
+        "uint256",
+        "bytes",
+        "string",
+        "uint256",
+      ],
+      [chain, at, identityAddress, topic, scheme, data, uri, validTo],
     ),
   );
   return signer.signMessage(ethers.getBytes(hash));
@@ -80,9 +95,16 @@ async function attestKyc(
 ) {
   const expiry = validTo === undefined ? await defaultValidTo() : validTo;
   const data = ethers.toUtf8Bytes("kyc:" + label);
-  const sig = await signClaim(issuerSigner, identityAddress, KYC_TOPIC, data, {
-    validTo: expiry,
-  });
+  const sig = await signClaim(
+    issuerSigner,
+    kycIssuer,
+    identityAddress,
+    KYC_TOPIC,
+    data,
+    {
+      validTo: expiry,
+    },
+  );
   const tx = await kycIssuer.connect(issuerSigner).issueClaim(
     identityAddress,
     KYC_TOPIC,
@@ -115,9 +137,16 @@ async function attestAml(
 ) {
   const expiry = validTo === undefined ? await defaultValidTo() : validTo;
   const data = ethers.toUtf8Bytes("aml:" + label);
-  const sig = await signClaim(issuerSigner, identityAddress, AML_TOPIC, data, {
-    validTo: expiry,
-  });
+  const sig = await signClaim(
+    issuerSigner,
+    amlIssuer,
+    identityAddress,
+    AML_TOPIC,
+    data,
+    {
+      validTo: expiry,
+    },
+  );
   const tx = await amlIssuer.connect(issuerSigner).issueClaim(
     identityAddress,
     AML_TOPIC,

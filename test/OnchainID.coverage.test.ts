@@ -295,12 +295,12 @@ describe("OnchainID System - Coverage Tests", function () {
       ];
       const uris = ["https://kyc.com", "https://aml.com"];
       const validTos = [0, 0];
+      const [ci, ids] = [claimIssuer, identityAddresses];
       const sign = (i: number) =>
-        signClaim(claimSigner, identityAddresses[i], topics[i], data[i], {
+        signClaim(claimSigner, ci, ids[i], topics[i], data[i], {
           uri: uris[i],
         });
       const claimSigs = [await sign(0), await sign(1)];
-
       await claimIssuer
         .connect(claimSigner)
         .batchIssueClaims(

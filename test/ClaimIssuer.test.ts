@@ -27,6 +27,9 @@ describe("ClaimIssuer", function () {
 
   // Signature schemes
   const ECDSA_SCHEME = 1;
+  // Signed for this issuer on this chain (Task 5.2, review L-1).
+  const sign = (...a: [SignerWithAddress, string, number, string, object?]) =>
+    signClaim(a[0], claimIssuer, a[1], a[2], a[3], a[4]);
 
   beforeEach(async function () {
     [owner, identity, claimSigner, unauthorized] = await ethers.getSigners();
@@ -319,7 +322,7 @@ describe("ClaimIssuer", function () {
         const sigs = [];
         for (const i of [0, 1])
           sigs.push(
-            await signClaim(claimSigner, identities[i], topics[i], claimData, {
+            await sign(claimSigner, identities[i], topics[i], claimData, {
               uri: uris[i],
             }),
           );
@@ -359,8 +362,8 @@ describe("ClaimIssuer", function () {
 
       it("Should revert the whole batch if one signature is bad", async function () {
         const id = await onchainID.getAddress();
-        const good = await signClaim(claimSigner, id, KYC_TOPIC, claimData);
-        const bad = await signClaim(unauthorized, id, AML_TOPIC, claimData);
+        const good = await sign(claimSigner, id, KYC_TOPIC, claimData);
+        const bad = await sign(unauthorized, id, AML_TOPIC, claimData);
 
         await expect(
           claimIssuer
@@ -387,7 +390,7 @@ describe("ClaimIssuer", function () {
       // MANAGEMENT key (or is the owner), the same rule verifyClaim applies.
       it("Should reject a signature from a key with no signing purpose", async function () {
         const id = await onchainID.getAddress();
-        const sig = await signClaim(unauthorized, id, KYC_TOPIC, claimData);
+        const sig = await sign(unauthorized, id, KYC_TOPIC, claimData);
         await expect(
           claimIssuer
             .connect(claimSigner)
@@ -419,7 +422,7 @@ describe("ClaimIssuer", function () {
 
       it("Should reject a valid signature over different claim data", async function () {
         const id = await onchainID.getAddress();
-        const sig = await signClaim(claimSigner, id, AML_TOPIC, claimData);
+        const sig = await sign(claimSigner, id, AML_TOPIC, claimData);
         await expect(
           claimIssuer
             .connect(claimSigner)
@@ -502,21 +505,11 @@ describe("ClaimIssuer", function () {
     describe("verifyClaim", function () {
       // verifyClaim recovers the signer of claimDigest (signClaim signs it
       // with the EIP-191 prefix) and applies issueClaim's signer rule.
-      const verify = async (signer: SignerWithAddress, data = claimData) =>
-        claimIssuer.verifyClaim(
-          await onchainID.getAddress(),
-          KYC_TOPIC,
-          1,
-          data,
-          "",
-          0,
-          await signClaim(
-            signer,
-            await onchainID.getAddress(),
-            KYC_TOPIC,
-            claimData,
-          ),
-        );
+      const verify = async (signer: SignerWithAddress, data = claimData) => {
+        const id = await onchainID.getAddress();
+        const sig = await sign(signer, id, KYC_TOPIC, claimData);
+        return claimIssuer.verifyClaim(id, KYC_TOPIC, 1, data, "", 0, sig);
+      };
 
       it("Should accept a CLAIM_SIGNER and the MANAGEMENT key (owner)", async function () {
         expect(await verify(claimSigner)).to.be.true;

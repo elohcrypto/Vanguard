@@ -5,6 +5,7 @@ import {
   IdentityRegistry,
   OnchainIDFactory,
 } from "../../typechain-types";
+const demoKyc = require("../../demo/utils/Kyc");
 
 // Task 1R.2 (plan 2026-09-25-zk-kyc-ownership-cleanup-v2, section 2.3):
 // IdentityRegistry.isVerified only returns true once every configured claim
@@ -38,34 +39,27 @@ export async function configureKyc(
 }
 
 /**
- * EIP-191 signature by `signer` over ClaimIssuer.claimDigest:
- * keccak256(abi.encode(identity, topic, scheme, data, uri, validTo)), the
- * payload issueClaim and verifyClaim check (Task 5.2, L-D).
+ * EIP-191 signature by `signer` over ClaimIssuer.claimDigest for `issuer`
+ * (chain id, issuer, identity, topic, scheme, data, uri, validTo): the
+ * demo's signer (demo/utils/Kyc.js), the one off-chain digest builder.
  */
 export async function signClaim(
   signer: SignerWithAddress,
+  issuer: { getAddress(): Promise<string> } | string,
   identityAddr: string,
   topic: number | bigint,
   data: Uint8Array | string,
-  { scheme = 1, uri = "", validTo = 0 }: ClaimFields = {},
+  fields: ClaimFields = {},
 ): Promise<string> {
-  return signer.signMessage(
-    ethers.getBytes(
-      ethers.keccak256(
-        ethers.AbiCoder.defaultAbiCoder().encode(
-          ["address", "uint256", "uint256", "bytes", "string", "uint256"],
-          [identityAddr, topic, scheme, data, uri, validTo],
-        ),
-      ),
-    ),
-  );
+  return demoKyc.signClaim(signer, issuer, identityAddr, topic, data, fields);
 }
 
-/** The claim fields signed besides identity, topic and data. */
+/** The claim fields signed besides issuer, identity, topic and data. */
 export type ClaimFields = {
   scheme?: number | bigint;
   uri?: string;
   validTo?: number | bigint;
+  chainId?: number | bigint;
 };
 
 /**
@@ -82,7 +76,7 @@ export async function issueSigned(
   uri: string = "",
   validTo: number | bigint = 0,
 ) {
-  const sig = await signClaim(issuerSigner, identityAddr, topic, data, {
+  const sig = await signClaim(issuerSigner, issuer, identityAddr, topic, data, {
     uri,
     validTo,
   });

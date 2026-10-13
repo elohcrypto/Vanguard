@@ -252,6 +252,7 @@ async function createNonCompliantNormalUser(mod) {
     const kycSigner = await issuerOwnerSigner(mod.state, kycIssuer);
     const kycSig = await signClaim(
       kycSigner,
+      kycIssuer,
       identityAddress,
       kycTopic,
       kycData,

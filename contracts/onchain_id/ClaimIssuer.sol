@@ -225,7 +225,9 @@ contract ClaimIssuer is IClaimIssuer, ClaimIssuerKeys, ReentrancyGuard {
     /**
      * @notice What a claim signer signs (EIP-191, signMessage over these
      *         32 bytes): every field the issuer records and the registry
-     *         relies on, validTo included (Task 5.2, L-D / Q5). abi.encode,
+     *         relies on, validTo included (Task 5.2, L-D / Q5), bound to
+     *         this chain and this issuer so a signer key shared with another
+     *         issuer or deployment cannot replay it (review L-1). abi.encode,
      *         not encodePacked: data and uri are adjacent dynamic fields,
      *         which packed encoding would let shift bytes between.
      */
@@ -236,8 +238,8 @@ contract ClaimIssuer is IClaimIssuer, ClaimIssuerKeys, ReentrancyGuard {
         bytes calldata _data,
         string calldata _uri,
         uint256 _validTo
-    ) public pure returns (bytes32) {
-        return keccak256(abi.encode(_identity, _topic, _scheme, _data, _uri, _validTo));
+    ) public view returns (bytes32) {
+        return keccak256(abi.encode(block.chainid, address(this), _identity, _topic, _scheme, _data, _uri, _validTo));
     }
 
     /**

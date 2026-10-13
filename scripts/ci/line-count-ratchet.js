@@ -30,7 +30,7 @@ const ALLOW = {
   "docs/TESTNET_DEMO.md": 1179,
   "test/KeyManager.test.ts": 1085,
   "test/integration/OracleIntegration.test.ts": 884,
-  "test/ClaimIssuer.test.ts": 849,
+  "test/ClaimIssuer.test.ts": 842,
   "test/FairVotingSystem.test.ts": 846,
   "test/governance/HardeningRound2.test.ts": 833,
   "docs/TECHNICAL_DEEP_DIVE.md": 831,
