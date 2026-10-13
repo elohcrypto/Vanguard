@@ -139,11 +139,16 @@ verdict glyph
 
 drive escrowdlm 1 21 51 31 74 61 84 "${CEREMONY_VOTERS[@]}" 22 32 83c:y \
   83d 83e 0
-need "$(count 'VanguardGovernance owns EscrowWalletFactory')" 1 "factory vote"
-need "$(count 'VanguardGovernance owns DynamicListManager')" 1 "list manager vote"
-need "$(count 'EscrowWalletFactory owned by governance, deployer holds no role')" 1 \
+# Anchored on the ✅ line: the completion check prints the same label
+# behind ❌ when it fails.
+need "$(count '^\s+✅ VanguardGovernance owns EscrowWalletFactory\s*$')" 1 \
+  "factory vote"
+need "$(count '^\s+✅ VanguardGovernance owns DynamicListManager\s*$')" 1 \
+  "list manager vote"
+need "$(count '^\s+✅ EscrowWalletFactory owned by governance, deployer holds no role\s*$')" 1 \
   "factory verified"
-need "$(count 'DynamicListManager owned by governance')" 1 "list manager verified"
+need "$(count '^\s+✅ DynamicListManager owned by governance\s*$')" 1 \
+  "list manager verified"
 ceremony
 verdict escrowdlm
 
