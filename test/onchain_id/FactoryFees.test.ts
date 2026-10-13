@@ -70,7 +70,7 @@ describe("OnchainIDFactory fee path (Task 5.2)", function () {
       expect(await fac.totalPendingFees()).to.equal(0n);
       await expect(
         rec.pull(await fac.getAddress(), other.address),
-      ).to.be.revertedWith("OnchainIDFactory: No fees pending");
+      ).to.be.revertedWithCustomError(fac, "NoFeesPending");
     });
   }
 
@@ -112,6 +112,6 @@ describe("OnchainIDFactory fee path (Task 5.2)", function () {
     const { user, fac } = await setup();
     await expect(
       fac.connect(user).withdrawFees(ethers.ZeroAddress),
-    ).to.be.revertedWith("OnchainIDFactory: Invalid recipient");
+    ).to.be.revertedWithCustomError(fac, "InvalidFeeDestination");
   });
 });

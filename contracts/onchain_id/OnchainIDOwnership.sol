@@ -51,7 +51,6 @@ abstract contract OnchainIDOwnership is OnchainIDKeys {
     error NoRecoveryForOwner(address newOwner);
     error RecoveryManagerAlreadyPinned();
     error NotCreatorOrOwner();
-    error NotCreator();
     error NotAContract();
     error TooManyManagers();
 

@@ -53,6 +53,8 @@ contract OnchainIDFactory is Ownable2Step {
     ///      deploy at most this much, never the deploy itself.
     uint256 public constant FEE_CALL_GAS = 50_000;
 
+    error NoFeesPending();
+    error InvalidFeeDestination();
     event FeeDeferred(address indexed recipient, uint256 amount);
     event FeesWithdrawn(address indexed recipient, address indexed to, uint256 amount);
     event RecoveryManagerSet(address indexed manager);
@@ -226,9 +228,9 @@ contract OnchainIDFactory is Ownable2Step {
     /// @notice Pull the fees owed to the caller, to `_to` (a recipient
     ///         that cannot receive ETH names another address).
     function withdrawFees(address payable _to) external {
-        require(_to != address(0), "OnchainIDFactory: Invalid recipient");
+        if (_to == address(0)) revert InvalidFeeDestination();
         uint256 amount = pendingFees[msg.sender];
-        require(amount > 0, "OnchainIDFactory: No fees pending");
+        if (amount == 0) revert NoFeesPending();
         pendingFees[msg.sender] = 0;
         totalPendingFees -= amount;
         (bool ok, ) = _to.call{value: amount}("");

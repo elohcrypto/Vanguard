@@ -14,6 +14,8 @@ interface IFeeFactory {
 contract RefusingFeeRecipient {
     bool public burn;
 
+    error Refused();
+
     function setBurn(bool b) external {
         burn = b;
     }
@@ -23,7 +25,7 @@ contract RefusingFeeRecipient {
     }
 
     receive() external payable {
-        if (!burn) revert("refused");
+        if (!burn) revert Refused();
         while (true) {}
     }
 }

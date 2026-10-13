@@ -112,6 +112,9 @@ abstract contract OnchainIDKeys is IOnchainID, Ownable2Step {
     error AlreadyApproved();
     /// @dev addKey(MANAGEMENT) while a recovery is approved (Task 4.11).
     error ManagementAdditionsFrozen();
+    /// @dev Only the deployer (CREATOR) may do this: initialize, and in the
+    ///      creating block addCreationKey (Task 5.2, N-4/N-5).
+    error NotCreator();
     /// @dev The purpose already holds MAX_KEYS_PER_PURPOSE active keys.
     error TooManyKeys(uint256 purpose);
 
@@ -201,7 +204,7 @@ abstract contract OnchainIDKeys is IOnchainID, Ownable2Step {
      */
     function initialize(address _owner, bytes32 _managementKey) external {
         require(!initialized, "OnchainID: Already initialized");
-        require(msg.sender == CREATOR, "OnchainID: Only the deployer initializes");
+        if (msg.sender != CREATOR) revert NotCreator();
         require(_owner != address(0), "OnchainID: Invalid owner");
         initialized = true;
         _transferOwnership(_owner);

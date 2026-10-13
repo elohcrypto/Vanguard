@@ -219,7 +219,7 @@ describe("Issuer and identity carry-overs (Task 5.2)", function () {
         id
           .connect(attacker)
           .initialize(attacker.address, keyOf(attacker.address)),
-      ).to.be.revertedWith("OnchainID: Only the deployer initializes");
+      ).to.be.revertedWithCustomError(id, "NotCreator");
       await id
         .connect(deployer)
         .initialize(holder.address, keyOf(holder.address));
