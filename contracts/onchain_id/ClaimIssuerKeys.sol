@@ -230,17 +230,20 @@ abstract contract ClaimIssuerKeys is Ownable2Step {
     }
 
     /**
-     * @dev Require `_sig` to be an EIP-191 signature over keccak256(identity, topic, data)
-     *      by a key allowed to sign claims: same rule as `onlyClaimSigner`, applied to the signer.
+     * @dev True if `_sig` is an EIP-191 signature over `_digest`
+     *      (ClaimIssuer.claimDigest) by a key allowed to sign claims: same
+     *      rule as `onlyClaimSigner`, applied to the signer.
      */
-    function _requireTrustedSignature(bytes32 _dataHash, bytes calldata _sig) internal view {
-        address signer = ECDSA.recover(MessageHashUtils.toEthSignedMessageHash(_dataHash), _sig);
+    function _isTrustedSigner(bytes32 _digest, bytes calldata _sig) internal view returns (bool) {
+        address signer = ECDSA.recover(MessageHashUtils.toEthSignedMessageHash(_digest), _sig);
         bytes32 signerKey = keccak256(abi.encodePacked(signer));
-        require(
+        return
             _hasKeyPurpose(signerKey, CLAIM_SIGNER_KEY) ||
-                _hasKeyPurpose(signerKey, MANAGEMENT_KEY) ||
-                signer == owner(),
-            "ClaimIssuer: Signer does not have claim signer key"
-        );
+            _hasKeyPurpose(signerKey, MANAGEMENT_KEY) ||
+            signer == owner();
+    }
+
+    function _requireTrustedSignature(bytes32 _digest, bytes calldata _sig) internal view {
+        require(_isTrustedSigner(_digest, _sig), "ClaimIssuer: Signer does not have claim signer key");
     }
 }

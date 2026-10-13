@@ -55,7 +55,6 @@ contract ClaimIssuer is IClaimIssuer, ClaimIssuerKeys, ReentrancyGuard {
     mapping(address => mapping(uint256 => bytes32)) public latestClaimId;
 
     bytes32[] public allClaims;
-    uint256 private claimRequestNonce;
 
     /**
      * @dev Constructor
@@ -90,50 +89,12 @@ contract ClaimIssuer is IClaimIssuer, ClaimIssuerKeys, ReentrancyGuard {
         uint256 _validTo,
         bytes calldata _signature
     ) external onlyClaimSigner whenActive nonReentrant returns (bytes32 claimId) {
-        require(_identity != address(0), "ClaimIssuer: Invalid identity");
-        require(_data.length > 0, "ClaimIssuer: Empty claim data");
-        _requireTrustedSignature(keccak256(abi.encodePacked(_identity, _topic, _data)), _signature);
-
-        // Generate claim ID
-        claimId = keccak256(abi.encodePacked(address(this), _identity, _topic, _data));
-
-        // Store issued claim
-        issuedClaims[claimId] = IssuedClaim({
-            identity: _identity,
-            topic: _topic,
-            scheme: _scheme,
-            signature: _signature,
-            data: _data,
-            uri: _uri,
-            issuedAt: block.timestamp,
-            validTo: _validTo,
-            revoked: false,
-            revokedAt: 0
-        });
-
-        // Update indexes
-        claimsByIdentity[_identity].push(claimId);
-        claimsByTopic[_topic].push(claimId);
-        allClaims.push(claimId);
-
-        // Add claim to the OnchainID contract
-        try IOnchainID(_identity).addClaim(_topic, _scheme, address(this), _signature, _data, _uri) {
-            latestClaimId[_identity][_topic] = claimId;
-            emit ClaimIssued(_identity, _topic, claimId, address(this), _signature, _data);
-        } catch {
-            // Revert the storage changes if adding to OnchainID fails
-            delete issuedClaims[claimId];
-            claimsByIdentity[_identity].pop();
-            claimsByTopic[_topic].pop();
-            allClaims.pop();
-            revert("ClaimIssuer: Failed to add claim to OnchainID");
-        }
-
-        return claimId;
+        return _issue(_identity, _topic, _scheme, _data, _uri, _validTo, _signature);
     }
 
     /**
-     * @dev Batch issue multiple claims
+     * @dev Batch issue multiple claims, each through issueClaim's path
+     *      (Task 5.2, L-C): one claim the identity refuses reverts the batch.
      * @param _identities Array of OnchainID addresses
      * @param _topics Array of claim topics
      * @param _schemes Array of signature schemes
@@ -163,47 +124,58 @@ contract ClaimIssuer is IClaimIssuer, ClaimIssuerKeys, ReentrancyGuard {
         );
 
         claimIds = new bytes32[](_identities.length);
-
         for (uint256 i = 0; i < _identities.length; i++) {
-            require(_identities[i] != address(0), "ClaimIssuer: Invalid identity");
-            require(_data[i].length > 0, "ClaimIssuer: Empty claim data");
-
-            // Check authorization for each claim
-            require(
-                msg.sender == owner() ||
-                    _hasKeyPurpose(keccak256(abi.encodePacked(msg.sender)), MANAGEMENT_KEY) ||
-                    _hasKeyPurpose(keccak256(abi.encodePacked(msg.sender)), CLAIM_SIGNER_KEY),
-                "ClaimIssuer: Sender does not have claim signer key"
+            claimIds[i] = _issue(
+                _identities[i],
+                _topics[i],
+                _schemes[i],
+                _data[i],
+                _uris[i],
+                _validTos[i],
+                _signatures[i]
             );
-
-            claimRequestNonce++;
-            bytes32 claimId = keccak256(abi.encodePacked(address(this), _identities[i], _topics[i], _data[i]));
-            claimIds[i] = claimId;
-
-            _requireTrustedSignature(keccak256(abi.encodePacked(_identities[i], _topics[i], _data[i])), _signatures[i]);
-
-            issuedClaims[claimId] = IssuedClaim({
-                identity: _identities[i],
-                topic: _topics[i],
-                scheme: _schemes[i],
-                signature: _signatures[i],
-                data: _data[i],
-                uri: _uris[i],
-                issuedAt: block.timestamp,
-                validTo: _validTos[i],
-                revoked: false,
-                revokedAt: 0
-            });
-
-            claimsByIdentity[_identities[i]].push(claimId);
-            claimsByTopic[_topics[i]].push(claimId);
-            allClaims.push(claimId);
-            latestClaimId[_identities[i]][_topics[i]] = claimId;
-
-            emit ClaimIssued(_identities[i], _topics[i], claimId, address(this), _signatures[i], _data[i]);
         }
+    }
 
-        return claimIds;
+    /// @dev The one issuing path: the signature is checked, the claim is
+    ///      recorded here and written to the identity. The identity refusing
+    ///      the write reverts the whole call, which is the rollback: nothing
+    ///      the registry relies on (latestClaimId) outlives a failed addClaim.
+    function _issue(
+        address _identity,
+        uint256 _topic,
+        uint256 _scheme,
+        bytes calldata _data,
+        string calldata _uri,
+        uint256 _validTo,
+        bytes calldata _signature
+    ) private returns (bytes32 claimId) {
+        require(_identity != address(0), "ClaimIssuer: Invalid identity");
+        require(_data.length > 0, "ClaimIssuer: Empty claim data");
+        _requireTrustedSignature(keccak256(abi.encodePacked(_identity, _topic, _data)), _signature);
+
+        claimId = keccak256(abi.encodePacked(address(this), _identity, _topic, _data));
+        issuedClaims[claimId] = IssuedClaim({
+            identity: _identity,
+            topic: _topic,
+            scheme: _scheme,
+            signature: _signature,
+            data: _data,
+            uri: _uri,
+            issuedAt: block.timestamp,
+            validTo: _validTo,
+            revoked: false,
+            revokedAt: 0
+        });
+        claimsByIdentity[_identity].push(claimId);
+        claimsByTopic[_topic].push(claimId);
+        allClaims.push(claimId);
+
+        try IOnchainID(_identity).addClaim(_topic, _scheme, address(this), _signature, _data, _uri) {} catch {
+            revert("ClaimIssuer: Failed to add claim to OnchainID");
+        }
+        latestClaimId[_identity][_topic] = claimId;
+        emit ClaimIssued(_identity, _topic, claimId, address(this), _signature, _data);
     }
 
     /**

@@ -313,10 +313,11 @@ describe("Claim-slot squatting (2F.2, H2)", function () {
     expect(await ir.isVerified(victim.address)).to.equal(true);
     await kyc.connect(issuerOwner).revokeClaim(issuerId(d1));
     expect(await ir.isVerified(victim.address)).to.equal(true);
-    await expect(kyc.connect(issuerOwner).revokeClaim(issuerId(d2))).to.emit(
-      kyc,
-      "ClaimRemovalFailed",
-    );
+    // Task 5.2 (L-C): the batch wrote the identity's copy, so revoking
+    // removes it (no ClaimRemovalFailed).
+    await expect(
+      kyc.connect(issuerOwner).revokeClaim(issuerId(d2)),
+    ).to.not.emit(kyc, "ClaimRemovalFailed");
     expect(await ir.isVerified(victim.address)).to.equal(false);
   });
 
@@ -346,21 +347,25 @@ describe("Claim-slot squatting (2F.2, H2)", function () {
     });
   }
 
-  it("an identity address with no code is unverified even with an issuer claim (M20)", async function () {
+  it("an identity address with no code is unverified and gets no issuer claim (M20)", async function () {
     const eoaId = attacker.address;
     const d = ethers.toUtf8Bytes("EOA");
-    await kyc
-      .connect(issuerOwner)
-      .batchIssueClaims(
-        [eoaId],
-        [KYC],
-        [1],
-        [d],
-        [""],
-        [0],
-        [await sign(issuerOwner, eoaId, KYC, d)],
-      );
-    expect(await kyc.hasValidClaim(eoaId, KYC)).to.equal(true);
+    // Task 5.2 (L-C): the batch writes to the identity, so an address
+    // with no code is refused like issueClaim refuses it.
+    await expect(
+      kyc
+        .connect(issuerOwner)
+        .batchIssueClaims(
+          [eoaId],
+          [KYC],
+          [1],
+          [d],
+          [""],
+          [0],
+          [await sign(issuerOwner, eoaId, KYC, d)],
+        ),
+    ).to.be.reverted;
+    expect(await kyc.hasValidClaim(eoaId, KYC)).to.equal(false);
     // D41 (4.14): the registry refuses the binding itself, since no wallet
     // controls an identity with no code; nothing is verified by it.
     await expect(ir.registerIdentity(attacker.address, eoaId, 840))
