@@ -9,7 +9,7 @@ on:
     branches: ["**"]
   pull_request:
 
-# The job only reads the repo and the actions cache.
+# The jobs only read the repo, the actions cache and this run's artifacts.
 permissions:
   contents: read
 
@@ -21,475 +21,252 @@ concurrency:
 env:
   CIRCOM_VERSION: v2.2.3
 
+# WALL-TIME TARGET: 40 minutes per run (owner decision Q12, plan v2 Task
+# 5.10). One job ran every step in sequence until Task 5.10: 60-67 min
+# (runs 38310673082, 38364942042: tests 18:01, coverage 19:52, proof
+# coverage 12:03, demo stages 15:06, the rest ~2 min). Now `compile`
+# builds once and uploads the contract artifacts; `gates` needs nothing;
+# tests, coverage, zk-coverage and demo run in parallel after compile.
+# The critical path is compile (~2 min) + coverage (~22 min). Each job
+# rebuilds the circuits (scripts/ci/zk-circuits.sh, ~30 s) rather than
+# download ~400 MB of zkeys. Step bodies live in scripts/ci/; each job's
+# timeout-minutes is a hang guard, not a pace target.
+#
+# Actions are pinned by commit SHA and updated by hand (no Dependabot
+# here). Re-resolve a pin with `gh api repos/<owner>/<repo>/git/ref/tags/
+# <tag>`; if `.object.type` is `tag` (annotated), follow `.object.url` to
+# the commit SHA. No step uses git credentials, so none are left in
+# .git/config. `npm ci` fails if package.json and package-lock.json
+# disagree, the drift that broke this build before (an unbounded
+# "typescript": ">=4.5.0" resolved to TypeScript 7 and crashed ts-node).
+
 jobs:
-  build-and-test:
+  compile:
     # A branch deletion is also a push event (its SHA reverts to the default
     # branch; GitHub docs, "Events that trigger workflows", push) and must
     # not start a run. pull_request events have no `deleted`, so they run.
+    # Every other job needs this one or carries the same condition.
     if: ${{ !github.event.deleted }}
     runs-on: ubuntu-latest
-    # Measured: 16 min end to end at 19d75cb on a normal runner; a 1.7x
-    # slower runner at 93f6fff needed ~28 min for tests + coverage alone;
-    # the real-proof CLI tests (3.5) add ~3 min on 2 vCPU. Run 37099152276
-    # took 41 min at a 369 s local suite (tests 13 min, coverage 24 min);
-    # the local suite is 631 s since Task 3.7b, and coverage skips the
-    # real-proof suites (ZK_PROOFS=0). 45-57 min per run before Task 4.15,
-    # which adds the exit gates and the gas ratchet (~1 min), the strict
-    # demo drive (1:22 locally) and the ZK_PROOFS=1 privacy coverage run
-    # (12:00 locally, proving-bound, slower on 2 vCPU):
-    # about 20-25 min more. This limit is a hang guard, not a pace target.
-    timeout-minutes: 120
-
+    timeout-minutes: 30
     steps:
-      # Actions are pinned by commit SHA and updated by hand (no Dependabot
-      # here). Re-resolve a pin with
-      # `gh api repos/<owner>/<repo>/git/ref/tags/<tag>`; if `.object.type`
-      # is `tag` (annotated), follow `.object.url` to the commit SHA.
-      # No later step uses git credentials, so none are left in .git/config.
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
-        with:
-          persist-credentials: false
-
+        with: { persist-credentials: false }
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
-        with:
-          node-version: "22"
-          cache: npm
-
-      # Fails if package.json and package-lock.json disagree, which is the
-      # drift that broke this build before (an unbounded "typescript": ">=4.5.0"
-      # resolved to TypeScript 7 and crashed ts-node).
+        with: { node-version: "22", cache: npm }
       - name: Install dependencies
         run: npm ci
-
-      # The circuits declare `pragma circom 2.0.0`; only the Rust compiler can
-      # build them. The `circom` npm package is the deprecated 0.5.x JS build.
+      # Only the Rust compiler builds the circuits (scripts/ci/build-circom.sh).
+      # This job saves the binary and the Powers of Tau (37.8 MB, from this
+      # repo's releases; setup:zk verifies its BLAKE2b-512 whether cached or
+      # fresh, and the key carries the hash prefix); the others restore them.
       - name: Cache circom binary
         id: circom-cache
         uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
         with:
           path: ~/.cargo/bin/circom
           key: circom-${{ runner.os }}-${{ env.CIRCOM_VERSION }}
-
       - name: Build circom ${{ env.CIRCOM_VERSION }}
         if: steps.circom-cache.outputs.cache-hit != 'true'
-        run: |
-          git clone --depth 1 --branch "$CIRCOM_VERSION" https://github.com/iden3/circom.git /tmp/circom
-          cargo build --release --manifest-path /tmp/circom/Cargo.toml
-          mkdir -p ~/.cargo/bin
-          cp /tmp/circom/target/release/circom ~/.cargo/bin/circom
-
-      - name: Verify circom is 2.x
-        run: |
-          ~/.cargo/bin/circom --version
-          ~/.cargo/bin/circom --version | grep -qE '\b2\.[0-9]+\.[0-9]+' \
-            || { echo "::error::circom is not 2.x"; exit 1; }
-
-      # 37.8 MB trusted-setup file, served from this repo's releases because
-      # every public mirror now 403s. Cached so CI does not re-download each
-      # run. setup:zk verifies the BLAKE2b-512 of whatever is on disk, cached
-      # or fresh, so a bad cache entry is replaced rather than trusted. The
-      # key carries the hash prefix: a different file is a different key.
+        run: scripts/ci/build-circom.sh
       - name: Cache Powers of Tau
         uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
         with:
           path: build/circuits/powersOfTau28_hez_final_15.ptau
           key: ptau-hez-final-15-982372c8
+      - name: Compile contracts
+        run: npx hardhat compile
+      - name: Typecheck (tsc exits 0, no NEW tsc errors)
+        run: scripts/ci/typecheck.sh
+      # circom 2.x, setup:zk, the artifacts are real, verify:zk.
+      - name: Build and verify ZK circuits
+        run: scripts/ci/zk-circuits.sh
+      - name: Upload compiled contracts
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: contracts
+          path: |
+            artifacts/
+            cache/solidity-files-cache.json
+            typechain-types/
+          if-no-files-found: error
+          retention-days: 1
 
-      # Static invariant: no setter or constructor may cast an address to a
-      # contract interface without checking the address has code. Casting does
-      # not validate, so a bad address is accepted here and reverts later inside
-      # the dependency call, with no reason string. Exits 1 on any finding.
-      # Runs before the build so a structural regression fails fast and cheap.
+  # Checkout-only gates, so no artifacts and no wait for compile.
+  gates:
+    if: ${{ !github.event.deleted }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with: { persist-credentials: false }
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with: { node-version: "22", cache: npm }
+      - name: Install dependencies
+        run: npm ci
+      # No setter or constructor may cast an address to a contract
+      # interface without checking the address has code.
       - name: Audit setter/constructor guards
         run: node scripts/audit-setter-guards.js
-
-      # Phase 4 exit row (plan v2 Task 4.15, D49; 4.17), four gates on the
-      # checkout alone, each a script under scripts/ci/: the line-count
-      # ratchet keeps every tracked hand-written file under 500 lines with
-      # a shrink-only allowlist (tests and docs, split in Phase 5); the
-      # scripts gate refuses a scripts/ file no root reaches; the
-      # deleted-names gate refuses a name Phase 3 or 4 removed; the
-      # free-identifier gate refuses a name demo/ or scripts/ uses but
-      # never declares. Each exits 1 on a finding.
+      # Phase 4 exit row (Task 4.15, D49; 4.17): line count, scripts
+      # reachable, deleted names, free identifiers (headers in each file).
       - name: Phase 4 exit gates (line count, scripts, names, free ids)
         run: |
           node scripts/ci/line-count-ratchet.js \
             && node scripts/ci/scripts-referenced.js \
             && node scripts/ci/deleted-names.js \
             && node scripts/ci/free-identifiers.js
-
-      - name: Compile contracts
-        run: npx hardhat compile
-
-      # ts-node strips types, so the suite never sees tsc errors; this step
-      # does. Baseline 0 (2026-10-02, was 98 then 1): Task 3.3 replaced the
-      # ZK integration test's dead validatePrivacyProofs call. Since Task
-      # 4.17 (CF-7) tsc's own non-zero exit fails too, so a crash or a
-      # config error with no "error TS" line cannot pass; at baseline 0
-      # that is the same gate. Runs after compile because tsc reads
-      # typechain-types/, which compile regenerates.
-      - name: Typecheck (tsc exits 0, no NEW tsc errors)
-        run: |
-          BASELINE=0
-          test -d typechain-types || { echo "::error::typechain-types/ missing; compile did not generate it"; exit 1; }
-          rc=0
-          npx tsc --noEmit --pretty false > tsc.log 2>&1 || rc=$?
-          count=$(grep -c 'error TS' tsc.log || true)
-          echo "tsc exit $rc, errors: $count (baseline $BASELINE)"
-          if [ "$rc" -ne 0 ] && [ "$count" -le "$BASELINE" ]; then
-            echo "::error::tsc exited $rc."
-            tail -20 tsc.log
-            exit 1
-          fi
-          if [ "$count" -gt "$BASELINE" ]; then
-            echo "::error::tsc error count rose from $BASELINE to $count."
-            grep 'error TS' tsc.log
-            exit 1
-          fi
-          if [ "$count" -lt "$BASELINE" ]; then
-            echo "::notice::tsc error count dropped to $count — lower BASELINE in ci.yml."
-          fi
-
-      # Solhint's own exit code is not a gate: it exits 0 on errors, and its
-      # --max-warnings check is skipped when the first file reported has an
-      # error. Its stdout is also truncated under a pipe (process.exit before
-      # flush), so the report goes to a file and is counted from there. Any
-      # error fails; warnings fail only when they RISE above the baseline.
-      # Baseline 788 (2026-10-07, after Task 4.8 slice 1 split eight
-      # contracts and dropped the IdentityRegistry investor-type pointer);
-      # 793 (2026-10-06, after Task 4.7 deleted an unimported
-      # payment interface and two unused mocks; 798 after Task 4.5
-      # dropped OnchainID's topic
-      # store; 802 then 801 during Task 4.4; 885 after 4.3, 887 after 4.2
-      # and 889 after 4.1; 976
-      # before 3.2, 965 after 3.2,
-      # 944 after the Task 3.3 PrivacyManager rewrite, 933 after Task 3.7b,
-      # 917 after Task 3.8 dropped PrivacyManager's own jurisdiction
-      # registry, 889 after Task 4.1 dropped ComplianceRules' inert rule
-      # store and split the contract, 887 after Task 4.2 dropped
-      # KeyManager's owner and allowlist, 885 after Task 4.3 moved trust
-      # registration into registrar contracts).
       - name: Lint ratchet (no solhint errors, no NEW warnings)
-        run: |
-          BASELINE=788
-          npx solhint -f unix 'contracts/**/*.sol' > solhint.log 2>&1 || true
-          errors=$(grep -c '\[Error/' solhint.log || true)
-          warnings=$(grep -c '\[Warning/' solhint.log || true)
-          echo "solhint: $errors errors, $warnings warnings (warning baseline $BASELINE)"
-          if [ "$errors" -gt 0 ]; then
-            echo "::error::solhint reported $errors error(s)."
-            grep '\[Error/' solhint.log
-            exit 1
-          fi
-          if [ "$warnings" -gt "$BASELINE" ]; then
-            echo "::error::solhint warning count rose from $BASELINE to $warnings."
-            exit 1
-          fi
-          if [ "$warnings" -lt "$BASELINE" ]; then
-            echo "::notice::solhint warnings dropped to $warnings — lower BASELINE in ci.yml."
-          fi
+        run: scripts/ci/lint-ratchet.sh
+      - name: Audit dependencies (critical blocks)
+        run: npm audit --audit-level=critical
+      # Baseline and its history: scripts/ci/audit-baseline.json.
+      - name: Audit ratchet (no NEW high vulnerabilities)
+        run: node scripts/ci/audit-ratchet.js
 
-      # `npm run` puts node_modules/.bin ahead of PATH, where the npm circom
-      # 0.5.x shim lives. CIRCOM_BIN pins the real compiler explicitly.
-      # $HOME rather than a literal path so this is not runner-specific.
-      - name: Build ZK circuits
-        run: CIRCOM_BIN="$HOME/.cargo/bin/circom" npm run setup:zk
-
-      # Regression guard for the silent-mock bug: setup:zk used to write
-      # placeholder files and overwrite the committed verifiers while exiting 0.
-      - name: Assert ZK artifacts are real
-        run: |
-          fail=0
-          for wasm in build/circuits/*/*_js/*.wasm; do
-            magic=$(xxd -p -l4 "$wasm")
-            if [ "$magic" != "0061736d" ]; then
-              echo "::error::$wasm is not WebAssembly (magic $magic; 'mock' is 6d6f636b)"
-              fail=1
-            fi
-          done
-          if ! git diff --quiet contracts/privacy/verifiers/; then
-            echo "::error::setup:zk modified committed verifier contracts"
-            git diff --stat contracts/privacy/verifiers/
-            fail=1
-          fi
-          exit $fail
-
-      # R-3R-9: every circuit is sound PLONK since Task 3.7b, so the
-      # readiness check exits 0 and gates (exit 2 = an unsound setup).
-      - name: ZK readiness (artifacts match the committed verifiers)
-        run: npm run verify:zk
-
+  tests:
+    needs: compile
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with: { persist-credentials: false }
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with: { node-version: "22", cache: npm }
+      - name: Install dependencies
+        run: npm ci
+      - name: Download compiled contracts
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with: { name: contracts }
+      - name: Restore circom binary
+        uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        with:
+          path: ~/.cargo/bin/circom
+          key: circom-${{ runner.os }}-${{ env.CIRCOM_VERSION }}
+          fail-on-cache-miss: true
+      - name: Restore Powers of Tau
+        uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        with:
+          path: build/circuits/powersOfTau28_hez_final_15.ptau
+          key: ptau-hez-final-15-982372c8
+      - name: Build and verify ZK circuits
+        run: scripts/ci/zk-circuits.sh
       - name: Run tests
         run: npm test
-
       # Task 4.15: the transfer-gas table (scripts/gas-analysis.ts) as a
-      # recorded-baseline ratchet on the in-process network: a scenario more
-      # than 1,500 gas above its recorded figure fails, a drop prints a
-      # notice. The hard gate stays the in-test bound (VerificationCache:
-      # E <= A + 40,000).
+      # recorded-baseline ratchet: a scenario more than 1,500 gas above its
+      # recorded figure fails, a drop prints a notice. The hard gate stays
+      # the in-test bound (VerificationCache: E <= A + 40,000).
       - name: Gas ratchet (transfer gas table)
         run: npm run gas:claims
 
-      # Coverage ratchet. Baseline 95 (Task 4.15, Q11 b): measured at
-      # 96.48% lines locally at the 4.15 tree on
-      # 2026-10-12 (earlier baselines 63.73% -> 65 -> 84 -> 86 -> 88 -> 90,
-      # 90.7% at c0e73fc, 95.33% at aa65de8 with three failures hidden).
-      # The run itself is a gate: a failing test fails the step (no
-      # `|| true`; three permanent failures and, since 4.13, a corrupted
-      # run hid behind it). Fails when the number DROPS below BASELINE;
-      # notices when it climbs 2+ points. The plugin compiles instrumented
-      # bytecode into artifacts/; nothing else may compile in this tree
-      # while it runs, which is why this step follows "Run tests" and why
-      # test/production/HandoverCliNode (child hardhat processes) skips
-      # itself under coverage. DEPLOY_GAS_LIMIT (set by the npm script)
-      # lifts the hard-coded deploy caps instrumented initcode exceeds.
-      # ZK_PROOFS=0 skips the PLONK-proving suites (test/helpers/zkProofs.js),
-      # all but ZKSystemIntegration, which proves under ZK=0 too: "Run
-      # tests" above proves everything, this run measures contract lines,
-      # and the PrivacyManager gate below measures the proof suites. Memory:
-      # every executed step is traced, so one call's trace grows with its
-      # gas; the 5,000-key recovery and the 40-wallet governance batch
-      # overflowed the 4 GB heap (run 38199623932) and run small under
-      # coverage. Measured locally after that: 7.6 GB
-      # peak RSS (EDR native memory included), 15:26 wall, default heap.
+  coverage:
+    needs: compile
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with: { persist-credentials: false }
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with: { node-version: "22", cache: npm }
+      - name: Install dependencies
+        run: npm ci
+      - name: Download compiled contracts
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with: { name: contracts }
+      - name: Restore circom binary
+        uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        with:
+          path: ~/.cargo/bin/circom
+          key: circom-${{ runner.os }}-${{ env.CIRCOM_VERSION }}
+          fail-on-cache-miss: true
+      - name: Restore Powers of Tau
+        uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        with:
+          path: build/circuits/powersOfTau28_hez_final_15.ptau
+          key: ptau-hez-final-15-982372c8
+      # ZKSystemIntegration proves under ZK_PROOFS=0 too.
+      - name: Build and verify ZK circuits
+        run: scripts/ci/zk-circuits.sh
+      # Baseline 95 lines; the run itself is a gate (no `|| true`).
       - name: Coverage ratchet (tests pass; no DROP in line coverage)
-        env:
-          ZK_PROOFS: "0"
-        run: |
-          BASELINE=95
-          if ! npm run test:coverage > coverage.log 2>&1; then
-            echo "::error::the instrumented test run failed; see coverage.log"
-            grep -E '^\s+[0-9]+ (passing|failing|pending)|^\s+[0-9]+\) ' coverage.log | head -40 || true
-            tail -20 coverage.log
-            exit 1
-          fi
-          # Informational: mocha's "N passing (10m)" carries a suffix, and a
-          # run with no pending or failing line is the normal case.
-          grep -E '^\s+[0-9]+ (passing|failing|pending)' coverage.log || true
-          lines=$(grep -E '^All files' coverage.log | awk -F'|' '{gsub(/ /,"",$5); print $5}')
-          echo "line coverage: ${lines:-<none>}% (baseline $BASELINE)"
-          if [ -z "$lines" ]; then
-            echo "::error::coverage summary line not found; see coverage.log"
-            tail -20 coverage.log
-            exit 1
-          fi
-          if [ "$(printf '%s\n' "$lines" "$BASELINE" | sort -g | head -1)" != "$BASELINE" ]; then
-            echo "::error::line coverage ${lines}% dropped below baseline ${BASELINE}%."
-            exit 1
-          fi
-          if [ "$(printf '%s\n' "$lines" "$((BASELINE+2))" | sort -g | head -1)" = "$((BASELINE+2))" ]; then
-            echo "::notice::line coverage ${lines}% is 2+ points above baseline — raise BASELINE in ci.yml."
-          fi
+        run: scripts/ci/coverage-ratchet.sh
+      # Per-contract floors (scripts/ci/branch-floors.json), this run's json.
+      - name: Branch floors (contract run)
+        run: node scripts/ci/branch-floors.js contracts coverage.json
 
-      # Phase 5 gate (80% branches) for PrivacyManager, measured with the
-      # proof suites (Task 4.15): its attestation and binding guards run only
-      # on real PLONK proofs, so the ZK=0 run above sees about 53% of its
-      # branches and the real figure needs ZK_PROOFS=1. A second instrumented
-      # run of the privacy suites alone (proving dominates; about
-      # 12:00 locally), asserting PrivacyManager's branch
-      # figure from that run's coverage.json. A step rather than a parallel
-      # job: a job would repeat npm ci, the circom build, the ptau cache and
-      # setup:zk to save wall-clock time this job has under the 120-minute
-      # guard (45-57 min before 4.15), and a second coverage.json in the same
-      # job is read right here.
-      - name: PrivacyManager branch gate (proof suites under coverage)
-        env:
-          ZK_PROOFS: "1"
-        run: |
-          MIN=80
-          if ! npm run test:coverage -- --testfiles 'test/privacy/**/*.{js,ts}' > coverage-zk.log 2>&1; then
-            echo "::error::the instrumented proof suites failed; see coverage-zk.log"
-            grep -E '^\s+[0-9]+ (passing|failing|pending)|^\s+[0-9]+\) ' coverage-zk.log | head -40 || true
-            tail -20 coverage-zk.log
-            exit 1
-          fi
-          grep -E '^\s+[0-9]+ (passing|failing|pending)' coverage-zk.log || true
-          pct=$(node -e '
-            const c = require("./coverage.json");
-            const k = Object.keys(c).find((f) => f.endsWith("contracts/privacy/PrivacyManager.sol"));
-            if (!k) { console.error("PrivacyManager.sol not in coverage.json"); process.exit(1); }
-            let hit = 0, total = 0;
-            for (const arms of Object.values(c[k].b)) { total += arms.length; hit += arms.filter((n) => n > 0).length; }
-            console.log(((100 * hit) / total).toFixed(2));')
-          echo "PrivacyManager branches with proofs: ${pct}% (minimum $MIN)"
-          if [ "$(printf '%s\n' "$pct" "$MIN" | sort -g | head -1)" != "$MIN" ]; then
-            echo "::error::PrivacyManager branch coverage ${pct}% is below ${MIN}%."
-            exit 1
-          fi
+  zk-coverage:
+    needs: compile
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with: { persist-credentials: false }
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with: { node-version: "22", cache: npm }
+      - name: Install dependencies
+        run: npm ci
+      - name: Download compiled contracts
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with: { name: contracts }
+      - name: Restore circom binary
+        uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        with:
+          path: ~/.cargo/bin/circom
+          key: circom-${{ runner.os }}-${{ env.CIRCOM_VERSION }}
+          fail-on-cache-miss: true
+      - name: Restore Powers of Tau
+        uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        with:
+          path: build/circuits/powersOfTau28_hez_final_15.ptau
+          key: ptau-hez-final-15-982372c8
+      - name: Build and verify ZK circuits
+        run: scripts/ci/zk-circuits.sh
+      # PrivacyManager's proof-gated branches run only on real proofs.
+      - name: Proof suites under coverage (ZK_PROOFS=1)
+        run: scripts/ci/zk-coverage.sh
+      - name: PrivacyManager branch gate (proof run floors)
+        run: node scripts/ci/branch-floors.js proofs coverage.json
 
-      # The demo wires contracts together the way an operator would — a path the
-      # unit tests do not cover. It cannot run interactively in CI (readline over
-      # a non-TTY pipe closes before the first prompt), so this drives the same
-      # ContractDeployer directly against a local node and reads the wiring back
-      # from chain. Exits non-zero on any mismatch.
+  # The smoke's node serves every later step of this job, in order: the
+  # CLI after its handover, the strict ceremony drive, then the
+  # regression drives, which hardhat_reset it (so they run last).
+  demo:
+    needs: compile
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    env:
+      DEMO_RPC_URL: http://127.0.0.1:8545
+      DEMO_SMOKE_OUT: /tmp/demo-smoke-out.json
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with: { persist-credentials: false }
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with: { node-version: "22", cache: npm }
+      - name: Install dependencies
+        run: npm ci
+      - name: Download compiled contracts
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with: { name: contracts }
+      - name: Restore circom binary
+        uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        with:
+          path: ~/.cargo/bin/circom
+          key: circom-${{ runner.os }}-${{ env.CIRCOM_VERSION }}
+          fail-on-cache-miss: true
+      - name: Restore Powers of Tau
+        uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        with:
+          path: build/circuits/powersOfTau28_hez_final_15.ptau
+          key: ptau-hez-final-15-982372c8
+      - name: Build and verify ZK circuits
+        run: scripts/ci/zk-circuits.sh
       - name: Demo deployment smoke test
-        env:
-          DEMO_SMOKE_OUT: /tmp/demo-smoke-out.json
-        run: |
-          npx hardhat node > /tmp/hardhat-node.log 2>&1 &
-          for i in $(seq 1 30); do
-            if curl -s -o /dev/null -m 1 -X POST -H "Content-Type: application/json" \
-                 --data '{"jsonrpc":"2.0","method":"eth_blockNumber","params":[],"id":1}' \
-                 http://127.0.0.1:8545; then break; fi
-            sleep 1
-          done
-          npx hardhat run scripts/demo-smoke.js --network localhost
-
-      # Plan v2 Task 3.5: the operator and investor CLIs (scripts/zk/) against
-      # the smoke's node, still running, after its handover. Three verified
-      # wallets onboard (identity = OnchainID address, own secret), ops
-      # (wallet 10, the listOperator) builds and publishes the root, wallet 2
-      # proves and binds. VSC is in whitelist mode Either with no oracle, so
-      # ComplianceRules.canReceive(wallet 2), called as VSC, follows the
-      # binding: false before, true after. Hardhat's default keys.
+        run: scripts/ci/demo-smoke.sh
       - name: Whitelist root + proof CLI
-        run: |
-          set -euo pipefail
-          OUT=/tmp/demo-smoke-out.json
-          RPC=http://127.0.0.1:8545
-          D=$(mktemp -d)
-          key() { node -e 'const { ethers } = require("ethers"); console.log(ethers.HDNodeWallet.fromPhrase("test test test test test test test test test test test junk", undefined, ethers.getIndexedAccountPath(+process.argv[1])).privateKey)' "$1"; }
-          user() { jq -r ".users[] | select(.index == $1) | .$2" "$OUT"; }
-          PM=$(jq -r .privacyManager "$OUT"); RULES=$(jq -r .complianceRules "$OUT"); VSC=$(jq -r .token "$OUT")
-          echo '[]' > "$D/entries.json"
-          for i in 1 2 3; do
-            (umask 077; echo "0x$(openssl rand -hex 31)" > "$D/secret-$i")
-            c=$(node scripts/zk/prove-whitelist.js --commitment --identity "$(user $i onchainID)" --secret-file "$D/secret-$i")
-            jq --arg id "$(user $i onchainID)" --arg c "$c" '. + [{identity: $id, commitment: $c}]' "$D/entries.json" > "$D/e" && mv "$D/e" "$D/entries.json"
-          done
-          WHITELIST_OPS_KEY=$(key 10) node scripts/zk/build-whitelist-root.js \
-            --in "$D/entries.json" --out "$D/root.json" --publish --rpc "$RPC" --privacy-manager "$PM"
-          USER=$(user 2 wallet)
-          gate() { node -e '
-            const { ethers } = require("ethers");
-            const [rpc, pm, rules, vsc, who] = process.argv.slice(1);
-            const p = new ethers.JsonRpcProvider(rpc);
-            const i = new ethers.Interface(["function hasValidWhitelistProof(address) view returns (bool)", "function canReceive(address) view returns (bool)"]);
-            const call = async (to, f, from) => i.decodeFunctionResult(f, await p.call({ to, from, data: i.encodeFunctionData(f, [who]) }))[0];
-            (async () => console.log(`${await call(pm, "hasValidWhitelistProof")} ${await call(rules, "canReceive", vsc)}`))()
-              .catch((e) => { console.error(e.message); process.exit(1); });' "$RPC" "$PM" "$RULES" "$VSC" "$USER"; }
-          before=$(gate); echo "before: hasValidWhitelistProof canReceive = $before"
-          WHITELIST_SECRET=$(cat "$D/secret-2") WHITELIST_WALLET_KEY=$(key 2) node scripts/zk/prove-whitelist.js \
-            --root "$D/root.json" --identity "$(user 2 onchainID)" --wallet "$USER" --out "$D/proof.json" \
-            --submit --rpc "$RPC" --privacy-manager "$PM" > "$D/stdout" 2> "$D/stderr"
-          cat "$D/stderr"
-          after=$(gate); echo "after:  hasValidWhitelistProof canReceive = $after"
-          for i in 1 2 3; do
-            hex=$(sed 's/^0x//' "$D/secret-$i")
-            dec=$(node -e 'console.log(BigInt(process.argv[1]).toString())' "0x$hex")
-            for f in "$D/stdout" "$D/stderr"; do
-              if grep -qiF -e "$hex" -e "$dec" "$f"; then echo "::error::the prover printed secret $i"; exit 1; fi
-            done
-          done
-          if [ "$before" != "false false" ] || [ "$after" != "true true" ]; then
-            echo "::error::expected 'false false' before and 'true true' after the binding"
-            exit 1
-          fi
-
-      # Task 4.15 (Q11 c): one strict drive of the interactive demo through
-      # the complete ceremony on the smoke's node, still running: option 1
-      # deploys, 21/51/31/74 wire the ERC-3643, privacy, oracle and
-      # governance layers, 24 and 75a onboard four verified VGT holders, 22
-      # and 32, 83c passes the handover vote, 83d and 83e complete it.
-      # --strict fails on a demo error line, a failed ceremony check, or
-      # the demo's own non-zero exit; the log must carry the success line
-      # and no "Handover incomplete". Measured 1:22 locally.
+        run: scripts/ci/whitelist-cli.sh
       - name: Strict demo drive (complete ceremony, 83c/83d/83e)
-        run: |
-          ./scripts/demo-drive.sh --strict --timeout 1500 --log /tmp/demo-drive.log \
-            1 21 51 31 74 24:1:Alice 24:1:Bob 24:1:Carol 24:1:Dave \
-            75a:4:1000:y 75a:5:1000:y 75a:6:1000:y 75a:7:1000:y 22 32 83c:y 83d 83e 0
-          if ! grep -qE '^\s+(✅|⚠️)\s+Handover complete' /tmp/demo-drive.log \
-            || grep -q "Handover incomplete" /tmp/demo-drive.log; then
-            echo "::error::the drive did not complete the handover"
-            tail -40 /tmp/demo-drive.log
-            exit 1
-          fi
-
-      # Task 4.17: five regression drives (4.8 OnchainID and token
-      # options, 4.16 option 1a, the Q9 fill-then-bind and the glyph
-      # list), each on a fresh chain (hardhat_reset of the smoke's node,
-      # the last step to use it) with its needles. 10:59 locally, so about
-      # 16-22 min on a runner.
+        run: scripts/ci/strict-drive.sh
+      # Six drives on fresh chains (4.17, 5.10), ~12.5 min locally.
       - name: Regression demo drives
-        env:
-          DEMO_RPC_URL: http://127.0.0.1:8545
-        run: ./scripts/ci/regression-drives.sh
-
-      # Blocks on critical (currently 0).
-      - name: Audit dependencies (critical blocks)
-        run: npm audit --audit-level=critical
-
-      # Ratchet. `npm audit fix` took highs 24 -> 22 on 2026-10-02; a rerun
-      # (--dry-run) changes nothing. The 22, from `npm audit --json`:
-      # - Hardhat 2 (11): hardhat, toolbox, hardhat-ethers, -chai-matchers,
-      #   -network-helpers, -verify, @typechain/hardhat, contract-sizer,
-      #   gas-reporter, adm-zip, undici. Fix: Hardhat 3 majors (toolbox
-      #   7.0.0, chai-matchers 3.0.0, hardhat-ethers 4.2.0, network-helpers
-      #   3.0.11, verify 3.1.2); typechain, sizer, gas-reporter list none.
-      # - Coverage/test runners (3): solidity-coverage, mocha (8.4.0, 10.8.2,
-      #   11.8.0), serialize-javascript (5.0.1, 6.0.2). Fix: downgrade to
-      #   solidity-coverage 0.7.22 (major).
-      # - ZK tooling (8), prod `dependencies` used off-chain only (proof
-      #   scripts, tests): exact pins under circom 0.5 -> circom_runtime ->
-      #   ffjavascript -> mocha 8.4.0 (js-yaml 4.0.0, minimatch 3.0.4, nanoid
-      #   3.1.20); tmp 0.1.0 (tmp-promise; 0.0.33 is solc's, under hardhat);
-      #   ws 8.18.0 (ethers 5 under circomlibjs); underscore 1.13.6, pinned
-      #   by jsonpath, which taints jsonpath and bfj (snarkjs). npm's fixes
-      #   leave the pins; clearing them needs overrides. `npm audit
-      #   --omit=dev` reports 10: these 8 plus mocha 8.4.0's copies of mocha
-      #   and serialize-javascript.
-      # 22 -> 34 on 2026-10-03 (CI run 37090710733 at 15f26f3): advisories
-      # published upstream against an unchanged tree (no dependency changed;
-      # an install from days earlier reports 34 too). `npm audit fix
-      # --dry-run` (non-breaking) only adds fsevents and leaves 34. The 12
-      # new highs, by chain:
-      # - @fastify/busboy (GHSA-x8mw-p69m-v3mx), under undici under hardhat
-      #   and hardhat-verify (1). Fix: the Hardhat 3 majors above (npm
-      #   offers solidity-coverage 0.7.22).
-      # - braces (GHSA-vfj7-8cjw-p6xm) -> micromatch -> fast-glob -> globby
-      #   -> solidity-coverage, and braces -> chokidar -> mocha (the copies
-      #   under solidity-coverage, eth-gas-reporter, circom_runtime) (5:
-      #   braces, micromatch, fast-glob, globby, chokidar). Fix: the
-      #   solidity-coverage major above; circom_runtime's needs overrides.
-      # - http-cache-semantics (GHSA-ch52-4w7c-c8xp) -> cacheable-request ->
-      #   got -> package-json -> latest-version -> solhint (6). Fix: npm
-      #   offers solhint 3.6.2 (major downgrade).
-      # The same audit lists further highs on packages already in the 22
-      # (js-yaml, minimatch, nanoid, undici, ws, tmp, underscore,
-      # serialize-javascript, adm-zip); the count is per package, so they
-      # do not move it.
-      # 34 -> 29 on 2026-10-04 (CI run 37176125602 at a56b24d; a local
-      # `npm audit` agrees): advisories withdrawn or re-scored upstream on an
-      # unchanged tree, so the baseline follows the count down.
-      # 29 -> 28 on 2026-10-12: CI run 38131143635 at fd258df failed the
-      # critical step on a new handlebars advisory (4.0.0 - 4.7.9 under
-      # solidity-coverage -> sc-istanbul, dev only; three GHSA entries,
-      # JavaScript injection in compile). `npm audit fix` (non-breaking)
-      # took handlebars 4.7.10, pbkdf2 3.1.7, http-cache-semantics 4.3.0
-      # and added the optional fsevents 2.3.3 entry: critical 1 -> 0,
-      # highs 29 -> 28 (http-cache-semantics), moderate 11 -> 10.
-      # The count is checked against the live advisory database, so a newly
-      # published advisory in an unchanged dependency reddens every branch
-      # at once; raise BASELINE with the advisory recorded here.
-      # Gating on `high` would be permanently red and quickly ignored. Instead
-      # fail only when the count RISES above the recorded baseline, so a newly
-      # introduced high is caught while the known backlog stays visible.
-      - name: Audit ratchet (no NEW high vulnerabilities)
-        run: |
-          BASELINE=28
-          count=$(npm audit --json 2>/dev/null \
-            | node -e "let s='';process.stdin.on('data',d=>s+=d).on('end',()=>{
-                console.log(JSON.parse(s).metadata.vulnerabilities.high)})")
-          echo "high vulnerabilities: $count (baseline $BASELINE)"
-          case "$count" in
-            "" | *[!0-9]*) echo "::error::npm audit gave no numeric high count: '$count'"; exit 1 ;;
-          esac
-          if [ "$count" -gt "$BASELINE" ]; then
-            echo "::error::High-severity count rose from $BASELINE to $count."
-            npm audit --audit-level=high || true
-            exit 1
-          fi
-          if [ "$count" -lt "$BASELINE" ]; then
-            echo "::notice::High count dropped to $count — lower BASELINE in ci.yml."
-          fi
+        run: scripts/ci/regression-drives.sh

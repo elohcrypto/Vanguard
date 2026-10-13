@@ -1,0 +1,50 @@
+{
+  "why": "Per-contract branch floors read by scripts/ci/branch-floors.js (plan v2 Task 5.10, CF-7). `run` names the coverage run whose coverage.json is read: `contracts` = scripts/ci/coverage-ratchet.sh (ZK_PROOFS=0), `proofs` = scripts/ci/zk-coverage.sh (the proof suites, where PrivacyManager's proof-gated branches run). The Phase 5 floor is 80. `measured` is the figure at 8b4b158 (2026-10-13, an isolated local coverage copy).",
+  "floors": [
+    {
+      "contract": "contracts/oracle/WhitelistOracle.sol",
+      "run": "contracts",
+      "min": 80,
+      "measured": "94.29 (66/70)"
+    },
+    {
+      "contract": "contracts/oracle/BlacklistOracle.sol",
+      "run": "contracts",
+      "min": 80,
+      "measured": "88.75 (71/80)"
+    },
+    {
+      "contract": "contracts/oracle/ListOracleBase.sol",
+      "run": "contracts",
+      "min": 80,
+      "measured": "96.43 (27/28)"
+    },
+    {
+      "contract": "contracts/privacy/PrivacyManager.sol",
+      "run": "proofs",
+      "min": 80,
+      "measured": "95.59 (65/68); 55.88 in the contracts run"
+    },
+    {
+      "contract": "contracts/investor/InvestorRequestManager.sol",
+      "run": "contracts",
+      "min": 73,
+      "measured": "73.40 (69/94)",
+      "note": "No-drop floor at the measured figure rounded down; Task 5.3 raises it to 80."
+    },
+    {
+      "contract": "contracts/payment/EscrowWalletFactory.sol",
+      "run": "contracts",
+      "min": 66,
+      "measured": "66.28 (57/86)",
+      "note": "No-drop floor at the measured figure rounded down; Task 5.3 raises it to 80."
+    },
+    {
+      "contract": "contracts/payment/MultiSigEscrowWallet.sol",
+      "run": "contracts",
+      "min": 74,
+      "measured": "74.07 (80/108)",
+      "note": "No-drop floor at the measured figure rounded down; Task 5.3 raises it to 80."
+    }
+  ]
+}

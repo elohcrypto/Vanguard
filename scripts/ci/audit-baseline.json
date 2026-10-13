@@ -1,0 +1,39 @@
+{
+  "high": 28,
+  "why": [
+    "Ratchet on npm audit's high count (scripts/ci/audit-ratchet.js). Gating on `high` would be permanently red and quickly ignored; instead fail only when the count RISES above this baseline, so a newly introduced high is caught while the known backlog stays visible. Critical blocks outright (`npm audit --audit-level=critical`, currently 0).",
+    "The count is checked against the live advisory database, so a newly published advisory in an unchanged dependency reddens every branch at once: raise `high` with the advisory recorded in `history`. When the count drops, lower `high` to it."
+  ],
+  "history": [
+    {
+      "date": "2026-10-02",
+      "high": 22,
+      "note": "`npm audit fix` took highs 24 -> 22; a rerun (--dry-run) changes nothing.",
+      "chains": [
+        "Hardhat 2 (11): hardhat, toolbox, hardhat-ethers, -chai-matchers, -network-helpers, -verify, @typechain/hardhat, contract-sizer, gas-reporter, adm-zip, undici. Fix: Hardhat 3 majors (toolbox 7.0.0, chai-matchers 3.0.0, hardhat-ethers 4.2.0, network-helpers 3.0.11, verify 3.1.2); typechain, sizer, gas-reporter list none.",
+        "Coverage/test runners (3): solidity-coverage, mocha (8.4.0, 10.8.2, 11.8.0), serialize-javascript (5.0.1, 6.0.2). Fix: downgrade to solidity-coverage 0.7.22 (major).",
+        "ZK tooling (8): Prod `dependencies` used off-chain only (proof scripts, tests): exact pins under circom 0.5 -> circom_runtime -> ffjavascript -> mocha 8.4.0 (js-yaml 4.0.0, minimatch 3.0.4, nanoid 3.1.20); tmp 0.1.0 (tmp-promise; 0.0.33 is solc's, under hardhat); ws 8.18.0 (ethers 5 under circomlibjs); underscore 1.13.6, pinned by jsonpath, which taints jsonpath and bfj (snarkjs). npm's fixes leave the pins; clearing them needs overrides. `npm audit --omit=dev` reports 10: these 8 plus mocha 8.4.0's copies of mocha and serialize-javascript."
+      ]
+    },
+    {
+      "date": "2026-10-03",
+      "high": 34,
+      "note": "22 -> 34 (CI run 37090710733 at 15f26f3): advisories published upstream against an unchanged tree (no dependency changed; an install from days earlier reports 34 too). `npm audit fix --dry-run` (non-breaking) only adds fsevents and leaves 34. The same audit lists further highs on packages already in the 22 (js-yaml, minimatch, nanoid, undici, ws, tmp, underscore, serialize-javascript, adm-zip); the count is per package, so they do not move it.",
+      "chains": [
+        "@fastify/busboy (GHSA-x8mw-p69m-v3mx), under undici under hardhat and hardhat-verify (1). Fix: the Hardhat 3 majors above (npm offers solidity-coverage 0.7.22).",
+        "braces (GHSA-vfj7-8cjw-p6xm) -> micromatch -> fast-glob -> globby -> solidity-coverage, and braces -> chokidar -> mocha (the copies under solidity-coverage, eth-gas-reporter, circom_runtime) (5: braces, micromatch, fast-glob, globby, chokidar). Fix: the solidity-coverage major above; circom_runtime's needs overrides.",
+        "http-cache-semantics (GHSA-ch52-4w7c-c8xp) -> cacheable-request -> got -> package-json -> latest-version -> solhint (6). Fix: npm offers solhint 3.6.2 (major downgrade)."
+      ]
+    },
+    {
+      "date": "2026-10-04",
+      "high": 29,
+      "note": "34 -> 29 (CI run 37176125602 at a56b24d; a local `npm audit` agrees): advisories withdrawn or re-scored upstream on an unchanged tree, so the baseline follows the count down."
+    },
+    {
+      "date": "2026-10-12",
+      "high": 28,
+      "note": "29 -> 28: CI run 38131143635 at fd258df failed the critical step on a new handlebars advisory (4.0.0 - 4.7.9 under solidity-coverage -> sc-istanbul, dev only; three GHSA entries, JavaScript injection in compile). `npm audit fix` (non-breaking) took handlebars 4.7.10, pbkdf2 3.1.7, http-cache-semantics 4.3.0 and added the optional fsevents 2.3.3 entry: critical 1 -> 0, highs 29 -> 28 (http-cache-semantics), moderate 11 -> 10."
+    }
+  ]
+}
