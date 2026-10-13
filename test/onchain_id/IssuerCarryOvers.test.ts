@@ -170,6 +170,34 @@ describe("Issuer and identity carry-overs (Task 5.2)", function () {
       ).to.be.revertedWithCustomError(id, "NotCreator");
     });
 
+    it("a stranger in the creating block cannot add a creation key", async function () {
+      const [owner, holder, stranger] = await ethers.getSigners();
+      const fac = await (
+        await ethers.getContractFactory("OnchainIDFactory")
+      ).deploy(owner.address, ethers.ZeroHash);
+      const salt = ethers.id("same-block");
+      const at = await fac.computeOnchainIDAddress(holder.address, salt);
+      const id = await ethers.getContractAt("OnchainID", at);
+      const key = ethers.id("stranger-key");
+      await ethers.provider.send("evm_setAutomine", [false]);
+      try {
+        await fac.deployOnchainID(holder.address, salt, { gasLimit: 6e6 });
+        const tx = await id
+          .connect(stranger)
+          .addCreationKey(key, { gasLimit: 2e5 });
+        await ethers.provider.send("evm_mine", []);
+        const rc = await ethers.provider.getTransactionReceipt(tx.hash);
+        expect(rc!.status).to.equal(0);
+        expect(rc!.blockNumber).to.equal(
+          (await ethers.provider.getBlock("latest"))!.number,
+        );
+      } finally {
+        await ethers.provider.send("evm_setAutomine", [true]);
+      }
+      expect(await id.owner()).to.equal(holder.address);
+      expect(await id.keyHasPurpose(key, 1)).to.equal(false);
+    });
+
     it("a direct deployer cannot add a creation key after its block", async function () {
       const [deployer, holder] = await ethers.getSigners();
       const id = await (
