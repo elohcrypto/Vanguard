@@ -119,6 +119,30 @@ describe("Task 5.1: no single node resolves; the list-oracle voter floor", funct
         "SingleNodeQuorum",
       );
     });
+
+    // Task 5.1 review I3: the signature path, the same property.
+    it("validateOracleConsensus refuses while one node alone reaches the bar", async function () {
+      const h = ethers.id("message");
+      const sign = (ws: SignerWithAddress[]) =>
+        Promise.all(ws.map((w) => w.signMessage(ethers.getBytes(h))));
+      const check = async (ws: SignerWithAddress[]) =>
+        OM.validateOracleConsensus(
+          ws.map((w) => w.address),
+          await sign(ws),
+          h,
+        );
+      expect(await check([n1, n2])).to.equal(true);
+      await OM.setOracleWeight(n1.address, 700);
+      await OM.setOracleWeight(n2.address, 150);
+      await OM.setOracleWeight(n3.address, 150);
+      expect(await check([n1])).to.equal(false);
+      expect(await check([n1, n2, n3])).to.equal(false);
+      await OM.setOracleWeight(n1.address, 659); // 659 of 959: 68.7%
+      expect(await check([n1])).to.equal(false);
+      await OM.setOracleWeight(n2.address, 191); // 659 of 1000: below
+      expect(await check([n1])).to.equal(false);
+      expect(await check([n1, n2])).to.equal(true);
+    });
   });
 
   describe("N11: minimumConsensusOracles is enforced on the verdict's side", function () {

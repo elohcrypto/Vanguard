@@ -216,10 +216,20 @@ contract ConsensusOracle {
 
     /// @notice True when `weight` meets the threshold against the live
     ///         registered total (OracleManager.validateOracleConsensus), so
-    ///         pausing nodes never lowers it; false with no node.
+    ///         pausing nodes never lowers it; false with no node, and false
+    ///         while one registered node's weight alone meets it (A1F-4 for
+    ///         signatures, Task 5.1 review I3: openQuery refuses the same).
     function meetsThreshold(uint256 weight) external view returns (bool) {
-        uint256 total = registeredWeight();
-        return total > 0 && weight * 100 >= total * consensusThreshold;
+        address[] memory nodes = oracleManager.getRegisteredOracles();
+        uint256 total = 0;
+        uint256 heaviest = 0;
+        for (uint256 i = 0; i < nodes.length; i++) {
+            uint256 w = weightOf(nodes[i]);
+            total += w;
+            if (w > heaviest) heaviest = w;
+        }
+        uint256 bar = total * consensusThreshold;
+        return total > 0 && heaviest * 100 < bar && weight * 100 >= bar;
     }
 
     /// @notice `oracle`'s weight in `queryId`'s snapshot (0: not a member)

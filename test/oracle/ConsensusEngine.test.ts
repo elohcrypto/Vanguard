@@ -157,29 +157,38 @@ describe("Consensus engine under the gate (4.4)", function () {
     });
 
     it("validateOracleConsensus tallies signer weight against the live total", async function () {
-      await OM.setOracleWeight(n1.address, 400);
       const h = ethers.id("message");
       const s = (n: SignerWithAddress) => n.signMessage(ethers.getBytes(h));
-      // 400 of 600 is 66.7%: n1 alone meets 66, n2 + n3 (200) do not.
-      expect(await OM.validateOracleConsensus([n1.address], [await s(n1)], h))
-        .to.be.true;
-      expect(
-        await OM.validateOracleConsensus(
-          [n2.address, n3.address],
-          [await s(n2), await s(n3)],
+      const check = async (ns: SignerWithAddress[]) =>
+        OM.validateOracleConsensus(
+          ns.map((n) => n.address),
+          await Promise.all(ns.map(s)),
           h,
-        ),
-      ).to.be.false;
-      await OM.setConsensusThreshold(70);
-      expect(await OM.validateOracleConsensus([n1.address], [await s(n1)], h))
-        .to.be.false;
-      // Against the registered total: pausing n2 and n3 does not lower it.
+        );
+      // Task 5.1 review I3: 400 of 600 is 66.7%, n1 alone meets 66, so
+      // no signature set counts (openQuery refuses the same).
+      await OM.setOracleWeight(n1.address, 400);
+      expect(await check([n1])).to.be.false;
+      expect(await check([n1, n2, n3])).to.be.false;
+      // 250/150/100 of 500, bar 66%: 330.
+      await OM.setOracleWeight(n1.address, 250);
+      await OM.setOracleWeight(n2.address, 150);
+      expect(await check([n1, n2])).to.be.true;
+      expect(await check([n1, n3])).to.be.true;
+      expect(await check([n2, n3])).to.be.false;
+      await OM.setConsensusThreshold(70); // bar 350: inclusive
+      expect(await check([n1, n3])).to.be.true;
+      await OM.setConsensusThreshold(71);
+      expect(await check([n1, n3])).to.be.false;
+      // Against the registered total: pausing n3 does not lower it.
+      // 100/100/200 of 400, bar 264: n1 + n2 (200) fall short; against
+      // the active total (200, bar 132) they would pass.
       await OM.setConsensusThreshold(66);
       await OM.setOracleWeight(n1.address, 100);
-      await OM.connect(ops).pauseOracle(n2.address);
+      await OM.setOracleWeight(n2.address, 100);
+      await OM.setOracleWeight(n3.address, 200);
       await OM.connect(ops).pauseOracle(n3.address);
-      expect(await OM.validateOracleConsensus([n1.address], [await s(n1)], h))
-        .to.be.false;
+      expect(await check([n1, n2])).to.be.false;
     });
 
     it("threshold is a percent in (50, 100]", async function () {
