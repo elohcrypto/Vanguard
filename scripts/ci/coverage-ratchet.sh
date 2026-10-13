@@ -26,6 +26,10 @@
 # small under coverage. Measured locally after that: 7.6 GB peak RSS
 # (EDR native memory included), 15:26 wall, default heap.
 #
+# A failed run prints mocha's failure blocks (message and stack, capped
+# at 200 lines) rather than only titles; CI uploads the full log on
+# failure.
+#
 # Leaves coverage.json for scripts/ci/branch-floors.js (run "contracts").
 #
 # USAGE  scripts/ci/coverage-ratchet.sh   (exit 1 on a finding)
@@ -36,7 +40,7 @@ BASELINE=95
 LOG=coverage.log
 if ! ZK_PROOFS=0 npm run test:coverage > "$LOG" 2>&1; then
   echo "::error::the instrumented test run failed; see $LOG"
-  grep -E '^\s+[0-9]+ (passing|failing|pending)|^\s+[0-9]+\) ' "$LOG" | head -40 || true
+  node scripts/ci/mocha-log.js failures "$LOG" 200
   tail -20 "$LOG"
   exit 1
 fi

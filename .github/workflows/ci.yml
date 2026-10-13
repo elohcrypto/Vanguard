@@ -194,6 +194,13 @@ jobs:
       # Per-contract floors (scripts/ci/branch-floors.json), this run's json.
       - name: Branch floors (contract run)
         run: node scripts/ci/branch-floors.js contracts coverage.json
+      - name: Upload coverage log (on failure)
+        if: failure()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: coverage-log
+          path: coverage.log
+          retention-days: 7
 
   zk-coverage:
     needs: compile
@@ -227,6 +234,13 @@ jobs:
         run: scripts/ci/zk-coverage.sh
       - name: PrivacyManager branch gate (proof run floors)
         run: node scripts/ci/branch-floors.js proofs coverage.json
+      - name: Upload proof coverage log (on failure)
+        if: failure()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: zk-coverage-log
+          path: coverage-zk.log
+          retention-days: 7
 
   # The smoke's node serves every later step of this job, in order: the
   # CLI after its handover, the strict ceremony drive, then the
