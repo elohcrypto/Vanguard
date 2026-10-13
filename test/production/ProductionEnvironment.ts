@@ -340,29 +340,14 @@ export class ProductionEnvironment {
       [JSON.stringify(kycData)],
     );
 
-    const uri = `https://kyc-provider.com/verification/${identityAddress}`;
-    const validTo =
-      (await ethers.provider.getBlock("latest"))!.timestamp +
-      this.config.claimValidityPeriod;
-    const signature = await signClaim(
+    await this.issueSigned(
+      this.kycIssuer,
       this.kycProvider,
       identityAddress,
       this.config.kycTopic,
       claimData,
-      { scheme: this.config.ecdsaScheme, uri, validTo },
+      `https://kyc-provider.com/verification/${identityAddress}`,
     );
-    await this.kycIssuer
-      .connect(this.kycProvider)
-      .issueClaim(
-        identityAddress,
-        this.config.kycTopic,
-        this.config.ecdsaScheme,
-        claimData,
-        uri,
-        validTo,
-        signature,
-        { gasPrice: this.networkConditions.gasPrice },
-      );
 
     console.log("   KYC claim issued successfully");
   }
@@ -388,31 +373,35 @@ export class ProductionEnvironment {
       [JSON.stringify(amlData)],
     );
 
-    const uri = `https://aml-provider.com/screening/${identityAddress}`;
-    const validTo =
-      (await ethers.provider.getBlock("latest"))!.timestamp +
-      this.config.claimValidityPeriod;
-    const signature = await signClaim(
+    await this.issueSigned(
+      this.amlIssuer,
       this.amlProvider,
       identityAddress,
       this.config.amlTopic,
       claimData,
-      { scheme: this.config.ecdsaScheme, uri, validTo },
+      `https://aml-provider.com/screening/${identityAddress}`,
     );
-    await this.amlIssuer
-      .connect(this.amlProvider)
-      .issueClaim(
-        identityAddress,
-        this.config.amlTopic,
-        this.config.ecdsaScheme,
-        claimData,
-        uri,
-        validTo,
-        signature,
-        { gasPrice: this.networkConditions.gasPrice },
-      );
 
     console.log("   AML claim issued successfully");
+  }
+
+  /** Signs every claim field (Task 5.2, L-D) and issues the claim. */
+  private async issueSigned(
+    issuer: any,
+    signer: any,
+    ...c: [string, number, string, string]
+  ) {
+    const [identity, topic, data, uri] = c;
+    const block = await ethers.provider.getBlock("latest");
+    const validTo = block!.timestamp + this.config.claimValidityPeriod;
+    const scheme = this.config.ecdsaScheme;
+    const f = { scheme, uri, validTo };
+    const sig = await signClaim(signer, identity, topic, data, f);
+    await issuer
+      .connect(signer)
+      .issueClaim(identity, topic, scheme, data, uri, validTo, sig, {
+        gasPrice: this.networkConditions.gasPrice,
+      });
   }
 
   // Setup comprehensive recovery system

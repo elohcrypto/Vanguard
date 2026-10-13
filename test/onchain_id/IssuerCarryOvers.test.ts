@@ -231,7 +231,14 @@ describe("Issuer and identity carry-overs (Task 5.2)", function () {
     const args = (issuer: string) =>
       [KYC, 1, issuer, "0x", ethers.toUtf8Bytes("x"), ""] as const;
     const batch = (issuer: string) =>
-      [[KYC], [1], [issuer], ["0x"], [ethers.toUtf8Bytes("x")], [""]] as const;
+      [[KYC], [1], [issuer], ["0x"], [ethers.toUtf8Bytes("x")], [""]] as [
+        number[],
+        number[],
+        string[],
+        string[],
+        Uint8Array[],
+        string[],
+      ];
 
     it("an authorized manager adds by both paths; a stranger by neither", async function () {
       const { holder, stranger, id, kycAddr } = await setup();
