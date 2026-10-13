@@ -11,7 +11,9 @@
  * era left while the deployer still owns the manager. The ceremony
  * prints each node's provenance (who sent its OracleRegistered) as a
  * residual warning when that was the deployer (D50: rotate by vote), and
- * warns below ConsensusOracle.MIN_NODES. Each list oracle bound to VSC
+ * warns below ConsensusOracle.MIN_NODES; it prints each node's weight
+ * share and fails when one node alone reaches the bar (Task 5.1, A1F-4:
+ * the engine then opens no query). Each list oracle bound to VSC
  * or VGT must carry the compiled WhitelistOracle or BlacklistOracle
  * code, not be paused, require at least two consensus oracles and keep a
  * sane maxVerdictAge; its manager link is HandoverDerive.js.
@@ -69,11 +71,39 @@ async function nodeFacts(o) {
   const designated = [];
   for (const a of live) if (await om.isEmergencyOracle(a)) designated.push(a);
   const engine = await ethers.getContractAt(
-    ["function MIN_NODES() view returns (uint256)"],
+    [
+      "function MIN_NODES() view returns (uint256)",
+      "function weightOf(address) view returns (uint256)",
+      "function consensusThreshold() view returns (uint256)",
+    ],
     await om.consensusEngine(),
   );
   const minNodes = Number(await engine.MIN_NODES().catch(() => 2));
-  return { nodes, designated, minNodes };
+  for (const n of nodes) n.weight = await engine.weightOf(n.addr).catch(() => 0n);
+  const threshold = await engine.consensusThreshold().catch(() => 0n);
+  return { nodes, designated, minNodes, threshold };
+}
+
+/**
+ * Task 5.1 (A1F-4): each node's share of the registered weight, and
+ * whether the heaviest alone reaches the bar (the engine then refuses
+ * every query: SingleNodeQuorum).
+ */
+function weightShares(f) {
+  const total = f.nodes.reduce((t, n) => t + n.weight, 0n);
+  const pct = (w) => (total ? Number((w * 1000n) / total) / 10 : 0);
+  const heavy = f.nodes.reduce((m, n) => (n.weight > m.weight ? n : m), {
+    weight: 0n,
+  });
+  return {
+    shares: f.nodes.map((n) => `${n.addr} ${n.weight} (${pct(n.weight)}%)`),
+    heavy,
+    // Below MIN_NODES no query opens anyway; nodeLines warns about that.
+    alone:
+      f.nodes.length >= f.minNodes &&
+      total > 0n &&
+      heavy.weight * 100n >= total * f.threshold,
+  };
 }
 
 /** [{ label, ok, fix, strays }] for the nodes and designations. */
@@ -100,6 +130,13 @@ async function nodeChecks(o, f = null) {
       fn: "removeOracle",
       args: [a, "handover: not acknowledged"],
     })),
+  });
+  const w = weightShares(f);
+  out.push({
+    label: `no OracleManager node alone reaches the ${f.threshold}% bar; weight shares: ${list(w.shares) || "none"}`,
+    ok: !w.alone,
+    fix: `OracleManager node ${w.heavy.addr} holds ${w.heavy.weight} of the registered weight, at or above the ${f.threshold}% bar alone: the engine opens no query (SingleNodeQuorum); the manager owner must setOracleWeight(...) so no node reaches the bar alone first`,
+    strays: [],
   });
   const unack = f.designated.filter((a) => !ack.some((b) => same(a, b)));
   out.push({

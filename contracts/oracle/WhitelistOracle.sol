@@ -47,7 +47,6 @@ contract WhitelistOracle is ListOracleBase {
     uint256 public constant MAX_REASON_LENGTH = 256;
     uint256 public constant MIN_TIER = 1;
     uint256 public constant MAX_TIER = 5;
-    uint8 public minimumConsensusOracles = 3;
 
     // Events
     event WhitelistUpdated(

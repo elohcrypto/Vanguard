@@ -353,6 +353,13 @@ contract OracleManager is IOracleManager, OracleQueryPayload, Ownable2Step, Reen
     }
 
     /// @inheritdoc IOracleManager
+    function getQuerySupport(bytes32 _queryId) external view returns (uint256) {
+        Query storage query = queries[_queryId];
+        if (!query.hasResult) return 0;
+        return _boundEngine().votersFor(_queryId, query.result);
+    }
+
+    /// @inheritdoc IOracleManager
     function getQueryData(bytes32 _queryId) external view returns (bytes memory) {
         return queries[_queryId].data;
     }

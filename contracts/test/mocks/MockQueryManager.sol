@@ -5,7 +5,7 @@ pragma solidity ^0.8.20;
  * @title MockQueryManager
  * @dev Test double for the OracleManager views a list oracle reads when it
  *      applies a verdict (isActiveOracle, getQueryResolution,
- *      getQueryBinding, getQueryData). It resolves any query YES now and
+ *      getQueryBinding, getQueryData, getQuerySupport: every node). It resolves any query YES now and
  *      returns whatever data the test set, so a test can hand
  *      WhitelistOracle a payload the real manager refuses at submit
  *      (Task 4.12: the oracle's own InvalidQueryTier re-check).
@@ -27,6 +27,10 @@ contract MockQueryManager {
 
     function getQueryResolution(bytes32) external view returns (bool, bool, uint256) {
         return (true, true, block.timestamp);
+    }
+
+    function getQuerySupport(bytes32) external pure returns (uint256) {
+        return type(uint256).max;
     }
 
     function getQueryBinding(bytes32) external view returns (address, uint8) {

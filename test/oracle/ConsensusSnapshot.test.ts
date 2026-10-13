@@ -111,10 +111,11 @@ describe("Consensus snapshot: pausing never lowers the bar", function () {
     expect((await CO.getConsensusResult(q)).expiresAt).to.equal(
       before.expiresAt,
     );
-    // A query opened now uses the new parameters: 1000 of 1200 >= 51%.
-    const later = await raise();
-    await answer(n1, later, true);
-    expect(await resolved(later)).to.deep.equal([true, true]);
+    // A query opened now uses the new parameters: n1 alone holds 1000 of
+    // 1200 >= 51%, so it no longer opens (Task 5.1, A1F-4).
+    await expect(raise())
+      .to.be.revertedWithCustomError(CO, "SingleNodeQuorum")
+      .withArgs(n1.address, 1000, 1200);
   });
 
   it("NO resolves exactly at the bar", async function () {

@@ -40,6 +40,9 @@ contract ConsensusOracle {
     /// @notice Fewer than MIN_NODES registered nodes: one node would
     ///         resolve every query alone (bar = its own weight x 66%).
     error TooFewNodes(uint256 registered, uint256 minimum);
+    /// @notice One node's weight alone reaches the bar (A1F-4, Task 5.1):
+    ///         that node would resolve the query by itself.
+    error SingleNodeQuorum(address node, uint256 weight, uint256 snapshotWeight);
     /// @notice The voter was not a registered node when the query opened.
     error NotInSnapshot();
     error InvalidThreshold();
@@ -111,19 +114,25 @@ contract ConsensusOracle {
 
     /// @notice Open `queryId`: snapshot every registered node's weight and
     ///         freeze the bar (manager only). Bounded by MAX_ORACLES (100);
-    ///         refused below MIN_NODES registered nodes.
+    ///         refused below MIN_NODES registered nodes, and when the
+    ///         heaviest node alone reaches the bar (A1F-4: MIN_NODES counts
+    ///         nodes, so a re-weighted node would otherwise resolve alone).
     function openQuery(bytes32 queryId) external onlyOracleManager {
         ConsensusQuery storage q = _queries[queryId];
         if (q.openedAt != 0) revert QueryExists();
         address[] memory nodes = oracleManager.getRegisteredOracles();
         if (nodes.length < MIN_NODES) revert TooFewNodes(nodes.length, MIN_NODES);
         uint256 snapshot = 0;
+        uint256 heaviest = 0;
+        address heavyNode;
         for (uint256 i = 0; i < nodes.length; i++) {
             uint256 w = weightOf(nodes[i]);
             q.weightAt[nodes[i]] = w;
             snapshot += w;
+            if (w > heaviest) (heaviest, heavyNode) = (w, nodes[i]);
         }
         if (snapshot == 0) revert NoRegisteredWeight();
+        if (heaviest * 100 >= snapshot * consensusThreshold) revert SingleNodeQuorum(heavyNode, heaviest, snapshot);
         q.openedAt = block.timestamp;
         q.expiresAt = block.timestamp + queryExpiryTime;
         q.snapshotWeight = snapshot;
@@ -249,6 +258,13 @@ contract ConsensusOracle {
             q.expiresAt,
             q.openedAt != 0 && !q.resolved && block.timestamp >= q.expiresAt
         );
+    }
+
+    /// @notice How many distinct snapshot nodes voted `side` on `queryId`
+    ///         (Task 5.1, N11: the list oracles' minimumConsensusOracles).
+    function votersFor(bytes32 queryId, bool side) external view returns (uint256 n) {
+        ConsensusQuery storage q = _queries[queryId];
+        for (uint256 i = 0; i < q.voters.length; i++) if (q.votes[q.voters[i]] == side) n++;
     }
 
     function getQueryVoters(bytes32 queryId) external view returns (address[] memory) {

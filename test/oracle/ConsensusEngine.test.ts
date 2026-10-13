@@ -101,11 +101,12 @@ describe("Consensus engine under the gate (4.4)", function () {
     });
 
     it("weights count from the snapshot; removal resets a node's weight", async function () {
-      await OM.setOracleWeight(n1.address, 400);
-      const q = await raise(); // 400 + 100 + 100
-      await expect(answer(n1, q, true))
+      await OM.setOracleWeight(n1.address, 150);
+      const q = await raise(); // 150 + 100 + 100, bar 350 x 66
+      await answer(n1, q, true); // alone below the bar (Task 5.1, A1F-4)
+      await expect(answer(n2, q, true))
         .to.emit(CO, "ConsensusReached")
-        .withArgs(q, true, 400, 0, 600, (t: bigint) => t > 0n);
+        .withArgs(q, true, 250, 0, 350, (t: bigint) => t > 0n);
       await OM.removeOracle(n1.address, "offboarded");
       expect(await CO.oracleWeights(n1.address)).to.equal(0);
       expect(await CO.getOracleWeight(n1.address)).to.equal(0);

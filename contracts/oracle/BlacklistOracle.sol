@@ -47,7 +47,6 @@ contract BlacklistOracle is ListOracleBase {
     // Blacklist configuration
     uint256 public constant DEFAULT_BLACKLIST_DURATION = 30 days;
     uint256 public constant EMERGENCY_BLACKLIST_DURATION = 7 days;
-    uint8 public minimumConsensusOracles = 2; // Lower threshold for blacklisting
 
     // Emergency blacklisting - one designated node for critical threats; the
     // designation is OracleManager.isEmergencyOracle (Task 4.4).

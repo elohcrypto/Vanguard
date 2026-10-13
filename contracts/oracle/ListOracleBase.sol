@@ -31,6 +31,9 @@ abstract contract ListOracleBase is IOracle, Ownable, ReentrancyGuard, Pausable 
     error VerdictSuperseded();
     /// @notice `maxVerdictAge` outside [MIN_VERDICT_AGE, MAX_VERDICT_AGE].
     error InvalidVerdictAge();
+    /// @notice Fewer distinct nodes voted the verdict's way than
+    ///         minimumConsensusOracles (Task 5.1, N11).
+    error TooFewVoters(uint256 voters, uint256 minimum);
     using ECDSA for bytes32;
 
     // State variables
@@ -59,6 +62,12 @@ abstract contract ListOracleBase is IOracle, Ownable, ReentrancyGuard, Pausable 
     uint256 public constant MAX_VERDICT_AGE = 30 days;
     event MaxVerdictAgeUpdated(uint256 previous, uint256 current);
     mapping(address => uint256) public oracleReputation;
+    /// @notice Distinct nodes that must have voted a verdict's way before
+    ///         this oracle applies it (Task 5.1, N11; the handover floors it
+    ///         at 2). The engine's MIN_NODES and single-node refusal are the
+    ///         engine floor; this is the per-oracle one. Set by the owner
+    ///         (each oracle's setMinimumConsensusOracles).
+    uint8 public minimumConsensusOracles = 2;
 
     string public oracleName;
     string public oracleDescription;
@@ -99,14 +108,17 @@ abstract contract ListOracleBase is IOracle, Ownable, ReentrancyGuard, Pausable 
     /**
      * @dev Consume a resolved verdict for `_subject`: refused if already
      *      applied, if the subject was written at or after it resolved, or
-     *      if it resolved more than maxVerdictAge ago; otherwise marked
-     *      applied (even when it changes nothing) and lastWriteAt moves to
-     *      its resolvedAt.
+     *      if it resolved more than maxVerdictAge ago, or if fewer than
+     *      minimumConsensusOracles distinct nodes voted its way; otherwise
+     *      marked applied (even when it changes nothing) and lastWriteAt
+     *      moves to its resolvedAt.
      */
     function _consumeVerdict(bytes32 _queryId, address _subject, uint256 _resolvedAt) internal {
         if (verdictApplied[_queryId]) revert VerdictAlreadyApplied();
         if (_resolvedAt <= lastWriteAt[_subject]) revert VerdictSuperseded();
         if (block.timestamp > _resolvedAt + maxVerdictAge) revert VerdictExpired();
+        uint256 support = oracleManager.getQuerySupport(_queryId);
+        if (support < minimumConsensusOracles) revert TooFewVoters(support, minimumConsensusOracles);
         verdictApplied[_queryId] = true;
         lastWriteAt[_subject] = _resolvedAt;
     }
