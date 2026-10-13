@@ -1,7 +1,12 @@
 import { expect } from "chai";
 import { ethers } from "hardhat";
 import { time } from "@nomicfoundation/hardhat-network-helpers";
-import { T, deployCustody, lockedRequest, setNormalCaps } from "../helpers/custody";
+import {
+  T,
+  deployCustody,
+  lockedRequest,
+  setNormalCaps,
+} from "../helpers/custody";
 
 // Plan v2 Task 5.1, A1F-6: InvestorRequestManager checked a lock against
 // the Normal cap only when the lock requirement was set. After the
@@ -18,7 +23,8 @@ describe("Task 5.1: request locks after a Normal cap cut", function () {
     return f;
   }
   const cut = (f: any, to: bigint) => setNormalCaps(f.types, to, to);
-  const status = async (f: any) => Number((await f.m.requests(f.user.address)).status);
+  const status = async (f: any) =>
+    Number((await f.m.requests(f.user.address)).status);
   const REJECTED = 5;
 
   it("a request made after the cut is refused", async function () {
@@ -61,8 +67,13 @@ describe("Task 5.1: request locks after a Normal cap cut", function () {
     await f.m.connect(f.user).requestInvestorStatus(T.Retail);
     await f.m.connect(f.bank).createMultiSigWallet(f.user.address);
     const r = await f.m.requests(f.user.address);
-    await f.token.connect(f.user).approve(r.multiSigWallet, r.requiredLockAmount);
-    const wallet = await ethers.getContractAt("MultiSigWallet", r.multiSigWallet);
+    await f.token
+      .connect(f.user)
+      .approve(r.multiSigWallet, r.requiredLockAmount);
+    const wallet = await ethers.getContractAt(
+      "MultiSigWallet",
+      r.multiSigWallet,
+    );
     await wallet.connect(f.user).lockTokens(r.requiredLockAmount);
     await cut(f, f.cap / 8n);
     await expect(f.m.connect(f.user).confirmTokensLocked())
@@ -89,8 +100,13 @@ describe("Task 5.1: request locks after a Normal cap cut", function () {
     await cut(f, f.cap / 4n);
     await f.m.connect(f.bank).createMultiSigWallet(f.user.address);
     const r = await f.m.requests(f.user.address);
-    await f.token.connect(f.user).approve(r.multiSigWallet, r.requiredLockAmount);
-    const wallet = await ethers.getContractAt("MultiSigWallet", r.multiSigWallet);
+    await f.token
+      .connect(f.user)
+      .approve(r.multiSigWallet, r.requiredLockAmount);
+    const wallet = await ethers.getContractAt(
+      "MultiSigWallet",
+      r.multiSigWallet,
+    );
     await wallet.connect(f.user).lockTokens(r.requiredLockAmount);
     await f.m.connect(f.user).confirmTokensLocked();
     await f.m.connect(f.bank).approveRequest(f.user.address);

@@ -79,7 +79,8 @@ async function nodeFacts(o) {
     await om.consensusEngine(),
   );
   const minNodes = Number(await engine.MIN_NODES().catch(() => 2));
-  for (const n of nodes) n.weight = await engine.weightOf(n.addr).catch(() => 0n);
+  for (const n of nodes)
+    n.weight = await engine.weightOf(n.addr).catch(() => 0n);
   const threshold = await engine.consensusThreshold().catch(() => 0n);
   return { nodes, designated, minNodes, threshold };
 }

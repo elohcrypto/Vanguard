@@ -24,18 +24,26 @@ describe("Task 5.1: bounded trusted-issuer calls", function () {
 
   beforeEach(async function () {
     [owner, user] = await ethers.getSigners();
-    good = await (await ethers.getContractFactory("ClaimIssuer")).deploy(owner.address, "g", "g");
-    const id = await (await ethers.getContractFactory("OnchainID")).deploy(user.address);
+    good = await (
+      await ethers.getContractFactory("ClaimIssuer")
+    ).deploy(owner.address, "g", "g");
+    const id = await (
+      await ethers.getContractFactory("OnchainID")
+    ).deploy(user.address);
     idA = await id.getAddress();
     await attest(good, owner, idA, KYC_TOPIC, 2_000_000_000);
     probe = await (await ethers.getContractFactory("IssuerCallProbe")).deploy();
   });
 
   async function registry(hostileModes: number[]) {
-    const r = await (await ethers.getContractFactory("IdentityRegistry")).deploy();
+    const r = await (
+      await ethers.getContractFactory("IdentityRegistry")
+    ).deploy();
     await r.registerIdentity(user.address, idA, 840);
     for (const m of hostileModes) {
-      const bad = await (await ethers.getContractFactory("HostileIssuer")).deploy(m);
+      const bad = await (
+        await ethers.getContractFactory("HostileIssuer")
+      ).deploy(m);
       await r.addTrustedIssuer(await bad.getAddress(), [KYC_TOPIC]);
     }
     await r.addTrustedIssuer(await good.getAddress(), [KYC_TOPIC]);
@@ -49,9 +57,14 @@ describe("Task 5.1: bounded trusted-issuer calls", function () {
     const stipend = await (await registry([])).ISSUER_CALL_GAS();
     // Deepest honest path: a live claim, every check read (cold slots).
     const [used, ok] = await probe.cost(await good.getAddress(), hasValid(idA));
-    const vt = good.interface.encodeFunctionData("claimValidTo", [idA, KYC_TOPIC]);
+    const vt = good.interface.encodeFunctionData("claimValidTo", [
+      idA,
+      KYC_TOPIC,
+    ]);
     const [usedVt] = await probe.cost(await good.getAddress(), vt);
-    console.log(`      hasValidClaim ${used} gas, claimValidTo ${usedVt} gas, stipend ${stipend}`);
+    console.log(
+      `      hasValidClaim ${used} gas, claimValidTo ${usedVt} gas, stipend ${stipend}`,
+    );
     expect(ok).to.equal(true);
     // Instrumented (coverage) ClaimIssuer costs more: measured, and it must
     // still fit the stipend, but the 3x bound is the plain build's.
@@ -72,7 +85,9 @@ describe("Task 5.1: bounded trusted-issuer calls", function () {
       // One stipend wasted, then the honest walk.
       expect(gas).to.be.lt(200_000n);
       for (const limit of [300_000, 3_000_000, 16_000_000]) {
-        expect(await r.isVerified.staticCall(user.address, { gasLimit: limit })).to.equal(true);
+        expect(
+          await r.isVerified.staticCall(user.address, { gasLimit: limit }),
+        ).to.equal(true);
       }
     });
   }
@@ -88,9 +103,13 @@ describe("Task 5.1: bounded trusted-issuer calls", function () {
   });
 
   it("an issuer whose only claim view is the hostile one is no claim", async function () {
-    const r = await (await ethers.getContractFactory("IdentityRegistry")).deploy();
+    const r = await (
+      await ethers.getContractFactory("IdentityRegistry")
+    ).deploy();
     await r.registerIdentity(user.address, idA, 840);
-    const bad = await (await ethers.getContractFactory("HostileIssuer")).deploy(BOMB);
+    const bad = await (
+      await ethers.getContractFactory("HostileIssuer")
+    ).deploy(BOMB);
     await r.addTrustedIssuer(await bad.getAddress(), [KYC_TOPIC]);
     await r.addClaimTopic(KYC_TOPIC);
     expect(await r.isVerified(user.address)).to.equal(false);
@@ -101,9 +120,13 @@ describe("Task 5.1: bounded trusted-issuer calls", function () {
     [BOMB_VALID_TO, "returns 1 MB"],
   ] as const) {
     it(`a refresh through an issuer whose claimValidTo ${what} verifies and does not cache`, async function () {
-      const r = await (await ethers.getContractFactory("IdentityRegistry")).deploy();
+      const r = await (
+        await ethers.getContractFactory("IdentityRegistry")
+      ).deploy();
       await r.registerIdentity(user.address, idA, 840);
-      const bad = await (await ethers.getContractFactory("HostileIssuer")).deploy(mode);
+      const bad = await (
+        await ethers.getContractFactory("HostileIssuer")
+      ).deploy(mode);
       await r.addTrustedIssuer(await bad.getAddress(), [KYC_TOPIC]);
       await r.addClaimTopic(KYC_TOPIC);
       expect(await r.refreshVerified.staticCall(user.address)).to.equal(true);
@@ -114,7 +137,11 @@ describe("Task 5.1: bounded trusted-issuer calls", function () {
 
   describe("BoundedStaticCall.word", function () {
     it("returns the first word of an honest answer", async function () {
-      const [ok, w] = await probe.word(await good.getAddress(), hasValid(idA), 30_000);
+      const [ok, w] = await probe.word(
+        await good.getAddress(),
+        hasValid(idA),
+        30_000,
+      );
       expect([ok, w]).to.deep.equal([true, 1n]);
     });
 
@@ -130,7 +157,9 @@ describe("Task 5.1: bounded trusted-issuer calls", function () {
       await expect(
         probe.word.staticCall(target, data, 1_000_000, { gasLimit: 900_000 }),
       ).to.be.revertedWithCustomError(probe, "StipendUnavailable");
-      const [ok] = await probe.word.staticCall(target, data, 1_000_000, { gasLimit: 1_200_000 });
+      const [ok] = await probe.word.staticCall(target, data, 1_000_000, {
+        gasLimit: 1_200_000,
+      });
       expect(ok).to.equal(true);
     });
 
@@ -142,7 +171,9 @@ describe("Task 5.1: bounded trusted-issuer calls", function () {
       let reverted = 0;
       for (let limit = 30_000; limit <= 110_000; limit += 500) {
         try {
-          const res = await r.refreshVerified.staticCall(user.address, { gasLimit: limit });
+          const res = await r.refreshVerified.staticCall(user.address, {
+            gasLimit: limit,
+          });
           expect(res, `gas limit ${limit}`).to.equal(true);
         } catch (e: any) {
           if (e.name === "AssertionError") throw e;

@@ -22,10 +22,15 @@ describe("Task 5.1: no single node resolves; the list-oracle voter floor", funct
     [owner, n1, n2, n3, subject] = await ethers.getSigners();
     OM = await (await ethers.getContractFactory("OracleManager")).deploy();
     CO = await bindEngine(OM);
-    for (const n of [n1, n2, n3]) await OM.registerOracle(n.address, "n", "", 500);
+    for (const n of [n1, n2, n3])
+      await OM.registerOracle(n.address, "n", "", 500);
     const om = await OM.getAddress();
-    WO = await (await ethers.getContractFactory("WhitelistOracle")).deploy(om, "WL", "");
-    BO = await (await ethers.getContractFactory("BlacklistOracle")).deploy(om, "BL", "");
+    WO = await (
+      await ethers.getContractFactory("WhitelistOracle")
+    ).deploy(om, "WL", "");
+    BO = await (
+      await ethers.getContractFactory("BlacklistOracle")
+    ).deploy(om, "BL", "");
   });
 
   async function raise(type = WHITELIST, data = TIER3): Promise<string> {
@@ -36,14 +41,21 @@ describe("Task 5.1: no single node resolves; the list-oracle voter floor", funct
   }
   const vote = (n: SignerWithAddress, q: string, v: boolean) =>
     OM.connect(n).submitResponse(q, v);
-  async function attest(oracle: any, n: SignerWithAddress, q: string, v: boolean) {
+  async function attest(
+    oracle: any,
+    n: SignerWithAddress,
+    q: string,
+    v: boolean,
+  ) {
     const chainId = (await ethers.provider.getNetwork()).chainId;
     const h = ethers.solidityPackedKeccak256(
       ["address", "bytes32", "bool", "uint256"],
       [subject.address, q, v, chainId],
     );
     const sig = await n.signMessage(ethers.getBytes(h));
-    return oracle.connect(n).provideAttestation(subject.address, q, v, sig, "0x");
+    return oracle
+      .connect(n)
+      .provideAttestation(subject.address, q, v, sig, "0x");
   }
 
   describe("A1F-4: the heaviest node alone never reaches the bar", function () {
@@ -51,7 +63,9 @@ describe("Task 5.1: no single node resolves; the list-oracle voter floor", funct
       await OM.setOracleWeight(n1.address, 1000);
       await OM.setOracleWeight(n2.address, 1);
       await OM.setOracleWeight(n3.address, 1);
-      await expect(OM.connect(n1).submitQuery(subject.address, WHITELIST, TIER3))
+      await expect(
+        OM.connect(n1).submitQuery(subject.address, WHITELIST, TIER3),
+      )
         .to.be.revertedWithCustomError(CO, "SingleNodeQuorum")
         .withArgs(n1.address, 1000, 1002);
     });
@@ -60,13 +74,19 @@ describe("Task 5.1: no single node resolves; the list-oracle voter floor", funct
       await OM.setOracleWeight(n1.address, 700);
       await OM.setOracleWeight(n2.address, 150);
       await OM.setOracleWeight(n3.address, 150);
-      await expect(raise()).to.be.revertedWithCustomError(CO, "SingleNodeQuorum");
+      await expect(raise()).to.be.revertedWithCustomError(
+        CO,
+        "SingleNodeQuorum",
+      );
       for (const n of [n1, n2, n3]) await OM.setOracleWeight(n.address, 100);
       const q = await raise();
       await vote(n1, q, true);
       expect((await OM.getQueryResolution(q))[0]).to.equal(false);
       await vote(n2, q, true);
-      expect((await OM.getQueryResolution(q)).slice(0, 2)).to.deep.equal([true, true]);
+      expect((await OM.getQueryResolution(q)).slice(0, 2)).to.deep.equal([
+        true,
+        true,
+      ]);
     });
 
     it("the bar is inclusive: a node at exactly the bar is refused, one unit below opens", async function () {
@@ -94,7 +114,10 @@ describe("Task 5.1: no single node resolves; the list-oracle voter floor", funct
       await OM.setOracleWeight(n1.address, 300); // 300 of 500 = 60%
       await raise();
       await OM.setConsensusThreshold(60);
-      await expect(raise()).to.be.revertedWithCustomError(CO, "SingleNodeQuorum");
+      await expect(raise()).to.be.revertedWithCustomError(
+        CO,
+        "SingleNodeQuorum",
+      );
     });
   });
 
@@ -162,7 +185,10 @@ describe("Task 5.1: no single node resolves; the list-oracle voter floor", funct
       await vote(n2, q, true);
       await OM.emergencyOverride(n1.address, q, false, "owner flip");
       expect(await OM.getQuerySupport(q)).to.equal(0);
-      await expect(attest(BO, n1, q, false)).to.be.revertedWithCustomError(BO, "TooFewVoters");
+      await expect(attest(BO, n1, q, false)).to.be.revertedWithCustomError(
+        BO,
+        "TooFewVoters",
+      );
     });
   });
 });

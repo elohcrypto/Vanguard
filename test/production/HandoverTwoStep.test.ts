@@ -67,26 +67,38 @@ describe("Handover: two-step oracle ownership and node weight shares (Task 5.1)"
     await o.transferOwnership(f.ops.address);
     await o.connect(f.ops).acceptOwnership();
     await o.connect(f.ops).transferOwnership(f.stranger.address);
-    const before = await ethers.provider.getTransactionCount(f.deployer.address);
+    const before = await ethers.provider.getTransactionCount(
+      f.deployer.address,
+    );
     await expect(handoverDeployerPowers(f.args)).to.be.rejectedWith(
       new RegExp(`is ops-owned with pending owner ${f.stranger.address}`),
     );
-    expect(await ethers.provider.getTransactionCount(f.deployer.address)).to.equal(before);
+    expect(
+      await ethers.provider.getTransactionCount(f.deployer.address),
+    ).to.equal(before);
   });
 
   it("completion prints node weight shares and fails a node that reaches the bar alone", async function () {
-    const nodes = (await ethers.getSigners()).slice(9, 12).map((s) => s.address);
-    for (const n of nodes) await f.c.oracleManager.registerOracle(n, "node", "", 500);
+    const nodes = (await ethers.getSigners())
+      .slice(9, 12)
+      .map((s) => s.address);
+    for (const n of nodes)
+      await f.c.oracleManager.registerOracle(n, "node", "", 500);
     f.args.oracleNodes = nodes;
     await ceremony();
     const share = (r: any) =>
-      r.checks.find((x: any) => x.label.startsWith("no OracleManager node alone reaches the 66% bar"));
+      r.checks.find((x: any) =>
+        x.label.startsWith("no OracleManager node alone reaches the 66% bar"),
+      );
     const pass = share(await assertHandoverComplete(f.args));
     expect(pass.ok).to.equal(true);
     expect(pass.label).to.include(`${nodes[0]} 100 (33.3%)`);
     // Governance (the manager's owner now) re-weights one node to 70%.
     await network.provider.send("hardhat_impersonateAccount", [f.govAddr]);
-    await network.provider.send("hardhat_setBalance", [f.govAddr, "0xDE0B6B3A7640000"]);
+    await network.provider.send("hardhat_setBalance", [
+      f.govAddr,
+      "0xDE0B6B3A7640000",
+    ]);
     const gov = await ethers.getSigner(f.govAddr);
     await f.c.oracleManager.connect(gov).setOracleWeight(nodes[0], 467);
     const fail = share(await assertHandoverComplete(f.args));
