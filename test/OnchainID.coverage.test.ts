@@ -296,10 +296,19 @@ describe("OnchainID System - Coverage Tests", function () {
       const uris = ["https://kyc.com", "https://aml.com"];
       const validTos = [0, 0];
 
-      const claimSigs = [
-        await signClaim(claimSigner, identityAddresses[0], topics[0], data[0]),
-        await signClaim(claimSigner, identityAddresses[1], topics[1], data[1]),
-      ];
+      const claimSigs = [];
+      for (const i of [0, 1])
+        claimSigs.push(
+          await signClaim(
+            claimSigner,
+            identityAddresses[i],
+            topics[i],
+            data[i],
+            {
+              uri: uris[i],
+            },
+          ),
+        );
 
       await claimIssuer
         .connect(claimSigner)

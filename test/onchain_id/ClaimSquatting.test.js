@@ -10,13 +10,8 @@ const { ethers } = require("hardhat");
 const KYC = 6;
 const DATA = ethers.toUtf8Bytes("KYC_OK");
 
-async function sign(signer, identity, topic, data) {
-  const h = ethers.solidityPackedKeccak256(
-    ["address", "uint256", "bytes"],
-    [identity, topic, data],
-  );
-  return signer.signMessage(ethers.getBytes(h));
-}
+// The demo's signer: ClaimIssuer.claimDigest (Task 5.2, L-D).
+const { signClaim: sign } = require("../../demo/utils/Kyc");
 
 const idSideId = (issuer, topic, data) =>
   ethers.solidityPackedKeccak256(
@@ -43,7 +38,7 @@ describe("Claim-slot squatting (2F.2, H2)", function () {
   });
 
   async function issue(data = DATA, validTo = 0) {
-    const sig = await sign(issuerOwner, idAddr, KYC, data);
+    const sig = await sign(issuerOwner, idAddr, KYC, data, { validTo });
     return kyc
       .connect(issuerOwner)
       .issueClaim(idAddr, KYC, 1, data, "", validTo, sig);

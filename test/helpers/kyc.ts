@@ -38,24 +38,35 @@ export async function configureKyc(
 }
 
 /**
- * EIP-191 signature by `signer` over keccak256(abi.encodePacked(identity,
- * topic, data)), the payload ClaimIssuer.issueClaim and verifyClaim check.
+ * EIP-191 signature by `signer` over ClaimIssuer.claimDigest:
+ * keccak256(abi.encode(identity, topic, scheme, data, uri, validTo)), the
+ * payload issueClaim and verifyClaim check (Task 5.2, L-D).
  */
 export async function signClaim(
   signer: SignerWithAddress,
   identityAddr: string,
   topic: number | bigint,
   data: Uint8Array | string,
+  { scheme = 1, uri = "", validTo = 0 }: ClaimFields = {},
 ): Promise<string> {
   return signer.signMessage(
     ethers.getBytes(
-      ethers.solidityPackedKeccak256(
-        ["address", "uint256", "bytes"],
-        [identityAddr, topic, data],
+      ethers.keccak256(
+        ethers.AbiCoder.defaultAbiCoder().encode(
+          ["address", "uint256", "uint256", "bytes", "string", "uint256"],
+          [identityAddr, topic, scheme, data, uri, validTo],
+        ),
       ),
     ),
   );
 }
+
+/** The claim fields signed besides identity, topic and data. */
+export type ClaimFields = {
+  scheme?: number | bigint;
+  uri?: string;
+  validTo?: number | bigint;
+};
 
 /**
  * Issues a claim from `issuer`, sent and signed by `issuerSigner`, with the
@@ -71,7 +82,10 @@ export async function issueSigned(
   uri: string = "",
   validTo: number | bigint = 0,
 ) {
-  const sig = await signClaim(issuerSigner, identityAddr, topic, data);
+  const sig = await signClaim(issuerSigner, identityAddr, topic, data, {
+    uri,
+    validTo,
+  });
   return issuer
     .connect(issuerSigner)
     .issueClaim(identityAddr, topic, 1, data, uri, validTo, sig);

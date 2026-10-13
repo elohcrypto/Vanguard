@@ -33,18 +33,29 @@ async function defaultValidTo() {
 
 /**
  * Sign a claim the way ClaimIssuer.issueClaim/verifyClaim expect: EIP-191
- * over keccak256(abi.encodePacked(identity, topic, data)).
+ * over ClaimIssuer.claimDigest, keccak256(abi.encode(identity, topic,
+ * scheme, data, uri, validTo)) (Task 5.2, L-D: every recorded field is
+ * signed, validTo included).
  *
  * @param {Object} signer - Signer holding the issuer's management/claim-signer key.
  * @param {string} identityAddress - The OnchainID contract address.
  * @param {number} topic - Claim topic.
  * @param {Uint8Array} data - Claim data bytes.
+ * @param {Object} [fields] - { scheme = 1, uri = "", validTo = 0 }, as issued.
  * @returns {Promise<string>} The 65-byte signature, hex.
  */
-async function signClaim(signer, identityAddress, topic, data) {
-  const hash = ethers.solidityPackedKeccak256(
-    ["address", "uint256", "bytes"],
-    [identityAddress, topic, data],
+async function signClaim(
+  signer,
+  identityAddress,
+  topic,
+  data,
+  { scheme = 1, uri = "", validTo = 0 } = {},
+) {
+  const hash = ethers.keccak256(
+    ethers.AbiCoder.defaultAbiCoder().encode(
+      ["address", "uint256", "uint256", "bytes", "string", "uint256"],
+      [identityAddress, topic, scheme, data, uri, validTo],
+    ),
   );
   return signer.signMessage(ethers.getBytes(hash));
 }
@@ -69,7 +80,9 @@ async function attestKyc(
 ) {
   const expiry = validTo === undefined ? await defaultValidTo() : validTo;
   const data = ethers.toUtf8Bytes("kyc:" + label);
-  const sig = await signClaim(issuerSigner, identityAddress, KYC_TOPIC, data);
+  const sig = await signClaim(issuerSigner, identityAddress, KYC_TOPIC, data, {
+    validTo: expiry,
+  });
   const tx = await kycIssuer.connect(issuerSigner).issueClaim(
     identityAddress,
     KYC_TOPIC,
@@ -102,7 +115,9 @@ async function attestAml(
 ) {
   const expiry = validTo === undefined ? await defaultValidTo() : validTo;
   const data = ethers.toUtf8Bytes("aml:" + label);
-  const sig = await signClaim(issuerSigner, identityAddress, AML_TOPIC, data);
+  const sig = await signClaim(issuerSigner, identityAddress, AML_TOPIC, data, {
+    validTo: expiry,
+  });
   const tx = await amlIssuer.connect(issuerSigner).issueClaim(
     identityAddress,
     AML_TOPIC,

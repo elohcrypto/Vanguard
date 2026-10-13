@@ -316,10 +316,13 @@ describe("ClaimIssuer", function () {
         const data = [claimData, claimData];
         const uris = ["https://example.com/kyc", "https://example.com/aml"];
         const validTos = [0, 0];
-        const sigs = [
-          await signClaim(claimSigner, identities[0], KYC_TOPIC, claimData),
-          await signClaim(claimSigner, identities[1], AML_TOPIC, claimData),
-        ];
+        const sigs = [];
+        for (const i of [0, 1])
+          sigs.push(
+            await signClaim(claimSigner, identities[i], topics[i], claimData, {
+              uri: uris[i],
+            }),
+          );
 
         const tx = await claimIssuer
           .connect(claimSigner)
@@ -433,14 +436,13 @@ describe("ClaimIssuer", function () {
         const stored = (await claimIssuer.issuedClaims(claimId)).signature;
 
         expect(await claimIssuer.isClaimValid(claimId)).to.be.true;
-        expect(await claimIssuer.verifyClaim(id, KYC_TOPIC, claimData, stored))
-          .to.be.true;
-
+        const v = () =>
+          claimIssuer.verifyClaim(id, KYC_TOPIC, 1, claimData, "", 0, stored);
+        expect(await v()).to.be.true;
         // Revocation kills the record, not the signature.
         await claimIssuer.connect(claimSigner).revokeClaim(claimId);
         expect(await claimIssuer.isClaimValid(claimId)).to.be.false;
-        expect(await claimIssuer.verifyClaim(id, KYC_TOPIC, claimData, stored))
-          .to.be.true;
+        expect(await v()).to.be.true;
       });
     });
 
@@ -498,69 +500,36 @@ describe("ClaimIssuer", function () {
     });
 
     describe("verifyClaim", function () {
-      // verifyClaim recovers the signer of
-      //   toEthSignedMessageHash(keccak256(abi.encodePacked(identity, topic, data)))
-      // and accepts it if that address holds a CLAIM_SIGNER or MANAGEMENT
-      // key. signMessage() applies the same EIP-191 prefix, so no mocking is
-      // needed: sign the packed hash with a real key and check both sides.
-      let dataHash: string;
-
-      beforeEach(async function () {
-        dataHash = ethers.solidityPackedKeccak256(
-          ["address", "uint256", "bytes"],
-          [await onchainID.getAddress(), KYC_TOPIC, claimData],
+      // verifyClaim recovers the signer of claimDigest (signClaim signs it
+      // with the EIP-191 prefix) and applies issueClaim's signer rule.
+      const verify = async (signer: SignerWithAddress, data = claimData) =>
+        claimIssuer.verifyClaim(
+          await onchainID.getAddress(),
+          KYC_TOPIC,
+          1,
+          data,
+          "",
+          0,
+          await signClaim(
+            signer,
+            await onchainID.getAddress(),
+            KYC_TOPIC,
+            claimData,
+          ),
         );
-      });
 
-      it("Should accept a signature from a CLAIM_SIGNER key", async function () {
-        const sig = await claimSigner.signMessage(ethers.getBytes(dataHash));
-        expect(
-          await claimIssuer.verifyClaim(
-            await onchainID.getAddress(),
-            KYC_TOPIC,
-            claimData,
-            sig,
-          ),
-        ).to.be.true;
-      });
-
-      it("Should accept a signature from the MANAGEMENT key (owner)", async function () {
-        const sig = await owner.signMessage(ethers.getBytes(dataHash));
-        expect(
-          await claimIssuer.verifyClaim(
-            await onchainID.getAddress(),
-            KYC_TOPIC,
-            claimData,
-            sig,
-          ),
-        ).to.be.true;
+      it("Should accept a CLAIM_SIGNER and the MANAGEMENT key (owner)", async function () {
+        expect(await verify(claimSigner)).to.be.true;
+        expect(await verify(owner)).to.be.true;
       });
 
       it("Should reject a signature from an address with no issuer key", async function () {
-        const sig = await unauthorized.signMessage(ethers.getBytes(dataHash));
-        expect(
-          await claimIssuer.verifyClaim(
-            await onchainID.getAddress(),
-            KYC_TOPIC,
-            claimData,
-            sig,
-          ),
-        ).to.be.false;
+        expect(await verify(unauthorized)).to.be.false;
       });
 
       it("Should reject a valid signature bound to different claim data", async function () {
-        // Signed over the right identity and topic, but different data: the
-        // recovered address is some unrelated key, so it must not verify.
-        const sig = await claimSigner.signMessage(ethers.getBytes(dataHash));
-        const otherData = ethers.solidityPacked(["string"], ["AML cleared"]);
-        expect(
-          await claimIssuer.verifyClaim(
-            await onchainID.getAddress(),
-            KYC_TOPIC,
-            otherData,
-            sig,
-          ),
-        ).to.be.false;
+        const other = ethers.solidityPacked(["string"], ["AML cleared"]);
+        expect(await verify(claimSigner, other)).to.be.false;
       });
     });
 

@@ -76,8 +76,9 @@ contract ClaimIssuer is IClaimIssuer, ClaimIssuerKeys, ReentrancyGuard {
      * @param _data The claim data
      * @param _uri The claim URI
      * @param _validTo Expiry timestamp (0 for no expiry)
-     * @param _signature EIP-191 signature over keccak256(abi.encodePacked(identity, topic, data))
-     *        by a claim-signer or management key (or the owner); stored and passed to the OnchainID
+     * @param _signature EIP-191 signature over claimDigest(identity, topic,
+     *        scheme, data, uri, validTo) by a claim-signer or management key
+     *        (or the owner); stored and passed to the OnchainID
      * @return claimId The ID of the issued claim
      */
     function issueClaim(
@@ -152,7 +153,7 @@ contract ClaimIssuer is IClaimIssuer, ClaimIssuerKeys, ReentrancyGuard {
     ) private returns (bytes32 claimId) {
         require(_identity != address(0), "ClaimIssuer: Invalid identity");
         require(_data.length > 0, "ClaimIssuer: Empty claim data");
-        _requireTrustedSignature(keccak256(abi.encodePacked(_identity, _topic, _data)), _signature);
+        _requireTrustedSignature(claimDigest(_identity, _topic, _scheme, _data, _uri, _validTo), _signature);
 
         claimId = keccak256(abi.encodePacked(address(this), _identity, _topic, _data));
         issuedClaims[claimId] = IssuedClaim({
@@ -222,26 +223,37 @@ contract ClaimIssuer is IClaimIssuer, ClaimIssuerKeys, ReentrancyGuard {
     }
 
     /**
-     * @dev Verify a claim signature
-     * @param _identity The OnchainID address
-     * @param _topic The claim topic
-     * @param _data The claim data
-     * @param _signature The signature to verify
-     * @return valid True if the signature is valid
+     * @notice What a claim signer signs (EIP-191, signMessage over these
+     *         32 bytes): every field the issuer records and the registry
+     *         relies on, validTo included (Task 5.2, L-D / Q5). abi.encode,
+     *         not encodePacked: data and uri are adjacent dynamic fields,
+     *         which packed encoding would let shift bytes between.
+     */
+    function claimDigest(
+        address _identity,
+        uint256 _topic,
+        uint256 _scheme,
+        bytes calldata _data,
+        string calldata _uri,
+        uint256 _validTo
+    ) public pure returns (bytes32) {
+        return keccak256(abi.encode(_identity, _topic, _scheme, _data, _uri, _validTo));
+    }
+
+    /**
+     * @dev True if `_signature` signs claimDigest(...) of these fields by a
+     *      key issueClaim accepts (claim-signer, management, or the owner).
      */
     function verifyClaim(
         address _identity,
         uint256 _topic,
+        uint256 _scheme,
         bytes calldata _data,
+        string calldata _uri,
+        uint256 _validTo,
         bytes calldata _signature
     ) external view returns (bool valid) {
-        bytes32 dataHash = keccak256(abi.encodePacked(_identity, _topic, _data));
-        bytes32 ethSignedMessageHash = MessageHashUtils.toEthSignedMessageHash(dataHash);
-
-        address signer = ECDSA.recover(ethSignedMessageHash, _signature);
-        bytes32 signerKey = keccak256(abi.encodePacked(signer));
-
-        return _hasKeyPurpose(signerKey, CLAIM_SIGNER_KEY) || _hasKeyPurpose(signerKey, MANAGEMENT_KEY);
+        return _isTrustedSigner(claimDigest(_identity, _topic, _scheme, _data, _uri, _validTo), _signature);
     }
 
     /**

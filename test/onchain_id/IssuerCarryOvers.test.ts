@@ -29,7 +29,7 @@ describe("Issuer and identity carry-overs (Task 5.2)", function () {
     it("a batch-issued claim is on the identity", async function () {
       const { issuerOwner, kyc, kycAddr, id, idAddr } = await setup();
       const d = ethers.toUtf8Bytes("B1");
-      const sig = await signClaim(issuerOwner, idAddr, KYC, d);
+      const sig = await signClaim(issuerOwner, idAddr, KYC, d, { uri: "u" });
       await kyc
         .connect(issuerOwner)
         .batchIssueClaims([idAddr], [KYC], [1], [d], ["u"], [0], [sig]);
@@ -71,5 +71,66 @@ describe("Issuer and identity carry-overs (Task 5.2)", function () {
       expect(await kyc.latestClaimId(badAddr, KYC)).to.equal(ethers.ZeroHash);
       expect((await kyc.getIssuerStats()).totalClaims).to.equal(0n);
     });
+  });
+
+  describe("L-D: the signature covers scheme, uri and validTo (Q5)", function () {
+    const d = ethers.toUtf8Bytes("KYC_OK");
+    const signed = { scheme: 1, uri: "ipfs://a", validTo: 4102444800 };
+    const edits: [string, Record<string, unknown>][] = [
+      ["validTo", { validTo: 4102444801 }],
+      ["uri", { uri: "ipfs://b" }],
+      ["scheme", { scheme: 2 }],
+    ];
+
+    it("the signers' digest is ClaimIssuer.claimDigest", async function () {
+      const { kyc, idAddr } = await setup();
+      const local = ethers.keccak256(
+        ethers.AbiCoder.defaultAbiCoder().encode(
+          ["address", "uint256", "uint256", "bytes", "string", "uint256"],
+          [idAddr, KYC, 1, d, "ipfs://a", 4102444800],
+        ),
+      );
+      expect(
+        await kyc.claimDigest(idAddr, KYC, 1, d, "ipfs://a", 4102444800),
+      ).to.equal(local);
+      // data and uri cannot trade bytes (abi.encode, not encodePacked).
+      expect(
+        await kyc.claimDigest(idAddr, KYC, 1, "0x6162", "c", 0),
+      ).to.not.equal(await kyc.claimDigest(idAddr, KYC, 1, "0x61", "bc", 0));
+    });
+
+    for (const [field, edit] of edits) {
+      it(`a claim with an edited ${field} is refused on every path`, async function () {
+        const { issuerOwner, kyc, idAddr } = await setup();
+        const sig = await signClaim(issuerOwner, idAddr, KYC, d, signed);
+        const f = { ...signed, ...edit } as typeof signed;
+        const args = [f.scheme, d, f.uri, f.validTo] as const;
+        const msg = "ClaimIssuer: Signer does not have claim signer key";
+        await expect(
+          kyc.connect(issuerOwner).issueClaim(idAddr, KYC, ...args, sig),
+        ).to.be.revertedWith(msg);
+        await expect(
+          kyc
+            .connect(issuerOwner)
+            .batchIssueClaims(
+              [idAddr],
+              [KYC],
+              [f.scheme],
+              [d],
+              [f.uri],
+              [f.validTo],
+              [sig],
+            ),
+        ).to.be.revertedWith(msg);
+        expect(await kyc.verifyClaim(idAddr, KYC, ...args, sig)).to.equal(
+          false,
+        );
+        // The signed fields verify and issue.
+        const ok = [signed.scheme, d, signed.uri, signed.validTo] as const;
+        expect(await kyc.verifyClaim(idAddr, KYC, ...ok, sig)).to.equal(true);
+        await kyc.connect(issuerOwner).issueClaim(idAddr, KYC, ...ok, sig);
+        expect(await kyc.claimValidTo(idAddr, KYC)).to.equal(signed.validTo);
+      });
+    }
   });
 });

@@ -2,6 +2,7 @@ import { expect } from "chai";
 import { ethers } from "hardhat";
 import { SignerWithAddress } from "@nomicfoundation/hardhat-ethers/signers";
 import { OnchainID, OnchainID__factory } from "../typechain-types";
+import { signClaim } from "./helpers/kyc";
 
 // A real ClaimIssuer owned by `signer` issues `data` on each topic to
 // `identity`. Verification asks the issuer (IdentityRegistry calls
@@ -17,14 +18,7 @@ async function issueVia(
     await ethers.getContractFactory("ClaimIssuer")
   ).deploy(signer.address, "KYC", "kyc");
   for (const topic of topics) {
-    const sig = await signer.signMessage(
-      ethers.getBytes(
-        ethers.solidityPackedKeccak256(
-          ["address", "uint256", "bytes"],
-          [identity, topic, data],
-        ),
-      ),
-    );
+    const sig = await signClaim(signer, identity, topic, data);
     await iss.connect(signer).issueClaim(identity, topic, 1, data, "", 0, sig);
   }
   return iss.getAddress();

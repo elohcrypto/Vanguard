@@ -340,11 +340,16 @@ export class ProductionEnvironment {
       [JSON.stringify(kycData)],
     );
 
+    const uri = `https://kyc-provider.com/verification/${identityAddress}`;
+    const validTo =
+      (await ethers.provider.getBlock("latest"))!.timestamp +
+      this.config.claimValidityPeriod;
     const signature = await signClaim(
       this.kycProvider,
       identityAddress,
       this.config.kycTopic,
       claimData,
+      { scheme: this.config.ecdsaScheme, uri, validTo },
     );
     await this.kycIssuer
       .connect(this.kycProvider)
@@ -353,9 +358,8 @@ export class ProductionEnvironment {
         this.config.kycTopic,
         this.config.ecdsaScheme,
         claimData,
-        `https://kyc-provider.com/verification/${identityAddress}`,
-        (await ethers.provider.getBlock("latest"))!.timestamp +
-          this.config.claimValidityPeriod,
+        uri,
+        validTo,
         signature,
         { gasPrice: this.networkConditions.gasPrice },
       );
@@ -384,11 +388,16 @@ export class ProductionEnvironment {
       [JSON.stringify(amlData)],
     );
 
+    const uri = `https://aml-provider.com/screening/${identityAddress}`;
+    const validTo =
+      (await ethers.provider.getBlock("latest"))!.timestamp +
+      this.config.claimValidityPeriod;
     const signature = await signClaim(
       this.amlProvider,
       identityAddress,
       this.config.amlTopic,
       claimData,
+      { scheme: this.config.ecdsaScheme, uri, validTo },
     );
     await this.amlIssuer
       .connect(this.amlProvider)
@@ -397,9 +406,8 @@ export class ProductionEnvironment {
         this.config.amlTopic,
         this.config.ecdsaScheme,
         claimData,
-        `https://aml-provider.com/screening/${identityAddress}`,
-        (await ethers.provider.getBlock("latest"))!.timestamp +
-          this.config.claimValidityPeriod,
+        uri,
+        validTo,
         signature,
         { gasPrice: this.networkConditions.gasPrice },
       );
