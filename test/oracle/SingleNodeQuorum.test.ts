@@ -137,6 +137,12 @@ describe("Task 5.1: no single node resolves; the list-oracle voter floor", funct
       await OM.setOracleWeight(n3.address, 150);
       expect(await check([n1])).to.equal(false);
       expect(await check([n1, n2, n3])).to.equal(false);
+      await OM.setOracleWeight(n1.address, 660);
+      await OM.setOracleWeight(n2.address, 170);
+      await OM.setOracleWeight(n3.address, 170);
+      expect(await check([n1])).to.equal(false); // exactly at the bar
+      await OM.setOracleWeight(n2.address, 150);
+      await OM.setOracleWeight(n3.address, 150);
       await OM.setOracleWeight(n1.address, 659); // 659 of 959: 68.7%
       expect(await check([n1])).to.equal(false);
       await OM.setOracleWeight(n2.address, 191); // 659 of 1000: below
