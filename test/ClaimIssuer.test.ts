@@ -432,7 +432,7 @@ describe("ClaimIssuer", function () {
         );
       });
 
-      it("Should store a signature that verifyClaim accepts, before and after revocation", async function () {
+      it("Should store a signature that verifyClaim accepts until revoked", async function () {
         const id = await onchainID.getAddress();
         await issueSigned(claimIssuer, claimSigner, id, KYC_TOPIC, claimData);
         const [claimId] = await claimIssuer.getClaimsByTopic(KYC_TOPIC);
@@ -442,10 +442,10 @@ describe("ClaimIssuer", function () {
         const v = () =>
           claimIssuer.verifyClaim(id, KYC_TOPIC, 1, claimData, "", 0, stored);
         expect(await v()).to.be.true;
-        // Revocation kills the record, not the signature.
+        // Revocation kills the record and the signature (epoch, L-2).
         await claimIssuer.connect(claimSigner).revokeClaim(claimId);
         expect(await claimIssuer.isClaimValid(claimId)).to.be.false;
-        expect(await v()).to.be.true;
+        expect(await v()).to.be.false;
       });
     });
 

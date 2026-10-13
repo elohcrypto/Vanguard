@@ -55,12 +55,11 @@ contract ClaimIssuer is IClaimIssuer, ClaimIssuerKeys, ReentrancyGuard {
     mapping(address => mapping(uint256 => bytes32)) public latestClaimId;
 
     bytes32[] public allClaims;
-    /// @notice keccak256 of every signature whose claim was revoked: it
-    ///         never issues again (Task 5.2 review). A renewal is a new
-    ///         signature over new fields (a later validTo).
-    mapping(bytes32 => bool) public revokedSignature;
-
-    error SignatureRevoked();
+    /// @notice Revocations so far per (identity, topic), part of the signed
+    ///         digest (Task 5.2 review L-2): revokeClaim bumps it, so no
+    ///         signature made before a revocation issues on that (identity,
+    ///         topic) again; a renewal is signed over the new epoch.
+    mapping(address => mapping(uint256 => uint256)) public revocationEpoch;
 
     /**
      * @dev Constructor
@@ -160,7 +159,6 @@ contract ClaimIssuer is IClaimIssuer, ClaimIssuerKeys, ReentrancyGuard {
         require(_identity != address(0), "ClaimIssuer: Invalid identity");
         require(_data.length > 0, "ClaimIssuer: Empty claim data");
         _requireTrustedSignature(claimDigest(_identity, _topic, _scheme, _data, _uri, _validTo), _signature);
-        if (revokedSignature[keccak256(_signature)]) revert SignatureRevoked();
 
         claimId = keccak256(abi.encodePacked(address(this), _identity, _topic, _data));
         issuedClaims[claimId] = IssuedClaim({
@@ -197,7 +195,7 @@ contract ClaimIssuer is IClaimIssuer, ClaimIssuerKeys, ReentrancyGuard {
         IssuedClaim storage claim = issuedClaims[_claimId];
         claim.revoked = true;
         claim.revokedAt = block.timestamp;
-        revokedSignature[keccak256(claim.signature)] = true;
+        revocationEpoch[claim.identity][claim.topic]++;
 
         // Remove our copy from the identity: OnchainID ids are
         // keccak256(issuer, topic, data), and an issuer may remove its own.
@@ -235,7 +233,8 @@ contract ClaimIssuer is IClaimIssuer, ClaimIssuerKeys, ReentrancyGuard {
      *         32 bytes): every field the issuer records and the registry
      *         relies on, validTo included (Task 5.2, L-D / Q5), bound to
      *         this chain and this issuer so a signer key shared with another
-     *         issuer or deployment cannot replay it (review L-1). abi.encode,
+     *         issuer or deployment cannot replay it (review L-1), and to the
+     *         (identity, topic)'s revocationEpoch (review L-2). abi.encode,
      *         not encodePacked: data and uri are adjacent dynamic fields,
      *         which packed encoding would let shift bytes between.
      */
@@ -247,7 +246,20 @@ contract ClaimIssuer is IClaimIssuer, ClaimIssuerKeys, ReentrancyGuard {
         string calldata _uri,
         uint256 _validTo
     ) public view returns (bytes32) {
-        return keccak256(abi.encode(block.chainid, address(this), _identity, _topic, _scheme, _data, _uri, _validTo));
+        return
+            keccak256(
+                abi.encode(
+                    block.chainid,
+                    address(this),
+                    revocationEpoch[_identity][_topic],
+                    _identity,
+                    _topic,
+                    _scheme,
+                    _data,
+                    _uri,
+                    _validTo
+                )
+            );
     }
 
     /**

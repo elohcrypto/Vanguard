@@ -40,7 +40,7 @@ export async function configureKyc(
 
 /**
  * EIP-191 signature by `signer` over ClaimIssuer.claimDigest for `issuer`
- * (chain id, issuer, identity, topic, scheme, data, uri, validTo): the
+ * (chain id, issuer, epoch, identity, topic, scheme, data, uri, validTo): the
  * demo's signer (demo/utils/Kyc.js), the one off-chain digest builder.
  */
 export async function signClaim(
@@ -60,6 +60,7 @@ export type ClaimFields = {
   uri?: string;
   validTo?: number | bigint;
   chainId?: number | bigint;
+  epoch?: number | bigint;
 };
 
 /**

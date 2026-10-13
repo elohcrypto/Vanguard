@@ -92,6 +92,7 @@ describe("Issuer and identity carry-overs (Task 5.2)", function () {
           [
             "uint256",
             "address",
+            "uint256",
             "address",
             "uint256",
             "uint256",
@@ -99,7 +100,7 @@ describe("Issuer and identity carry-overs (Task 5.2)", function () {
             "string",
             "uint256",
           ],
-          [chainId, kycAddr, idAddr, KYC, 1, d, "ipfs://a", 4102444800],
+          [chainId, kycAddr, 0, idAddr, KYC, 1, d, "ipfs://a", 4102444800],
         ),
       );
       expect(
@@ -367,37 +368,6 @@ describe("Issuer and identity carry-overs (Task 5.2)", function () {
         chainId,
       });
       await kyc.connect(issuerOwner).issueClaim(idAddr, KYC, 1, d, "", 0, here);
-    });
-  });
-
-  describe("a revoked claim's signature never issues again", function () {
-    it("resubmitting it is refused; a new signature over new fields issues", async function () {
-      const { issuerOwner, kyc, idAddr } = await setup();
-      const d = ethers.toUtf8Bytes("KYC_OK");
-      const sig = await signClaim(issuerOwner, kyc, idAddr, KYC, d);
-      await kyc.connect(issuerOwner).issueClaim(idAddr, KYC, 1, d, "", 0, sig);
-      await kyc
-        .connect(issuerOwner)
-        .revokeClaim(await kyc.latestClaimId(idAddr, KYC));
-      expect(await kyc.revokedSignature(ethers.keccak256(sig))).to.equal(true);
-      await expect(
-        kyc.connect(issuerOwner).issueClaim(idAddr, KYC, 1, d, "", 0, sig),
-      ).to.be.revertedWithCustomError(kyc, "SignatureRevoked");
-      await expect(
-        kyc
-          .connect(issuerOwner)
-          .batchIssueClaims([idAddr], [KYC], [1], [d], [""], [0], [sig]),
-      ).to.be.revertedWithCustomError(kyc, "SignatureRevoked");
-      expect(await kyc.hasValidClaim(idAddr, KYC)).to.equal(false);
-      // A renewal: a fresh signature over a later validTo.
-      const validTo = 4102444800;
-      const fresh = await signClaim(issuerOwner, kyc, idAddr, KYC, d, {
-        validTo,
-      });
-      await kyc
-        .connect(issuerOwner)
-        .issueClaim(idAddr, KYC, 1, d, "", validTo, fresh);
-      expect(await kyc.hasValidClaim(idAddr, KYC)).to.equal(true);
     });
   });
 });

@@ -31,20 +31,27 @@ async function defaultValidTo() {
   return latest.timestamp + DEFAULT_VALIDITY_SECONDS;
 }
 
+/** The issuer getter the signer reads the revocation epoch from. */
+const EPOCH_ABI = [
+  "function revocationEpoch(address, uint256) view returns (uint256)",
+];
+
 /**
  * Sign a claim the way ClaimIssuer.issueClaim/verifyClaim expect: EIP-191
  * over ClaimIssuer.claimDigest, keccak256(abi.encode(chainId, issuer,
- * identity, topic, scheme, data, uri, validTo)) (Task 5.2: every recorded
- * field is signed, bound to one issuer on one chain). The one off-chain
- * builder of the digest; test/helpers/kyc.ts signs through it.
+ * revocationEpoch, identity, topic, scheme, data, uri, validTo)) (Task
+ * 5.2: every recorded field is signed, bound to one issuer on one chain,
+ * and void once a claim on the (identity, topic) is revoked). The one
+ * off-chain builder of the digest; test/helpers/kyc.ts signs through it.
  *
  * @param {Object} signer - Signer holding the issuer's management/claim-signer key.
  * @param {Object|string} issuer - The ClaimIssuer (contract or address) it is for.
  * @param {string} identityAddress - The OnchainID contract address.
  * @param {number} topic - Claim topic.
  * @param {Uint8Array} data - Claim data bytes.
- * @param {Object} [fields] - { scheme = 1, uri = "", validTo = 0, chainId }
- *   as issued; chainId defaults to the signer's network.
+ * @param {Object} [fields] - { scheme = 1, uri = "", validTo = 0, chainId,
+ *   epoch } as issued; chainId defaults to the signer's network, epoch to
+ *   the issuer's revocationEpoch(identity, topic) now.
  * @returns {Promise<string>} The 65-byte signature, hex.
  */
 async function signClaim(
@@ -53,15 +60,23 @@ async function signClaim(
   identityAddress,
   topic,
   data,
-  { scheme = 1, uri = "", validTo = 0, chainId } = {},
+  { scheme = 1, uri = "", validTo = 0, chainId, epoch } = {},
 ) {
   const chain = chainId ?? (await signer.provider.getNetwork()).chainId;
   const at = typeof issuer === "string" ? issuer : await issuer.getAddress();
+  // Review L-2: the (identity, topic)'s revocation epoch, read now.
+  const ep =
+    epoch ??
+    (await new ethers.Contract(at, EPOCH_ABI, signer.provider).revocationEpoch(
+      identityAddress,
+      topic,
+    ));
   const hash = ethers.keccak256(
     ethers.AbiCoder.defaultAbiCoder().encode(
       [
         "uint256",
         "address",
+        "uint256",
         "address",
         "uint256",
         "uint256",
@@ -69,7 +84,7 @@ async function signClaim(
         "string",
         "uint256",
       ],
-      [chain, at, identityAddress, topic, scheme, data, uri, validTo],
+      [chain, at, ep, identityAddress, topic, scheme, data, uri, validTo],
     ),
   );
   return signer.signMessage(ethers.getBytes(hash));
