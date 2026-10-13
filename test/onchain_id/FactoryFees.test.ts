@@ -85,6 +85,29 @@ describe("OnchainIDFactory fee path (Task 5.2)", function () {
     expect(await fac.totalPendingFees()).to.equal(0n);
   });
 
+  it("a gas-burning recipient costs a deploy at most FEE_CALL_GAS", async function () {
+    const { user, other, fac, rec } = await setup();
+    await rec.setBurn(true);
+    const gas = async (salt: string) => {
+      const tx = await fac
+        .connect(user)
+        .deployOnchainID(
+          ethers.Wallet.createRandom().address,
+          ethers.id(salt),
+          {
+            value: FEE,
+            gasLimit: 10_000_000,
+          },
+        );
+      return (await tx.wait())!.gasUsed;
+    };
+    const burnt = await gas("g1");
+    await fac.setFeeRecipient(other.address);
+    const paid = await gas("g2");
+    // The burnt stipend plus recording the debt (two fresh slots, an event).
+    expect(burnt - paid).to.be.lessThan((await fac.FEE_CALL_GAS()) + 100_000n);
+  });
+
   it("withdrawFees refuses the zero address", async function () {
     const { user, fac } = await setup();
     await expect(
