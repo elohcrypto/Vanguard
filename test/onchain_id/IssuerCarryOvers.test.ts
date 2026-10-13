@@ -137,6 +137,50 @@ describe("Issuer and identity carry-overs (Task 5.2)", function () {
   const keyOf = (a: string) =>
     ethers.keccak256(ethers.solidityPacked(["address"], [a]));
 
+  describe("N-4: deployOnchainIDWithKey adds the key", function () {
+    it("a factory identity holds the given management key", async function () {
+      const [owner, holder, stranger] = await ethers.getSigners();
+      const fac = await (
+        await ethers.getContractFactory("OnchainIDFactory")
+      ).deploy(owner.address, ethers.ZeroHash);
+      const key = keyOf(stranger.address);
+      const salt = ethers.id("n4");
+      await fac.deployOnchainIDWithKey(holder.address, key, salt);
+      const id = await ethers.getContractAt(
+        "OnchainID",
+        await fac.saltToIdentity(salt),
+      );
+      expect(await id.keyHasPurpose(key, 1)).to.equal(true);
+      expect(await id.keyHasPurpose(keyOf(holder.address), 1)).to.equal(true);
+      expect(await id.getKeysByPurpose(1)).to.have.length(2);
+      // The owner's own key as the "extra" key is not a second entry.
+      await fac.deployOnchainIDWithKey(
+        stranger.address,
+        keyOf(stranger.address),
+        ethers.id("n4b"),
+      );
+      const id2 = await ethers.getContractAt(
+        "OnchainID",
+        await fac.saltToIdentity(ethers.id("n4b")),
+      );
+      expect(await id2.getKeysByPurpose(1)).to.have.length(1);
+      // Only the creator, only in the creating block.
+      await expect(
+        id.connect(stranger).addCreationKey(ethers.id("k")),
+      ).to.be.revertedWithCustomError(id, "NotCreator");
+    });
+
+    it("a direct deployer cannot add a creation key after its block", async function () {
+      const [deployer, holder] = await ethers.getSigners();
+      const id = await (
+        await ethers.getContractFactory("OnchainID")
+      ).deploy(holder.address);
+      await expect(
+        id.connect(deployer).addCreationKey(ethers.id("k")),
+      ).to.be.revertedWithCustomError(id, "NotCreator");
+    });
+  });
+
   describe("N-5: only the deployer initializes", function () {
     it("a front-run initialize is refused; the deployer's goes through", async function () {
       const [deployer, holder, attacker] = await ethers.getSigners();

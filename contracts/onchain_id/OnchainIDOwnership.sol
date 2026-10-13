@@ -51,6 +51,7 @@ abstract contract OnchainIDOwnership is OnchainIDKeys {
     error NoRecoveryForOwner(address newOwner);
     error RecoveryManagerAlreadyPinned();
     error NotCreatorOrOwner();
+    error NotCreator();
     error NotAContract();
     error TooManyManagers();
 
@@ -83,6 +84,15 @@ abstract contract OnchainIDOwnership is OnchainIDKeys {
         if (manager.code.length == 0) revert NotAContract();
         recoveryManager = manager;
         emit RecoveryManagerPinned(manager);
+    }
+
+    /// @dev N-4 (Task 5.2): the creator, in the creating block, makes `key`
+    ///      a MANAGEMENT key (OnchainIDFactory.deployOnchainIDWithKey); a
+    ///      key that already is one is left as is. Same window as the
+    ///      creator's pin above.
+    function addCreationKey(bytes32 key) external {
+        if (msg.sender != CREATOR || block.number != CREATED_AT) revert NotCreator();
+        if (!keyHasPurpose(key, MANAGEMENT_KEY)) _addKey(key, MANAGEMENT_KEY, ECDSA_TYPE);
     }
 
     /// @dev The authorized managers.

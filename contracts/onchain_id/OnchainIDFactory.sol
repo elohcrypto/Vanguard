@@ -19,6 +19,11 @@ contract OnchainIDFactory is Ownable2Step {
 
     // State variables
     mapping(address => bool) public isOnchainID;
+    /// @notice The wallet each identity was created for, set at creation
+    ///         only (N-4, Task 5.2): an ownership transfer or a recovery
+    ///         (KeyManager -> identity, never through this factory) does
+    ///         not move it. IdentityRegistry.identity(wallet) is the binding
+    ///         of record; the demo reads this only as a fallback.
     mapping(address => address) public ownerToIdentity;
     mapping(bytes32 => address) public saltToIdentity;
 
@@ -121,9 +126,9 @@ contract OnchainIDFactory is Ownable2Step {
 
         identity = Create2.deploy(0, _salt, bytecode);
         _pin(identity);
-
-        // The OnchainID is deployed with the owner, so we can add the management key directly
-        // The owner can add the management key themselves after deployment
+        // N-4 (Task 5.2): the identity holds the key it was asked for (the
+        // factory is its creator, in the creating block).
+        OnchainID(identity).addCreationKey(_managementKey);
 
         // Register the deployed identity
         isOnchainID[identity] = true;

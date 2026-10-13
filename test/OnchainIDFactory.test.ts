@@ -163,13 +163,10 @@ describe("OnchainIDFactory", function () {
           user1.address,
         );
 
-      // Verify the deployed identity exists and owner can add the management key
+      // N-4 (Task 5.2): the factory added the key.
       const identityAddress = await factory.saltToIdentity(salt);
       const identity = await ethers.getContractAt("OnchainID", identityAddress);
       expect(await identity.owner()).to.equal(user1.address);
-
-      // Owner can add the management key themselves
-      await identity.connect(user1).addKey(managementKey, 1, 1);
       expect(await identity.keyHasPurpose(managementKey, 1)).to.be.true;
     });
 
