@@ -85,13 +85,16 @@ abstract contract GovernanceProposals is GovernanceConfig, ReentrancyGuard {
     // Token locking tracking.
     //
     // _lockedTokens is the aggregate: burned on pass, zeroed on settlement.
-    // _voterLockedTokens is per person. While the proposal is Active it is
-    // the deposit; once the proposal is Rejected or Cancelled it is the
-    // amount that person may claim via claimRefund(). Settlement never
-    // transfers VGT (see _settleWithRefund), so it cannot fail on a
-    // recipient the token refuses to pay.
+    // _voterLockedTokens is per person, keyed by IDENTITY (OnchainID) as
+    // votes are (D25 b; Task 5.2, Q6): a recovered holder's deposits
+    // follow the identity to the new wallet. While the proposal is Active
+    // it is the deposit; once the proposal is Rejected or Cancelled it is
+    // the amount a wallet bound to and controlling that identity may claim
+    // via claimRefund(). Settlement never transfers VGT (see
+    // _settleWithRefund), so it cannot fail on a recipient the token
+    // refuses to pay.
     mapping(uint256 => uint256) internal _lockedTokens; // proposalId => total locked tokens
-    mapping(uint256 => mapping(address => uint256)) internal _voterLockedTokens; // proposalId => voter => locked amount
+    mapping(uint256 => mapping(address => uint256)) internal _voterLockedTokens; // proposalId => identity => locked amount
 
     // Events
     event ProposalCreated(
@@ -183,7 +186,7 @@ abstract contract GovernanceProposals is GovernanceConfig, ReentrancyGuard {
 
         // Track locked tokens
         _lockedTokens[proposalId] = proposalCreationCost;
-        _voterLockedTokens[proposalId][msg.sender] = proposalCreationCost;
+        _voterLockedTokens[proposalId][proposerId] = proposalCreationCost;
 
         emit ProposalCreated(proposalId, msg.sender, proposalType, title);
 
@@ -225,8 +228,7 @@ abstract contract GovernanceProposals is GovernanceConfig, ReentrancyGuard {
             "Token transfer failed"
         );
 
-        // Mark as voted (by identity; the deposit below stays per wallet,
-        // since that is where the VGT came from)
+        // Mark as voted, by identity, as the deposit below is.
         _hasVoted[proposalId][id] = true;
         _voteChoice[proposalId][id] = support;
 
@@ -235,10 +237,10 @@ abstract contract GovernanceProposals is GovernanceConfig, ReentrancyGuard {
 
         // Track locked tokens
         _lockedTokens[proposalId] += votingCost;
-        // +=, not =: votes are keyed by identity, so one wallet can vote
-        // twice through two identities (a consenting holder's identity moved
-        // onto it after a deletion). Each deposit must stay claimable (L-3).
-        _voterLockedTokens[proposalId][msg.sender] += votingCost;
+        // Per identity (Q6): one wallet voting through two identities (a
+        // consenting holder's identity moved onto it after a deletion)
+        // leaves two deposits, each claimable through its identity (L-3).
+        _voterLockedTokens[proposalId][id] = votingCost;
 
         // 1 Person = 1 Vote (equal voting power)
         if (support) {
@@ -336,7 +338,7 @@ abstract contract GovernanceProposals is GovernanceConfig, ReentrancyGuard {
     ///      MANAGEMENT or ACTION key; fails closed on no code, a revert or a
     ///      malformed word (the former try/returns copy reverted in the
     ///      decoder on a word other than 0/1, review N-5).
-    function _controls(address wallet, address id) private view returns (bool) {
+    function _controls(address wallet, address id) internal view returns (bool) {
         return IdentityControl.controls(wallet, id);
     }
 
@@ -350,12 +352,13 @@ abstract contract GovernanceProposals is GovernanceConfig, ReentrancyGuard {
     }
 
     /**
-     * @dev Get voter's locked tokens for a proposal
+     * @dev An identity's locked tokens for a proposal (deposits are keyed
+     *      by identity, Q6)
      * @param proposalId Proposal ID
-     * @param voter Voter address
-     * @return Locked tokens for this voter
+     * @param identity The proposer's or voter's OnchainID
+     * @return Locked tokens for this identity
      */
-    function getVoterLockedTokens(uint256 proposalId, address voter) external view returns (uint256) {
-        return _voterLockedTokens[proposalId][voter];
+    function getVoterLockedTokens(uint256 proposalId, address identity) external view returns (uint256) {
+        return _voterLockedTokens[proposalId][identity];
     }
 }

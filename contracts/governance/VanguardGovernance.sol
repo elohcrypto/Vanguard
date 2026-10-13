@@ -219,10 +219,16 @@ contract VanguardGovernance is GovernanceProposals {
     }
 
     /**
-     * @notice Pull your deposit from a Rejected or Cancelled proposal.
-     * @dev Anyone with a recorded deposit may call. Once. The slot is zeroed
-     *      before the transfer (checks-effects-interactions); the guard is
-     *      belt and braces against a token that re-enters on transfer.
+     * @notice Pull your identity's deposit from a Rejected or Cancelled
+     *         proposal.
+     * @dev Deposits are keyed by identity (Task 5.2, Q6, as votes are,
+     *      D25 b): the caller's identity is the registry's for it now, and
+     *      the caller must control it now (IdentityControl: owner,
+     *      MANAGEMENT or ACTION key). A wallet recovery moves the registry
+     *      entry, so the recovered wallet claims and the lost one cannot.
+     *      Once per identity. The slot is zeroed before the transfer
+     *      (checks-effects-interactions); the guard is belt and braces
+     *      against a token that re-enters on transfer.
      */
     function claimRefund(uint256 proposalId) external nonReentrant {
         ProposalStatus status = _proposals[proposalId].status;
@@ -230,24 +236,27 @@ contract VanguardGovernance is GovernanceProposals {
             status == ProposalStatus.Rejected || status == ProposalStatus.Cancelled,
             "Proposal not settled"
         );
-        uint256 amount = _voterLockedTokens[proposalId][msg.sender];
+        address id = identityRegistry.identity(msg.sender);
+        uint256 amount = id == address(0) ? 0 : _voterLockedTokens[proposalId][id];
         require(amount > 0, "Nothing to claim");
-        _voterLockedTokens[proposalId][msg.sender] = 0;
+        require(_controls(msg.sender, id), "Wallet does not control its identity");
+        _voterLockedTokens[proposalId][id] = 0;
         require(governanceToken.transfer(msg.sender, amount), "Refund transfer failed");
         emit RefundClaimed(proposalId, msg.sender, amount);
     }
 
     /**
-     * @notice VGT `account` may still pull from `proposalId`. Zero while the
-     *         proposal is Active (deposit not yet claimable), after a claim,
-     *         or on a proposal that passed (deposits were burned).
+     * @notice VGT `identity` may still pull from `proposalId` (through a
+     *         wallet bound to and controlling it). Zero while the proposal
+     *         is Active (deposit not yet claimable), after a claim, or on
+     *         a proposal that passed (deposits were burned).
      */
-    function getClaimableRefund(uint256 proposalId, address account) external view returns (uint256) {
+    function getClaimableRefund(uint256 proposalId, address identity) external view returns (uint256) {
         ProposalStatus status = _proposals[proposalId].status;
         if (status != ProposalStatus.Rejected && status != ProposalStatus.Cancelled) return 0;
-        return _voterLockedTokens[proposalId][account];
+        return _voterLockedTokens[proposalId][identity];
     }
-    
+
     /**
      * @dev Cancel a proposal (owner only).
      *

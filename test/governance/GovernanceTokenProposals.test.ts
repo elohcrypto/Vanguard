@@ -295,8 +295,15 @@ describe("GovernanceToken is governable by proposal", function () {
         [doneId, bob],
         [openId, alice],
       ];
+      const ir = await ethers.getContractAt(
+        "IdentityRegistry",
+        await gov.identityRegistry(),
+      );
       for (const [id, w] of claims) {
-        const due = await gov.getClaimableRefund(id, w.address);
+        const due = await gov.getClaimableRefund(
+          id,
+          await ir.identity(w.address),
+        );
         expect(due).to.be.gt(0n);
         const before = await vgt.balanceOf(w.address);
         await gov.connect(w).claimRefund(id);

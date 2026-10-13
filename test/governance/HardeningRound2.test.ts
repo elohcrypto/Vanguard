@@ -441,13 +441,13 @@ describe("Hardening round 2 — contract changes", () => {
       expect(p.status).to.equal(3n);
       // Nothing moved at settlement; every deposit is now claimable.
       expect(await gt.balanceOf(govAddr)).to.equal(ethers.parseEther("30"));
-      expect(await gov.getClaimableRefund(id, alice.address)).to.equal(
+      expect(await gov.getClaimableRefund(id, ids.alice)).to.equal(
         ethers.parseEther("10"),
       );
-      expect(await gov.getClaimableRefund(id, bob.address)).to.equal(
+      expect(await gov.getClaimableRefund(id, ids.bob)).to.equal(
         ethers.parseEther("10"),
       );
-      expect(await gov.getClaimableRefund(id, carol.address)).to.equal(
+      expect(await gov.getClaimableRefund(id, ids.carol)).to.equal(
         ethers.parseEther("10"),
       );
       await expect(gov.connect(alice).claimRefund(id))
@@ -466,7 +466,7 @@ describe("Hardening round 2 — contract changes", () => {
       // is ComplianceRules' counterparty check on the trusted path (D21),
       // which this permissive mock does not run: TrustedGovernance.test.ts
       // proves it on real ComplianceRules.
-      expect(await gov.getClaimableRefund(id, bob.address)).to.equal(
+      expect(await gov.getClaimableRefund(id, ids.bob)).to.equal(
         ethers.parseEther("10"),
       );
       expect(await gt.balanceOf(govAddr)).to.equal(ethers.parseEther("10"));
@@ -486,7 +486,7 @@ describe("Hardening round 2 — contract changes", () => {
       await expect(gov.connect(owner).cancelProposal(c))
         .to.emit(gov, "ProposalCancelled")
         .withArgs(c);
-      expect(await gov.getClaimableRefund(c, bob.address)).to.equal(
+      expect(await gov.getClaimableRefund(c, ids.bob)).to.equal(
         ethers.parseEther("10"),
       );
       await ir.registerIdentity(bob.address, ids.bob, 840);
@@ -516,10 +516,10 @@ describe("Hardening round 2 — contract changes", () => {
         gov,
         "ProposalExecutionFailed",
       );
-      expect(await gov.getClaimableRefund(e, bob.address)).to.equal(
+      expect(await gov.getClaimableRefund(e, ids.bob)).to.equal(
         ethers.parseEther("10"),
       );
-      expect(await gov.getClaimableRefund(e, alice.address)).to.equal(
+      expect(await gov.getClaimableRefund(e, ids.alice)).to.equal(
         ethers.parseEther("10"),
       );
       await gov.connect(alice).claimRefund(c);
@@ -529,7 +529,7 @@ describe("Hardening round 2 — contract changes", () => {
     });
 
     it("claim is once, only after settlement, and never on a passed proposal", async () => {
-      const { owner, alice, bob, carol, gt, gov, id } =
+      const { owner, alice, bob, carol, gt, gov, id, ids } =
         await rejectedWithTwoVoters();
       await expect(gov.connect(alice).claimRefund(id)).to.be.revertedWith(
         "Proposal not settled",
@@ -554,7 +554,7 @@ describe("Hardening round 2 — contract changes", () => {
       const s0 = await gt.totalSupply();
       await expect(gov.executeProposal(ok)).to.emit(gov, "ProposalExecuted");
       expect(s0 - (await gt.totalSupply())).to.equal(ethers.parseEther("30"));
-      expect(await gov.getClaimableRefund(ok, bob.address)).to.equal(0n);
+      expect(await gov.getClaimableRefund(ok, ids.bob)).to.equal(0n);
       await expect(gov.connect(bob).claimRefund(ok)).to.be.revertedWith(
         "Proposal not settled",
       );
@@ -607,7 +607,7 @@ describe("Hardening round 2 — contract changes", () => {
       ]);
 
     it("manager call reverts (oracles unset): Rejected, claimable, reason preserved", async () => {
-      const { alice, bob, carol, gov, govAddr, dlm } = await listFixture();
+      const { alice, bob, carol, gov, govAddr, dlm, ids } = await listFixture();
       await gov.setDynamicListManager(await dlm.getAddress());
       await dlm.setGovernanceContract(govAddr);
       // The manager fails closed with no oracle to write.
@@ -629,16 +629,16 @@ describe("Hardening round 2 — contract changes", () => {
         });
       const [p] = await gov.getProposal(id);
       expect(p.status).to.equal(3n);
-      expect(await gov.getClaimableRefund(id, alice.address)).to.equal(
+      expect(await gov.getClaimableRefund(id, ids.alice)).to.equal(
         ethers.parseEther("10"),
       );
-      expect(await gov.getClaimableRefund(id, bob.address)).to.equal(
+      expect(await gov.getClaimableRefund(id, ids.bob)).to.equal(
         ethers.parseEther("10"),
       );
     });
 
     it("manager not authorised settles the same way", async () => {
-      const { alice, bob, carol, gov, govAddr, dlm } = await listFixture();
+      const { alice, bob, carol, gov, govAddr, dlm, ids } = await listFixture();
       await gov.setDynamicListManager(await dlm.getAddress());
       // createProposal requires the manager to report this governance, so
       // the unauthorised state arises only after the vote: the manager is
@@ -661,7 +661,7 @@ describe("Hardening round 2 — contract changes", () => {
             gov.interface.parseError(data)?.args[0] ===
             "Only owner or governance",
         );
-      expect(await gov.getClaimableRefund(a, alice.address)).to.equal(
+      expect(await gov.getClaimableRefund(a, ids.alice)).to.equal(
         ethers.parseEther("10"),
       );
     });
@@ -687,7 +687,7 @@ describe("Hardening round 2 — contract changes", () => {
     });
 
     it("a passed ListUpdate writes a permanent blacklist entry to the oracle", async () => {
-      const { alice, bob, carol, gov, govAddr, dlm } = await listFixture();
+      const { alice, bob, carol, gov, govAddr, dlm, ids } = await listFixture();
       const om = await (
         await ethers.getContractFactory("OracleManager")
       ).deploy();

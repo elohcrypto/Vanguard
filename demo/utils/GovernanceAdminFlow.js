@@ -272,16 +272,21 @@ async function claimRefund(mod) {
     }
 
     // Scan every settled proposal for every signer; list what is owed.
+    // Deposits are per identity (Task 5.2, Q6): a signer claims what its
+    // registered identity is owed.
+    const registry = mod.state.getContract("identityRegistry");
+    const ids = [];
+    for (const s of signers) ids.push(await registry.identity(s.address));
     const claimable = [];
     for (let id = 1; id <= count; id++) {
       const [p] = await vanguardGovernance.getProposal(id);
       const status = Number(p.status);
       if (status !== 3 && status !== 5) continue; // Rejected, Cancelled
       for (let i = 0; i < signers.length; i++) {
-        const owed = await vanguardGovernance.getClaimableRefund(
-          id,
-          signers[i].address,
-        );
+        // One claim per identity: the first signer bound to it.
+        if (ids[i] === ethers.ZeroAddress || ids.indexOf(ids[i]) !== i)
+          continue;
+        const owed = await vanguardGovernance.getClaimableRefund(id, ids[i]);
         if (owed > 0n) claimable.push({ id, i, owed, title: p.title, status });
       }
     }

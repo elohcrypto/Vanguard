@@ -150,10 +150,11 @@ describe("Governance as a trusted contract (D21)", function () {
     await idReg.deleteIdentity(v1.address);
     // Governance is trusted, so the token skips identities; ComplianceRules
     // still checks the human counterparty.
+    // Deposits are per identity (Q6): an unbound wallet has none to claim.
     await expect(gov.connect(v1).claimRefund(id)).to.be.revertedWith(
-      "Compliance check failed",
+      "Nothing to claim",
     );
-    expect(await gov.getClaimableRefund(id, v1.address)).to.equal(FEE);
+    expect(await gov.getClaimableRefund(id, v1Id)).to.equal(FEE);
     await idReg.registerIdentity(v1.address, v1Id, 840);
     const b0 = await vgt.balanceOf(v1.address);
     await gov.connect(v1).claimRefund(id);

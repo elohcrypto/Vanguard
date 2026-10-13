@@ -474,14 +474,15 @@ describe("Vote binding: one identity, one wallet, one vote", function () {
       const id = await propose();
       const cost = await gov.votingCost();
       await gov.connect(bob).castVote(id, true, "");
+      const bobId = await ir.identity(bob.address);
       // With Xavier's consent his identity moves onto Bob's wallet.
       await ir.connect(ops).deleteIdentity(bob.address);
       await xOid.connect(x).addKey(keyOf(bob.address), ACTION_KEY, ECDSA);
       await ir.connect(ops).moveIdentity(x.address, bob.address);
       await gov.connect(bob).castVote(id, false, "");
-      expect(await gov.getVoterLockedTokens(id, bob.address)).to.equal(
-        2n * cost,
-      );
+      // Deposits are per identity (Q6): one each.
+      expect(await gov.getVoterLockedTokens(id, bobId)).to.equal(cost);
+      expect(await gov.getVoterLockedTokens(id, xId)).to.equal(cost);
     });
   });
 });
