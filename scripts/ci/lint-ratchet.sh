@@ -8,7 +8,12 @@
 # warnings fail only when they RISE above the baseline. Solhint exiting
 # anything but 0 or 1 (a crash, a bad config), or reporting neither an
 # error nor a warning (it did not lint), fails too: an empty report is
-# not a pass.
+# not a pass. So does a partial lint: a second run in SARIF form, whose
+# `artifacts` list every file solhint linted (clean ones included; the
+# unix and json reports list only files with findings), must cover every
+# tracked contracts/**/*.sol not under a .solhintignore entry (entries
+# are read as path prefixes; today one directory, the generated
+# verifiers).
 #
 # Baseline history: 976 before Task 3.2, 965 after 3.2, 944 after the
 # Task 3.3 PrivacyManager rewrite, 933 after 3.7b, 917 after 3.8 dropped
@@ -41,6 +46,29 @@ fi
 if [ "$errors" -eq 0 ] && [ "$warnings" -eq 0 ]; then
   echo "::error::solhint reported no error and no warning: did it run?"
   tail -20 "$LOG"
+  exit 1
+fi
+SARIF=$(mktemp "${TMPDIR:-/tmp}/solhint-sarif.XXXXXX")
+npx solhint -f sarif 'contracts/**/*.sol' > "$SARIF" 2>/dev/null
+if ! node -e '
+  const fs = require("fs");
+  const { execFileSync } = require("child_process");
+  const text = fs.readFileSync(process.argv[1], "utf8");
+  const sarif = JSON.parse(text.slice(text.indexOf("{")));
+  const root = process.cwd() + "/";
+  const linted = new Set(sarif.runs[0].artifacts.map((a) =>
+    decodeURIComponent(a.location.uri.replace(/^file:\/\//, "")).replace(root, "")));
+  const ignored = (fs.existsSync(".solhintignore") ? fs.readFileSync(".solhintignore", "utf8") : "").split("\n")
+    .map((l) => l.trim()).filter((l) => l && !l.startsWith("#"));
+  const want = execFileSync("git", ["ls-files", "contracts/*.sol", "contracts/**/*.sol"], { encoding: "utf8" })
+    .split("\n").filter((f) => f && !ignored.some((p) => f.startsWith(p)));
+  const missed = want.filter((f) => !linted.has(f));
+  console.log(`solhint linted ${linted.size} files; ${want.length} expected`);
+  if (missed.length) {
+    console.log(`::error::solhint did not lint ${missed.length} of ${want.length} contracts: ${missed.slice(0, 10).join(", ")}`);
+    process.exit(1);
+  }' "$SARIF"; then
+  echo "::error::solhint did not lint the whole tree (above)."
   exit 1
 fi
 if [ "$errors" -gt 0 ]; then
