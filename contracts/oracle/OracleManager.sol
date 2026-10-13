@@ -56,6 +56,7 @@ contract OracleManager is IOracleManager, OracleQueryPayload, Ownable2Step, Reen
         bool hasResult;
         bool result;
         uint256 resolvedAt; // block time hasResult first became true; never moves
+        uint256 support; // nodes that voted the verdict's way, read when it was set
     }
 
     // State variables
@@ -324,13 +325,15 @@ contract OracleManager is IOracleManager, OracleQueryPayload, Ownable2Step, Reen
         // A settled verdict is final: a later group must not flip it (review L4).
         if (query.hasResult) revert QueryAlreadyResolved();
 
-        (bool resolved, bool result) = _boundEngine().recordVote(_queryId, msg.sender, _result);
+        ConsensusOracle engine = _boundEngine();
+        (bool resolved, bool result) = engine.recordVote(_queryId, msg.sender, _result);
         oracles[msg.sender].totalAttestations++;
 
         if (resolved) {
             query.hasResult = true;
             query.result = result;
             query.resolvedAt = block.timestamp;
+            query.support = engine.votersFor(_queryId, result);
         }
     }
 
@@ -354,9 +357,7 @@ contract OracleManager is IOracleManager, OracleQueryPayload, Ownable2Step, Reen
 
     /// @inheritdoc IOracleManager
     function getQuerySupport(bytes32 _queryId) external view returns (uint256) {
-        Query storage query = queries[_queryId];
-        if (!query.hasResult) return 0;
-        return _boundEngine().votersFor(_queryId, query.result);
+        return queries[_queryId].support;
     }
 
     /// @inheritdoc IOracleManager
@@ -379,6 +380,9 @@ contract OracleManager is IOracleManager, OracleQueryPayload, Ownable2Step, Reen
         if (!query.hasResult) query.resolvedAt = block.timestamp;
         query.hasResult = true;
         query.result = _result;
+        // Only nodes that voted its way (none in an engine bound since).
+        ConsensusOracle e = consensusEngine;
+        query.support = address(e) == address(0) ? 0 : e.votersFor(_queryId, _result);
 
         emit EmergencyOverrideExecuted(_oracle, _queryId, _reason);
     }

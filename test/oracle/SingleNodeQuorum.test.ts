@@ -190,5 +190,24 @@ describe("Task 5.1: no single node resolves; the list-oracle voter floor", funct
         "TooFewVoters",
       );
     });
+
+    // Task 5.1 review L4: support is recorded at resolve, not read from
+    // whichever engine is bound when the oracle applies the verdict.
+    it("a verdict resolved before an engine rebind still applies", async function () {
+      const q = await raise();
+      await vote(n1, q, true);
+      await vote(n2, q, true);
+      await bindEngine(OM);
+      expect(await OM.getQuerySupport(q)).to.equal(2);
+      await expect(attest(WO, n1, q, true)).to.emit(WO, "WhitelistUpdated");
+    });
+
+    it("an override after a rebind counts no voter", async function () {
+      const q = await raise(BLACKLIST, "0x");
+      await vote(n1, q, true);
+      await bindEngine(OM);
+      await OM.emergencyOverride(n1.address, q, true, "owner");
+      expect(await OM.getQuerySupport(q)).to.equal(0);
+    });
   });
 });

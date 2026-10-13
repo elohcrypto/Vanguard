@@ -67,10 +67,11 @@ interface IOracleManager {
         bytes32 queryId
     ) external view returns (bool hasResult, bool result, uint256 resolvedAt);
 
-    /// @notice Distinct nodes whose vote matches the query's stored verdict
-    ///         (0 while open; an emergency override counts only the nodes
-    ///         that voted its way). The list oracles refuse a verdict below
-    ///         their minimumConsensusOracles (Task 5.1, N11).
+    /// @notice Distinct nodes whose vote matches the query's stored verdict,
+    ///         recorded when the verdict was set, so an engine rebound since
+    ///         does not erase it (0 while open; an emergency override counts
+    ///         only the nodes that voted its way). The list oracles refuse a
+    ///         verdict below their minimumConsensusOracles (Task 5.1, N11).
     function getQuerySupport(bytes32 queryId) external view returns (uint256);
 
     /// @notice The `data` the query was raised with (for a blacklist query:
