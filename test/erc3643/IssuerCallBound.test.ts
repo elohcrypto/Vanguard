@@ -18,6 +18,8 @@ const BOMB = 2;
 const BURN_VALID_TO = 3;
 const BOMB_VALID_TO = 4;
 const WIDE = 5; // "yes" plus 64 KB, within the stipend
+const SHORT = 6; // 31 bytes ending in 0x01
+const GAUGE = 7; // "yes" only with at least 40,000 gas at entry
 
 describe("Task 5.1: bounded trusted-issuer calls", function () {
   let owner: SignerWithAddress, user: SignerWithAddress;
@@ -152,6 +154,18 @@ describe("Task 5.1: bounded trusted-issuer calls", function () {
       expect([ok, w]).to.deep.equal([false, 0n]);
     });
 
+    it("31 bytes ending in 0x01 are not a word", async function () {
+      const short = await (
+        await ethers.getContractFactory("HostileIssuer")
+      ).deploy(SHORT);
+      const [ok, w] = await probe.word(
+        await short.getAddress(),
+        hasValid(idA),
+        45_000,
+      );
+      expect([ok, w]).to.deep.equal([false, 0n]);
+    });
+
     it("reads one word of a 64 KB answer: the caller pays for none of the rest", async function () {
       const wide = await (
         await ethers.getContractFactory("HostileIssuer")
@@ -181,6 +195,38 @@ describe("Task 5.1: bounded trusted-issuer calls", function () {
         gasLimit: 1_200_000,
       });
       expect(ok).to.equal(true);
+    });
+
+    it("a gas-sensitive issuer: every refresh reverts or verifies, never answers false", async function () {
+      // R-51-7: the issuer says yes only when it enters with 40,000 gas.
+      // Without StipendUnavailable a caller short of the stipend would
+      // hand it less and read its "no" as a negative.
+      const r = await (
+        await ethers.getContractFactory("IdentityRegistry")
+      ).deploy();
+      await r.registerIdentity(user.address, idA, 840);
+      const gauge = await (
+        await ethers.getContractFactory("HostileIssuer")
+      ).deploy(GAUGE);
+      await r.addTrustedIssuer(await gauge.getAddress(), [KYC_TOPIC]);
+      await r.addClaimTopic(KYC_TOPIC);
+      await r.refreshVerified(user.address);
+      let reverted = 0;
+      let verified = 0;
+      for (let limit = 40_000; limit <= 140_000; limit += 250) {
+        try {
+          const res = await r.refreshVerified.staticCall(user.address, {
+            gasLimit: limit,
+          });
+          expect(res, `gas limit ${limit}`).to.equal(true);
+          verified++;
+        } catch (e: any) {
+          if (e.name === "AssertionError") throw e;
+          reverted++;
+        }
+      }
+      expect(reverted).to.be.gt(0);
+      expect(verified).to.be.gt(0);
     });
 
     it("a refresh starved below the stipend reverts, never answers false", async function () {
