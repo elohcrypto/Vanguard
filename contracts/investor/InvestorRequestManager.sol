@@ -9,11 +9,6 @@ import "../erc3643/interfaces/IERC3643.sol";
 import "../compliance/interfaces/ITrustedContracts.sol";
 import "./MultiSigWallet.sol";
 
-/// @dev Read-only slice of Token: the investor-type registry it applies.
-interface ITokenTypesView {
-    function investorTypeRegistry() external view returns (address);
-}
-
 /// @dev Read-only slice of ComplianceRules: the token's whitelist source.
 interface IRulesWhitelistView {
     function whitelistOracle(address token) external view returns (address);

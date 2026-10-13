@@ -6,6 +6,12 @@ import "@openzeppelin/contracts/access/Ownable.sol";
 import "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
 import {IERC3643} from "../erc3643/interfaces/IERC3643.sol";
 import {IIdentityRegistry} from "../erc3643/interfaces/IIdentityRegistry.sol";
+import {IInvestorTypeRegistry} from "../erc3643/interfaces/IInvestorTypeRegistry.sol";
+
+/// @dev Read-only slice of Token: the investor-type registry it applies.
+interface ITokenTypesView {
+    function investorTypeRegistry() external view returns (address);
+}
 
 /// @dev Read-only slice of ComplianceRules: trusted-contract status on a token.
 interface ITrustedContractView {
@@ -65,6 +71,8 @@ contract MultiSigWallet is Ownable, ReentrancyGuard {
     error UserNotVerified(address user);
     error UserFrozen(address user);
     error UserBlacklisted(address user);
+    /// @dev A1F-6 (Task 5.1): a lock above the token's Normal cap.
+    error LockAboveNormalCap(uint256 amount, uint256 cap);
 
     // Events
     event TokensLocked(address indexed user, uint256 amount, uint256 timestamp);
@@ -99,6 +107,8 @@ contract MultiSigWallet is Ownable, ReentrancyGuard {
         require(msg.sender == user, "Only user can lock tokens");
         require(amount > 0, "Amount must be greater than 0");
         require(lockedAmount == 0, "Tokens already locked");
+        uint256 cap = _normalLockCap();
+        if (amount > cap) revert LockAboveNormalCap(amount, cap);
         
         // Transfer tokens from user to this contract
         require(
@@ -111,6 +121,32 @@ contract MultiSigWallet is Ownable, ReentrancyGuard {
         emit TokensLocked(msg.sender, amount, block.timestamp);
     }
     
+    /**
+     * @dev A1F-6 (Task 5.1): the largest lock a Normal holder can make on
+     *      the token, read now from the registry the token applies: the
+     *      smaller of the Normal per-transfer and holding caps (the same
+     *      bound as InvestorRequestManager._lockCap). The per-transfer cap
+     *      alone is not enough: a cut of only the holding cap left a lock
+     *      above it lockable. A token without an investor-type registry
+     *      has no Normal cap to apply.
+     */
+    function _normalLockCap() private view returns (uint256) {
+        address live;
+        try ITokenTypesView(token).investorTypeRegistry() returns (address r) {
+            live = r;
+        } catch {
+            return type(uint256).max;
+        }
+        if (live == address(0)) return type(uint256).max;
+        IInvestorTypeRegistry.InvestorTypeConfig memory normal = IInvestorTypeRegistry(live).getInvestorTypeConfig(
+            IInvestorTypeRegistry.InvestorType.Normal
+        );
+        return
+            normal.maxTransferAmount < normal.maxHoldingAmount
+                ? normal.maxTransferAmount
+                : normal.maxHoldingAmount;
+    }
+
     /**
      * @dev Create unlock proposal
      * @param amount Amount to unlock

@@ -47,7 +47,7 @@ describe("Task 5.1: request locks after a Normal cap cut", function () {
     expect(await f.m.hasActiveRequest(f.user.address)).to.equal(false);
   });
 
-  it("P7 regression: the lock itself is refused by the token's Normal cap", async function () {
+  it("P7 regression: lockTokens refuses a lock above the cut cap", async function () {
     const f = await setup();
     await f.m.connect(f.user).requestInvestorStatus(T.Institutional);
     await f.m.connect(f.bank).createMultiSigWallet(f.user.address);
@@ -55,11 +55,33 @@ describe("Task 5.1: request locks after a Normal cap cut", function () {
     const w = (await f.m.requests(f.user.address)).multiSigWallet;
     await f.token.connect(f.user).approve(w, f.cap);
     const wallet = await ethers.getContractAt("MultiSigWallet", w);
-    await expect(wallet.connect(f.user).lockTokens(f.cap)).to.be.revertedWith(
-      "Transfer amount limit exceeded",
-    );
+    await expect(wallet.connect(f.user).lockTokens(f.cap))
+      .to.be.revertedWithCustomError(wallet, "LockAboveNormalCap")
+      .withArgs(f.cap, f.cap / 8n);
     await f.m.connect(f.bank).rejectRequest(f.user.address, "cap cut");
     expect(await status(f)).to.equal(REJECTED);
+  });
+
+  it("a holding-only cut: lockTokens refuses a lock above the new cap", async function () {
+    // R-51-1: the token's per-transfer cap alone let this lock through.
+    const f = await setup();
+    await f.m.connect(f.user).requestInvestorStatus(T.Retail);
+    await f.m.connect(f.bank).createMultiSigWallet(f.user.address);
+    const r = await f.m.requests(f.user.address);
+    const c = await f.types.getInvestorTypeConfig(0);
+    await setNormalCaps(f.types, c.maxTransferAmount, f.cap / 8n);
+    await f.token
+      .connect(f.user)
+      .approve(r.multiSigWallet, r.requiredLockAmount);
+    const wallet = await ethers.getContractAt(
+      "MultiSigWallet",
+      r.multiSigWallet,
+    );
+    await expect(wallet.connect(f.user).lockTokens(r.requiredLockAmount))
+      .to.be.revertedWithCustomError(wallet, "LockAboveNormalCap")
+      .withArgs(r.requiredLockAmount, f.cap / 8n);
+    await wallet.connect(f.user).lockTokens(f.cap / 8n);
+    expect(await wallet.getLockedBalance()).to.equal(f.cap / 8n);
   });
 
   it("confirming a lock made before the cut is refused", async function () {
