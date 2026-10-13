@@ -181,16 +181,17 @@ describe("Issuer and identity carry-overs (Task 5.2)", function () {
       const key = ethers.id("stranger-key");
       await ethers.provider.send("evm_setAutomine", [false]);
       try {
-        await fac.deployOnchainID(holder.address, salt, { gasLimit: 6e6 });
+        // Estimated now: the deploy does not depend on the pending block.
+        const dep = await fac.deployOnchainID(holder.address, salt);
         const tx = await id
           .connect(stranger)
           .addCreationKey(key, { gasLimit: 2e5 });
         await ethers.provider.send("evm_mine", []);
         const rc = await ethers.provider.getTransactionReceipt(tx.hash);
+        const depRc = await ethers.provider.getTransactionReceipt(dep.hash);
+        expect(depRc!.status).to.equal(1);
         expect(rc!.status).to.equal(0);
-        expect(rc!.blockNumber).to.equal(
-          (await ethers.provider.getBlock("latest"))!.number,
-        );
+        expect(rc!.blockNumber).to.equal(depRc!.blockNumber);
       } finally {
         await ethers.provider.send("evm_setAutomine", [true]);
       }
