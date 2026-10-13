@@ -2,7 +2,7 @@
 pragma solidity ^0.8.19;
 
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
-import "@openzeppelin/contracts/access/Ownable.sol";
+import "@openzeppelin/contracts/access/Ownable2Step.sol";
 import "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
 import {IERC3643} from "../erc3643/interfaces/IERC3643.sol";
 import {IIdentityRegistry} from "../erc3643/interfaces/IIdentityRegistry.sol";
@@ -30,8 +30,12 @@ interface IBlacklistStatusView {
  * @dev 2-of-2 multi-signature wallet for investor token locking
  * @notice Requires both bank and user signatures to unlock tokens
  * @author Vanguard StableCoin Team
+ * @dev Two-step ownership (Task 5.2, Q7): transferOwnership only
+ *      nominates; the nominee completes it with acceptOwnership. The
+ *      deploying InvestorRequestManager owns each wallet and never moves
+ *      that ownership.
  */
-contract MultiSigWallet is Ownable, ReentrancyGuard {
+contract MultiSigWallet is Ownable2Step, ReentrancyGuard {
     // Wallet participants. Storage, not immutable (plan v2 Task 4.3): an
     // immutable is spliced into the runtime code, so every wallet would have
     // its own code hash. ComplianceRules lets a registrar trust only accounts
