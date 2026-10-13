@@ -9,7 +9,8 @@
 //    only run in which PrivacyManager's proof-gated branches execute.
 // A floor is a minimum: a figure below it fails, a figure 2+ points
 // above a floor under 80 prints a notice to raise it. A listed contract
-// missing from the json fails (a renamed file must not pass silently).
+// missing from the json fails (a renamed file must not pass silently),
+// and so does one with no branch arms recorded (nothing was measured).
 // Exits 1 on any finding;
 // `node scripts/ci/branch-floors.js <run> [coverage.json]`.
 const fs = require("fs");
@@ -41,7 +42,7 @@ function branchPct(suffix) {
     total += arms.length;
     hit += arms.filter((n) => n > 0).length;
   }
-  return total ? (100 * hit) / total : 100;
+  return total ? (100 * hit) / total : NaN;
 }
 
 let failed = false;
@@ -49,6 +50,13 @@ for (const { contract, min } of mine) {
   const pct = branchPct(contract);
   if (pct === null) {
     console.error(`::error::branch floors: ${contract} not in ${file}`);
+    failed = true;
+    continue;
+  }
+  if (Number.isNaN(pct)) {
+    console.error(
+      `::error::branch floors: ${contract} has no branch arms in ${file} (not instrumented?)`,
+    );
     failed = true;
     continue;
   }
