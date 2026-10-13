@@ -43,6 +43,18 @@ contract OnchainIDFactory is Ownable2Step {
     ///      no recovery manager can ever be set.
     bytes32 public immutable recoveryManagerCodeHash;
 
+    /// @notice Fees owed to a recipient that refused them at deploy time
+    ///         (Task 5.2): it pulls them with withdrawFees.
+    mapping(address => uint256) public pendingFees;
+    /// @notice Sum of pendingFees; the emergency withdrawals leave it.
+    uint256 public totalPendingFees;
+    /// @dev Gas the fee push forwards: ample for a multisig treasury's
+    ///      receive (D54), and a recipient that burns it all costs a
+    ///      deploy at most this much, never the deploy itself.
+    uint256 public constant FEE_CALL_GAS = 50_000;
+
+    event FeeDeferred(address indexed recipient, uint256 amount);
+    event FeesWithdrawn(address indexed recipient, address indexed to, uint256 amount);
     event RecoveryManagerSet(address indexed manager);
     error RecoveryManagerCodeMismatch();
 
@@ -90,10 +102,7 @@ contract OnchainIDFactory is Ownable2Step {
         deployedIdentities.push(identity);
         totalIdentities++;
 
-        // Transfer excess fee to fee recipient
-        if (msg.value > 0 && feeRecipient != address(0)) {
-            payable(feeRecipient).transfer(msg.value);
-        }
+        _payFee();
 
         emit OnchainIDDeployed(identity, _owner, _salt, msg.sender);
 
@@ -137,10 +146,7 @@ contract OnchainIDFactory is Ownable2Step {
         deployedIdentities.push(identity);
         totalIdentities++;
 
-        // Transfer excess fee to fee recipient
-        if (msg.value > 0 && feeRecipient != address(0)) {
-            payable(feeRecipient).transfer(msg.value);
-        }
+        _payFee();
 
         emit OnchainIDDeployed(identity, _owner, _salt, msg.sender);
 
@@ -198,12 +204,36 @@ contract OnchainIDFactory is Ownable2Step {
             emit OnchainIDDeployed(identity, _owners[i], _salts[i], msg.sender);
         }
 
-        // Transfer fees to fee recipient
-        if (msg.value > 0 && feeRecipient != address(0)) {
-            payable(feeRecipient).transfer(msg.value);
-        }
+        _payFee();
 
         return identities;
+    }
+
+    /// @dev Pays msg.value to feeRecipient. A recipient that reverts (or
+    ///      runs out of FEE_CALL_GAS) is owed it in pendingFees instead, so
+    ///      it cannot block deployments; 2300-gas .transfer used to block
+    ///      every paid deploy to a contract recipient.
+    function _payFee() private {
+        address r = feeRecipient;
+        if (msg.value == 0 || r == address(0)) return;
+        (bool ok, ) = r.call{value: msg.value, gas: FEE_CALL_GAS}("");
+        if (ok) return;
+        pendingFees[r] += msg.value;
+        totalPendingFees += msg.value;
+        emit FeeDeferred(r, msg.value);
+    }
+
+    /// @notice Pull the fees owed to the caller, to `_to` (a recipient
+    ///         that cannot receive ETH names another address).
+    function withdrawFees(address payable _to) external {
+        require(_to != address(0), "OnchainIDFactory: Invalid recipient");
+        uint256 amount = pendingFees[msg.sender];
+        require(amount > 0, "OnchainIDFactory: No fees pending");
+        pendingFees[msg.sender] = 0;
+        totalPendingFees -= amount;
+        (bool ok, ) = _to.call{value: amount}("");
+        require(ok, "OnchainIDFactory: Withdraw failed");
+        emit FeesWithdrawn(msg.sender, _to, amount);
     }
 
     /**
@@ -324,26 +354,30 @@ contract OnchainIDFactory is Ownable2Step {
     }
 
     /**
-     * @dev Emergency withdraw function
+     * @dev Emergency withdraw to the owner: the balance not owed as
+     *      pendingFees.
      */
     function emergencyWithdraw() external onlyOwner {
-        uint256 balance = address(this).balance;
-        require(balance > 0, "OnchainIDFactory: No balance to withdraw");
-
-        payable(owner()).transfer(balance);
+        _withdrawFree(payable(owner()));
     }
 
     /**
      * @dev Emergency withdraw to `_recipient` (2F.5 review L-3): governance
      *      owns the factory after the handover and cannot receive ETH, so a
      *      vote names where the balance goes.
-     * @param _recipient Address that receives the whole balance
+     * @param _recipient Address that receives the balance not owed as
+     *        pendingFees
      */
     function emergencyWithdrawTo(address payable _recipient) external onlyOwner {
         require(_recipient != address(0), "OnchainIDFactory: Invalid recipient");
-        uint256 balance = address(this).balance;
+        _withdrawFree(_recipient);
+    }
+
+    /// @dev Sends the balance not owed as pendingFees to `_to`.
+    function _withdrawFree(address payable _to) private {
+        uint256 balance = address(this).balance - totalPendingFees;
         require(balance > 0, "OnchainIDFactory: No balance to withdraw");
-        (bool ok, ) = _recipient.call{value: balance}("");
+        (bool ok, ) = _to.call{value: balance}("");
         require(ok, "OnchainIDFactory: Withdraw failed");
     }
 
