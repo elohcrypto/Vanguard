@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.19;
 
-import "@openzeppelin/contracts/access/Ownable.sol";
+import "@openzeppelin/contracts/access/Ownable2Step.sol";
 import "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
 import "../erc3643/interfaces/IInvestorTypeRegistry.sol";
 import "../erc3643/interfaces/IIdentityRegistry.sol";
@@ -30,10 +30,11 @@ interface IWhitelistEntryView {
 /**
  * @title InvestorRequestManager
  * @dev Manages investor status requests with multi-sig wallet token locking
- * @notice Handles complete investor onboarding workflow
+ * @notice Handles complete investor onboarding workflow. Ownership is
+ *         two-step (Task 5.1, Q7).
  * @author Vanguard StableCoin Team
  */
-contract InvestorRequestManager is Ownable, ReentrancyGuard {
+contract InvestorRequestManager is Ownable2Step, ReentrancyGuard {
     // Request status enumeration
     enum RequestStatus {
         None,               // 0 - No request exists

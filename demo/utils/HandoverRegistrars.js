@@ -126,6 +126,18 @@ async function custodyOwnerLines(o, dAddr, ops, govAddr) {
     const owner = await c.owner().catch(() => null);
     if (!owner || !(same(owner, ops) || same(owner, govAddr)))
       bad.push(`${a} (owner ${owner ?? "unreadable"})`);
+    // Task 5.1 (Q7): a pending nominee other than ops or governance could
+    // take the contract after the handover (no pendingOwner: one-step).
+    const pending = await (
+      await ethers.getContractAt(
+        ["function pendingOwner() view returns (address)"],
+        a,
+      )
+    )
+      .pendingOwner()
+      .catch(() => ethers.ZeroAddress);
+    if (![ethers.ZeroAddress, ops, govAddr].some((x) => same(pending, x)))
+      bad.push(`${a} (pending owner ${pending})`);
   }
   return [
     [

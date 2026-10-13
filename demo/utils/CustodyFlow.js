@@ -84,7 +84,12 @@ async function deployCustody(state, log = console.log) {
   );
   // Review L1: ops owns the manager BEFORE it gains any power (officer,
   // registrar), so a failure below never leaves a deployer-owned officer.
+  // Task 5.1 (Q7): the manager is Ownable2Step; ops nominated, ops accepts.
   await (await m.transferOwnership(bank.address)).wait();
+  await (await m.connect(bank).acceptOwnership()).wait();
+  if (!same(await m.owner(), bank.address)) {
+    throw new Error("InvestorRequestManager owner did not move to ops");
+  }
   log("   ✅ Manager owned by ops: the deployer keeps no custody power");
 
   if (same(await types.owner(), deployer.address)) {

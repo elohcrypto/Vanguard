@@ -296,6 +296,12 @@ async function assertHandoverComplete(o) {
   for (const oracle of o.oracles || []) {
     const a = await oracle.getAddress();
     add(`oracle ${a} owned by ops`, same(await oracle.owner(), ops));
+    // Task 5.1 (Q7): no nominee waits to take the oracle from ops.
+    const pending = await oracle.pendingOwner().catch(() => null);
+    add(
+      `oracle ${a} has no pending owner`,
+      Boolean(pending) && same(pending, ethers.ZeroAddress),
+    );
     const lm = await listManagerOf(oracle);
     if (lm)
       add(`oracle ${a} listManager is not the deployer`, !same(lm, dAddr));

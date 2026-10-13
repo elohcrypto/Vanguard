@@ -200,6 +200,7 @@ describe("Handover strays: roles (Task 4.13)", function () {
         await c.identityRegistry.getAddress(),
       );
       await m.transferOwnership(f.ops.address);
+      await m.connect(f.ops).acceptOwnership(); // Task 5.1: two-step
       const mAddr = await m.getAddress();
       await c.investorTypeRegistry.setComplianceOfficer(mAddr, true);
       await both(

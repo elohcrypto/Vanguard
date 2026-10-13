@@ -163,7 +163,7 @@ async function trustChecks(o, f = null, pre = false) {
       ok:
         Boolean(plan) ||
         (Boolean(owner) && (same(owner, ops) || same(owner, govAddr))),
-      fix: `registrar / officer contract ${addr} is owned by ${owner ?? "nobody readable"}, neither ops nor governance: a deployer-owned InvestorRequestManager assigns investor types and creates trusted wallets after the handover; its owner must transferOwnership(ops) first`,
+      fix: `registrar / officer contract ${addr} is owned by ${owner ?? "nobody readable"}, neither ops nor governance: a deployer-owned InvestorRequestManager assigns investor types and creates trusted wallets after the handover; its owner must transferOwnership(ops) and ops acceptOwnership() first`,
       strays: [],
     });
     out.push({

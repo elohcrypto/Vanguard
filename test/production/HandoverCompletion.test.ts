@@ -177,6 +177,14 @@ describe("Handover completion check (table)", function () {
       ["guardian set on Token", () => c.token.connect(gov).setGuardian(s)],
       [
         `oracle ${oAddr} owned by ops`,
+        async () => {
+          await oracle.connect(ops).transferOwnership(s);
+          await oracle.connect(stranger).acceptOwnership();
+        },
+      ],
+      // Task 5.1 (Q7): a nomination alone is a power too.
+      [
+        `oracle ${oAddr} has no pending owner`,
         () => oracle.connect(ops).transferOwnership(s),
       ],
       [

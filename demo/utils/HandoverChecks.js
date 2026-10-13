@@ -376,6 +376,13 @@ async function preflight(o, { acceptOnly = false } = {}) {
     if (!same(owner, dAddr) && !same(owner, ops)) {
       fail(`oracle ${a} is owned by ${owner}, neither deployer nor ops`);
     }
+    // Task 5.1 (Q7): a nominee on an ops-owned oracle could take it.
+    const pending = await oracle.pendingOwner();
+    if (same(owner, ops) && !same(pending, ethers.ZeroAddress)) {
+      fail(
+        `oracle ${a} is ops-owned with pending owner ${pending}: ops must transferOwnership(${ethers.ZeroAddress}) to cancel the nomination first`,
+      );
+    }
     const lm = await listManagerOf(oracle);
     if (lm && same(lm, dAddr) && !same(owner, dAddr)) {
       fail(`oracle ${a} listManager is the deployer and only ops can clear it`);

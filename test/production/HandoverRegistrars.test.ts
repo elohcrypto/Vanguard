@@ -116,8 +116,14 @@ describe("Handover: trusted-contract registrars (Task 4.3)", function () {
       ),
     );
     await m.transferOwnership(f.ops.address);
+    await m.connect(f.ops).acceptOwnership(); // Task 5.1: two-step
     await ceremony();
     await m.connect(f.ops).transferOwnership(f.stranger.address);
+    // Task 5.1 (Q7): the nomination alone fails the line.
+    expect((await assertHandoverComplete(f.args)).failures).to.include(
+      `registrar / compliance-officer contracts not owned by ops or governance: ${mAddr} (pending owner ${f.stranger.address})`,
+    );
+    await m.connect(f.stranger).acceptOwnership();
     const { failures } = await assertHandoverComplete(f.args);
     expect(failures).to.include.members([
       `registrar / compliance-officer contracts not owned by ops or governance: ${mAddr} (owner ${f.stranger.address})`,
@@ -135,6 +141,7 @@ describe("Handover: trusted-contract registrars (Task 4.3)", function () {
       await f.c.identityRegistry.getAddress(),
     );
     await m.transferOwnership(f.ops.address);
+    await m.connect(f.ops).acceptOwnership(); // Task 5.1: two-step
     await f.c.investorTypeRegistry.setComplianceOfficer(
       await m.getAddress(),
       true,

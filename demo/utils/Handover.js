@@ -217,11 +217,19 @@ async function handoverDeployerPowers(o) {
         `oracle ${a} listManager moved off the deployer to ${to}`,
       );
     }
+    // Task 5.1 (Q7): list oracles are Ownable2Step: nominate, ops accepts.
     if (!same(await oracle.owner(), ops)) {
-      await send(oracle.connect(d).transferOwnership(ops));
+      if (!same(await oracle.pendingOwner(), ops)) {
+        await send(oracle.connect(d).transferOwnership(ops));
+      }
+      await send(oracle.connect(o.ops).acceptOwnership());
     }
     check(same(await oracle.owner(), ops), `oracle ${a} owner is not ops`);
-    ok(`oracle ${a} owner: ops`);
+    check(
+      same(await oracle.pendingOwner(), ethers.ZeroAddress),
+      `oracle ${a} still has a pending owner`,
+    );
+    ok(`oracle ${a} owner: ops (nominated and accepted)`);
   }
   await oracleSteps(ctx); // Task 4.4: ops is OracleManager's operator
 

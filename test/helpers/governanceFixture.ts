@@ -162,7 +162,9 @@ export async function handoverFixture({ recordGovernanceToken = true } = {}) {
     await custody.getAddress(),
     true,
   );
+  // Task 5.1 (Q7): the manager is Ownable2Step; ops accepts.
   await custody.transferOwnership(ops.address);
+  await custody.connect(ops).acceptOwnership();
   for (const w of [alice, bob, carol]) {
     const id = await deployIdentity(factory, w.address);
     await identityRegistry.registerIdentity(w.address, id, 840);

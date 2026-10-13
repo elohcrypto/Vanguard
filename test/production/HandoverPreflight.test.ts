@@ -244,6 +244,7 @@ describe("Handover preflight and self-healing (plan 2E.2)", function () {
     const [oracle] = args.oracles;
     await oracle.setListManager(deployer.address);
     await oracle.transferOwnership(ops.address);
+    await oracle.connect(ops).acceptOwnership(); // Task 5.1: two-step
     await rejectsBeforeAnyTx(
       /listManager is the deployer and only ops can clear it/,
     );
@@ -327,6 +328,7 @@ describe("Handover preflight and self-healing (plan 2E.2)", function () {
 
   it("rejects an oracle owned by a third party", async function () {
     await args.oracles[0].transferOwnership(stranger.address);
+    await args.oracles[0].connect(stranger).acceptOwnership(); // Task 5.1
     await rejectsBeforeAnyTx(/is owned by .*, neither deployer nor ops/);
   });
 

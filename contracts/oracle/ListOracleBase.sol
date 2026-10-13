@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.19;
 
-import "@openzeppelin/contracts/access/Ownable.sol";
+import "@openzeppelin/contracts/access/Ownable2Step.sol";
 import "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
 import "@openzeppelin/contracts/utils/Pausable.sol";
 import "@openzeppelin/contracts/utils/cryptography/ECDSA.sol";
@@ -17,8 +17,10 @@ import "./interfaces/IOracleManager.sol";
  *      writer role, the pause switch and the verdict rules of plan 2F.3.
  *      Each list oracle keeps its own entries, attestations, consensus
  *      application and reason strings; each is deployed on its own.
+ *      Ownership is two-step (Task 5.1, Q7): the ceremony nominates ops
+ *      and ops accepts.
  */
-abstract contract ListOracleBase is IOracle, Ownable, ReentrancyGuard, Pausable {
+abstract contract ListOracleBase is IOracle, Ownable2Step, ReentrancyGuard, Pausable {
     /// @notice A resolved consensus was replayed against an address, or under a
     ///         policy, the query was not raised for. Binds queryId consensus to
     ///         its subject and query type.

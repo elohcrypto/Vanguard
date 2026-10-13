@@ -59,7 +59,9 @@ import * as fs from "fs";
 // reverts, which the ceremony treats as "no writer role".
 const ORACLE_ABI = [
   "function owner() view returns (address)",
+  "function pendingOwner() view returns (address)",
   "function transferOwnership(address)",
+  "function acceptOwnership()",
   "function listManager() view returns (address)",
   "function setListManager(address)",
 ];
