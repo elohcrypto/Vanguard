@@ -11,7 +11,8 @@
  * era left while the deployer still owns the manager. The ceremony
  * prints each node's provenance (who sent its OracleRegistered) as a
  * residual warning when that was the deployer (D50: rotate by vote; the
- * day-2 audit trusts an acknowledged node whoever registered it), and
+ * day-2 audit skips only a node a governance execution registered,
+ * R-56c-1), and
  * warns below ConsensusOracle.MIN_NODES; it prints each node's weight
  * share and fails when one node alone reaches the bar (Task 5.1, A1F-4:
  * the engine then opens no query). Each list oracle bound to VSC
@@ -40,8 +41,22 @@ const MIN_CONSENSUS = 2;
 const ZERO = ethers.ZeroAddress;
 const list = (xs) => xs.join(", ");
 
+const EXECUTED = ethers.id("ProposalExecuted(uint256)");
+
 /**
- * { nodes: [{ addr, name, registeredBy, block }], designated: [addr],
+ * R-56c-1: the registering transaction was sent to governance and its
+ * receipt carries governance's ProposalExecuted (a vote's execution,
+ * whoever sent it), not a call the deployer made itself.
+ */
+async function viaGovernance(tx, gov) {
+  if (!tx.to || !same(tx.to, gov)) return false;
+  const rc = await ethers.provider.getTransactionReceipt(tx.hash);
+  return rc.logs.some((l) => same(l.address, gov) && l.topics[0] === EXECUTED);
+}
+
+/**
+ * { nodes: [{ addr, name, registeredBy, block, byGovernance }],
+ * designated: [addr],
  * minNodes }: the live node list and each node's designation are direct
  * reads; the OracleRegistered scan adds provenance only.
  */
@@ -57,6 +72,7 @@ async function nodeFacts(o) {
     );
   }
   const nodes = [];
+  const gov = o.governance ? await addrOf(o.governance) : null;
   for (const addr of live) {
     const ev = regs.filter((e) => same(e.args[0], addr)).at(-1);
     const tx = ev && (await ethers.provider.getTransaction(ev.transactionHash));
@@ -65,6 +81,7 @@ async function nodeFacts(o) {
       name: ev ? ev.args[1] : "?",
       registeredBy: tx ? tx.from : null,
       block: ev ? ev.blockNumber : null,
+      byGovernance: Boolean(gov && tx && (await viaGovernance(tx, gov))),
     });
   }
   // R-413-6: a designation can only sit on a registered node
@@ -303,13 +320,12 @@ async function nodeSteps({ o, d, dAddr, ok, log }) {
  */
 async function nodeLines(o, dAddr, warnings = [], residual = []) {
   const f = await nodeFacts(o);
-  // Task 5.6b: in the day-2 audit an acknowledged node is the operator's
-  // word, whoever sent its registration (executeProposal is permissionless).
-  const ack = o.audit
-    ? await Promise.all((o.oracleNodes || []).map(addrOf))
-    : [];
+  // Task 5.6b: the day-2 audit skips a node a governance execution
+  // registered (executeProposal is permissionless, so the deployer may
+  // have sent it); a node the deployer registered itself keeps D50's
+  // warning there too (R-56c-1), acknowledged or not.
   for (const n of f.nodes) {
-    if (ack.some((a) => same(a, n.addr))) continue;
+    if (o.audit && n.byGovernance) continue;
     if (n.registeredBy && same(n.registeredBy, dAddr)) {
       const w = `OracleManager node ${n.addr} (${n.name}) was registered by the deployer at block ${n.block}: it votes with a key the deployer chose; rotate deployer-era nodes by an OracleParameters vote (D50)`;
       warnings.push(w);

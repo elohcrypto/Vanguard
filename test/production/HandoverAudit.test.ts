@@ -170,13 +170,29 @@ describe("Handover audit (HANDOVER_PHASE=audit, Task 5.6b)", function () {
     );
   });
 
-  it("trusts an acknowledged node whoever executed its registration (D50)", async function () {
+  it("fails on an InvestorRequestManager nominee other than ops or governance (R-56c-9)", async function () {
+    await run("full");
+    const irm = await f.custody.getAddress();
+    const line = (ok: string) =>
+      `   ${ok} registrar / officer contract ${irm} has no pending owner other than ops or governance`;
+    out.length = 0;
+    await run("audit");
+    expect(out).to.include(line("✅"));
+    await f.custody.connect(f.ops).transferOwnership(f.stranger.address);
+    await fails("audit", /❌ registrar \/ officer contract .* has no pending/);
+    expect(out).to.include(line("❌"));
+  });
+
+  it("trusts a node a governance execution registered, whoever sent it (D50)", async function () {
     await run("full");
     // executeProposal is permissionless: the deployer executes the votes.
     await registerNodes(f.deployer);
     const facts = await nodeFacts(f.args);
     expect(facts.nodes.map((n: any) => n.registeredBy)).to.deep.equal(
       Array(3).fill(f.deployer.address),
+    );
+    expect(facts.nodes.map((n: any) => n.byGovernance)).to.deep.equal(
+      Array(3).fill(true),
     );
     cfg.oracleNodes = (await nodes()).map((n) => n.address);
     // The ceremony's completion names each as deployer-registered...
@@ -185,10 +201,32 @@ describe("Handover audit (HANDOVER_PHASE=audit, Task 5.6b)", function () {
       oracleNodes: cfg.oracleNodes,
     });
     expect(warnings.join("\n")).to.include("was registered by the deployer");
-    // ...the audit takes the acknowledgement as the operator's word.
+    // ...the audit sees each registration was a governance execution.
     out.length = 0;
     await run("audit");
     expect(out).to.include(PASSED);
     expect(out.join("\n")).to.not.include("was registered by the deployer");
+  });
+
+  it("keeps D50's warning for a node the deployer registered (R-56c-1)", async function () {
+    // Deployer era: the deployer registers the nodes directly, and the
+    // config acknowledges them.
+    const om = f.c.oracleManager.connect(f.deployer);
+    for (const [i, n] of (await nodes()).entries())
+      await om.registerOracle(n.address, `DEP_${i + 1}`, "deployer era", 500);
+    cfg.oracleNodes = (await nodes()).map((n) => n.address);
+    await run("full");
+    const facts = await nodeFacts(f.args);
+    expect(facts.nodes.map((n: any) => n.byGovernance)).to.deep.equal(
+      Array(3).fill(false),
+    );
+    out.length = 0;
+    await run("audit");
+    const text = out.join("\n");
+    for (const n of await nodes())
+      expect(text).to.include(`OracleManager node ${n.address} (DEP_`);
+    expect(text).to.include("was registered by the deployer");
+    expect(out).to.include("\n⚠️  Audit passed with warnings: see above.");
+    expect(out).to.not.include(PASSED);
   });
 });
