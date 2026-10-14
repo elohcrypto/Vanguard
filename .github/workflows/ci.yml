@@ -157,6 +157,10 @@ jobs:
         run: scripts/ci/zk-circuits.sh
       - name: Run tests
         run: npm test
+        env: { TEST_PARITY_OUT: /tmp/test-parity-run.json }
+      # Task 5.4: the split test files lost no test or assertion.
+      - name: Test-file split parity
+        run: node scripts/ci/test-parity.js check /tmp/test-parity-run.json
       # Task 4.15: the transfer-gas table (scripts/gas-analysis.ts) as a
       # recorded-baseline ratchet: a scenario more than 1,500 gas above its
       # recorded figure fails, a drop prints a notice. The hard gate stays
