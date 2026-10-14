@@ -16,7 +16,8 @@
 //     73b", "Options 33a, 34a and 35a") is a `case "N":` of the menu in
 //     demo/core/MenuSystem.js, read from the source.
 //  4. Every command cited in code (spans and fences) exists: paths under
-//     scripts/ and demo/, `npm run` names, `hardhat run` paths.
+//     scripts/ and demo/, `npm run` names, hardhat tasks and the
+//     `hardhat run` / `hardhat test` paths.
 // Exits 1 on any finding; `node scripts/ci/docs-gate.js`.
 const { execFileSync } = require("child_process");
 const fs = require("fs");
@@ -227,24 +228,73 @@ function codeOf(text) {
   }
   return out;
 }
-const cited = { paths: 0, npm: 0, run: 0 };
-const PATH = /(?<![\w./<$-])(?:\.\/)?((?:scripts|demo)\/[\w.*/-]+)/g;
+// R-56c-5: a static list, from `npx hardhat --help` at 87271ee (built-in
+// and plugin tasks, the vars scope); hardhat.config.ts defines none. A
+// live `--help` would compile the project on every gate run.
+const HARDHAT_TASKS = new Set(
+  "check clean compile console coverage flatten gas-reporter:merge help node run size-contracts test typechain verify vars".split(
+    " ",
+  ),
+);
+// Hardhat flags that take a value; any other --flag stands alone.
+const VALUED = new Set([
+  "--network",
+  "--config",
+  "--tsconfig",
+  "--grep",
+  "--max-memory",
+]);
+// A suffix that is a file extension is no member name (`scripts/x.sh`).
+const EXT =
+  /^(sh|js|cjs|mjs|ts|json|md|sol|ya?ml|txt|circom|py|toml|zkey|wasm|ptau|r1cs|log)$/;
+const SHELL = /^(#|&&|\|\|?|;|>|>>|2>.*|<|\))/;
+const cited = { paths: 0, npm: 0, run: 0, test: 0, tasks: 0 };
+const PATH = /(?<![\w<$-])((?:\.{1,2}\/)*(?:scripts|demo)\/[\w.*/-]+)/g;
+// A cited path: repository-relative (./ too), or ../ from the doc.
+function citedPath(doc, raw) {
+  if (!/^\.{1,2}\//.test(raw)) return raw;
+  if (raw.startsWith("./")) return raw.slice(2); // run from the root
+  // Outside the repository it starts with ../: no tracked file.
+  return path.posix.normalize(path.posix.join(path.posix.dirname(doc), raw));
+}
+// The words after `hardhat` up to a shell separator: { task, args }.
+function hardhatCall(words) {
+  const args = [];
+  let task = null;
+  for (let i = 0; i < words.length; i++) {
+    const w = words[i];
+    if (SHELL.test(w)) break;
+    if (w.startsWith("--")) {
+      if (VALUED.has(w)) i++;
+      continue;
+    }
+    if (task === null) task = w;
+    else args.push(w);
+  }
+  return { task, args };
+}
+const placeholder = (w) => /^[<$"'{]/.test(w);
 for (const doc of docs) {
   for (const [n, code] of codeOf(fs.readFileSync(doc, "utf8"))) {
     for (const m of code.matchAll(PATH)) {
+      // Inside a longer path (a/scripts/x) it is no citation.
+      if (m.index > 0 && code[m.index - 1] === "/") continue;
       cited.paths++;
-      const p = m[1].replace(/[.,:;]+$/, "");
+      const raw = m[1].replace(/[.,:;]+$/, "");
+      const p = citedPath(doc, raw);
       // `demo/utils/ChainTime.advancePast` names a member of ChainTime.js;
       // require("./demo/utils/HandoverVotes") a module without extension.
-      const member = /^(.+)\.\w+$/.exec(p);
+      const member = /^(.+)\.(\w+)$/.exec(p);
       const ok =
         pathOk(p) ||
         ["js", "ts"].some(
-          (x) => pathOk(`${p}.${x}`) || (member && pathOk(`${member[1]}.${x}`)),
+          (x) =>
+            pathOk(`${p}.${x}`) ||
+            (member && !EXT.test(member[2]) && pathOk(`${member[1]}.${x}`)),
         );
-      if (!ok) findings.push(`${doc}:${n}: names ${p}, absent`);
+      if (!ok) findings.push(`${doc}:${n}: names ${raw}, absent`);
     }
-    for (const m of code.matchAll(/\bnpm run ([\w:.-]+)/g)) {
+    for (const m of code.matchAll(/\bnpm (?:run|run-script) ([\w:.-]+)/g)) {
       cited.npm++;
       if (!npmScripts.has(m[1])) {
         findings.push(
@@ -252,14 +302,29 @@ for (const doc of docs) {
         );
       }
     }
-    for (const m of code.matchAll(
-      /\bhardhat run\s+((?:--\S+\s+\S+\s+)*)(\S+)/g,
-    )) {
-      const p = m[2].replace(/[.,:;`]+$/, "");
-      if (/^[<$]/.test(p)) continue;
-      cited.run++;
-      if (!pathOk(p.replace(/^\.\//, ""))) {
-        findings.push(`${doc}:${n}: hardhat run ${p}: absent`);
+    // Each `hardhat` starts a call; hardhatCall stops at a separator.
+    for (const m of code.matchAll(/\bhardhat(?=\s)/g)) {
+      const rest = code.slice(m.index + m[0].length);
+      // A quoted value ("a b") is one word.
+      const { task, args } = hardhatCall(
+        rest.match(/"[^"]*"|'[^']*'|\S+/g) || [],
+      );
+      if (task === null || placeholder(task)) continue;
+      cited.tasks++;
+      if (!HARDHAT_TASKS.has(task)) {
+        findings.push(`${doc}:${n}: hardhat ${task}: no such task`);
+        continue;
+      }
+      if (task !== "run" && task !== "test") continue;
+      // run takes one script; test any number of files (none: all).
+      for (const a of task === "run" ? args.slice(0, 1) : args) {
+        const w = a.replace(/[.,:;`]+$/, "");
+        if (placeholder(w)) continue;
+        cited[task]++;
+        const p = citedPath(doc, w);
+        if (!pathOk(p)) {
+          findings.push(`${doc}:${n}: hardhat ${task} ${w}: absent`);
+        }
       }
     }
   }
@@ -270,5 +335,5 @@ if (findings.length) {
   process.exit(1);
 }
 console.log(
-  `docs gate: README tree, links in ${docs.length} docs, option citations ok (menu ${menu.size}), cited commands exist (${cited.paths} paths, ${cited.npm} npm run, ${cited.run} hardhat run)`,
+  `docs gate: README tree, links in ${docs.length} docs, option citations ok (menu ${menu.size}), cited commands exist (${cited.paths} paths, ${cited.npm} npm run, ${cited.tasks} hardhat tasks, ${cited.run} hardhat run, ${cited.test} hardhat test)`,
 );
