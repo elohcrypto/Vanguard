@@ -8,7 +8,8 @@
 const { ethers, artifacts } = require("hardhat");
 const { proposeCall } = require("./Handover");
 const { voterAgeRefusal, walletControlRefusal } = require("./ChainTime");
-const { deployerBarred, askWallet } = require("./ProposalExecutor");
+const { askWallet } = require("./ProposalExecutor");
+const { postCeremonyOf } = require("./PostCeremony");
 
 const same = (a, b) => a.toLowerCase() === b.toLowerCase();
 const COMPLIANCE_RULES_TYPE = 1; // ProposalType.ComplianceRules
@@ -25,7 +26,7 @@ async function pickProposer(state) {
   const idReg = state.getContract("identityRegistry");
   const vgt = state.getContract("governanceToken");
   const cost = await gov.proposalCreationCost();
-  const first = (await deployerBarred(state)) ? 1 : 0;
+  const first = (await postCeremonyOf(state)) ? 1 : 0;
   for (let i = first; i < Math.min(10, state.signers.length); i++) {
     if (ROLE_WALLETS.has(i)) continue;
     const s = state.signers[i];
@@ -44,7 +45,7 @@ async function pickProposer(state) {
  * else one asked for (0 refused: { refused }).
  */
 async function barredProposer(state, prompt) {
-  if (!(await deployerBarred(state))) return null;
+  if (!(await postCeremonyOf(state))) return null;
   const s = await pickProposer(state);
   if (s) return { signer: s, why: "not wallet 0 after the ceremony" };
   return askWallet(prompt, state.signers, "Propose");

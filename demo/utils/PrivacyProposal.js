@@ -12,7 +12,6 @@ const { ethers } = require("hardhat");
 const { displayError, displaySuccess } = require("./DisplayHelpers");
 const { proposeCall } = require("./Handover");
 const { pickVoters } = require("./VoterPicker");
-const { deployerBarred } = require("./ProposalExecutor");
 
 const SPECS = {
   11: {
@@ -54,9 +53,7 @@ async function createPrivacyProposal(state, prompt, type) {
     return (displayError(`Not ${spec.min}-${spec.max}`), null);
   }
   const value = BigInt(n) * spec.unit;
-  const pick = await pickVoters(state, type, spec.name, {
-    noDeployer: await deployerBarred(state),
-  });
+  const pick = await pickVoters(state, type, spec.name);
   if (!pick) return null;
   const title = `${spec.key}.${spec.fn}(${value})`;
   const id = await proposeCall(

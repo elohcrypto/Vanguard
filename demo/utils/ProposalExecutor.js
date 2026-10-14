@@ -12,26 +12,14 @@
  * reads in chunks (HandoverScans.scanLogs, the ceremony's logChunk).
  *
  * Option 76 (round 2, R-56-5): before the ceremony wallet 0 may propose;
- * after it the first eligible wallet but 0 proposes (deployerBarred), and
+ * after it the first eligible wallet but 0 proposes (PostCeremony.js), and
  * a flow with no eligible wallet asks (askWallet refuses 0).
  */
 
-const { ethers } = require("hardhat");
 const { scanLogs } = require("./HandoverScans");
+const { postCeremony } = require("./PostCeremony");
 
 const same = (a, b) => String(a).toLowerCase() === String(b).toLowerCase();
-const OWNER_ABI = ["function owner() view returns (address)"];
-
-/** True once governance owns VSC (TokenParameters' bound target). */
-async function ceremonyDone(gov) {
-  const vsc = await gov.boundTarget(3).catch(() => ethers.ZeroAddress);
-  if (same(vsc, ethers.ZeroAddress)) return false;
-  const t = await ethers.getContractAt(OWNER_ABI, vsc);
-  return same(
-    await t.owner().catch(() => ethers.ZeroAddress),
-    await gov.getAddress(),
-  );
-}
 
 /**
  * { signer, why } to execute proposal `id` from, or { refused } when
@@ -40,7 +28,7 @@ async function ceremonyDone(gov) {
 async function executorFor(mod, gov, id) {
   const signers = mod.state.signers || [];
   const deployer = signers[0];
-  const after = await ceremonyDone(gov);
+  const after = await postCeremony(gov);
   const ours = (a) => signers.find((s) => same(s.address, a));
   const usable = (s) =>
     Boolean(s) && !(after && deployer && same(s.address, deployer.address));
@@ -75,10 +63,4 @@ async function askWallet(prompt, signers, verb) {
   return { signer: signers[i], why: `wallet ${i}` };
 }
 
-/** True when wallet 0 may not send: the ceremony is over (R-56-5). */
-async function deployerBarred(state) {
-  const gov = state.getContract("vanguardGovernance");
-  return Boolean(gov) && (await ceremonyDone(gov));
-}
-
-module.exports = { executorFor, ceremonyDone, askWallet, deployerBarred };
+module.exports = { executorFor, askWallet };

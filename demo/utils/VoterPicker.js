@@ -12,6 +12,7 @@ const {
   eligibleVotersNow,
   walletControlRefusal,
 } = require("./ChainTime");
+const { postCeremonyOf } = require("./PostCeremony");
 
 /** issuerAdmin 9, ops 10, guardian 11 (docs/TESTNET_SETUP.md) never vote. */
 const ROLE_WALLETS = [9, 10, 11];
@@ -20,14 +21,16 @@ const same = (a, b) => a.toLowerCase() === b.toLowerCase();
 
 /**
  * Verified wallets among 0-9 that may act through their identity: the role
- * wallets and governance itself excluded, in index order.
+ * wallets and governance itself excluded, in index order; after the
+ * ceremony wallet 0, the deployer, too (R-56-5, PostCeremony.js).
  */
 async function verifiedHumans(state) {
   const gov = state.getContract("vanguardGovernance");
   const idReg = state.getContract("identityRegistry");
   const govAddr = await gov.getAddress();
   const out = [];
-  for (let i = 0; i < Math.min(10, state.signers.length); i++) {
+  const first = (await postCeremonyOf(state)) ? 1 : 0;
+  for (let i = first; i < Math.min(10, state.signers.length); i++) {
     if (ROLE_WALLETS.includes(i)) continue; // review N-3
     const s = state.signers[i];
     if (same(s.address, govAddr)) continue;
@@ -44,15 +47,9 @@ async function verifiedHumans(state) {
  * null (after the refusal with its diagnosis) when there are too few.
  * Returns { proposer, voters, needed }: the proposer never votes (the
  * contract refuses "Proposer cannot vote on own proposal"); `needed` is the
- * advisory quorum count. `noDeployer` leaves wallet 0 out (option 76
- * after the ceremony).
+ * advisory quorum count.
  */
-async function pickVoters(
-  state,
-  proposalType,
-  typeName,
-  { noDeployer = false } = {},
-) {
+async function pickVoters(state, proposalType, typeName) {
   const gov = state.getContract("vanguardGovernance");
   const vgt = state.getContract("governanceToken");
   const idReg = state.getContract("identityRegistry");
@@ -60,10 +57,7 @@ async function pickVoters(
   // Report the two prerequisites SEPARATELY: missing verified voters and
   // missing VGT are different fixes.
   const stake = (await gov.proposalCreationCost()) + (await gov.votingCost());
-  // R-56-5: after the ceremony option 76 passes noDeployer (wallet 0).
-  const humans = (await verifiedHumans(state)).filter(
-    (s) => !noDeployer || !same(s.address, state.signers[0].address),
-  );
+  const humans = await verifiedHumans(state);
   const usable = [];
   for (const s of humans) {
     if ((await vgt.balanceOf(s.address)) >= stake) usable.push(s);
