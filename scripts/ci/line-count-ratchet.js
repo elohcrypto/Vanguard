@@ -34,7 +34,6 @@ const ALLOW = {
   "test/production/ProductionSimulation.test.ts": 825,
   "test/investor/InvestorOnboarding.test.ts": 752,
   "test/integration/OracleERC3643Integration.test.ts": 742,
-  "test/GovernanceComplianceIntegration.test.ts": 714,
   "test/OnchainID.test.ts": 691,
   "test/oracle/OracleManager.test.ts": 626,
   "test/GovernanceToken.test.ts": 623,

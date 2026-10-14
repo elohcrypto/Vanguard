@@ -72,7 +72,7 @@ describe("VanguardGovernance — quorum enforcement", () => {
   // A test that fails when comments grow, and that pins the exact identifiers
   // a fix must change, blocks correct work and permits incorrect work. The
   // behavioural equivalents live in
-  // test/GovernanceComplianceIntegration.test.ts ("Quorum enforcement"):
+  // test/GovernanceComplianceQuorum.test.ts ("Quorum enforcement"):
   // refund below quorum, refund on zero votes, snapshot immunity to mid-vote
   // registration, and advisory/enforcement agreement — all executed on chain.
   //
