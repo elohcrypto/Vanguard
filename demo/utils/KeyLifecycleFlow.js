@@ -35,7 +35,7 @@ const ECDSA = 1;
 /**
  * Option 12's defaults: wallet 1's identity; recovery agents 7 and 8, the
  * investors Bob and Carol, which hold no issuer, ops or guardian role
- * (docs/TESTNET_DEMO.md "Roles are wallet indices").
+ * (docs/TESTNET_SETUP.md "Roles are wallet indices").
  */
 const DEMO_WALLET = 1;
 const AGENT_WALLETS = [7, 8];

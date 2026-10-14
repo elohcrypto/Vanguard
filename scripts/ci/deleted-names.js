@@ -33,6 +33,8 @@ const FILES = [
   "MockComplianceRegistry.sol",
   "PAYMENT_PROTOCOL_DESIGN.md",
   "SECURITY_UPGRADE.md",
+  // Task 5.5: docs split by topic (docs/TESTNET_*.md, docs/DEEP_DIVE_*.md).
+  "TESTNET_DEMO.md",
   // Task 4.16: two interfaces no contract imported, a demo helper no flow
   // required (review B L-1).
   "IMultiSigWallet.sol",

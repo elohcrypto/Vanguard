@@ -42,7 +42,7 @@ const STATE_KEY = {
   governance: "vanguardGovernance",
 };
 
-/** Wallet indices from docs/TESTNET_DEMO.md (multisigs on Sepolia). */
+/** Wallet indices from docs/TESTNET_SETUP.md (multisigs on Sepolia). */
 const OPS_INDEX = 10;
 const GUARDIAN_INDEX = 11;
 // Owns the claim issuers the deployer holds; never ops (2F.5, D25 b).

@@ -2,8 +2,9 @@
 
 What the five circuits are, how to build and check them, what each proof
 does on chain, and what it does not. For the operator and investor command
-lines see [TESTNET_DEMO.md](TESTNET_DEMO.md) ("Whitelist roots and proofs
-from the command line" and the privacy sections after it); for the build
+lines see [TESTNET_CEREMONY.md](TESTNET_CEREMONY.md) ("Whitelist roots and proofs
+from the command line" and "Issuer-signed attestations") and
+[TESTNET_DEMO_OPTIONS.md](TESTNET_DEMO_OPTIONS.md) ("Privacy options"); for the build
 itself see [ZK_CIRCUIT_BUILD_GUIDE.md](ZK_CIRCUIT_BUILD_GUIDE.md).
 
 Status: the circuits, verifiers and consumers are implemented and tested

@@ -5,7 +5,7 @@
  *
  *   HANDOVER_CONFIG=handover.json npx hardhat run scripts/handover.ts --network <net>
  *
- * handover.json (wallet indices from docs/TESTNET_DEMO.md):
+ * handover.json (wallet indices from docs/TESTNET_SETUP.md):
  *   {
  *     "governance": "0x..",                   // the one root: every other
  *                                             // contract is derived from it

@@ -21,7 +21,7 @@ const {
 const { advancePastVoterAge } = require("../demo/utils/ChainTime");
 const { attestorPublicKey } = require("./zk/attest");
 
-/** Wallet roles from docs/TESTNET_DEMO.md. */
+/** Wallet roles from docs/TESTNET_SETUP.md. */
 const OPS = 10;
 const GUARDIAN = 11;
 // Takes any claim issuer the deployer holds; never ops (2F.5, D25 b).

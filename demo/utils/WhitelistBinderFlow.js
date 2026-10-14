@@ -15,7 +15,7 @@ const {
 } = require("../../scripts/zk/build-whitelist-root");
 const { proveWhitelist } = require("../../scripts/zk/prove-whitelist");
 
-const OPS_INDEX = 10; // docs/TESTNET_DEMO.md wallet roles
+const OPS_INDEX = 10; // docs/TESTNET_SETUP.md wallet roles
 const same = (a, b) => a.toLowerCase() === b.toLowerCase();
 
 /**

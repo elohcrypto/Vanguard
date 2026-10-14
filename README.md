@@ -77,7 +77,9 @@ Vanguard/
 │   ├── INVESTOR_TYPE_SYSTEM.md                 # Investor type documentation
 │   ├── SYSTEM_WORKFLOW_GUIDE.md                # User workflows and interactions
 │   ├── TECHNICAL_DEEP_DIVE.md                  # In-depth technical analysis
-│   ├── TESTNET_DEMO.md                         # Roles, ceremony, demo runbook
+│   ├── TESTNET_SETUP.md                        # Role wallets, time scale, rehearsal, gas
+│   ├── TESTNET_DEMO_OPTIONS.md                 # Privacy, custody, oracle, key options
+│   ├── TESTNET_CEREMONY.md                     # Handover ceremony, operator CLIs
 │   ├── VANGUARD_RWA_TOKEN_ECOSYSTEM_GUIDE.md   # Complete ecosystem guide
 │   ├── VOTING_SYSTEM_DIAGRAM.md                # Voting system visualization
 │   ├── WORKFLOW_IMPLEMENTATION_SUMMARY.md      # Implementation workflow summary
@@ -129,7 +131,9 @@ Vanguard/
 ### **System Overview & Architecture**
 
 - [System Overview](/docs/SYSTEM_OVERVIEW.md) - Complete system architecture (83 menu options, 5 ZK circuits, 32+ contracts)
-- [Testnet Demo](/docs/TESTNET_DEMO.md) - Role wallets from one mnemonic, governance time scale, local rehearsal before Sepolia
+- [Testnet Setup](/docs/TESTNET_SETUP.md) - Role wallets from one mnemonic, governance time scale, local rehearsal before Sepolia
+- [Testnet Demo Options](/docs/TESTNET_DEMO_OPTIONS.md) - Privacy, custody, oracle and identity-key options on a live node
+- [Handover Ceremony](/docs/TESTNET_CEREMONY.md) - The handover ceremony and the operators' command lines
 - [Vanguard RWA StableCoin Ecosystem Guide](/docs/VANGUARD_RWA_TOKEN_ECOSYSTEM_GUIDE.md) - Complete ecosystem overview
 - [Technical Deep Dive](/docs/TECHNICAL_DEEP_DIVE.md) - In-depth technical analysis
 
@@ -394,7 +398,7 @@ npx hardhat node
 npm run demo:interactive:proof
 
 
-**See the [System Workflow Guide](/docs/SYSTEM_WORKFLOW_GUIDE.md) and [Testnet Demo](/docs/TESTNET_DEMO.md) for the step-by-step guide.**
+**See the [System Workflow Guide](/docs/SYSTEM_WORKFLOW_GUIDE.md) and [Testnet Setup](/docs/TESTNET_SETUP.md) for the step-by-step guide.**
 
 ## 📈 Performance & Scalability
 

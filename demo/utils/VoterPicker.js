@@ -13,7 +13,7 @@ const {
   walletControlRefusal,
 } = require("./ChainTime");
 
-/** issuerAdmin 9, ops 10, guardian 11 (docs/TESTNET_DEMO.md) never vote. */
+/** issuerAdmin 9, ops 10, guardian 11 (docs/TESTNET_SETUP.md) never vote. */
 const ROLE_WALLETS = [9, 10, 11];
 
 const same = (a, b) => a.toLowerCase() === b.toLowerCase();

@@ -204,7 +204,7 @@ ALERT_WEBHOOK_URL=https://your-monitoring-service.com/webhook
 # Run the production test set on the in-process network (the runner lists
 # the integration test files with fs, refuses any network but
 # hardhat/localhost and deploys nothing: a live-network rehearsal is the
-# deploy script below plus the handover ceremony, docs/TESTNET_DEMO.md)
+# deploy script below plus the handover ceremony, docs/TESTNET_CEREMONY.md)
 npx hardhat run scripts/production/RunProductionTests.ts
 
 # Verify all tests pass

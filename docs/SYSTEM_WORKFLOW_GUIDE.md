@@ -7,7 +7,7 @@ interactive demo option that runs each step (`npm run
 demo:interactive:proof`; the menu text is `demo/core/MenuText.js`, its routing
 `demo/core/MenuSystem.js`). Every
 contract, function and option named here exists in this tree. The
-governance votes and the handover ceremony are in `docs/TESTNET_DEMO.md`;
+governance votes are in `docs/TESTNET_SETUP.md`, the ceremony in `TESTNET_CEREMONY.md`;
 investor types in `docs/INVESTOR_TYPE_SYSTEM.md`.
 
 ## Contracts
@@ -83,7 +83,7 @@ topic)` answers true for its latest claim on that topic
    be removed. `refreshVerified(wallet)` (anyone) caches a passing walk
    for the identity up to 24 hours, capped at the claims' `validTo`. With
    no cached entry a revocation counts at once; with one, it counts once
-   anyone refreshes or the entry lapses (TESTNET_DEMO.md, "The
+   anyone refreshes or the entry lapses (TESTNET_SETUP.md, "The
    verification cache").
 
 Demo: option 3 creates the OnchainID, 6 and 7 issue the KYC and AML
@@ -178,7 +178,7 @@ purpose)` (identity, key, purpose, the key's removal nonce and chain id,
 A wallet recovered with `Token.recoveryAddress` votes only once it holds a
 key on its OnchainID; KeyManager recovery is the designed path. The demo
 exercises the lifecycle in options 12, 12a, 12b, 5 and 5a
-(docs/TESTNET_DEMO.md, "Identity keys through KeyManager"); its resume
+(docs/TESTNET_DEMO_OPTIONS.md, "Identity keys through KeyManager"); its resume
 works within one demo session only.
 
 ## Oracle Whitelist and Blacklist
@@ -209,7 +209,7 @@ node cannot answer or attest but stays in the denominator, so pausing
 never lowers the bar; the operator (ops) pauses, unpauses and
 emergency-designates nodes; governance removes them and sets the
 threshold by an OracleParameters vote. Demo options 33a, 34a and 35a run
-this path without prompts (docs/TESTNET_DEMO.md, "Oracle nodes and
+this path without prompts (docs/TESTNET_DEMO_OPTIONS.md, "Oracle nodes and
 consensus").
 
 WhitelistOracle tiers run 1 to 5 (higher is better). The owner or list
@@ -322,7 +322,7 @@ the submitting wallet, and keeps one wallet per attestation per policy;
 records under each user's preference flags. Options 42 -> 3, 4 and 5 run
 this with the demo's issuer key; 44, 45 and 46 show the records. The
 issuer keys and the policies are owner settings, PrivacyParameters votes
-(type 11) after the handover. See `docs/TESTNET_DEMO.md` for the
+(type 11) after the handover. See `docs/TESTNET_CEREMONY.md` for the
 command-line tools and the runbook rules.
 
 The jurisdiction set for private proofs is ComplianceRules' rule for VSC,
@@ -476,7 +476,7 @@ delegation is recorded, not counted (D12). Demo: 74 deploys, 75-75c
 fund, 76 proposes, 77 votes, 78 executes, 78a refunds, 79 waits, 80 is
 the dashboard, 82 runs one ComplianceRules proposal from creation to
 execution, 83b accepts the registry by vote, 83c-83e are the ceremony
-(from governance; 83c removes strays or refuses). Rules: `docs/TESTNET_DEMO.md`.
+(from governance; 83c removes strays or refuses). Rules: `docs/TESTNET_CEREMONY.md`.
 
 ## Errors a user sees
 
