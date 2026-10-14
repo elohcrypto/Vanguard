@@ -108,16 +108,16 @@ jobs:
       # interface without checking the address has code.
       - name: Audit setter/constructor guards
         run: node scripts/audit-setter-guards.js
-      # Phase 4 exit row (Task 4.15, D49; 4.17): line count, scripts
-      # reachable, deleted names, free identifiers (headers in each file).
-      - name: Phase 4 exit gates (line count, scripts, names, free ids)
+      # Phase 4 exit row (4.15, D49; 4.17) and Task 5.5 docs (file headers).
+      - name: Exit gates (line count, scripts, names, free ids, docs)
         run: |
           node scripts/ci/line-count-ratchet.js \
             && node scripts/ci/scripts-referenced.js \
             && node scripts/ci/deleted-names.js \
-            && node scripts/ci/free-identifiers.js
+            && node scripts/ci/free-identifiers.js \
+            && node scripts/ci/docs-gate.js
       # Task 5.3: every guard site in contracts/ has a row in
-      # test/guards.json (tested/unreachable/defensive); no bare revert.
+      # test/guards/table/ (tested or unreachable); no bare revert.
       - name: Guard table (every require/revert classified)
         run: node scripts/ci/guards-table.js
       - name: Lint ratchet (no solhint errors, no NEW warnings)
