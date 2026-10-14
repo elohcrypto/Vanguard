@@ -27,7 +27,6 @@ const EXEMPT = [
 // Allowlist, measured at aa65de8 (2026-10-12, the start of Task 4.15).
 const ALLOW = {
   "docs/TESTNET_DEMO.md": 1179,
-  "test/KeyManager.test.ts": 1085,
   "test/integration/OracleIntegration.test.ts": 884,
   "test/ClaimIssuer.test.ts": 842,
   "docs/TECHNICAL_DEEP_DIVE.md": 831,
