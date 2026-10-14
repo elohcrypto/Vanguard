@@ -52,7 +52,7 @@ async function issueKYCClaimForIdentity(mod, identity) {
     console.log("   250 - France");
     console.log("   156 - China (may be blocked)");
     console.log("   643 - Russia (may be blocked)");
-    console.log("   850 - North Korea (may be blocked)");
+    console.log("   408 - North Korea (may be blocked)");
     console.log("   364 - Iran (may be blocked)");
     console.log("");
 

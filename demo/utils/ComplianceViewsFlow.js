@@ -336,7 +336,7 @@ async function viewJurisdictionRules(mod) {
         36: "Australia",
         156: "China",
         643: "Russia",
-        850: "North Korea",
+        408: "North Korea",
         364: "Iran",
         760: "Syria",
       };
@@ -374,7 +374,7 @@ async function viewJurisdictionRules(mod) {
         36: "Australia",
         156: "China",
         643: "Russia",
-        850: "North Korea",
+        408: "North Korea",
         364: "Iran",
         760: "Syria",
       };

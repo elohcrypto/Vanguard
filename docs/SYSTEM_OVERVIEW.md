@@ -68,9 +68,8 @@ recovers identities.
   requires tier 1 (D46 a).
 - A country rule per token (`setJurisdictionRule`); the default blocked
   list always applies. Demo default: allowed 840, 826, 124, 276, 250, 392,
-  702, 36, 344, 756; blocked 156, 643, 364, 760 and 850. The demo labels
-  850 "North Korea", but ISO 3166-1 numeric 850 is the US Virgin Islands
-  (North Korea is 408), so the demo default does not block North Korea.
+  702, 36, 344, 756; blocked 156 (China), 643 (Russia), 408 (North
+  Korea), 364 (Iran) and 760 (Syria).
 - Trusted contracts per token, added by the owner or by a registrar for
   one runtime code hash. The investor-type, holding-period and
   compliance-level rules ComplianceRules once stored were removed in Task

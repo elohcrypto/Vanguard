@@ -60,7 +60,7 @@ async function deployComplianceRules(mod) {
     console.log("📋 Common Sanctioned Countries:");
     console.log("   156 - China");
     console.log("   643 - Russia");
-    console.log("   850 - North Korea");
+    console.log("   408 - North Korea");
     console.log("   364 - Iran");
     console.log("   760 - Syria");
     console.log("");
@@ -92,7 +92,7 @@ async function deployComplianceRules(mod) {
 
     if (blockedInput.trim() === "") {
       // Default: Block sanctioned countries
-      blockedCountries = [156, 643, 850, 364, 760];
+      blockedCountries = [156, 643, 408, 364, 760];
       console.log(
         "   ✅ Using default blacklist: China, Russia, North Korea, Iran, Syria",
       );
@@ -264,7 +264,7 @@ async function configureJurisdictionRules(mod) {
       case "3": // Add to blacklist
         console.log("\n➕ ADD COUNTRIES TO BLACKLIST");
         console.log(
-          "   Examples: 643 (Russia), 156 (China), 850 (North Korea), 364 (Iran), 760 (Syria)",
+          "   Examples: 643 (Russia), 156 (China), 408 (North Korea), 364 (Iran), 760 (Syria)",
         );
         const addBlockedInput = await mod.promptUser("Countries to add: ");
         if (addBlockedInput.trim()) {
@@ -319,7 +319,7 @@ async function configureJurisdictionRules(mod) {
 
         console.log("\n📋 Configure NEW blocked countries (comma-separated):");
         console.log(
-          "   Examples: 643 (Russia), 156 (China), 850 (North Korea), 364 (Iran), 760 (Syria)",
+          "   Examples: 643 (Russia), 156 (China), 408 (North Korea), 364 (Iran), 760 (Syria)",
         );
         console.log("   💡 Leave empty for no blacklist");
         const newBlockedInput = await mod.promptUser("Blocked countries: ");

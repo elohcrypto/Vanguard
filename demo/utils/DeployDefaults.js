@@ -41,7 +41,7 @@ const DEFAULT_ALLOWED_COUNTRIES = [
 const DEFAULT_BLOCKED_COUNTRIES = [
   156, // China
   643, // Russia
-  850, // North Korea
+  408, // North Korea
   364, // Iran
   760, // Syria
 ];
