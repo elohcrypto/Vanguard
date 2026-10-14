@@ -86,8 +86,12 @@ async function assertHandoverComplete(o) {
   };
   // M-1: no snapshot, no proof the chain stood still since step 1 (this
   // process's own preflight counts; another process must pass it in).
-  const snapshot = o.snapshot || preflightSnapshots.get(govAddr.toLowerCase());
-  if (!snapshot) {
+  // Task 5.6b: the day-2 audit (o.audit) judges the state governance
+  // derives now, so it reads no snapshot and scans no window.
+  const snapshot = o.audit
+    ? null
+    : o.snapshot || preflightSnapshots.get(govAddr.toLowerCase());
+  if (!snapshot && !o.audit) {
     add(
       "no preflight snapshot: nothing proves the chain did not change since step 1 (run the full phase, or pass the snapshot the full phase wrote)",
       false,
@@ -120,6 +124,13 @@ async function assertHandoverComplete(o) {
   for (const e of planFor(o)) {
     const c = o[e.key];
     const owned = same(await c.owner(), govAddr);
+    // Task 5.6b: a nominee other than governance or ops (a vote's
+    // transferOwnership) is a power holder in waiting.
+    const pending = await c.pendingOwner();
+    add(
+      `${e.label} pending owner is none, governance or ops (${pending})`,
+      [ZERO, govAddr, ops].some((a) => same(a, pending)),
+    );
     if (e.key !== "escrowWalletFactory") {
       add(`${e.label} owned by governance`, owned);
       continue;

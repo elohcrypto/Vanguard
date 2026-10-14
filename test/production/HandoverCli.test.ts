@@ -13,6 +13,8 @@ const cfgPath = path.join(
   "handover.json",
 );
 const snapPath = `${cfgPath}.snapshot.json`;
+// Task 5.6b (B-6): a snapshot the accept phase reads carries its digest.
+const { writeSnapshotFile } = require("../../demo/utils/HandoverSnapshotFile");
 
 const {
   castAcceptanceVotes,
@@ -67,7 +69,8 @@ describe("Handover CLI (scripts/handover.ts)", function () {
   });
   afterEach(function () {
     console.log = quiet;
-    fs.rmSync(snapPath, { force: true });
+    for (const p of [snapPath, `${snapPath}.sha256`])
+      fs.rmSync(p, { force: true });
   });
 
   it("the full phase completes and writes the preflight snapshot", async function () {
@@ -249,15 +252,12 @@ describe("Handover CLI (scripts/handover.ts)", function () {
     await expect(runHandover(cfg, "accept", cfgPath)).to.be.rejectedWith(
       /no preflight snapshot from the full phase/,
     );
-    fs.writeFileSync(
-      snapPath,
-      JSON.stringify({
-        governance: govAddr,
-        chainId: 31337,
-        block: report.preflightBlock,
-        snapshot: report.snapshot,
-      }),
-    );
+    writeSnapshotFile(snapPath, {
+      governance: govAddr,
+      chainId: 31337,
+      block: report.preflightBlock,
+      snapshot: report.snapshot,
+    });
     await runHandover(cfg, "accept", cfgPath);
     expect(await c.oracleManager.owner()).to.equal(govAddr);
     expect(await reg.isComplianceOfficer(f.ops.address)).to.equal(true);
@@ -298,15 +298,12 @@ describe("Handover CLI (scripts/handover.ts)", function () {
 
   /** M-1: the accept phase needs the full phase's snapshot file first. */
   const snapshotFile = () =>
-    fs.writeFileSync(
-      snapPath,
-      JSON.stringify({
-        governance: f.govAddr,
-        chainId: 31337,
-        block: 0,
-        snapshot: null,
-      }),
-    );
+    writeSnapshotFile(snapPath, {
+      governance: f.govAddr,
+      chainId: 31337,
+      block: 0,
+      snapshot: null,
+    });
 
   it("refuses the accept phase when step 1 never ran (L-A)", async function () {
     snapshotFile();
@@ -446,14 +443,11 @@ describe("Handover CLI (scripts/handover.ts)", function () {
   it("the accept phase refuses a snapshot from another chain or after step 1", async function () {
     const report = await handoverDeployerPowers(f.args);
     const write = (o: object) =>
-      fs.writeFileSync(
-        snapPath,
-        JSON.stringify({
-          governance: f.govAddr,
-          snapshot: report.snapshot,
-          ...o,
-        }),
-      );
+      writeSnapshotFile(snapPath, {
+        governance: f.govAddr,
+        snapshot: report.snapshot,
+        ...o,
+      });
     const chainId = Number((await ethers.provider.getNetwork()).chainId);
     write({ chainId: chainId + 1, block: report.preflightBlock });
     await expect(runHandover(cfg, "accept", cfgPath)).to.be.rejectedWith(

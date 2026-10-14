@@ -49,6 +49,18 @@
  * steps and only votes the acceptances (and registry proposals) still
  * pending, then verifies. Before any transaction the proposer and every
  * voter must be verified and hold the VGT fees for every proposal.
+ *
+ * Task 5.6b (B-6): the full phase also writes
+ * `<config>.snapshot.json.sha256` and prints the digest; the accept phase
+ * refuses a snapshot whose digest differs from it or from
+ * HANDOVER_SNAPSHOT_SHA256 (demo/utils/HandoverSnapshotFile.js).
+ *
+ * HANDOVER_PHASE=audit is the day-2 re-check: read-only, it runs every
+ * completion line against the state governance derives now, with the
+ * acknowledgements in the config and no snapshot or voting window, so a
+ * change made by vote (a node rotation, a rule administrator) passes and
+ * any deployer power or unacknowledged holder fails. It refuses to run
+ * while governance does not own every plan contract.
  */
 // ponytail: a JSON file via HANDOVER_CONFIG is the ceiling (hardhat run has no
 // argv passthrough); a typed CLI can replace it later.
@@ -77,6 +89,12 @@ const {
 } = require("../demo/utils/Handover");
 const { planFor, withBoundRegistry } = require("../demo/utils/HandoverChecks");
 const { withDerivedContracts } = require("../demo/utils/HandoverDerive");
+const {
+  reserveSnapshotFile,
+  writeSnapshotFile,
+  readSnapshotFile,
+  sidecarOf,
+} = require("../demo/utils/HandoverSnapshotFile");
 
 /**
  * The whole CLI run for a parsed handover.json (`path` names it in errors).
@@ -168,8 +186,10 @@ export async function runHandover(
   ) {
     throw new Error(`${path}: "logChunk" must be a block count >= 100`);
   }
-  if (phase !== "full" && phase !== "accept") {
-    throw new Error(`HANDOVER_PHASE must be "accept" or unset, got "${phase}"`);
+  if (!["full", "accept", "audit"].includes(phase)) {
+    throw new Error(
+      `HANDOVER_PHASE must be "accept", "audit" or unset, got "${phase}"`,
+    );
   }
   if (!Array.isArray(cfg.voters) || cfg.voters.length === 0) {
     throw new Error(`${path}: "voters" must list wallet indices`);
@@ -255,6 +275,7 @@ export async function runHandover(
   };
 
   const snapshotPath = `${path}.snapshot.json`;
+  if (phase === "audit") return audit(args);
   let registryProposals: any[];
   if (phase === "accept") {
     console.log("⏭️  HANDOVER_PHASE=accept: deployer steps skipped");
@@ -265,11 +286,14 @@ export async function runHandover(
         `${snapshotPath}: no preflight snapshot from the full phase; the accept phase cannot prove the chain did not change since step 1`,
       );
     }
-    // Residual (review B-6, same trust as M-1): the file is the full
-    // phase's word. Its ceremonyTxs, block and nonce bound the voting
-    // window; an operator who edits it can launder a deployer transaction
-    // into the ceremony's. Keep it with the run's records.
-    const snap = JSON.parse(fs.readFileSync(snapshotPath, "utf8"));
+    // B-6 (Task 5.6b): its ceremonyTxs, block and nonce bound the voting
+    // window, so an edited file could launder a deployer transaction into
+    // the ceremony's: the digest is checked before anything is parsed.
+    const { snap, digest } = readSnapshotFile(
+      snapshotPath,
+      process.env.HANDOVER_SNAPSHOT_SHA256 || undefined,
+    );
+    console.log(`   snapshot sha256: ${digest} (matches the full phase's)`);
     if (String(snap.governance).toLowerCase() !== govAddr) {
       throw new Error(
         `${snapshotPath} was taken for governance ${snap.governance}, not ${cfg.governance}`,
@@ -329,24 +353,27 @@ export async function runHandover(
         ? (await pendingRegistryProposals(o)).length
         : 0;
     await checkVoters(o, proposer, voters, (await acceptances(o)) + regVotes);
+    // B-6: an unwritable directory stops the run before step 1.
+    const release = reserveSnapshotFile(snapshotPath);
     console.log("🔑 Handover: deployer powers");
-    const report = await handoverDeployerPowers(args);
+    const report = await handoverDeployerPowers(args).catch((e: Error) => {
+      release();
+      throw e;
+    });
     registryProposals = report.registryProposals;
     args.snapshot = report.snapshot; // completion compares with preflight
-    fs.writeFileSync(
-      snapshotPath,
-      JSON.stringify(
-        {
-          governance: cfg.governance,
-          chainId: Number((await ethers.provider.getNetwork()).chainId),
-          block: report.preflightBlock, // L-9: the block the preflight read
-          snapshot: report.snapshot,
-        },
-        null,
-        2,
-      ),
-    );
+    const { digest, replaced } = writeSnapshotFile(snapshotPath, {
+      governance: cfg.governance,
+      chainId: Number((await ethers.provider.getNetwork()).chainId),
+      block: report.preflightBlock, // L-9: the block the preflight read
+      snapshot: report.snapshot,
+    });
     console.log(`   snapshot written: ${snapshotPath}`);
+    if (replaced)
+      console.log(`   (replaced a snapshot with sha256 ${replaced})`);
+    console.log(
+      `   snapshot sha256: ${digest} (in ${sidecarOf(snapshotPath)}; keep this line with the run's records)`,
+    );
   }
 
   console.log("\n🏛️  Handover: governance accepts by vote");
@@ -371,6 +398,41 @@ export async function runHandover(
     residual.length
       ? "\n⚠️  Handover complete with warnings: see above."
       : "\n✅ Handover complete: the deployer holds no power.",
+  );
+}
+
+/**
+ * HANDOVER_PHASE=audit (Task 5.6b): the completion lines against the
+ * state governance derives now; sends nothing. Refused before the
+ * ceremony completed (governance does not own every plan contract).
+ */
+async function audit(args: Record<string, any>): Promise<void> {
+  const o = await withBoundRegistry(await withDerivedContracts(args));
+  const govAddr = (await o.governance.getAddress()).toLowerCase();
+  const missing = [];
+  for (const e of planFor(o)) {
+    if ((await o[e.key].owner()).toLowerCase() !== govAddr)
+      missing.push(e.label);
+  }
+  if (missing.length) {
+    throw new Error(
+      `HANDOVER_PHASE=audit: the ceremony has not completed: governance does not own ${missing.join(", ")}; run the full phase (or HANDOVER_PHASE=accept) first`,
+    );
+  }
+  console.log(
+    "🔍 Handover audit: every completion line against the state governance derives now (no snapshot, no voting window)",
+  );
+  const { ok, checks, warnings, residual } = await assertHandoverComplete({
+    ...args,
+    audit: true,
+  });
+  for (const c of checks) console.log(`   ${c.ok ? "✅" : "❌"} ${c.label}`);
+  for (const w of warnings) console.log(`   ⚠️  ${w}`);
+  if (!ok) throw new Error("audit failed (see ❌ above)");
+  console.log(
+    residual.length
+      ? "\n⚠️  Audit passed with warnings: see above."
+      : "\n✅ Audit passed: the deployer holds no power.",
   );
 }
 

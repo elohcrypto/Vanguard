@@ -10,7 +10,8 @@
  * acknowledged node, and step 5 clears every designation the deployer
  * era left while the deployer still owns the manager. The ceremony
  * prints each node's provenance (who sent its OracleRegistered) as a
- * residual warning when that was the deployer (D50: rotate by vote), and
+ * residual warning when that was the deployer (D50: rotate by vote; the
+ * day-2 audit trusts an acknowledged node whoever registered it), and
  * warns below ConsensusOracle.MIN_NODES; it prints each node's weight
  * share and fails when one node alone reaches the bar (Task 5.1, A1F-4:
  * the engine then opens no query). Each list oracle bound to VSC
@@ -302,7 +303,13 @@ async function nodeSteps({ o, d, dAddr, ok, log }) {
  */
 async function nodeLines(o, dAddr, warnings = [], residual = []) {
   const f = await nodeFacts(o);
+  // Task 5.6b: in the day-2 audit an acknowledged node is the operator's
+  // word, whoever sent its registration (executeProposal is permissionless).
+  const ack = o.audit
+    ? await Promise.all((o.oracleNodes || []).map(addrOf))
+    : [];
   for (const n of f.nodes) {
+    if (ack.some((a) => same(a, n.addr))) continue;
     if (n.registeredBy && same(n.registeredBy, dAddr)) {
       const w = `OracleManager node ${n.addr} (${n.name}) was registered by the deployer at block ${n.block}: it votes with a key the deployer chose; rotate deployer-era nodes by an OracleParameters vote (D50)`;
       warnings.push(w);

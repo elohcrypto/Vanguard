@@ -410,7 +410,8 @@ describe("Handover: KeyManager (4.2)", function () {
       cfg.keyManager = kmAddr;
       cfg.keyManagerIdentity = await identity.getAddress();
       await runHandover(cfg, "full", tmp);
-      require("fs").rmSync(`${tmp}.snapshot.json`, { force: true });
+      for (const x of [".snapshot.json", ".snapshot.json.sha256"])
+        require("fs").rmSync(`${tmp}${x}`, { force: true });
     } finally {
       console.log = quiet;
     }
