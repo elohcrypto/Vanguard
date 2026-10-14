@@ -286,6 +286,9 @@ describe("🏭 Production Simulation - OnchainID System", function () {
           ethers.solidityPacked(["string"], ["FAKE_CLAIM"]),
           "",
         );
+      // The victim holds the AML claim, so KYC is the only missing piece:
+      // were the fake claim counted, the victim would verify.
+      await prodEnv.issueAMLClaim(address);
       const ids = await identity.getClaimIdsByTopic(prodEnv.config.kycTopic);
       expect(ids.length).to.equal(1);
       expect((await identity.getClaim(ids[0])).issuer).to.equal(
