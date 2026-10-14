@@ -308,8 +308,8 @@ plain `83c` otherwise).
   vote the deployer key sends only votes (a transaction to governance that
   emits a voting event) and VGT `approve(governance)`; any other or
   reverted deployer transaction fails the completion for good. After the
-  ceremony it sends nothing: demo options 76 and 78 propose and execute
-  from another wallet (the proposer, a voter, or one asked for; 0 refused).
+  ceremony it sends nothing: every demo picker leaves wallet 0 out and the
+  demo refuses any wallet-0 transaction (`DeployerKeyAfterCeremony`).
   Demo 83c-83e end with the warnings line: option 31's nodes and option
   1's attestor key are deployer-era.
 - A contract nominated to governance is accepted only by a vote of the

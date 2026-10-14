@@ -20,6 +20,7 @@ const path = require("path");
 
 // Core Components
 const DemoState = require("./core/DemoState");
+const { guardDeployerKey } = require("./utils/PostCeremony");
 const ContractDeployer = require("./core/ContractDeployer");
 const MenuSystem = require("./core/MenuSystem");
 
@@ -120,6 +121,8 @@ class InteractiveDemo {
     try {
       // Get signers from Hardhat
       this.state.signers = await ethers.getSigners();
+      // R-56-5: after the ceremony no transaction from wallet 0 (PostCeremony.js).
+      guardDeployerKey(this.state);
       console.log(
         `✅ Loaded ${this.state.signers.length} signers from Hardhat`,
       );
