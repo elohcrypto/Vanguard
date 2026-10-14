@@ -36,7 +36,6 @@ const ALLOW = {
   "test/integration/OracleERC3643Integration.test.ts": 742,
   "test/OnchainID.test.ts": 691,
   "test/oracle/OracleManager.test.ts": 626,
-  "test/GovernanceToken.test.ts": 623,
   "test/production/ProductionEnvironment.ts": 569,
   "test/OnchainID.coverage.test.ts": 541,
   "test/OnchainIDFactory.test.ts": 534,
