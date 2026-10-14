@@ -239,5 +239,37 @@ describe("Task 5.1: no single node resolves; the list-oracle voter floor", funct
       await OM.emergencyOverride(n1.address, q, true, "owner");
       expect(await OM.getQuerySupport(q)).to.equal(0);
     });
+
+    // Task 5.3 (5.1 review L-N1): an override that confirms the side the
+    // query resolved to keeps the support counted at resolve.
+    it("an override confirming the resolved side after a rebind keeps the verdict", async function () {
+      const q = await raise();
+      await vote(n1, q, true);
+      await vote(n2, q, true);
+      await bindEngine(OM);
+      await OM.emergencyOverride(n1.address, q, true, "owner confirms");
+      expect(await OM.getQuerySupport(q)).to.equal(2);
+      await expect(attest(WO, n1, q, true)).to.emit(WO, "WhitelistUpdated");
+    });
+
+    it("an override on an open query counts the nodes that voted its way", async function () {
+      const q = await raise(BLACKLIST, "0x");
+      await vote(n1, q, false);
+      expect((await OM.getQueryResolution(q))[0]).to.equal(false);
+      await OM.emergencyOverride(n1.address, q, false, "owner settles");
+      expect(await OM.getQuerySupport(q)).to.equal(1);
+    });
+
+    it("an override flipping the resolved side after a rebind counts no voter", async function () {
+      const q = await raise(BLACKLIST, "0x");
+      await vote(n1, q, true);
+      await vote(n2, q, true);
+      await bindEngine(OM);
+      await OM.emergencyOverride(n1.address, q, false, "owner flips");
+      expect(await OM.getQuerySupport(q)).to.equal(0);
+      await expect(attest(BO, n1, q, false))
+        .to.be.revertedWithCustomError(BO, "TooFewVoters")
+        .withArgs(0, 2);
+    });
   });
 });

@@ -377,12 +377,17 @@ contract OracleManager is IOracleManager, OracleQueryPayload, Ownable2Step, Reen
         Query storage query = queries[_queryId];
         require(query.timestamp > 0, "OracleManager: Query does not exist");
 
+        // Confirming the side already resolved keeps the support counted then
+        // (an engine bound since knows no voter; 5.1 review L-N1).
+        bool sameSide = query.hasResult && query.result == _result;
         if (!query.hasResult) query.resolvedAt = block.timestamp;
         query.hasResult = true;
         query.result = _result;
-        // Only nodes that voted its way (none in an engine bound since).
-        ConsensusOracle e = consensusEngine;
-        query.support = address(e) == address(0) ? 0 : e.votersFor(_queryId, _result);
+        if (!sameSide) {
+            // Only nodes that voted its way (none in an engine bound since).
+            ConsensusOracle e = consensusEngine;
+            query.support = address(e) == address(0) ? 0 : e.votersFor(_queryId, _result);
+        }
 
         emit EmergencyOverrideExecuted(_oracle, _queryId, _reason);
     }
