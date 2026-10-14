@@ -373,7 +373,7 @@ export async function runHandover(
     if (replaced)
       console.log(`   (replaced a snapshot with sha256 ${replaced})`);
     console.log(
-      `   snapshot sha256: ${digest} (in ${sidecarOf(snapshotPath)}; keep this line with the run's records)`,
+      `   snapshot sha256: ${digest} (in ${sidecarOf(snapshotPath)}; record this line outside the run directory)`,
     );
   }
 

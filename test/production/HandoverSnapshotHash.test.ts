@@ -49,7 +49,7 @@ describe("Handover snapshot hash (B-6, Task 5.6b)", function () {
       `${digest}  ${snap}\n`,
     );
     expect(out).to.include(
-      `   snapshot sha256: ${digest} (in ${snap}.sha256; keep this line with the run's records)`,
+      `   snapshot sha256: ${digest} (in ${snap}.sha256; record this line outside the run directory)`,
     );
     expect(fs.readdirSync(dir).sort()).to.deep.equal([
       "handover.json.snapshot.json",
@@ -71,7 +71,7 @@ describe("Handover snapshot hash (B-6, Task 5.6b)", function () {
     const none = (await run("accept").catch((e: Error) => e)) as Error;
     expect(none.name).to.equal("SnapshotDigestMissing");
     expect(none.message).to.equal(
-      `snapshot digest missing: set HANDOVER_SNAPSHOT_SHA256 to the digest the full phase printed for ${snap} ("snapshot sha256: <hex>", kept in the run's records); the sidecar alone cannot prove the file was not rewritten with it`,
+      `snapshot digest missing: set HANDOVER_SNAPSHOT_SHA256 to the digest the full phase printed for ${snap} ("snapshot sha256: <hex>", recorded outside the run directory); the sidecar alone cannot prove the file was not rewritten with it`,
     );
     process.env.HANDOVER_SNAPSHOT_SHA256 = digest;
     const body = JSON.parse(fs.readFileSync(snap, "utf8"));
@@ -129,5 +129,44 @@ describe("Handover snapshot hash (B-6, Task 5.6b)", function () {
       `${sha(snap)}  ${snap}\n`,
     );
     expect(path.basename(snap)).to.equal("handover.json.snapshot.json");
+  });
+
+  it("never follows a symlink planted at a temporary path (R-56c-7)", async function () {
+    const {
+      reserveSnapshotFile,
+      writeSnapshotFile,
+    } = require("../../demo/utils/HandoverSnapshotFile");
+    const victim = path.join(dir, "victim.txt");
+    const plant = () => {
+      for (const t of [`${snap}.tmp`, `${snap}.sha256.tmp`]) {
+        fs.rmSync(t, { force: true });
+        fs.symlinkSync(victim, t);
+      }
+    };
+    fs.writeFileSync(victim, "keep");
+    plant();
+    reserveSnapshotFile(snap);
+    expect(fs.readFileSync(victim, "utf8")).to.equal("keep");
+    for (const t of [`${snap}.tmp`, `${snap}.sha256.tmp`])
+      expect(fs.lstatSync(t).isSymbolicLink()).to.equal(false);
+    plant(); // swapped in during the ceremony
+    const { digest } = writeSnapshotFile(snap, { x: 1 });
+    expect(fs.readFileSync(victim, "utf8")).to.equal("keep");
+    expect(sha(snap)).to.equal(digest);
+    expect(fs.lstatSync(snap).isSymbolicLink()).to.equal(false);
+    // A link that reappears between the removal and the create (a race)
+    // makes the exclusive create refuse; nothing is written through it.
+    const nodeFs = require("fs");
+    const rm = nodeFs.rmSync;
+    nodeFs.rmSync = (t: string, o: any) => {
+      rm(t, o);
+      if (t.endsWith(".tmp")) fs.symlinkSync(victim, t);
+    };
+    try {
+      expect(() => reserveSnapshotFile(snap)).to.throw(/EEXIST/);
+    } finally {
+      nodeFs.rmSync = rm;
+    }
+    expect(fs.readFileSync(victim, "utf8")).to.equal("keep");
   });
 });

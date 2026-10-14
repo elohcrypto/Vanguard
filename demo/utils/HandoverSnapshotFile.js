@@ -11,9 +11,10 @@
  * directory the CLI cannot write stops the run before step 1. The accept
  * phase hashes the file before it parses it and refuses a digest that
  * differs from the sidecar's or from HANDOVER_SNAPSHOT_SHA256 (the digest
- * the full phase printed, from the run's records). The variable is
- * required (SnapshotDigestMissing): the sidecar sits next to the file, so
- * only the recorded digest proves the pair was not rewritten together.
+ * the full phase printed, recorded outside the run directory). The
+ * variable is required (SnapshotDigestMissing): the sidecar sits next to
+ * the file, so only a digest kept elsewhere proves the pair was not
+ * rewritten together (R-56c-2).
  */
 
 const crypto = require("crypto");
@@ -35,10 +36,20 @@ function mismatch(msg) {
 function missingDigest(p) {
   return Object.assign(
     new Error(
-      `snapshot digest missing: set HANDOVER_SNAPSHOT_SHA256 to the digest the full phase printed for ${p} ("snapshot sha256: <hex>", kept in the run's records); the sidecar alone cannot prove the file was not rewritten with it`,
+      `snapshot digest missing: set HANDOVER_SNAPSHOT_SHA256 to the digest the full phase printed for ${p} ("snapshot sha256: <hex>", recorded outside the run directory); the sidecar alone cannot prove the file was not rewritten with it`,
     ),
     { name: "SnapshotDigestMissing" },
   );
+}
+
+/**
+ * R-56c-7: write `bytes` to a file created new at `f`: whatever sits
+ * there (a planted symlink included) is removed, not followed, and the
+ * exclusive create refuses anything that reappears in between.
+ */
+function fresh(f, bytes) {
+  fs.rmSync(f, { force: true });
+  fs.writeFileSync(f, bytes, { flag: "wx" });
 }
 
 /**
@@ -47,7 +58,7 @@ function missingDigest(p) {
  * when the run stops before writeSnapshotFile).
  */
 function reserveSnapshotFile(p) {
-  for (const f of [tmpOf(p), tmpOf(sidecarOf(p))]) fs.writeFileSync(f, "");
+  for (const f of [tmpOf(p), tmpOf(sidecarOf(p))]) fresh(f, "");
   return () => {
     for (const f of [tmpOf(p), tmpOf(sidecarOf(p))])
       fs.rmSync(f, { force: true });
@@ -59,11 +70,11 @@ function writeSnapshotFile(p, data) {
   const bytes = Buffer.from(JSON.stringify(data, null, 2));
   const digest = sha256(bytes);
   const replaced = fs.existsSync(p) ? sha256(fs.readFileSync(p)) : null;
-  fs.writeFileSync(tmpOf(p), bytes);
+  fresh(tmpOf(p), bytes);
   fs.renameSync(tmpOf(p), p);
   // The file first: a crash between the renames leaves a pair that
   // disagrees, which the accept phase refuses.
-  fs.writeFileSync(tmpOf(sidecarOf(p)), `${digest}  ${p}\n`);
+  fresh(tmpOf(sidecarOf(p)), `${digest}  ${p}\n`);
   fs.renameSync(tmpOf(sidecarOf(p)), sidecarOf(p));
   return { digest, replaced };
 }
