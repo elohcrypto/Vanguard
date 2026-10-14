@@ -32,7 +32,6 @@ const ALLOW = {
   "test/investor/InvestorOnboarding.test.ts": 752,
   "test/integration/OracleERC3643Integration.test.ts": 742,
   "test/oracle/OracleManager.test.ts": 626,
-  "test/OnchainID.coverage.test.ts": 541,
   "test/OnchainIDFactory.test.ts": 534,
 };
 
