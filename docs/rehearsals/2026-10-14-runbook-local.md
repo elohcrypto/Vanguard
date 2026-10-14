@@ -5,6 +5,11 @@ An independent operator (not the runbook's author) followed
 rehearsal box values, running every command as written. No repository
 file was changed to make a step pass.
 
+> Superseded procedure: this record ran the runbook at 87271ee. Its
+> section 6 kept the operator digest in `$RB`; the runbook now records it
+> outside the run directory (review M-2, R-56c-2). Follow the current
+> [OPERATOR_RUNBOOK](../OPERATOR_RUNBOOK.md), not the commands below.
+
 - Date: 2026-10-14
 - Commit: `7db047c` (branch `feat/zk-kyc-ownership-cleanup`, the runbook
   at 446 lines)
