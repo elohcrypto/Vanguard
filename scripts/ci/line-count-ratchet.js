@@ -29,7 +29,6 @@ const ALLOW = {
   "docs/TESTNET_DEMO.md": 1179,
   "docs/TECHNICAL_DEEP_DIVE.md": 831,
   "test/investor/InvestorOnboarding.test.ts": 752,
-  "test/integration/OracleERC3643Integration.test.ts": 742,
   "test/oracle/OracleManager.test.ts": 626,
 };
 
