@@ -116,6 +116,10 @@ jobs:
             && node scripts/ci/scripts-referenced.js \
             && node scripts/ci/deleted-names.js \
             && node scripts/ci/free-identifiers.js
+      # Task 5.3: every guard site in contracts/ has a row in
+      # test/guards.json (tested/unreachable/defensive); no bare revert.
+      - name: Guard table (every require/revert classified)
+        run: node scripts/ci/guards-table.js
       - name: Lint ratchet (no solhint errors, no NEW warnings)
         run: scripts/ci/lint-ratchet.sh
       - name: Audit dependencies (critical blocks)
