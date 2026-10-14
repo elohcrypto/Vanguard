@@ -23,6 +23,12 @@ User wants to create proposal
 ↓
 Check: Is user KYC/AML verified? ✅
 ↓
+Check: Does the wallet control its OnchainID (owner, MANAGEMENT or ACTION
+       key)? Was the identity bound at least minVoterAge ago?
+↓
+Check: Is target the contract this type is bound to (boundTarget(type)),
+       and is the function selector allowed?
+↓
 Check: Does user have enough VGT? (proposalCreationCost)
 ↓
 User pays 10 VGT → LOCKED in governance contract
@@ -41,7 +47,10 @@ User wants to vote
 ↓
 Check: Is user KYC/AML verified? ✅
 ↓
-Check: Has user already voted? ❌
+Check: Is the voter's identity the proposer's? (refused) Does the wallet
+       control the identity? Was it bound before the voter-age cutoff?
+↓
+Check: Has this identity already voted? ❌
 ↓
 Check: Does user have enough VGT? (votingCost)
 ↓
@@ -65,9 +74,10 @@ configured per proposal type (see the table below) and read from
 Voting period ends; ANYONE calls executeProposal(id)
 ↓
 QUORUM:   totalVotes / eligibleVotersAtCreation  ≥  type quorum
-          (a share of ELIGIBLE VOTERS, frozen when the proposal was
-          created, so registering or deleting identities mid-vote
-          cannot move the bar)
+          (eligibleVotersAtCreation is the registry's identity count at
+          the voter-age cutoff, creation time minus minVoterAge, read
+          once at creation, so registering or deleting identities
+          mid-vote cannot move the bar)
 ↓
 APPROVAL: votesFor / totalVotes  ≥  type approval
 ↓
@@ -95,8 +105,11 @@ Either threshold NOT met (including zero votes):
 > **executeProposal never reverts on an outcome.** A failed threshold, no
 > votes at all, and a target that rejects the call are all settled in one
 > mined transaction. It reverts only on an invalid call: wrong status,
-> voting still open, execution delay not yet elapsed for a passing
-> proposal, or the list manager address never configured. A UI must keep
+> voting still open, and, for a passing proposal, execution delay not yet
+> elapsed, less than 3,000,000 gas left (`MIN_EXECUTION_GAS`, "Insufficient
+> gas for execution"), or a target call that ran out of gas
+> (`InsufficientExecutionGas`; the proposal stays Active and anyone retries
+> with a higher gas limit). A UI must keep
 > offering "execute" on failing proposals; that is the only way to close
 > them and make the deposits claimable.
 
@@ -133,9 +146,16 @@ on that proposal forever.
 | GovernanceTokenParameters  | 30%    | 70%      |
 | EscrowFactoryParameters    | 30%    | 70%      |
 | IdentityFactoryParameters  | 30%    | 70%      |
+| PrivacyParameters          | 30%    | 70%      |
+| VerifierParameters         | 30%    | 70%      |
 
 Set once in `_initializeThresholds()`; there is no setter, so they cannot be
-changed after deployment.
+changed after deployment. Voting period and delay: 7 and 2 days for most
+types, 7 and 3 for TokenParameters, GovernanceTokenParameters, the two
+factory types, PrivacyParameters and VerifierParameters, 5 and 1 for
+ListUpdate, all divided by the deployment's `TIME_SCALE`. EmergencyAction
+has a row but no bound target (`boundTarget` returns zero), so
+`createProposal` refuses it (`TargetNotBoundToType`).
 
 ---
 
@@ -179,7 +199,8 @@ Alternative (Failed):
 ├─ Votes: 1 FOR, 3 AGAINST
 ├─ Percentage: 25% FOR (below this type's approval threshold)
 ├─ Status: FAILED ❌
-└─ Action: RETURN 50 VGT to all participants 💰
+└─ Action: 50 VGT becomes claimable; each participant pulls its own
+   deposit with claimRefund(id) 💰
 ```
 
 ---
@@ -203,34 +224,14 @@ require(identityRegistry.isVerified(msg.sender), "Must be KYC/AML verified");
 - ✅ One vote per identity, not per wallet: the registry binds each OnchainID to one wallet, governance keys votes on the identity, and the voting wallet must own the OnchainID or hold a MANAGEMENT/ACTION key on it (plan 2F.1, D25)
 - ✅ Only identities at least `minVoterAge` old (7 days / TIME_SCALE) at proposal creation vote or count toward quorum
 - ⚠️ Residual: a registry agent colluding with an issuer key can still create fake identities; that is visible on chain, and the fakes cannot vote for `minVoterAge`, the window in which honest voters remove those keys
-- ✅ Ensures compliance with regulations
 - ✅ Fair voting (verified identities only)
 
 ---
 
 ## ⚖️ **Fair Voting (1 Person = 1 Vote)**
 
-### **Old System (Token-Weighted):**
-
-```
-User A: 100,000 VGT → 100,000 votes
-User B: 1,000 VGT → 1,000 votes
-User C: 500 VGT → 500 votes
-
-Total: 101,500 votes
-User A has 98.5% voting power! ❌ Unfair!
-```
-
-### **New System (Equal Voting):**
-
-```
-User A: 100,000 VGT → 1 vote
-User B: 1,000 VGT → 1 vote
-User C: 500 VGT → 1 vote
-
-Total: 3 votes
-Each user has 33.3% voting power! ✅ Fair!
-```
+Every verified identity casts one vote whatever its VGT balance; VGT pays
+the fees and is not a vote weight.
 
 ---
 
@@ -255,9 +256,8 @@ Total supply decreased by 50 VGT
 
 **Why burn?**
 
-- ✅ Reduces total supply
-- ✅ Increases scarcity
-- ✅ Rewards token holders (deflationary)
+- Burning reduces total supply by the burned deposits. VGT agents can
+  still mint (`mint` is `onlyAgent`), so supply is not guaranteed to fall.
 
 ---
 
@@ -300,13 +300,13 @@ function setProposalCreationCost(uint256 newCost) external onlyOwner
 ```
 Current cost: 10 VGT
 ↓
-Owner raises it to 50 VGT (any value in 1 .. 1000 VGT)
+Owner raises it to 50 VGT (any value above 0 and at most 1000 VGT)
 ↓
 New proposals now cost 50 VGT to create
 ```
 
-Both setters revert with `CostOutOfRange` outside `1 <= cost <= MAX_COST`
-(1000 VGT) and emit the old and new values. The bound stops an owner from
+Both setters revert with `CostOutOfRange` outside `0 < cost <= MAX_COST`
+(1000 VGT; the floor is 1 wei, not 1 VGT) and emit the old and new values. The bound stops an owner from
 pricing every holder out of governance in one call.
 
 ---
@@ -333,17 +333,17 @@ New votes now cost 5 VGT each
 
 ## 📊 **Comparison: Old vs New System**
 
-| Feature              | Old System         | New System        |
-| -------------------- | ------------------ | ----------------- |
-| **Voting Power**     | Token-weighted     | 1 person = 1 vote |
-| **Fairness**         | ❌ Whales dominate | ✅ Equal voting   |
-| **Proposal Cost**    | ❌ Free            | ✅ Costs VGT      |
-| **Voting Cost**      | ❌ Free            | ✅ Costs VGT      |
-| **Token Locking**    | ❌ No              | ✅ Yes            |
-| **Token Burning**    | ❌ No              | ✅ If passed      |
-| **Token Return**     | N/A                | ✅ If failed      |
-| **KYC/AML Required** | ❌ No              | ✅ Yes            |
-| **Sybil Resistance** | ❌ Low             | ✅ High           |
+| Feature              | Old System         | New System                                     |
+| -------------------- | ------------------ | ---------------------------------------------- |
+| **Voting Power**     | Token-weighted     | 1 person = 1 vote                              |
+| **Fairness**         | ❌ Whales dominate | ✅ Equal voting                                |
+| **Proposal Cost**    | ❌ Free            | ✅ Costs VGT                                   |
+| **Voting Cost**      | ❌ Free            | ✅ Costs VGT                                   |
+| **Token Locking**    | ❌ No              | ✅ Yes                                         |
+| **Token Burning**    | ❌ No              | ✅ If passed                                   |
+| **Token Return**     | N/A                | ✅ If failed                                   |
+| **KYC/AML Required** | ❌ No              | ✅ Yes                                         |
+| **Sybil Resistance** | ❌ Low             | ✅ One vote per aged identity (residual above) |
 
 ---
 
@@ -377,8 +377,8 @@ mapping(uint256 => address[]) private _proposalVoters;
 - `cancelProposal()` - Owner-only; settles like a rejection, deposits become claimable
 - `claimRefund()` - Pull your identity's deposit from a Rejected or Cancelled proposal (once; the wallet must be bound to and control the identity, so a recovered wallet claims and the lost one cannot)
 - `getClaimableRefund()` - View what an identity may still claim from a proposal
-- `getLockedTokens()` - View total locked while Active (zero after settlement)
-- `getVoterLockedTokens()` - View one identity's locked or still-claimable amount
+- `getLockedTokens()` - View total locked while Active; zero after a Rejected or Cancelled settlement; after execution it still reports the amount that was burned
+- `getVoterLockedTokens()` - View one identity's deposit (locked while Active, claimable after Rejected or Cancelled until claimed; on an Executed proposal it shows the burned deposit)
 
 ---
 
@@ -388,9 +388,14 @@ mapping(uint256 => address[]) private _proposalVoters;
 
 ```solidity
 function burn(uint256 amount) external onlyAgent {
-    _burn(address(this), amount);
+    _burn(msg.sender, amount); // the caller's balance; governance is the caller
 }
 ```
+
+Delegation (`delegate`, `getVotingPower` and the other voting-power views)
+is recorded on the token but not counted: governance counts one vote per
+identity and never reads voting power (D12 b; wiring it is scheduled after
+the external audit).
 
 ---
 
@@ -412,6 +417,8 @@ Option 75: Distribute Governance Tokens
 → Users need tokens to pay for proposals/voting
 ```
 
+Option 75c approves governance to spend VGT; proposals and votes need it.
+
 ### **Step 3: Create Proposal (Costs 10 VGT)**
 
 ```bash
@@ -429,6 +436,9 @@ Option 77: Vote on Proposal
 ```
 
 ### **Step 5: Execute**
+
+Execution needs the voting period and the delay over: on a local node
+option 79 moves the clock forward 9 days first.
 
 ```bash
 Option 78: Execute Proposal
@@ -451,29 +461,18 @@ Option 78a: Claim Refund
 2. **Economic Incentives**
    - ✅ Costs to create proposals (prevents spam)
    - ✅ Costs to vote (ensures serious participation)
-   - ✅ Token burning (deflationary, increases value)
+   - ✅ Token burning (passed proposals' deposits are destroyed)
 
 3. **Security**
-   - ✅ KYC/AML required (prevents Sybil attacks)
+   - ✅ KYC/AML required (an agent colluding with an issuer can still mint identities; see the residual above)
    - ✅ Token locking (commitment to vote)
    - ✅ Fair deposit claim (no penalty for failed proposals)
 
 4. **Governance Control**
-   - ✅ Adjustable costs
-   - ✅ Flexible parameters
-   - ✅ Community-driven
+   - ✅ Costs and the minimum voter age are owner settings (governance
+     itself after the handover ceremony)
+   - Thresholds are fixed at deployment
 
 ---
 
-## 🎉 **Summary**
-
-**The new fair voting system ensures:**
-
-- ✅ Equal voting power for all verified investors
-- ✅ Economic costs to prevent spam
-- ✅ Token burning for successful proposals (deflationary)
-- ✅ Deposits claimable after failed proposals (fair)
-- ✅ KYC/AML compliance
-- ✅ Democratic governance
-
-**Ready to deploy and test!** 🚀
+Runs end to end on a local node with the demo (options 74-79).

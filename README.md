@@ -82,7 +82,6 @@ Vanguard/
 │   ├── TESTNET_SETUP.md                        # Role wallets, time scale, rehearsal, gas
 │   ├── TESTNET_DEMO_OPTIONS.md                 # Privacy, custody, oracle, key options
 │   ├── TESTNET_CEREMONY.md                     # Handover ceremony, operator CLIs
-│   ├── VANGUARD_RWA_TOKEN_ECOSYSTEM_GUIDE.md   # Complete ecosystem guide
 │   ├── VOTING_SYSTEM_DIAGRAM.md                # Voting system visualization
 │   ├── WORKFLOW_IMPLEMENTATION_SUMMARY.md      # Implementation workflow summary
 │   ├── ZK_CIRCUIT_BUILD_GUIDE.md               # Zero-knowledge circuit build guide
@@ -136,7 +135,6 @@ Vanguard/
 - [Testnet Setup](/docs/TESTNET_SETUP.md) - Role wallets from one mnemonic, governance time scale, local rehearsal before Sepolia
 - [Testnet Demo Options](/docs/TESTNET_DEMO_OPTIONS.md) - Privacy, custody, oracle and identity-key options on a live node
 - [Handover Ceremony](/docs/TESTNET_CEREMONY.md) - The handover ceremony and the operators' command lines
-- [Vanguard RWA StableCoin Ecosystem Guide](/docs/VANGUARD_RWA_TOKEN_ECOSYSTEM_GUIDE.md) - Complete ecosystem overview
 - Technical deep dive: [transfer path](/docs/DEEP_DIVE_TRANSFER.md), [identity, recovery and governance](/docs/DEEP_DIVE_IDENTITY.md), [ZK circuits](/docs/DEEP_DIVE_ZK.md)
 
 ### **Governance & Voting System**
@@ -451,7 +449,6 @@ MIT License (the `license` field of package.json; the repository has no LICENSE 
 
 ### **Documentation**
 - [System Overview](/docs/SYSTEM_OVERVIEW.md) - Start here for system architecture
-- [Vanguard RWA StableCoin Ecosystem Guide](/docs/VANGUARD_RWA_TOKEN_ECOSYSTEM_GUIDE.md) - Complete ecosystem overview
 - [System Workflow Guide](/docs/SYSTEM_WORKFLOW_GUIDE.md) - User workflows and interactions
 
 ### **Getting Help**

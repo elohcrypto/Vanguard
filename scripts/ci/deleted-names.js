@@ -36,6 +36,9 @@ const FILES = [
   // Task 5.5: docs split by topic (docs/TESTNET_*.md, docs/DEEP_DIVE_*.md).
   "TESTNET_DEMO.md",
   "TECHNICAL_DEEP_DIVE.md",
+  // Task 5.5: a guide to a banking demo the code never had (four named
+  // banks, a locked reserve, options 13-19 as token options).
+  "VANGUARD_RWA_TOKEN_ECOSYSTEM_GUIDE.md",
   // Task 4.16: two interfaces no contract imported, a demo helper no flow
   // required (review B L-1).
   "IMultiSigWallet.sol",
