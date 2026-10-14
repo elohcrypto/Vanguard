@@ -128,11 +128,6 @@ const config: HardhatUserConfig = {
     ...(process.env.MOCHA_TIMINGS
       ? { rootHooks: require("./scripts/ci/mocha-log.js").mochaHooks }
       : {}),
-    // CI's tests job sets TEST_PARITY_OUT: the spec reporter also writes
-    // every test's title, file and state there (scripts/ci/test-parity.js).
-    ...(process.env.TEST_PARITY_OUT
-      ? { reporter: require("./scripts/ci/test-parity.js").Reporter }
-      : {}),
   },
 };
 

@@ -42,6 +42,10 @@ const FILES = [
   // Task 5.5: a pre-Phase-1 plan summary ("security audit passed",
   // links to Requirements.md, Tasks.md and Design.md that never existed).
   "WORKFLOW_IMPLEMENTATION_SUMMARY.md",
+  // Task 5.5: the Task 5.4 split-parity gate, retired once the line-count
+  // allowlist was empty (its header said so).
+  "test-parity.js",
+  "test-parity-baseline.json",
   // Task 4.16: two interfaces no contract imported, a demo helper no flow
   // required (review B L-1).
   "IMultiSigWallet.sol",
@@ -65,6 +69,8 @@ const SYMBOLS = [
   // direct OnchainID deploy, replaced by the factory path (Onboard.js).
   "hasContract",
   "deployPinned",
+  // Task 5.5: the parity gate's environment hook (hardhat.config.ts).
+  "TEST_PARITY_OUT",
 ];
 
 const EXCLUDE = [

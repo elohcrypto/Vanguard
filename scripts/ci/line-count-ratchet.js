@@ -24,7 +24,8 @@ const EXEMPT = [
   // binary or build output, none tracked today (circuit keys, wasm, images)
   /\.(zkey|ptau|wasm|r1cs|sym|png|jpe?g|gif|ico|pdf)$/i,
 ];
-// Allowlist, measured at aa65de8 (2026-10-12, the start of Task 4.15).
+// Allowlist, measured at aa65de8 (2026-10-12, the start of Task 4.15);
+// empty since Task 5.5 split the last two docs. Keep it empty.
 const ALLOW = {
 };
 
