@@ -4,13 +4,13 @@ This directory contains OnchainID implementation contracts following ERC-734 and
 
 ## Contracts
 
-- `OnchainIDFactory.sol` - Factory for deploying OnchainID contracts
+- `OnchainIDFactory.sol` - Factory for deploying OnchainID contracts (CREATE2); `deployOnchainIDWithKey` only by the future owner (`OnlyOwnerNamesKey`), which adds the named key through the identity's `addCreationKey`; deployment fees pulled with `withdrawFees` when a push fails (`FEE_CALL_GAS` 50,000; Task 5.2)
 - `OnchainID.sol` - Core OnchainID contract: ERC-735 claims on top of `OnchainIDKeys`
 - `OnchainIDKeys.sol` - Abstract base of OnchainID: ERC-734 keys and execution requests (one deployed contract; split for size in plan v2 Task 4.5)
 - `OnchainIDOwnership.sol` - Abstract base of OnchainID over OnchainIDKeys: manager authorization, two-step ownership, the pinned recovery manager and its two hooks (`evictManagementKeys`, `transferOwnershipByRecovery`), the manager list and the freeze while a recovery is approved (split in Task 4.11)
-- `ClaimIssuer.sol` - Trusted claim issuer contract: issued claims, revocation, `hasValidClaim` and `claimValidTo`
+- `ClaimIssuer.sol` - Trusted claim issuer contract: issued claims, revocation, `hasValidClaim` and `claimValidTo`; a claim's signature covers `claimDigest` (chain id, issuer, the (identity, topic) revocation epoch, identity, topic, scheme, data, uri, validTo), and `revokeClaim` bumps the epoch, voiding every earlier signature (Task 5.2)
 - `ClaimIssuerKeys.sol` - Abstract base of ClaimIssuer, not deployed: the issuer's keys, trusted-issuer list, issuer info and the signer checks (split in Task 4.8)
-- `KeyManager.sol` - Timelocked key rotation and agent recovery for identities that authorize it (no owner)
+- `KeyManager.sol` - Timelocked key rotation for identities that authorize it (`authorizeManager`), and agent recovery for identities that pin it as their recovery manager (`recoveryManager()`); no owner
 - `KeyManagerRecovery.sol` - Abstract base of KeyManager, not deployed: recovery agents, candidates, approvals, cancel votes, execution with eviction, `recoveryLocked` (split in Task 4.8)
 - `KeyManagerRecoverySetup.sol` - Abstract base of KeyManager over KeyManagerRecovery: seating the agents; a re-seat waits 48h and can be vetoed (Task 4.11, R-411-16)
 - `KeyManagerOwnerTransfer.sol` - Abstract base of KeyManager over KeyManagerRecoverySetup: the owner transfer 7 days after an approval (Task 4.11)
@@ -44,21 +44,25 @@ This directory contains OnchainID implementation contracts following ERC-734 and
   `recoveryManager()` before relying on recovery. Recovery does not
   depend on `authorizedManagers`, so withdrawing KeyManager pauses its
   rotations and batches, never recovery. Who can do what, and when:
-  the owner seats the agents and threshold (`setupKeyRecovery`); the
+  the owner seats the agents and threshold (`setupKeyRecovery`; the
+  threshold is at least 2, `ThresholdBelowTwo`, D59); the
   first seating is immediate, a re-seat of seated agents is pending for
   48 hours, the seated agents can veto it at their threshold
-  (`vetoKeyRecoverySetup`), anyone applies it afterwards
+  (`vetoKeyRecoverySetup`), anyone applies it in the 7 days after
   (`applyKeyRecoverySetup`), an approved recovery blocks it and an executed
-  one drops it; neither the owner nor a current MANAGEMENT key can be
-  seated as an agent, at seating or at re-seat apply, and the owner is
-  refused at every open or approve (D53, R-414-10; a MANAGEMENT key is
+  one drops it; neither the owner, a current MANAGEMENT key, the identity
+  itself nor the KeyManager can be seated as an agent, at seating or at
+  re-seat apply. Before seating agents the owner removes every MANAGEMENT
+  key it does not know: such a key can make the chosen agents MANAGEMENT
+  keys and so block the seating or the re-seat (A2F-4). The owner is and the owner is
+  refused at every open or approve too (D53, R-414-10; a MANAGEMENT key is
   not refused at the vote: a rogue key could force one onto every agent
   and stall recovery, and holding one makes nobody an agent). A new owner who
   takes over by an ordinary transfer re-seats the agents: after a
   completed recovery the old agents can re-open once the transfer window
   passes if `owner()` is not the recovered key. An agent opens a candidate
-  (`initiateKeyRecovery`), which counts as its approval (at threshold 1
-  the open approves); none opens while another is approved. Until the
+  (`initiateKeyRecovery`), which counts as its approval; none opens
+  while another is approved. Until the
   approvals reach the threshold only its initiator may cancel it: not
   the owner (a stolen owner key raced every candidate: D39, R-414-1),
   not a MANAGEMENT key. From the approval only the agents cancel it, at
@@ -81,7 +85,10 @@ This directory contains OnchainID implementation contracts following ERC-734 and
   the approval
   (`OWNER_TRANSFER_TIMELOCK`) and before 14 days, someone (the recovered
   wallet, or anyone for it) must call `executeOwnerTransfer` and the
-  recovered wallet must accept (`acceptOwnership`); if nobody does in
+  recovered wallet must accept (`acceptOwnership`); only a recovered key
+  of the form keccak256(address) can become the owner, so a recovery to
+  any other key adds that key and evicts the other MANAGEMENT keys but
+  never moves ownership (A2F-7); if nobody does in
   that window the lock lifts, the old owner keeps the identity and an
   agent's next `initiateKeyRecovery` re-opens recovery
   (`KeyRecoveryReopened`, a new epoch; D52). Between the execution and
@@ -102,7 +109,9 @@ This directory contains OnchainID implementation contracts following ERC-734 and
   which stays the asset-side bound; its new wallet must control the
   identity (own it or hold a MANAGEMENT or ACTION key on it, D41), as
   every registry binding requires (`registerIdentity`,
-  `batchRegisterIdentity`, `updateIdentity`, `moveIdentity`). Control
+  `batchRegisterIdentity`, `updateIdentity`, `moveIdentity`). That D41
+  rule keeps the asset side and the identity side consistent; it is not
+  a defence against a rogue agent (A2F-6). Control
   is checked when the wallet is bound; a wallet may lose it afterwards
   (its key removed, the identity transferred) and keeps its entry, and
   governance refuses such a wallet at vote time (R-414-11). A holder
@@ -169,8 +178,9 @@ and authorized managers survive; the new owner audits them
 (`getKeysByPurpose`, `getManagers()`, `ManagerAuthorized` and
 `ManagerDeauthorized` events) and removes any it does not want. After a
 recovery's transfer the acceptance removes them (see Keys and removal).
-`renounceOwnership` reverts and `initialize` runs once, so an identity
-always has a controller.
+`renounceOwnership` reverts and `initialize` runs once, called by the
+deploying contract only (`NotCreator`, Task 5.2), so an identity always
+has a controller.
 
 Managers (Task 4.11, R-411-14/15): one recovery manager is pinned
 (`recoveryManager()`, see above) and is the only contract that can evict
@@ -192,6 +202,8 @@ Claims on an identity are a record. `IdentityRegistry` holds the required
 topics and trusted issuers, and `isVerified` asks each trusted issuer
 (`ClaimIssuer.hasValidClaim(identity, topic)`, which checks expiry and
 revocation); it never reads the identity's lists, so a claim the owner or
-anyone naming itself as issuer writes counts for nothing. The identity
+anyone naming itself as issuer writes counts for nothing. Each issuer
+call is bounded to 45,000 gas and one return word; a failing issuer counts
+as no claim (`BoundedStaticCall`, Task 5.1). The identity
 keeps no trusted-issuer list, required topics or compliance view of its
 own.

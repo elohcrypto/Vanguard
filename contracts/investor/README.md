@@ -1,8 +1,8 @@
-# Investor Onboarding System
+# Investor custody (onboarding to an investor type)
 
 ## 🎯 Overview
 
-The Investor Onboarding System provides a sophisticated workflow for users to upgrade from Normal users to verified investors (Retail, Accredited, or Institutional) with multi-signature wallet token locking requirements.
+A Normal user upgrades to Retail, Accredited or Institutional by locking VSC in a 2-of-2 `MultiSigWallet` the bank (ops) creates for it; the bank then approves and the manager assigns the type.
 
 ## 📋 Components
 
@@ -19,8 +19,8 @@ A 2-of-2 multi-signature wallet requiring both bank and user signatures to unloc
 
 **Functions:**
 
-- `lockTokens(uint256 amount)` - User locks tokens
-- `proposeUnlock(uint256 amount, address recipient, string reason)` - Create unlock proposal
+- `lockTokens(uint256 amount)` - the user locks once, at most the Normal cap of the registry the token applies (`LockAboveNormalCap`, Task 5.1)
+- `proposeUnlock(uint256 amount, address recipient, string reason)` - user or bank; a recipient other than the user must be verified and not a trusted contract (`RecipientNotVerified`, `RecipientTrusted`)
 - `signUnlock(bytes32 proposalId)` - Sign unlock proposal
 - `getLockedBalance()` - View locked amount
 
@@ -39,7 +39,7 @@ Manages the complete investor onboarding workflow.
 **Functions:**
 
 - `requestInvestorStatus(InvestorType type)` - User requests investor status
-- `createMultiSigWallet(address user)` - Bank creates wallet for user
+- `createMultiSigWallet(address user)` - bank or owner; the manager trusts the wallet on the token, so it must be a ComplianceRules registrar for the `MultiSigWallet` code hash
 - `confirmTokensLocked()` - User confirms tokens locked
 - `approveRequest(address user)` - Bank approves request
 - `rejectRequest(address user, string reason)` - Bank rejects request
@@ -67,9 +67,8 @@ Manages the complete investor onboarding workflow.
    → Signature requirement: 2-of-2
 
 7. User locks required tokens in multi-sig wallet
-   → Retail: 10,000 tokens
-   → Accredited: 100,000 tokens
-   → Institutional: 1,000,000 tokens
+   → Retail: 2,000 VSC / Accredited: 4,000 / Institutional: 8,000
+     (defaults: a quarter, a half and all of the Normal cap)
    → Status: TOKENS_LOCKED
 
 8. Bank approves request
@@ -90,17 +89,17 @@ Manages the complete investor onboarding workflow.
 ### Phase 4: Downgrade to Normal User
 
 ```
-10. User requests downgrade
-    → Creates unlock proposal
+10. User or bank proposes an unlock (amount, recipient, reason)
 
-11. User signs unlock proposal
+11. User signs the proposal
     → Signatures: 1 of 2
 
-12. Bank signs unlock proposal
-    → Signatures: 2 of 2
-    → Tokens automatically unlocked
-    → Tokens returned to user
-    → User downgraded to NORMAL USER
+12. Bank signs the proposal
+    → Signatures: 2 of 2: the second signature pays the recipient
+
+13. The investor type is unchanged by the unlock: a compliance officer
+    downgrades it with InvestorTypeRegistry.downgradeInvestorType
+    (InvestorRequestManager declares InvestorDowngraded but never emits it)
 ```
 
 ## 💰 Token Lock Requirements
@@ -117,8 +116,8 @@ Manages the complete investor onboarding workflow.
 
 - **2-of-2 Requirement**: Both bank and user must sign to unlock tokens
 - **Proposal System**: All unlocks require explicit proposals
-- **Immutable Participants**: Bank and user addresses cannot be changed
-- **Reentrancy Protection**: All state-changing functions protected
+- **Fixed participants**: bank and user are set once in the constructor (storage, so every wallet shares one code hash); no setter changes them
+- **Reentrancy guard** on the calls that move tokens or deploy (`lockTokens`, the unlock execution, `requestInvestorStatus`, `createMultiSigWallet`, `confirmTokensLocked`, `approveRequest`); `proposeUnlock`, `signUnlock`'s signing leg, `cancelProposal`, `rejectRequest` and `updateLockRequirement` have none
 
 ### Compliance Integration
 
@@ -130,13 +129,13 @@ Manages the complete investor onboarding workflow.
 
 - **Locked Balance Tracking**: Precise tracking of locked amounts
 - **Transfer Verification**: Tokens cannot be unlocked without dual signatures
-- **Balance Checks**: Continuous verification of locked amounts
+- **Balance checks**: the lock is checked at confirmation and again at approval
 
 ## 📊 Request Status Flow
 
 ```
 None → Pending → WalletCreated → TokensLocked → Approved
-                                              ↘ Rejected
+        ↘ Rejected (from Pending, WalletCreated or TokensLocked)
 ```
 
 **Status Descriptions:**
@@ -168,10 +167,10 @@ investorRequestManager.createMultiSigWallet(userAddress);
 
 ```solidity
 // User approves tokens
-token.approve(multiSigWalletAddress, 100_000 * 10**18);
+token.approve(multiSigWalletAddress, 4_000 * 10**18);
 
-// User locks tokens in multi-sig wallet
-multiSigWallet.lockTokens(100_000 * 10**18);
+// User locks tokens in multi-sig wallet (Accredited default: 4,000)
+multiSigWallet.lockTokens(4_000 * 10**18);
 
 // User confirms tokens locked
 investorRequestManager.confirmTokensLocked();
@@ -189,7 +188,7 @@ investorRequestManager.approveRequest(userAddress);
 ```solidity
 // User creates unlock proposal
 bytes32 proposalId = multiSigWallet.proposeUnlock(
-    100_000 * 10**18,
+    4_000 * 10**18,
     userAddress,
     "Downgrade to normal user"
 );
@@ -197,7 +196,7 @@ bytes32 proposalId = multiSigWallet.proposeUnlock(
 // User signs
 multiSigWallet.signUnlock(proposalId);
 
-// Bank signs (tokens automatically unlocked)
+// Bank signs: the second signature pays the recipient
 multiSigWallet.signUnlock(proposalId);
 ```
 
@@ -234,6 +233,7 @@ for comprehensive test coverage including:
 - `InvestorRequestApproved` - Request approved
 - `InvestorRequestRejected` - Request rejected
 - `LockRequirementUpdated` - Lock amount changed
+- `InvestorDowngraded` - declared, never emitted
 
 ### MultiSigWallet Events
 
@@ -257,7 +257,11 @@ const manager = await InvestorRequestManager.deploy(
   identityRegistryAddress,
 );
 
-// MultiSigWallet is deployed automatically by InvestorRequestManager
+// MultiSigWallet is deployed automatically by InvestorRequestManager.
+// Wiring before use (demo options 21/51 do it):
+// - InvestorTypeRegistry.setComplianceOfficer(manager, true) (approval assigns the type)
+// - ComplianceRules.setTrustedRegistrar(token, manager, MultiSigWallet code hash)
+// - ownership: Ownable2Step; the handover ceremony nominates ops, ops accepts (Task 5.1)
 ```
 
 ## 🔗 Integration

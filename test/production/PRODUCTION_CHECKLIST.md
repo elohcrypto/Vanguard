@@ -1,44 +1,34 @@
-# 🚀 OnchainID Production Deployment Checklist
+# 🚀 Production Deployment Checklist (template)
 
-This comprehensive checklist ensures the OnchainID system is production-ready before mainnet deployment.
+A template for the checks before a production deploy. Nothing here is checked by code; a box is ticked by the people doing the deploy. `scripts/production/DeployProduction.ts` deploys the identity side only (KeyManager, claim issuers, IdentityRegistry, ComplianceRules, OnchainIDFactory); the token, custody, governance and the handover ceremony are deployed by other paths (docs/TESTNET_CEREMONY.md).
 
 ## 📋 Pre-Deployment Validation
 
 ### ✅ Code Quality & Testing
 
-- [ ] **Unit Tests**: All unit tests pass (100% success rate)
+- [ ] **All tests**: the whole suite passes
 
   ```bash
-  npx hardhat test test/unit/**/*.test.ts
+  npm test
   ```
 
-- [ ] **Integration Tests**: All integration tests pass
+- [ ] **Integration Tests**: test/integration passes
 
   ```bash
-  npx hardhat test test/integration/**/*.test.ts
+  npx hardhat test test/integration/*.test.ts test/integration/*.test.js
   ```
 
-- [ ] **Production Simulation**: Complete production simulation passes
+- [ ] **Production Simulation**: the three production suites pass
 
   ```bash
   npx hardhat test test/production/Production*.test.ts
   ```
 
-- [ ] **Security Tests**: All security tests pass
+- [ ] **Guards**: every require/revert classified (`node scripts/ci/guards-table.js`; guard tests in test/guards/)
 
+- [ ] **Code Coverage**: no drop below the CI line baseline and the per-contract branch floors (`scripts/ci/coverage-ratchet.sh`, `scripts/ci/branch-floors.json`)
   ```bash
-  npx hardhat test test/security/**/*.test.ts
-  ```
-
-- [ ] **Performance Tests**: Performance benchmarks met
-
-  ```bash
-  npx hardhat test test/performance/**/*.test.ts
-  ```
-
-- [ ] **Code Coverage**: Minimum 95% code coverage achieved
-  ```bash
-  npx hardhat coverage
+  npm run test:coverage
   ```
 
 ### ✅ Security Validation
@@ -68,23 +58,10 @@ This comprehensive checklist ensures the OnchainID system is production-ready be
 
 ### ✅ Performance & Gas Optimization
 
-- [ ] **Gas Usage**: Within acceptable limits
-  - [ ] Identity deployment: < 3M gas ✅
-  - [ ] Key addition: < 200K gas ✅
-  - [ ] Claim issuance: < 300K gas ✅
-  - [ ] Recovery operations: < 500K gas ✅
-
-- [ ] **Transaction Costs**: Economically viable (at 20 gwei, $2000 ETH)
-  - [ ] Identity creation: ~$1.20 ✅
-  - [ ] Key management: ~$0.08 ✅
-  - [ ] Claim operations: ~$0.12 ✅
-  - [ ] Recovery procedures: ~$0.20 ✅
-
-- [ ] **Performance Benchmarks**: Response times acceptable
-  - [ ] Deployment time: < 60 seconds ✅
-  - [ ] Key operations: < 5 seconds ✅
-  - [ ] Claim verification: < 2 seconds ✅
-  - [ ] Recovery initiation: < 10 seconds ✅
+- [ ] **Gas and performance**: the production suite asserts identity
+      deployment under 30 s and `addKey` under 200,000 gas and under $10
+      (ProductionResilience); other figures are logged, not asserted. The
+      transfer-path gas ratchet runs in CI (`npm run gas:claims`).
 
 ### ✅ Network & Infrastructure
 
@@ -104,6 +81,10 @@ This comprehensive checklist ensures the OnchainID system is production-ready be
         wallet owns the ops identity; otherwise (or with `OPS_IDENTITY`
         unset) it prints `OnchainID(<ops identity>).authorizeManager(<keyManager>)`,
         which the ops identity's owner must send
+  - [ ] KeyManager pinned as the ops identity's recovery manager: the
+        deploy pins it when the deploying wallet owns the identity,
+        prints the `pinRecoveryManager` call for another owner, and
+        refuses an identity already pinned to another manager
 
 - [ ] **Contract Verification**: Source code verification ready
   - [ ] Etherscan API key configured
@@ -158,42 +139,23 @@ This comprehensive checklist ensures the OnchainID system is production-ready be
 
 ## 🔧 Production Configuration Validation
 
-### Network Settings
+### Deploy settings (scripts/production/DeployProduction.ts)
 
-```typescript
-const PRODUCTION_CONFIG = {
-  // Core settings
-  deploymentFee: "0.01", // 0.01 ETH
-  feeRecipient: "0x...", // Production fee recipient
+- Deployment fee 0.01 ETH per identity, gas price 20 gwei, gas limit
+  `DEPLOY_GAS_LIMIT` or 10,000,000, 3 confirmations off the hardhat
+  network.
+- Timelocks are on chain, not configuration: `RECOVERY_TIMELOCK` is a
+  48-hour constant; the rotation timelock defaults to 24 hours and an
+  identity may set 1 hour to 7 days (`setCustomTimelock`).
 
-  // Security settings
-  recoveryTimelock: 48 * 60 * 60, // 48 hours
-  keyRotationTimelock: 24 * 60 * 60, // 24 hours
-  maxGasPrice: "100", // 100 gwei maximum
-  minConfirmations: 3, // 3 block confirmations
-
-  // Performance settings
-  gasLimit: 5000000, // 5M gas limit
-  batchSize: 10, // Transaction batching
-  retryAttempts: 3, // Retry failed transactions
-};
-```
-
-### Environment Variables
+### Environment variables the code reads
 
 ```bash
-# Network configuration
-MAINNET_RPC_URL=https://mainnet.infura.io/v3/YOUR_PROJECT_ID
-ETHERSCAN_API_KEY=YOUR_ETHERSCAN_API_KEY
-
-# Security settings
-DEPLOYER_PRIVATE_KEY=0x... # Secured in production
-RECOVERY_TIMELOCK=172800   # 48 hours
-KEY_ROTATION_TIMELOCK=86400 # 24 hours
-
-# Monitoring
-MONITORING_ENABLED=true
-ALERT_WEBHOOK_URL=https://your-monitoring-service.com/webhook
+MNEMONIC=...            # or PRIVATE_KEY (hardhat.config.ts)
+MAINNET_RPC_URL=...     # or SEPOLIA_RPC_URL
+ETHERSCAN_API_KEY=...
+OPS_IDENTITY=0x...      # DeployProduction: the ops OnchainID
+DEPLOY_GAS_LIMIT=...    # optional
 ```
 
 ## 🚨 Final Pre-Deployment Steps
@@ -201,10 +163,11 @@ ALERT_WEBHOOK_URL=https://your-monitoring-service.com/webhook
 ### 1. Final Test Run
 
 ```bash
-# Run the production test set on the in-process network (the runner lists
-# the integration test files with fs, refuses any network but
-# hardhat/localhost and deploys nothing: a live-network rehearsal is the
-# deploy script below plus the handover ceremony, docs/TESTNET_CEREMONY.md)
+# Run the production test set on the in-process network: test/integration
+# (listed with fs) and the three Production*.test.ts suites. The runner
+# refuses any network but hardhat/localhost and deploys nothing; a
+# live-network rehearsal is the deploy script below plus the handover
+# ceremony (docs/TESTNET_CEREMONY.md)
 npx hardhat run scripts/production/RunProductionTests.ts
 
 # Verify all tests pass
@@ -283,12 +246,12 @@ If issues are discovered post-deployment:
 
 Before mainnet deployment, obtain sign-off from:
 
-- [ ] **Technical Lead**: Code quality and architecture ✅
-- [ ] **Security Team**: Security audit and validation ✅
-- [ ] **DevOps Team**: Infrastructure and monitoring ✅
-- [ ] **Product Team**: Feature completeness and UX ✅
-- [ ] **Legal Team**: Compliance and regulatory approval ✅
-- [ ] **Executive Team**: Business approval and go-live ✅
+- [ ] **Technical Lead**: Code quality and architecture
+- [ ] **Security Team**: Security audit and validation
+- [ ] **DevOps Team**: Infrastructure and monitoring
+- [ ] **Product Team**: Feature completeness and UX
+- [ ] **Legal Team**: Compliance and regulatory approval
+- [ ] **Executive Team**: Business approval and go-live
 
 ## 📞 Emergency Contacts
 
@@ -316,16 +279,12 @@ Before mainnet deployment, obtain sign-off from:
 
 **CRITICAL**: All items must be checked before mainnet deployment.
 
-**Total Items**: 50+ validation points
-**Required Pass Rate**: 100%
-**Estimated Completion Time**: 2-4 weeks
-
 **Final Approval**:
 
-- [ ] All checklist items completed ✅
-- [ ] All stakeholders have signed off ✅
-- [ ] Emergency procedures are in place ✅
-- [ ] Monitoring systems are active ✅
+- [ ] All checklist items completed
+- [ ] All stakeholders have signed off
+- [ ] Emergency procedures are in place
+- [ ] Monitoring systems are active
 
 **Deployment Authorization**:
 

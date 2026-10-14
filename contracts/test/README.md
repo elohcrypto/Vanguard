@@ -1,14 +1,18 @@
-# Test Contracts and Helpers
+# Test contracts
 
-This directory contains mock contracts and test helpers for comprehensive testing.
+Deployed only by the tests; no deploy path uses them.
 
-## Mock Contracts
+- `MockTarget.sol` - a call target for governance and execution tests
+- `mocks/` - test doubles, each described in its file header:
+  verifiers (`AlwaysTrueVerifier`, `FakeZKVerifier`), identities and
+  recovery managers (`BloatedOnchainID`, `FalseReturningIdentity`,
+  `EvilRecoveryManager`, `OddRecoveryManager`), issuers
+  (`MockClaimIssuer`, `HostileIssuer`, `IssuerCallProbe`), registries and
+  compliance (`MockIdentityRegistry`, `ComplianceRegistry`, a permissive
+  double `scripts/deploy-helpers.ts` refuses, `YesCompliance`), tokens (`MockToken`,
+  `MockTypedToken`, `MockPolicyToken`), oracles and engines
+  (`MockQueryManager`, `RawWhitelistOracle`, `ShortWhitelistOracle`,
+  `WeightlessEngine`, `MockWhitelistBinder`) and `RefusingFeeRecipient`.
 
-- `MockOnchainID.sol` - Mock OnchainID for testing
-- `MockOracle.sol` - Mock oracle for testing
-- `MockERC3643.sol` - Mock ERC-3643 for testing
-
-## Test Helpers
-
-- `TestHelpers.sol` - Common test utility functions
-- `DeploymentHelpers.sol` - Contract deployment helpers
+TypeScript test helpers live in `test/helpers/`; deployment helpers in
+`scripts/deploy-helpers.ts`.

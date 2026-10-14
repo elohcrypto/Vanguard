@@ -1,38 +1,46 @@
-# CMTA UTXO Compliance POC - Smart Contracts
+# Vanguard contracts
 
-This directory contains all smart contracts for the CMTA UTXO Compliance POC project.
+Solidity sources for the Vanguard token (VSC) system: an ERC-3643-style
+security token with OnchainID identities, list oracles, ZK proofs,
+custody, escrow and governance. Under development, not audited.
 
-## Directory Structure
+## Directory structure
 
 ```
 contracts/
-├── onchain_id/              # OnchainID contracts (ERC-734/735)
-├── erc3643/                 # ERC-3643 T-REX contracts
-├── oracle/                  # Oracle management contracts
-├── compliance/              # UTXO compliance contracts
-├── privacy/                 # ZK verification contracts
-├── test/                    # Test contracts and helpers
-└── migrations/              # Deployment scripts
+├── onchain_id/   OnchainID, OnchainIDFactory, ClaimIssuer, KeyManager (+ interfaces/)
+├── erc3643/      Token (VSC), IdentityRegistry, InvestorTypeRegistry (+ interfaces/)
+├── compliance/   ComplianceRules: per-token jurisdiction rules, list gates, trust (+ interfaces/)
+├── oracle/       OracleManager, ConsensusOracle, WhitelistOracle, BlacklistOracle (+ interfaces/)
+├── privacy/      PrivacyManager, ZKVerifierIntegrated, DynamicListManager, verifiers/ (+ interfaces/)
+├── investor/     Custody: InvestorRequestManager, MultiSigWallet
+├── payment/      Escrow: EscrowWalletFactory, MultiSigEscrowWallet
+├── governance/   GovernanceToken (VGT), VanguardGovernance
+└── test/         MockTarget and mocks/ (tests only)
 ```
 
-## Development Setup
+The abstract bases each contract is built on are listed in
+`docs/SYSTEM_WORKFLOW_GUIDE.md` ("Contracts").
+
+## Development
 
 1. Install dependencies: `npm install`
-2. Compile contracts: `npx hardhat compile`
-3. Run tests: `npx hardhat test`
-4. Deploy locally: `npx hardhat node` then `npx hardhat run scripts/deploy.js --network localhost`
+2. Compile: `npx hardhat compile`
+3. Build the circuits: `npm run setup:zk` (needed by the proof tests)
+4. Test: `npm test`
+5. Deploy locally: `npm run node`, then `npm run demo:interactive:proof`
+   and option 1a (or 1 and the options after it).
+   `scripts/production/DeployProduction.ts` deploys the identity side
+   (KeyManager, issuers, IdentityRegistry, ComplianceRules, factory).
 
-## Network Configurations
+## Networks
 
-- **localhost**: Local Hardhat network for development
-- **sepolia**: Ethereum testnet for testing
-- **mainnet**: Ethereum mainnet for production
+`hardhat.config.ts` defines `hardhat`, `localhost`, `devnode` (when
+`DEMO_RPC_URL` is set), `sepolia` and `mainnet`. Nothing is deployed on a public network yet (Sepolia
+rehearsal and production deploy: Phase 5 Task 5.7).
 
 ## Security
 
-All contracts follow security best practices:
-
-- Comprehensive access controls
-- Reentrancy protection
-- Gas optimization
-- Formal verification where applicable
+Not audited. What the contracts guard and how is in the README's
+Security section; every `require`/`revert` is classified in
+`test/guards/table/` and checked by `scripts/ci/guards-table.js`.

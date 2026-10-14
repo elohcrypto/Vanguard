@@ -1,34 +1,41 @@
-# ERC-3643 T-REX Smart Contracts
+# ERC-3643 contracts
 
-This directory contains the complete implementation of ERC-3643 (T-REX) standard smart contracts for compliant security tokens.
+An ERC-3643-style permissioned security token and its registries. The
+token implements this repository's `IERC3643` interface (identity
+registry, compliance hooks, agent mint/burn/freeze, wallet recovery,
+pause); it is not the T-REX reference code (no forced transfers, batch
+mints, separate claim-topics or trusted-issuers registries, or
+compliance modules).
 
-## 🏗️ Core Contracts Implemented
+## Contracts
 
-### 1. **Token.sol** - ERC-3643 Compliant Security Token
+### Token.sol (VSC; GovernanceToken, VGT, is a subclass)
 
-- Full ERC-3643 implementation with compliance checks
-- Integrated with Identity Registry and Compliance Registry
-- Support for token freezing, partial freezing, and recovery
-- Agent-based access control for administrative functions
-- Pausable functionality for emergency situations
+- Every transfer and mint is checked by `IdentityRegistry.isVerified`,
+  `ComplianceRules.canTransfer` and, with an InvestorTypeRegistry bound,
+  the registry's authorization, caps and cooldown (docs/SYSTEM_WORKFLOW_GUIDE.md, "Transfers")
+- Agent-only mint, burn (free balance only, never gated by compliance),
+  freezing, partial freezing and wallet recovery (`recoveryAddress`; the
+  new wallet must control the identity, D41)
+- Pause by the owner or the guardian, unpause by the owner; on VGT an
+  agent (ops) may also unpause, so the guardian can pause again after a
+  voted unpause; a pause has no expiry (D56; an audit item)
+- Registries and compliance are replaced by owner setters
+  (`setIdentityRegistry`, `setCompliance`, `setInvestorTypeRegistry`);
+  there are no proxies
 
-### 2. **IdentityRegistry.sol** - Investor Identity Management
+### IdentityRegistry.sol
 
-- OnchainID integration for blockchain-based identity verification
-- Country code management for jurisdiction compliance
-- Batch registration capabilities for efficient onboarding
-- Agent-based access control with owner oversight
+- Binds a wallet to an OnchainID and a country (one wallet per
+  identity); registration is agent only, the wallet must control the
+  identity (owner, MANAGEMENT or ACTION key, D41) and the country must
+  pass the token's ComplianceRules rule when a jurisdiction source is set
 - Required topics, trusted issuers, `isVerified` and its per-identity
-  verification cache in the base `RegistryVerification.sol`
+  verification cache in the base `RegistryVerification.sol`; each issuer
+  call is bounded to 45,000 gas and one return word, and a failing issuer
+  counts as no claim (`BoundedStaticCall.sol`, Task 5.1)
 
-### 3. **ComplianceRegistry.sol** - Compliance Rule Engine
-
-- Modular compliance system supporting pluggable rules
-- Integration with Identity Registry for verification
-- Token binding for secure compliance enforcement
-- Module management for extensible compliance logic
-
-### 4. **InvestorTypeRegistry.sol** - Investor Types
+### InvestorTypeRegistry.sol
 
 - Per-type transfer and holding caps, transfer cooldown and required
   whitelist tier; Token enforces the caps and the cooldown, ComplianceRules
@@ -38,92 +45,39 @@ This directory contains the complete implementation of ERC-3643 (T-REX) standard
 - Its own config proposals and governors in the base
   `InvestorTypeGovernance.sol`
 
-## 🔗 Interface Definitions
+### Compliance
 
-All contracts implement comprehensive interfaces located in `interfaces/`:
+The compliance contract the token binds is
+`contracts/compliance/ComplianceRules.sol` (per-token jurisdiction rules,
+blacklist and whitelist gates, trusted contracts).
+`contracts/test/mocks/ComplianceRegistry.sol` is a permissive test
+double whose `isProductionCompliance()` is false, so the deployment
+helper (`scripts/deploy-helpers.ts`) refuses it; Token itself does not
+check.
 
-- **IERC3643.sol** - Core T-REX token interface
-- **IIdentityRegistry.sol** - Identity management interface
-- **ICompliance.sol** - Compliance validation interface
+## Interfaces (`interfaces/`)
 
-## 🎯 Key Features Implemented
+- `IERC3643.sol` - the token interface Token implements
+- `IIdentityRegistry.sol` - identity registry
+- `ICompliance.sol` - `IComplianceHooks`, the token's view of compliance
+- `IInvestorTypeRegistry.sol` - investor types
 
-### ✅ **ERC-3643 Standard Compliance**
+## Deploying
 
-- Full T-REX standard implementation
-- Transfer restrictions and compliance validation
-- Identity verification requirements
-- Claim-based authorization system
-
-### ✅ **Security Features**
-
-- Address and token freezing capabilities
-- Recovery mechanism for lost wallets
-- Agent-based access control
-- Emergency pause functionality
-
-### ✅ **Modular Architecture**
-
-- Pluggable compliance modules
-- Extensible claim validation system
-- Configurable transfer restrictions
-- Upgradeable registry system
-
-### ✅ **Integration Ready**
-
-- OnchainID (ERC-734/ERC-735) compatibility
-- Oracle network integration points
-- UTXO compliance system hooks
-- Regulatory reporting event emissions
-
-## 🚀 Usage Examples
-
-### Deploy Token System
+The demo's option 1a deploys and wires everything; in outline:
 
 ```solidity
-// 1. Deploy registries
-IdentityRegistry identityRegistry = new IdentityRegistry();
-ComplianceRegistry compliance = new ComplianceRegistry(address(identityRegistry));
-
-// 2. Deploy token
-Token token = new Token(
-    "Security Token",
-    "SEC",
-    address(identityRegistry),
-    address(compliance)
-);
-
-// 3. Bind token to compliance
-compliance.bindToken(address(token));
+IdentityRegistry registry = new IdentityRegistry();
+ComplianceRules rules = new ComplianceRules(owner, allowedCountries, blockedCountries);
+Token token = new Token("Vanguard Token", "VSC", address(registry), address(rules));
+registry.setComplianceRules(address(rules), address(token)); // country check source
+// then: trusted issuers and claim topics on the registry, list oracles and
+// whitelist mode on ComplianceRules, the investor-type registry on the token
 ```
 
-### Register Investor Identity
-
 ```solidity
-// Register investor with OnchainID and country
-identityRegistry.registerIdentity(
-    investorWallet,
-    onchainIDAddress,
-    840 // US country code
-);
-```
-
-### Mint Compliant Tokens
-
-```solidity
-// Mint tokens to verified investor
+// Agent only; the wallet must control the identity (D41)
+registry.registerIdentity(investorWallet, onchainIDAddress, 840);
+// Agent only; checked like a transfer to the recipient
 token.mint(investorWallet, 1000 * 10**18);
 ```
-
-## 🔧 Next Steps
-
-This completes **Task 3.1: Implement ERC-3643 core contracts**. The implementation provides:
-
-1. ✅ Complete ERC-3643 T-REX standard implementation
-2. ✅ Identity registry with OnchainID integration
-3. ✅ Modular compliance system
-4. ✅ Trusted issuers and claim topics management
-5. ✅ Security features (freezing, recovery, pause)
-6. ✅ Agent-based access control
-
-Ready for **Task 3.2: Implement ERC-3643 compliance modules** to add specific compliance rules like country restrictions, investor limits, and transfer restrictions.
