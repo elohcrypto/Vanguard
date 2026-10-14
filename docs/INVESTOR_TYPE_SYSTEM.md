@@ -23,8 +23,8 @@ describes the contract as it is in this tree.
 
 `getInvestorTypeConfig(type)` and `getAllInvestorTypeConfigs()` return the
 current values; `updateInvestorTypeConfig(type, config)` (owner only)
-replaces one, requiring both caps above zero and a tier from 1 to 5, and
-emits `InvestorTypeConfigUpdated`.
+replaces one, requiring both caps above zero, a tier from 1 to 5 and a
+cooldown of at most 43,200 minutes (`CooldownAboveMax`), and emits `InvestorTypeConfigUpdated`.
 
 ## What the token enforces
 
@@ -112,19 +112,30 @@ investor-type registry (`Token.investorTypeRegistry()`; none bound, no
 rule). It covers both parties of a transfer, the human party on the
 trusted path (the contract is exempt from the whitelist), the mint
 recipient and a recovery wallet. A tier-short live entry is refused even
-in Either. Not applicable: in ZkOnly, and for a party that passes Either
-by a proof binding with no live entry, since a proof binding carries no
-tier. `investorLimitExempt` parties skip it. Token reports the refusal as
+in Either. Not applicable in ZkOnly, or in Either with no whitelist
+oracle bound (which acts as ZkOnly). In Either with an oracle bound, a
+party with no live entry passes on its proof binding only if its type
+requires tier 1 (D46 a: a proof binding carries no tier), so a Retail,
+Accredited or Institutional holder needs a listing at its tier.
+`investorLimitExempt` parties skip it. Token reports the refusal as
 `Compliance check failed`; `ComplianceRules.whitelistTierAllows(token,
-party)` is false exactly when the tier rule is the cause. The
+party)` is false exactly when the tier rule is the cause (a tier-short
+live entry, or in Either an unlisted party whose type needs a tier above
+1). The
 IdentityRegistry holds no investor-type registry (its pointer and
 forwarders were deleted in Task 4.8); the token's registry is the only one.
 
-In the demo no deploy path binds a `WhitelistOracle` to VSC, so VSC reads
-no entry and the tier rule does not apply to VSC today; option 58 proves
-it on a probe token. GovernanceToken (VGT) never gets an investor-type
-registry on any deploy, ceremony or demo path, so neither rule throttles
-voting (governance pulls vote fees by `transferFrom`).
+No deploy path binds a `WhitelistOracle` to VSC on its own. Option 38a
+binds one: it lists every holder at its type's tier, then calls
+`setWhitelistOracle(VSC, oracle)` (a ComplianceRules vote after the
+handover); from then on the tier rule applies to VSC. Option 58 also
+proves the rule on a probe token. GovernanceToken (VGT) never gets an
+investor-type registry on any deploy, ceremony or demo path, so neither
+rule throttles voting (governance pulls vote fees by `transferFrom`):
+ComplianceRules refuses a whitelist oracle or a mode other than
+OracleOnly on VGT (`GovernanceTokenWhitelist`), and the handover
+preflight refuses an investor-type registry or a whitelist oracle on VGT
+(D56).
 
 ## Recorded, not enforced
 
@@ -154,7 +165,10 @@ officer of the registry: the user requests a type
 `MultiSigWallet` for the user (`createMultiSigWallet`), the user locks the
 type's `lockRequirements` amount in it (`lockTokens`, then
 `confirmTokensLocked`), and the bank approves (`approveRequest`), which
-assigns the type. A downgrade is a 2-of-2 unlock, then the type goes back
+assigns the type. The lock may not exceed the Normal cap (the smaller of
+Normal's transfer and holding caps; `LockAboveNormalCap`, checked again
+in `lockTokens`, Task 5.1), and the approval is refused while the user's
+live whitelist entry is below the new type's tier (`TierBelowNewType`). A downgrade is a 2-of-2 unlock, then the type goes back
 to Normal. Details: `docs/SYSTEM_WORKFLOW_GUIDE.md`, "Investor custody".
 
 ## Roles
@@ -170,9 +184,9 @@ to Normal. Details: `docs/SYSTEM_WORKFLOW_GUIDE.md`, "Investor custody".
 - **Authorized tokens** (`authorizeToken`, `isTokenAuthorized`): the only
   callers of `recordTransfer`. A token whose registry has not authorized it
   refuses every mint and transfer. Every path that binds a registry to VSC
-  also authorizes it: option 21 (when the registry exists), option 51 and
-  `scripts/demo-smoke.js` (`demo/utils/InvestorTypeRules.js`
-  `wireInvestorRegistry`); after the handover it is an InvestorTypeConfig
+  also authorizes it: option 21 (when the registry exists) and option 51
+  (both through `wireInvestorRegistry` in `demo/utils/InvestorTypeRules.js`;
+  `scripts/demo-smoke.js` drives option 51); after the handover it is an InvestorTypeConfig
   vote (option 76, type 0).
 
 **The registry's own proposals.** `createProposal(type, config,

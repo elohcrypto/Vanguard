@@ -39,6 +39,9 @@ const FILES = [
   // Task 5.5: a guide to a banking demo the code never had (four named
   // banks, a locked reserve, options 13-19 as token options).
   "VANGUARD_RWA_TOKEN_ECOSYSTEM_GUIDE.md",
+  // Task 5.5: a pre-Phase-1 plan summary ("security audit passed",
+  // links to Requirements.md, Tasks.md and Design.md that never existed).
+  "WORKFLOW_IMPLEMENTATION_SUMMARY.md",
   // Task 4.16: two interfaces no contract imported, a demo helper no flow
   // required (review B L-1).
   "IMultiSigWallet.sol",

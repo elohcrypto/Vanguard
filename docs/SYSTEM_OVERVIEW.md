@@ -1,299 +1,190 @@
-# Vanguard StableCoin System - Complete Overview
+# Vanguard token (VSC) - System Overview
 
-## 🎯 **System Summary**
+## Summary
 
-We have implemented a **Vanguard StableCoin system** with compliance, privacy, and regulatory features; it is under development and not yet audited. The system demonstrates advanced blockchain technology integration with real-world regulatory requirements.
+VSC is an ERC-3643-style permissioned security token (its own
+implementation of the `IERC3643` interface, not the T-REX reference code)
+with OnchainID identities, KYC/AML claims, list oracles with node
+consensus, a ZK allow list, investor types, custody and escrow wallets and
+one-identity-one-vote governance. It is not a stablecoin as coded: nothing
+in the contracts backs, redeems or pegs it. The system is under
+development and not audited; it runs end to end on a local Hardhat node
+(contracts, the interactive demo, the tests and CI).
 
-## 🏗️ **Architecture Overview**
-
-### **Core Components (All Implemented)**
-
-```
-┌─────────────────────────────────────────────────────────────────────────────┐
-│                         VANGUARD STABLECOIN SYSTEM                          │
-├─────────────────────────────────────────────────────────────────────────────┤
-│                                                                             │
-│  ┌─────────────┐  ┌─────────────┐  ┌─────────────┐  ┌─────────────────────┐ │
-│  │ OnchainID   │  │Compliance   │  │Oracle Access│  │  Privacy & ZK       │ │
-│  │ Identity    │  │Rules Engine │  │Control      │  │ Verification System │ │
-│  │Management   │  │             │  │             │  │                     │ │
-│  └─────────────┘  └─────────────┘  └─────────────┘  └─────────────────────┘ │
-│       │                 │                 │                    │            │
-│       └─────────────────┼─────────────────┼────────────────────┘            │
-│                         │                 │                                 │
-│  ┌────────────────────────────────────────────────────────────────────────┐ │
-│  │                  ERC-3643 Vanguard StableCoin Token                    │ │
-│  │                    (Compliant StableCoin)                              │ │
-│  │              with Token Burning System                                 │ │
-│  └────────────────────────────────────────────────────────────────────────┘ │
-│                                                                             │
-└─────────────────────────────────────────────────────────────────────────────┘
-```
-
-## ✅ **Implemented Systems**
-
-### **1. OnchainID Identity Management System**
-
-- **Technology**: ERC-734/ERC-735 compliant smart contracts
-- **Features**:
-  - Blockchain-based identity creation and management
-  - KYC/AML claim lifecycle (Issue/Reject/Update/Revoke/History)
-  - Complete audit trail with timestamps and reason tracking
-  - Integration with ERC-3643 Identity Registry
-- **Demo Options**: 3, 6-8
-- **Status**: ✅ Implemented and tested (not audited)
-
-### **2. ERC-3643 Vanguard StableCoin Token System**
-
-- **Technology**: T-REX standard compliant digital securities token
-- **Features**:
-  - Vanguard StableCoin (VSC) with 8,000 maximum transfer limit
-  - Token issuer exclusive minting authority
-  - Complete compliance validation before transfers
-  - Integration with all compliance systems
-- **Demo Options**: 21-30
-- **Status**: ✅ Implemented and tested (not audited)
-
-### **3. ComplianceRules Engine**
-
-- **Technology**: Configurable smart contract validation system
-- **Features**:
-  - Jurisdiction validation (US, DE, UK allowed; RU, CN, KP blocked)
-  - Investor type rules (Retail/Accredited/Institutional, $100K minimum)
-  - Holding period enforcement (24-hour minimum, 1-hour cooldown)
-  - Compliance level aggregation and inheritance
-- **Demo Options**: 13-20
-- **Status**: ✅ Implemented and tested (not audited)
-
-### **4. Oracle Access Control System**
-
-- **Technology**: Multi-oracle consensus mechanism
-- **Features**:
-  - Whitelist management with 5-tier access levels
-  - Blacklist management with 4 severity levels (Low/Medium/High/Critical)
-  - Oracle consensus at 66% of the registered node weight (two of three equal nodes), with emergency override
-  - Real-time integration with Vanguard StableCoin transfers
-- **Demo Options**: 31-40
-- **Status**: ✅ Implemented and tested (not audited)
-
-### **5. Privacy & Zero-Knowledge Verification System**
-
-- **Technology**: PLONK ZK proof system (universal setup) with **5 Circom circuits**
-- **Features**:
-  - Whitelist membership proofs without revealing identity
-  - Blacklist non-membership proofs without revealing identity (a demonstration; the blacklist gate itself stays explicit, D2)
-  - Jurisdiction compliance proofs without revealing location
-  - Accreditation proofs without revealing exact levels
-  - Compliance aggregation proofs without revealing scores
-- **Demo Options**: 41-50
-- **Status**: ✅ Implemented and tested (not audited)
-
-### **6. Token Burning System**
-
-- **Technology**: Issuer-exclusive supply management operations
-- **Features**:
-  - Daily quota (100,000 VSC), Monthly quota (1,000,000 VSC)
-  - Emergency burning (unlimited with multi-signature)
-  - Supply management rationale requirements
-  - Complete audit trail with burning certificates (BC-YYYY-NNN)
-- **Demo Options**: 51-58
-- **Status**: ✅ Implemented and tested (not audited)
-
-### **7. Investor Type and Transfer Limit System**
-
-- **Technology**: Differentiated investor categories with appropriate limits
-- **Features**:
-  - 4 investor types (Normal, Retail, Accredited, Institutional)
-  - Type-specific transfer limits (8K/50K/500K VSC)
-  - Type-specific holding limits (50K/500K/5M VSC)
-  - Whitelist tier requirements and transfer cooldowns
-  - Large transfer detection and compliance officer notifications
-- **Demo Options**: 51-60
-- **Status**: ✅ Implemented and tested (not audited)
-
-### **8. Governance System**
-
-- **Technology**: 1 Person = 1 Vote governance with VGT token-based voting fees
-- **Features**:
-  - Equal voting power (1 Person = 1 Vote, not weighted by tokens)
-  - VGT token voting fees (10 VGT proposal creation, 10 VGT per vote, both owner-adjustable up to 1000 VGT)
-  - Per-type quorum (10-30% of eligible voters) and approval (60-75%) thresholds
-  - Token burning for passed proposals; failed ones settle and each participant claims their deposit
-  - KYC/AML verification required for all governance participants
-  - Parameter updates for ComplianceRules, InvestorTypeRegistry, Oracle settings
-- **Demo Options**: 79-88
-- **Status**: ✅ Implemented and tested (not audited)
-
-### **9. Enhanced Escrow System**
-
-- **Technology**: 2-of-3 multi-signature escrow wallets with dispute resolution
-- **Features**:
-  - One-time-use escrow wallets per payment, funded once through the factory
-  - 2-of-3 multisig (Investor MUST sign + Payer OR Payee); the investor states release or refund explicitly
-  - Payee-signed shipment proof bound to the escrow address and chain id, opening a 14-day dispute window
-  - Investor-mediated dispute resolution (refund, or reopen with all signatures cleared)
-  - Fees fixed at creation (3% investor, 2% owner), paid on release
-  - `sweepExcess()` returns tokens sent to a settled escrow outside the factory
-  - KYC/AML verification for all parties
-- **Demo Options**: 61-73 (70a sweeps a settled escrow)
-- **Workflow**: [Escrow Payment Workflow](SYSTEM_WORKFLOW_GUIDE.md#escrow-payment-workflow)
-- **Status**: ✅ Implemented and tested (not audited)
-
-### **11. Interactive Demo System**
-
-- **Technology**: Comprehensive Node.js interactive demonstration
-- **Features**:
-  - **83 menu options** covering all system workflows
-  - End-to-end testing of complete system integration
-  - User-friendly guided workflows with error handling
-  - System dashboards and monitoring views
-- **Status**: ✅ Implemented and tested (not audited)
-
-## 🔄 **System Integration Flow**
-
-### **Complete Vanguard StableCoin Transaction Process**
+## Architecture
 
 ```
-1. User Identity Creation
-   ├── OnchainID deployment (ERC-734/ERC-735)
-   ├── KYC/AML claim issuance by trusted issuers
-   └── ERC-3643 Identity Registry registration
+Token (VSC) transfer / mint
+  ├─ IdentityRegistry.isVerified(party)  ── asks each trusted ClaimIssuer
+  │                                         about the party's OnchainID
+  ├─ ComplianceRules.canTransfer(token,…)
+  │    ├─ BlacklistOracle            (list writes: owner, DynamicListManager
+  │    ├─ WhitelistOracle  (by mode)  votes, OracleManager + ConsensusOracle
+  │    ├─ PrivacyManager   (by mode)  verdicts)
+  │    └─ country rule, trusted contracts per token
+  └─ InvestorTypeRegistry: authorization, transfer cap, cooldown, holding cap
 
-2. Compliance Validation
-   ├── ComplianceRules engine validation
-   │   ├── Jurisdiction check (country eligibility)
-   │   ├── Investor type validation (accreditation)
-   │   └── Holding period enforcement
-   ├── Oracle Access Control validation
-   │   ├── Whitelist status check (5-tier system)
-   │   ├── Blacklist status check (4-severity system)
-   │   └── Oracle consensus validation (66% of the registered weight)
-   └── Privacy-Preserving validation (optional)
-       ├── ZK whitelist membership proof
-       ├── ZK jurisdiction compliance proof
-       ├── ZK accreditation status proof
-       └── ZK compliance aggregation proof
-
-3. Vanguard StableCoin Operations
-   ├── Token issuer minting (issuer exclusive)
-   ├── Peer-to-peer transfers (investor type-specific limits: 8K/50K/500K VSC)
-   ├── Token issuer burning (supply management with quotas)
-   ├── Governance participation (1 Person = 1 Vote with VGT voting fees)
-   └── Enhanced escrow (2-of-3 multisig with dispute resolution)
-
-4. Audit and Reporting
-   ├── Complete transaction logging
-   ├── Compliance event tracking
-   ├── Regulatory reporting capabilities
-   └── Real-time system monitoring
+VanguardGovernance (fees in VGT) owns the core contracts after the handover
+ceremony; ops holds the agent roles and the list oracles; KeyManager
+recovers identities.
 ```
 
-## 🎯 **Key Benefits Achieved**
+## Components
 
-### **Regulatory Compliance**
+### 1. Identity (OnchainID, ERC-734/735)
 
-- ✅ Full KYC/AML compliance with blockchain-based identity
-- ✅ ERC-3643 T-REX standard compliance for digital securities
-- ✅ Comprehensive audit trails for regulatory reporting
-- ✅ Real-time compliance validation and monitoring
+- `OnchainIDFactory` deploys identities with CREATE2; `ClaimIssuer` issues
+  and revokes KYC (topic 6) and AML (topic 7) claims. A claim's signature
+  covers `claimDigest` (chain id, issuer, revocation epoch, identity,
+  topic, scheme, data, uri, validTo; Task 5.2); a revocation bumps the
+  epoch. `IdentityRegistry.isVerified` asks each trusted issuer, never the
+  identity's own claim list, and can cache a passing walk for 24 hours
+  (capped at the claims' expiry).
+- `KeyManager` rotates keys behind a timelock and recovers an identity
+  through seated agents (threshold at least 2) after 48 hours, with an
+  owner transfer at 7 days (docs/DEEP_DIVE_IDENTITY.md).
+- Events record issuance and revocation; the demo also records
+  rejections. Demo options 2-12b.
 
-### **Real-time Control**
+### 2. Token (VSC, ERC-3643)
 
-- ✅ Oracle-based access management with consensus mechanisms
-- ✅ Dynamic whitelist/blacklist management without contract upgrades
-- ✅ Emergency protocols for immediate threat response
-- ✅ Configurable compliance rules for different jurisdictions
+- Mint and burn are agent only (the deployer before the handover, ops
+  after it). Burn needs free balance and is never gated by compliance.
+- Every transfer checks freezes, both parties' verification, the free
+  balance, `ComplianceRules.canTransfer` and, with an InvestorTypeRegistry
+  bound, the registry's authorization, the sender's per-transfer cap and
+  cooldown and the recipient's holding cap.
+- The guardian can pause; unpause is the owner's (governance after the
+  handover). The guardian can pause again after a voted unpause and a
+  pause has no expiry (D56; pause expiry is an audit item).
+- Demo options 21-30.
 
-### **Privacy Protection**
+### 3. ComplianceRules (per token)
 
-- ✅ Zero-knowledge proofs for compliance without revealing personal data
-- ✅ Privacy-preserving identity verification
-- ✅ Selective disclosure of compliance information
-- ✅ Complete integration with existing compliance systems
+- Blacklist oracle gate on every path but burn; whitelist gate by mode
+  (OracleOnly, ZkOnly, Either); a party passing by its oracle entry needs
+  its investor type's whitelist tier (D37 a); in Either with an oracle
+  bound, a party with no entry passes on a ZK binding only if its type
+  requires tier 1 (D46 a).
+- A country rule per token (`setJurisdictionRule`); the default blocked
+  list always applies. Demo default: allowed 840, 826, 124, 276, 250, 392,
+  702, 36, 344, 756; blocked 156, 643, 364, 760 and 850. The demo labels
+  850 "North Korea", but ISO 3166-1 numeric 850 is the US Virgin Islands
+  (North Korea is 408), so the demo default does not block North Korea.
+- Trusted contracts per token, added by the owner or by a registrar for
+  one runtime code hash. The investor-type, holding-period and
+  compliance-level rules ComplianceRules once stored were removed in Task
+  4.1 (no transfer read them).
+- Demo options 13-14 and 18-20a (15-17 and 20b-20d show the
+  InvestorTypeRegistry).
 
-### **Issuer Control**
+### 4. Oracles (OracleManager, ConsensusOracle, list oracles)
 
-- ✅ Exclusive issuer authority for minting and burning operations
-- ✅ Supply management integration with economic rationale requirements
-- ✅ Quota management for different types of operations
-- ✅ Complete supply management with consistency checks
+- Whitelist tiers 1-5; blacklist severities LOW, MEDIUM, HIGH, CRITICAL.
+- A verdict needs 66% of the registered node weight (two of three equal
+  nodes). A query opens only with at least two registered nodes and no
+  single node meeting the bar; a list oracle applies a verdict only when
+  at least two distinct nodes voted its way (Task 5.1).
+- Nodes raise tiers 1-4 and severities up to HIGH; only the OracleManager
+  owner raises tier 5 or CRITICAL. The list oracles' own owner (ops after
+  the handover) writes any entry directly, with no vote (D44 a; the
+  ownership posture is an audit item). One designated node may list
+  CRITICAL in an emergency.
+- The blacklist gates VSC once bound (`setBlacklistOracle`); the whitelist
+  once bound (option 38a, or a ComplianceRules vote after the handover).
+- Demo options 31-40.
 
-### **Governance and Payment Systems**
+### 5. Privacy (PLONK, five Circom circuits)
 
-- ✅ 1 Person = 1 Vote governance (equal voting power for all)
-- ✅ VGT token-based voting fees (10 VGT proposal, 10 VGT vote)
-- ✅ 2-of-3 multisig escrow with investor-mediated dispute resolution
+- Whitelist membership: a wallet proves it holds a commitment in the
+  published root without revealing which identity's; the binding is the
+  only proof any transfer reads (by whitelist mode).
+- Blacklist non-membership: a demonstration; nothing on chain gates on it
+  (D2).
+- Jurisdiction, accreditation and compliance aggregation: issuer-signed
+  attestations (D31 a) recorded by PrivacyManager and read by the
+  `validatePrivate*` functions; no transfer checks them.
+- Demo options 41-50.
 
-### **System Integration**
+### 6. Investor types and custody
 
-- ✅ All components working together seamlessly
-- ✅ Comprehensive testing through interactive demo system (83 options)
-- ✅ Architecture with error handling, exercised by the test suite and the demo smoke in CI
-- ✅ Scalable design for enterprise deployment
+- Four types; per-transfer caps 8,000 (Normal, Retail), 50,000
+  (Accredited), 500,000 (Institutional) VSC; holding caps 50,000 / 50,000
+  / 500,000 / 5,000,000; cooldowns 60 / 60 / 30 / 15 minutes; required
+  whitelist tiers 1 / 2 / 3 / 4 (defaults in InvestorTypeRegistry).
+- A large-transfer threshold is stored per type; no contract reads it.
+- Custody: `InvestorRequestManager` deploys a 2-of-2 `MultiSigWallet`
+  (bank and user) per request; the lock is a transfer into it, capped at
+  the Normal cap (`LockAboveNormalCap`, Task 5.1).
+- Demo options 51-60 and 23.
 
-## 📊 **Technical Specifications**
+### 7. Governance
 
-### **Smart Contracts Deployed**
+- One verified identity, one vote; VGT pays the fees (10 VGT to propose,
+  10 VGT per vote, owner-adjustable above 0 and up to 1,000 VGT) and is
+  not a vote weight. VGT delegation is recorded, not counted (D12).
+- Quorum 10-30% of the identities registered at the voter-age cutoff,
+  approval 60-75%, per proposal type. Passed proposals burn the deposits;
+  on Rejected or Cancelled each identity's controlling wallet claims its
+  deposit back (keyed by identity, Task 5.2).
+- Each proposal type is bound to one target: investor types, compliance
+  rules, oracles, token, system, list update, identity registry, VGT,
+  escrow factory, identity factory, privacy, verifier (EmergencyAction has
+  no target and cannot be proposed).
+- Demo options 74-83e; dynamic lists 84-89.
 
-- **OnchainID System**: 5 contracts (Factory, Identity, ClaimIssuer, etc.)
-- **ERC-3643 System**: 6 contracts (Token, Registries, Compliance, etc.)
-- **Oracle System**: 4 contracts (Manager, Whitelist, Blacklist, Consensus)
-- **ComplianceRules**: 1 comprehensive validation contract
-- **Privacy System**: 7 contracts (ZKVerifier, PrivacyManager, 5 Validators)
-- **Investor Type System**: 1 contract (InvestorTypeRegistry)
-- **Governance System**: 2 contracts (VanguardGovernance, GovernanceToken)
-- **Enhanced Escrow System**: 2 contracts (EscrowWalletFactory, MultiSigEscrowWallet)
+### 8. Escrow
 
-### **Interactive Demo Coverage**
+- One `MultiSigEscrowWallet` per payment from `EscrowWalletFactory`,
+  funded once; release needs the investor and the payee, refund the
+  investor and the payer; before a shipment proof or in a dispute the
+  investor may refund alone (`manualRefund`).
+- The payee's shipment proof is bound to the escrow address and chain id
+  and opens a 14-day dispute window. Fees fixed at creation (3% investor,
+  2% owner). `sweepExcess()` (payer, payee, investor or platform owner)
+  returns tokens sent to a settled escrow outside the factory.
+- Demo options 61-73b (70a sweeps).
 
-- **83 Menu Options** covering all system functionality
-- **Complete Workflows** from user onboarding to governance and payments
-- **Error Handling** with comprehensive user guidance
-- **System Monitoring** with real-time status dashboards
+### 9. Interactive demo
 
-### **Compliance Features**
+- 116 menu entries (89 numbered options and 27 sub-options such as 1a,
+  33a, 83c), from `demo/core/MenuSystem.js`. CI drives a scripted smoke
+  of it (`scripts/ci/demo-smoke.sh`) and regression drives
+  (`scripts/ci/strict-drive.sh`).
 
-- **3 Compliance Models**: Traditional, Oracle Access Control, Privacy-Preserving
-- **Multi-layer Validation**: Identity, Claims, Rules, Oracle, Privacy
-- **Real-time Processing**: Immediate compliance validation and updates
-- **Audit Compliance**: Complete trails for regulatory requirements
+## Contracts
 
-## 🚀 **Future Development Path**
+| Folder      | Deployable contracts                                                  |
+| ----------- | --------------------------------------------------------------------- |
+| onchain_id/ | OnchainIDFactory, OnchainID, ClaimIssuer, KeyManager                  |
+| erc3643/    | Token, IdentityRegistry, InvestorTypeRegistry                         |
+| compliance/ | ComplianceRules                                                       |
+| oracle/     | OracleManager, ConsensusOracle, WhitelistOracle, BlacklistOracle      |
+| privacy/    | PrivacyManager, ZKVerifierIntegrated, DynamicListManager, 5 verifiers |
+| investor/   | InvestorRequestManager, MultiSigWallet                                |
+| payment/    | EscrowWalletFactory, MultiSigEscrowWallet                             |
+| governance/ | GovernanceToken, VanguardGovernance                                   |
 
-### **Phase 1: Performance and Security Testing** ❌ PENDING
+26 deployable contracts (the rest are abstract bases, libraries,
+interfaces and test mocks; docs/SYSTEM_WORKFLOW_GUIDE.md, "Contracts").
 
-- **Gas Optimization**: Optimize contract gas usage and benchmarking
-- **Security Auditing**: Professional security audits and penetration testing
-- **Load Testing**: High-volume transaction scenario testing
-- **Formal Verification**: Static analysis and formal verification of critical functions
+## Testing and CI
 
-### **Phase 2: Production Deployment** ❌ PENDING
+Six CI jobs (`.github/workflows/ci.yml`): compile, tests, coverage
+(contract line coverage may not drop below the recorded baseline, and
+listed contracts have branch floors, `scripts/ci/branch-floors.json`),
+zk-coverage, demo (smoke, ceremony and regression drives on a node) and
+gates (guard table: every require/revert in `contracts/` classified in
+`test/guards/table/`; line count; docs; lint and audit ratchets). A gas
+ratchet runs in the tests job.
 
-- **Mainnet Deployment**: Deploy to Ethereum mainnet or StableCoin-specific blockchain
-- **Monitoring Setup**: Network configuration and real-time monitoring
-- **Disaster Recovery**: Backup and recovery procedures
-- **Regulatory Approval**: Work with regulators for production authorization
+## Not done yet
 
-### **Phase 3: Advanced Features** ❌ FUTURE
+- A third-party security audit, a Sepolia rehearsal and a production
+  deploy with external signers (Phase 5 Task 5.7; mainnet is Phase 6).
+- Formal verification of the circuits, load testing, monitoring.
+- Oracle-driven KYC/AML claim updates; delegation counted in votes (after
+  the audit).
 
-- **Oracle-Enhanced KYC Management**: Connect oracle network to KYC claim updates
-- **Oracle-Enhanced AML Management**: Real-time AML rating updates by oracles
-- **Advanced Governance**: one verified identity, one vote; VGT delegation recorded, not counted (D12), wired into castVote only after the external audit
-- **Rust Backend**: Off-chain processing and performance optimization
-
-## 🎯 **Conclusion**
-
-This Vanguard StableCoin system represents a **substantial technological achievement** that successfully demonstrates:
-
-- **Advanced Blockchain Integration**: Multiple standards working together seamlessly (ERC-734/735, ERC-3643, ZK proofs)
-- **Regulatory Compliance**: Meeting real-world StableCoin requirements with comprehensive KYC/AML
-- **Privacy Innovation**: 5 zero-knowledge circuits for compliance validation without revealing personal data
-- **Token Issuer Operations**: Complete supply management control with quotas and audit trails
-- **Governance System**: 1 Person = 1 Vote democratic governance with VGT token-based voting fees
-- **Payment Infrastructure**: Escrow-based payments with multi-type refunds and 2-of-3 multisig
-- **Investor Management**: 4 investor types with differentiated limits and features
-- **Production Readiness**: Comprehensive testing with 83 interactive demo options
-
-The system provides a **solid foundation** for a real-world Vanguard StableCoin implementation with all the necessary compliance, privacy, governance, payment, and regulatory features required for a modern compliant stablecoin system.
-
-This is not production software yet: the remaining remediation phases and a third-party security audit come before any mainnet deployment.
+This is not production software yet: the remaining remediation phases and
+a third-party security audit come before any mainnet deployment.

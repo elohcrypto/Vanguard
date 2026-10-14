@@ -1,4 +1,4 @@
-# Vanguard StableCoin - System Workflow Guide
+# Vanguard token (VSC) - System Workflow Guide
 
 ## Overview
 
@@ -14,13 +14,17 @@ investor types in `docs/INVESTOR_TYPE_SYSTEM.md`.
 
 ```
 contracts/
-├── onchain_id/       OnchainID (ERC-735 claims) on OnchainIDKeys (ERC-734
-│                     keys), OnchainIDFactory, ClaimIssuer on
-│                     ClaimIssuerKeys, KeyManager on KeyManagerRecovery
-├── erc3643/          Token (VSC), IdentityRegistry, InvestorTypeRegistry
+├── onchain_id/       OnchainID (ERC-735 claims) on OnchainIDOwnership on
+│                     OnchainIDKeys (ERC-734 keys), OnchainIDFactory,
+│                     ClaimIssuer on ClaimIssuerKeys, KeyManager on
+│                     KeyManagerOwnerTransfer, KeyManagerRecoverySetup and
+│                     KeyManagerRecovery; library IdentityControl
+├── erc3643/          Token (VSC), IdentityRegistry on RegistryVerification,
+│                     InvestorTypeRegistry on InvestorTypeGovernance;
+│                     library BoundedStaticCall
 ├── compliance/       ComplianceRules on ComplianceRulesAdmin and
 │                     ComplianceRulesTrust (one deployed contract)
-├── oracle/           OracleManager (the gate), ConsensusOracle (its
+├── oracle/           OracleManager (the gate, on OracleQueryPayload), ConsensusOracle (its
 │                     engine), WhitelistOracle and BlacklistOracle (both
 │                     on ListOracleBase)
 ├── privacy/          PrivacyManager on PrivacyAttestationPolicy,
@@ -30,13 +34,16 @@ contracts/
 ├── investor/         InvestorRequestManager, MultiSigWallet (custody)
 ├── payment/          EscrowWalletFactory, MultiSigEscrowWallet on
 │                     MultiSigEscrowTerms
-├── governance/       GovernanceToken (VGT), VanguardGovernance on
+├── governance/       GovernanceToken (VGT, a Token subclass), VanguardGovernance on
 │                     GovernanceProposals and GovernanceConfig
 └── test/             MockTarget and mocks/ (tests only)
 ```
 
-Each folder has its interfaces in `interfaces/`; `contracts/README.md`
-and the folder READMEs describe the contracts. "X on Y" means Y is an
+compliance/, erc3643/, onchain_id/, oracle/ and privacy/ keep their
+interfaces in `interfaces/`; investor/, payment/ and governance/ declare
+the few they need inline. `contracts/README.md` and the READMEs in
+onchain_id/, erc3643/, oracle/, privacy/ and investor/ describe the
+contracts. "X on Y" means Y is an
 abstract base of X, not deployed on its own: X is one contract at one
 address. The Task 4.8 splits changed storage layouts, so a deployment made
 before them is redeployed, not upgraded (there are no proxies).
@@ -70,10 +77,14 @@ required topic from a trusted issuer.
    token's ComplianceRules rule refuses reverts ("Country not allowed:
    ...", event `IdentityRegistrationRejected`). One identity binds one
    wallet.
-3. **Claims.** A trusted issuer's key signs the claim data and the issuer
-   calls `ClaimIssuer.issueClaim(identity, topic, scheme, data, uri,
-validTo, signature)`. The ClaimIssuer keeps the claim; a copy written to
-   the OnchainID is a record only (`demo/utils/Kyc.js`).
+3. **Claims.** A claim-signer key of a trusted issuer signs
+   `claimDigest(identity, topic, scheme, data, uri, validTo)`, which also
+   binds the chain id, the issuer's address and the (identity, topic)
+   revocation epoch (Task 5.2), and calls `ClaimIssuer.issueClaim(identity,
+topic, scheme, data, uri, validTo, signature)`. `revokeClaim` bumps the
+   epoch, so no signature made before it can be reused; `verifyClaim`
+   takes every field. The ClaimIssuer keeps the claim; a copy written to
+   the OnchainID is a record only (`demo/utils/Kyc.js` `signClaim`).
 4. **Verification.** `IdentityRegistry.isVerified(wallet)` is true when
    every topic in `getClaimTopics()` (6 KYC and 7 AML in the demo) has a
    trusted issuer (`addTrustedIssuer`) whose `hasValidClaim(identity,
@@ -92,94 +103,12 @@ and 24 onboard users in one step.
 
 ### Identity key lifecycle (KeyManager)
 
-`KeyManager` rotates and recovers the keys of an OnchainID behind
-timelocks. It has no owner and no allowlist of its own. An identity opts in
-with `OnchainID.authorizeManager(keyManager)`, which only the identity's
-owner can send; while it is authorized, KeyManager may add and remove the
-identity's keys. Every KeyManager rotation or batch for an identity needs
-the caller to hold a MANAGEMENT key on it and the identity to have
-authorized KeyManager ("KeyManager: Identity has not authorized
-KeyManager" otherwise). Recovery instead needs the identity to have
-pinned KeyManager as its recovery manager (Task 4.11, below).
-
-`deauthorizeManager` pauses KeyManager's rotations and batches for the
-identity (refused while a recovery is approved); it does not cancel, and
-it does not pause recovery. `cancelKeyRotation` and `cancelKeyRecovery`
-work while withdrawn and are how to stop an item. A rotation or recovery executes
-only within `EXECUTION_WINDOW` (7 days) after its execution time; after
-that it reverts ("execution window passed, re-initiate"), so an item
-paused for longer cannot revive when the identity re-authorizes.
-
-- **Rotation**: a MANAGEMENT key calls `initiateKeyRotation(identity,
-oldKey, newKey, purpose)`; after the timelock anyone calls
-  `executeKeyRotation`, which adds the new key and revokes the old one. The
-  timelock is 24 hours (`DEFAULT_TIMELOCK`) unless the identity's own
-  MANAGEMENT key set another with `setCustomTimelock` (1 hour to 7 days;
-  it applies to rotations initiated afterwards). A rotation whose initiator
-  lost its MANAGEMENT key before execution does not run; any current
-  MANAGEMENT key can `cancelKeyRotation`. The timelock binds only rotations
-  through KeyManager: a MANAGEMENT key adds and removes keys at once
-  (ERC-734), through `batchAddKeys`/`batchRemoveKeys` or `OnchainID.addKey`/
-  `removeKey`, so the timelock gives the holder visibility, not a control
-  against a compromised MANAGEMENT key. This is by design (Task 4.5,
-  R-45-1): `executeKeyRotation` and `executeKeyRecovery` themselves call
-  `addKey`, so a timelock inside `addKey` would either block them or tie
-  the identity to one manager. The defence against a rogue MANAGEMENT key
-  is recovery (below).
-- **Removal with the holder's consent**: `removeKey` is the management
-  action (no consent; KeyManager batches and rotations use it, and it is
-  the only path for a non-ECDSA key). `OnchainID.removeKeyWithProof(key,
-purpose, signature)` is still sent by a MANAGEMENT key but also needs
-  the key's own address to have signed `getRemoveKeyMessage(key,
-purpose)` (identity, key, purpose, the key's removal nonce and chain id,
-  so a signature removes the key once; the returned digest is
-  already EIP-191 prefixed, so the holder signs the inner keccak256 with
-  `signMessage`). Demo options 5 -> 1 and 5a.
-- **Recovery** (Tasks 4.11 and 4.14, D38 = c) is the defence against a rogue
-  MANAGEMENT key and a stolen owner key. It runs only through the identity's
-  one pinned recovery manager (`recoveryManager()`): the factory pins its
-  KeyManager at creation (the compiled code hash, `recoveryManagerCodeHash`, or
-  none); a directly deployed identity is pinned by its creator in the creating
-  block or by its owner. The pin is final and outlives ownership transfers, so
-  a new owner checks `recoveryManager()` first and, after an ordinary transfer,
-  re-seats the agents. The owner seats up to ten agents and a threshold
-  (`setupKeyRecovery`); MANAGEMENT keys are refused as agents at seating and
-  re-seat apply, the owner at every vote as well (D53); a re-seat waits 48
-  hours, the seated agents can veto it, an approved recovery blocks it and it
-  applies only while its proposer still owns the identity (else `StaleReseat`;
-  anyone drops it, `dropStaleRecoverySetup`). An agent's open is its approval
-  (D39); before the threshold only the initiator cancels, never the owner;
-  after, only the agents cancel, at the threshold, and the owner's
-  `authorizeManager`, `deauthorizeManager`, `transferOwnership`, any new
-  MANAGEMENT key and any `acceptOwnership` but the nominee the manager still
-  names are refused. 48 hours after the approval, within 7 days, anyone
-  executes: the recovered key is added and every other MANAGEMENT key is
-  removed in one call (64 keys a purpose, D42; O(1) removal). From 7 to 14 days
-  after the approval someone must call `executeOwnerTransfer` and the recovered
-  wallet must accept, or the lock lifts, the old owner keeps the identity and
-  an agent's next open re-opens recovery (D52). Until the transfer the old
-  owner can still remove claims, ACTION or CLAIM keys and the recovered key
-  (restored by the transfer). The acceptance removes every other MANAGEMENT key
-  and every manager but the recovery manager; the thief's ACTION and CLAIM keys
-  survive, so the recovered owner reviews `getKeysByPurpose(2|3)` (D40). Agents
-  at the threshold can take the identity: choose them as you would an heir; the
-  owner has the 48 hours to move assets through the issuer's
-  `Token.recoveryAddress`. Every registry binding (register, batch, update,
-  move, token recovery) requires the wallet to control the identity then
-  (owner, MANAGEMENT or ACTION key: D41); control lost later keeps the entry
-  and governance refuses the vote. A holder without seated agents whose owner
-  key is lost is burned and re-issued by the agent. Demo options 12 and 5 -> 2.
-- **Batch and multi-signature keys**: `batchAddKeys` and `batchRemoveKeys`
-  write several keys in one call; `addMultiSigKey` records an N-of-M
-  signer set that `signMultiSigOperation` and `checkMultiSigThreshold`
-  count. The multi-signature record is bookkeeping: nothing in KeyManager
-  executes on it.
-
-A wallet recovered with `Token.recoveryAddress` votes only once it holds a
-key on its OnchainID; KeyManager recovery is the designed path. The demo
-exercises the lifecycle in options 12, 12a, 12b, 5 and 5a
-(docs/TESTNET_DEMO_OPTIONS.md, "Identity keys through KeyManager"); its resume
-works within one demo session only.
+`KeyManager` rotates and recovers an OnchainID's keys behind timelocks;
+recovery (Tasks 4.11 and 4.14) is the defence against a rogue MANAGEMENT
+key or a stolen owner key. The full rules, who may do what and when, are
+in [DEEP_DIVE_IDENTITY.md](DEEP_DIVE_IDENTITY.md#identity-key-lifecycle-keymanager).
+Demo options 12, 12a, 12b, 5 and 5a (docs/TESTNET_DEMO_OPTIONS.md,
+"Identity keys through KeyManager").
 
 ## Oracle Whitelist and Blacklist
 
@@ -198,7 +127,7 @@ sequenceDiagram
     Node2->>Manager: submitResponse(query, YES)
     Manager->>Engine: recordVote (200 of 300 meets 66%)
     Engine-->>Manager: resolved YES; the manager stamps resolvedAt
-    Node1->>Whitelist: provideAttestation(investor, query, YES, signature)
+    Node1->>Whitelist: provideAttestation(investor, query, YES, signature, data)
     Whitelist->>Manager: getQueryBinding, getQueryResolution, getQueryData
     Whitelist->>Whitelist: add the investor at tier 4 (the voted tier)
 ```
@@ -210,13 +139,23 @@ never lowers the bar; the operator (ops) pauses, unpauses and
 emergency-designates nodes; governance removes them and sets the
 threshold by an OracleParameters vote. Demo options 33a, 34a and 35a run
 this path without prompts (docs/TESTNET_DEMO_OPTIONS.md, "Oracle nodes and
-consensus").
+consensus"). Task 5.1: a query opens only with at least two registered
+nodes and when no single node's weight meets the bar (`TooFewNodes`,
+`SingleNodeQuorum`); a list oracle applies a verdict only when at least
+`minimumConsensusOracles` distinct nodes (default and floor 2,
+`TooFewVoters`) voted its way, within `maxVerdictAge` (1 day by default),
+once per query and only if it resolved after the subject's last write.
 
 WhitelistOracle tiers run 1 to 5 (higher is better). The owner or list
 manager (`addToWhitelist`, a DynamicListManager vote) names the tier and
-alone lowers it. A consensus query names (wallet, T), checked at submit
-(a node raises 1 to 4, the owner 5): an approval lists at T or raises a
-lower live entry to T (expiry capped at 365 days) and never lowers; a
+alone lowers it; the list oracles' owner is ops after the handover, so ops
+writes any tier, tier 5 and CRITICAL (365-day) blacklist entries included,
+with no vote (D44 a; the ownership posture is an audit item). A consensus
+query names (wallet, T), checked at submit (a node raises 1 to 4, only the
+OracleManager owner 5 or a CRITICAL query; severity sets only the
+duration): an approval lists at T or raises a lower live entry to T (a
+dated entry's expiry capped at 365 days from now, a permanent one stays
+permanent, D51 b) and never lowers; a
 rejection delists an entry at T or above (Task 4.12). Where a party
 passes the whitelist by its oracle entry (OracleOnly, or Either with a
 live entry), ComplianceRules requires the entry's tier to reach the
@@ -225,7 +164,7 @@ party's `requiredWhitelistTier` in the token's InvestorTypeRegistry (D37
 entry passes only if its type needs tier 1 or it is exempt (D46 a: a proof carries no
 tier). The whitelist oracle gates VSC only when bound to it in ComplianceRules
 (`setWhitelistOracle`, which probes `whitelistStanding`, the one call transfers make), by
-the token's whitelist mode (below); the blacklist oracle (`setBlacklistOracle`) gates every path.
+the token's whitelist mode (below); the blacklist oracle (`setBlacklistOracle`) gates every path but burn.
 
 ## Minting
 
@@ -358,7 +297,7 @@ Plan v2 Task 4.3 (owner decision D13 = b). An investor-status request locks VSC 
 | 6. Approve            | Bank                  | `approveRequest(user)`: the manager, a compliance officer, assigns the type while the lock is held                                                                                                                                     |
 | 8. Downgrade          | User, then bank       | `proposeUnlock(amount, recipient, reason)`, `signUnlock` by both; the second signature pays out. Then a compliance officer sets the type back to Normal                                                                                |
 
-Neither signer can move the tokens alone, and every payout passes the token's gate on the recipient (identity, country, caps). The wallet may also hold escrow investor fees routed to it (option 62); an unlock pays from that free balance first, then from the lock. The lock requirements default to a quarter, a half and the whole of the Normal type's cap (2,000 / 4,000 / 8,000 VSC for Retail / Accredited / Institutional with the default caps, read from the registry the token applies) and cannot be set above that cap, because the user is still Normal when locking (Task 4.16, D45); an approval is refused while the user's live whitelist entry is below the new type's tier (Q7 c), but not when the user has no entry: in OracleOnly such a holder, approved into a higher type and then listed below its tier, is refused until re-listed at that tier (D46 d, documented). A platform contract holds client tokens here: the bank alone cannot move them, but it is contract custody.
+Neither signer can move the tokens alone, and every payout passes the token's gate on the recipient (identity, country, caps). The wallet may also hold escrow investor fees routed to it (option 62); an unlock pays from that free balance first, then from the lock. The lock requirements default to a quarter, a half and the whole of the Normal type's cap (2,000 / 4,000 / 8,000 VSC for Retail / Accredited / Institutional with the default caps, read from the registry the token applies) and cannot be set above that cap, because the user is still Normal when locking (Task 4.16, D45); an approval is refused while the user's live whitelist entry is below the new type's tier (Q7 c), but not when the user has no entry or is exempt (A1F-5): in OracleOnly such a holder, approved into a higher type and then listed below its tier, is refused until re-listed at that tier (R-416-3, a documented gap; D46 a governs Either mode, above). The cap is the smaller of Normal's transfer and holding caps, re-checked at request, wallet creation, confirmation, approval and in `MultiSigWallet.lockTokens` (`LockAboveNormalCap`, Task 5.1). A platform contract holds client tokens here: the bank alone cannot move them, but it is contract custody.
 
 ## Escrow Payment Workflow
 
@@ -366,12 +305,12 @@ A conditional VSC payment between a **payer** and a **payee**, mediated by a reg
 
 ### Parties and money
 
-| Party    | Does                                                                                | Must be                                                                                                  |
-| -------- | ----------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------- |
-| Payer    | Funds the escrow. May dispute. Signs to allow a refund.                             | KYC/AML verified. May be unknown at creation (marketplace): the first verified funder becomes the payer. |
-| Payee    | Ships, submits the signed shipment proof, signs to allow a release.                 | KYC/AML verified.                                                                                        |
-| Investor | Creates the escrow, states the settlement direction, mediates disputes, may refund. | Registered on the factory (`registerInvestor`, `INVESTOR_ROLE`).                                         |
-| Platform | Receives the owner fee.                                                             | Fee wallet set on the factory.                                                                           |
+| Party    | Does                                                                                                                          | Must be                                                                                                  |
+| -------- | ----------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------- |
+| Payer    | Funds the escrow. May dispute. Signs to allow a refund.                                                                       | KYC/AML verified. May be unknown at creation (marketplace): the first verified funder becomes the payer. |
+| Payee    | Ships, submits the signed shipment proof, signs to allow a release.                                                           | KYC/AML verified.                                                                                        |
+| Investor | Creates the escrow, states the settlement direction, mediates disputes, may refund before the shipment proof or in a dispute. | Registered on the factory (`registerInvestor`, `INVESTOR_ROLE`).                                         |
+| Platform | Receives the owner fee.                                                                                                       | Fee wallet set on the factory.                                                                           |
 
 The escrow holds **amount + 3% investor fee + 2% owner fee**, all fixed at creation. A 1000 VSC payment is funded with 1050 VSC. On release the payee gets 1000, the investor fee wallet 30, the platform fee wallet 20. On refund the payer gets the full 1050 back.
 
@@ -387,7 +326,7 @@ stateDiagram-v2
     Disputed --> Refunded : resolveDispute(true)
     Active --> Released : signAsInvestor(true), needs payee signature
     Active --> Refunded : signAsInvestor(false), needs payer signature
-    Active --> Refunded : manualRefund (investor)
+    Active --> Refunded : manualRefund (investor, before a shipment proof)
     Disputed --> Refunded : manualRefund (investor)
     Released --> Released : sweepExcess
     Refunded --> Refunded : sweepExcess
@@ -420,7 +359,7 @@ If the required counterparty signature is missing the call reverts (`PayeeHasNot
 
 The escrow wallet is a trusted contract, but the human side of every escrow leg still meets its investor-type caps (D26): funding counts against the payer's transfer cap, and a release that would put the payee over its holding cap reverts with `Holding limit exceeded`. The same holds for every recipient of a settlement: a release or refund that would put the payee, the payer or either fee wallet over its holding cap reverts atomically, the escrow stays `Active` (or `Disputed`) and the funds stay in it. The exits are: the over-cap party moves balance out, the registry raises its investor type, or it is exempted (D22). The refund (which needs the payer's signature or a dispute) stays open only while the payer has room under its own holding cap. Option 69 checks every leg before signing and names the one that would fail. The two fee wallets carry the D22 exemption so fees never hit their holding cap: the deploy sets it before the handover (the demo does it in options 61 and 62), after it an InvestorTypeConfig vote (option 76, type 0, choice 2). The handover check warns about any fee wallet (the factory's owner wallet, each registered investor's fee wallet, and a `feeWallets` list in handover.json) that is not exempt on the registry the Token enforces, and about a fee wallet registered after the handover. The factory itself is Ownable2Step and goes to governance at the ceremony: its owner (governance, written into every new escrow) sets the fee wallet, the registry and the rules by an EscrowFactoryParameters vote (type 9), while ops holds ADMIN_ROLE to register and deactivate investors. The OnchainIDFactory follows the same path under IdentityFactoryParameters (type 10). After a wallet recovery, re-assign the investor type (and the exemption, if any) to the new wallet: recovery moves the balance but not the type, so the new wallet holds the old balance as a Normal investor and cannot receive until its type is assigned.
 
-**8. Manual refund (70).** The investor may refund the payer at any time while the escrow is `Active` or `Disputed`, without any other signature.
+**8. Manual refund (70).** The investor alone may refund the payer while the escrow is `Active` and the payee has submitted no shipment proof, or while it is `Disputed`. Once a proof exists a refund needs the payer: a dispute, or `signAsPayer` then `signAsInvestor(false)` (`RefundBlockedAfterShipment`).
 
 **9. Sweep what settlement left behind (70a).** See below.
 
@@ -473,7 +412,8 @@ proposal is bound to its type's target contract, passes on the type's
 quorum and approval (`proposalThresholds`), and executes its call after
 the voting period and the execution delay (`executeProposal`). VGT
 delegation is recorded, not counted (D12). Demo: 74 deploys, 75-75c
-fund, 76 proposes, 77 votes, 78 executes, 78a refunds, 79 waits, 80 is
+fund, 76 proposes, 77 votes, 78 executes, 78a claims a deposit back
+(keyed by identity; the wallet must control it, Task 5.2), 79 waits, 80 is
 the dashboard, 82 runs one ComplianceRules proposal from creation to
 execution, 83b accepts the registry by vote, 83c-83e are the ceremony
 (from governance; 83c removes strays or refuses). Rules: `docs/TESTNET_CEREMONY.md`.

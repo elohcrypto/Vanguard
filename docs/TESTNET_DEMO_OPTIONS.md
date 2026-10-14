@@ -233,7 +233,7 @@ code hash, `setConsensusEngine` checks code and binding only.
 Option 1 deploys `KeyManager` with the core contracts. It has no owner and
 no allowlist: an identity opts in with `authorizeManager(keyManager)` from
 its owner, and every rotation or recovery then needs a MANAGEMENT key of
-that identity (docs/SYSTEM_WORKFLOW_GUIDE.md, "Identity key lifecycle").
+that identity (docs/DEEP_DIVE_IDENTITY.md, "Identity key lifecycle").
 The wallets the options use: wallet 1 (fee wallet, compliance officer)
 owns the demo identity; wallets 7 and 8 (investors Bob and Carol) are the
 recovery agents, chosen because they hold no issuer, ops or guardian role;
