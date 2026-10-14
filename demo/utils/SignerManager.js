@@ -90,12 +90,12 @@ class SignerManager {
     return [
       {
         index: 0,
-        role: "Platform Owner (Deployer)",
+        role: "deployer",
         address: this.state.signers[0]?.address,
       },
       {
         index: 1,
-        role: "Owner Fee Wallet (2% fees)",
+        role: "fee wallet, compliance officer",
         address: this.state.signers[1]?.address,
       },
       {
@@ -110,17 +110,17 @@ class SignerManager {
       },
       {
         index: 9,
-        role: "Issuer Admin (handover, D25 b)",
+        role: "issuer admin",
         address: this.state.signers[9]?.address,
       },
       {
         index: 10,
-        role: "Ops (handover)",
+        role: "ops",
         address: this.state.signers[10]?.address,
       },
       {
         index: 11,
-        role: "Guardian (handover)",
+        role: "guardian",
         address: this.state.signers[11]?.address,
       },
     ];
@@ -171,36 +171,6 @@ class SignerManager {
     console.log(
       `\n✅ Available Signers: ${availableCount} (signers[${this.state.nextAvailableSignerIndex}] onwards)`,
     );
-  }
-
-  /**
-   * Get a specific reserved signer by role
-   *
-   * @param {string} role - Role name: 'owner', 'feeWallet', 'kycIssuer',
-   *   'amlIssuer', 'issuerAdmin', 'ops' or 'guardian'
-   * @returns {Object|null} Signer object or null if not found
-   *
-   * @example
-   * const owner = manager.getReservedSigner('owner');
-   * const kycIssuer = manager.getReservedSigner('kycIssuer');
-   */
-  getReservedSigner(role) {
-    const roleMap = {
-      owner: 0,
-      feeWallet: 1,
-      kycIssuer: 2,
-      amlIssuer: 3,
-      issuerAdmin: 9,
-      ops: 10,
-      guardian: 11,
-    };
-
-    const index = roleMap[role];
-    if (index !== undefined && this.state.signers[index]) {
-      return this.state.signers[index];
-    }
-
-    return null;
   }
 
   /**

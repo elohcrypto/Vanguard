@@ -74,6 +74,9 @@ const SYMBOLS = [
   "deployPinned",
   // Task 5.5: the parity gate's environment hook (hardhat.config.ts).
   "TEST_PARITY_OUT",
+  // Task 5.5: SignerManager's role lookup nothing called (its map named
+  // wallets 2 and 3 the KYC and AML issuers).
+  "getReservedSigner",
 ];
 
 const EXCLUDE = [
