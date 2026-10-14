@@ -206,6 +206,14 @@ async function voteOnProposal(mod) {
     const support = await mod.promptUser("\nVote FOR (y) or AGAINST (n): ");
     const reason = await mod.promptUser("Enter reason (optional): ");
 
+    // castVote pulls the voting fee from the voter: approve exactly that
+    // from the voter's own key first, as the ceremony's votes do
+    // (HandoverVotes.castAcceptanceVotes). 75c approves wallet 0 only.
+    await (
+      await governanceToken
+        .connect(voter)
+        .approve(await vanguardGovernance.getAddress(), voteFee)
+    ).wait();
     const tx = await vanguardGovernance
       .connect(voter)
       .castVote(

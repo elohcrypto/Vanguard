@@ -235,7 +235,8 @@ Then walk: 1 (deploy, privacy pair and KeyManager included), 21 (VSC and
 ComplianceRules), 31 (oracles), 51 (investor types), 74 (governance), 23 or
 24 three times (onboard three verified investors), 12 (key rotation and
 recovery on wallet 1's identity), 75 (distribute VGT to them), 76 (one
-proposes), 77 (the others vote), 79 (jumps past the vote and the delay on
+proposes; types 0 and 1 propose as wallet 0, after 75c), 77 (the others
+vote; 77 approves each voter's fee from its own key), 79 (jumps past the vote and the delay on
 this node), 78 (execute), 78a (claim on a rejected one). Every action is signed by its role's key.
 Name the treasury wallet and exempt it from investor limits (option 22 or 51,
 or `setInvestorLimitExempt` directly) BEFORE the ceremony, while the deployer
