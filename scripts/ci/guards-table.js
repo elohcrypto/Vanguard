@@ -11,7 +11,8 @@
 //    `asserts`), and the titled block itself names it and calls the
 //    site's function (see blockMisses for `via` and `calls`). This
 //    catches a row pointed at a test that neither names nor calls its
-//    site; it is not proof the test fires that site (mutation is);
+//    site; it is not proof the test fires that site (mutation is:
+//    scripts/ci/guard-mutants.js, run by hand);
 //  - unreachable: no caller can make it fire in the current code (an
 //    earlier check or the callee's own revert always fires first);
 //    `reason` says why and `mutant` names the mutation that leaves the
@@ -82,13 +83,21 @@ function enumerateSites() {
     const seen = new Map();
     // `reason` keys the site; `named` is what a test can assert (a
     // literal reason or an error name; "" for none or a computed one).
-    const add = (node, ctx, cond, reason, named) => {
+    const add = (node, ctx, cond, reason, named, crange) => {
       let key = `${ctx.contract}.${ctx.fn} | ${cond} | ${reason}`;
       const n = (seen.get(key) || 0) + 1;
       seen.set(key, n);
       if (n > 1) key += ` #${n}`;
       const line = node.loc.start.line;
-      sites.push({ key, file, line, fn: ctx.fn, named });
+      sites.push({
+        key,
+        file,
+        line,
+        fn: ctx.fn,
+        named,
+        range: node.range,
+        crange,
+      });
     };
     const visit = (node, ctx) => {
       if (!node || typeof node !== "object") return;
@@ -126,7 +135,8 @@ function enumerateSites() {
         if (node.expression.name === "assert")
           banned.push(`${file}:${node.loc.start.line} assert()`);
         if (node.expression.name === "require") {
-          add(node, ctx, text(a0), a1 ? lit(a1) || text(a1) : "", lit(a1));
+          const r = a1 ? lit(a1) || text(a1) : "";
+          add(node, ctx, text(a0), r, lit(a1), a0.range);
         } else if (node.expression.name === "revert") {
           add(
             node,
@@ -346,4 +356,5 @@ function main() {
   }
 }
 
-main();
+if (require.main === module) main();
+else module.exports = { enumerateSites, TABLE_DIR };

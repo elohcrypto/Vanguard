@@ -28,6 +28,8 @@ const path = require("path");
 const ENTRY_POINTS = {
   "scripts/print-role-wallets.js":
     "operator tool run by hand: prints the role wallets of a mnemonic (.env.example, docs/TESTNET_DEMO.md)",
+  "scripts/ci/guard-mutants.js":
+    "run by hand in a copy: switches each tested guard off once and runs its named test (Task 5.3)",
   "scripts/test-proof-generation.js":
     "manual check that all five circuits prove (docs/ZK_CIRCUIT_BUILD_GUIDE.md)",
 };
