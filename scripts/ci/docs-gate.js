@@ -5,11 +5,11 @@
 // .superpowers/ (plan and review notes).
 //  0. Every code fence is closed (an open one turns the rest to code).
 //  1. README's project tree: every entry it names exists (or is
-//     gitignored build output, checked as a directory), and under
+//     a gitignored root build directory), and under
 //     contracts/ it lists every directory holding such a file (a
 //     directory of ignored files only, e.g. a tool's state, is not in
 //     the repo and does not count).
-//  2. Every relative markdown link resolves to a tracked file or
+//  2. Every relative markdown link (inline or reference-style) resolves to a tracked file or
 //     directory, and a #anchor to a heading in the target file (GitHub's
 //     slug rule). Links inside code fences and inline code are skipped.
 //  3. Every demo option cited in prose ("option 31", "options 61 to
@@ -35,7 +35,16 @@ for (const f of tracked) {
   }
 }
 const exists = (p) => tracked.includes(p) || trackedDirs.has(p);
-// Build output the tree names (typechain-types/) is gitignored, not absent.
+// Build output the tree names (typechain-types/) is gitignored, not absent:
+// an absent entry passes only as one of these root build directories.
+const BUILD_DIRS = new Set([
+  "artifacts",
+  "cache",
+  "build",
+  "typechain-types",
+  "coverage",
+  "node_modules",
+]);
 function ignored(p) {
   try {
     execFileSync("git", ["check-ignore", "-q", "--no-index", p + "/"]);
@@ -89,7 +98,7 @@ for (const doc of docs) {
     stack.push(name);
     const p = stack.join("/");
     if (m[2].includes("*")) continue; // a glob names a family of files
-    if (!exists(p) && !ignored(p)) {
+    if (!exists(p) && !(BUILD_DIRS.has(p) && ignored(p))) {
       findings.push(`README.md:${i + 1}: tree names ${p}, absent`);
     }
     if (m[2].endsWith("/")) listed.add(p);
@@ -125,7 +134,11 @@ function slugs(file) {
 for (const doc of docs) {
   const text = fs.readFileSync(doc, "utf8");
   for (const [n, line] of proseLines(text)) {
-    for (const m of line.matchAll(/\]\(\s*<?([^)\s>]+)>?(?:\s+"[^"]*")?\)/g)) {
+    const inline = [
+      ...line.matchAll(/\]\(\s*<?([^)\s>]+)>?(?:\s+"[^"]*")?\)/g),
+    ];
+    const ref = /^\s{0,3}\[[^\]]+\]:\s*<?([^\s>]+)>?/.exec(line); // [x]: path
+    for (const m of ref ? [...inline, ref] : inline) {
       const target = m[1];
       if (/^[a-z][a-z0-9+.-]*:/i.test(target)) continue; // http:, mailto:
       const [rel, anchor] = target.split("#");
