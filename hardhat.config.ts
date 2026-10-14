@@ -1,4 +1,5 @@
-import { HardhatUserConfig } from "hardhat/config";
+import { HardhatUserConfig, extendEnvironment } from "hardhat/config";
+import { HDNodeWallet, Wallet } from "ethers";
 import "@nomicfoundation/hardhat-toolbox";
 import "hardhat-contract-sizer";
 import "hardhat-gas-reporter";
@@ -6,6 +7,39 @@ import "solidity-coverage";
 import * as dotenv from "dotenv";
 
 dotenv.config();
+
+// R-56c-6: the published Hardhat test phrase (and its keys) is anyone's;
+// on a live network it would sign with keys the whole internet holds.
+const TEST_PHRASE =
+  "test test test test test test test test test test test junk";
+export function refuseTestKeys(network: string, accounts: any): void {
+  if (!["sepolia", "mainnet"].includes(network)) return;
+  const phrase = String(accounts?.mnemonic ?? "")
+    .toLowerCase()
+    .trim()
+    .split(/\s+/)
+    .join(" ");
+  const keys = Array.isArray(accounts) ? accounts : [];
+  const published = new Set(
+    Array.from(
+      { length: 20 },
+      (_, i) =>
+        HDNodeWallet.fromPhrase(TEST_PHRASE, undefined, `m/44'/60'/0'/0/${i}`)
+          .address,
+    ),
+  );
+  if (
+    phrase === TEST_PHRASE ||
+    keys.some((k: string) => published.has(new Wallet(k).address))
+  ) {
+    throw new Error(
+      `refusing --network ${network}: MNEMONIC / PRIVATE_KEY is the published Hardhat test phrase; unset it (the local rehearsal's) and use the deployment's own keys`,
+    );
+  }
+}
+extendEnvironment((hre) =>
+  refuseTestKeys(hre.network.name, (hre.network.config as any).accounts),
+);
 
 const config: HardhatUserConfig = {
   solidity: {
