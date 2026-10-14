@@ -230,7 +230,7 @@ describe("🏭 Production Simulation - OnchainID System", function () {
   });
 
   describe("🔒 Advanced Security Testing", function () {
-    it("Should resist sophisticated attack scenarios", async function () {
+    it("refuses a stranger's key and ownership grab; a self-issued claim verifies nobody", async function () {
       console.log("\n🔒 Running Advanced Security Tests...");
 
       // Deploy test identity
@@ -238,12 +238,20 @@ describe("🏭 Production Simulation - OnchainID System", function () {
         prodEnv.individualUser,
         "individual",
       );
+      const registry = prodEnv.identityRegistry.connect(prodEnv.admin);
+      if (!(await registry.isAgent(prodEnv.admin.address))) {
+        await registry.addAgent(prodEnv.admin.address);
+      }
+      await registry.registerIdentity(
+        prodEnv.individualUser.address,
+        address,
+        840,
+      );
 
       console.log("🛡️ Test 1: Coordinated multi-vector attack simulation...");
 
-      // Simulate multiple attackers trying different attack vectors simultaneously
-      const attackPromises = [
-        // Attacker 1: Unauthorized key addition
+      // Attack 1: a stranger adds a MANAGEMENT key.
+      await expect(
         identity
           .connect(prodEnv.maliciousActor1)
           .addKey(
@@ -252,52 +260,59 @@ describe("🏭 Production Simulation - OnchainID System", function () {
             ),
             1,
             1,
-          )
-          .catch(() => "blocked"),
+          ),
+      ).to.be.revertedWith("OnchainID: Sender does not have management key");
 
-        // Attacker 2: Fake claim injection
-        identity
-          .connect(prodEnv.maliciousActor2)
-          .addClaim(
-            prodEnv.config.kycTopic,
-            prodEnv.config.ecdsaScheme,
-            prodEnv.maliciousActor2.address,
-            "0x",
-            ethers.solidityPacked(["string"], ["FAKE_CLAIM"]),
-            "",
-          )
-          .catch(() => "blocked"),
-
-        // Attacker 1: Ownership hijacking attempt
+      // Attack 3: a stranger takes ownership.
+      await expect(
         identity
           .connect(prodEnv.maliciousActor1)
-          .transferOwnership(prodEnv.maliciousActor1.address)
-          .catch(() => "blocked"),
-      ];
+          .transferOwnership(prodEnv.maliciousActor1.address),
+      )
+        .to.be.revertedWithCustomError(identity, "OwnableUnauthorizedAccount")
+        .withArgs(prodEnv.maliciousActor1.address);
 
-      const results = await Promise.all(attackPromises);
-      console.log("Attack results:", results);
-
-      // Check if all attacks were blocked (either returned "blocked" or threw an error)
-      const allBlocked = results.every((result) => {
-        return (
-          result === "blocked" ||
-          (typeof result === "object" && result !== null)
+      // Attack 2: a self-issued claim. OnchainID accepts a claim from a
+      // caller naming itself as issuer (how ClaimIssuer writes its copy),
+      // so it lands in the list; the list is a record only: isVerified asks
+      // the trusted issuers, so the victim stays unverified.
+      await identity
+        .connect(prodEnv.maliciousActor2)
+        .addClaim(
+          prodEnv.config.kycTopic,
+          prodEnv.config.ecdsaScheme,
+          prodEnv.maliciousActor2.address,
+          "0x",
+          ethers.solidityPacked(["string"], ["FAKE_CLAIM"]),
+          "",
         );
-      });
-
-      // If any attack succeeded (returned a transaction), that's a security issue
-      // For now, let's be more lenient and just check that most attacks were blocked
-      const blockedCount = results.filter(
-        (result) => result === "blocked",
-      ).length;
-      console.log(
-        `${blockedCount}/${results.length} attacks were properly blocked`,
+      const ids = await identity.getClaimIdsByTopic(prodEnv.config.kycTopic);
+      expect(ids.length).to.equal(1);
+      expect((await identity.getClaim(ids[0])).issuer).to.equal(
+        prodEnv.maliciousActor2.address,
       );
+      expect(
+        await registry.isVerified(prodEnv.individualUser.address),
+      ).to.equal(false);
 
-      expect(blockedCount).to.be.greaterThan(0); // At least some attacks should be blocked
-
-      console.log("✅ Multi-vector attack successfully blocked");
+      // A genuinely verified identity (both trusted issuers' claims) verifies.
+      const corp = await prodEnv.createProductionIdentity(
+        prodEnv.corporateUser,
+        "corporate",
+      );
+      await prodEnv.issueKYCClaim(corp.address, { name: "Corp" });
+      await prodEnv.issueAMLClaim(corp.address);
+      await registry.registerIdentity(
+        prodEnv.corporateUser.address,
+        corp.address,
+        840,
+      );
+      expect(await registry.isVerified(prodEnv.corporateUser.address)).to.equal(
+        true,
+      );
+      console.log(
+        "✅ Key and ownership attacks refused; the fake claim verifies nobody",
+      );
 
       console.log("🛡️ Test 2: Replay attack resistance...");
 

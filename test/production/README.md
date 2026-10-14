@@ -60,10 +60,10 @@ external signers is Phase 5 Task 5.7 (not done).
   and institutional identities, KYC and AML claims
 - Key rotation through KeyManager and agent recovery
 - Congestion: transactions at a 100 gwei gas price
-- Security probes: an unauthorized key addition, a fake claim and an
-  ownership takeover are attempted; the test asserts only that at least
-  one is refused (each guard is tested on its own in test/onchain_id and
-  test/guards)
+- Security probes: a stranger's MANAGEMENT key and ownership takeover
+  are refused with their reasons; a self-issued claim lands in the
+  identity's list but verifies nobody (`isVerified` asks the trusted
+  issuers), while an identity with both trusted claims verifies
 
 Asserted thresholds (ProductionResilience): identity deployment under
 30 s, `addKey` under 200,000 gas and under $10. Other timings, gas and
