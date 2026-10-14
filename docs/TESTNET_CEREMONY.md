@@ -218,7 +218,10 @@ live registrar created). An address key of an older config is an assertion, refu
 differs from the derivation (R-413-1); `escrowWalletFactory`, `onchainIDFactory`,
 `privacyManager` and `zkVerifier` must still be stated (an address, or `null`) while governance
 cannot derive them, before step 3 binds them (R-413-2); any other key is refused.
-`HANDOVER_PHASE=accept` resumes a partial run. The preflight (and 83e, as failing lines) also
+`HANDOVER_PHASE=accept` resumes a partial run; it refuses a snapshot whose sha256 differs from the
+sidecar the full phase wrote and printed (B-6, Task 5.6b). `HANDOVER_PHASE=audit` is the day-2
+re-check: every completion line against the state governance derives now, no snapshot or window
+([OPERATOR_RUNBOOK](OPERATOR_RUNBOOK.md) section 10). The preflight (and 83e, as failing lines) also
 refuses, from the event scans: any agent but the deployer, ops, governance (VGT) and the tokens
 (registry), a missing governance or token agent; any InvestorTypeRegistry officer wallet but
 ops, a token other than VSC authorized, a registry or whitelist oracle on VGT (D56), a Token
@@ -241,10 +244,10 @@ rotation, recovery or owner nomination on the demo identity; and a code hash off
 oracle, registrar and issuer (immutables masked). A scan that cannot find a holder known to be
 granted by event fails rather than passing as clean (R-413-6). Completion re-derives everything
 and compares it with the preflight snapshot (the CLI writes it next to the config with the chain
-id and the preflight block; the demo keeps it in state): nothing may appear the ceremony did not
+id, the preflight block and a sha256 sidecar; the demo keeps it in state): nothing may appear the ceremony did not
 grant, and every grant, mint, identity registration, freeze and rule-administrator event after
 the preflight must come from a ceremony transaction, ops or a vote, even if revoked since (Task
-4.17). Re-running the full phase refreshes the preflight, so a chain prepared between an aborted
+4.17); every plan contract's pending owner is none, governance or ops (Task 5.6b). Re-running the full phase refreshes the preflight, so a chain prepared between an aborted
 preflight and the re-run is judged by the re-run. Demo option 83c acknowledges what the demo
 itself registered and trusted, lists every stray the preflight refuses and offers to remove them
 as the deployer (answer `y`; the drive argument is `83c:y` when there are strays to remove,

@@ -7,10 +7,10 @@ line it prints when it worked. The rules in full: [TESTNET_SETUP](TESTNET_SETUP.
 and the deep dives ([transfer](DEEP_DIVE_TRANSFER.md),
 [identity](DEEP_DIVE_IDENTITY.md), [ZK](DEEP_DIVE_ZK.md)).
 
-Status: draft (Task 5.6). Section 2 is final only after Task 5.7 (the
-production deploy with an external signer); the day-2 audit lines
-(`HANDOVER_PHASE=audit`) work once Task 5.6b lands; the whole runbook is
-final after the Sepolia rehearsal (Task 5.8).
+Status: draft (Task 5.6; the day-2 audit and the snapshot digest since
+Task 5.6b). Section 2 is final only after Task 5.7 (the production deploy
+with an external signer); the whole runbook is final after the Sepolia
+rehearsal (Task 5.8).
 
 ## Conventions and the local rehearsal
 
@@ -175,7 +175,25 @@ reaches the 66% bar (`TooFewNodes`, `SingleNodeQuorum`).
    prints one `   ⏩ proposal #N: voting period + execution delay: jumped Ns (dev node)`
    per node, then
    `registered nodes: 0xa0Ee7A142d267C1f36714E4a8F75612F20a79720 0xBcd4042DE499D14e55001CcbB24a551F3b954096 0x71bE63f3384f5fb98995898A86B02Fb2426c5788`.
-   Add the addresses to `oracleNodes` in `handover.json`.
+   Acknowledge them in `handover.json` (`oracleNodes`):
+
+   ```bash
+   node -e 'const fs = require("fs"); const p = process.env.HANDOVER_CONFIG; const c = JSON.parse(fs.readFileSync(p, "utf8")); c.oracleNodes = process.argv.slice(1); fs.writeFileSync(p, JSON.stringify(c, null, 2)); console.log("oracleNodes:", c.oracleNodes.length)' 0xa0Ee7A142d267C1f36714E4a8F75612F20a79720 0xBcd4042DE499D14e55001CcbB24a551F3b954096 0x71bE63f3384f5fb98995898A86B02Fb2426c5788
+   ```
+
+   prints `oracleNodes: 3` (publicly the three `<NODE_n>`). Then audit
+   (section 10; again after every rotation, `oracleNodes` updated):
+
+   ```bash
+   HANDOVER_PHASE=audit npx hardhat run scripts/handover.ts --network $NET > $RB/audit-d50.log 2>&1; tail -1 $RB/audit-d50.log
+   grep "OracleManager node" $RB/audit-d50.log
+   ```
+
+   ends `✅ Audit passed: the deployer holds no power.` and lists
+   `   ✅ every registered OracleManager node is acknowledged in oracleNodes (3 registered, 3 acknowledged)`
+   (a node left out fails it). The accept phase compares with the
+   ceremony's snapshot: after any vote it fails for good
+   (`   ❌ appeared after the preflight, not granted by the ceremony: 0x… in OracleManager nodes, …`).
 
 2. Remove each deployer-era node by an OracleParameters vote: demo option
    76, type 2, action 3 (`removeOracle`), then 77 per voter (77 approves
@@ -188,13 +206,10 @@ reaches the 66% bar (`TooFewNodes`, `SingleNodeQuorum`).
 
    The log (`$RB/d50.log`) shows
    `   Call: OracleManager.removeOracle(0x90F79bf6EB2c4f870365E785982E1f101E93b906, D50 rotation)`,
-   four `✅ VOTE CAST SUCCESSFULLY!`,
-   `✅ PROPOSAL EXECUTED — callData ran, locked VGT burned` and option 39's
-   `   Total Oracles: 2`; the drive ends `✓ demo ran to completion`.
-
-3. Re-check with the day-2 audit (section 10; audit mode lands in 5.6b).
-   The accept phase fails after any change by vote, here with
-   `   ❌ appeared after the preflight, not granted by the ceremony: 0x… in OracleManager nodes, …`.
+   four `✅ VOTE CAST SUCCESSFULLY!`, option 78's
+   `   Executing from 0x15d34AAf54267DB7D7c367839AAf71A00a2C6A65 (a voter on it)`
+   (never wallet 0 after the ceremony), `✅ PROPOSAL EXECUTED — callData ran, locked VGT burned` and
+   option 39's `   Total Oracles: 2`; it ends `✓ demo ran to completion`.
 
 Node operators: clearing a governance sanction by consensus is a visible,
 accountable act (D27, section 9). Ops pauses a node at once (35a above:
@@ -213,8 +228,8 @@ npx hardhat run scripts/handover.ts --network $NET > $RB/handover.log 2>&1; tail
 ```
 
 It prints `🔑 Handover: deployer powers` (steps 1, 2, 5, 3),
-`   snapshot written: /tmp/vanguard-runbook/handover.json.snapshot.json`,
-`🏛️  Handover: governance accepts by vote` (one
+`   snapshot written: /tmp/vanguard-runbook/handover.json.snapshot.json`
+and its digest (section 6), `🏛️  Handover: governance accepts by vote` (one
 `   ✅ Token: owned by governance (proposal #1)` line per contract),
 `🔍 Handover: verify`, and ends
 `✅ Handover complete: the deployer holds no power.` (or
@@ -274,44 +289,37 @@ Rules for the window and after:
 
 ## 6. The snapshot (B-6)
 
-The full phase writes `$HANDOVER_CONFIG.snapshot.json` (what the
-preflight found, the chain id and the preflight block). A resumed run
-(`HANDOVER_PHASE=accept`) compares the chain with it. The file is the
-full phase's word: the code neither hashes nor protects it, so whoever
-can edit it can launder a deployer transaction into the ceremony's.
-Local: L0.
+The full phase writes `$HANDOVER_CONFIG.snapshot.json` (the preflight's
+findings, chain id and block, the ceremony's transactions), its sha256
+beside it (`….snapshot.json.sha256`, `sha256sum` format) and prints the
+digest. `HANDOVER_PHASE=accept` refuses a file whose hash differs from
+the sidecar or from `HANDOVER_SNAPSHOT_SHA256`; the sidecar can be
+rewritten with the file, so pass the recorded digest. Local: L0.
 
-1. Right after the full phase, hash it, make it read-only, record the
-   line:
-
-   ```bash
-   sha256sum $HANDOVER_CONFIG.snapshot.json > $RB/snapshot.sha256; chmod 0444 $HANDOVER_CONFIG.snapshot.json; cat $RB/snapshot.sha256
-   ```
-
-   prints `<64 hex>  /tmp/vanguard-runbook/handover.json.snapshot.json`
-   (on L0 the hash starts `4826f3cc`).
-
-2. Before every `HANDOVER_PHASE=accept` run, check it, then resume:
+1. Right after the full phase, keep the digest it printed
+   (`   snapshot sha256: <64 hex> (in …snapshot.json.sha256; keep this line with the run's records)`):
+   `awk '/snapshot sha256:/ {print $3}' $RB/handover.log > $RB/snapshot.sha256; cat $RB/snapshot.sha256`.
+2. Before every accept run, check and pass it:
 
    ```bash
-   sha256sum -c $RB/snapshot.sha256
-   HANDOVER_PHASE=accept npx hardhat run scripts/handover.ts --network $NET > $RB/accept.log 2>&1; tail -1 $RB/accept.log
+   sha256sum -c $HANDOVER_CONFIG.snapshot.json.sha256
+   HANDOVER_SNAPSHOT_SHA256=$(cat $RB/snapshot.sha256) HANDOVER_PHASE=accept npx hardhat run scripts/handover.ts --network $NET > $RB/accept.log 2>&1; tail -1 $RB/accept.log
    ```
 
-   `sha256sum -c` must print
-   `/tmp/vanguard-runbook/handover.json.snapshot.json: OK`; the log has
-   `⏭️  HANDOVER_PHASE=accept: deployer steps skipped` and
-   `   snapshot: /tmp/vanguard-runbook/handover.json.snapshot.json (block 62)`
+   prints `/tmp/vanguard-runbook/handover.json.snapshot.json: OK`; the log
+   has `⏭️  HANDOVER_PHASE=accept: deployer steps skipped`,
+   `   snapshot sha256: <64 hex> (matches the full phase's)` and
+   `   snapshot: /tmp/vanguard-runbook/handover.json.snapshot.json (block N)`
    and ends as in section 5.
 
-3. A completion against a snapshot whose hash does not match is a re-run,
-   not a pass: record it so and run the full phase again.
-4. Re-running the full phase writes a new snapshot. Move the old one and
-   its hash into the record first
-   (`mv $HANDOVER_CONFIG.snapshot.json $RB/snapshot-1.json`): a read-only
-   file at that path makes the full phase fail after its deployer steps,
-   before the votes (`❌ Handover failed: EACCES: permission denied, open '…/handover.json.snapshot.json'`).
-   A full re-run after that failure completes.
+3. An edited snapshot stops it before anything is read (a re-run, not a
+   pass: record it so and run the full phase again):
+   `❌ Handover failed: snapshot hash mismatch: …snapshot.json hashes to <hex>, but …snapshot.json.sha256 records <hex>: the file was edited after the full phase wrote it; a completion against it is a re-run, not a pass`
+   (sidecar rewritten too: `… but HANDOVER_SNAPSHOT_SHA256 is <hex>: …`).
+4. A full re-run writes a new pair to a new path, then renames it (a
+   read-only old file is replaced: `   (replaced a snapshot with sha256 <hex>)`);
+   move the old pair into the record first. An unwritable directory stops
+   it before step 1 (`❌ Handover failed: EACCES: permission denied, open '…snapshot.json.tmp'`).
 
 ## 7. The KeyManager ops identity
 
@@ -403,21 +411,25 @@ oracle owner (ops) are held by parties able to re-list within hours.
   construction. Redeploy the list oracles with it (their bindings and
   `listManager` point at the old set), bind them fill-then-bind (section
   9), and run the checks again.
-- Re-check a live deployment (audit mode lands in 5.6b):
-  `HANDOVER_PHASE=audit npx hardhat run scripts/handover.ts --network $NET`,
-  the completion against the state governance derives now and the
-  acknowledgements in `handover.json`, without the ceremony window's
-  snapshot comparison. Until then the accept phase re-checks only while
-  nothing changed since the ceremony. Local: the L0 chain of section 9
-  (its own snapshot, hashed as in section 6):
+- The day-2 audit, after an upgrade, a rotation or any vote that moves a
+  power: every completion line against the state governance derives now
+  and `handover.json`'s acknowledgements, with no snapshot or window;
+  sends nothing. A change by vote that leaves the deployer no power
+  passes; a deployer power, an unacknowledged holder (agent, role, owner,
+  node, attestor, trusted contract), a pending owner but governance or
+  ops, or an open proposal on a plan contract fails (audit between
+  votes). An acknowledged node passes whoever sent its registration.
+  Local: section 9's L0 chain.
 
   ```bash
-  sha256sum $HANDOVER_CONFIG.snapshot.json > $RB/snapshot.sha256; chmod 0444 $HANDOVER_CONFIG.snapshot.json   # local
-  sha256sum -c $RB/snapshot.sha256
-  HANDOVER_PHASE=accept npx hardhat run scripts/handover.ts --network $NET > $RB/recheck.log 2>&1; tail -1 $RB/recheck.log
+  HANDOVER_PHASE=audit npx hardhat run scripts/handover.ts --network $NET > $RB/audit.log 2>&1; tail -1 $RB/audit.log
+  grep "Handover audit" $RB/audit.log
   ```
 
-  ends `✅ Handover complete: the deployer holds no power.`
+  ends `✅ Audit passed: the deployer holds no power.` (`⚠️  Audit passed with warnings: see above.`;
+  failing: `❌ Handover failed: audit failed (see ❌ above)`) and has
+  `🔍 Handover audit: every completion line against the state governance derives now (no snapshot, no voting window)`.
+  Before the ceremony: `❌ Handover failed: HANDOVER_PHASE=audit: the ceremony has not completed: governance does not own Token, …; run the full phase (or HANDOVER_PHASE=accept) first`.
 
 - Never unbind an oracle as a remedy: unbinding switches its gate off
   (with no blacklist oracle nobody is sanctions-checked; OracleOnly with
