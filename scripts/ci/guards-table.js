@@ -21,6 +21,11 @@
 // Not enumerated: contracts/test/ (mocks and harnesses deployed only by
 // tests) and contracts/privacy/verifiers/ (snarkjs-generated; their only
 // reverts are assembly `revert(0, 0)`).
+// Also refused in scope: assert() and inline-assembly revert (the table
+// cannot key them), and one site key in two files (a copied contract).
+// Not covered here: checks that report instead of reverting, such as
+// Token._checkTransferFull's `return (false, "...")` branches; their
+// reasons reach users through the transfer and canTransfer tests.
 // A site is keyed by contract, function, condition and reason, not by
 // line, so it survives line drift: `C.fn | condition | reason`, where a
 // revert's condition is its innermost enclosing `if` (`!(...)` in an
@@ -59,9 +64,14 @@ const tracked = (dir) =>
     .filter(Boolean);
 const squash = (s) => s.replace(/\s+/g, " ").trim();
 
-/** Every guard site in the in-scope contracts, keyed as above. */
+/**
+ * Every guard site in the in-scope contracts, keyed as above, plus the
+ * checks this table cannot key (assert() and inline-assembly revert),
+ * which the gate refuses in scope.
+ */
 function enumerateSites() {
   const sites = [];
+  const banned = [];
   const files = tracked("contracts").filter(
     (f) => f.endsWith(".sol") && !SKIP.some((re) => re.test(f)),
   );
@@ -105,12 +115,16 @@ function enumerateSites() {
         return;
       }
       if (node.type === "CatchClause") ctx = { ...ctx, cond: "catch" };
+      if (node.type === "AssemblyCall" && node.functionName === "revert")
+        banned.push(`${file}:${node.loc.start.line} assembly revert`);
       if (
         node.type === "FunctionCall" &&
         node.expression.type === "Identifier"
       ) {
         const [a0, a1] = node.arguments;
         const lit = (a) => (a && a.type === "StringLiteral" ? a.value : "");
+        if (node.expression.name === "assert")
+          banned.push(`${file}:${node.loc.start.line} assert()`);
         if (node.expression.name === "require") {
           add(node, ctx, text(a0), a1 ? lit(a1) || text(a1) : "", lit(a1));
         } else if (node.expression.name === "revert") {
@@ -135,7 +149,7 @@ function enumerateSites() {
     };
     visit(ast, { contract: "<file>", fn: "<file>", cond: "" });
   }
-  return sites;
+  return { sites, banned };
 }
 
 const TITLE = /\bit\s*\(\s*(["'`])((?:\\.|(?!\1)[^\\])*)\1/g;
@@ -224,7 +238,7 @@ function blockMisses(r, s, src) {
 
 function main() {
   const suggest = process.argv.includes("--suggest");
-  const sites = enumerateSites();
+  const { sites, banned } = enumerateSites();
   const testFiles = tracked("test").filter((f) => /\.(ts|js)$/.test(f));
   const tests = new Map(testFiles.map((f) => [f, fs.readFileSync(f, "utf8")]));
   const rows = [];
@@ -242,7 +256,17 @@ function main() {
     if (byKey.has(r.site)) errors.push(`duplicate row: ${r.site}`);
     byKey.set(r.site, r);
   }
-  const live = new Map(sites.map((s) => [s.key, s]));
+  const live = new Map();
+  for (const s of sites) {
+    const other = live.get(s.key);
+    // Two contracts of one name in two files share keys, so a copy would
+    // need no rows: refuse it (rename one) rather than key by path.
+    if (other && other.file !== s.file)
+      errors.push(`site key in ${other.file} and ${s.file}: ${s.key}`);
+    live.set(s.key, s);
+  }
+  for (const b of banned)
+    errors.push(`${b}: use require/revert with a reason (not keyed here)`);
   const missing = sites.filter((s) => !byKey.has(s.key));
   for (const s of missing)
     errors.push(`no row for ${s.file}:${s.line}  ${s.key}`);
