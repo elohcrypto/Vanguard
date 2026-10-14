@@ -1,14 +1,17 @@
 # Technical Deep Dive: identity, recovery and governance
 
-The technical deep dive is three files: [transfer path](DEEP_DIVE_TRANSFER.md) (token, compliance, oracles), [identity, recovery and governance](DEEP_DIVE_IDENTITY.md) and [zero-knowledge circuits](DEEP_DIVE_ZK.md).
+Checked against the code in Task 5.5; listings are condensed from the
+Solidity named next to each. The technical deep dive is three files: [transfer path](DEEP_DIVE_TRANSFER.md) (token, compliance, oracles), [identity, recovery and governance](DEEP_DIVE_IDENTITY.md) and [zero-knowledge circuits](DEEP_DIVE_ZK.md).
 
 ---
 
 ## 🔐 OnchainID Implementation Analysis
 
-`OnchainID` is one deployed contract built from two files (plan v2 Task
-4.5): `OnchainIDKeys.sol` (abstract, ERC-734 keys, execution requests,
-manager authorization, ownership) and `OnchainID.sol` (ERC-735 claims).
+`OnchainID` is one deployed contract built from three files:
+`OnchainIDKeys.sol` (abstract: ERC-734 keys, execution requests; Task
+4.5), `OnchainIDOwnership.sol` (abstract: manager authorization, two-step
+ownership, the recovery manager pin and its hooks; Task 4.11) and
+`OnchainID.sol` (ERC-735 claims).
 `OnchainIDFactory` deploys it with CREATE2.
 
 ### Key Management System
@@ -31,7 +34,9 @@ struct Key {
   authorized manager (`onlyManagementKey`). They act at once (ERC-734):
   a MANAGEMENT key adds or removes any key, a MANAGEMENT key included,
   without the holder's consent. `addKey` re-activates a revoked key and
-  refuses an active one.
+  refuses an active one, keeps at most 64 active keys per purpose
+  (`TooManyKeys`) and adds no MANAGEMENT key while a recovery is approved
+  (`ManagementAdditionsFrozen`).
 - `removeKeyWithProof(key, purpose, signature)` is the holder-consented
   removal: still sent by a MANAGEMENT key, it recovers the signer from
   `getRemoveKeyMessage(key, purpose)`, the EIP-191 digest of
@@ -43,21 +48,29 @@ purpose, removalNonces[key], chainid))`, and requires
   signs the inner keccak256 with `signMessage`; a `personal_sign` of the
   digest prefixes twice and is refused. Demo options 5 -> 1 and 5a.
 - KeyManager's timelocks bind only the rotations and recoveries sent
-  through it (`executeKeyRotation` / `executeKeyRecovery` call `addKey`
-  themselves). The defence against a rogue MANAGEMENT key or a stolen
+  through it (`executeKeyRotation` calls `removeKey` and `addKey`;
+  `executeKeyRecovery` calls the identity's `evictManagementKeys`, which
+  seats the recovered key and removes the others). The defence against a rogue MANAGEMENT key or a stolen
   owner key is recovery (Task 4.11), through the identity's one pinned
   recovery manager (other managers hold key powers only and are cleared
-  when the recovered wallet accepts): the owner seats the agents (a
-  re-seat waits 48 hours and the seated agents can veto it); from
+  when the recovered wallet accepts): the owner seats at least two agents
+  at a threshold of at least 2, none of them the owner, the identity, the
+  KeyManager or a MANAGEMENT key (`AgentControlsIdentity`), so the owner
+  first removes any MANAGEMENT key it does not know (A2F-4); a re-seat
+  waits 48 hours and the seated agents can veto it; from
   the agents' approval only they cancel, at their threshold, and the
   owner's `authorizeManager`, `deauthorizeManager` and
   `transferOwnership` and new MANAGEMENT keys are frozen; 48 hours later
   execution evicts every other MANAGEMENT key (in batches of 100,
   `continueKeyEviction`); 7 days after the approval the recovered wallet
-  is proposed as owner and accepts. Agents at the threshold can take the
+  is proposed as owner and accepts. Each step runs within a 7-day window,
+  and a recovery to a key that is not an address hash adds the key but
+  never moves ownership (A2F-7). Agents at the threshold can take the
   identity ("Identity key lifecycle" below).
-- `authorizeManager` / `deauthorizeManager` (owner only) are the one way
-  KeyManager accepts. Any contract can also be added as a MANAGEMENT key
+- KeyManager's rotations and batches need `authorizeManager(KeyManager)`
+  (owner only); recovery needs only the identity's pinned recovery
+  manager (`recoveryManager`, set at creation by the factory or once by
+  the owner), so deauthorizing KeyManager never switches recovery off. Any contract can also be added as a MANAGEMENT key
   with `addKey(keccak256(abi.encodePacked(contract)), 1, 1)` and then
   passes `onlyManagementKey`, which KeyManager does not count as an
   authorization.
@@ -65,12 +78,13 @@ purpose, removalNonces[key], chainid))`, and requires
   the new owner). On acceptance the old owner's MANAGEMENT key is revoked
   and the new owner ends with one; other keys and `authorizedManagers`
   survive, and the new owner audits them (`getKeysByPurpose`;
-  `authorizedManagers` has no list or event, so read the identity's
-  `authorizeManager` transactions). `renounceOwnership` reverts and
-  `initialize` runs once, so an identity always has a controller.
+  `getManagers()` lists the authorized managers, at most 8, with
+  `ManagerAuthorized` / `ManagerDeauthorized` events). `renounceOwnership`
+  reverts and `initialize` runs once and only from the deployer
+  (`NotCreator`, Task 5.2), so an identity always has a controller.
 - `execute` from a MANAGEMENT key (or the owner) runs at once; from an
-  ACTION key it waits for `executionThreshold` (at least 2) approvals
-  from distinct keys other than the requester.
+  ACTION key it waits until `executionThreshold` (default 2, never below 2) approvals are counted: the request counts as one and each other
+  ACTION or MANAGEMENT key (or the owner) adds one, never the requester.
 
 ### Claim Management System
 
@@ -88,15 +102,18 @@ struct Claim {
 ```
 
 - The claim id is `keccak256(abi.encodePacked(issuer, topic, data))`.
-  `addClaim` accepts the owner, a MANAGEMENT or CLAIM_SIGNER key, or a
-  caller naming itself as issuer (how `ClaimIssuer.issueClaim` writes its
+  `addClaim` accepts the owner, a MANAGEMENT or CLAIM_SIGNER key, an
+  authorized manager, or a caller naming itself as issuer (`batchAddClaims`,
+  up to 50, applies the same rule) (how `ClaimIssuer.issueClaim` writes its
   copy); only the issuer updates an existing id. `removeClaim` accepts
   the issuer, a MANAGEMENT key, the owner or an authorized manager.
   Lists are indexed per topic (`getClaimIdsByTopic`) with O(1) removal.
 - These lists are a record, not the verification. `IdentityRegistry`
   holds the required topics and trusted issuers and `isVerified` asks
   each trusted issuer (`ClaimIssuer.hasValidClaim(identity, topic)`,
-  which checks expiry and revocation); it never reads the identity's
+  which checks expiry and revocation; each call gets 45,000 gas and one
+  return word, `ISSUER_CALL_GAS`, Task 5.1, and an issuer that reverts or
+  misbehaves counts as no claim); it never reads the identity's
   lists, so a claim the owner or a stranger writes naming an issuer
   counts for nothing. A passing walk can be cached per identity by
   `refreshVerified` (24h, capped at claim expiry; Task 4.9). The
@@ -201,6 +218,34 @@ exercises the lifecycle in options 12, 12a, 12b, 5 and 5a
 (docs/TESTNET_DEMO_OPTIONS.md, "Identity keys through KeyManager"); its resume
 works within one demo session only.
 
+## Token-side recovery (`recoveryAddress`)
+
+`Token.recoveryAddress(lost, new, identity)` (agent only, `whenNotPaused`)
+moves a holder's balance to a new wallet after the wallet is lost:
+
+1. `_checkAgentTarget` on both wallets (VGT refuses a trusted contract,
+   D23); "Token: recovery into trusted contract"; "Invalid identity" for a
+   zero identity.
+2. The lost wallet holds the identity in the shared IdentityRegistry, or a
+   sibling token's recovery already moved it to the new wallet (the lost
+   wallet unbound, the new one bound to it, `formerIdentity(lost)` the
+   identity); the new wallet has no other identity ("New wallet already
+   has identity").
+3. D41: the new wallet controls the identity (owner, MANAGEMENT or ACTION
+   key; `WalletDoesNotControlIdentity`). This keeps the token side and the
+   identity side consistent; it is not a defence against a rogue agent,
+   which can still recover into a wallet that holds a key on the identity
+   (A2F-6).
+4. The whole balance moves through OpenZeppelin's internal `_transfer` (no
+   compliance or free-balance check), the frozen amount is added to the
+   new wallet's, and an address freeze on either wallet survives (OR).
+5. `IdentityRegistry.moveIdentity(lost, new)` unless already moved, then
+   `ComplianceRules.canReceive(new)` (the lists only: a holder whose country
+   was blocked after onboarding still recovers), then `RecoverySuccess`.
+
+The investor type does not move: a compliance officer re-assigns it (and
+any exemption) to the new wallet.
+
 ---
 
 ## 🎯 Governance System Deep Dive
@@ -239,7 +284,7 @@ function castVote(uint256 proposalId, bool support, string calldata reason)
     _voteChoice[proposalId][id] = support;
     _proposalVoters[proposalId].push(msg.sender);        // for the refund ledger
     _lockedTokens[proposalId] += votingCost;
-    _voterLockedTokens[proposalId][msg.sender] += votingCost;
+    _voterLockedTokens[proposalId][id] = votingCost;       // per identity (Task 5.2, Q6)
 
     if (support) proposal.votesFor += 1; else proposal.votesAgainst += 1;   // 1 person = 1 vote
     emit VoteCast(proposalId, msg.sender, support, 1, reason);
@@ -273,7 +318,8 @@ function executeProposal(uint256 proposalId) external nonReentrant {
     ProposalThresholds memory t = proposalThresholds[proposal.proposalType];
     uint256 totalVotes = proposal.votesFor + proposal.votesAgainst;
     // Quorum is a share of eligible voters FROZEN at creation, not of supply.
-    bool quorumMet   = totalVotes * 10000 >= proposal.eligibleVotersAtCreation * t.quorumPercentage;
+    uint256 eligible = proposal.eligibleVotersAtCreation;
+    bool quorumMet   = eligible > 0 && totalVotes * 10000 >= eligible * t.quorumPercentage;
     bool approvalMet = totalVotes > 0 && (proposal.votesFor * 10000) / totalVotes >= t.approvalPercentage;
     bool passed      = totalVotes > 0 && quorumMet && approvalMet;
 
@@ -284,17 +330,23 @@ function executeProposal(uint256 proposalId) external nonReentrant {
     }
 
     require(block.timestamp >= proposal.executionTime, "Execution delay not met");
-    (bool success, bytes memory reason) = isListType(proposal.proposalType)
-        ? _executeListUpdate(proposalId)                          // DynamicListManager call
-        : proposal.target.call(proposal.callData);
+    require(gasleft() >= MIN_EXECUTION_GAS, "Insufficient gas for execution"); // 3,000,000
+    uint256 gasBefore = gasleft();
+    // A list update targets the DynamicListManager bound to this governance,
+    // checked at creation (_requireGovernedListManager).
+    (bool success, bytes memory reason) = proposal.target.call(proposal.callData);
 
     if (!success) {
+        // Out of gas: revert, the proposal stays Active and anyone retries.
+        if (gasleft() <= gasBefore / 63) revert InsufficientExecutionGas();
         _settleWithRefund(proposalId, ProposalStatus.Rejected);   // terminal; resubmit
         emit ProposalExecutionFailed(proposalId, reason);         // target's raw revert data
         return;
     }
 
-    governanceToken.burn(_lockedTokens[proposalId]);
+    // The call may have settled the proposal itself (cancelProposal(self)).
+    if (proposal.status != ProposalStatus.Active) { emit ProposalExecuted(proposalId); return; }
+    if (_lockedTokens[proposalId] > 0) governanceToken.burn(_lockedTokens[proposalId]);
     proposal.status = ProposalStatus.Executed;
     emit ProposalExecuted(proposalId);
 }

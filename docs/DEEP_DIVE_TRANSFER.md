@@ -1,7 +1,9 @@
-# 🔬 Technical Deep Dive - ERC-3643 System Implementation
+# Technical Deep Dive: the transfer path
 
-**Analysis Date:** 2025-10-02  
-**Focus:** Smart Contract Implementation Details & ZK Circuit Analysis
+How a VSC transfer is checked: the token, ComplianceRules, the oracle
+consensus that writes the lists, and the security notes for that path.
+Checked against the code in Task 5.5; listings are condensed from the
+Solidity named next to each.
 
 The technical deep dive is three files: [transfer path](DEEP_DIVE_TRANSFER.md) (token, compliance, oracles), [identity, recovery and governance](DEEP_DIVE_IDENTITY.md) and [zero-knowledge circuits](DEEP_DIVE_ZK.md).
 
@@ -32,105 +34,74 @@ graph TB
 
 ## 🎫 ERC-3643 Token Implementation
 
-### Transfer Validation Pipeline
+### Transfer checks (`Token.sol`)
 
-**Multi-Layer Validation:**
+There is no `_transfer` override. `transfer` and `transferFrom` carry
+`whenNotPaused` and `whenNotFrozen(sender)` and run `_checkTransferFull`,
+which returns the first failing reason; `canTransfer` returns the same
+verdict as a bool.
 
 ```solidity
-function _transfer(address from, address to, uint256 amount)
-    internal
-    override
-    whenNotPaused
-    whenNotFrozen(from)
-    whenNotFrozen(to)
-{
-    // Layer 1: Identity Verification
-    require(_identityRegistry.isVerified(to), "Recipient not verified");
-    require(_identityRegistry.isVerified(from), "Sender not verified");
-
-    // Layer 2: Compliance Check
-    require(_compliance.canTransfer(from, to, amount), "Compliance failed");
-
-    // Layer 3: Frozen Token Check
-    require(getFreeBalance(from) >= amount, "Insufficient free balance");
-
-    // Layer 4: Execute Transfer
-    super._transfer(from, to, amount);
-
-    // Layer 5: Post-Transfer Hook
-    _compliance.transferred(from, to, amount);
+function transfer(address _to, uint256 _amount) public override whenNotPaused whenNotFrozen(msg.sender) returns (bool) {
+    bool fromTrusted = _requireTransfer(msg.sender, _to, _amount); // reverts with _checkTransferFull's reason
+    bool success = super.transfer(_to, _amount);
+    if (success) {
+        _compliance.transferred(msg.sender, _to, _amount);   // empty hook
+        _recordTransfer(msg.sender, _amount, fromTrusted);   // cooldown clock, below
+    }
+    return success;
 }
 ```
 
-**Frozen Token Management:**
+`_checkTransferFull(from, to, amount)` for a transfer, in order:
+
+1. `Token paused`, `Sender frozen`, `Recipient frozen`.
+2. Unless either side is a contract trusted on this token (escrow, custody
+   wallet, governance on VGT): `Sender not verified`, `Recipient not
+verified` (`IdentityRegistry.isVerified`). On that trusted path
+   ComplianceRules verifies the other party's identity, whitelist and
+   country instead.
+3. `Insufficient balance` (the free balance: balance minus partially
+   frozen tokens).
+4. `Compliance check failed` (`ComplianceRules.canTransfer`).
+5. With an InvestorTypeRegistry bound: for a non-trusted sender one call,
+   `transferCheck(from, amount)`, answers the registry's authorization,
+   the sender's per-transfer cap and its cooldown (codes 1/2/3: `Token not
+authorized by investor registry`, `Transfer amount limit exceeded`,
+   `Transfer cooldown`); a trusted sender is checked for the authorization
+   only. Then a non-trusted recipient's `canHoldAmount`: `Holding limit
+exceeded`.
+
+A mint checks `Recipient frozen`, `Identity not verified`, `Compliance
+check failed`, the authorization and the holding cap. `burn(from,
+amount)` is agent only, checks `Insufficient balance` and `Insufficient
+free balance` and is never gated by ComplianceRules. After a successful
+transfer `_recordTransfer` writes the sender's cooldown clock
+(`recordTransfer`) unless the amount is 0 or the sender is trusted.
+
+Pause: the owner or the guardian; unpause: the owner on VSC, the owner or
+an agent on VGT. The guardian can pause again after a voted unpause, and a
+pause never expires (D56; an audit item).
+
+### Frozen tokens
 
 ```solidity
 function getFreeBalance(address _userAddress) public view returns (uint256) {
-    uint256 totalBalance = balanceOf(_userAddress);
-    uint256 frozenAmount = _frozenTokens[_userAddress];
-
-    // Prevent underflow
-    if (frozenAmount >= totalBalance) {
-        return 0;
-    }
-
-    return totalBalance - frozenAmount;
+    return balanceOf(_userAddress) - _frozenTokens[_userAddress]; // no guard: relies on frozen <= balance
 }
 
-function freezePartialTokens(address _userAddress, uint256 _amount)
-    external
-    override
-    onlyAgent
-{
-    uint256 currentBalance = balanceOf(_userAddress);
-    uint256 currentFrozen = _frozenTokens[_userAddress];
-
-    // Ensure sufficient balance to freeze
-    require(
-        currentBalance >= currentFrozen + _amount,
-        "Insufficient balance to freeze"
-    );
-
+function freezePartialTokens(address _userAddress, uint256 _amount) external override onlyAgent {
+    _checkAgentTarget(_userAddress); // VGT: refuses a trusted contract (D23)
+    require(balanceOf(_userAddress) >= _frozenTokens[_userAddress] + _amount, "Insufficient balance to freeze");
     _frozenTokens[_userAddress] += _amount;
     emit TokensFrozen(_userAddress, _amount);
 }
 ```
 
-**Recovery Mechanism:**
-
-```solidity
-function recoveryAddress(
-    address _lostWallet,
-    address _newWallet,
-    address _investorOnchainID
-) external override onlyAgent returns (bool) {
-    // Validate new wallet
-    require(_newWallet != address(0), "Invalid new wallet");
-    require(_newWallet != _lostWallet, "Same wallet");
-
-    // Verify new wallet is registered
-    require(
-        _identityRegistry.identity(_newWallet) == _investorOnchainID,
-        "New wallet not registered to same identity"
-    );
-
-    // Transfer balance
-    uint256 balance = balanceOf(_lostWallet);
-    if (balance > 0) {
-        _transfer(_lostWallet, _newWallet, balance);
-    }
-
-    // Transfer frozen tokens
-    uint256 frozen = _frozenTokens[_lostWallet];
-    if (frozen > 0) {
-        _frozenTokens[_newWallet] += frozen;
-        _frozenTokens[_lostWallet] = 0;
-    }
-
-    emit RecoverySuccess(_lostWallet, _newWallet, _investorOnchainID);
-    return true;
-}
-```
+Freezing, the free-balance checks on transfer and burn, and recovery
+(which moves balance and frozen amount together) keep `frozen <= balance`.
+Token-side wallet recovery (`recoveryAddress`) is described with identity
+recovery in [DEEP_DIVE_IDENTITY.md](DEEP_DIVE_IDENTITY.md#token-side-recovery-recoveryaddress).
 
 ---
 
@@ -139,10 +110,10 @@ function recoveryAddress(
 ### One gate, one engine (plan v2 Task 4.4, D11 = a)
 
 `OracleManager` is the gate. It holds the node registry and lifecycle,
-the query registry, and the one vote entry, `submitResponse`. The
-Whitelist and Blacklist oracles read only `isActiveOracle`,
-`isRegisteredOracle`, `getQueryBinding`, `getQueryData` and
-`getQueryResolution` from it. `ConsensusOracle` is the manager's
+the query registry, and the one vote entry, `submitResponse`. The list
+oracles read `isActiveOracle`, `getQueryBinding`, `getQueryData`,
+`getQueryResolution` and `getQuerySupport` from it; BlacklistOracle also
+reads `isEmergencyOracle`. `ConsensusOracle` is the manager's
 weighted engine: it is built for one manager (`constructor(address
 manager)`), every write is manager-only, it has no owner, no pause and no
 query store of its own. The manager binds it with the owner-only
@@ -165,37 +136,51 @@ at open and unpaused later votes with its snapshot weight. YES resolves
 when `yesWeight * 100 >= bar`, NO symmetrically; the threshold is a
 percent in (50, 100]. The default, 66, makes two of three equal nodes a
 verdict (200 of 300 is 66.7%); a 1-1 split resolves nothing. Weight,
-threshold and expiry changes apply to later queries only. Removal (owner
-only) is the only thing that shrinks a later denominator. A query expires
+threshold and expiry changes apply to later queries only. Removal or a
+weight change (both owner only) changes a later denominator. A query opens
+only with at least two registered nodes (`TooFewNodes`) and when no single
+node's weight reaches the bar (`SingleNodeQuorum`, Task 5.1). A query expires
 `queryExpiryTime` after it opened (1 hour; 10 minutes to 24 hours): later
 votes are refused and it closes without a verdict, so a new query must be
-raised. Opening costs about 263k gas with 3 nodes and 2.9M with 100
-(`MAX_ORACLES`), one storage write per node.
+raised. Opening writes one storage slot per registered node (up to 100,
+`MAX_ORACLES`); its gas is not measured in the repo.
 
 **Opening a query** (`OracleManager.submitQuery`, owner or active
-node; first `_checkQueryPayload`: R-2F3-2 severity, 4.12 tier 1..5):
+node; a non-zero subject, type 1..4, then `_checkQueryPayload`: R-2F3-2
+severity, 4.12 tier 1..5, and a CRITICAL blacklist or tier-5 whitelist
+query only from the owner, `SeverityRequiresOwner` / `TierRequiresOwner`):
 
 ```solidity
 queryId = keccak256(abi.encodePacked(_subject, _queryType, _data, block.timestamp, msg.sender));
-_boundEngine().openQuery(queryId); // snapshot; refuses an existing id or no registered weight
+_boundEngine().openQuery(queryId); // snapshot; refuses an existing id, < 2 registered nodes, zero weight, or one node at the bar
 ```
+
+Owner-only CRITICAL and tier 5 restrict who may raise a query. The list
+oracles' owner (ops after the handover) and their list manager still write
+a CRITICAL or tier-5 entry directly (`addToBlacklist`, `addToWhitelist`),
+and a consensus severity sets only the duration (D44 a; the list-oracle
+ownership posture is an audit item).
 
 **Answering** (`OracleManager.submitResponse`, an active node):
 
 ```solidity
+require(query.timestamp > 0, "OracleManager: Query does not exist");
 if (query.hasResult) revert QueryAlreadyResolved();
-(bool resolved, bool result) = _boundEngine().recordVote(_queryId, msg.sender, _result);
+(bool resolved, bool result) = engine.recordVote(_queryId, msg.sender, _result);
 oracles[msg.sender].totalAttestations++;
 if (resolved) {
     query.hasResult = true;
     query.result = result;
-    query.resolvedAt = block.timestamp; // set once (R-2F3-1)
+    query.resolvedAt = block.timestamp;                  // set once (R-2F3-1)
+    query.support = engine.votersFor(_queryId, result);  // Task 5.1
 }
 ```
 
 **The tally** (`ConsensusOracle.recordVote`, manager only):
 
 ```solidity
+if (q.openedAt == 0) revert UnknownQuery();
+if (q.resolved) revert QueryResolved();
 if (block.timestamp >= q.expiresAt) revert QueryExpired();
 if (q.hasVoted[voter]) revert AlreadyVoted();
 uint256 weight = q.weightAt[voter]; // frozen at open
@@ -209,14 +194,18 @@ else if (q.noWeight * 100 >= q.bar) { q.resolved = true; }
 oracle (`provideAttestation`, its own signature over subject, queryId,
 result and chain id). The oracle binds the queryId to its subject and
 type, then applies the manager's resolution once, while fresh and only if
-it resolved after the subject's last write (R-2F3-1). A paused node can
-neither answer nor attest. `emergencyOverride` (owner) can still stamp a
-verdict on an existing query.
+it resolved after the subject's last write (R-2F3-1), and only if at
+least `minimumConsensusOracles` distinct nodes (default 2, never below 2)
+voted its way (`TooFewVoters`, Task 5.1). A paused node can neither answer
+nor attest. `emergencyOverride(oracle, queryId, result, reason)` (owner)
+can stamp or flip the verdict of any existing query; `support` is
+recounted from the engine's votes when the side changes.
 
 **Signature sets.** `validateOracleConsensus(oracles, signatures, hash)`
 adds the engine weights of distinct, active signers whose EIP-191
 signature recovers to them and compares the sum with the same threshold
-of the live registered weight (pausing nodes never lowers it).
+of the live registered weight (pausing nodes never lowers it); it is
+false while a single registered node could meet that bar alone.
 
 **Parameters** go through the manager, so governance sets them after the
 handover (OracleParameters, type 2): `setConsensusThreshold(percent)`,
@@ -237,25 +226,34 @@ handover (OracleParameters, type 2): `setConsensusThreshold(percent)`,
 
 ### Structure (plan v2 Task 4.1)
 
-`ComplianceRules` is one deployed contract built from two files:
-`ComplianceRulesAdmin` (abstract) holds every setting and the functions
-that write them, and `ComplianceRules is ComplianceRulesAdmin,
-IComplianceHooks` holds the evaluation the token calls (`canTransfer`,
-`canReceive`, the `transferred`/`created`/`destroyed` hooks, which are
-empty, and the `isProductionCompliance` markers). One address, one
-governance type (ComplianceRules, type 1), one ABI.
+`ComplianceRules` is one deployed contract built from three files:
+`ComplianceRulesTrust` (abstract: per-token trusted contracts and
+code-hash registrars), `ComplianceRulesAdmin` (abstract: every other
+setting and its setters) and `ComplianceRules is ComplianceRulesAdmin,
+IComplianceHooks` (the evaluation the token calls: `canTransfer`,
+`canReceive`, `isTrustedContract`, `whitelistTierAllows`, the empty
+`transferred`/`created`/`destroyed` hooks and the `isProductionCompliance`
+markers). One address, one governance type (ComplianceRules, type 1), one
+ABI.
 
-The only rule ComplianceRules evaluates is the jurisdiction rule. The
-investor-type, holding-period and compliance-level rules it once stored
-were removed in Task 4.1: no transfer ever read them. Investor-type
-limits live in `InvestorTypeRegistry`, which the token reads on every
-transfer and mint (`canTransferAmount`, `canHoldAmount`: "Transfer amount
-limit exceeded", "Holding limit exceeded") and since Task 4.10 the
-sender's cooldown (`canTransferNow`, "Transfer cooldown"; the clock is
-written by `recordTransfer` from an authorized token). ComplianceRules
-also requires a party's whitelist oracle entry tier to reach its type's
-required tier where the party passes by that entry
-(`whitelistTierAllows`); see docs/INVESTOR_TYPE_SYSTEM.md.
+`canTransfer` applies the blacklist oracle on every path, the whitelist by
+mode with the tier rule, the counterparty's identity on the trusted path,
+and the jurisdiction rule, and fails closed when no identity registry is
+bound for the token. Of the per-investor rules it evaluates only the
+jurisdiction rule: the investor-type, holding-period and compliance-level
+rules it once stored were removed in Task 4.1 (no transfer read them).
+Investor-type limits live in `InvestorTypeRegistry`, which the token reads
+on every transfer (`transferCheck`: authorization, "Transfer amount limit
+exceeded", "Transfer cooldown"; then `canHoldAmount`: "Holding limit
+exceeded") and mint (authorization and `canHoldAmount`). A registry that
+has not authorized the token refuses everything ("Token not authorized by
+investor registry", R-410-1); the clock is written by `recordTransfer`,
+from an authorized token only. ComplianceRules also requires a party's
+whitelist oracle entry tier to reach its type's required tier where the
+party passes by that entry (`whitelistTierAllows`); in Either mode with a
+whitelist oracle bound, a ZK proof alone serves only investor types whose
+required tier is 1, and Either with no oracle bound acts as ZkOnly (D46
+a); see docs/INVESTOR_TYPE_SYSTEM.md.
 
 ### Jurisdiction verdict
 
@@ -284,9 +282,14 @@ PrivacyManager folds into its jurisdiction policy hash.
 
 Trusted contracts and rule administrators are kept per token:
 
-- `addTrustedContract(token, account)` / `removeTrustedContract(token,
-account)` (owner; contracts only, never a wallet or an EIP-7702
-  delegated wallet; the owner stays trusted, D21). Trusting governance
+- `addTrustedContract(token, account)`: the owner, or a registrar of
+  that token for an account whose runtime code hash is the registered one
+  (InvestorRequestManager for `MultiSigWallet`, EscrowWalletFactory for
+  `MultiSigEscrowWallet`; `setTrustedRegistrar(token, registrar,
+codeHash)`, owner only, event `TrustedRegistrarSet`).
+  `removeTrustedContract(token, account)`: owner only, never the owner
+  itself (D21). Contracts only, never a wallet or an EIP-7702 delegated
+  wallet. Trusting governance
   for VGT, where it holds proposal fees, does not trust it on VSC.
 - `isTrustedContract(account)` answers for `msg.sender`: Token and
   GovernanceToken call it as the token. Off-chain readers use
@@ -301,135 +304,57 @@ account)` (owner; contracts only, never a wallet or an EIP-7702
 
 ---
 
-## 📊 Performance Metrics
+## 📊 Gas
 
-### Gas Usage Analysis
-
-**Typical Operations:**
-
-- OnchainID Creation: ~500,000 gas
-- Claim Addition: ~150,000 gas
-- Token Transfer (with compliance): ~200,000 gas
-- Oracle Attestation: ~100,000 gas
-- ZK Proof Verification: ~300,000 gas
-- Governance Vote: ~120,000 gas
-
-### Optimization Opportunities
-
-1. **Storage Packing:**
-
-   ```solidity
-   // Current
-   struct Claim {
-       uint256 topic;      // 32 bytes
-       uint256 scheme;     // 32 bytes
-       address issuer;     // 20 bytes
-       uint256 validFrom;  // 32 bytes
-       uint256 validTo;    // 32 bytes
-   }
-
-   // Optimized
-   struct Claim {
-       uint64 topic;       // 8 bytes
-       uint8 scheme;       // 1 byte
-       address issuer;     // 20 bytes  } 32 bytes (1 slot)
-       uint40 validFrom;   // 5 bytes
-       uint40 validTo;     // 5 bytes   } 32 bytes (1 slot)
-   }
-   // Saves 3 storage slots per claim!
-   ```
-
-2. **Batch Operations:**
-
-   ```solidity
-   // Add multiple claims in one transaction
-   function addClaimsBatch(ClaimData[] calldata claims) external {
-       for (uint256 i = 0; i < claims.length; i++) {
-           _addClaim(claims[i]);
-       }
-   }
-   ```
-
-3. **Event Optimization:**
-   ```solidity
-   // Use indexed parameters wisely (max 3)
-   event Transfer(
-       address indexed from,
-       address indexed to,
-       uint256 amount  // Not indexed to save gas
-   );
-   ```
-
----
+The repo measures the transfer path only: `scripts/gas-analysis.ts`
+(`npm run gas:claims`) records a baseline and CI fails a rise over 1,500
+gas. At aa65de8 plus Task 4.17: 96,902 with the permissive mock registry
+(A), 144,868 with one claim topic (B), 178,682 with KYC and AML (C),
+105,896 with both identities in the verification cache (D), 135,232 with
+an authorized InvestorTypeRegistry too (E); `refreshVerified` 104,403. No
+figure for identity creation, claims, attestations, ZK verification or
+votes is measured in the repo.
 
 ## 🔍 Security Considerations
 
-### Critical Invariants
+### Invariants
 
-1. **Token Supply Invariant:**
+1. **Supply:** `totalSupply() == Σ balanceOf(a)` (OpenZeppelin), and for
+   every holder `frozenTokens(a) <= balanceOf(a)`: frozen tokens are part
+   of the balance.
+2. **Identity binding:** IdentityRegistry maps each wallet to at most one
+   identity ("Identity already registered") and each identity to at most
+   one wallet ("Identity already bound", `walletOf`). One identity per
+   person rests on the KYC issuer and the registry agent, off chain; the
+   factory can re-point `ownerToIdentity`, so it is not an invariant.
+3. **Consensus:** for every query `yesWeight + noWeight <= snapshotWeight`
+   (only snapshot members vote, once each, with their weight at open).
 
-   ```solidity
-   // Total supply = sum of all balances + frozen tokens
-   assert(totalSupply() == sumOfBalances + sumOfFrozenTokens);
-   ```
+### Attack vectors
 
-2. **Identity Uniqueness:**
+1. **Sybil:** one vote per registered identity; identities younger than
+   `minVoterAge` do not vote; one identity per person is off chain (above).
+2. **Proof replay and front-running:** every proof binds the submitting
+   wallet (`walletBinding == msg.sender`), so a copied proof is useless to
+   another wallet; a nullifier binds one wallet per whitelist root version
+   or attestation policy. There is no commit-reveal.
+3. **Oracle manipulation:** a weighted threshold over a registered-node
+   snapshot, at least two nodes and no single-node quorum, at least two
+   distinct supporting voters per applied verdict (Task 5.1). Reputation
+   does not weight votes (penalizing a node to 100 parks it). The list
+   oracles' owner (ops) writes entries directly, CRITICAL and tier 5
+   included (D44 a; an audit item).
+4. **Governance:** the proposal cost deters spam; the voting cost is a
+   deposit (burned on a pass, claimable on reject or cancel) and does not
+   weight votes; the execution delay; the quorum denominator frozen at
+   creation; cost setters bounded (at most 1,000 VGT); settlement makes no
+   external call, so one unpayable participant cannot freeze the others'
+   deposits.
+5. **Oracle failure:** ComplianceRules calls the oracles without a
+   fallback, so a reverting oracle reverts every transfer (fail closed);
+   unbinding it is the remedy.
 
-   ```solidity
-   // Each address can have only one OnchainID
-   assert(onchainIDFactory.getIdentityByOwner(user) != address(0) => unique);
-   ```
+### Not done
 
-3. **Consensus Integrity:**
-   ```solidity
-   // Total weight = sum of yes weight + no weight
-   assert(data.yesWeight + data.noWeight <= getTotalOracleWeight());
-   ```
-
-### Attack Vectors & Mitigations
-
-1. **Sybil Attack:**
-   - ✅ Mitigated by KYC/AML verification
-   - ✅ One identity per person enforced
-
-2. **Front-Running:**
-   - ✅ Mitigated by commit-reveal in ZK proofs
-   - ✅ Nullifiers prevent replay
-
-3. **Oracle Manipulation:**
-   - ✅ Mitigated by M-of-N consensus
-   - ✅ Reputation system discourages bad behavior
-
-4. **Governance Attacks:**
-   - ✅ Proposal creation cost prevents spam
-   - ✅ Voting cost prevents vote manipulation
-   - ✅ Execution delay prevents immediate execution
-   - ✅ Quorum denominator frozen at creation: registering or deleting identities mid-vote cannot move the bar
-   - ✅ Cost setters bounded (≤ 1000 VGT): the owner cannot price every holder out in one call
-   - ✅ Settlement has no external call: one unpayable participant cannot freeze others' deposits
-
----
-
-## 📚 Conclusion
-
-This technical deep dive reveals a **sophisticated, well-architected system** with:
-
-✅ **Robust identity management** (OnchainID with ERC-734/735)  
-✅ **Comprehensive compliance** (ERC-3643 with multi-layer validation)  
-✅ **Secure oracle consensus** (weighted voting with reputation)  
-✅ **Advanced privacy** (ZK circuits for compliance proofs)  
-✅ **Fair governance** (1 person = 1 vote with Sybil resistance)
-
-The implementation demonstrates **production-grade quality** with proper security measures, efficient algorithms, and extensible architecture.
-
-**Next Steps:**
-
-1. Complete formal verification of ZK circuits
-2. Optimize gas usage (storage packing, batch operations)
-3. External security audit
-4. Testnet deployment and validation
-
----
-
-**Analyzed by:** AI Technical Review Agent  
-**Date:** 2025-10-02
+Formal verification of the circuits (not started); an external security
+audit; a testnet deployment (Task 5.7).

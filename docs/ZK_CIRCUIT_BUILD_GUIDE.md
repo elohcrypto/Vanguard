@@ -8,7 +8,7 @@ implementation and **cannot** compile them — do not `npm install -g circom`.
 
 ```bash
 # Build and install Rust circom 2.x (takes ~1 minute)
-git clone --depth 1 https://github.com/iden3/circom.git
+git clone --depth 1 --branch v2.2.3 https://github.com/iden3/circom.git  # the version CI uses
 cd circom && cargo build --release
 cp target/release/circom ~/.cargo/bin/
 
@@ -35,9 +35,9 @@ npm run setup:zk
 This command will:
 
 1. ✅ Create build directories
-2. ✅ Download Powers of Tau file (trusted setup)
+2. ✅ Verify the Powers of Tau file against its BLAKE2b-512 (downloading it first when missing)
 3. ✅ Compile all 5 Circom circuits
-4. ✅ Generate proving keys (.zkey files)
+4. ✅ Generate PLONK proving keys (`snarkjs plonk setup`, .zkey files)
 5. ✅ Generate verifying keys (.json files)
 6. ✅ Generate Solidity verifier contracts
 7. ✅ Create circuit information file
@@ -76,8 +76,9 @@ npm run setup:zk
 🚀 Setting up ZK circuits for CMTA UTXO Compliance POC
 ============================================================
 📁 Creating build directories...
-⬇️  Downloading Powers of Tau file...
-✅ Powers of Tau file downloaded
+⬇️  Powers of Tau file...
+✅ Powers of Tau file present, hash verified   (or: downloaded, hash verified)
+🔎 Using circom: <bin> (<version>)
 
 🔄 Processing whitelist_membership...
 🔧 Compiling whitelist_membership circuit...
@@ -144,8 +145,9 @@ npm run setup:zk
    • Build directory: build/circuits
    • Verifier contracts: contracts/privacy/verifiers/
 
-💡 Note: This demo uses simplified/mock implementations.
-   For production, use proper Circom compilation and trusted setup.
+(abridged; the exact lines are the console.log calls in
+scripts/setup-zk-circuits.js: per circuit "plonk proving key generated",
+"verifying key exported (nPublic N)", "Solidity verifier generated")
 ```
 
 ---
@@ -161,7 +163,8 @@ build/circuits/
 │
 ├── whitelist_membership/
 │   ├── whitelist_membership.r1cs             # Constraint system
-│   ├── whitelist_membership.wasm             # Witness calculator
+│   ├── whitelist_membership.sym              # Symbols (--sym)
+│   ├── whitelist_membership_js/whitelist_membership.wasm  # Witness calculator
 │   ├── whitelist_membership.zkey             # Proving key
 │   ├── whitelist_membership_vkey.json        # Verifying key
 │   └── whitelist_membership_js/              # JS witness calculator
@@ -250,7 +253,7 @@ contracts/privacy/verifiers/
 
 - **File:** `{circuit_name}Verifier.sol`
 - **Purpose:** On-chain proof verification
-- **Gas Cost:** ~250,000-300,000 gas per verification
+- **Gas Cost:** not measured in the repo
 - **Optimized:** Uses precompiled contracts (ecPairing)
 
 ---
@@ -297,6 +300,8 @@ snarkjs zkey export verificationkey \
 snarkjs zkey export solidityverifier \
   build/circuits/whitelist_membership/whitelist_membership.zkey \
   contracts/privacy/verifiers/whitelist_membershipVerifier.sol
+# then rename `contract PlonkVerifier` to `contract WhitelistMembershipVerifier`
+# (setup:zk does this); CI fails if a committed verifier changes
 ```
 
 ---
@@ -313,7 +318,7 @@ After building, check `build/circuits/circuit-info.json`:
       "name": "whitelist_membership",
       "description": "Proves a whitelist slot (Poseidon(identity, secret) in the root) for a public wallet, without revealing which listed identity",
       "verifyingKey": { ... },
-      "buildPath": "build/circuits/whitelist_membership",
+      "buildPath": "<absolute path>/build/circuits/whitelist_membership",
       "hasVerifier": true
     },
     "jurisdiction_proof": {
@@ -321,7 +326,7 @@ After building, check `build/circuits/circuit-info.json`:
       "name": "jurisdiction_proof",
       "description": "Proves an issuer-attested jurisdiction is in the allowed set without revealing it (D31 a)",
       "verifyingKey": { ... },
-      "buildPath": "build/circuits/jurisdiction_proof",
+      "buildPath": "<absolute path>/build/circuits/jurisdiction_proof",
       "hasVerifier": true
     }
     // ... other circuits
@@ -349,7 +354,7 @@ cat build/circuits/circuit-info.json | jq
 ### **Test Proof Generation:**
 
 ```bash
-# Generate a test proof (requires witness input)
+# Prove all five circuits with built-in sample inputs (exit 1 on any failure)
 node scripts/test-proof-generation.js
 ```
 
@@ -362,7 +367,7 @@ node scripts/test-proof-generation.js
 Install the **Rust** circom 2.x compiler (see Prerequisite at the top):
 
 ```bash
-git clone --depth 1 https://github.com/iden3/circom.git
+git clone --depth 1 --branch v2.2.3 https://github.com/iden3/circom.git  # the version CI uses
 cd circom && cargo build --release
 cp target/release/circom ~/.cargo/bin/
 circom --version    # must report 2.x
@@ -383,13 +388,10 @@ npm install -g snarkjs
 npx snarkjs --version
 ```
 
-### **Issue 3: "wget: command not found" (macOS)**
+### **Issue 3: Fetching the Powers of Tau file by hand**
 
 ```bash
-# Install wget using Homebrew
-brew install wget
-
-# Or use curl instead. The Hermez S3 and GCS mirrors are gone (403); the
+# setup:zk uses curl. The Hermez S3 and GCS mirrors are gone (403); the
 # file is served from this repo's releases. setup:zk does this for you and
 # verifies the hash; if you fetch by hand, verify it yourself:
 curl -fL -o build/circuits/powersOfTau28_hez_final_15.ptau \
@@ -410,7 +412,8 @@ NODE_OPTIONS="--max-old-space-size=4096" npm run setup:zk
 
 `setup:zk` never writes mock or placeholder files. If any stage fails — missing
 compiler, failed Powers of Tau download, compilation error, key generation error —
-it aborts with exit code 1 and leaves `contracts/privacy/verifiers/` untouched.
+it aborts with exit code 1; the failing circuit's verifier is left as it was
+(circuits earlier in the same run were regenerated, a no-op for unchanged circuits).
 
 Read the reported error and fix its cause; there is no fallback to work around.
 
@@ -420,7 +423,7 @@ Read the reported error and fix its cause; there is no fallback to work around.
 # Real WebAssembly starts with the magic bytes 0061736d
 xxd -p -l4 build/circuits/whitelist_membership/whitelist_membership_js/whitelist_membership.wasm
 
-# Proving keys are large binaries (300 KB – 5 MB), not small JSON
+# Proving keys are large binaries (about 29 MB to 104 MB), not small JSON
 ls -la build/circuits/*/*.zkey
 ```
 
@@ -430,12 +433,13 @@ ls -la build/circuits/*/*.zkey
 
 ### **Quick Commands:**
 
-| Command             | Purpose               |
-| ------------------- | --------------------- |
-| `npm run setup:zk`  | Build all circuits    |
-| `npm install`       | Install dependencies  |
-| `circom --version`  | Check Circom version  |
-| `snarkjs --version` | Check SnarkJS version |
+| Command             | Purpose                                         |
+| ------------------- | ----------------------------------------------- |
+| `npm run setup:zk`  | Build all circuits                              |
+| `npm run verify:zk` | Check artifacts against the committed verifiers |
+| `npm install`       | Install dependencies                            |
+| `circom --version`  | Check Circom version                            |
+| `snarkjs --version` | Check SnarkJS version                           |
 
 ### **Key Files:**
 
@@ -453,7 +457,7 @@ ls -la build/circuits/*/*.zkey
   build `pragma circom 2.0.0` circuits. Verified working: 2.2.3
 - ✅ **snarkjs** (v0.7.5+) - Proof generation/verification
 - ✅ **circomlib** (v2.0.5+) - Circuit library
-- ✅ **Node.js** (v16+) - Runtime environment
+- ✅ **Node.js** 20, 22 or 24 (CI uses 22) - Runtime environment
 
 ---
 

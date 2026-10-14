@@ -38,8 +38,8 @@ cover the first, the test suite the second.
 
 ## Circuit inventory
 
-Numbers from `npm run verify:zk` and `snarkjs r1cs info` on the current
-tree.
+Numbers from `npm run verify:zk` (nPublic, sizes), `snarkjs r1cs info`
+(constraints) and `snarkjs plonk setup` (gates) on the current tree.
 
 | Circuit                | Public signals (snarkjs order)                                                                    | nPublic | R1CS constraints | PLONK gates | PLONK domain | WASM   | zkey   |
 | ---------------------- | ------------------------------------------------------------------------------------------------- | ------- | ---------------- | ----------- | ------------ | ------ | ------ |
@@ -52,19 +52,24 @@ tree.
 PLONK gates are the "Plonk constraints" `snarkjs plonk setup` reports.
 
 A proof takes seconds to generate (the attestation soundness tests take
-about 9 s per real proof). A PLONK verification through the wrapper costs
-roughly 0.4M gas.
+about 9 s per real proof). The gas of a PLONK verification through the
+wrapper is not measured in the repo (the soundness suites print `gasUsed`
+but assert nothing).
 
 ## What each proof does on chain
 
 - **Whitelist** (the only proof that gates transfers). The leaf is the
-  investor's commitment `Poseidon(identity, secret)`; the operator (ops,
-  the `listOperator`) publishes the root on `PrivacyManager`.
+  investor's commitment `Poseidon(identity, secret)`; the list operator
+  (ops) or PrivacyManager's owner (governance after the handover)
+  publishes the root on `PrivacyManager`.
   `submitWhitelistProof` requires the current root, `walletBinding ==
 msg.sender`, and one wallet per nullifier `Poseidon(secret, root)` per
   root version. `ComplianceRules` reads `hasValidWhitelistProof(wallet)`
   when a token's whitelist mode is ZkOnly or Either (OracleOnly ignores
-  it). Publishing a new root lapses every binding until its holder proves
+  it). In Either with a whitelist oracle bound, a proof alone serves only
+  investor types whose required tier is 1; a type needing more needs an
+  oracle listing at that tier (D46 a). Either with no oracle bound acts as
+  ZkOnly. Publishing a new root lapses every binding until its holder proves
   again.
 - **Blacklist**: the holder of a whitelist commitment proves its identity
   is not in the sanctions tree. It gates nothing; sanctions on transfers
@@ -78,8 +83,9 @@ msg.sender`, and one wallet per nullifier `Poseidon(secret, root)` per
   `min(now + proofValidityPeriod, validUntil)`, so a record never outlives
   its attestation; a new attestation renews it. The jurisdiction policy is the
   set of countries `ComplianceRules` allows for VSC (one source, Task 3.8).
-  The records are read by the `validatePrivate*` views, which nothing on
-  the transfer path calls.
+  The records are read by the `validatePrivate*` calls (state-changing:
+  they emit an event) and the `validateAllPrivateCompliance` view; nothing
+  on the transfer path calls them.
 
 What stays private: which listed identity a whitelist proof belongs to
 (the list cannot be enumerated from public identity data), and the

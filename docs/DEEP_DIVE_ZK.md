@@ -129,13 +129,15 @@ refuses a listed identity before proving.
 
 A trusted issuer signs the investor's attributes off chain with an EdDSA
 Baby Jubjub key (D31 a, `scripts/zk/attest.js`); the circuits verify the
-signature against the issuer's public key (Ax, Ay) and the public policy,
-bind the wallet and emit a nullifier. Shared templates live in
+signature against the issuer's public key (Ax, Ay), the chain id, the
+PrivacyManager (`verifierContext`), the signed expiry `validUntil` and the
+public policy, bind the wallet and emit a nullifier. Shared templates live in
 `circuits/attestation.circom`:
 
 ```circom
-// M = Poseidon(domain, identity, attributes..., salt); domain 1, 2, 3 per
-// circuit, so an attestation signed for one circuit fails in another.
+// M = Poseidon(domain, chainId, verifierContext, validUntil, identity, attributes..., salt);
+// domain 1, 2, 3 per circuit, so an attestation signed for one circuit fails in
+// another; validUntil < 2^64; R8 checked on the curve (BabyCheck).
 component sig = EdDSAPoseidonVerifier();
 sig.enabled <== 1;                 // constant: the check cannot be switched off
 sig.Ax <== Ax; sig.Ay <== Ay;      // public: PrivacyManager must trust them
@@ -143,26 +145,32 @@ sig.R8x <== R8x; sig.R8y <== R8y; sig.S <== S; sig.M <== message.out;
 // nullifier = Poseidon(salt, policyHash): one wallet per attestation per policy
 ```
 
-| Circuit                  | Attested (private)                                       | Policy (public)                                                                       | Public signals                                                                            |
-| ------------------------ | -------------------------------------------------------- | ------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------- |
-| `jurisdiction_proof`     | PrivacyManager's bit for the investor's ISO country code | `allowedMask` = OR of the bits of the registered codes ComplianceRules allows for VSC | `[nullifier, Ax, Ay, chainId, verifierContext, allowedMask, walletBinding]`               |
-| `accreditation_proof`    | the accreditation amount (< 2^64)                        | `minimumAccreditation`                                                                | `[nullifier, Ax, Ay, chainId, verifierContext, minimumAccreditation, walletBinding]`      |
-| `compliance_aggregation` | four scores 0..100 in one attestation                    | minimum and four weights summing to 100                                               | `[nullifier, Ax, Ay, chainId, verifierContext, minimum, wK, wA, wJ, wAcc, walletBinding]` |
+| Circuit                  | Attested (private)                                       | Policy (public)                                                                       | Public signals                                                                                        |
+| ------------------------ | -------------------------------------------------------- | ------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------- |
+| `jurisdiction_proof`     | PrivacyManager's bit for the investor's ISO country code | `allowedMask` = OR of the bits of the registered codes ComplianceRules allows for VSC | `[nullifier, Ax, Ay, chainId, verifierContext, validUntil, allowedMask, walletBinding]`               |
+| `accreditation_proof`    | the accreditation amount (< 2^64)                        | `minimumAccreditation`                                                                | `[nullifier, Ax, Ay, chainId, verifierContext, validUntil, minimumAccreditation, walletBinding]`      |
+| `compliance_aggregation` | four scores 0..100 in one attestation                    | minimum and four weights summing to 100                                               | `[nullifier, Ax, Ay, chainId, verifierContext, validUntil, minimum, wK, wA, wJ, wAcc, walletBinding]` |
 
 Every check is a hard constraint: the mask has exactly one bit and it is set
 in `allowedMask` (both range-checked to 64 bits); `amount >= minimum`; the
 weighted sum `>= minimum * 100` (no aggregate is output, so nothing beyond
-"meets the policy" is disclosed). PLONK on the universal ptau: 24,187 /
-24,131 / 26,046 gates (power 15).
+"meets the policy" is disclosed). nPublic 8 / 8 / 12. PLONK on the universal
+ptau: 25,100 / 25,044 / 27,085 gates (power 15).
 
-PrivacyManager's `submitAttestationProof(circuitId, proof, signals)` requires
-the issuer key to be trusted for the circuit (`setTrustedAttestor`), the
-policy signals to equal the current policy, `walletBinding == msg.sender`
+PrivacyManager's `submitAttestationProof(circuitId, proof, signals)` refuses
+the blacklist circuit (`NonGatingBlacklistProof`), a wrong signal count, an
+unset policy, another chain (`WrongChainId`), another PrivacyManager
+(`WrongVerifierContext`) and an expired attestation (`AttestationExpired`);
+it requires the issuer key to be trusted for the circuit
+(`setTrustedAttestor`), the policy signals to equal the current policy,
+`walletBinding == msg.sender`
 and the nullifier to be free under the policy (or the caller's), verifies
 through the wrapper, and records `{policyHash, attestor, nullifier,
-expiresAt}`. A record counts while its policy is current, its issuer key is
-still trusted and it has not expired; `validatePrivate*` add the user's
-preference flags.
+expiresAt}` (with the policy and attestor epochs), where `expiresAt =
+min(now + proofValidityPeriod, validUntil)`. A record counts while its
+policy is current, its issuer key is still trusted and it has not expired;
+`validatePrivate*` add the user's preference flags (state-changing calls
+that emit an event; no transfer path calls them).
 
 **Properties:**
 
