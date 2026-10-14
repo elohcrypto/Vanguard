@@ -3,10 +3,12 @@
 # Coverage ratchet: the instrumented suite passes and line coverage does
 # not DROP below BASELINE; a climb of 2+ points prints a notice.
 #
-# Baseline 95 (Task 4.15, Q11 b): measured at 96.48% lines locally at
-# the 4.15 tree on 2026-10-12 (earlier baselines 63.73% -> 65 -> 84 ->
-# 86 -> 88 -> 90, 90.7% at c0e73fc, 95.33% at aa65de8 with three
-# failures hidden). The run itself is a gate: a failing test fails it
+# Baseline 97 (Task 5.3): 97.43% lines measured at a9f18fb and in CI
+# (run 38432941280), 97.61% at 1317330 with the 5.3 guard tests, rounded
+# down.
+# Earlier: 95 at the 4.15 tree (96.48%, 2026-10-12, Q11 b); 63.73% ->
+# 65 -> 84 -> 86 -> 88 -> 90, 90.7% at c0e73fc, 95.33% at aa65de8 with
+# three failures hidden. The run itself is a gate: a failing test fails it
 # (no `|| true`; three permanent failures and, since 4.13, a corrupted
 # run hid behind one).
 #
@@ -40,7 +42,7 @@
 
 set -uo pipefail
 cd "$(dirname "$0")/../.."
-BASELINE=95
+BASELINE=97
 LOG=coverage.log
 TIMINGS=coverage-timings.log
 if [ "${1:-}" = "--from" ]; then
