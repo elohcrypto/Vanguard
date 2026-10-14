@@ -9,9 +9,8 @@ line it prints when it worked. The rules and their reasons:
 ([transfer](DEEP_DIVE_TRANSFER.md), [identity](DEEP_DIVE_IDENTITY.md),
 [ZK](DEEP_DIVE_ZK.md)).
 
-Status: draft (Task 5.6; audit and snapshot digest since 5.6b). Section 2
-is final after Task 5.7 (deploy with an external signer), the whole
-runbook after the Sepolia rehearsal (Task 5.8).
+Status: draft (Task 5.6; audit and digest since 5.6b). Section 2 is final
+after Task 5.7 (external signer), the rest after the Sepolia run (5.8).
 
 ## Conventions and the local rehearsal
 
@@ -21,9 +20,8 @@ run's record directory: logs, snapshot, digests; keep it). `<ANGLE>` is a
 value the operator fills in. Output is quoted as printed; `0x…` and `N`
 stand for an address and a number that differ between runs.
 
-> **Local rehearsal box.** A fresh local node. The keys are Hardhat's
-> public test accounts (phrase published in Hardhat's documentation):
-> never use them, or this phrase, on a public network.
+> **Local rehearsal box.** A fresh local node with Hardhat's public test
+> accounts (a published phrase): never use them on a public network.
 >
 > ```bash
 > cd <repo checkout>                 # a clean checkout of the reviewed commit
@@ -48,7 +46,8 @@ stand for an address and a number that differ between runs.
 > `reset` prints `{"jsonrpc":"2.0","id":1,"result":true}`; `l0deploy`
 > adds `handover fixture deployed; config written to /tmp/vanguard-runbook/handover.json`;
 > `l0` adds `✅ Handover complete: the deployer holds no power.`
-> Skip lines marked `# local` on a public network.
+> Skip lines marked `# local` on a public network. When the rehearsal ends:
+> `unset MNEMONIC PRIVATE_KEY` (`sepolia` and `mainnet` refuse the phrase).
 >
 > **Two tracks.** The ceremony CLI (`scripts/handover.ts`) is the
 > production path; locally it runs on the handover fixture
@@ -80,8 +79,8 @@ npx hardhat run scripts/print-role-wallets.js --network $NET
 ```
 
 prints one row per role, locally
-` 10  ops                                0xBcd4042DE499D14e55001CcbB24a551F3b954096  10000.0 ETH`
-(on Sepolia the balances to fund; amounts pending 5.7).
+` 10  ops                                0xBcd4042DE499D14e55001CcbB24a551F3b954096  10000.0 ETH` (on Sepolia
+the balances to fund; amounts pending 5.7).
 
 ## 2. Deploy (final after Task 5.7)
 
@@ -94,25 +93,23 @@ prints one row per role, locally
   npx hardhat run scripts/production/DeployProduction.ts --network hardhat > $RB/deploy-identity.log 2>&1; grep "Complete!" $RB/deploy-identity.log
   ```
 
-  prints `✅ System Configuration Complete!` and
-  `🎉 Production Deployment Complete!`.
+  prints `✅ System Configuration Complete!` and `🎉 Production Deployment Complete!`.
 
 - The full stack is deployed today only by the demo (option 1 or 1a,
   then 21, 51, 31, 74) or locally by the fixture (L0); Task 5.7 adds the
-  deploy writing `handover.json`. Do not improvise one publicly. Its keys
-  (one root, `governance`; wallet indices; acknowledgement lists):
-  [TESTNET_CEREMONY](TESTNET_CEREMONY.md#handover-ceremony).
+  deploy writing `handover.json` (do not improvise one publicly; its keys:
+  [TESTNET_CEREMONY](TESTNET_CEREMONY.md#handover-ceremony)).
 
 ## 3. Voter registration (D25)
 
 The ceremony's proposer and voters are verified wallets that control
 their OnchainID, hold the VGT fees for every acceptance vote, with an
 identity at least `minVoterAge` (7 days / `GOV_TIME_SCALE`) old at the
-first proposal: register and fund them 7 days ahead. Onboard with demo
-options 23 or 24 (`24:1:<name>`) or claims 6 and 7; fund with 75a (mint;
-the deployer before the ceremony, ops after) or 75. Delete every identity
-whose claims expired before any proposal (`deleteIdentity`): it still
-counts toward quorum (D7). The CLI checks this first. Local: L0.
+first proposal: register and fund them 7 days ahead (onboard: demo
+options 23, 24 `24:1:<name>` or claims 6 and 7; fund: 75a, a mint by the
+deployer before the ceremony and ops after, or 75). Delete every identity
+whose claims expired (`deleteIdentity`): it still counts toward quorum
+(D7). The CLI checks all this first. Local: L0.
 
 ```bash
 l0   # local
@@ -126,8 +123,8 @@ L0 prints
 
 ## 4. Oracle nodes (D50, Q4)
 
-Production runs three independent node keys. The ceremony names each node
-the deployer registered (demo option 31 registers wallets 1, 2, 3):
+Production runs three independent node keys. The ceremony and the audit
+name each node the deployer registered (demo option 31: wallets 1, 2, 3):
 `   ⚠️  OracleManager node 0x… (KYC_ORACLE) was registered by the deployer at block N: it votes with a key the deployer chose; rotate deployer-era nodes by an OracleParameters vote (D50)`.
 Rotate by vote once governance owns OracleManager, before going live
 (R-56-2): new nodes first, so at least two stay and none alone reaches
@@ -171,14 +168,18 @@ the 66% bar (`TooFewNodes`, `SingleNodeQuorum`).
 
    ends `✅ Audit passed: the deployer holds no power.` and lists
    `   ✅ every registered OracleManager node is acknowledged in oracleNodes (3 registered, 3 acknowledged)`
-   (a node left out fails it). The accept phase compares with the
-   ceremony's snapshot, so after any vote it fails for good
+   (a node left out fails it; one the deployer registered itself ends it
+   `⚠️  Audit passed with warnings: see above.`). The accept phase compares
+   with the ceremony's snapshot, so after any vote it fails for good
    (`   ❌ appeared after the preflight, not granted by the ceremony: 0x… in OracleManager nodes, …`).
 
-2. Remove each deployer-era node by an OracleParameters vote: demo option
-   76, type 2, action 3 (`removeOracle`; after the ceremony 76 proposes
-   from the first eligible wallet but 0), then 77 per other voter (77
-   approves the voter's fee), 79 and 78. Local: reset.
+2. Then remove each deployer-era node by an OracleParameters vote: demo
+   option 76, type 2, action 3 (`removeOracle`; after the ceremony 76
+   proposes from the first eligible wallet but 0), then 77 per other
+   voter (77 approves the voter's fee), 79 and 78. Option 76 registers no
+   node, so the drive is a removal-only illustration on a reset chain
+   (option 31's three nodes to two); publicly step 1 comes first. Local:
+   reset.
 
    ```bash
    reset   # local
@@ -201,10 +202,9 @@ A consensus clearing a governance sanction is accountable (D27, section 9).
 
 ## 5. The ceremony
 
-From a clean checkout of the reviewed commit after
-`npx hardhat clean && npx hardhat compile` (the code-hash pins compare
-against `artifacts/`; a coverage build refuses an honest deployment).
-Local: `l0deploy` stands in for the deploy.
+From a clean checkout of the reviewed commit after `npx hardhat clean &&
+npx hardhat compile` (the code-hash pins compare against `artifacts/`; a
+coverage build refuses an honest deployment). Local: `l0deploy` deploys.
 
 ```bash
 l0deploy   # local
@@ -226,8 +226,8 @@ The rules for the window and after (the deployer key sends only votes
 and VGT `approve(governance)` in the window and nothing after it; no
 governance nomination on an InvestorRequestManager or list oracle;
 factory-made identities only; re-sign claims after a revocation
-(`Signer does not have claim signer key`); exempt
-the treasury and fee wallets first) and their reasons:
+(`Signer does not have claim signer key`); exempt the treasury and fee
+wallets first) and their reasons:
 [TESTNET_CEREMONY](TESTNET_CEREMONY.md#runbook-rules-for-the-ceremony-and-after-plan-2f).
 Check and clear a nomination on the InvestorRequestManager from ops;
 `IRM` is the address the completion names in
@@ -259,17 +259,21 @@ prints `owner: 0x70997970C51812dc3A010C7d01b50e0d17dc79C8 pendingOwner: 0x9A676e
 The full phase writes `$HANDOVER_CONFIG.snapshot.json`, its sha256
 beside it (`….snapshot.json.sha256`) and prints the digest.
 `HANDOVER_PHASE=accept` requires that digest in `HANDOVER_SNAPSHOT_SHA256`
-(the sidecar can be rewritten with the file) and refuses a file whose
-hash differs from either. Local: L0.
+and refuses a file whose hash differs from it or the sidecar. Whoever can
+rewrite `$RB` can rewrite the snapshot, the sidecar and any digest kept
+there together, so `$RB` must not hold the only copy. Local: L0.
 
-1. Right after the full phase, keep the digest it printed
-   (`   snapshot sha256: <64 hex> (in …snapshot.json.sha256; keep this line with the run's records)`):
-   `awk '/snapshot sha256:/ {print $3}' $RB/handover.log > $RB/snapshot.sha256; cat $RB/snapshot.sha256`.
-2. Before every accept run, check and pass it:
+1. Right after the full phase, record the digest it printed
+   (`   snapshot sha256: <64 hex> (in …snapshot.json.sha256; record this line outside the run directory)`)
+   outside `$RB` (the ceremony ticket, a signed message, a second person);
+   locally a shell variable stands in:
+   `export TICKET_SHA256=$(awk '/snapshot sha256:/ {print $3}' $RB/handover.log)`.
+
+2. Before every accept run, take the digest from that record, not `$RB`:
 
    ```bash
    sha256sum -c $HANDOVER_CONFIG.snapshot.json.sha256
-   HANDOVER_SNAPSHOT_SHA256=$(cat $RB/snapshot.sha256) HANDOVER_PHASE=accept npx hardhat run scripts/handover.ts --network $NET > $RB/accept.log 2>&1; tail -1 $RB/accept.log
+   HANDOVER_SNAPSHOT_SHA256=$TICKET_SHA256 HANDOVER_PHASE=accept npx hardhat run scripts/handover.ts --network $NET > $RB/accept.log 2>&1; tail -1 $RB/accept.log
    ```
 
    prints `/tmp/vanguard-runbook/handover.json.snapshot.json: OK`; the log
@@ -277,15 +281,15 @@ hash differs from either. Local: L0.
    `   snapshot sha256: <64 hex> (matches the full phase's)` and
    `   snapshot: /tmp/vanguard-runbook/handover.json.snapshot.json (block N)`
    and ends as in section 5. Without the variable it refuses:
-   `❌ Handover failed: snapshot digest missing: set HANDOVER_SNAPSHOT_SHA256 to the digest the full phase printed for …snapshot.json ("snapshot sha256: <hex>", kept in the run's records); …`.
+   `❌ Handover failed: snapshot digest missing: set HANDOVER_SNAPSHOT_SHA256 to the digest the full phase printed for …snapshot.json ("snapshot sha256: <hex>", recorded outside the run directory); …`.
 
 3. An edited snapshot stops it before anything is read (a re-run, not a
    pass: record it so and run the full phase again):
    `❌ Handover failed: snapshot hash mismatch: …snapshot.json hashes to <hex>, but …snapshot.json.sha256 records <hex>: the file was edited after the full phase wrote it; a completion against it is a re-run, not a pass`
    (sidecar rewritten too: `… but HANDOVER_SNAPSHOT_SHA256 is <hex>: …`).
 4. A full re-run writes a new pair (a read-only old file is replaced:
-   `   (replaced a snapshot with sha256 <hex>)`); move the old pair into
-   the record first. An unwritable directory stops it before step 1
+   `   (replaced a snapshot with sha256 <hex>)`; record the old pair first).
+   An unwritable directory stops it before step 1
    (`❌ Handover failed: EACCES: permission denied, open '…snapshot.json.tmp'`).
 
 ## 7. The KeyManager ops identity
@@ -302,8 +306,7 @@ grep -E "OPS_IDENTITY|must send" $RB/deploy-identity.log
 ```
 
 With `OPS_IDENTITY` unset it prints
-`   ⚠️  OPS_IDENTITY not set: KeyManager is authorized on no identity yet.`
-and
+`   ⚠️  OPS_IDENTITY not set: KeyManager is authorized on no identity yet.` and
 `   The ops key must send: OnchainID(<ops identity>).authorizeManager(0x…) from the identity owner <ops key>`.
 With `OPS_IDENTITY=<ops OnchainID>` owned by the ops key it prints the
 `authorizeManager` call and
@@ -437,8 +440,7 @@ one subject per clearing otherwise.
   EOF
   ```
 
-  prints `VSC paused: true`,
-  `   ⏩ unpause VSC: voting period + execution delay: jumped 656s (dev node)`
+  prints `VSC paused: true`, `   ⏩ unpause VSC: voting period + execution delay: jumped 656s (dev node)`
   and `VSC paused: false`; publicly `settleProposal` waits.
 
 - VGT: a pause by vote is released by ops (VGT agent) with `unpause()`,

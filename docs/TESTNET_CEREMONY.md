@@ -219,7 +219,8 @@ differs from the derivation (R-413-1); `escrowWalletFactory`, `onchainIDFactory`
 `privacyManager` and `zkVerifier` must still be stated (an address, or `null`) while governance
 cannot derive them, before step 3 binds them (R-413-2); any other key is refused.
 `HANDOVER_PHASE=accept` resumes a partial run; it requires `HANDOVER_SNAPSHOT_SHA256` (the digest
-the full phase printed) and refuses a snapshot whose sha256 differs from it or the sidecar (B-6). `HANDOVER_PHASE=audit` is the day-2
+the full phase printed, recorded outside the run directory: the directory holding the snapshot and
+its sidecar must not hold the only copy, R-56c-2) and refuses a snapshot whose sha256 differs from it or the sidecar (B-6). `HANDOVER_PHASE=audit` is the day-2
 re-check: every completion line against the state governance derives now, no snapshot or window
 ([OPERATOR_RUNBOOK](OPERATOR_RUNBOOK.md) section 10). The preflight (and 83e, as failing lines) also
 refuses, from the event scans: any agent but the deployer, ops, governance (VGT) and the tokens
@@ -337,8 +338,9 @@ plain `83c` otherwise).
   A change by vote that leaves the deployer no power passes; a deployer
   power, an unacknowledged holder (agent, role, owner, node, attestor,
   trusted contract), a pending owner other than governance or ops, or an
-  open proposal on a plan contract fails. An acknowledged node passes
-  whoever sent its registration. It refuses before the ceremony
+  open proposal on a plan contract fails. A node a governance execution
+  registered passes whoever sent it; one the deployer registered itself
+  ends it with D50's warning (R-56c-1). It refuses before the ceremony
   completed (governance does not own every plan contract).
 
 ### Whitelist roots and proofs from the command line (Task 3.5)
