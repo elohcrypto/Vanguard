@@ -26,7 +26,9 @@
 //                                 optionally over the named groups only
 //   record <run.json> <file...>   (re)write the baseline groups for the
 //                                 named files from a run, files = [file]
-// Retires when the ratchet allowlists no test/ file.
+// A deliberate later change to a group's tests (one added, one renamed,
+// an assertion more) updates that group's row in the same commit. The
+// gate retires with the ratchet's allowlist (empty after Task 5.5).
 const fs = require("fs");
 const path = require("path");
 
