@@ -216,7 +216,7 @@ investorRequestManager.updateLockRequirement(
 ## 🧪 Testing
 
 See `test/investor/Investor{WalletAndRequests,OnboardingWorkflow,Custody}.test.ts`
-for comprehensive test coverage including:
+for the tests, including:
 
 - Complete onboarding workflow
 - Multi-sig operations
