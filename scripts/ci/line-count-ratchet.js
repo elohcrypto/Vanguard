@@ -26,8 +26,7 @@ const EXEMPT = [
 ];
 // Allowlist, measured at aa65de8 (2026-10-12, the start of Task 4.15);
 // empty since Task 5.5 split the last two docs. Keep it empty.
-const ALLOW = {
-};
+const ALLOW = {};
 
 function lineCount(file) {
   const text = fs.readFileSync(file, "utf8");
