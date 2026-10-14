@@ -6,14 +6,14 @@
 const { ethers, network } = require("hardhat");
 const ROLES = [
   "deployer",
-  "fee wallet, compliance officer, KYC oracle node",
+  "fee wallet, compliance officer",
   "AML oracle node",
   "compliance oracle node",
   "onboarded user",
   "onboarded user",
-  "investor (Alice)",
-  "investor (Bob)",
-  "investor (Carol)",
+  "investor Alice",
+  "investor Bob",
+  "investor Carol",
   "issuer admin",
   "ops",
   "guardian",

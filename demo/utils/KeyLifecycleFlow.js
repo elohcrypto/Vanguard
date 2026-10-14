@@ -43,14 +43,14 @@ const AGENT_WALLETS = [7, 8];
 const RECOVERED_WALLET = 6;
 const ROLES = [
   "deployer",
-  "fee wallet, compliance officer, KYC oracle node",
+  "fee wallet, compliance officer",
   "AML oracle node",
   "compliance oracle node",
   "onboarded user",
   "onboarded user",
-  "investor (Alice)",
-  "investor (Bob)",
-  "investor (Carol)",
+  "investor Alice",
+  "investor Bob",
+  "investor Carol",
   "issuer admin",
   "ops",
   "guardian",
