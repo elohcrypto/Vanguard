@@ -212,7 +212,7 @@ VanguardGovernance is the owner, its vote is the protection.
 `test/erc3643/TrustedPathCaps.test.ts` (D26),
 `test/erc3643/InvestorTypeCooldown.test.ts` and
 `test/erc3643/InvestorTypeTier.test.ts` (Task 4.10),
-`test/investor/InvestorOnboarding.test.ts` (custody),
+`test/investor/InvestorCustody.test.ts` (custody),
 `test/simple-transfer-limits-test.js` and
 `test/transfer-limits-verification.js`. All run under `npm test`.
 `scripts/demo-smoke-investor.js` (a leg of `scripts/demo-smoke.js`) runs
