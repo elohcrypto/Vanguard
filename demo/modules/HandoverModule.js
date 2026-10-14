@@ -307,7 +307,7 @@ class HandoverModule {
           r.label,
         );
         await castAcceptanceVotes(gov, id, pick.voters);
-        await settleProposal(gov, id, r.label);
+        await settleProposal(gov.connect(pick.proposer), id, r.label);
         console.log(`   ✅ ${r.label} (proposal #${id})`);
         queued.shift();
       }
@@ -428,7 +428,11 @@ class HandoverModule {
         "\n⏰ Step 4: Advancing past the voting period and execution delay, then executing...",
       );
       try {
-        await settleProposal(vanguardGovernance, proposalId, label);
+        await settleProposal(
+          vanguardGovernance.connect(proposer),
+          proposalId,
+          label,
+        );
       } catch (error) {
         if (error.code !== "NOT_PASSED") throw error;
         displayError(

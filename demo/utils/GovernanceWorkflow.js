@@ -260,7 +260,8 @@ async function runCompleteWorkflow({ state, promptUser, log = console.log }) {
       log(`   💡 Execute proposal #${id} with option 78 after that time`);
       return { proposalId: id, status: STATUS[Number(p.status)], target };
     }
-    await settleProposal(gov, id, `proposal #${id}`);
+    // R-56-5: executed by the proposer, never the default wallet 0.
+    await settleProposal(gov.connect(pick.proposer), id, `proposal #${id}`);
     const [after] = await gov.getProposal(id);
     const rule = await rules.getJurisdictionRule(vscAddr);
     const ok =

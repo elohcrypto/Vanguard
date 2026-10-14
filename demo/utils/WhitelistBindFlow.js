@@ -213,7 +213,12 @@ async function bindWhitelistToToken(mod) {
         return console.log("   💡 Vote with option 77, execute with 78");
       }
       await castAcceptanceVotes(gov, id, pick.voters);
-      await settleProposal(gov, id, "bind the whitelist oracle");
+      // R-56-5: executed by the proposer, never the default wallet 0.
+      await settleProposal(
+        gov.connect(pick.proposer),
+        id,
+        "bind the whitelist oracle",
+      );
       console.log(`   ✅ proposal #${id} executed`);
     }
     const after = await rules.whitelistOracle(vsc);
