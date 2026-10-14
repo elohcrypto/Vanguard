@@ -41,7 +41,7 @@ describe("Governance and custody guards (Task 5.3)", function () {
 
   it("the VanguardGovernance constructor refuses a zero or codeless token or registry", async function () {
     const f = await loadFixture(handoverFixture);
-    const F = await ethers.getContractFactory("VanguardGovernance");
+    const F: any = await ethers.getContractFactory("VanguardGovernance");
     const c = f.c;
     const ok = [
       await c.governanceToken.getAddress(),
@@ -69,7 +69,7 @@ describe("Governance and custody guards (Task 5.3)", function () {
   describe("MultiSigWallet", function () {
     it("the constructor refuses zero parties or token and a bank that is the user", async function () {
       const f = await loadFixture(deployCustody);
-      const F = await ethers.getContractFactory("MultiSigWallet");
+      const F: any = await ethers.getContractFactory("MultiSigWallet");
       const [b, u, t] = [f.bank.address, f.user.address, f.token.target];
       for (const [a, reason] of [
         [[Z, u, t], "Invalid bank address"],

@@ -11,7 +11,7 @@ describe("InvestorRequestManager guards (Task 5.3)", function () {
 
   it("the constructor refuses a zero bank, token or registry and a codeless registry", async function () {
     const f = await loadFixture(deployCustody);
-    const F = await IRM();
+    const F: any = await IRM();
     const eoa = f.stranger.address;
     const ok = [
       f.bank.address,

@@ -11,7 +11,7 @@ describe("EscrowWalletFactory guards (Task 5.3)", function () {
 
   it("the constructor refuses a zero or codeless dependency", async function () {
     const f = await loadFixture(deployEscrow);
-    const F = await ethers.getContractFactory("EscrowWalletFactory");
+    const F: any = await ethers.getContractFactory("EscrowWalletFactory");
     const eoa = f.stranger.address;
     const ok = [
       f.vsc.target,
