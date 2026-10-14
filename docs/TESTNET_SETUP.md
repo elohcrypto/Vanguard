@@ -12,17 +12,18 @@ The testnet guide is three files: [setup](TESTNET_SETUP.md) (roles, time scale, 
 One BIP-39 mnemonic in `.env`; Hardhat derives twelve keys at
 `m/44'/60'/0'/0/N`. Index N is the same role on every network, so demo code
 that reads `signers[2]` means "the AML oracle node" whether the node is local or
-Sepolia. Each role signs only its own transactions; the contracts' 26 access
-modifiers are what enforce the separation.
+Sepolia. Each role signs only its own transactions; the contracts' access
+checks (their own modifiers, OpenZeppelin ownership and roles, and inline
+caller checks) are what enforce the separation.
 
 | Index   | Role                                   | Signs                                                                                                                  |
 | ------- | -------------------------------------- | ---------------------------------------------------------------------------------------------------------------------- |
 | 0       | Platform owner, deployer, central bank | deploys, agent grants, treasury mints (investor-limit exempt, D22), governance ownership (until the handover ceremony) |
 | 1       | Fee wallet, compliance officer         | investor-type assignments; KYC oracle node (registered by option 31)                                                   |
-| 2       | AML oracle node                        | oracle attestations (option 31); emergency designation (option 32)                                                     |
+| 2       | AML oracle node                        | oracle attestations (option 31); emergency listings once designated (option 32 has ops, or a vote, designate it)       |
 | 3       | Compliance oracle node                 | oracle attestations (option 31)                                                                                        |
-| 4, 5    | Risk and fraud oracles                 | attestations                                                                                                           |
-| 6, 7, 8 | Investors Alice, Bob, Carol            | proposals, votes, transfers, escrow parties                                                                            |
+| 4, 5    | Onboarded users                        | the first two names given to options 23/24: proposals, votes, transfers                                                |
+| 6, 7, 8 | Investors                              | proposals, votes, transfers, escrow parties; 6 is option 12's recovered wallet, 7 and 8 its recovery agents            |
 | 9       | Deliberately unverified; issuer admin  | rejection demonstrations; after the handover, owner of every claim issuer the deployer held (D25 b)                    |
 | 10      | Ops multisig stand-in                  | agent roles, compliance officer, oracle ownership and the escrow factory's ADMIN_ROLE after handover                   |
 | 11      | Guardian                               | pause only                                                                                                             |
@@ -30,7 +31,14 @@ modifiers are what enforce the separation.
 On Sepolia and beyond, wallets 9, 10 and 11 must be multisig addresses, not
 single keys, held by different parties: ops is an IdentityRegistry agent and
 must never also own or sign for a claim issuer (2F.5, D25 b). The demo's
-signer allocation never hands wallets 0-3 or 9-11 to an onboarded user.
+signer allocation reserves wallets 0-3 and 9-11 and hands out 4, 5, 6, ...
+in the order names are entered at options 23/24 (option 62's fallback fee
+wallet, wallet 3, is the one exception). Option 32 registers wallets 4 and
+5 as risk and fraud oracle nodes only on a manager with fewer than three
+nodes, which never happens after option 31. Some demo prints still use
+older labels (option 12 and `print-role-wallets.js` call wallets 2 and 3
+the KYC and AML issuers and 10 and 11 spare); the deploy code (option 31)
+is what this table follows.
 
 ```bash
 cp .env.example .env
@@ -51,12 +59,14 @@ table (1 day) is still 60 s. The percentages are never scaled. The demo reads
 | -------------- | ----------------------- | ------ | ----------------------------- |
 | 1              | 7 days                  | 2 days | mainnet, tests                |
 | 336            | 30 min                  | ~9 min | Sepolia walkthrough           |
-| 1440           | 7 min                   | 1 min  | local rehearsal (the ceiling) |
+| 1440           | 7 min                   | 2 min  | local rehearsal (the ceiling) |
 
 ## KYC claims and verification (2F.2)
 
 `IdentityRegistry.isVerified` asks each issuer trusted for a required topic
-(`ClaimIssuer.hasValidClaim(identity, topic)`); it does not read the
+(`ClaimIssuer.hasValidClaim(identity, topic)`, each call given 45,000 gas,
+`ISSUER_CALL_GAS`, Task 5.1; an issuer that needs more counts as having no
+claim); it does not read the
 identity's own claim list, which anyone can pad with claims naming
 themselves. The issuer's `issueClaim` still writes a copy onto the
 OnchainID (ERC-735 view), but nothing reads that copy to decide
@@ -72,11 +82,14 @@ and revoke the same way. `revokeClaim` also removes the identity-side copy
 or a batch-issued claim that never had one). A wallet recovered with `Token.recoveryAddress` is bound
 to the old OnchainID in the registry, but the identity's owner and keys are
 unchanged, so it cannot propose or vote ("Wallet does not control its
-identity") until it holds a key on that OnchainID: the designed path is
-KeyManager recovery (the holder authorised KeyManager and named recovery
-agents beforehand; the agents initiate and approve the new wallet's key, and
-after the 48-hour timelock, and within the 7 days after it, anyone executes
-it).
+identity") until it holds a key on that OnchainID, and `recoveryAddress`
+itself refuses a new wallet that does not control the identity (D41): the
+designed path is KeyManager recovery. The identity pins KeyManager as its
+recovery manager (the factory does this when it creates the identity) and
+its owner seated at least two recovery agents beforehand; one agent opens
+the new wallet's key (its own approval), the others approve, and 48 hours
+after the approval, within the 7 days after that, anyone executes it. The
+new key is a MANAGEMENT key, which is enough to vote.
 
 ## Electorate rule (D7)
 
@@ -165,9 +178,9 @@ demo (83b, 83d) and the smoke advance past it with `ChainTime.advancePastVoterAg
 which jumps on a dev node and waits on Sepolia.
 Option 82 (Task 4.7, `demo/utils/GovernanceWorkflow.js`) runs one
 ComplianceRules proposal end to end: the voter picker the ceremony votes
-use (`demo/utils/VoterPicker.js`) chooses a proposer and at least three
-voters among the verified wallets 0-9 (never 9, 10, 11; the proposer
-never votes); an actor short of the two fees is minted the difference by
+use (`demo/utils/VoterPicker.js`) takes verified wallets among 0-8 (never
+9, 10 or 11); option 82 needs one proposer and three voters among them
+(the proposer never votes); an actor short of the two fees is minted the difference by
 the VGT agent (the deployer before the ceremony, ops after it), else the
 option stops with the 75a hint; the proposer approves exactly
 `proposalCreationCost` and proposes VSC's current jurisdiction rule with
@@ -180,16 +193,19 @@ proposal exists prints its id and "continue with 77/78".
 `scripts/demo-smoke-workflow.js` runs it after the smoke's ceremony and
 asserts Executed, the proposer's absent vote, the ops top-up and the
 rule; `demo-drive.sh --strict 1 21 51 74 24:1:Alice 24:1:Bob 24:1:Carol
-24:1:Dave 82:yes` drives it before the ceremony (the deployer tops up).
+24:1:Dave 82:yes` drives it before the ceremony (the deployer tops up;
+the four users take wallets 4 to 7).
 
 ## Waiting instead of jumping
 
-The four demo paths that used to call `evm_increaseTime` (governance option
-79, ownership-by-vote 83b, escrow 73a and 73b) now go through
+Governance option 79, ownership-by-vote 83b and escrow 73b go through
 `demo/utils/ChainTime.advancePast`. It reads the real deadline from the
 chain, jumps if the node allows it, and otherwise polls until the deadline
-has passed. The 13-of-14-day escrow demonstration is dev-node only and says
-so on a network that cannot jump. Option 73 runs 62 -> 63 -> 64 -> 65 -> 73b
+has passed. The 13-of-14-day escrow demonstration (73a) jumps itself and
+only on a dev node, and says so on a network that cannot jump. Option 11
+(claim expiry) still jumps 120 s with no such check, so it is dev-node
+only. The key options (12, 5) jump on a dev node and otherwise print when
+to come back. Option 73 runs 62 -> 63 -> 64 -> 65 -> 73b
 -> 68 -> 69 -> 71 with no prompts and a chain-read verdict per step; on a
 network that cannot jump it stops after the proof and prints when the
 dispute window closes.
@@ -206,8 +222,9 @@ for the default wallet), `47:1`. An empty field is Enter. Answers may
 contain commas (`0,1,2`), not colons. A menu choice goes only to the menu
 and a sub-answer only to another prompt: when an option asks a prompt the
 argument does not answer, or returns to the menu with answers left, the
-drive stops with exit 1 and names the prompt. `--strict` also fails on
-any line starting with "❌".
+drive stops with exit 1 and names the prompt. `--strict` also fails on a
+line starting with "❌", an indented "❌" inside the handover ceremony's
+output, a "Handover incomplete" line, or a non-zero exit of the demo.
 
 ## Local rehearsal (do this before Sepolia)
 
@@ -216,10 +233,12 @@ MNEMONIC="<your phrase>" npx hardhat node          # funds the 12 role wallets
 GOV_TIME_SCALE=1440 npm run demo:interactive:proof   # in another terminal
 ```
 
-Then walk: 1 (deploy, privacy pair and KeyManager included), 12 (key
-rotation and recovery on wallet 1's identity), 74 (governance), 75 (distribute VGT to 6-8), 76
-(Alice proposes), 77 (Bob and Carol vote), 79 (wait ~8 min), 78 (execute),
-78a (claim on a rejected one). Every action is signed by its role's key.
+Then walk: 1 (deploy, privacy pair and KeyManager included), 21 (VSC and
+ComplianceRules), 31 (oracles), 51 (investor types), 74 (governance), 23 or
+24 three times (onboard three verified investors), 12 (key rotation and
+recovery on wallet 1's identity), 75 (distribute VGT to them), 76 (one
+proposes), 77 (the others vote), 79 (jumps past the vote and the delay on
+this node), 78 (execute), 78a (claim on a rejected one). Every action is signed by its role's key.
 Name the treasury wallet and exempt it from investor limits (option 22 or 51,
 or `setInvestorLimitExempt` directly) BEFORE the ceremony, while the deployer
 owns the registry; afterwards only an InvestorTypeConfig vote can (option 76,
@@ -265,7 +284,14 @@ second transfer (after a warm-up) for five deployments: the permissive
 required topic (B, KYC), two (C, KYC+AML), and two with both identities
 refreshed into the verification cache (D), and D with an authorized
 investor-type registry (E, Task 4.10). Re-run with `npm run gas:claims`
-(fresh in-process Hardhat network, no external node needed).
+(fresh in-process Hardhat network, no external node needed). It also
+compares each figure with the baseline recorded in the script and fails on
+a rise over 1,500 gas (CI runs it in the tests job).
+
+**Current baseline** (`scripts/gas-analysis.ts`, recorded at aa65de8 plus
+Task 4.17): A 96,902, B 144,868, C 178,682, D 105,896 (+8,994 over A), E
+135,232 (+38,330), `refreshVerified` 104,403. The two tables below are
+history, measured on 2026-10-07.
 
 **Task 4.9 (measured 2026-10-07).** Before: 88d9454, no cache. After: the
 cache (D17 = a) with the review fixes.
@@ -335,4 +361,4 @@ immediate. The demo refreshes after onboarding claims and after a revoke in
 options 6/7, and prints "verification cached until <date>" (or, after a
 revoke, "walk fails (no live claim), cache entry cleared").
 
-Deploying all eleven contracts costs under 0.01 ETH at 1.3 gwei.
+Deploy cost on a public network: to be measured in the Sepolia rehearsal (Task 5.7).

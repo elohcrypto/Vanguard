@@ -19,9 +19,12 @@ mock mode: every proof is real, and mocks exist only in `test/`.
 Option 42 -> 1 publishes a root, binds the chosen wallet, then runs five
 steps on VSC: (a) it switches VSC to whitelist mode Either (the deployer
 owns ComplianceRules until the handover; afterwards it prints the
-ComplianceRules vote needed); no whitelist oracle is bound, so Either is
-an allow list of PrivacyManager bindings and every holder without a live
-binding is refused (mint recipient and transfers, not burns); (b) the
+ComplianceRules vote needed). When no whitelist oracle is bound (option
+38a has not run), Either acts as ZkOnly: an allow list of PrivacyManager
+bindings, and every holder without a live binding is refused (mint
+recipient and transfers, not burns). When 38a has bound one, oracle-listed
+wallets also pass, and a ZK binding alone serves only investor types whose
+required tier is 1 (D46 a); (b) the
 bound wallet sends VSC to another listed, verified wallet, which proves
 and binds first; (c) a verified wallet without a binding is refused
 (shown with `canTransfer` and a static call); (d) ops or the owner
@@ -54,9 +57,11 @@ sets minimum accreditation 100000 and compliance minimum 70 with weights
 jurisdiction source, and 42 -> 3 asks for an ISO numeric code. Options
 42 -> 3, 4 and 5 sign for the chosen wallet with a one-year validity,
 prove and bind through the same library and print the attestation's
-expiry, the record and the validator's answer; 44, 45 and 46 read
+expiry, the record and the validator's answer; 44 and 45 read
 PrivacyManager's records and validators and show each record's expiry
-next to its attestation's. The handover completion lists the
+next to its attestation's; 46 prints `validateAllPrivateCompliance`
+(whitelist, jurisdiction, accreditation, compliance) for every wallet that
+holds any record. The handover completion lists the
 trusted attestors per circuit and warns when one has none, the jurisdiction
 source and policy token, and the number of jurisdiction bits; the demo key
 stays trusted after the ceremony until a vote untrusts it.
@@ -92,8 +97,11 @@ Options 21 and 51 (whichever runs second) deploy `InvestorRequestManager`
 for VSC with the bank = ops (wallet 10), make it an InvestorTypeRegistry
 compliance officer and a ComplianceRules registrar on VSC for the
 compiled `MultiSigWallet` code hash, set the lock requirements within the
-Normal one-transfer cap (2,000 / 4,000 / 8,000 VSC), and hand its
-ownership to ops, so the deployer keeps no custody power.
+Normal one-transfer cap (2,000 / 4,000 / 8,000 VSC; the manager and
+`MultiSigWallet.lockTokens` refuse a lock above that cap,
+`LockAboveNormalCap`, Task 5.1), and nominate ops as owner, which ops
+accepts (`acceptOwnership`, Ownable2Step), so the deployer keeps no
+custody power.
 
 Who signs what in option 23: the user requests (2); the bank creates the
 wallet (4), which the manager trusts on VSC in the same transaction; the
@@ -129,8 +137,8 @@ investor registry"). Option 58 asks nothing: on VSC a verified,
 non-exempt wallet sends 1 VSC, a second send is refused ("Transfer
 cooldown", `canTransfer` false), a dev node jumps past the type's
 cooldown and the send passes (a real network prints when to run 58
-again); no deploy path binds a whitelist oracle to VSC, so 58 shows the
-tier on a probe token (its own ComplianceRules in OracleOnly,
+again); no deploy path binds a whitelist oracle to VSC (option 38a does so
+on request), so 58 always shows the tier on a probe token (its own ComplianceRules in OracleOnly,
 WhitelistOracle and registry, on the demo's IdentityRegistry): an
 Accredited wallet listed at tier 2 is refused ("Compliance check
 failed", `whitelistTierAllows` false) and passes when re-listed at
@@ -160,8 +168,12 @@ and 3, reputation 500). A paused node stays in the denominator but cannot
 answer, so pausing never lowers the bar: with two nodes paused the third
 cannot resolve alone. A node registered after the query opened cannot
 answer it, and weight or threshold changes apply to later queries only. A query expires after `queryExpiryTime` (1 hour)
-without a verdict; raise a new one. One node then applies the verdict
-with `provideAttestation` on the Whitelist or Blacklist oracle.
+without a verdict; raise a new one. No query opens with fewer than two
+registered nodes (`TooFewNodes`) or when one node's weight alone reaches
+the bar (`SingleNodeQuorum`, Task 5.1). One node then applies the verdict
+with `provideAttestation` on the Whitelist or Blacklist oracle, which
+applies it only when at least `minimumConsensusOracles` distinct nodes
+(default 2, never below 2) voted its way (`TooFewVoters`).
 
 Who does what: the operator (ops, wallet 10) pauses and unpauses nodes
 and sets or clears the emergency designation; unpause refuses a node at
@@ -197,9 +209,13 @@ to vote (77, 78), from the first wallet among 0-8 that may propose. `demo-drive.
 runs with no error; 33, 34, 35 and 37 ask sub-prompts, which a drive
 answers only when the argument carries them (`37:<sub-option>:...`).
 A whitelist query names a tier T (Task 4.12; 37 -> 1 asks 1-4, 5 is the
-owner's): approval lists at T or raises a lower entry (expiry capped at
-365 days), never lowers; only the owner or list manager (33, 40,
-DynamicListManager) lowers.
+OracleManager owner's, governance after the handover): approval lists at
+T or raises a lower entry (a dated entry's expiry capped at 365 days, a
+permanent one stays permanent), never lowers; only the list oracle's
+owner or list manager (33, 40, DynamicListManager) writes a tier directly
+and lowers one. After the handover that owner is ops, which can list at
+tier 5 or blacklist CRITICAL without a vote (D44 a; the list-oracle
+ownership posture is an audit item).
 `DEMO_RPC_URL=http://127.0.0.1:<port>` points the drive at a node on
 another port (network `devnode`).
 
@@ -231,9 +247,11 @@ code hash, `setConsensusEngine` checks code and binding only.
 ## Identity keys through KeyManager (Task 4.2)
 
 Option 1 deploys `KeyManager` with the core contracts. It has no owner and
-no allowlist: an identity opts in with `authorizeManager(keyManager)` from
-its owner, and every rotation or recovery then needs a MANAGEMENT key of
-that identity (docs/DEEP_DIVE_IDENTITY.md, "Identity key lifecycle").
+no allowlist: an identity opts in to rotations and batches with
+`authorizeManager(keyManager)` from its owner, after which each needs a
+MANAGEMENT key of that identity; recovery needs no authorization: it runs
+through the identity's pinned recovery manager and its seated agents
+(below) (docs/DEEP_DIVE_IDENTITY.md, "Identity key lifecycle").
 The wallets the options use: wallet 1 (fee wallet, compliance officer)
 owns the demo identity; wallets 7 and 8 (investors Bob and Carol) are the
 recovery agents, chosen because they hold no issuer, ops or guardian role;
@@ -282,8 +300,8 @@ Every print names each wallet's role.
   key's wallet must be a demo signer), a passphrase key through
   `removeKey`; it prints the method it called and reads the key back
   (`keyHasPurpose`, `getKey` revokedAt). In 5 -> 2 the
-  owner authorizes KeyManager and names the agents: that is the owner's
-  step, taken at onboarding; a holder who already lost every key cannot
+  owner pins KeyManager as the recovery manager (factory identities already
+  pin it) and seats the agents: that is the owner's step, taken at onboarding; a holder who already lost every key cannot
   take it. In 5 -> 3, replacing the owner's own key leaves `owner()`
   rights on OnchainID only: KeyManager accepts MANAGEMENT keys for
   rotations, so 12, 12b and 5 -> 3 refuse that owner until it holds a
@@ -316,9 +334,14 @@ first seating is immediate, a re-seat of seated agents is pending for
 (`vetoKeyRecoverySetup`), anyone applies it afterwards
 (`applyKeyRecoverySetup`), an approved recovery blocks it and an executed
 one drops it; neither the owner nor a current MANAGEMENT key can be
-seated as an agent (D53). An agent opens a candidate
-(`initiateKeyRecovery`), which counts as its approval (at threshold 1 the
-open approves); none opens while another is approved. Until the approvals
+seated as an agent (D53), nor the identity itself or KeyManager; the
+threshold is at least 2 (`ThresholdBelowTwo`, D59) and at most 10 agents.
+Before seating agents the owner must remove every MANAGEMENT key it does
+not know (A2F-4): `setupKeyRecovery` does not check them, and such a key
+can make the chosen agents MANAGEMENT keys and block the seating. An agent
+opens a candidate (`initiateKeyRecovery`), which counts as its approval
+(every seat needs at least two, so another agent must approve); none
+opens while another is approved. Until the approvals
 reach the threshold only its initiator may cancel it: not the owner (a
 stolen owner key raced every candidate: D39, R-414-1), not a MANAGEMENT
 key. From the approval only the agents cancel it, at the same threshold,
@@ -336,7 +359,9 @@ at most 50 keys, `MAX_BATCH_SIZE`; `continueKeyEviction` is reachable
 only on an identity deployed before the cap). 7 days after the approval
 (`OWNER_TRANSFER_TIMELOCK`) and before 14 days, someone (the recovered
 wallet, or anyone for it) must call `executeOwnerTransfer` and the
-recovered wallet must accept (`acceptOwnership`); if nobody does in that
+recovered wallet must accept (`acceptOwnership`); a recovery to a key that
+is not a wallet address's hash (a passphrase key) evicts the other
+MANAGEMENT keys but never moves ownership (A2F-7); if nobody does in that
 window the lock lifts, the old owner keeps the identity and an agent's
 next `initiateKeyRecovery` re-opens recovery (`KeyRecoveryReopened`, a
 new epoch; D52). Between the execution and the transfer the old owner
@@ -356,7 +381,8 @@ approval on chain and has the 48 hours to move assets through the
 issuer's `Token.recoveryAddress`, which stays the asset-side bound; its
 new wallet must control the identity (own it or hold a MANAGEMENT or
 ACTION key on it, D41), as `IdentityRegistry.registerIdentity` and
-`moveIdentity` require of every wallet they bind; a holder without seated
+`moveIdentity` require of every wallet they bind (D41 is a consistency
+rule, not a defence against a rogue registry agent, A2F-6); a holder without seated
 agents whose owner key is lost is burned and re-issued by the agent
 instead.
 
@@ -398,8 +424,9 @@ pass").
 `DEMO_SMOKE_OUT` records `keyManager`.
 
 The handover ceremony hands nothing over for KeyManager (it has no
-owner). handover.json names `"keyManager"` (required when the factory
-pins one) and may name `"keyManagerIdentity"` (the demo OnchainID).
+owner). It derives the KeyManager from the factory's `recoveryManager()`
+(a `"keyManager"` key is an assertion, refused when it differs);
+handover.json may name `"keyManagerIdentity"` (the demo OnchainID).
 Before Step 1, without a transaction, the preflight refuses a
 `keyManager` with no code or whose runtime code is not the compiled
 KeyManager, a `keyManagerIdentity` with no code, one that has not
@@ -411,9 +438,8 @@ named KeyManager as its recovery manager or authorizes any other manager
 named without `keyManager`, and an `onchainIDFactory` (checked with or
 without `keyManager`) whose `recoveryManagerCodeHash` is neither zero nor
 the compiled KeyManager's or whose `recoveryManager()` is not the named
-KeyManager: a factory that pins one needs `"keyManager"` named, so a
-config for an option 1 deployment names both. Option 83c names option 1's
-KeyManager and, once option 12 ran, its identity. 83e adds the KeyManager
+KeyManager. Option 83c names option 1's KeyManager and, once option 12
+ran, its identity. 83e adds the KeyManager
 and factory lines, plus the identity line once option 12 ran: the code
 matches the compiled KeyManager (no owner, no allowlist, so the
 deployer holds no KeyManager power; only an identity's pinned recovery
@@ -426,12 +452,16 @@ to its KeyManager; the factory accepts only a contract with the compiled
 KeyManager's code hash (`recoveryManagerCodeHash`, fixed at
 construction), so after the handover governance can switch pinning off or
 to another KeyManager deployment, never to a contract of its own. The
-smoke's ceremony passes 76
-checks (Task 4.4 adds the five oracle lines below).
+smoke prints the number of ceremony checks that pass (`Handover ceremony:
+N checks pass`).
 
 `scripts/production/DeployProduction.ts` deploys KeyManager and authorizes
 it on the ops identity named by `OPS_IDENTITY` when the deploying wallet
 owns that identity. When another wallet (the ops key) owns it, or
 `OPS_IDENTITY` is unset, nothing is authorized and the deploy prints the
 exact call the identity owner must send:
-`OnchainID(<ops identity>).authorizeManager(<keyManager>)`.
+`OnchainID(<ops identity>).authorizeManager(<keyManager>)`. It also pins
+KeyManager as the ops identity's recovery manager (or prints
+`OnchainID(<ops identity>).pinRecoveryManager(<keyManager>)` for its
+owner), refuses an identity already pinned to another manager (a pin is
+final), and sets the factory's `recoveryManager` to KeyManager.

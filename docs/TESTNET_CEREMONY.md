@@ -8,17 +8,22 @@ After the ceremony the deployer (wallet 0) holds no power: governance owns
 Token, GovernanceToken (VGT), IdentityRegistry, ComplianceRules,
 OracleManager, InvestorTypeRegistry (when deployed), the EscrowWalletFactory
 and OnchainIDFactory (when deployed), PrivacyManager and ZKVerifierIntegrated
-(option 1 deploys them) and itself; ops (wallet 10) holds the
+(option 1 deploys them), DynamicListManager (when option 84 deployed it)
+and itself; ops (wallet 10) holds the OnchainIDFactory `feeRecipient` and,
+if it was the deployer's, the escrow factory's fee wallet (D54), and the
 agent roles, the compliance-officer role, the escrow factory's ADMIN_ROLE,
 PrivacyManager's `listOperator` (it publishes the whitelist root), the
 oracles the deployer owned and OracleManager's operator role (pause,
 unpause and emergency designation of nodes, Task 4.4); the issuer admin (wallet 9) owns the
 claim issuers the deployer held; the guardian (wallet 11) can pause the
-token but not unpause it. Issuer ownership moves by nominate and accept:
-the deployer's `transferOwnership` only nominates the issuer admin, so on
-Sepolia, where it is a multisig the script does not control, that multisig
-must itself execute `acceptOwnership` and the deployer-key revoke for each
-claim issuer. Since Task 4.13 option 1 deploys both issuers owned by the
+token but not unpause it; it can pause again after a voted unpause, and a
+pause has no expiry (D56; an audit item). Issuer ownership moves by
+nominate and accept: the deployer's `transferOwnership` only nominates the
+issuer admin. `scripts/handover.ts` signs as the issuer admin (each
+issuer's `acceptOwnership` and the deployer-key revoke) and as ops (each
+list oracle's `acceptOwnership`, Task 5.1) and refuses before step 1 when
+the issuer admin is not a signer; how a multisig issuer admin or ops signs
+these on Sepolia is Task 5.7 (pending). Since Task 4.13 option 1 deploys both issuers owned by the
 deployer (wallet 0 signs every claim before the ceremony, wallet 9 after
 it): every trusted issuer must end owned by issuerAdmin with issuerAdmin's
 the only live key, so an issuer another wallet owns is refused, never
@@ -47,21 +52,24 @@ InvestorTypeRegistry included as an InvestorTypeConfig vote), then 83e
 shortcut; if it ran first the ceremony skips the registry's nomination and
 queues its officer changes as InvestorTypeConfig proposals, which 83d votes
 through after the ownership votes (ops becomes officer, the deployer stops
-being one).
+being officer and governor).
 Before its first transaction the ceremony runs a read-only preflight and
 refuses to start rather than stop halfway: governance bound to every plan
-contract; each plan contract owned by the deployer, or already by governance
+contract except the two factories and the privacy pair, which step 3
+binds; each plan contract owned by the deployer, or already by governance
 where the deployer never calls it (Token, VGT, IdentityRegistry and
 ComplianceRules must still be the deployer's); no issuer where the deployer
 holds a key but not ownership; the issuer admin a signer wherever it must
 accept or revoke on an issuer, and no issuer-admin key on it that is revoked
 or of another purpose (it cannot be re-added as MANAGEMENT_KEY); each oracle
 owned by the deployer or ops, and an ops-owned oracle whose `listManager` is
-still the deployer fails, because only ops can clear it. Since 2F.5 it also
+still the deployer fails, because only ops can clear it, and so does an
+ops-owned oracle with a pending owner (Task 5.1: the list oracles are
+Ownable2Step; step 2 nominates ops and ops accepts). Since 2F.5 it also
 refuses: an `oracles` or `issuers` list that omits a contract bound on chain
 (an extra one is handed over with a warning; leave a list out to use the
-chain's set); a config that does not name a DynamicListManager, factory or privacy
-contract governance is already bound to; a `zkVerifier` that is not the
+chain's set); a config address that differs from what governance derives
+(R-413-1) or a `null` for a contract governance does derive (R-413-12); a `zkVerifier` that is not the
 verifier PrivacyManager uses, and a testingMode verifier; a PrivacyManager,
 ZKVerifierIntegrated or any of the wrapper's five circuit verifiers whose
 runtime code hash is not the compiled artifact's (an always-true verifier
@@ -82,8 +90,10 @@ For the same reason it refuses VGT in whitelist mode ZkOnly or Either
 (D33): every vote and proposal fee would then need a whitelist binding,
 so ops, the list operator, could halt governance by publishing one root,
 and the acceptance votes would revert halfway; set VGT back to OracleOnly
-first. It also refuses a VSC or VGT whose `compliance()` is not the
-config's `complianceRules` (governance would own a ComplianceRules the
+first, and a ComplianceRules that does not record VGT as its governance
+token (`setGovernanceToken(VGT)`, set once; the contract then holds VGT to
+OracleOnly itself, D33 b; 83e checks the same). It also refuses a VSC or
+VGT whose `compliance()` is not the config's `complianceRules` (governance would own a ComplianceRules the
 token does not enforce).
 An `investorTypeRegistry` governance is not bound to is left out with a
 warning only when the Token does not enforce it; if the Token does, preflight
@@ -126,21 +136,30 @@ governance", "no IdentityRegistry agent owns or holds a key on a trusted
 issuer (D25 b)" and "InvestorTypeRegistry: no governor but governance, no
 open proposal". It prints warnings that do not fail it: the deployer's
 remaining VSC with its exemption and verification (the demo deployer keeps
-100M VSC, verified and exempt, as the treasury artifact: move it and remove
-the exemption by vote), escrow fee wallets that are not exempt or were
-registered after the handover, and a current whitelist root the deployer
-published ("republish as ops so deployer-era bindings lapse") or an issuer
-key the deployer trusted on PrivacyManager; when either of these two
-fires, `scripts/handover.ts` and 83e close with "Handover complete with
-warnings: see above" instead of "the deployer holds no power". The InvestorTypeRegistry's own proposals
+whatever option 25 minted to it, 100M with choice 3, verified and exempt,
+as the treasury artifact: move it and remove the exemption by vote), escrow
+fee wallets that are not exempt or were registered after the handover, and
+the residual warnings: a current whitelist root not published by ops or
+governance ("republish as ops so deployer-era bindings lapse"), an issuer
+key the deployer trusted on PrivacyManager, an OracleManager node the
+deployer registered (D50: rotate by an OracleParameters vote), an
+`extraTrusted` acknowledgement, or a config key set to `null`. When any
+residual warning fires, `scripts/handover.ts` and 83e close with "Handover
+complete with warnings: see above" instead of "the deployer holds no
+power". In the demo this always happens (option 31's nodes and option 1's
+attestor key are deployer-era), and the smoke asserts exactly those seven
+warnings. The InvestorTypeRegistry's own proposals
 now belong to the governor set they were created under (every `setGovernor`
 bumps `governorEpoch`, so the ceremony's removal of the deployer kills any
 planted proposal), expire 7 days after their execution time, and pass the
 same whitelist-tier check as `updateInvestorTypeConfig`. Preflight refuses to start on a
 governance that is untrusted or still registered (a pre-D21 deployment).
-The votes need a proposer plus quorum voters that are verified VGT holders
-among wallets 0 to 9: options 23/24 and 3/4 onboard them, 75a then 75/75b
-fund them; without them 83d refuses exactly as 83b does. Onboard first:
+The votes need a proposer plus quorum voters that are verified wallets
+among 0 to 8 (wallet 9, the issuer admin, never votes), each holding the
+proposal fee plus the voting fee: options 23/24 onboard them (6 and 7 issue
+KYC/AML claims to any still unverified), and 75a (mint) or 75 (distribute
+from the agent's balance) funds them; without them 83d refuses exactly as
+83b does. Onboard first:
 after 83c the deployer can no longer register identities.
 After the ceremony governance owns VGT and ops (a VGT agent) distributes it;
 `distributeGovernanceTokens` sends from the caller's own balance, so option
@@ -156,12 +175,15 @@ removal vote, by the oracle owner (ops) or by an oracle consensus clearing;
 an emergency listing never shortens an entry (the longer expiry wins).
 Oracle consensus verdicts (a query in OracleManager, resolved by the
 registered oracle nodes, then applied by one node's `provideAttestation`)
-follow four rules. A query is raised only by the OracleManager owner or an
+follow five rules. A query is raised only by the OracleManager owner or an
 active oracle, and a blacklist query fixes its severity (so its duration)
 when it is raised (`abi.encode(uint8)`, empty = MEDIUM); the severity a
 node passes when it attests is ignored. Answering yes accepts the query's
 severity, and a node can raise at most HIGH: only the OracleManager owner
-raises a CRITICAL (365-day) query. A resolved verdict is final (no
+raises a CRITICAL (365-day) query. Separately, ops as the list-oracle owner
+writes entries directly, CRITICAL blacklist and tier-5 whitelist entries
+included (D44 a); consensus severity only sets a verdict's duration; the
+list-oracle ownership posture is an audit item. A resolved verdict is final (no
 responses after it resolves), except that the OracleManager owner's
 `emergencyOverride` may flip it before it is applied; it is applied once
 per oracle contract (`VerdictAlreadyApplied`). It is usable for
@@ -173,7 +195,11 @@ emergency listing, an owner write or a removal; for an applied verdict,
 even one that changed nothing, its resolution time), and a verdict that
 resolved at or before it is refused (`VerdictSuperseded`). So an older
 verdict applied late never undoes a newer one, and a newer one still
-applies after it. Options 33a, 34a, 35a, 37 and 40 raise OracleManager
+applies after it. A verdict applies only when at least
+`minimumConsensusOracles` distinct nodes (default 2, never below 2) voted
+its way (`TooFewVoters`, Task 5.1); an `emergencyOverride` that flips a
+verdict counts only the nodes that voted the new side, so a flip with
+fewer than two such voters cannot be applied. Options 33a, 34a, 35a, 37 and 40 raise OracleManager
 queries; ConsensusOracle is the manager's engine and keeps no queries of
 its own (Task 4.4, "Oracle nodes and consensus" in TESTNET_DEMO_OPTIONS.md).
 
@@ -201,13 +227,17 @@ governance, a registry agent or an oracle node; a trusted contract outside gover
 live registrar's wallets and `extraTrusted`; a registrar or officer contract whose code is not
 the compiled InvestorRequestManager or EscrowWalletFactory, or whose immutable bank is not ops;
 an unacknowledged node, the deployer as a node, an emergency designation on an unacknowledged
-node (step 5 clears the rest), a paused list oracle or one below two consensus oracles;
-`minVoterAge` under 7 days, an open proposal targeting a plan contract, a factory `feeRecipient`
+node (step 5 clears the rest), a paused or inactive list oracle, one below two consensus
+oracles, one whose code is not the compiled WhitelistOracle or BlacklistOracle or whose
+`maxVerdictAge` is outside 1 hour to 30 days, a node whose weight alone reaches the consensus
+threshold (the engine would refuse every query, `SingleNodeQuorum`), a DynamicListManager
+writing oracles no token reads; `minVoterAge` under 7 days / GOV_TIME_SCALE, a zero proposal or
+vote cost, an open proposal targeting a plan contract, a factory `feeRecipient`
 other than the deployer or ops (step 5 sets ops, D54), an escrow factory fee wallet that is
 neither ops nor a `feeWallets` entry (step 5 moves the deployer's to ops), a trusted escrow the deployer arbitrates,
 an escrow `INVESTOR_ROLE` without an active registration (step 5 deactivates the deployer's;
-Task 4.17), an unacknowledged attestor key, a root published by a stranger, a pending re-seat on
-the demo identity; and a code hash off the compiled artifact for every plan contract, list
+Task 4.17), an unacknowledged attestor key, a root published by a stranger, a pending re-seat,
+rotation, recovery or owner nomination on the demo identity; and a code hash off the compiled artifact for every plan contract, list
 oracle, registrar and issuer (immutables masked). A scan that cannot find a holder known to be
 granted by event fails rather than passing as clean (R-413-6). Completion re-derives everything
 and compares it with the preflight snapshot (the CLI writes it next to the config with the chain
@@ -217,12 +247,14 @@ the preflight must come from a ceremony transaction, ops or a vote, even if revo
 4.17). Re-running the full phase refreshes the preflight, so a chain prepared between an aborted
 preflight and the re-run is judged by the re-run. Demo option 83c acknowledges what the demo
 itself registered and trusted, lists every stray the preflight refuses and offers to remove them
-as the deployer (answer `y`; the drive argument is `83c:y`).
+as the deployer (answer `y`; the drive argument is `83c:y` when there are strays to remove,
+plain `83c` otherwise).
 
 ### Runbook rules for the ceremony and after (plan 2F)
 
-- Register every voter at least 7 days (`minVoterAge`) before the
-  ceremony's first proposal (D25); a dev node jumps, Sepolia waits.
+- Register every voter at least `minVoterAge` (7 days / GOV_TIME_SCALE:
+  420 s at 1440, 30 min at 336) before the ceremony's first proposal
+  (D25); a dev node jumps, Sepolia waits.
 - Exempt the escrow fee wallets and the treasury before the ceremony, while
   the deployer owns the InvestorTypeRegistry; after it only an
   InvestorTypeConfig vote can (R-2F4-2). The completion check warns about a
@@ -231,8 +263,12 @@ as the deployer (answer `y`; the drive argument is `83c:y`).
   before any vote that moves a bound contract's ownership, and trust the
   new owner first (A-N3, R-2F1-1): a ComplianceRules owner that does not
   trust governance makes `createProposal` revert and strands open deposits.
-- A wallet recovered with `recoveryAddress` votes only after KeyManager
-  recovery gives it a key on its OnchainID (R-2F2-3).
+- A wallet recovered with `recoveryAddress` must already control the
+  OnchainID (own it or hold a MANAGEMENT or ACTION key, D41;
+  `Token.recoveryAddress` refuses otherwise), so give the new wallet a key
+  first, through KeyManager recovery when the old keys are lost. D41 keeps
+  the asset side and the identity side consistent; it is no defence
+  against a rogue recovery agent (A2F-6).
 - Oracle consensus may clear a permanent (governance, no-expiry) blacklist
   entry when its verdict resolved after the governance write (D27 = a):
   watch `BlacklistUpdated` events whose reason is "Oracle consensus
@@ -252,16 +288,20 @@ as the deployer (answer `y`; the drive argument is `83c:y`).
   (`setTrustedRegistrar(VSC, factory, MultiSigEscrowWallet code hash)`;
   vote with 77, execute with 78); no escrow can be created until it passes.
   Option 63 needs no vote: the factory trusts each escrow it deploys.
-  Option 61's closing "security model" is the design the contracts enforce;
-  the two lines under it (owner fee wallet verified, VSC jurisdiction rule
-  active) are chain reads.
+  Option 61's closing "security model" lists the design; its fee-wallet
+  bullet ("verified, not trusted") predates Task 4.3: option 62 uses the
+  investor's MultiSigWallet, a trusted contract, as fee wallet. The two
+  lines under it (owner fee wallet verified, VSC jurisdiction rule active)
+  are chain reads.
 - Revoking a whitelist binding is root rotation: publish a root without
   the commitment (ops, or a PrivacyParameters vote). Expiry alone does not
   revoke, since a holder may resubmit the same proof under the same root
   to refresh it. Under ComplianceRules whitelist mode ZkOnly (and Either
   without a whitelist oracle) a root rotation, or an expired binding,
   pauses every affected holder, escrow releases to them included, until
-  they re-prove; burns stay open.
+  they re-prove; burns stay open. In Either with a whitelist oracle bound,
+  a proof binding alone serves only investor types whose required tier is
+  1; every other type needs a listing at its tier (D46 a).
 
 ### Whitelist roots and proofs from the command line (Task 3.5)
 
@@ -309,9 +349,10 @@ unless `--force`, because an old root, rebuilt for instance from an old
 adds and removes against it. The prover warns on stderr when
 `--secret-file` is readable by group or others, and when `--new-secret`
 writes to stdout instead of `--out`.
-Demo option 42 -> 1 builds roots and proofs with the same functions but
-publishes the root directly (`publishWhitelistRoot`), without the old-root
-history check, which is the CLI builder's.
+Demo option 42 -> 1 builds roots and proofs with the same functions. Its
+first publish calls `publishWhitelistRoot` directly, with no old-root
+history check; the rotations in steps (d) and (e) publish through the
+CLI's `publishRoot`, which refuses a root that was published before.
 
 ### Issuer-signed attestations (Task 3.7b, D31 a)
 
@@ -341,8 +382,8 @@ redeploy, issuers sign again for the new PrivacyManager.
 
 An attestation also expires on a date the issuer sets (Task 3.10, D32 a):
 `attest.js --sign` requires `--valid-days <n>` or `--valid-until <ISO 8601
-UTC date>` (`2027-01-01` or `2027-01-01T00:00:00Z`; other forms are
-refused) and refuses a date not in the future; the issuer signs that
+UTC date>` (`2027-01-01`, or a UTC time ending in `Z` such as
+`2027-01-01T00:00:00Z`; a time without `Z` or with an offset is refused) and refuses a date not in the future; the issuer signs that
 `validUntil` with the attributes and the proof publishes it. PrivacyManager
 refuses the proof from `validUntil` on (`AttestationExpired`), and a
 record's `expiresAt` is `min(submission + proofValidityPeriod,
