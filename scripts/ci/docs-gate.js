@@ -15,6 +15,8 @@
 //  3. Every demo option cited in prose ("option 31", "options 61 to
 //     73b", "Options 33a, 34a and 35a") is a `case "N":` of the menu in
 //     demo/core/MenuSystem.js, read from the source.
+//  4. Every command cited in code (spans and fences) exists: paths under
+//     scripts/ and demo/, `npm run` names, `hardhat run` paths.
 // Exits 1 on any finding; `node scripts/ci/docs-gate.js`.
 const { execFileSync } = require("child_process");
 const fs = require("fs");
@@ -181,10 +183,92 @@ for (const doc of docs) {
   }
 }
 
+// 4. Commands cited in code (Task 5.6): in inline code spans and fenced
+//    blocks, every path under scripts/ or demo/ exists (a glob matches a
+//    tracked file), every `npm run X` is a package.json script, and every
+//    `hardhat run <path>` names a tracked file. A placeholder (<x>, $X)
+//    is not a path.
+const npmScripts = new Set(
+  Object.keys(JSON.parse(fs.readFileSync("package.json", "utf8")).scripts),
+);
+const globRe = (g) =>
+  new RegExp(
+    "^" +
+      g
+        .split("*")
+        .map((s) => s.replace(/[.+?^${}()|[\]\\]/g, "\\$&"))
+        .join("[^/]*") +
+      "$",
+  );
+const pathOk = (p) =>
+  p.includes("*")
+    ? tracked.some((f) => globRe(p).test(f))
+    : exists(p.replace(/\/$/, ""));
+// [lineNo, code] for every code span (it may wrap a line) and fenced line.
+function codeOf(text) {
+  const lines = text.split("\n");
+  const out = [];
+  let fence = false;
+  const prose = lines.map((line, i) => {
+    if (/^\s*(```|~~~)/.test(line)) {
+      fence = !fence;
+      return "";
+    }
+    if (fence) {
+      out.push([i + 1, line]);
+      return "";
+    }
+    return line;
+  });
+  const joined = prose.join("\n");
+  for (const m of joined.matchAll(/(`+)([\s\S]*?[^`])\1(?!`)/g)) {
+    const n = joined.slice(0, m.index).split("\n").length;
+    out.push([n, m[2].replace(/\n/g, " ")]);
+  }
+  return out;
+}
+const cited = { paths: 0, npm: 0, run: 0 };
+const PATH = /(?<![\w./<$-])(?:\.\/)?((?:scripts|demo)\/[\w.*/-]+)/g;
+for (const doc of docs) {
+  for (const [n, code] of codeOf(fs.readFileSync(doc, "utf8"))) {
+    for (const m of code.matchAll(PATH)) {
+      cited.paths++;
+      const p = m[1].replace(/[.,:;]+$/, "");
+      // `demo/utils/ChainTime.advancePast` names a member of ChainTime.js;
+      // require("./demo/utils/HandoverVotes") a module without extension.
+      const member = /^(.+)\.\w+$/.exec(p);
+      const ok =
+        pathOk(p) ||
+        ["js", "ts"].some(
+          (x) => pathOk(`${p}.${x}`) || (member && pathOk(`${member[1]}.${x}`)),
+        );
+      if (!ok) findings.push(`${doc}:${n}: names ${p}, absent`);
+    }
+    for (const m of code.matchAll(/\bnpm run ([\w:.-]+)/g)) {
+      cited.npm++;
+      if (!npmScripts.has(m[1])) {
+        findings.push(
+          `${doc}:${n}: npm run ${m[1]}: no such package.json script`,
+        );
+      }
+    }
+    for (const m of code.matchAll(
+      /\bhardhat run\s+((?:--\S+\s+\S+\s+)*)(\S+)/g,
+    )) {
+      const p = m[2].replace(/[.,:;`]+$/, "");
+      if (/^[<$]/.test(p)) continue;
+      cited.run++;
+      if (!pathOk(p.replace(/^\.\//, ""))) {
+        findings.push(`${doc}:${n}: hardhat run ${p}: absent`);
+      }
+    }
+  }
+}
+
 if (findings.length) {
   for (const f of findings) console.error(`::error::docs gate: ${f}`);
   process.exit(1);
 }
 console.log(
-  `docs gate: README tree, links in ${docs.length} docs, option citations ok (menu ${menu.size})`,
+  `docs gate: README tree, links in ${docs.length} docs, option citations ok (menu ${menu.size}), cited commands exist (${cited.paths} paths, ${cited.npm} npm run, ${cited.run} hardhat run)`,
 );
