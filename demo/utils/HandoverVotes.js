@@ -164,7 +164,8 @@ async function acceptAllByVote({
   );
   const vote = async (id, label) => {
     await castAcceptanceVotes(governance, id, voters);
-    await settleProposal(governance, id, label);
+    // R-56c-3: executed by the proposer, never the default wallet 0.
+    await settleProposal(governance.connect(proposer), id, label);
   };
   for (const e of planFor(contracts)) {
     const c = contracts[e.key];

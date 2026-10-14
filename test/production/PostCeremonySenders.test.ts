@@ -1,5 +1,5 @@
 import { expect } from "chai";
-import { ethers } from "hardhat";
+import { ethers, network } from "hardhat";
 import { ageVoters, handoverFixture } from "../helpers/governanceFixture";
 import { attest, deployIdentity } from "../helpers/kyc";
 
@@ -14,6 +14,9 @@ const {
 } = require("../../demo/utils/PostCeremony");
 const { bindWhitelistToToken } = require("../../demo/utils/WhitelistBindFlow");
 const { runCompleteWorkflow } = require("../../demo/utils/GovernanceWorkflow");
+import { captured, cliConfig } from "../helpers/handoverCli";
+import { runHandover } from "../../scripts/handover";
+import * as fs from "fs";
 
 // Task 5.6b round 3 (R-56-5): after the ceremony the deployer key (wallet
 // 0) sends nothing. One check (PostCeremony.postCeremony) leaves wallet 0
@@ -120,6 +123,28 @@ describe("No transaction from wallet 0 after the ceremony (Task 5.6b)", function
     expect([...senders]).to.not.include(f.deployer.address);
   });
 
+  it("the CLI executes every acceptance after VSC's from the proposer (R-56c-3)", async function () {
+    const { cfg, cfgPath, dir } = await cliConfig(f);
+    try {
+      await captured([], () => runHandover(cfg, "full", cfgPath));
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+    const t = f.c.token;
+    const [taken] = await t.queryFilter(
+      t.filters.OwnershipTransferred(undefined, f.govAddr),
+    );
+    const g = f.c.governance;
+    const executed = await g.queryFilter(
+      g.filters.ProposalExecuted(),
+      taken.blockNumber + 1,
+    );
+    expect(executed.length).to.be.greaterThan(0);
+    const senders = await sendersSince(taken.blockNumber);
+    expect(senders.size).to.be.greaterThan(0);
+    expect([...senders]).to.not.include(f.deployer.address);
+  });
+
   it("the provider guard refuses wallet 0's transactions only after the ceremony", async function () {
     const seen: string[] = [];
     const fake: any = {
@@ -148,5 +173,34 @@ describe("No transaction from wallet 0 after the ceremony (Task 5.6b)", function
       "eth_call",
       "eth_sendTransaction",
     ]);
+  });
+
+  it("on the real provider the guard refuses wallet 0's raw transactions (R-56c-4)", async function () {
+    const p: any = network.provider;
+    const saved = { request: p.request, send: p.send };
+    // Hardhat's first default account: wallet 0 signs locally.
+    const w0 = new ethers.Wallet(
+      "0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80",
+      ethers.provider,
+    );
+    expect(w0.address).to.equal(f.deployer.address);
+    const pay = (w: any) =>
+      w
+        .sendTransaction({ to: f.ops.address, value: 1n })
+        .then((t: any) => t.wait());
+    try {
+      guardDeployerKey(state);
+      await pay(w0); // before the ceremony wallet 0 still sends
+      await ceremony();
+      const err = (await pay(w0).catch((e: Error) => e)) as Error;
+      expect(err.name).to.equal("DeployerKeyAfterCeremony");
+      expect(err.message).to.include("eth_sendRawTransaction refused");
+      const other = ethers.Wallet.createRandom(ethers.provider);
+      await f.ops.sendTransaction({ to: other.address, value: 10n ** 17n });
+      await pay(other); // another wallet's raw transaction goes through
+    } finally {
+      p.request = saved.request;
+      p.send = saved.send;
+    }
   });
 });

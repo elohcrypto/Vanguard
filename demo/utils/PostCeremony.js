@@ -6,7 +6,8 @@
  * ProposalExecutor.executorFor) to leave wallet 0 out, and by
  * `guardDeployerKey`, which the demo installs on the provider at start:
  * any transaction from wallet 0 after the ceremony is refused there
- * (DeployerKeyAfterCeremony), whichever flow tries it. During the
+ * (DeployerKeyAfterCeremony), whichever flow tries it, a signed raw
+ * transaction included (its recovered sender, R-56c-4). During the
  * ceremony's voting window the deployer still votes (R-417-8): VSC is
  * the first contract governance accepts, and from then on the pickers
  * choose other wallets.
@@ -44,16 +45,33 @@ function deployerKeyRefusal(method) {
   );
 }
 
+/** The sender a signed raw transaction recovers to (null if unreadable). */
+function rawSender(raw) {
+  try {
+    return ethers.Transaction.from(raw).from;
+  } catch {
+    return null;
+  }
+}
+
 /**
  * Wrap `provider` (request and send) so a transaction from wallet 0 is
  * refused once postCeremonyOf(state). Returns the provider.
  */
 function guardDeployerKey(state, provider = network.provider) {
-  const sends = new Set(["eth_sendTransaction", "eth_signTransaction"]);
+  const sends = new Set([
+    "eth_sendTransaction",
+    "eth_signTransaction",
+    "eth_sendRawTransaction",
+  ]);
   const check = async (method, params) => {
     if (!sends.has(method)) return;
     const d = state.signers && state.signers[0];
-    const from = params && params[0] && params[0].from;
+    // R-56c-4: a signed transaction names its sender by its signature.
+    const from =
+      method === "eth_sendRawTransaction"
+        ? rawSender(params && params[0])
+        : params && params[0] && params[0].from;
     if (d && from && same(from, d.address) && (await postCeremonyOf(state)))
       throw deployerKeyRefusal(method);
   };
