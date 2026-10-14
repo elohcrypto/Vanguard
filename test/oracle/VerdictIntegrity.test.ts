@@ -252,7 +252,9 @@ describe("Oracle verdict integrity (2F.3)", function () {
         await expect(
           o.setMaxVerdictAge(30 * DAY + 1),
         ).to.be.revertedWithCustomError(o, "InvalidVerdictAge");
-        await expect(o.connect(stranger).setMaxVerdictAge(3600)).to.be.reverted;
+        await expect(
+          o.connect(stranger).setMaxVerdictAge(3600),
+        ).to.be.revertedWithCustomError(o, "OwnableUnauthorizedAccount");
         await expect(o.setMaxVerdictAge(3600))
           .to.emit(o, "MaxVerdictAgeUpdated")
           .withArgs(DAY, 3600);

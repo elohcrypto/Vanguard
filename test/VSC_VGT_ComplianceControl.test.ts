@@ -159,8 +159,9 @@ describe("🔒 VSC & VGT Compliance Control - Complete Proof", function () {
       console.log("   ✅ PASS: VSC transferred to verified user");
 
       console.log("\n❌ TEST 1.2: VSC transfer to unverified user BLOCKED");
-      await expect(vscToken.transfer(unverifiedUser.address, VSC(1000))).to.be
-        .reverted;
+      await expect(
+        vscToken.transfer(unverifiedUser.address, VSC(1000)),
+      ).to.be.revertedWith("Recipient not verified");
       console.log(
         "   ✅ PASS: VSC transfer to unverified user BLOCKED by ComplianceRules",
       );
@@ -186,7 +187,7 @@ describe("🔒 VSC & VGT Compliance Control - Complete Proof", function () {
         vgtToken
           .connect(verifiedUser1)
           .transfer(unverifiedUser.address, VGT(1000)),
-      ).to.be.reverted;
+      ).to.be.revertedWith("Recipient not verified");
       console.log(
         "   ✅ PASS: VGT transfer to unverified user BLOCKED by ComplianceRules",
       );
@@ -313,8 +314,9 @@ describe("🔒 VSC & VGT Compliance Control - Complete Proof", function () {
         VSC(5000),
       );
 
-      await expect(vscToken.transfer(unverifiedUser.address, VSC(1000))).to.be
-        .reverted;
+      await expect(
+        vscToken.transfer(unverifiedUser.address, VSC(1000)),
+      ).to.be.revertedWith("Recipient not verified");
     });
 
     it("✅ VGT: Only verified users can receive tokens", async function () {
@@ -330,7 +332,7 @@ describe("🔒 VSC & VGT Compliance Control - Complete Proof", function () {
         vgtToken
           .connect(verifiedUser1)
           .transfer(unverifiedUser.address, VGT(1000)),
-      ).to.be.reverted;
+      ).to.be.revertedWith("Recipient not verified");
     });
 
     it("✅ VGT: Voting power equals token balance", async function () {

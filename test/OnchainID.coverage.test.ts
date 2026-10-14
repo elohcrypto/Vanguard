@@ -178,7 +178,7 @@ describe("OnchainID System - Coverage Tests", function () {
         keyManager
           .connect(identity)
           .initiateKeyRotation(ethers.ZeroAddress, oldKey, newKey, 2),
-      ).to.be.reverted;
+      ).to.be.revertedWithoutReason();
 
       await expect(
         keyManager

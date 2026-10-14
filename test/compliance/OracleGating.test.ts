@@ -112,8 +112,9 @@ describe("Oracle gating in ComplianceRules", function () {
 
     it("an expired blacklist entry stops blocking", async function () {
       await bl.addToBlacklist(bob.address, 2, 3600, "temporary");
-      await expect(token.connect(alice).transfer(bob.address, E(10))).to.be
-        .reverted;
+      await expect(
+        token.connect(alice).transfer(bob.address, E(10)),
+      ).to.be.revertedWith("Compliance check failed");
       await ethers.provider.send("evm_increaseTime", [3601]);
       await ethers.provider.send("evm_mine", []);
       expect(await bl.isBlacklisted(bob.address)).to.be.false;
@@ -123,8 +124,9 @@ describe("Oracle gating in ComplianceRules", function () {
 
     it("removing from the blacklist restores transfers", async function () {
       await bl.addToBlacklist(bob.address, 2, 0, "AML risk");
-      await expect(token.connect(alice).transfer(bob.address, E(10))).to.be
-        .reverted;
+      await expect(
+        token.connect(alice).transfer(bob.address, E(10)),
+      ).to.be.revertedWith("Compliance check failed");
       await bl.removeFromBlacklist(bob.address, "cleared");
       await expect(token.connect(alice).transfer(bob.address, E(10))).to.not.be
         .reverted;
@@ -132,8 +134,9 @@ describe("Oracle gating in ComplianceRules", function () {
 
     it("unsetting the oracle disables the gate", async function () {
       await bl.addToBlacklist(bob.address, 2, 0, "AML risk");
-      await expect(token.connect(alice).transfer(bob.address, E(10))).to.be
-        .reverted;
+      await expect(
+        token.connect(alice).transfer(bob.address, E(10)),
+      ).to.be.revertedWith("Compliance check failed");
       await rules.setBlacklistOracle(
         await token.getAddress(),
         ethers.ZeroAddress,
@@ -159,8 +162,9 @@ describe("Oracle gating in ComplianceRules", function () {
 
     it("blocks when only the sender is whitelisted", async function () {
       await wl.addToWhitelist(alice.address, 1, 0, "kyc");
-      await expect(token.connect(alice).transfer(bob.address, E(10))).to.be
-        .reverted;
+      await expect(
+        token.connect(alice).transfer(bob.address, E(10)),
+      ).to.be.revertedWith("Compliance check failed");
     });
 
     it("allows when both are whitelisted", async function () {
@@ -179,8 +183,9 @@ describe("Oracle gating in ComplianceRules", function () {
       await ethers.provider.send("evm_increaseTime", [3601]);
       await ethers.provider.send("evm_mine", []);
       expect(await wl.isWhitelisted(bob.address)).to.be.false;
-      await expect(token.connect(alice).transfer(bob.address, E(10))).to.be
-        .reverted;
+      await expect(
+        token.connect(alice).transfer(bob.address, E(10)),
+      ).to.be.revertedWith("Compliance check failed");
     });
   });
 
@@ -206,8 +211,9 @@ describe("Oracle gating in ComplianceRules", function () {
     it("blacklist beats whitelist", async function () {
       await bl.addToBlacklist(bob.address, 3, 0, "critical");
       expect(await wl.isWhitelisted(bob.address)).to.be.true;
-      await expect(token.connect(alice).transfer(bob.address, E(10))).to.be
-        .reverted;
+      await expect(
+        token.connect(alice).transfer(bob.address, E(10)),
+      ).to.be.revertedWith("Compliance check failed");
     });
   });
 
@@ -225,7 +231,9 @@ describe("Oracle gating in ComplianceRules", function () {
 
     it("minting to a blacklisted address is blocked", async function () {
       await bl.addToBlacklist(bob.address, 2, 0, "AML risk");
-      await expect(token.mint(bob.address, E(10))).to.be.reverted;
+      await expect(token.mint(bob.address, E(10))).to.be.revertedWith(
+        "Compliance check failed",
+      );
     });
 
     it("burning from a blacklisted address still works (recovery path)", async function () {
@@ -385,10 +393,10 @@ describe("Oracle gating in ComplianceRules", function () {
       const t = await token.getAddress();
       await expect(
         rules.connect(alice).setBlacklistOracle(t, await bl.getAddress()),
-      ).to.be.reverted;
+      ).to.be.revertedWithCustomError(rules, "OwnableUnauthorizedAccount");
       await expect(
         rules.connect(alice).setWhitelistOracle(t, await wl.getAddress()),
-      ).to.be.reverted;
+      ).to.be.revertedWithCustomError(rules, "OwnableUnauthorizedAccount");
     });
 
     it("emits an event when an oracle is set", async function () {
@@ -422,7 +430,7 @@ describe("Oracle gating in ComplianceRules", function () {
     it("rejects a non-contract oracle address", async function () {
       await expect(
         rules.setBlacklistOracle(await token.getAddress(), alice.address),
-      ).to.be.reverted;
+      ).to.be.revertedWithCustomError(rules, "OracleNotAContract");
     });
   });
 });

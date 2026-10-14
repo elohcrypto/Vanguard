@@ -279,7 +279,7 @@ describe("One jurisdiction source (Task 3.8)", function () {
         "PrivacyManager",
         await c.zkVerifier.getAddress(),
       );
-      await expect(lacking.policyToken()).to.be.rejected;
+      await expect(lacking.policyToken()).to.be.revertedWithoutReason();
       args.privacyManager = new Proxy(pm, {
         get: (t, k) =>
           k === "policyToken" ? lacking.policyToken : Reflect.get(t, k),

@@ -125,14 +125,14 @@ describe("Quorum denominator integrity", function () {
 
     await expect(
       idReg.registerIdentity(signers[1].address, await newId(signers[1]), 643),
-    ).to.be.reverted;
+    ).to.be.revertedWith("Country not allowed: Country is blocked");
     await expect(
       idReg.batchRegisterIdentity(
         [signers[2].address],
         [await newId(signers[2])],
         [643],
       ),
-    ).to.be.reverted;
+    ).to.be.revertedWith("Country not allowed: Country is blocked");
   });
 });
 

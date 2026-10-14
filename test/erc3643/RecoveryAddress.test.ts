@@ -171,8 +171,9 @@ describe("recoveryAddress", function () {
     // an explicit revert, not a silent half-recovery.
     await idReg.removeAgent(await token.getAddress());
     const before = await token.balanceOf(lost.address);
-    await expect(token.recoveryAddress(lost.address, fresh.address, lostId)).to
-      .be.reverted;
+    await expect(
+      token.recoveryAddress(lost.address, fresh.address, lostId),
+    ).to.be.revertedWith("Not authorized agent");
     expect(
       await token.balanceOf(lost.address),
       "no partial state change",
@@ -181,8 +182,9 @@ describe("recoveryAddress", function () {
 
   it("does not run while the token is paused", async function () {
     await token.pause();
-    await expect(token.recoveryAddress(lost.address, fresh.address, lostId)).to
-      .be.reverted;
+    await expect(
+      token.recoveryAddress(lost.address, fresh.address, lostId),
+    ).to.be.revertedWithCustomError(token, "EnforcedPause");
   });
 
   // Task 2A.6: recovery moved the balance with _transfer and never asked

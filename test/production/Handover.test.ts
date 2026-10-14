@@ -246,7 +246,9 @@ describe("Deployer holds no power after handover (plan Task 0.3)", function () {
   // so the deployer must hold no power over the vote token either.
   it("governance owns GovernanceToken", async function () {
     expect(await governanceToken.owner()).to.equal(govAddr);
-    await expect(governanceToken.connect(deployer).pause()).to.be.reverted;
+    await expect(governanceToken.connect(deployer).pause()).to.be.revertedWith(
+      "Token: caller is not owner or guardian",
+    );
     await expect(
       governanceToken.connect(deployer).addAgent(deployer.address),
     ).to.be.revertedWithCustomError(
@@ -261,7 +263,7 @@ describe("Deployer holds no power after handover (plan Task 0.3)", function () {
       governanceToken
         .connect(deployer)
         .freezePartialTokens(voters[0].address, 1n),
-    ).to.be.reverted;
+    ).to.be.revertedWith("Not authorized agent");
   });
 
   it("the ops multisig is a GovernanceToken agent", async function () {
@@ -271,7 +273,9 @@ describe("Deployer holds no power after handover (plan Task 0.3)", function () {
   it("the guardian can pause the token but cannot unpause it", async function () {
     await token.connect(guardian).pause();
     expect(await token.paused()).to.equal(true);
-    await expect(token.connect(guardian).unpause()).to.be.reverted;
+    await expect(token.connect(guardian).unpause()).to.be.revertedWith(
+      "Token: caller cannot unpause",
+    );
   });
 
   it("the deployer can no longer issue a claim", async function () {

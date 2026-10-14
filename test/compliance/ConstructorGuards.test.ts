@@ -31,9 +31,15 @@ describe("Constructor guards — runtime behaviour", () => {
   const CASES: Array<{
     name: string;
     args: (ok: string, owner: string) => unknown[];
-    /** indices of address args that carry a code-length guard */
-    guarded: number[];
-  }> = [{ name: "PrivacyManager", args: (ok) => [ok], guarded: [0] }];
+    /** address args that carry a code-length guard, with its reason */
+    guarded: Array<[number, string]>;
+  }> = [
+    {
+      name: "PrivacyManager",
+      args: (ok) => [ok],
+      guarded: [[0, "PrivacyManager: ZK verifier is not a contract"]],
+    },
+  ];
 
   for (const { name, args, guarded } of CASES) {
     describe(name, () => {
@@ -45,7 +51,7 @@ describe("Constructor guards — runtime behaviour", () => {
           .not.be.reverted;
       });
 
-      for (const idx of guarded) {
+      for (const [idx, reason] of guarded) {
         it(`rejects an EOA in address argument #${idx}`, async () => {
           const [owner] = await ethers.getSigners();
           const ok = await anyContract();
@@ -54,10 +60,11 @@ describe("Constructor guards — runtime behaviour", () => {
           const bad = args(ok, owner.address);
           bad[idx] = owner.address; // an EOA: no code
 
-          // Must revert. Asserting only that it reverts (not the exact string)
-          // keeps this robust to message wording, while still proving the
-          // guard is on the executed path.
-          await expect(factory.deploy(...(bad as never[]))).to.be.reverted;
+          // The guard's own reason (Task 5.3, CF-8): a revert from anywhere
+          // else on the deploy path must not pass for it.
+          await expect(factory.deploy(...(bad as never[]))).to.be.revertedWith(
+            reason,
+          );
         });
       }
     });

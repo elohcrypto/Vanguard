@@ -212,7 +212,7 @@ describe("KeyManager", function () {
               newKey,
               ACTION_KEY,
             ),
-        ).to.be.reverted;
+        ).to.be.revertedWithoutReason();
       });
 
       it("Should reject initiation with zero keys", async function () {

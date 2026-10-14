@@ -333,7 +333,7 @@ describe("Governance Token KYC/AML Restriction Test", function () {
         governanceToken
           .connect(verifiedUser)
           .distributeGovernanceTokens([attacker.address], [VGT(10000)]),
-      ).to.be.reverted;
+      ).to.be.revertedWith("Not authorized agent");
       console.log("   ✅ Distribution REJECTED (not owner)");
 
       console.log("\n✅ ONLY OWNER CAN MINT VGT!");
@@ -355,7 +355,7 @@ describe("Governance Token KYC/AML Restriction Test", function () {
         governanceToken
           .connect(verifiedUser)
           .transfer(unverifiedUser.address, VGT(1000)),
-      ).to.be.reverted;
+      ).to.be.revertedWith("Recipient not verified");
       console.log("   ✅ Transfer BLOCKED (recipient not verified)");
 
       const unverifiedBalance = await governanceToken.balanceOf(

@@ -130,8 +130,9 @@ describe("Transfer Limits Verification - 8,000 Yuan Max", function () {
     });
 
     it("Should REJECT bank transfer over 8,000 Yuan limit", async function () {
-      await expect(token.connect(bank).transfer(investor2.address, OVER_LIMIT))
-        .to.be.reverted;
+      await expect(
+        token.connect(bank).transfer(investor2.address, OVER_LIMIT),
+      ).to.be.revertedWith("Transfer amount limit exceeded");
     });
 
     it("Should verify transfer limit is enforced in canTransfer check", async function () {
@@ -178,7 +179,7 @@ describe("Transfer Limits Verification - 8,000 Yuan Max", function () {
     it("Should REJECT investor transfer over 8,000 Yuan limit", async function () {
       await expect(
         token.connect(investor1).transfer(investor2.address, OVER_LIMIT),
-      ).to.be.reverted;
+      ).to.be.revertedWith("Transfer amount limit exceeded");
     });
 
     it("Should verify investor transfer limit in canTransfer check", async function () {
@@ -299,7 +300,7 @@ describe("Transfer Limits Verification - 8,000 Yuan Max", function () {
         token
           .connect(bank)
           .transferFrom(investor1.address, investor2.address, OVER_LIMIT),
-      ).to.be.reverted;
+      ).to.be.revertedWith("Transfer amount limit exceeded");
     });
   });
 });

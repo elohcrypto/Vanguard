@@ -90,7 +90,7 @@ describe("ZKVerifierIntegrated — updateVerifier trust assumption", () => {
       zk
         .connect(attacker)
         .updateVerifier("whitelist", await rogue.getAddress()),
-    ).to.be.reverted;
+    ).to.be.revertedWithCustomError(zk, "OwnableUnauthorizedAccount");
   });
 
   it("the swapped-in verifier accepts arbitrary proofs, not one crafted case", async () => {

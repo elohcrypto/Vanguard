@@ -194,7 +194,7 @@ describe("Handover: PrivacyManager wired in ComplianceRules (3.4)", function () 
       "ComplianceRules",
       await c.identityRegistry.getAddress(),
     );
-    await expect(lacking.whitelistMode(vgt)).to.be.rejected;
+    await expect(lacking.whitelistMode(vgt)).to.be.revertedWithoutReason();
     args.complianceRules = new Proxy(rules, {
       get: (t, k) =>
         k === "whitelistMode" ? lacking.whitelistMode : Reflect.get(t, k),

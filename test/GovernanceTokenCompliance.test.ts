@@ -182,7 +182,7 @@ describe("🔒 Governance Token Compliance - Complete Proof", function () {
         governanceToken
           .connect(verifiedUser1)
           .distributeGovernanceTokens([verifiedUser2.address], [VGT(1000)]),
-      ).to.be.reverted;
+      ).to.be.revertedWith("Not authorized agent");
       console.log("   ✅ PASS: Non-owner minting attempt REJECTED");
 
       // ============================================================
@@ -248,7 +248,7 @@ describe("🔒 Governance Token Compliance - Complete Proof", function () {
         governanceToken
           .connect(verifiedUser1)
           .transfer(unverifiedUser.address, VGT(1000)),
-      ).to.be.reverted;
+      ).to.be.revertedWith("Recipient not verified");
       const unverifiedBalance = await governanceToken.balanceOf(
         unverifiedUser.address,
       );
@@ -355,7 +355,7 @@ describe("🔒 Governance Token Compliance - Complete Proof", function () {
         governanceToken
           .connect(verifiedUser1)
           .distributeGovernanceTokens([verifiedUser2.address], [VGT(100)]),
-      ).to.be.reverted;
+      ).to.be.revertedWith("Not authorized agent");
     });
 
     it("✅ Transfers to unverified addresses are blocked", async function () {
@@ -368,7 +368,7 @@ describe("🔒 Governance Token Compliance - Complete Proof", function () {
         governanceToken
           .connect(verifiedUser1)
           .transfer(unverifiedUser.address, VGT(100)),
-      ).to.be.reverted;
+      ).to.be.revertedWith("Recipient not verified");
     });
 
     it("✅ Transfers between verified addresses work", async function () {

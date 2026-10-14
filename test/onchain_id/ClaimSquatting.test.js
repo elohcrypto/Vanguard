@@ -361,7 +361,7 @@ describe("Claim-slot squatting (2F.2, H2)", function () {
           [0],
           [await sign(issuerOwner, kycAddr, eoaId, KYC, d)],
         ),
-    ).to.be.reverted;
+    ).to.be.revertedWithoutReason();
     expect(await kyc.hasValidClaim(eoaId, KYC)).to.equal(false);
     // D41 (4.14): the registry refuses the binding itself, since no wallet
     // controls an identity with no code; nothing is verified by it.

@@ -1001,10 +1001,10 @@ describe("Enhanced Escrow System", function () {
     });
 
     it("rejects a fabricated signature", async function () {
-      const dh = ethers.keccak256(ethers.toUtf8Bytes(DATA));
       const junk = "0x" + "11".repeat(65);
-      await expect(wallet.connect(payee).submitShipmentProof(DATA, dh, junk)).to
-        .be.reverted;
+      await expect(
+        wallet.connect(payee).submitShipmentProof(DATA, ethers.id(DATA), junk),
+      ).to.be.revertedWithCustomError(wallet, "ECDSAInvalidSignature");
     });
 
     it("rejects a signature from someone other than the payee", async function () {

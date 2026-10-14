@@ -147,7 +147,9 @@ describe("GovernanceToken is governable by proposal", function () {
       vgt,
       "OwnableUnauthorizedAccount",
     );
-    await expect(vgt.pause()).to.be.reverted;
+    await expect(vgt.pause()).to.be.revertedWith(
+      "Token: caller is not owner or guardian",
+    );
   });
 
   // Shape: the unpause proposal is created AND voted before the pause executes

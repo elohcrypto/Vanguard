@@ -63,7 +63,9 @@ describe("ZKVerifierIntegrated — ownership migration path", () => {
     // Re-targeting replaces the pending owner; the mistaken one loses its claim.
     await zk.transferOwnership(owner.address);
 
-    await expect(zk.connect(wrong).acceptOwnership()).to.be.reverted;
+    await expect(
+      zk.connect(wrong).acceptOwnership(),
+    ).to.be.revertedWithCustomError(zk, "OwnableUnauthorizedAccount");
     expect(await zk.owner()).to.equal(owner.address);
   });
 
