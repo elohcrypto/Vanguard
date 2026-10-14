@@ -15,6 +15,7 @@ const {
   displayError,
 } = require("./DisplayHelpers");
 const { walletControlRefusal } = require("./ChainTime");
+const { executorFor } = require("./ProposalExecutor");
 const { ethers } = require("hardhat");
 
 /** Option 77: Vote on Proposal */
@@ -381,7 +382,17 @@ async function executeProposal(mod) {
       return;
     }
 
-    const tx = await vanguardGovernance.executeProposal(parseInt(proposalId));
+    // Task 5.6b: from the proposer or a voter, never wallet 0 after the
+    // ceremony (ProposalExecutor.js).
+    const pick = await executorFor(mod, vanguardGovernance, proposalId);
+    if (pick.refused) {
+      displayError(`Execution refused: ${pick.refused}`);
+      return;
+    }
+    console.log(`   Executing from ${pick.signer.address} (${pick.why})`);
+    const tx = await vanguardGovernance
+      .connect(pick.signer)
+      .executeProposal(parseInt(proposalId));
     const receipt = await tx.wait();
 
     // A mined receipt is not a success. executeProposal settles THREE
