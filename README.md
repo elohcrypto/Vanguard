@@ -76,7 +76,9 @@ Vanguard/
 │   ├── NEW_FAIR_VOTING_SYSTEM.md               # Fair voting implementation
 │   ├── INVESTOR_TYPE_SYSTEM.md                 # Investor type documentation
 │   ├── SYSTEM_WORKFLOW_GUIDE.md                # User workflows and interactions
-│   ├── TECHNICAL_DEEP_DIVE.md                  # In-depth technical analysis
+│   ├── DEEP_DIVE_TRANSFER.md                   # Token, compliance and oracle internals
+│   ├── DEEP_DIVE_IDENTITY.md                   # OnchainID, recovery, governance internals
+│   ├── DEEP_DIVE_ZK.md                         # The five circuits and their checks
 │   ├── TESTNET_SETUP.md                        # Role wallets, time scale, rehearsal, gas
 │   ├── TESTNET_DEMO_OPTIONS.md                 # Privacy, custody, oracle, key options
 │   ├── TESTNET_CEREMONY.md                     # Handover ceremony, operator CLIs
@@ -135,7 +137,7 @@ Vanguard/
 - [Testnet Demo Options](/docs/TESTNET_DEMO_OPTIONS.md) - Privacy, custody, oracle and identity-key options on a live node
 - [Handover Ceremony](/docs/TESTNET_CEREMONY.md) - The handover ceremony and the operators' command lines
 - [Vanguard RWA StableCoin Ecosystem Guide](/docs/VANGUARD_RWA_TOKEN_ECOSYSTEM_GUIDE.md) - Complete ecosystem overview
-- [Technical Deep Dive](/docs/TECHNICAL_DEEP_DIVE.md) - In-depth technical analysis
+- Technical deep dive: [transfer path](/docs/DEEP_DIVE_TRANSFER.md), [identity, recovery and governance](/docs/DEEP_DIVE_IDENTITY.md), [ZK circuits](/docs/DEEP_DIVE_ZK.md)
 
 ### **Governance & Voting System**
 
