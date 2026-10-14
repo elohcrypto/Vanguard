@@ -99,7 +99,7 @@
     {"site":"Token.setCompliance | _complianceAddress.code.length > 0 | Token: Compliance is not a contract","class":"tested","file":"test/erc3643/TokenSetterGuards.test.ts","test":"setCompliance rejects zero address and EOAs, accepts a contract"},
     {"site":"Token.setInvestorTypeRegistry | _investorTypeRegistryAddress != address(0) | Token: Investor type registry is zero address","class":"tested","file":"test/erc3643/TokenSetterGuards.test.ts","test":"setInvestorTypeRegistry rejects zero address and EOAs, accepts a contract"},
     {"site":"Token.setInvestorTypeRegistry | _investorTypeRegistryAddress.code.length > 0 | Token: Investor type registry is not a contract","class":"tested","file":"test/erc3643/TokenSetterGuards.test.ts","test":"setInvestorTypeRegistry rejects zero address and EOAs, accepts a contract"},
-    {"site":"Token.addAgent | _agent == address(0) | ZeroAgent","class":"tested","file":"test/governance/HardeningRound2.test.ts","test":"Token emits AgentAdded/AgentRemoved and rejects address(0)"},
+    {"site":"Token.addAgent | _agent == address(0) | ZeroAgent","class":"tested","file":"test/governance/HardeningRound2Rules.test.ts","test":"Token emits AgentAdded/AgentRemoved and rejects address(0)"},
     {"site":"Token._requireTransfer | ok | why","class":"tested","file":"test/GovernanceTokenKYCRestriction.test.ts","test":"Should PREVENT transfer to unverified address"}
   ]
 }

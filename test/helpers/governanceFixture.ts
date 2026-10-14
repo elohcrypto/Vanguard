@@ -222,3 +222,81 @@ export async function handoverFixture({ recordGovernanceToken = true } = {}) {
     custody,
   };
 }
+
+// owner(): a harmless call. createProposal refuses calldata under 4 bytes
+// (plan 2F.1 selector check), so "0x" is no longer a valid no-op.
+export const NOOP = "0x8da5cb5b";
+
+/**
+ * Hardening round 2 governance (Task 5.4 moved it here from
+ * HardeningRound2.test.ts, now split in three): VanguardGovernance over
+ * VGT with a ComplianceRegistry, four verified holders (owner, alice, bob,
+ * carol; 1,000 VGT and an unlimited governance allowance each but the
+ * owner) and voters aged past minVoterAge.
+ */
+export async function govFixture() {
+  const [owner, alice, bob, carol] = await ethers.getSigners();
+  const ir = await (
+    await ethers.getContractFactory("IdentityRegistry")
+  ).deploy();
+  const cr = await (
+    await ethers.getContractFactory("ComplianceRegistry")
+  ).deploy();
+  const gt = await (
+    await ethers.getContractFactory("GovernanceToken")
+  ).deploy("VGT", "VGT", await ir.getAddress(), await cr.getAddress());
+  const gov = await (
+    await ethers.getContractFactory("VanguardGovernance")
+  ).deploy(
+    await gt.getAddress(),
+    await ir.getAddress(),
+    owner.address,
+    owner.address,
+    owner.address,
+    owner.address,
+    1,
+  );
+  const govAddr = await gov.getAddress();
+  await gt.addAgent(govAddr);
+
+  const kycIssuer = await (
+    await ethers.getContractFactory("ClaimIssuer")
+  ).deploy(owner.address, "KYC Issuer", "Trusted KYC attestations");
+  await configureKyc(ir, await kycIssuer.getAddress());
+
+  const OID = await ethers.getContractFactory("OnchainID");
+  const ids: Record<string, string> = {};
+  const named: [string, string][] = [
+    ["owner", owner.address],
+    ["alice", alice.address],
+    ["bob", bob.address],
+    ["carol", carol.address],
+  ];
+  // D21: governance holds VGT fees as a trusted contract, never an identity.
+  await cr.setTrusted(govAddr, true);
+  for (const [key, addr] of named) {
+    const id = await (await OID.deploy(addr)).getAddress();
+    await ir.registerIdentity(addr, id, 840);
+    await attest(kycIssuer, owner, id);
+    ids[key] = id;
+  }
+  for (const s of [alice, bob, carol]) {
+    await gt.transfer(s.address, ethers.parseEther("1000"));
+    await gt.connect(s).approve(govAddr, ethers.MaxUint256);
+  }
+  // Voters must be older than minVoterAge before they propose (D25).
+  await ageVoters(gov);
+  return {
+    owner,
+    alice,
+    bob,
+    carol,
+    ir,
+    cr,
+    gt,
+    gov,
+    govAddr,
+    kycIssuer,
+    ids,
+  };
+}
