@@ -263,7 +263,7 @@ key.
 ## Sepolia
 
 1. `SEPOLIA_RPC_URL` in `.env` (Alchemy or Infura free tier).
-2. Fund index 0 with ~0.3 ETH and indices 1 to 9 with ~0.02 each from a
+2. (Amounts pending 5.7; fund wallets 10 and 11 too.) Fund index 0 with ~0.3 ETH and indices 1 to 9 with ~0.02 each from a
    faucet. `print-role-wallets.js --network sepolia` shows balances.
 3. `GOV_TIME_SCALE=336 npx hardhat run demo/index.js --network sepolia`.
 4. Same menu walk. Option 79 waits about 40 minutes of real time.

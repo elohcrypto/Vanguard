@@ -10,7 +10,7 @@ VSC is not a stablecoin as coded: nothing in the contracts backs, redeems
 or pegs it. The system provides:
 
 - ✅ **Identity and claims**: OnchainID identities, KYC (topic 6) and AML (topic 7) claims from trusted `ClaimIssuer`s, and KeyManager key rotation and agent recovery
-- ✅ **Whitelist/blacklist oracles with node consensus** (66% of the registered node weight: two of three equal nodes; never a single node)
+- ✅ **Whitelist/blacklist oracles with node consensus** (66% of the registered node weight by default, owner-settable in (50, 100]: two of three equal nodes; never a single node, except a designated emergency node's 7-day CRITICAL listing, renewable, and the OracleManager owner's `emergencyOverride`)
 - ✅ **Zero-knowledge proofs** (5 Circom circuits, PLONK); only the whitelist binding gates transfers
 - ✅ **Investor types** (Normal, Retail, Accredited, Institutional) with transfer and holding caps, cooldowns and whitelist tiers
 - ✅ **One identity, one vote governance**, with VGT paying the proposal and voting fees
@@ -187,17 +187,17 @@ npm run test:coverage                          # coverage (sets DEPLOY_GAS_LIMIT
 
 ### Identity & compliance
 
-- **OnchainID (ERC-734/735)**: keys and claims; `ClaimIssuer` signatures cover `claimDigest` (chain id, issuer, revocation epoch, identity, topic, scheme, data, uri, validTo) and a revocation voids every earlier signature (Task 5.2). `IdentityRegistry.isVerified` asks each trusted issuer, with each call bounded to 45,000 gas and one return word (`BoundedStaticCall`, Task 5.1)
+- **OnchainID (ERC-734/735)**: keys and claims; `ClaimIssuer` signatures cover `claimDigest` (chain id, issuer, revocation epoch, identity, topic, scheme, data, uri, validTo) and a revocation voids every earlier signature for that identity and topic (Task 5.2). `IdentityRegistry.isVerified` asks each trusted issuer, with each call bounded to 45,000 gas and one return word (`BoundedStaticCall`, Task 5.1)
 - **KeyManager**: timelocked rotation for identities that authorize it; agent recovery (threshold at least 2) for identities that pin it as their recovery manager
 - **ComplianceRules**: per-token jurisdiction rules, blacklist and whitelist gates (oracle or ZK binding), and per-token trusted contracts; investor-type caps live in `InvestorTypeRegistry`, which the token enforces
 
 ### Oracles
 
 - **Whitelist** tiers 1-5 and **blacklist** severities LOW to CRITICAL, written by consensus verdicts, governance ListUpdate votes (DynamicListManager) or the list oracles' owner
-- **Weighted consensus**: a side needs 66% of the weight of every node registered when the query opened; a query no single node can resolve alone (`SingleNodeQuorum`) and a verdict a list oracle applies only with at least 2 supporting nodes (`TooFewVoters`) (Task 5.1). Reputation is owner-set and gates a node's unpause; it does not weight votes
+- **Weighted consensus**: a side needs 66% (the default; the owner sets it in (50, 100]) of the weight of every node registered when the query opened; a query no single node can resolve alone (`SingleNodeQuorum`) and a verdict a list oracle applies only with at least 2 supporting nodes (`TooFewVoters`) (Task 5.1). Reputation is owner-set and gates a node's unpause; it does not weight votes
 - **Owner writes**: ops, as the list oracles' owner after the handover, can write any tier (5 included) or severity (CRITICAL included) directly, without consensus; a consensus verdict's severity only sets the listing's duration. The list-oracle ownership posture is an audit item (D44 a)
-- **Emergency listing**: one designated node may list CRITICAL
-- **Fail closed**: ComplianceRules calls the oracles without a fallback, so an oracle that reverts makes the transfer revert; unbinding it (`setWhitelistOracle` / `setBlacklistOracle` to 0) is the fallback
+- **Emergency listing**: any designated emergency node, alone, may list CRITICAL for 7 days, renewable by listing again (`emergencyBlacklist`); the OracleManager owner may also stamp or flip a verdict alone (`emergencyOverride`)
+- **Fail closed**: ComplianceRules calls the oracles without a fallback, so an oracle that reverts makes the transfer revert (fail closed). Unbinding an oracle removes its gate until a working one is rebound: with no blacklist oracle nobody is sanctions-checked; OracleOnly with no whitelist oracle passes every party; Either with no whitelist oracle falls back to the ZK binding alone. The remedy for a failing oracle is rebinding a working one (or pausing the token), not unbinding
 
 ### Privacy & zero-knowledge
 
@@ -262,7 +262,7 @@ MIT License (the `license` field of package.json; the repository has no LICENSE 
 
 ## 🎯 Project Status
 
-**Current phase**: remediation plan v2, Phases 0 to 4 done; Phase 5 in progress (Tasks 5.1-5.4 and 5.10 done, 5.5 docs truth now), then the Sepolia rehearsal and production deploy with external signers (5.7) and the audit package. Mainnet is Phase 6.
+**Current phase**: remediation plan v2, Phases 0 to 4 done; Phase 5 in progress (see the plan for the task status), then the Sepolia rehearsal and production deploy with external signers (5.7) and the audit package. Mainnet is Phase 6.
 
 - **Smart contracts**: 26 deployable contracts (21 written, 5 generated PLONK verifiers), implemented and tested locally, not audited
 - **Not done**: security audit, testnet and production deployment, gas optimisation beyond the transfer-path ratchet, monitoring

@@ -80,15 +80,16 @@ recovers identities.
 ### 4. Oracles (OracleManager, ConsensusOracle, list oracles)
 
 - Whitelist tiers 1-5; blacklist severities LOW, MEDIUM, HIGH, CRITICAL.
-- A verdict needs 66% of the registered node weight (two of three equal
-  nodes). A query opens only with at least two registered nodes and no
+- A verdict needs 66% of the registered node weight by default (two of
+  three equal nodes; the owner sets the threshold in (50, 100]). A query opens only with at least two registered nodes and no
   single node meeting the bar; a list oracle applies a verdict only when
   at least two distinct nodes voted its way (Task 5.1).
 - Nodes raise tiers 1-4 and severities up to HIGH; only the OracleManager
   owner raises tier 5 or CRITICAL. The list oracles' own owner (ops after
   the handover) writes any entry directly, with no vote (D44 a; the
-  ownership posture is an audit item). One designated node may list
-  CRITICAL in an emergency.
+  ownership posture is an audit item). Never a single node, except a
+  designated emergency node's CRITICAL listing (7 days, renewable by
+  listing again) and the OracleManager owner's `emergencyOverride`.
 - The blacklist gates VSC once bound (`setBlacklistOracle`); the whitelist
   once bound (option 38a, or a ComplianceRules vote after the handover).
 - Demo options 31-40.

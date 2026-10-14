@@ -351,8 +351,12 @@ votes is measured in the repo.
    external call, so one unpayable participant cannot freeze the others'
    deposits.
 5. **Oracle failure:** ComplianceRules calls the oracles without a
-   fallback, so a reverting oracle reverts every transfer (fail closed);
-   unbinding it is the remedy.
+   fallback, so a reverting oracle reverts every transfer (fail closed).
+   Unbinding an oracle removes its gate until a working one is rebound:
+   with no blacklist oracle nobody is sanctions-checked; OracleOnly with
+   no whitelist oracle passes every party; Either with no whitelist oracle
+   falls back to the ZK binding alone. The remedy is rebinding a working
+   oracle (or pausing the token), not unbinding.
 
 ### Not done
 
