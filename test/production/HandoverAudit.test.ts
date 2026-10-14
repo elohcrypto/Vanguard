@@ -42,7 +42,10 @@ describe("Handover audit (HANDOVER_PHASE=audit, Task 5.6b)", function () {
     ({ cfg, cfgPath, dir } = await cliConfig(f));
     out.length = 0;
   });
-  afterEach(() => fs.rmSync(dir, { recursive: true, force: true }));
+  afterEach(() => {
+    fs.rmSync(dir, { recursive: true, force: true });
+    delete process.env.HANDOVER_SNAPSHOT_SHA256;
+  });
 
   const nodes = async () => (await ethers.getSigners()).slice(9, 12);
   /** D50: three nodes registered by OracleParameters votes. */
@@ -83,6 +86,9 @@ describe("Handover audit (HANDOVER_PHASE=audit, Task 5.6b)", function () {
       om,
       om.interface.encodeFunctionData("removeOracle", [n3.address, "D50"]),
     );
+    process.env.HANDOVER_SNAPSHOT_SHA256 = fs
+      .readFileSync(`${cfgPath}.snapshot.json.sha256`, "utf8")
+      .split(" ")[0];
     // The accept phase compares with the ceremony's snapshot: a voted node
     // reads as one that appeared after the preflight.
     await fails(

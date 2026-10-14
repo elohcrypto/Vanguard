@@ -15,6 +15,11 @@ const cfgPath = path.join(
 const snapPath = `${cfgPath}.snapshot.json`;
 // Task 5.6b (B-6): a snapshot the accept phase reads carries its digest.
 const { writeSnapshotFile } = require("../../demo/utils/HandoverSnapshotFile");
+const writeSnap = (d: object) =>
+  (process.env.HANDOVER_SNAPSHOT_SHA256 = writeSnapshotFile(
+    snapPath,
+    d,
+  ).digest);
 
 const {
   castAcceptanceVotes,
@@ -71,6 +76,7 @@ describe("Handover CLI (scripts/handover.ts)", function () {
     console.log = quiet;
     for (const p of [snapPath, `${snapPath}.sha256`])
       fs.rmSync(p, { force: true });
+    delete process.env.HANDOVER_SNAPSHOT_SHA256;
   });
 
   it("the full phase completes and writes the preflight snapshot", async function () {
@@ -252,7 +258,7 @@ describe("Handover CLI (scripts/handover.ts)", function () {
     await expect(runHandover(cfg, "accept", cfgPath)).to.be.rejectedWith(
       /no preflight snapshot from the full phase/,
     );
-    writeSnapshotFile(snapPath, {
+    writeSnap({
       governance: govAddr,
       chainId: 31337,
       block: report.preflightBlock,
@@ -298,7 +304,7 @@ describe("Handover CLI (scripts/handover.ts)", function () {
 
   /** M-1: the accept phase needs the full phase's snapshot file first. */
   const snapshotFile = () =>
-    writeSnapshotFile(snapPath, {
+    writeSnap({
       governance: f.govAddr,
       chainId: 31337,
       block: 0,
@@ -443,7 +449,7 @@ describe("Handover CLI (scripts/handover.ts)", function () {
   it("the accept phase refuses a snapshot from another chain or after step 1", async function () {
     const report = await handoverDeployerPowers(f.args);
     const write = (o: object) =>
-      writeSnapshotFile(snapPath, {
+      writeSnap({
         governance: f.govAddr,
         snapshot: report.snapshot,
         ...o,

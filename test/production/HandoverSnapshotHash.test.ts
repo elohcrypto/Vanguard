@@ -64,9 +64,16 @@ describe("Handover snapshot hash (B-6, Task 5.6b)", function () {
     expect(out).to.include(COMPLETE);
   });
 
-  it("accept refuses an edited snapshot (hash mismatch) and a missing digest", async function () {
+  it("accept refuses no digest, an edited snapshot (hash mismatch) and a missing sidecar", async function () {
     await run("full");
     const digest = sha(snap);
+    // Round 2: the operator's digest is required (SnapshotDigestMissing).
+    const none = (await run("accept").catch((e: Error) => e)) as Error;
+    expect(none.name).to.equal("SnapshotDigestMissing");
+    expect(none.message).to.equal(
+      `snapshot digest missing: set HANDOVER_SNAPSHOT_SHA256 to the digest the full phase printed for ${snap} ("snapshot sha256: <hex>", kept in the run's records); the sidecar alone cannot prove the file was not rewritten with it`,
+    );
+    process.env.HANDOVER_SNAPSHOT_SHA256 = digest;
     const body = JSON.parse(fs.readFileSync(snap, "utf8"));
     body.snapshot.ceremonyTxs.pop(); // launder one ceremony transaction
     fs.writeFileSync(snap, JSON.stringify(body, null, 2));
@@ -77,7 +84,6 @@ describe("Handover snapshot hash (B-6, Task 5.6b)", function () {
     );
     // Rewriting the sidecar too passes it; the recorded digest does not.
     fs.writeFileSync(`${snap}.sha256`, `${sha(snap)}  ${snap}\n`);
-    process.env.HANDOVER_SNAPSHOT_SHA256 = digest;
     await expect(run("accept")).to.be.rejectedWith(
       `snapshot hash mismatch: ${snap} hashes to ${sha(snap)}, but HANDOVER_SNAPSHOT_SHA256 is ${digest}`,
     );

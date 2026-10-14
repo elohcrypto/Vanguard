@@ -11,9 +11,9 @@
  * directory the CLI cannot write stops the run before step 1. The accept
  * phase hashes the file before it parses it and refuses a digest that
  * differs from the sidecar's or from HANDOVER_SNAPSHOT_SHA256 (the digest
- * the full phase printed, from the run's records): the sidecar sits next
- * to the file, so only the recorded digest proves the pair was not
- * rewritten together.
+ * the full phase printed, from the run's records). The variable is
+ * required (SnapshotDigestMissing): the sidecar sits next to the file, so
+ * only the recorded digest proves the pair was not rewritten together.
  */
 
 const crypto = require("crypto");
@@ -29,6 +29,16 @@ function mismatch(msg) {
   return Object.assign(new Error(`snapshot hash mismatch: ${msg}`), {
     name: "SnapshotHashMismatch",
   });
+}
+
+/** Task 5.6b round 2: the operator's recorded digest is required. */
+function missingDigest(p) {
+  return Object.assign(
+    new Error(
+      `snapshot digest missing: set HANDOVER_SNAPSHOT_SHA256 to the digest the full phase printed for ${p} ("snapshot sha256: <hex>", kept in the run's records); the sidecar alone cannot prove the file was not rewritten with it`,
+    ),
+    { name: "SnapshotDigestMissing" },
+  );
 }
 
 /**
@@ -59,11 +69,13 @@ function writeSnapshotFile(p, data) {
 }
 
 /**
- * The parsed snapshot after its digest matched the sidecar's and, when
- * given, `expected` (HANDOVER_SNAPSHOT_SHA256). Throws a
- * SnapshotHashMismatch otherwise; returns { snap, digest }.
+ * The parsed snapshot after its digest matched the sidecar's and
+ * `expected` (HANDOVER_SNAPSHOT_SHA256, required). Throws
+ * SnapshotDigestMissing or SnapshotHashMismatch otherwise; returns
+ * { snap, digest }.
  */
 function readSnapshotFile(p, expected) {
+  if (!expected) throw missingDigest(p);
   const bytes = fs.readFileSync(p);
   const digest = sha256(bytes);
   const side = sidecarOf(p);
@@ -78,7 +90,7 @@ function readSnapshotFile(p, expected) {
       `${p} hashes to ${digest}, but ${side} records ${recorded}: the file was edited after the full phase wrote it; a completion against it is a re-run, not a pass`,
     );
   }
-  if (expected !== undefined && expected.toLowerCase() !== digest) {
+  if (expected.toLowerCase() !== digest) {
     throw mismatch(
       `${p} hashes to ${digest}, but HANDOVER_SNAPSHOT_SHA256 is ${expected}: the file and its sidecar are not the pair the full phase printed`,
     );

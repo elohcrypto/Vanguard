@@ -53,7 +53,8 @@
  * Task 5.6b (B-6): the full phase also writes
  * `<config>.snapshot.json.sha256` and prints the digest; the accept phase
  * refuses a snapshot whose digest differs from it or from
- * HANDOVER_SNAPSHOT_SHA256 (demo/utils/HandoverSnapshotFile.js).
+ * HANDOVER_SNAPSHOT_SHA256, which it requires (the printed digest;
+ * demo/utils/HandoverSnapshotFile.js).
  *
  * HANDOVER_PHASE=audit is the day-2 re-check: read-only, it runs every
  * completion line against the state governance derives now, with the
