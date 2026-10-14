@@ -38,7 +38,7 @@ const { CIRCUITS: circuits, protocolOf } = require("./setup-zk-circuits");
 // public inputs): whitelist [nullifier, merkleRoot, walletBinding],
 // blacklist [nullifier, whitelistRoot, blacklistRoot, walletBinding],
 // the attestations carry [nullifier, Ax, Ay, chainId, verifierContext,
-// policy..., walletBinding] (Task 3.8 M1): jurisdiction policy [allowedMask],
+// validUntil, policy..., walletBinding] (validUntil since Task 3.10) (Task 3.8 M1): jurisdiction policy [allowedMask],
 // accreditation [minimumAccreditation], compliance [minimum, wK, wA, wJ, wAcc].
 const EXPECTED_NPUBLIC = {
   whitelist_membership: 3,

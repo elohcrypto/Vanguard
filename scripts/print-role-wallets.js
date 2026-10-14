@@ -5,18 +5,18 @@
  */
 const { ethers, network } = require("hardhat");
 const ROLES = [
-  "platform owner / deployer",
-  "fee wallet / compliance officer",
-  "KYC issuer",
-  "AML issuer",
-  "risk oracle",
-  "fraud oracle",
-  "investor Alice",
-  "investor Bob",
-  "investor Carol",
-  "unverified user",
-  "spare",
-  "spare",
+  "deployer",
+  "fee wallet, compliance officer, KYC oracle node",
+  "AML oracle node",
+  "compliance oracle node",
+  "onboarded user",
+  "onboarded user",
+  "investor (Alice)",
+  "investor (Bob)",
+  "investor (Carol)",
+  "issuer admin",
+  "ops",
+  "guardian",
 ];
 async function main() {
   let phrase = process.env.MNEMONIC;

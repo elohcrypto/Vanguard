@@ -368,7 +368,7 @@ function getCircuitDescription(circuitName) {
 }
 
 async function main() {
-  console.log("🚀 Setting up ZK circuits for CMTA UTXO Compliance POC");
+  console.log("🚀 Setting up ZK circuits for Vanguard");
   console.log("=".repeat(60));
 
   try {

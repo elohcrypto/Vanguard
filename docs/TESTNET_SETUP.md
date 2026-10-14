@@ -35,10 +35,8 @@ signer allocation reserves wallets 0-3 and 9-11 and hands out 4, 5, 6, ...
 in the order names are entered at options 23/24 (option 62's fallback fee
 wallet, wallet 3, is the one exception). Option 32 registers wallets 4 and
 5 as risk and fraud oracle nodes only on a manager with fewer than three
-nodes, which never happens after option 31. Some demo prints still use
-older labels (option 12 and `print-role-wallets.js` call wallets 2 and 3
-the KYC and AML issuers and 10 and 11 spare); the deploy code (option 31)
-is what this table follows.
+nodes, which never happens after option 31. Option 12, the signer
+allocation and `print-role-wallets.js` print these roles in the same words.
 
 ```bash
 cp .env.example .env

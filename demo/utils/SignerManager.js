@@ -2,7 +2,7 @@
  * @fileoverview Signer allocation and management utility
  * @module SignerManager
  * @description Manages allocation of Ethereum signers for the demo, ensuring
- * system roles (owner, fee wallet, KYC/AML issuers) are reserved and user/investor
+ * system roles (owner, fee wallet, oracle nodes) are reserved and user/investor
  * signers are allocated intelligently without conflicts.
  *
  * @example
@@ -100,12 +100,12 @@ class SignerManager {
       },
       {
         index: 2,
-        role: "KYC oracle node",
+        role: "AML oracle node",
         address: this.state.signers[2]?.address,
       },
       {
         index: 3,
-        role: "AML oracle node",
+        role: "compliance oracle node",
         address: this.state.signers[3]?.address,
       },
       {

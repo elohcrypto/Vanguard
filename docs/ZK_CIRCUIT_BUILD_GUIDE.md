@@ -73,7 +73,7 @@ npm run setup:zk
 ### **Expected Output:**
 
 ```
-🚀 Setting up ZK circuits for CMTA UTXO Compliance POC
+🚀 Setting up ZK circuits for Vanguard
 ============================================================
 📁 Creating build directories...
 ⬇️  Powers of Tau file...

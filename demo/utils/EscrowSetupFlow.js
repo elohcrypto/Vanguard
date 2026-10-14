@@ -121,7 +121,7 @@ async function deployEscrowSystem(mod) {
       "   • Escrow wallets trusted at creation by the factory (registrar, code-hash bound)",
     );
     console.log(
-      "   • Owner and investor fee wallets are verified, not trusted",
+      "   • The owner fee wallet is verified; an investor fee wallet is verified or the investor's trusted 2-of-2 MultiSigWallet",
     );
     console.log("   • VSC applies its jurisdiction rule to every party");
     const ownerVerified = await identityRegistry.isVerified(

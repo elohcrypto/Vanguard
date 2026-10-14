@@ -288,9 +288,8 @@ plain `83c` otherwise).
   (`setTrustedRegistrar(VSC, factory, MultiSigEscrowWallet code hash)`;
   vote with 77, execute with 78); no escrow can be created until it passes.
   Option 63 needs no vote: the factory trusts each escrow it deploys.
-  Option 61's closing "security model" lists the design; its fee-wallet
-  bullet ("verified, not trusted") predates Task 4.3: option 62 uses the
-  investor's MultiSigWallet, a trusted contract, as fee wallet. The two
+  Option 61's closing "security model" lists the design (an investor fee
+  wallet may be the investor's trusted 2-of-2 MultiSigWallet, option 62). The two
   lines under it (owner fee wallet verified, VSC jurisdiction rule active)
   are chain reads.
 - Revoking a whitelist binding is root rotation: publish a root without
