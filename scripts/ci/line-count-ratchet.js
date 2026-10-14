@@ -39,7 +39,6 @@ const ALLOW = {
   "test/production/ProductionEnvironment.ts": 569,
   "test/OnchainID.coverage.test.ts": 541,
   "test/OnchainIDFactory.test.ts": 534,
-  "test/governance/QuorumIntegrity.test.ts": 509,
 };
 
 function lineCount(file) {
