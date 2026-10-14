@@ -82,6 +82,45 @@ describe("Identity, key and identity-factory guards (Task 5.3)", function () {
     });
   });
 
+  // Task 5.3 fix round (M-1): any caller may name an identity contract of
+  // its own; one that passes KeyManager's view checks and returns false
+  // from addKey/removeKey reaches the four "Failed to" requires.
+  describe("KeyManager against an identity that returns false", function () {
+    const [k1, k2] = [ethers.id("k1"), ethers.id("k2")];
+    async function fake() {
+      const km = await deployC("KeyManager");
+      const id = await deployC("FalseReturningIdentity");
+      return { km, id };
+    }
+
+    it("batchAddKeys refuses a false addKey", async function () {
+      const { km, id } = await fake();
+      await expect(
+        km.batchAddKeys(id.target, [k1], [ACTION], [1]),
+      ).to.be.revertedWith("KeyManager: Failed to add key");
+    });
+
+    it("batchRemoveKeys refuses a false removeKey", async function () {
+      const { km, id } = await fake();
+      await expect(
+        km.batchRemoveKeys(id.target, [k1], [ACTION]),
+      ).to.be.revertedWith("KeyManager: Failed to remove key");
+    });
+
+    it("executeKeyRotation refuses a false removeKey, then a false addKey", async function () {
+      const { km, id } = await fake();
+      await km.initiateKeyRotation(id.target, k1, k2, ACTION);
+      await time.increase(24 * 3600 + 1);
+      await expect(
+        km.executeKeyRotation(id.target, k1, k2, ACTION),
+      ).to.be.revertedWith("KeyManager: Failed to remove old key");
+      await id.setRemoveOk(true);
+      await expect(
+        km.executeKeyRotation(id.target, k1, k2, ACTION),
+      ).to.be.revertedWith("KeyManager: Failed to add new key");
+    });
+  });
+
   it("OnchainID: removeKeyWithProof refuses a key it does not hold", async function () {
     const { id } = await identity();
     await expect(
