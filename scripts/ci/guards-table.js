@@ -5,10 +5,13 @@
 // test/guards/table/<dir>.json (dir = the contract's folder under
 // contracts/; one row per line keeps each file under the line-count
 // ratchet) saying how it is covered:
-//  - tested: `file` + `test` name an it() title in that test file, and
-//    that file names the site's reason string or error name (a site
-//    without a fixed reason is checked by title alone; a test that builds
-//    the reason from a template gives the literal part as `asserts`);
+//  - tested: `file` + `test` name an it() title in that test file; the
+//    file names the site's reason string or error name (a test that
+//    builds the reason from a template gives the literal part as
+//    `asserts`), and the titled block itself names it and calls the
+//    site's function (see blockMisses for `via` and `calls`). This
+//    catches a row pointed at a test that neither names nor calls its
+//    site; it is not proof the test fires that site (mutation is);
 //  - unreachable: no caller can make it fire in the current code (an
 //    earlier check or the callee's own revert always fires first);
 //    `reason` says why and `mutant` names the mutation that leaves the
@@ -189,6 +192,36 @@ function suggestTest(s, tests) {
   return fallback;
 }
 
+/**
+ * The named it() block (its title to the next it(); any block of that
+ * title, when a file repeats it) must hold the test's evidence, not just
+ * its file: the reason (or `asserts`), or else `via`, the helper or
+ * const the block asserts it through; and, for an external function,
+ * its call `fn(`, or `calls`, the entry the block drives it through (a
+ * helper, a manager, a selector string). A constructor, modifier or
+ * internal (`_x`) site is checked for `calls` only when the row gives
+ * one. Returns what is missing, or "".
+ */
+function blockMisses(r, s, src) {
+  const titles = titlesOf(src);
+  const reason = r.asserts || s.named;
+  const internal = /^(constructor|receive|fallback|modifier |_|<)/.test(s.fn);
+  const call = r.calls || (internal ? "" : `${s.fn}(`);
+  let why = "";
+  for (let i = 0; i < titles.length; i++) {
+    if (titles[i].title !== r.test) continue;
+    const end = i + 1 < titles.length ? titles[i + 1].at : src.length;
+    const block = src.slice(titles[i].at, end);
+    if (r.via !== undefined && (r.via.length < 3 || !block.includes(r.via)))
+      why = `block never uses "via" ${r.via}`;
+    else if (r.via === undefined && reason && !block.includes(reason))
+      why = `block never names "${reason}"`;
+    else if (call && !block.includes(call)) why = `block never calls ${call}`;
+    else return "";
+  }
+  return why;
+}
+
 function main() {
   const suggest = process.argv.includes("--suggest");
   const sites = enumerateSites();
@@ -244,6 +277,10 @@ function main() {
         errors.push(
           `${r.file} never names "${r.asserts || s.named}": ${r.site}`,
         );
+      else {
+        const why = blockMisses(r, s, src);
+        if (why) errors.push(`"${r.test}" (${r.file}) ${why}: ${r.site}`);
+      }
     } else if (!r.reason || (r.class === "unreachable" && !r.mutant)) {
       errors.push(
         `${r.class} row needs reason${r.class === "unreachable" ? " and mutant" : ""}: ${r.site}`,
