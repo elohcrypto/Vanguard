@@ -218,8 +218,8 @@ live registrar created). An address key of an older config is an assertion, refu
 differs from the derivation (R-413-1); `escrowWalletFactory`, `onchainIDFactory`,
 `privacyManager` and `zkVerifier` must still be stated (an address, or `null`) while governance
 cannot derive them, before step 3 binds them (R-413-2); any other key is refused.
-`HANDOVER_PHASE=accept` resumes a partial run; it refuses a snapshot whose sha256 differs from the
-sidecar the full phase wrote and printed (B-6, Task 5.6b). `HANDOVER_PHASE=audit` is the day-2
+`HANDOVER_PHASE=accept` resumes a partial run; it requires `HANDOVER_SNAPSHOT_SHA256` (the digest
+the full phase printed) and refuses a snapshot whose sha256 differs from it or the sidecar (B-6). `HANDOVER_PHASE=audit` is the day-2
 re-check: every completion line against the state governance derives now, no snapshot or window
 ([OPERATOR_RUNBOOK](OPERATOR_RUNBOOK.md) section 10). The preflight (and 83e, as failing lines) also
 refuses, from the event scans: any agent but the deployer, ops, governance (VGT) and the tokens
@@ -304,6 +304,42 @@ plain `83c` otherwise).
   they re-prove; burns stay open. In Either with a whitelist oracle bound,
   a proof binding alone serves only investor types whose required tier is
   1; every other type needs a listing at its tier (D46 a).
+- The window (R-417-8, R-56-5): from the preflight to the last acceptance
+  vote the deployer key sends only votes (a transaction to governance that
+  emits a voting event) and VGT `approve(governance)`; any other or
+  reverted deployer transaction fails the completion for good. After the
+  ceremony it sends nothing: demo options 76 and 78 propose and execute
+  from another wallet (the proposer, a voter, or one asked for; 0 refused).
+  Demo 83c-83e end with the warnings line: option 31's nodes and option
+  1's attestor key are deployer-era.
+- A contract nominated to governance is accepted only by a vote of the
+  type bound to it (`VanguardGovernance.boundTarget`); the ceremony does
+  this for every plan contract, the EscrowWalletFactory included. No type
+  targets an InvestorRequestManager or a list oracle: ops is their owner
+  (D44). Never nominate governance on them: the nomination can never be
+  accepted (it fails safe; R-56-3); clear it from ops.
+- Onboard only identities the OnchainIDFactory made, whose
+  `recoveryManager()` is the pinned KeyManager (I-2): one deployed
+  outside it can carry a stranger's MANAGEMENT key and recovery manager.
+  A claim signature made before a revocation on that (identity, topic)
+  fails with `Signer does not have claim signer key`: re-sign (Task 5.2).
+- A rule administrator's jurisdiction rule lapses every private
+  jurisdiction record of that token. A new ComplianceRules or
+  InvestorTypeRegistry is a fresh deploy, not a migration (D34 a):
+  governance binds its ComplianceRules at construction, and the list
+  oracles' bindings and `listManager` point at the old set. Unbinding an
+  oracle switches its gate off: no blacklist oracle sanctions-checks no
+  one; OracleOnly with no whitelist oracle passes every party.
+- The day-2 audit (`HANDOVER_PHASE=audit`, Task 5.6b) runs every
+  completion line against the state governance derives now and
+  `handover.json`'s acknowledgements (`oracleNodes`, `attestors`,
+  `extraTrusted`), with no snapshot or voting window, and sends nothing.
+  A change by vote that leaves the deployer no power passes; a deployer
+  power, an unacknowledged holder (agent, role, owner, node, attestor,
+  trusted contract), a pending owner other than governance or ops, or an
+  open proposal on a plan contract fails. An acknowledged node passes
+  whoever sent its registration. It refuses before the ceremony
+  completed (governance does not own every plan contract).
 
 ### Whitelist roots and proofs from the command line (Task 3.5)
 
