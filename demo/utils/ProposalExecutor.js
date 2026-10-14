@@ -9,6 +9,10 @@
  * sends nothing once the ceremony is over (runbook section 5). Only when
  * no proposer or voter key qualifies does it ask for a wallet index, so
  * a drive's `78:<id>:y` still answers every prompt.
+ *
+ * Option 76 (round 2, R-56-5): before the ceremony wallet 0 may propose;
+ * after it the first eligible wallet but 0 proposes (deployerBarred), and
+ * a flow with no eligible wallet asks (askWallet refuses 0).
  */
 
 const { ethers } = require("hardhat");
@@ -49,8 +53,13 @@ async function executorFor(mod, gov, id) {
   if (!after && deployer) {
     return { signer: deployer, why: "wallet 0, before the ceremony" };
   }
-  const ans = await mod.promptUser(
-    "Execute from wallet index (not 0: the deployer sends nothing after the ceremony): ",
+  return askWallet(mod.promptUser, signers, "Execute");
+}
+
+/** Prompt for a wallet index, refusing 0 (the deployer). */
+async function askWallet(prompt, signers, verb) {
+  const ans = await prompt(
+    `${verb} from wallet index (not 0: the deployer sends nothing after the ceremony): `,
   );
   const i = Number(ans);
   if (!Number.isInteger(i) || i < 1 || !signers[i]) {
@@ -61,4 +70,10 @@ async function executorFor(mod, gov, id) {
   return { signer: signers[i], why: `wallet ${i}` };
 }
 
-module.exports = { executorFor, ceremonyDone };
+/** True when wallet 0 may not send: the ceremony is over (R-56-5). */
+async function deployerBarred(state) {
+  const gov = state.getContract("vanguardGovernance");
+  return Boolean(gov) && (await ceremonyDone(gov));
+}
+
+module.exports = { executorFor, ceremonyDone, askWallet, deployerBarred };

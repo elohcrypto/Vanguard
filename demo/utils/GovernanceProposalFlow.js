@@ -18,6 +18,7 @@ const { voterAgeRefusal } = require("./ChainTime");
 const { ethers } = require("hardhat");
 const { createOracleParametersProposal } = require("./OracleProposal");
 const { createPrivacyProposal } = require("./PrivacyProposal");
+const { barredProposer, approveFee } = require("./GovernedCalls");
 const { bindProposal } = require("./WhitelistBindFlow");
 
 /**
@@ -112,7 +113,8 @@ async function createProposal(mod) {
     const proposalType = parseInt(typeChoice);
 
     // Types 2, 11 and 12 pick their proposer among the verified wallets
-    // (OracleProposal.js, PrivacyProposal.js); 0 and 1 propose as signer 0.
+    // (OracleProposal.js, PrivacyProposal.js); 0 and 1 propose as signer 0
+    // before the ceremony, after it as the first eligible other wallet.
     if (proposalType === 2) {
       // Task 4.4: node lifecycle and engine parameters (OracleProposal.js).
       return await createOracleParametersProposal(mod.state, mod.promptUser);
@@ -131,8 +133,13 @@ async function createProposal(mod) {
       return;
     }
 
-    // Pre-flight checks (types 0 and 1 propose as signer 0)
-    const owner = mod.state.signers[0];
+    // Pre-flight checks. R-56-5: after the ceremony wallet 0 (the deployer)
+    // sends nothing; the first eligible wallet proposes, else one asked for.
+    const pick = await barredProposer(mod.state, mod.promptUser);
+    if (pick && pick.refused)
+      return displayError(`Proposal refused: ${pick.refused}`);
+    const owner = pick ? pick.signer : mod.state.signers[0];
+    if (pick) console.log(`   Proposer: ${owner.address} (${pick.why})`);
     const identityRegistry = mod.state.getContract("identityRegistry");
     const isVerified = await identityRegistry.isVerified(owner.address);
 
@@ -180,7 +187,9 @@ async function createProposal(mod) {
       return;
     }
 
-    if (allowance < proposalCost) {
+    if (allowance < proposalCost && pick) {
+      await approveFee(owner, governanceToken, governanceAddress, proposalCost);
+    } else if (allowance < proposalCost) {
       displayError(
         `Insufficient allowance. Governance contract needs approval to spend ${ethers.formatEther(proposalCost)} VGT`,
       );
@@ -194,6 +203,7 @@ async function createProposal(mod) {
     }
 
     console.log("   ✅ All checks passed!\n");
+    mod._proposer = owner; // the sub-flows propose from it
 
     if (proposalType === 0) {
       await mod._createInvestorTypeConfigProposal();
@@ -219,6 +229,9 @@ async function createProposal(mod) {
     }
   }
 }
+
+/** The wallet option 76's types 0 and 1 propose from (R-56-5). */
+const proposerOf = (mod) => mod._proposer || mod.state.signers[0];
 
 /**
  * Helper: Create InvestorTypeConfig proposal
@@ -284,7 +297,7 @@ async function _createInvestorTypeConfigProposal(mod) {
   );
 
   const vanguardGovernance = mod.state.getContract("vanguardGovernance");
-  const tx = await vanguardGovernance.createProposal(
+  const tx = await vanguardGovernance.connect(proposerOf(mod)).createProposal(
     0, // ProposalType.InvestorTypeConfig
     title,
     description,
@@ -346,7 +359,7 @@ async function _createTreasuryExemptionProposal(mod, investorTypeRegistry) {
     [wallet, exempt],
   );
   const receipt = await (
-    await vanguardGovernance.createProposal(
+    await vanguardGovernance.connect(proposerOf(mod)).createProposal(
       0, // ProposalType.InvestorTypeConfig
       title,
       `setInvestorLimitExempt(${wallet}, ${exempt}) (D22)`,
@@ -448,7 +461,7 @@ async function _createComplianceRulesProposal(mod) {
   }
 
   const vanguardGovernance = mod.state.getContract("vanguardGovernance");
-  const tx = await vanguardGovernance.createProposal(
+  const tx = await vanguardGovernance.connect(proposerOf(mod)).createProposal(
     1, // ProposalType.ComplianceRules
     title,
     description,

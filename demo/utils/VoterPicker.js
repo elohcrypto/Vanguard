@@ -44,9 +44,15 @@ async function verifiedHumans(state) {
  * null (after the refusal with its diagnosis) when there are too few.
  * Returns { proposer, voters, needed }: the proposer never votes (the
  * contract refuses "Proposer cannot vote on own proposal"); `needed` is the
- * advisory quorum count.
+ * advisory quorum count. `noDeployer` leaves wallet 0 out (option 76
+ * after the ceremony).
  */
-async function pickVoters(state, proposalType, typeName) {
+async function pickVoters(
+  state,
+  proposalType,
+  typeName,
+  { noDeployer = false } = {},
+) {
   const gov = state.getContract("vanguardGovernance");
   const vgt = state.getContract("governanceToken");
   const idReg = state.getContract("identityRegistry");
@@ -54,7 +60,10 @@ async function pickVoters(state, proposalType, typeName) {
   // Report the two prerequisites SEPARATELY: missing verified voters and
   // missing VGT are different fixes.
   const stake = (await gov.proposalCreationCost()) + (await gov.votingCost());
-  const humans = await verifiedHumans(state);
+  // R-56-5: after the ceremony option 76 passes noDeployer (wallet 0).
+  const humans = (await verifiedHumans(state)).filter(
+    (s) => !noDeployer || !same(s.address, state.signers[0].address),
+  );
   const usable = [];
   for (const s of humans) {
     if ((await vgt.balanceOf(s.address)) >= stake) usable.push(s);

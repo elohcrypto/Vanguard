@@ -8,6 +8,7 @@
 const { ethers, artifacts } = require("hardhat");
 const { proposeCall } = require("./Handover");
 const { voterAgeRefusal, walletControlRefusal } = require("./ChainTime");
+const { deployerBarred, askWallet } = require("./ProposalExecutor");
 
 const same = (a, b) => a.toLowerCase() === b.toLowerCase();
 const COMPLIANCE_RULES_TYPE = 1; // ProposalType.ComplianceRules
@@ -16,14 +17,16 @@ const ROLE_WALLETS = new Set([9, 10, 11]);
 
 /**
  * First wallet among 0-8 that may propose: verified, old enough, controls
- * its identity and holds the creation fee. Null when none can.
+ * its identity and holds the creation fee; after the ceremony never wallet
+ * 0, the deployer (R-56-5). Null when none can.
  */
 async function pickProposer(state) {
   const gov = state.getContract("vanguardGovernance");
   const idReg = state.getContract("identityRegistry");
   const vgt = state.getContract("governanceToken");
   const cost = await gov.proposalCreationCost();
-  for (let i = 0; i < Math.min(10, state.signers.length); i++) {
+  const first = (await deployerBarred(state)) ? 1 : 0;
+  for (let i = first; i < Math.min(10, state.signers.length); i++) {
     if (ROLE_WALLETS.has(i)) continue;
     const s = state.signers[i];
     if (!(await idReg.isVerified(s.address))) continue;
@@ -33,6 +36,26 @@ async function pickProposer(state) {
     return s;
   }
   return null;
+}
+
+/**
+ * Option 76 types 0 and 1 (R-56-5): null before the ceremony (wallet 0
+ * proposes); after it { signer, why } for the first eligible wallet but 0,
+ * else one asked for (0 refused: { refused }).
+ */
+async function barredProposer(state, prompt) {
+  if (!(await deployerBarred(state))) return null;
+  const s = await pickProposer(state);
+  if (s) return { signer: s, why: "not wallet 0 after the ceremony" };
+  return askWallet(prompt, state.signers, "Propose");
+}
+
+/** `signer` approves exactly `cost` VGT to governance (the fee). */
+async function approveFee(signer, vgt, gov, cost) {
+  await (await vgt.connect(signer).approve(gov, cost)).wait();
+  console.log(
+    `   ✅ ${signer.address} approved ${ethers.formatEther(cost)} VGT (the creation fee)`,
+  );
 }
 
 /**
@@ -151,4 +174,6 @@ module.exports = {
   governOracleManager,
   walletCodeHash,
   pickProposer,
+  barredProposer,
+  approveFee,
 };
