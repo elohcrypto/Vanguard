@@ -3,6 +3,7 @@
 ## 🎯 **System Overview**
 
 ### **Key Features:**
+
 1. ✅ **1 Person = 1 Vote** (NOT token-weighted)
 2. ✅ **KYC/AML Verification Required** (only verified investors can vote)
 3. ✅ **Proposal Creation Cost** (must pay VGT to create proposal)
@@ -16,6 +17,7 @@
 ## 📋 **How It Works**
 
 ### **Step 1: Create Proposal**
+
 ```
 User wants to create proposal
 ↓
@@ -33,6 +35,7 @@ Proposal created ✅
 ---
 
 ### **Step 2: Users Vote**
+
 ```
 User wants to vote
 ↓
@@ -117,19 +120,19 @@ on that proposal forever.
 
 ### **Configured thresholds**
 
-| Proposal type | Quorum | Approval |
-|---|---|---|
-| InvestorTypeConfig | 20% | 60% |
-| ComplianceRules | 25% | 65% |
-| OracleParameters | 20% | 60% |
-| TokenParameters | 30% | 70% |
-| SystemParameters | 25% | 65% |
-| EmergencyAction | 10% | 75% |
-| ListUpdate | 20% | 70% |
-| IdentityRegistryParameters | 25% | 65% |
-| GovernanceTokenParameters | 30% | 70% |
-| EscrowFactoryParameters | 30% | 70% |
-| IdentityFactoryParameters | 30% | 70% |
+| Proposal type              | Quorum | Approval |
+| -------------------------- | ------ | -------- |
+| InvestorTypeConfig         | 20%    | 60%      |
+| ComplianceRules            | 25%    | 65%      |
+| OracleParameters           | 20%    | 60%      |
+| TokenParameters            | 30%    | 70%      |
+| SystemParameters           | 25%    | 65%      |
+| EmergencyAction            | 10%    | 75%      |
+| ListUpdate                 | 20%    | 70%      |
+| IdentityRegistryParameters | 25%    | 65%      |
+| GovernanceTokenParameters  | 30%    | 70%      |
+| EscrowFactoryParameters    | 30%    | 70%      |
+| IdentityFactoryParameters  | 30%    | 70%      |
 
 Set once in `_initializeThresholds()`; there is no setter, so they cannot be
 changed after deployment.
@@ -139,12 +142,14 @@ changed after deployment.
 ## 💰 **Token Economics**
 
 ### **Proposal Creation:**
+
 - **Cost:** 10 VGT (owner-adjustable, ≤ 1000 VGT)
 - **Locked:** Yes
 - **Claimable if it fails:** Yes, via `claimRefund`
 - **Burned if it passes:** Yes
 
 ### **Voting:**
+
 - **Cost:** 10 VGT per vote (owner-adjustable, ≤ 1000 VGT)
 - **Locked:** Yes
 - **Claimable if it fails:** Yes, via `claimRefund`
@@ -182,16 +187,19 @@ Alternative (Failed):
 ## 🔐 **KYC/AML Verification**
 
 ### **Requirements:**
+
 - ✅ Must be verified in IdentityRegistry
 - ✅ Must have valid KYC claim
 - ✅ Must have valid AML claim
 
 ### **Checks:**
+
 ```solidity
 require(identityRegistry.isVerified(msg.sender), "Must be KYC/AML verified");
 ```
 
 ### **Benefits:**
+
 - ✅ One vote per identity, not per wallet: the registry binds each OnchainID to one wallet, governance keys votes on the identity, and the voting wallet must own the OnchainID or hold a MANAGEMENT/ACTION key on it (plan 2F.1, D25)
 - ✅ Only identities at least `minVoterAge` old (7 days / TIME_SCALE) at proposal creation vote or count toward quorum
 - ⚠️ Residual: a registry agent colluding with an issuer key can still create fake identities; that is visible on chain, and the fakes cannot vote for `minVoterAge`, the window in which honest voters remove those keys
@@ -203,6 +211,7 @@ require(identityRegistry.isVerified(msg.sender), "Must be KYC/AML verified");
 ## ⚖️ **Fair Voting (1 Person = 1 Vote)**
 
 ### **Old System (Token-Weighted):**
+
 ```
 User A: 100,000 VGT → 100,000 votes
 User B: 1,000 VGT → 1,000 votes
@@ -213,6 +222,7 @@ User A has 98.5% voting power! ❌ Unfair!
 ```
 
 ### **New System (Equal Voting):**
+
 ```
 User A: 100,000 VGT → 1 vote
 User B: 1,000 VGT → 1 vote
@@ -227,6 +237,7 @@ Each user has 33.3% voting power! ✅ Fair!
 ## 🔥 **Token Burning vs Returning**
 
 ### **If Proposal Passes (quorum + approval both met):**
+
 ```
 Proposal Result: 75% FOR
 ↓
@@ -243,6 +254,7 @@ Total supply decreased by 50 VGT
 ```
 
 **Why burn?**
+
 - ✅ Reduces total supply
 - ✅ Increases scarcity
 - ✅ Rewards token holders (deflationary)
@@ -250,6 +262,7 @@ Total supply decreased by 50 VGT
 ---
 
 ### **If Proposal Fails (a threshold not met, or the target call reverts):**
+
 ```
 Proposal Result: 25% FOR
 ↓
@@ -266,21 +279,24 @@ No tokens burned
 ```
 
 **Why claim rather than push?**
+
 - ✅ Fair to voters (didn't waste tokens on a failed proposal)
 - ✅ No penalty for voting on failed proposals
 - ✅ One participant the token cannot pay (de-verified, frozen) blocks
-     only their own claim, never anyone else's settlement
+  only their own claim, never anyone else's settlement
 
 ---
 
 ## 🎛️ **Governance-Controlled Costs**
 
 ### **Update Proposal Creation Cost:**
+
 ```solidity
 function setProposalCreationCost(uint256 newCost) external onlyOwner
 ```
 
 **Example:**
+
 ```
 Current cost: 10 VGT
 ↓
@@ -296,6 +312,7 @@ pricing every holder out of governance in one call.
 ---
 
 ### **Update Voting Cost:**
+
 ```solidity
 function setVotingCost(uint256 newCost) external onlyOwner
 // 0 < newCost <= MAX_COST (1000 VGT); emits VotingCostUpdated(old, new).
@@ -303,6 +320,7 @@ function setVotingCost(uint256 newCost) external onlyOwner
 ```
 
 **Example:**
+
 ```
 Current cost: 10 VGT per vote
 ↓
@@ -315,17 +333,17 @@ New votes now cost 5 VGT each
 
 ## 📊 **Comparison: Old vs New System**
 
-| Feature | Old System | New System |
-|---------|------------|------------|
-| **Voting Power** | Token-weighted | 1 person = 1 vote |
-| **Fairness** | ❌ Whales dominate | ✅ Equal voting |
-| **Proposal Cost** | ❌ Free | ✅ Costs VGT |
-| **Voting Cost** | ❌ Free | ✅ Costs VGT |
-| **Token Locking** | ❌ No | ✅ Yes |
-| **Token Burning** | ❌ No | ✅ If passed |
-| **Token Return** | N/A | ✅ If failed |
-| **KYC/AML Required** | ❌ No | ✅ Yes |
-| **Sybil Resistance** | ❌ Low | ✅ High |
+| Feature              | Old System         | New System        |
+| -------------------- | ------------------ | ----------------- |
+| **Voting Power**     | Token-weighted     | 1 person = 1 vote |
+| **Fairness**         | ❌ Whales dominate | ✅ Equal voting   |
+| **Proposal Cost**    | ❌ Free            | ✅ Costs VGT      |
+| **Voting Cost**      | ❌ Free            | ✅ Costs VGT      |
+| **Token Locking**    | ❌ No              | ✅ Yes            |
+| **Token Burning**    | ❌ No              | ✅ If passed      |
+| **Token Return**     | N/A                | ✅ If failed      |
+| **KYC/AML Required** | ❌ No              | ✅ Yes            |
+| **Sybil Resistance** | ❌ Low             | ✅ High           |
 
 ---
 
@@ -334,6 +352,7 @@ New votes now cost 5 VGT each
 ### **VanguardGovernance (one deployed contract, split by inheritance in Task 4.8):**
 
 **New State Variables:**
+
 ```solidity
 // GovernanceConfig.sol
 IIdentityRegistry public identityRegistry;
@@ -346,11 +365,13 @@ mapping(uint256 => address[]) private _proposalVoters;
 ```
 
 **Updated Functions:**
+
 - `createProposal()` - Charges creation cost, locks tokens
 - `castVote()` - Charges voting cost, locks tokens, 1 vote per person
 - `executeProposal()` - Burns tokens if passed; otherwise settles and makes deposits claimable
 
 **New Functions:**
+
 - `setProposalCreationCost()` - Update creation cost
 - `setVotingCost()` - Update voting cost (bounded, emits `VotingCostUpdated`)
 - `cancelProposal()` - Owner-only; settles like a rejection, deposits become claimable
@@ -364,6 +385,7 @@ mapping(uint256 => address[]) private _proposalVoters;
 ### **GovernanceToken.sol:**
 
 **New Function:**
+
 ```solidity
 function burn(uint256 amount) external onlyAgent {
     _burn(address(this), amount);
@@ -375,6 +397,7 @@ function burn(uint256 amount) external onlyAgent {
 ## 🚀 **Testing the New System**
 
 ### **Step 1: Deploy**
+
 ```bash
 npm run demo:interactive:proof
 
@@ -383,12 +406,14 @@ Option 74: Deploy Governance System (VGT and VanguardGovernance)
 ```
 
 ### **Step 2: Distribute Tokens**
+
 ```bash
 Option 75: Distribute Governance Tokens
 → Users need tokens to pay for proposals/voting
 ```
 
 ### **Step 3: Create Proposal (Costs 10 VGT)**
+
 ```bash
 Option 76: Create Proposal
 → User pays 10 VGT (locked)
@@ -396,6 +421,7 @@ Option 76: Create Proposal
 ```
 
 ### **Step 4: Vote (Costs 10 VGT per vote)**
+
 ```bash
 Option 77: Vote on Proposal
 → Each user pays 10 VGT (locked)
@@ -403,6 +429,7 @@ Option 77: Vote on Proposal
 ```
 
 ### **Step 5: Execute**
+
 ```bash
 Option 78: Execute Proposal
 → Quorum AND approval met, target call succeeds: burn all locked tokens
@@ -441,6 +468,7 @@ Option 78a: Claim Refund
 ## 🎉 **Summary**
 
 **The new fair voting system ensures:**
+
 - ✅ Equal voting power for all verified investors
 - ✅ Economic costs to prevent spam
 - ✅ Token burning for successful proposals (deflationary)
@@ -449,4 +477,3 @@ Option 78a: Claim Refund
 - ✅ Democratic governance
 
 **Ready to deploy and test!** 🚀
-

@@ -33,6 +33,7 @@ npm run setup:zk
 ```
 
 This command will:
+
 1. ✅ Create build directories
 2. ✅ Download Powers of Tau file (trusted setup)
 3. ✅ Compile all 5 Circom circuits
@@ -47,13 +48,13 @@ This command will:
 
 The system builds **5 ZK circuits** for privacy-preserving compliance:
 
-| # | Circuit Name | Purpose | File |
-|---|--------------|---------|------|
-| 1 | **Whitelist Membership** | Prove a whitelist slot (commitment `Poseidon(identity, secret)` in the published root) for your wallet, without revealing which listed identity it is; the wallet is public. The only proof that gates transfers (whitelist modes ZkOnly and Either) | `whitelist_membership.circom` |
-| 2 | **Blacklist Non-Membership** | Prove your whitelist identity is not in the sanctions tree; a demonstration that gates nothing (sanctions are enforced by the blacklist oracle) | `blacklist_membership.circom` |
-| 3 | **Jurisdiction Proof** | Prove an issuer-attested jurisdiction is in PrivacyManager's allowed set without revealing it | `jurisdiction_proof.circom` |
-| 4 | **Accreditation Proof** | Prove an issuer-attested amount meets the minimum without revealing it | `accreditation_proof.circom` |
-| 5 | **Compliance Aggregation** | Prove issuer-attested scores meet the weighted minimum without revealing them | `compliance_aggregation.circom` |
+| #   | Circuit Name                 | Purpose                                                                                                                                                                                                                                              | File                            |
+| --- | ---------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------- |
+| 1   | **Whitelist Membership**     | Prove a whitelist slot (commitment `Poseidon(identity, secret)` in the published root) for your wallet, without revealing which listed identity it is; the wallet is public. The only proof that gates transfers (whitelist modes ZkOnly and Either) | `whitelist_membership.circom`   |
+| 2   | **Blacklist Non-Membership** | Prove your whitelist identity is not in the sanctions tree; a demonstration that gates nothing (sanctions are enforced by the blacklist oracle)                                                                                                      | `blacklist_membership.circom`   |
+| 3   | **Jurisdiction Proof**       | Prove an issuer-attested jurisdiction is in PrivacyManager's allowed set without revealing it                                                                                                                                                        | `jurisdiction_proof.circom`     |
+| 4   | **Accreditation Proof**      | Prove an issuer-attested amount meets the minimum without revealing it                                                                                                                                                                               | `accreditation_proof.circom`    |
+| 5   | **Compliance Aggregation**   | Prove issuer-attested scores meet the weighted minimum without revealing them                                                                                                                                                                        | `compliance_aggregation.circom` |
 
 ---
 
@@ -206,6 +207,7 @@ contracts/privacy/verifiers/
 ## 🔍 File Explanations
 
 ### **1. Powers of Tau (.ptau)**
+
 - **File:** `powersOfTau28_hez_final_15.ptau`
 - **Purpose:** Universal setup parameters; every circuit is PLONK (`snarkjs plonk setup`), so there is no per-circuit phase 2
 - **Size:** 37.8 MB
@@ -216,24 +218,28 @@ contracts/privacy/verifiers/
 - **Supports:** Circuits up to 2^15 constraints (~32,000)
 
 ### **2. R1CS (.r1cs)**
+
 - **File:** `{circuit_name}.r1cs`
 - **Purpose:** Rank-1 Constraint System (circuit constraints)
 - **Format:** Binary format
 - **Contains:** Mathematical constraints that define the circuit
 
 ### **3. WASM (.wasm)**
+
 - **File:** `{circuit_name}.wasm`
 - **Purpose:** WebAssembly witness calculator
 - **Use:** Generates witness (private inputs) for proof generation
 - **Fast:** Optimized for browser and Node.js
 
 ### **4. Proving Key (.zkey)**
+
 - **File:** `{circuit_name}.zkey`
 - **Purpose:** Key used to generate proofs
 - **Size:** Varies by circuit complexity
 - **Security:** Must be kept secure (but not secret)
 
 ### **5. Verifying Key (.json)**
+
 - **File:** `{circuit_name}_vkey.json`
 - **Purpose:** Key used to verify proofs
 - **Format:** JSON
@@ -241,6 +247,7 @@ contracts/privacy/verifiers/
 - **Contains:** Elliptic curve points for verification
 
 ### **6. Solidity Verifier (.sol)**
+
 - **File:** `{circuit_name}Verifier.sol`
 - **Purpose:** On-chain proof verification
 - **Gas Cost:** ~250,000-300,000 gas per verification
@@ -423,21 +430,21 @@ ls -la build/circuits/*/*.zkey
 
 ### **Quick Commands:**
 
-| Command | Purpose |
-|---------|---------|
-| `npm run setup:zk` | Build all circuits |
-| `npm install` | Install dependencies |
-| `circom --version` | Check Circom version |
+| Command             | Purpose               |
+| ------------------- | --------------------- |
+| `npm run setup:zk`  | Build all circuits    |
+| `npm install`       | Install dependencies  |
+| `circom --version`  | Check Circom version  |
 | `snarkjs --version` | Check SnarkJS version |
 
 ### **Key Files:**
 
-| File | Purpose |
-|------|---------|
-| `circuits/*.circom` | Circuit source code |
-| `build/circuits/` | Compiled circuits |
-| `contracts/privacy/verifiers/` | Solidity verifiers |
-| `scripts/setup-zk-circuits.js` | Build script |
+| File                           | Purpose             |
+| ------------------------------ | ------------------- |
+| `circuits/*.circom`            | Circuit source code |
+| `build/circuits/`              | Compiled circuits   |
+| `contracts/privacy/verifiers/` | Solidity verifiers  |
+| `scripts/setup-zk-circuits.js` | Build script        |
 
 ### **Dependencies:**
 
@@ -450,5 +457,4 @@ ls -la build/circuits/*/*.zkey
 
 ---
 
-**Run `npm run setup:zk` to get started!** 
-
+**Run `npm run setup:zk` to get started!**

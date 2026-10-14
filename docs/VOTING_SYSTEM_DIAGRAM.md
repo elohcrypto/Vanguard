@@ -278,6 +278,7 @@ BOB tries to use old whitelist proof
 ## 📊 Token Economics
 
 ### **Proposal Creation**
+
 ```
 Cost: 10 VGT (owner-adjustable, ≤ 1000 VGT)
 
@@ -291,6 +292,7 @@ Otherwise (threshold not met, or the call reverted):
 ```
 
 ### **Voting**
+
 ```
 Cost: 10 VGT per vote (owner-adjustable, ≤ 1000 VGT)
 
@@ -305,6 +307,7 @@ Otherwise:
 ```
 
 ### **Example Scenario**
+
 ```
 Proposal #1: Add Bob to Whitelist
    Proposer: Alice (10 VGT locked; may not vote on her own proposal)
@@ -328,18 +331,19 @@ Result: PASSED (3 of 10 eligible = 30% turnout ≥ 20% quorum;
 
 ### **Voting Thresholds**
 
-| Proposal Type | Quorum | Approval | Example (100 eligible voters) |
-|---------------|--------|----------|-------------------------------|
-| ListUpdate | 20% | 70% | ≥20 voters, ≥70% of them FOR |
-| IdentityRegistryParameters | 25% | 65% | ≥25 voters, ≥65% of them FOR |
-| GovernanceTokenParameters | 30% | 70% | ≥30 voters, ≥70% of them FOR |
-| EscrowFactoryParameters | 30% | 70% | ≥30 voters, ≥70% of them FOR |
-| IdentityFactoryParameters | 30% | 70% | ≥30 voters, ≥70% of them FOR |
+| Proposal Type              | Quorum | Approval | Example (100 eligible voters) |
+| -------------------------- | ------ | -------- | ----------------------------- |
+| ListUpdate                 | 20%    | 70%      | ≥20 voters, ≥70% of them FOR  |
+| IdentityRegistryParameters | 25%    | 65%      | ≥25 voters, ≥65% of them FOR  |
+| GovernanceTokenParameters  | 30%    | 70%      | ≥30 voters, ≥70% of them FOR  |
+| EscrowFactoryParameters    | 30%    | 70%      | ≥30 voters, ≥70% of them FOR  |
+| IdentityFactoryParameters  | 30%    | 70%      | ≥30 voters, ≥70% of them FOR  |
 
-*Quorum is a share of eligible (KYC-verified) voters counted when the
-proposal was created, not of VGT supply. Votes are one per person.*
+_Quorum is a share of eligible (KYC-verified) voters counted when the
+proposal was created, not of VGT supply. Votes are one per person._
 
 ### **Timeline**
+
 ```
 Day 0: Proposal created
 Day 0-5: Voting period
@@ -348,6 +352,7 @@ Day 6+: Proposal can be executed
 ```
 
 ### **Costs**
+
 ```
 Proposal creation: 10 VGT   (owner-adjustable, 1 .. 1000)
 Voting:            10 VGT per vote (same bound)
@@ -358,12 +363,14 @@ Voting:            10 VGT per vote (same bound)
 ## 🎉 Summary
 
 **Creating Proofs**:
+
 1. User must be WHITELISTED (via governance vote)
 2. Generate ZK proof (Option 1-6)
 3. Proof valid as long as status is WHITELISTED
 4. Status change → proof invalidated
 
 **Voting Process**:
+
 1. Create proposal (lock VGT)
 2. Community votes (lock VGT)
 3. Wait for voting period (5 days)
@@ -371,4 +378,3 @@ Voting:            10 VGT per vote (same bound)
 5. Status change applied automatically
 
 **Try It**: Run Option 88 to see the complete lifecycle! 🚀
-

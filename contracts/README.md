@@ -31,6 +31,7 @@ contracts/
 ## Security
 
 All contracts follow security best practices:
+
 - Comprehensive access controls
 - Reentrancy protection
 - Gas optimization
