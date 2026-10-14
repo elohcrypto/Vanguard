@@ -8,7 +8,8 @@
  * ceremony (governance owns VSC) never from wallet 0, the deployer, which
  * sends nothing once the ceremony is over (runbook section 5). Only when
  * no proposer or voter key qualifies does it ask for a wallet index, so
- * a drive's `78:<id>:y` still answers every prompt.
+ * a drive's `78:<id>:y` still answers every prompt. The VoteCast lookup
+ * reads in chunks (HandoverScans.scanLogs, the ceremony's logChunk).
  *
  * Option 76 (round 2, R-56-5): before the ceremony wallet 0 may propose;
  * after it the first eligible wallet but 0 proposes (deployerBarred), and
@@ -16,6 +17,7 @@
  */
 
 const { ethers } = require("hardhat");
+const { scanLogs } = require("./HandoverScans");
 
 const same = (a, b) => String(a).toLowerCase() === String(b).toLowerCase();
 const OWNER_ABI = ["function owner() view returns (address)"];
@@ -45,8 +47,11 @@ async function executorFor(mod, gov, id) {
   const [p] = await gov.getProposal(id);
   const proposer = ours(p.proposer);
   if (usable(proposer)) return { signer: proposer, why: "the proposer" };
-  const from = mod.state.deployStartBlock || 0;
-  for (const ev of await gov.queryFilter(gov.filters.VoteCast(id), from)) {
+  const scope = {
+    fromBlock: mod.state.deployStartBlock || 0,
+    logChunk: mod.state.logChunk,
+  };
+  for (const ev of await scanLogs(gov, gov.filters.VoteCast(id), scope)) {
     const v = ours(ev.args.voter);
     if (usable(v)) return { signer: v, why: "a voter on it" };
   }
