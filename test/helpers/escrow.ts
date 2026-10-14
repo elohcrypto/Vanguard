@@ -8,10 +8,10 @@ export const AMOUNT = ethers.parseEther("1000");
 export const DATA = "shipped";
 
 /**
- * The escrow stack (as EnhancedEscrow.test.js builds it): a mock VSC, a
- * KYC-gated registry with payer and payee verified, ComplianceRules, the
- * factory as a registrar for the escrow code hash and `investor`
- * registered. The payer holds 10,000 VSC.
+ * The escrow stack (as test/helpers/escrowFixture.js builds it): a mock
+ * VSC, a KYC-gated registry with payer and payee verified,
+ * ComplianceRules, the factory as a registrar for the escrow code hash and
+ * `investor` registered. The payer holds 10,000 VSC.
  */
 export async function deployEscrow() {
   const [owner, investor, payer, payee, investorWallet, ownerWallet, stranger] =
