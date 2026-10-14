@@ -32,7 +32,7 @@ stand for an address and a number that differ between runs.
 > export MNEMONIC="test test test test test test test test test test test junk"
 > export DEMO_RPC_URL=http://127.0.0.1:8547 NET=devnode
 > export RB=/tmp/vanguard-runbook HANDOVER_CONFIG=/tmp/vanguard-runbook/handover.json
-> mkdir -p $RB
+> rm -rf $RB && mkdir -p $RB   # start from an empty $RB
 > npx hardhat node --port 8547 > $RB/node.log 2>&1 &   # leave it running
 > sleep 10                                              # until it listens
 > ```
@@ -191,10 +191,12 @@ the 66% bar (`TooFewNodes`, `SingleNodeQuorum`).
    three `✅ VOTE CAST SUCCESSFULLY!`,
    `   Executing from 0x15d34AAf54267DB7D7c367839AAf71A00a2C6A65 (the proposer)`,
    `✅ PROPOSAL EXECUTED — callData ran, locked VGT burned` and option
-   39's `   Total Oracles: 2`; it ends `✓ demo ran to completion`.
+   39's `   Total Oracles: 2`; the drive's own summary (stdout, not the
+   log) ends `✓ demo ran to completion`.
 
-Ops pauses a misbehaving node at once (35a above:
-`   ⏸️  ops paused node 3 0x90F79bf6EB2c4f870365E785982E1f101E93b906`).
+Ops pauses a misbehaving node at once (35a above pauses two:
+`   ⏸️  ops paused node 3 0x90F79bf6EB2c4f870365E785982E1f101E93b906`,
+then `   ⏸️  ops paused node 2 0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC`).
 A consensus clearing a governance sanction is accountable (D27, section 9).
 
 ## 5. The ceremony
