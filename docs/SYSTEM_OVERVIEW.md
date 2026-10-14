@@ -89,7 +89,9 @@ recovers identities.
   the handover) writes any entry directly, with no vote (D44 a; the
   ownership posture is an audit item). Never a single node, except a
   designated emergency node's CRITICAL listing (7 days, renewable by
-  listing again) and the OracleManager owner's `emergencyOverride`.
+  listing again) and the OracleManager owner's `emergencyOverride`, which
+  flips the recorded verdict alone; the list oracles apply it only with
+  at least two supporting nodes (`TooFewVoters`).
 - The blacklist gates VSC once bound (`setBlacklistOracle`); the whitelist
   once bound (option 38a, or a ComplianceRules vote after the handover).
 - Demo options 31-40.

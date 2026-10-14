@@ -10,7 +10,7 @@ VSC is not a stablecoin as coded: nothing in the contracts backs, redeems
 or pegs it. The system provides:
 
 - ✅ **Identity and claims**: OnchainID identities, KYC (topic 6) and AML (topic 7) claims from trusted `ClaimIssuer`s, and KeyManager key rotation and agent recovery
-- ✅ **Whitelist/blacklist oracles with node consensus** (66% of the registered node weight by default, owner-settable in (50, 100]: two of three equal nodes; never a single node, except a designated emergency node's 7-day CRITICAL listing, renewable, and the OracleManager owner's `emergencyOverride`)
+- ✅ **Whitelist/blacklist oracles with node consensus** (66% of the registered node weight by default, owner-settable in (50, 100]: two of three equal nodes; never a single node, except a designated emergency node's 7-day CRITICAL listing, renewable, and the OracleManager owner's `emergencyOverride`, which flips the recorded verdict alone; the list oracles apply it only with at least two supporting nodes)
 - ✅ **Zero-knowledge proofs** (5 Circom circuits, PLONK); only the whitelist binding gates transfers
 - ✅ **Investor types** (Normal, Retail, Accredited, Institutional) with transfer and holding caps, cooldowns and whitelist tiers
 - ✅ **One identity, one vote governance**, with VGT paying the proposal and voting fees
@@ -196,7 +196,7 @@ npm run test:coverage                          # coverage (sets DEPLOY_GAS_LIMIT
 - **Whitelist** tiers 1-5 and **blacklist** severities LOW to CRITICAL, written by consensus verdicts, governance ListUpdate votes (DynamicListManager) or the list oracles' owner
 - **Weighted consensus**: a side needs 66% (the default; the owner sets it in (50, 100]) of the weight of every node registered when the query opened; a query no single node can resolve alone (`SingleNodeQuorum`) and a verdict a list oracle applies only with at least 2 supporting nodes (`TooFewVoters`) (Task 5.1). Reputation is owner-set and gates a node's unpause; it does not weight votes
 - **Owner writes**: ops, as the list oracles' owner after the handover, can write any tier (5 included) or severity (CRITICAL included) directly, without consensus; a consensus verdict's severity only sets the listing's duration. The list-oracle ownership posture is an audit item (D44 a)
-- **Emergency listing**: any designated emergency node, alone, may list CRITICAL for 7 days, renewable by listing again (`emergencyBlacklist`); the OracleManager owner may also stamp or flip a verdict alone (`emergencyOverride`)
+- **Emergency listing**: any designated emergency node, alone, may list CRITICAL for 7 days, renewable by listing again (`emergencyBlacklist`); the OracleManager owner may also stamp or flip a recorded verdict alone (`emergencyOverride`), but a list oracle applies it only when at least two nodes voted that side (`TooFewVoters`)
 - **Fail closed**: ComplianceRules calls the oracles without a fallback, so an oracle that reverts makes the transfer revert (fail closed). Unbinding an oracle removes its gate until a working one is rebound: with no blacklist oracle nobody is sanctions-checked; OracleOnly with no whitelist oracle passes every party; Either with no whitelist oracle falls back to the ZK binding alone. The remedy for a failing oracle is rebinding a working one (or pausing the token), not unbinding
 
 ### Privacy & zero-knowledge
