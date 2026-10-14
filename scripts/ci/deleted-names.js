@@ -46,6 +46,9 @@ const FILES = [
   // allowlist was empty (its header said so).
   "test-parity.js",
   "test-parity-baseline.json",
+  // Task 5.5: a config table no file imported (invented KYC providers,
+  // timelocks that are contract constants).
+  "ProductionConfig.ts",
   // Task 4.16: two interfaces no contract imported, a demo helper no flow
   // required (review B L-1).
   "IMultiSigWallet.sol",

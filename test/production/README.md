@@ -14,7 +14,6 @@ test/production/
 ├── ProductionOnboarding.test.ts  # Corporate, individual and institutional onboarding
 ├── ProductionResilience.test.ts  # Recovery, congestion, performance, security probes
 ├── ProductionDeployOps.test.ts   # DeployProduction's ops-identity step
-├── ProductionConfig.ts           # A config table no file imports
 ├── OpsKeyManager.test.ts         # scripts/production/opsKeyManager.ts
 ├── Onboard.test.ts               # The shared onboarding helper
 ├── CustodyFlow.test.ts           # Custody (InvestorRequestManager, MultiSigWallet)
