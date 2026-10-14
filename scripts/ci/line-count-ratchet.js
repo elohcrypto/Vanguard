@@ -31,12 +31,10 @@ const ALLOW = {
   "test/integration/OracleIntegration.test.ts": 884,
   "test/ClaimIssuer.test.ts": 842,
   "docs/TECHNICAL_DEEP_DIVE.md": 831,
-  "test/production/ProductionSimulation.test.ts": 825,
   "test/investor/InvestorOnboarding.test.ts": 752,
   "test/integration/OracleERC3643Integration.test.ts": 742,
   "test/OnchainID.test.ts": 691,
   "test/oracle/OracleManager.test.ts": 626,
-  "test/production/ProductionEnvironment.ts": 569,
   "test/OnchainID.coverage.test.ts": 541,
   "test/OnchainIDFactory.test.ts": 534,
 };

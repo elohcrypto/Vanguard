@@ -21,7 +21,7 @@ This comprehensive checklist ensures the OnchainID system is production-ready be
 - [ ] **Production Simulation**: Complete production simulation passes
 
   ```bash
-  npx hardhat test test/production/ProductionSimulation.test.ts
+  npx hardhat test test/production/Production*.test.ts
   ```
 
 - [ ] **Security Tests**: All security tests pass

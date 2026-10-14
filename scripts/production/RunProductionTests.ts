@@ -35,7 +35,14 @@ export function testFiles(dir: string): string[] {
 /** The production test set. */
 const SUITES: Array<[string, string[]]> = [
   ["Integration Tests", testFiles("test/integration")],
-  ["Production Simulation", ["test/production/ProductionSimulation.test.ts"]],
+  [
+    "Production Simulation",
+    [
+      "test/production/ProductionOnboarding.test.ts",
+      "test/production/ProductionResilience.test.ts",
+      "test/production/ProductionDeployOps.test.ts",
+    ],
+  ],
 ];
 const LOCAL = new Set(["hardhat", "localhost"]);
 

@@ -8,7 +8,10 @@ This directory contains comprehensive production simulation and testing tools to
 test/production/
 ├── README.md                    # This file
 ├── ProductionEnvironment.ts     # Production simulation environment
-├── ProductionSimulation.test.ts # Comprehensive production tests
+├── ProductionUtils.ts           # Helpers, the simulation's start and finish
+├── ProductionOnboarding.test.ts # Corporate, individual, institutional
+├── ProductionResilience.test.ts # Recovery, stress, performance, security
+├── ProductionDeployOps.test.ts  # DeployProduction's ops-identity step
 ├── ProductionConfig.ts          # Production configuration management
 └── PRODUCTION_CHECKLIST.md     # Pre-deployment checklist
 ```
@@ -31,13 +34,13 @@ The production environment simulates real-world conditions to validate:
 
 ```bash
 # Run all production tests
-npx hardhat test test/production/ProductionSimulation.test.ts
+npx hardhat test test/production/Production*.test.ts
 
 # Run with specific network
-npx hardhat test test/production/ProductionSimulation.test.ts --network sepolia
+npx hardhat test test/production/Production*.test.ts --network sepolia
 
 # Run with verbose output
-VERBOSE=true npx hardhat test test/production/ProductionSimulation.test.ts
+VERBOSE=true npx hardhat test test/production/Production*.test.ts
 ```
 
 ### 2. Run Complete Production Test Suite
