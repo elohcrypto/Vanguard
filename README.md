@@ -1,77 +1,97 @@
-# Vanguard RWA StableCoin - ERC-3643 Compliant Digital Currency
+# Vanguard token (VSC): an ERC-3643 security token with OnchainID, list oracles and ZK KYC
 
 ## Overview
 
-This project implements a **Vanguard RWA StableCoin (VSC)** system, under development and not yet audited, with comprehensive compliance management integrated with **ERC-3643** standard and **OnchainID (ERC-734/ERC-735)**. The system provides:
+This project implements the Vanguard token (VSC), an ERC-3643-style
+permissioned security token (its own implementation of the `IERC3643`
+interface, not the T-REX reference code), with identities and claims on
+OnchainID (ERC-734/ERC-735). It is under development and not audited.
+VSC is not a stablecoin as coded: nothing in the contracts backs, redeems
+or pegs it. The system provides:
 
-- ✅ **Real-time compliance validation** through oracle networks
-- ✅ **Dynamic whitelist/blacklist management** with oracle consensus (66% of the registered node weight: two of three equal nodes)
-- ✅ **Zero-knowledge privacy features** (5 Circom circuits)
-- ✅ **Complete token lifecycle management** with audit trails
-- ✅ **Investor type differentiation** (4 types: Normal, Retail, Accredited, Institutional)
-- ✅ **Democratic governance** (1 Person = 1 Vote with VGT voting fees)
-- ✅ **Enhanced escrow system** (2-of-3 multisig with dispute resolution)
+- ✅ **Identity and claims**: OnchainID identities, KYC (topic 6) and AML (topic 7) claims from trusted `ClaimIssuer`s, and KeyManager key rotation and agent recovery
+- ✅ **Whitelist/blacklist oracles with node consensus** (66% of the registered node weight: two of three equal nodes; never a single node)
+- ✅ **Zero-knowledge proofs** (5 Circom circuits, PLONK); only the whitelist binding gates transfers
+- ✅ **Investor types** (Normal, Retail, Accredited, Institutional) with transfer and holding caps, cooldowns and whitelist tiers
+- ✅ **One identity, one vote governance**, with VGT paying the proposal and voting fees
+- ✅ **Escrow** (one 2-of-3 wallet per payment, with dispute resolution)
 - ✅ **Investor custody** (the investor lock moves into an on-chain 2-of-2 `MultiSigWallet`; bank and user both sign to release)
-- ✅ **89 interactive demo options** for complete system testing
+- ✅ **Interactive demo**: 89 numbered options, 116 with their sub-options (1a, 33a, 83c, ...)
 
-**Current Status**: under development. The contracts, the interactive demo, the tests and CI run end to end on a local Hardhat node; the remaining remediation phases and a third-party security audit come before any production or mainnet use.
+**Current status**: under development. The contracts, the interactive demo, the tests and CI run end to end on a local Hardhat node; the remaining remediation phases and a third-party security audit come before any production or mainnet use.
 
 > **Building from a fresh clone:** the ZK circuit artifacts are gitignored build output.
 > Run `npm run setup:zk` before `npm test`; without the artifacts every suite that
 > generates real proofs fails with `ENOENT`.
-> `setup:zk` requires the **Rust circom 2.x** compiler — the `circom` npm package is the
-> deprecated 0.5.x JS build and cannot compile these circuits. See
+> `setup:zk` requires the **Rust circom 2.x** compiler (CI uses v2.2.3) — the `circom`
+> npm package is the deprecated 0.5.x JS build and cannot compile these circuits. See
 > [docs/ZK_CIRCUIT_BUILD_GUIDE.md](docs/ZK_CIRCUIT_BUILD_GUIDE.md).
 
 ## 🏗️ Project Structure
 
 ```
 Vanguard/
-├── contracts/                    # Smart Contract Implementation
-│   ├── onchain_id/              # OnchainID contracts (ERC-734/735)
-│   ├── erc3643/                 # ERC-3643 T-REX contracts
-│   ├── oracle/                  # Oracle management contracts
-│   ├── compliance/              # ComplianceRules engine
-│   ├── privacy/                 # ZK verification contracts
-│   ├── investor/                # Investor type management
-│   ├── governance/              # Governance system (1 Person = 1 Vote)
+├── contracts/                    # Solidity sources
+│   ├── onchain_id/              # OnchainID, OnchainIDFactory, ClaimIssuer, KeyManager
+│   │   └── interfaces/          # ERC-734, ERC-735, IOnchainID, IClaimIssuer
+│   ├── erc3643/                 # Token (VSC), IdentityRegistry, InvestorTypeRegistry
+│   │   └── interfaces/          # IERC3643, IIdentityRegistry, ICompliance, IInvestorTypeRegistry
+│   ├── compliance/              # ComplianceRules (per-token rules, list gates, trust)
+│   │   └── interfaces/          # IComplianceRules, ITrustedContracts
+│   ├── oracle/                  # OracleManager, ConsensusOracle, Whitelist/BlacklistOracle
+│   │   └── interfaces/          # IOracle, IOracleManager
+│   ├── privacy/                 # PrivacyManager, ZKVerifierIntegrated, DynamicListManager
+│   │   ├── interfaces/          # IZKVerifier
+│   │   └── verifiers/           # Five snarkjs-generated PLONK verifiers
+│   ├── investor/                # Custody: InvestorRequestManager, 2-of-2 MultiSigWallet
+│   ├── governance/              # GovernanceToken (VGT), VanguardGovernance
 │   ├── payment/                 # Escrow factory + one-time 2-of-3 escrow wallets
-│   └── test/                    # Test contracts and helpers
+│   └── test/                    # MockTarget (tests only)
+│       └── mocks/               # Test doubles (tests only)
 ├── circuits/                    # Zero-Knowledge Circuits
 │   ├── whitelist_membership.circom          # Whitelist membership proof
 │   ├── blacklist_membership.circom          # Blacklist non-membership proof (non-gating, D2)
 │   ├── jurisdiction_proof.circom            # Issuer-attested jurisdiction in the allowed set
 │   ├── accreditation_proof.circom           # Issuer-attested accreditation >= minimum
 │   ├── compliance_aggregation.circom        # Issuer-attested scores meet a weighted minimum
-│   └── attestation.circom                   # Shared EdDSA-Poseidon attestation templates
+│   ├── attestation.circom                   # Shared EdDSA-Poseidon attestation templates
+│   └── merkletree.circom                    # Shared Merkle inclusion template
 ├── demo/                        # Interactive Demo System
-│   ├── core/                    # Core demo functionality
-│   ├── modules/                 # Demo modules (89 menu options)
+│   ├── core/                    # Menu text and routing, state, deployer
+│   ├── modules/                 # Option handlers by area
 │   ├── logging/                 # Demo logging utilities
-│   ├── utils/                   # Demo helper utilities
+│   ├── utils/                   # The option flows
 │   └── index.js                 # Main demo entry point
 ├── scripts/                     # Deployment & Utility Scripts
-│   ├── production/              # Production deploy (DeployProduction.ts)
+│   ├── ci/                      # CI step bodies and gates (.github/workflows/ci.yml)
+│   ├── production/              # DeployProduction.ts, RunProductionTests.ts, opsKeyManager.ts
 │   ├── zk/                      # Whitelist root, proof and attestation CLIs
 │   ├── demo-smoke*.js           # Demo smoke test (CI) and its legs
 │   ├── demo-drive.sh            # Drives the interactive demo (npm run demo:drive)
 │   ├── handover.ts              # Handover ceremony CLI
 │   ├── deploy-helpers.ts        # DeploymentHelper (compliance guards)
+│   ├── gas-analysis.ts          # Transfer gas table and ratchet (npm run gas:claims)
 │   ├── generate-real-proofs.js  # ZK proof generation
 │   ├── setup-zk-circuits.js     # Circuit build (npm run setup:zk)
 │   └── verify-zk-readiness.js   # Circuit and verifier check (npm run verify:zk)
-├── test/                        # Comprehensive Test Suite
+├── test/                        # Test suite (npm test runs all of test/)
 │   ├── circuits/                # ZK circuit tests
-│   ├── compliance/              # Compliance system tests
-│   ├── erc3643/                 # ERC-3643 token tests
-│   ├── investor/                # Investor type system tests
-│   ├── onchain_id/              # OnchainID tests
-│   ├── oracle/                  # Oracle system tests
-│   ├── privacy/                 # Privacy/ZK tests
+│   ├── compliance/              # ComplianceRules tests
+│   ├── erc3643/                 # Token, registry and investor-type tests
+│   ├── governance/              # Governance tests
+│   ├── guards/                  # Guard tests; table/ classifies every require/revert
+│   ├── helpers/                 # Shared test helpers
 │   ├── integration/             # Integration tests
-│   ├── production/              # Production readiness tests
+│   ├── investor/                # Custody (InvestorRequestManager, MultiSigWallet) tests
+│   ├── onchain_id/              # OnchainID and KeyManager tests
+│   ├── oracle/                  # Oracle tests
+│   ├── payment/                 # Escrow tests
+│   ├── privacy/                 # Privacy/ZK tests
+│   ├── production/              # Production-simulation and handover ceremony tests
+│   ├── proof-generation/        # Proof generator tests
+│   ├── utils/                   # Utility tests
 │   └── *.test.ts                # Individual test files
-├── docs/                        # Comprehensive Documentation
+├── docs/                        # Documentation
 │   ├── SYSTEM_OVERVIEW.md                      # System architecture overview
 │   ├── NEW_FAIR_VOTING_SYSTEM.md               # Fair voting implementation
 │   ├── INVESTOR_TYPE_SYSTEM.md                 # Investor type documentation
@@ -83,401 +103,168 @@ Vanguard/
 │   ├── TESTNET_DEMO_OPTIONS.md                 # Privacy, custody, oracle, key options
 │   ├── TESTNET_CEREMONY.md                     # Handover ceremony, operator CLIs
 │   ├── VOTING_SYSTEM_DIAGRAM.md                # Voting system visualization
-│   ├── WORKFLOW_IMPLEMENTATION_SUMMARY.md      # Implementation workflow summary
 │   ├── ZK_CIRCUIT_BUILD_GUIDE.md               # Zero-knowledge circuit build guide
 │   └── ZK_CIRCUITS_READINESS.md                # Circuit soundness status
 ├── utils/                       # Utility Functions
 │   ├── merkle-tree-builder.js   # Merkle tree construction
+│   ├── smt-builder.js           # Sparse Merkle tree (blacklist proof)
 │   └── proof-formatter.js       # ZK proof formatting
-├── typechain-types/             # TypeScript contract types
+├── typechain-types/             # TypeScript contract types (generated, gitignored)
 ├── hardhat.config.ts            # Hardhat configuration
 ├── tsconfig.json                # TypeScript configuration
 ├── foundry.toml                 # Foundry configuration
 └── package.json                 # Project dependencies
 ```
 
-## ✅ Implementation Status
-
-### **Core System**
-
-1. ✅ OnchainID System (ERC-734/735) - Blockchain identity management
-2. ✅ ERC-3643 System - Compliant security token
-3. ✅ Oracle System - Consensus-based access control
-4. ✅ ComplianceRules - per-token jurisdiction rules, list gates and trusted contracts
-5. ✅ Privacy System - 5 ZK circuits for privacy-preserving compliance
-
-### **Investor Management**
-
-6. ✅ Investor Type System - 4 types with differentiated limits
-7. ✅ Transfer Limits - Type-specific transfer and holding limits
-8. ✅ Whitelist Tiers - Required tiers per investor type
-9. ✅ Large Transfer Detection - Compliance officer notifications
-10. ✅ Investor Custody - `InvestorRequestManager` deploys a 2-of-2 `MultiSigWallet` per request; the lock is a token transfer into it, released only by bank + user
-
-### **Governance & Escrow**
-
-14. ✅ VanguardGovernance - 1 Person = 1 Vote governance
-15. ✅ GovernanceToken (VGT) - ERC-3643 compliant voting fee token
-16. ✅ Enhanced Escrow - 2-of-3 multisig with dispute resolution
-17. ✅ EscrowWalletFactory - One-time-use escrow wallets
-
-### **Interactive Demo System**
-
-18. ✅ 83 Menu Options - Complete workflow coverage
-19. ✅ End-to-End Testing - All systems integrated
-20. ✅ User-Friendly Interface - Step-by-step guided workflows
-
 ## 📚 Documentation
 
-### **System Overview & Architecture**
-
-- [System Overview](/docs/SYSTEM_OVERVIEW.md) - Complete system architecture (83 menu options, 5 ZK circuits, 32+ contracts)
-- [Testnet Setup](/docs/TESTNET_SETUP.md) - Role wallets from one mnemonic, governance time scale, local rehearsal before Sepolia
+- [System Overview](/docs/SYSTEM_OVERVIEW.md) - Architecture, components, contracts
+- [System Workflow Guide](/docs/SYSTEM_WORKFLOW_GUIDE.md) - Workflows with the demo option for each step
+- [Testnet Setup](/docs/TESTNET_SETUP.md) - Role wallets from one mnemonic, governance time scale, local rehearsal
 - [Testnet Demo Options](/docs/TESTNET_DEMO_OPTIONS.md) - Privacy, custody, oracle and identity-key options on a live node
 - [Handover Ceremony](/docs/TESTNET_CEREMONY.md) - The handover ceremony and the operators' command lines
 - Technical deep dive: [transfer path](/docs/DEEP_DIVE_TRANSFER.md), [identity, recovery and governance](/docs/DEEP_DIVE_IDENTITY.md), [ZK circuits](/docs/DEEP_DIVE_ZK.md)
-
-### **Governance & Voting System**
-
-- [New Fair Voting System](/docs/NEW_FAIR_VOTING_SYSTEM.md) - Fair voting implementation (1 Person = 1 Vote)
-- [Voting System Diagram](/docs/VOTING_SYSTEM_DIAGRAM.md) - Voting system visualization
-
-### **Investor & Payment Systems**
-
-- [Investor Type System](/docs/INVESTOR_TYPE_SYSTEM.md) - 4 investor types with limits
-
-### **Workflow & Implementation Guides**
-
-- [System Workflow Guide](/docs/SYSTEM_WORKFLOW_GUIDE.md) - User workflows and interactions
-- [Workflow Implementation Summary](/docs/WORKFLOW_IMPLEMENTATION_SUMMARY.md) - Implementation workflow summary
-- [ZK Circuit Build Guide](/docs/ZK_CIRCUIT_BUILD_GUIDE.md) - Zero-knowledge circuit build guide
+- [New Fair Voting System](/docs/NEW_FAIR_VOTING_SYSTEM.md) and [Voting System Diagram](/docs/VOTING_SYSTEM_DIAGRAM.md)
+- [Investor Type System](/docs/INVESTOR_TYPE_SYSTEM.md) - Caps, cooldowns, tiers, custody
+- [ZK Circuit Build Guide](/docs/ZK_CIRCUIT_BUILD_GUIDE.md) and [ZK Circuits Readiness](/docs/ZK_CIRCUITS_READINESS.md)
 
 ## 🛠️ Quick Start
 
 ### Prerequisites
 
-- Node.js 18+
-- Hardhat
-- Circom (for ZK circuits)
-- snarkjs (for ZK proof generation)
+- Node.js (CI uses 22) and npm; Hardhat and snarkjs come with `npm install`
+- Rust circom 2.x on `PATH` (or `CIRCOM_BIN`) for `npm run setup:zk`
 
 ### Installation
 
 ```bash
-# 1. Clone the repository
 git clone <repository-url>
-cd ERC-3643
-
-# 2. Install dependencies
+cd Vanguard
 npm install
-
-# 3. Compile contracts
 npx hardhat compile
-
-# 4. Compile ZK circuits (optional - pre-compiled artifacts included)
-
-npm run setup:zk             # Setup ZK circuits (one-time)
+npm run setup:zk             # builds the circuits (required before npm test; build/ is gitignored)
 ```
 
-### Available NPM Scripts
-
-**Core Development** (Most Used):
+### NPM scripts
 
 ```bash
-npm run compile              # Compile smart contracts
-npm run test                 # Run all tests
-npm run node                 # Start local Hardhat node
-npm run clean                # Clean build artifacts
-npm run demo:interactive:proof  # Run main interactive demo (89 options)
+npm run compile                 # Compile smart contracts
+npm test                        # Run all tests
+npm run test:coverage           # All tests under solidity-coverage
+npm run test:gas                # Tests with the gas reporter
+npm run gas:claims              # Transfer gas table (scripts/gas-analysis.ts)
+npm run node                    # Start a local Hardhat node
+npm run demo:interactive:proof  # The interactive demo, against the local node
+npm run demo:drive -- <choices> # Drive the demo without a terminal
+npm run setup:zk                # Build the circuits
+npm run verify:zk               # Check circuits and committed verifiers
+npm run lint                    # solhint
+npm run clean                   # Clean build artifacts
 ```
 
-**Testing & Analysis**:
+### Running the interactive demo
 
 ```bash
-npm run test            # Run all tests
-npm run test:coverage   # Run all tests under solidity-coverage
+npm run node                    # terminal 1
+npm run demo:interactive:proof  # terminal 2
 ```
 
-### Running the Interactive Demo
+The menu covers onboarding (KYC/AML claims), identity keys and recovery,
+ComplianceRules, the token, oracles and consensus, privacy and ZK proofs,
+investor types and custody, escrow, governance (including cost changes by
+proposal, option 83a, and the handover ceremony, 83c-83e) and dynamic
+lists.
+
+### Running tests
 
 ```bash
-# 1. Start Hardhat node in one terminal
-npm run node
-
-# 2. Run the interactive demo in another terminal
-npm run demo:interactive:proof
-```
-
-**The interactive demo provides 89 menu options covering:**
-
-- User onboarding (KYC/AML verification)
-- Token minting and transfers
-- Oracle access control (whitelist/blacklist)
-- Privacy & ZK verification
-- Token burning with quotas
-- Investor type management
-- Enhanced escrow with dispute resolution
-- Governance (1 Person = 1 Vote)
-- Dynamic governance cost management (NEW!)
-- Complete system integration
-
-### Running Tests
-
-```bash
-# Run all tests
-npx hardhat test
-
-# Run specific test file
-npx hardhat test test/VanguardGovernance.test.ts
-
-# Run with gas reporting
-REPORT_GAS=true npx hardhat test
-
-# Run with coverage
-npx hardhat coverage
+npm test                                       # every suite under test/
+npx hardhat test test/GovernanceSystem.test.ts # one file
+npm run test:coverage                          # coverage (sets DEPLOY_GAS_LIMIT for instrumented code)
 ```
 
 ## 🎯 Key Features
 
-### **1. Identity & Compliance**
+### Identity & compliance
 
-- ✅ **OnchainID (ERC-734/735)**: Blockchain-based identity with key and claim management
-- ✅ **ERC-3643 T-REX**: Compliant security token standard
-- ✅ **KYC/AML Verification**: Trusted claim issuers for identity verification
-- ✅ **ComplianceRules**: per-token jurisdiction rules, blacklist and whitelist gates (oracle or ZK binding), and per-token trusted contracts; investor-type transfer and holding caps live in `InvestorTypeRegistry`, which the token enforces
+- **OnchainID (ERC-734/735)**: keys and claims; `ClaimIssuer` signatures cover `claimDigest` (chain id, issuer, revocation epoch, identity, topic, scheme, data, uri, validTo) and a revocation voids every earlier signature (Task 5.2). `IdentityRegistry.isVerified` asks each trusted issuer, with each call bounded to 45,000 gas and one return word (`BoundedStaticCall`, Task 5.1)
+- **KeyManager**: timelocked rotation for identities that authorize it; agent recovery (threshold at least 2) for identities that pin it as their recovery manager
+- **ComplianceRules**: per-token jurisdiction rules, blacklist and whitelist gates (oracle or ZK binding), and per-token trusted contracts; investor-type caps live in `InvestorTypeRegistry`, which the token enforces
 
-### **2. Oracle Access Control**
+### Oracles
 
-- ✅ **Dynamic Whitelist**: 5-tier whitelist with oracle consensus (66% of the registered node weight)
-- ✅ **Real-time Blacklist**: 4-severity blacklist with emergency override
-- ✅ **Oracle Consensus**: M-of-N consensus mechanism with reputation scoring
-- ✅ **Fallback Mechanisms**: Graceful degradation on oracle failures
+- **Whitelist** tiers 1-5 and **blacklist** severities LOW to CRITICAL, written by consensus verdicts, governance ListUpdate votes (DynamicListManager) or the list oracles' owner
+- **Weighted consensus**: a side needs 66% of the weight of every node registered when the query opened; a query no single node can resolve alone (`SingleNodeQuorum`) and a verdict a list oracle applies only with at least 2 supporting nodes (`TooFewVoters`) (Task 5.1). Reputation is owner-set and gates a node's unpause; it does not weight votes
+- **Owner writes**: ops, as the list oracles' owner after the handover, can write any tier (5 included) or severity (CRITICAL included) directly, without consensus; a consensus verdict's severity only sets the listing's duration. The list-oracle ownership posture is an audit item (D44 a)
+- **Emergency listing**: one designated node may list CRITICAL
+- **Fail closed**: ComplianceRules calls the oracles without a fallback, so an oracle that reverts makes the transfer revert; unbinding it (`setWhitelistOracle` / `setBlacklistOracle` to 0) is the fallback
 
-### **3. Privacy & Zero-Knowledge**
+### Privacy & zero-knowledge
 
-- ✅ **5 ZK Circuits**: Whitelist, blacklist, jurisdiction, accreditation, compliance aggregation
-- ✅ **PLONK Proofs**: Privacy-preserving compliance validation (universal setup, all five circuits)
-- ✅ **What stays private**: which identity on the whitelist a wallet belongs to (each leaf is a commitment `Poseidon(identity, secret)`), and the attested attributes (an issuer-signed jurisdiction, accreditation amount or compliance scores, proved against a policy). The prover's wallet is public: ERC-3643 transfers name it and every proof binds it (`walletBinding`).
-- ✅ **What gates transfers**: only the whitelist binding (`PrivacyManager.hasValidWhitelistProof`), read by `ComplianceRules` when a token's whitelist mode is ZkOnly or Either. The attestation proofs are views (`validatePrivate*`) that nothing on the transfer path reads, and the blacklist proof gates nothing; sanctions are enforced by the blacklist oracle.
+- **5 ZK circuits** (PLONK, universal setup): whitelist, blacklist, jurisdiction, accreditation, compliance aggregation
+- **What stays private**: which identity on the whitelist a wallet belongs to (each leaf is a commitment `Poseidon(identity, secret)`), and the attested attributes (an issuer-signed jurisdiction, accreditation amount or compliance scores, proved against a policy). The prover's wallet is public: ERC-3643 transfers name it and every proof binds it (`walletBinding`).
+- **What gates transfers**: only the whitelist binding (`PrivacyManager.hasValidWhitelistProof`), read by `ComplianceRules` when a token's whitelist mode is ZkOnly or Either. In Either with a bound whitelist oracle, a party with no live entry passes by a ZK binding only if its type requires tier 1 (D46 a: a proof carries no tier); Either with no oracle bound acts as ZkOnly. The attestation records are read through `validatePrivate*` (state-changing only to emit `PrivateComplianceValidated`), which nothing on the transfer path calls, and the blacklist proof gates nothing; sanctions are enforced by the blacklist oracle.
 
-### **4. Investor Type Management**
+### Investor types and custody
 
-- ✅ **4 Investor Types**: Normal (0), Retail (1), Accredited (2), Institutional (3)
-- ✅ **Type-Specific Limits**: Transfer limits (8K/50K/500K VSC), Holding limits (50K/500K/5M VSC)
-- ✅ **Whitelist Tiers**: required tiers per investor type (1/2/3/4); ComplianceRules refuses a party whose whitelist oracle entry tier is below its type's (OracleOnly, or Either with an entry; not applicable in ZkOnly: a proof binding carries no tier) (D37 = a, Task 4.10)
-- ✅ **Transfer Cooldowns**: type-specific cooldowns (60/60/30/15 minutes); Token refuses a sender inside its cooldown ("Transfer cooldown"); the registry writes each sender's clock only for a token it authorized (D37 = a, Task 4.10)
+- **4 investor types**: Normal (0), Retail (1), Accredited (2), Institutional (3)
+- **Caps** (defaults): per transfer 8,000 / 8,000 / 50,000 / 500,000 VSC, holding 50,000 / 50,000 / 500,000 / 5,000,000 VSC
+- **Whitelist tiers** 1/2/3/4: ComplianceRules refuses a party whose whitelist oracle entry tier is below its type's (OracleOnly, or Either with an entry; D46 a above for Either without one; not applicable in ZkOnly) (D37 = a, Task 4.10)
+- **Cooldowns** 60/60/30/15 minutes: Token refuses a sender inside its cooldown ("Transfer cooldown"); the registry writes each sender's clock only for a token it authorized
+- **Large-transfer threshold**: stored per type and readable with `isLargeTransfer` (a view; nothing emits or notifies)
+- **Custody**: `InvestorRequestManager` deploys a 2-of-2 `MultiSigWallet` per request; the lock is a token transfer into it, at most the Normal cap (`LockAboveNormalCap`), released only by bank + user
 
-### **5. Governance System**
+### Governance
 
-- ✅ **1 Person = 1 Vote**: Equal voting power for all verified users
-- ✅ **VGT Voting Fees**: 10 VGT proposal creation, 10 VGT per vote
-- ✅ **Token Burning**: Passed proposals burn deposits; failed ones make them claimable per participant
-- ✅ **Per-Type Thresholds**: Quorum 10-30% of eligible voters and approval 60-75%, set per proposal type
-- ✅ **KYC/AML Required**: Only verified users can participate in governance
+- **1 identity = 1 vote**: equal votes for verified identities at least `minVoterAge` old; VGT delegation is recorded, not counted (D12)
+- **VGT fees**: 10 VGT to create a proposal, 10 VGT per vote (owner-adjustable above 0 and up to 1,000 VGT)
+- **Deposits**: passed proposals burn them; rejected or cancelled ones make them claimable per identity, by a wallet the registry binds to it and that controls it (Task 5.2)
+- **Per-type thresholds**: quorum 10-30% of the identities registered at the voter-age cutoff, approval 60-75%
+- **Proposer restriction**: a proposer's identity never votes on its own proposal
 
-### **6. Enhanced Escrow System**
+### Escrow
 
-- ✅ **2-of-3 Multisig, Explicit Direction**: Investor MUST sign + (Payer OR Payee). The investor states release or refund; the matching counterparty signature must already be there, it is never inferred from who signed first
-- ✅ **One-Time-Use Wallets**: Unique escrow wallet per payment, funded once through the factory (`EscrowAlreadyFunded` on a second attempt)
-- ✅ **Verified Shipment Proof**: Signed by the payee and bound to the escrow address and chain id, so it cannot be replayed; opens the 14-day dispute window
-- ✅ **Dispute Resolution**: Payer may dispute within the window; the investor refunds or reopens with all signatures cleared
-- ✅ **Fee Distribution**: Fixed at creation (3% investor, 2% owner), paid on release and recorded per investor in the factory (`getInvestorProfile().totalFeesEarned`); the investor fee can be routed to the investor's 2-of-2 `MultiSigWallet`
-- ✅ **Trust by Registrar**: the factory is a ComplianceRules registrar on VSC and trusts each escrow it deploys; a registrar may trust only accounts with the compiled `MultiSigEscrowWallet` (or, for `InvestorRequestManager`, `MultiSigWallet`) code hash
-- ✅ **Sweep**: Tokens sent to a settled escrow outside the factory are returned by `sweepExcess()` (demo option 70a)
-- 📖 Step by step, with the demo option for each step: [Escrow Payment Workflow](/docs/SYSTEM_WORKFLOW_GUIDE.md#escrow-payment-workflow)
+- **2-of-3, explicit direction**: the investor signs with the payee (release) or the payer (refund); the matching counterparty signature must already be there, it is never inferred from who signed first. Before a shipment proof, or in a dispute, the investor may refund alone (`manualRefund`)
+- **One-time-use wallets**: one escrow wallet per payment, funded once through the factory (`EscrowAlreadyFunded` on a second attempt)
+- **Shipment proof**: signed by the payee and bound to the escrow address and chain id, so it cannot be replayed; opens the 14-day dispute window
+- **Dispute resolution**: the payer may dispute within the window; the investor refunds or reopens with all signatures cleared
+- **Fees**: fixed at creation (3% investor, 2% owner), paid on release and recorded per investor in the factory (`getInvestorProfile().totalFeesEarned`); the investor fee can be routed to the investor's 2-of-2 `MultiSigWallet`
+- **Trust by registrar**: the factory is a ComplianceRules registrar on VSC and trusts each escrow it deploys; a registrar may trust only accounts with the compiled `MultiSigEscrowWallet` (or, for `InvestorRequestManager`, `MultiSigWallet`) code hash
+- **Sweep**: tokens sent to a settled escrow outside the factory are returned by `sweepExcess()` (demo option 70a)
+- Step by step, with the demo option for each step: [Escrow Payment Workflow](/docs/SYSTEM_WORKFLOW_GUIDE.md#escrow-payment-workflow)
 
-### **8. Token Lifecycle Management**
+### Token lifecycle
 
-- ✅ **Issuer-Only Minting**: Exclusive minting authority with economic rationale
-- ✅ **Quota-Based Burning**: Daily/weekly/monthly quotas with consistency checks
-- ✅ **Supply Management**: Complete supply tracking with audit trails
-- ✅ **Compliance Validation**: All operations validated through ComplianceRules
+- **Agent-only mint and burn**: every mint is checked like a transfer to the recipient (identity, ComplianceRules, holding cap); a burn needs free (unfrozen) balance and is not gated by ComplianceRules
+- **Pause**: by the owner or the guardian; unpause by the owner. On VGT an agent (ops) may also unpause, and the guardian can pause again after a voted unpause; a pause has no expiry (D56; an audit item)
 
 ## 🔒 Security
 
-### **Smart Contract Security**
+- **Access control**: owner, agent, operator and registrar roles per contract; the handover ceremony moves ownership to governance and the operational roles to ops (docs/TESTNET_CEREMONY.md)
+- **Reentrancy**: `ReentrancyGuard` on the contracts that move tokens or call out (governance, custody, escrow, ClaimIssuer, KeyManager, OracleManager, the list oracles, PrivacyManager, ZKVerifierIntegrated), not on every function: `MultiSigWallet.proposeUnlock`, `signUnlock` (its execution leg is guarded) and `cancelProposal`, and `InvestorRequestManager.rejectRequest` and `updateLockRequirement`, have none, nor do Token, IdentityRegistry, InvestorTypeRegistry, ComplianceRules, OnchainID (it marks an execution done before its call), OnchainIDFactory, ConsensusOracle and DynamicListManager
+- **Guards**: every `require`/`revert` in `contracts/` is classified (tested or unreachable) in `test/guards/table/`, checked in CI by `scripts/ci/guards-table.js`
+- **No proxies**: a component is replaced by redeploying it and re-pointing its owner-only setters
+- **Not audited**: a third-party audit is pending
 
-- ✅ **Access Control**: Role-based access control for all critical functions
-- ✅ **Reentrancy Protection**: ReentrancyGuard on all state-changing functions
-- ✅ **Input Validation**: Comprehensive validation of all inputs
-- ✅ **Safe Math**: Built-in overflow protection (Solidity 0.8+)
+## 📈 Testing and CI
 
-### **Oracle Security**
-
-- ✅ **Weighted Consensus**: an oracle verdict needs 66% of the registered node weight (two of three equal nodes); governance list updates go through DynamicListManager instead
-- ✅ **Reputation Management**: Oracle scoring and reputation tracking
-- ✅ **Emergency Override**: Emergency blacklist for immediate threat response
-- ✅ **Fallback Mechanisms**: Graceful degradation on oracle failures
-
-### **Privacy & Compliance**
-
-- ✅ **Zero-Knowledge Proofs**: Privacy-preserving compliance validation
-- ✅ **Private allow-list membership**: a wallet proves it holds a whitelist slot without revealing which identity's slot; the wallet itself stays public
-- ✅ **Audit Trail**: Immutable compliance event logging
-- ✅ **KYC/AML Verification**: Trusted claim issuers for identity verification
-
-### **Governance Security**
-
-- ✅ **Sybil Resistance**: KYC/AML required for all governance participants
-- ✅ **Proposer Restriction**: Proposers cannot vote on their own proposals
-- ✅ **Token Locking**: Voting fees locked during voting period
-- ✅ **Equal Voting Power**: 1 Person = 1 Vote prevents whale domination
-
-## 📊 System Architecture
-
-### **Smart Contract Layers**
-
-```
-┌─────────────────────────────────────────────────────────────────┐
-│                    VANGUARD RWA STABLECOIN SYSTEM               │
-├─────────────────────────────────────────────────────────────────┤
-│                                                                 │
-│  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐           │
-│  │  OnchainID   │  │ ERC-3643     │  │ Oracle       │           │
-│  │  (Identity)  │  │ (Compliance) │  │ (Access)     │           │
-│  └──────────────┘  └──────────────┘  └──────────────┘           │
-│         │                 │                  │                  │
-│         └─────────────────┼──────────────────┘                  │
-│                           │                                     │
-│  ┌────────────────────────────────────────────────────────┐     │
-│  │         ComplianceRules (admin base + evaluation)      │     │
-│  │  - Jurisdiction rules per token                        │     │
-│  │  - Blacklist / whitelist gates (oracle or ZK binding)  │     │
-│  │  - Trusted contracts and rule administrators per token │     │
-│  │  (investor-type caps: InvestorTypeRegistry)            │     │
-│  └────────────────────────────────────────────────────────┘     │
-│                           │                                     │
-│  ┌────────────────────────────────────────────────────────┐     │
-│  │      Vanguard RWA StableCoin Token (VSC) - ERC-3643    │     │
-│  │  - Compliant transfers with multi-layer validation     │     │
-│  │  - Investor type-specific limits                       │     │
-│  │  - Issuer-only minting with quotas                     │     │
-│  │  - Quota-based burning with audit trails               │     │
-│  └────────────────────────────────────────────────────────┘     │
-│                                                                 │
-│  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐           │
-│  │ Governance   │  │ Escrow       │  │ Payment      │           │
-│  │ (1P=1V)      │  │ (2-of-3)     │  │ (Refunds)    │           │
-│  └──────────────┘  └──────────────┘  └──────────────┘           │
-│                                                                 │
-│  ┌────────────────────────────────────────────────────────┐     │
-│  │      Privacy Layer (5 ZK Circuits - PLONK)             │     │
-│  │  - Whitelist/Blacklist membership proofs               │     │
-│  │  - Jurisdiction compliance proofs                      │     │
-│  │  - Accreditation status proofs                         │     │
-│  │  - Compliance aggregation proofs                       │     │
-│  └────────────────────────────────────────────────────────┘     │
-│                                                                 │
-└─────────────────────────────────────────────────────────────────┘
-```
-
-### **Contract Categories**
-
-| Category          | Contracts         | Status                                |
-| ----------------- | ----------------- | ------------------------------------- |
-| **OnchainID**     | 5 contracts       | ✅ COMPLETE                           |
-| **ERC-3643**      | 6 contracts       | ✅ COMPLETE                           |
-| **Oracle**        | 4 contracts       | ✅ COMPLETE                           |
-| **Compliance**    | 1 contract        | ✅ COMPLETE                           |
-| **Privacy**       | 7 contracts       | ✅ COMPLETE                           |
-| **Investor Type** | 2 contracts       | ✅ COMPLETE                           |
-| **Governance**    | 2 contracts       | ✅ COMPLETE                           |
-| **Escrow**        | 2 contracts       | ✅ COMPLETE                           |
-| **Payment**       | 3 contracts       | ✅ COMPLETE                           |
-| **Total**         | **32+ contracts** | Implemented and tested; audit pending |
-
-## 🚀 Getting Started with the Demo
-
-### **Step 1: Deploy the System**
-
-```bash
-# Start Hardhat node
-npx hardhat node
-
-# In another terminal, run the demo
-npm run demo:interactive:proof
-
-
-**See the [System Workflow Guide](/docs/SYSTEM_WORKFLOW_GUIDE.md) and [Testnet Setup](/docs/TESTNET_SETUP.md) for the step-by-step guide.**
-
-## 📈 Performance & Scalability
-
-### **Gas Optimization**
-- ✅ Efficient storage patterns (packed structs, minimal storage writes)
-- ✅ Batch operations for multiple actions
-- ✅ Optimized loops and data structures
-- ⏳ **PENDING**: Comprehensive gas benchmarking and optimization
-
-### **Scalability**
-- ✅ Modular architecture for easy upgrades
-- ✅ Oracle consensus for distributed validation
-- ✅ Efficient caching mechanisms
-- ✅ Designed for high-throughput transaction processing
-
-### **Monitoring & Observability**
-- ✅ Comprehensive event logging for all operations
-- ✅ Audit trails for compliance and governance
-- ⏳ **PENDING**: Real-time monitoring and alerting setup
-- ⏳ **PENDING**: Performance metrics and dashboards
-
-## 🤝 Contributing
-
-### **Development Guidelines**
-1. ✅ Maintain comprehensive test coverage
-2. ✅ Update documentation with any changes
-3. ✅ Follow security best practices
-4. ✅ Submit detailed test results
-5. ✅ Follow existing code style and patterns
-
-### **Testing Requirements**
-- All new features must include unit tests
-- Integration tests for cross-contract interactions
-- Gas optimization tests for critical functions
-- Security testing for access control and validation
-
-### **Documentation Requirements**
-- Update relevant documentation files
-- Add inline code comments for complex logic
-- Create workflow guides for new features
-- Update API documentation for contract changes
+CI (`.github/workflows/ci.yml`) runs six jobs: compile; tests (with the
+transfer gas ratchet); coverage (line coverage may not drop below the
+recorded baseline; listed contracts have branch floors in
+`scripts/ci/branch-floors.json`; a near-timeout guard flags slow tests);
+zk-coverage; demo (smoke, ceremony and regression drives on a node); and
+gates (line count, docs, deleted names, scripts reachable, guard table,
+lint and audit ratchets). Step bodies live in `scripts/ci/`.
 
 ## 📄 License
 
 MIT License (the `license` field of package.json; the repository has no LICENSE file)
 
-## 🆘 Support & Resources
-
-### **Documentation**
-- [System Overview](/docs/SYSTEM_OVERVIEW.md) - Start here for system architecture
-- [System Workflow Guide](/docs/SYSTEM_WORKFLOW_GUIDE.md) - User workflows and interactions
-
-### **Getting Help**
-1. Check the comprehensive documentation in the `/docs` folder
-2. Review the interactive demo (83 menu options)
-3. Examine test files for usage examples
-4. Submit issues with detailed reproduction steps
-
----
-
 ## 🎯 Project Status
 
-**Current Phase**: remediation plan v2, Phases 0 to 3 done (Phase 3 closed by Task 3.9); next are Task 3.10 (attestation lifetime) and Phase 4 (wire or delete), then Phase 5 (docs, coverage, third-party audit).
-**Before any mainnet deployment**: the remaining phases, gas optimization and a security audit.
+**Current phase**: remediation plan v2, Phases 0 to 4 done; Phase 5 in progress (Tasks 5.1-5.4 and 5.10 done, 5.5 docs truth now), then the Sepolia rehearsal and production deploy with external signers (5.7) and the audit package. Mainnet is Phase 6.
 
-### **Implementation Summary**
-- ✅ **11 Core Requirements**: All fully implemented
-- ✅ **32+ Smart Contracts**: implemented and tested, not yet audited
-- ✅ **5 ZK Circuits**: Privacy-preserving compliance
-- ✅ **83 Demo Options**: Complete system testing
-- ✅ **Comprehensive Documentation**: Complete guides and technical deep dives
-
-### **Production Readiness**
-- ✅ **Smart Contracts**: Complete and tested
-- ✅ **Integration**: All systems working together
-- ✅ **Documentation**: Comprehensive and up-to-date
-- ⏳ **Security Audits**: Pending professional audits
-- ⏳ **Gas Optimization**: Pending benchmarking and optimization
-- ⏳ **Mainnet Deployment**: Pending production deployment
+- **Smart contracts**: 26 deployable contracts (21 written, 5 generated PLONK verifiers), implemented and tested locally, not audited
+- **Not done**: security audit, testnet and production deployment, gas optimisation beyond the transfer-path ratchet, monitoring
 
 This is not production software yet: the remaining remediation phases and a third-party security audit come before any mainnet deployment.
-```
