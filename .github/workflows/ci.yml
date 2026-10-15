@@ -290,6 +290,8 @@ jobs:
         run: scripts/ci/whitelist-cli.sh
       - name: Strict demo drive (complete ceremony, 83c/83d/83e)
         run: scripts/ci/strict-drive.sh
+      - name: Production deploy drive (external signer, resume, ceremony)
+        run: scripts/ci/deploy-drive.sh
       # Six drives on fresh chains (4.17, 5.10), ~12.5 min locally.
       - name: Regression demo drives
         run: scripts/ci/regression-drives.sh
