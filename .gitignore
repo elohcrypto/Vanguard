@@ -145,3 +145,9 @@ demo/logs/*.log
 # Ignore sensitive configuration
 config/production.json
 config/mainnet.json
+
+# Task 5.7: deploy records and handover configs of local dev chains
+# (scripts/production/DeployProduction.ts); a public chain's record is
+# committed on purpose.
+deployments/31337.*
+deployments/1337.*

@@ -2,32 +2,40 @@ import { expect } from "chai";
 import { ethers } from "hardhat";
 import { OnchainID } from "../../typechain-types";
 
-// Plan v2 Task 4.2: DeployProduction.ts authorizes KeyManager on the ops
-// identity (OPS_IDENTITY) when the deployer owns it, else prints the call.
+// Plan v2 Task 4.2: the production deploy authorizes KeyManager on the ops
+// identity when the deployer owns it, else prints the call. Since Task 5.7
+// DeployProduction.ts calls configureKeyManager with the config's
+// "opsIdentity" after the stack is deployed (scripts/ci/deploy-drive.sh
+// runs the CLI end to end).
 describe("🔐 Production deploy: KeyManager on the ops identity (4.2)", function () {
   it("authorizes a deployer-owned ops identity; prints the call for another owner", async function () {
     const {
-      deployProduction,
-    } = require("../../scripts/production/DeployProduction");
-    const {
       authorizeKeyManagerOnOps,
+      configureKeyManager,
     } = require("../../scripts/production/opsKeyManager");
     const signers = await ethers.getSigners();
     const [deployer, opsKey] = [signers[0], signers[5]];
     const OID = await ethers.getContractFactory("OnchainID");
     const ownOps = await OID.deploy(deployer.address);
+    const keyManager = await (
+      await ethers.getContractFactory("KeyManager")
+    ).deploy();
     const quiet = console.log;
     const out: string[] = [];
     console.log = (...a: unknown[]) => void out.push(a.join(" "));
     let r: any;
     try {
-      process.env.OPS_IDENTITY = await ownOps.getAddress();
-      r = await deployProduction();
+      r = await configureKeyManager(
+        keyManager,
+        deployer,
+        await ownOps.getAddress(),
+        {},
+      );
     } finally {
-      delete process.env.OPS_IDENTITY;
       console.log = quiet;
     }
-    const km = r.addresses.keyManager;
+    const km = await keyManager.getAddress();
+    expect(r.recoveryTimelock).to.equal(await keyManager.RECOVERY_TIMELOCK());
     expect(r.opsKeyManager).to.deep.equal({
       opsIdentity: await ownOps.getAddress(),
       authorized: true,

@@ -101,6 +101,19 @@ const config: HardhatUserConfig = {
           },
         }
       : {}),
+    // Task 5.7 (D48 a): an external signer's JSON-RPC endpoint (Frame
+    // style: it holds the keys, signs eth_sendTransaction and forwards
+    // the rest to its chain); this process holds no key. Absent unless
+    // set. Long timeout: a person may approve each transaction.
+    ...(process.env.SIGNER_RPC_URL
+      ? {
+          remote: {
+            url: process.env.SIGNER_RPC_URL,
+            accounts: "remote" as const,
+            timeout: 600_000,
+          },
+        }
+      : {}),
     sepolia: {
       url:
         process.env.SEPOLIA_RPC_URL ||
