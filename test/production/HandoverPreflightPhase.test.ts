@@ -79,5 +79,16 @@ describe("Handover CLI preflight phase (Task 5.7)", function () {
     });
     expect(out.join("\n")).to.include("✅ Preflight passed");
     expect(out.filter((l) => l.includes("Preflight passed"))).to.have.length(1);
+    // A deployer reconnected to another runner still refuses (M-3).
+    const nonce = await ethers.provider.getTransactionCount(f.deployer);
+    await preflightOnly(args, async (o: any) => {
+      await o.deployer
+        .connect(ethers.provider)
+        .sendTransaction({ to: f.ops.address });
+    });
+    expect(await ethers.provider.getTransactionCount(f.deployer)).to.equal(
+      nonce,
+    );
+    expect(out.filter((l) => l.includes("Preflight passed"))).to.have.length(2);
   });
 });
