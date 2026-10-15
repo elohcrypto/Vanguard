@@ -182,7 +182,9 @@ describe("Production deploy record: resume and refusals (Task 5.7)", function ()
         const data = "0xdeadbeef";
         await (await d.sendTransaction({ to, data, gasLimit: 100_000 })).wait();
       };
-      await expect(run(await h.fresh(box.file), bad)).to.be.rejected;
+      await expect(run(await h.fresh(box.file), bad)).to.be.rejectedWith(
+        "function selector was not recognized",
+      );
       expect(load().txs[1]).to.include({ status: "sending", nonce: n + 1 });
       await h.settle(box.file, load());
       expect(load().txs[1].status).to.equal("reverted");

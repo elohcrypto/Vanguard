@@ -123,7 +123,8 @@ describe("Production deploy: a front-run identity deploy (Task 5.7, M-1)", funct
         .connect(s[3])
         .deployOnchainIDWithKey(s[3].address, extra, ethers.id("b"))
     ).wait();
-    await expect(deployIdentity(factory, s[3].address, ethers.id("b"))).to.be
-      .rejected;
+    await expect(
+      deployIdentity(factory, s[3].address, ethers.id("b")),
+    ).to.be.rejectedWith("OnchainIDFactory: Salt already used");
   });
 });
