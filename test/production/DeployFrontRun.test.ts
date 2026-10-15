@@ -45,6 +45,7 @@ describe("Production deploy: a front-run identity deploy (Task 5.7, M-1)", funct
         } else {
           await network.provider.send("evm_setAutomine", [false]);
           let mine: Promise<unknown> = Promise.resolve();
+          let copy = "";
           try {
             mine = deployIdentity(factory, w, salt);
             let p: any[] = [];
@@ -57,7 +58,7 @@ describe("Production deploy: a front-run identity deploy (Task 5.7, M-1)", funct
             );
             // Outside the deploy: past the record's hook, as another node's
             // sender would be.
-            await outside({
+            copy = await outside({
               method: "eth_sendTransaction",
               params: [
                 {
@@ -65,7 +66,9 @@ describe("Production deploy: a front-run identity deploy (Task 5.7, M-1)", funct
                   to: await factory.getAddress(),
                   data: p[0].input,
                   gasPrice: ethers.toQuantity(50n * 10n ** 9n),
-                  gas: ethers.toQuantity(5_000_000),
+                  // The pending call's own gas: a fixed limit ran the copy
+                  // out of gas under coverage (instrumented code, ~8.2 M).
+                  gas: p[0].gas,
                 },
               ],
             });
@@ -81,6 +84,20 @@ describe("Production deploy: a front-run identity deploy (Task 5.7, M-1)", funct
             }
             await network.provider.send("evm_setAutomine", [true]);
           }
+          // The attacker's copy mined, and before the deploy's own.
+          const rc = await network.provider.send("eth_getTransactionReceipt", [
+            copy,
+          ]);
+          expect(rc.status, "the attacker's copy succeeded").to.equal("0x1");
+          const blk = await network.provider.send("eth_getBlockByNumber", [
+            rc.blockNumber,
+            false,
+          ]);
+          expect(
+            Number(rc.transactionIndex),
+            "the attacker's copy mined first",
+          ).to.equal(0);
+          expect(blk.transactions[0]).to.equal(copy);
           expect(await mine).to.equal(null); // the attacker's copy stands
         }
       }
