@@ -99,7 +99,13 @@ killed_at() {
   wait "$d" 2>/dev/null || true
   [[ $(txs) -ge $1 ]] || fail "the deploy recorded $(txs) transactions, not $1"
   grep -q "Preflight passed" "$OUT/$2" && fail "the deploy finished before the kill"
-  echo "   killed with $(txs) transactions recorded"
+  # The killed run's lock stays: a second deploy is refused until the
+  # operator, sure none runs, removes it (runbook section 2).
+  deploy >"$OUT/locked-$2" 2>&1 && fail "a held record was deployed on"
+  grep -q "\.lock is held by pid [0-9]*: another deploy on this record" "$OUT/locked-$2" \
+    || fail "no lock refusal"
+  rm "$DEPLOY_RECORD.lock"
+  echo "   killed with $(txs) transactions recorded; its lock refused a second run"
 }
 killed_at "$KILL_AT" deploy1.log
 KILLED=$(txs)
