@@ -34,13 +34,13 @@ import {
   refuseTimeScale,
   resolveInputs,
 } from "./deployConfig";
+import { Recorder } from "./deployRecord";
 import {
   DeployRecord,
   loadRecord,
-  Recorder,
   recordPath,
   saveRecord,
-} from "./deployRecord";
+} from "./deployRecordFile";
 import {
   handoverConfig,
   preflightHandover,

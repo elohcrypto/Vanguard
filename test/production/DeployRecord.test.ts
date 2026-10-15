@@ -1,90 +1,33 @@
 import { expect } from "chai";
 import { ethers, network } from "hardhat";
 import * as fs from "fs";
-import * as os from "os";
-import * as path from "path";
+import { Recorder } from "../../scripts/production/deployRecord";
 import {
-  DeployRecord,
   loadRecord,
-  Recorder,
   saveRecord,
-} from "../../scripts/production/deployRecord";
+} from "../../scripts/production/deployRecordFile";
+import * as h from "../helpers/deployRecordFlow";
 
 /**
  * Plan v2 Task 5.7: the production deploy's record (deployments/<chainId>
  * .json). Every transaction is recorded before the next; a re-run replays
  * the record in order with reads pinned to the original blocks, sends only
  * what is missing, and refuses a record the chain contradicts (a code
- * hash, a transaction outside it) or a flow that leaves it.
+ * hash, a transaction outside it) or a flow that leaves it. Resume edge
+ * cases: DeployRecordResume.test.ts.
  */
 describe("Production deploy record (Task 5.7)", function () {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "deploy-record-"));
-  let file: string;
-  let n = 0;
+  const box = h.files();
   const quiet = () => {};
-  const AGENT = "0x000000000000000000000000000000000000a11c";
-
+  const AGENT = h.AGENT;
+  const fresh = () => h.fresh(box.file);
+  const flow = h.flow;
+  const run = (rec: any, f: () => Promise<any>) => h.run(box.file, rec, f);
+  const nonce = () => h.nonce();
+  let file = "";
   beforeEach(function () {
-    file = path.join(dir, `${++n}.json`);
+    file = box.file;
   });
-  after(function () {
-    fs.rmSync(dir, { recursive: true, force: true });
-  });
-
-  async function fresh(): Promise<DeployRecord> {
-    const [d] = await ethers.getSigners();
-    const rec: DeployRecord = {
-      version: 1,
-      chainId: 31337,
-      configDigest: "test",
-      deployer: d.address,
-      fromBlock: await ethers.provider.getBlockNumber(),
-      salt: ethers.ZeroHash,
-      txs: [],
-      contracts: {},
-      complete: false,
-    };
-    saveRecord(file, rec);
-    return rec;
-  }
-
-  /** Two deploys and two calls, one behind a read; stops after `stop` sends. */
-  async function flow(stop = Infinity, agent = AGENT) {
-    let sends = 0;
-    const tick = () => {
-      if (++sends >= stop) throw new Error("killed");
-    };
-    const ir = await (
-      await ethers.getContractFactory("IdentityRegistry")
-    ).deploy();
-    await ir.waitForDeployment();
-    tick();
-    if (!(await ir.isAgent(agent))) {
-      await (await ir.addAgent(agent)).wait();
-      tick();
-    }
-    const km = await (await ethers.getContractFactory("KeyManager")).deploy();
-    await km.waitForDeployment();
-    tick();
-    await (await ir.addAgent(await km.getAddress())).wait();
-    tick();
-    return { ir: await ir.getAddress(), km: await km.getAddress() };
-  }
-
-  async function run(rec: DeployRecord, f: () => Promise<any>) {
-    const r = new Recorder(file, rec, 1, quiet);
-    await r.install();
-    try {
-      const out = await f();
-      await r.finish();
-      return { r, out };
-    } finally {
-      r.remove();
-    }
-  }
-
-  const nonce = async () =>
-    ethers.provider.getTransactionCount((await ethers.getSigners())[0]);
 
   it("records every transaction; a complete re-run sends nothing", async function () {
     const a = await run(await fresh(), () => flow());
