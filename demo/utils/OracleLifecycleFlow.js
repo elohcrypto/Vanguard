@@ -22,6 +22,8 @@
 
 const { ethers } = require("hardhat");
 const { governOracleManager } = require("./GovernedCalls");
+// The nodes on chain (Task 5.12), re-exported for this file's callers.
+const { registeredNodes, nodeSigners } = require("./OracleNodes");
 
 const OPS_WALLET = 10;
 const THRESHOLD = 66;
@@ -39,35 +41,6 @@ const reason = (e) => (e.shortMessage || e.message || String(e)).split("\n")[0];
 
 function opsSigner(state) {
   return state.signers[OPS_WALLET];
-}
-
-/**
- * Task 5.12: [{ address, signer }] for every node registered on chain now
- * (getRegisteredOracles), `signer` the demo wallet holding its key or null.
- */
-async function registeredNodes(state) {
-  const om = state.getContract("oracleManager");
-  return (await om.getRegisteredOracles()).map((address) => ({
-    address,
-    signer: state.signers.find((s) => same(s.address, address)) || null,
-  }));
-}
-
-/**
- * The demo signers of the registered nodes, in chain order: after a
- * rotation by vote (D50) the rounds are answered by the nodes on chain.
- * A node with no demo key is named, never skipped silently.
- */
-async function nodeSigners(state, log = console.log) {
-  const out = [];
-  for (const n of await registeredNodes(state)) {
-    if (n.signer) out.push(n.signer);
-    else
-      log(
-        `   ⚠️  node ${n.address} (registered on chain): no demo key: cannot answer`,
-      );
-  }
-  return out;
 }
 
 /** A fresh address no demo wallet uses: rounds never touch real holders. */
@@ -185,14 +158,14 @@ async function applyVerdict(oracle, node, subject, q, result) {
 }
 
 /**
- * Raise a query by the first registered node and let the nodes answer YES
- * in chain order until the engine resolves (two of three equal nodes).
- * Returns the tally with the nodes, or null with fewer than two keys.
+ * Raise a query by the first active keyed node and let the active keyed
+ * nodes answer YES in chain order until the engine resolves (two of three
+ * equal nodes). Returns the tally with the nodes, or null under two.
  */
 async function consensusRound(state, type, subject, data, log = console.log) {
   const nodes = await nodeSigners(state, log);
   if (nodes.length < 2) {
-    log(`❌ ${nodes.length} node(s) with a demo key: a round needs two`);
+    log(`❌ ${nodes.length} active node(s) with a demo key: a round needs two`);
     return null;
   }
   const [n1] = nodes;
@@ -337,13 +310,15 @@ async function runLifecycle(state, log = console.log) {
   if (!c) return null;
   const { om, bl } = c;
   const ops = opsSigner(state);
-  const nodes = await nodeSigners(state, log);
+  // Every registered node, paused or not (35a pauses and unpauses them).
+  const reg = await registeredNodes(state);
+  const nodes = reg.filter((n) => n.signer).map((n) => n.signer);
   const [n1, n2, n3] = nodes;
   const out = { done: false };
   log("\n🔁 ORACLE LIFECYCLE (OPTION 35a)");
-  if (nodes.length !== 3) {
+  if (reg.length !== 3 || nodes.length !== 3) {
     log(
-      `❌ 35a not started: ${nodes.length} node(s) with a demo key; it pauses two of three`,
+      `❌ 35a not started: ${reg.length} registered node(s), ${nodes.length} with a demo key; it pauses two of three`,
     );
     return out;
   }
