@@ -87,13 +87,13 @@ the balances to fund: section 2).
 ## 2. Deploy
 
 `scripts/production/DeployProduction.ts` deploys the whole stack (demo
-option 1a's flows) through an external signer holding every key the
+option 1a's flows, then option 61's escrow factory) through an external signer holding every key the
 ceremony uses: Frame publicly (any endpoint answering `eth_accounts`,
 `eth_sendTransaction`, `personal_sign`), `scripts/ci/remote-signer.js`
 locally; unsigned-transaction files (air-gapped, KMS) are not built. The
 config (`DEPLOY_CONFIG`, keys in `scripts/production/deployConfig.ts`)
-names the roles, D50 nodes, D47 operator (ops), D45 lock amounts and the
-issuer's EdDSA public key; on Sepolia absent values take section 1's
+names the roles, D50 nodes, D47 operator (ops), D45 lock amounts, escrow
+fee wallet and the issuer's EdDSA public key; on Sepolia absent values take section 1's
 wallets and cap/4, cap/2, cap; mainnet requires every value. Local:
 
 ```bash
@@ -104,27 +104,27 @@ env -u MNEMONIC DEPLOY_CONFIG=$RB/deploy.json DEPLOY_RECORD=$RB/deploy-record.js
 ```
 
 prints
-`✅ Deployed: 66 transactions in /tmp/vanguard-runbook/deploy-record.json (0 from the record, 66 sent now; 64,266,178 gas)`
+`✅ Deployed: 74 transactions in /tmp/vanguard-runbook/deploy-record.json (0 from the record, 74 sent now; 74,566,215 gas)`
 and
 `✅ Preflight passed: every check before the ceremony's first transaction holds (voters are checked by the full phase)`.
 
 - Publicly drop `DEPLOY_RECORD` and `HANDOVER_CONFIG`: the record goes to
   `deployments/<chainId>.json` (keep it), the ceremony's config to
   `deployments/<chainId>.handover.json` (roles as the signer's wallet
-  indices). The deployer pays about 64.3 M gas (1.93 ETH at 30 gwei); ops
+  indices). The deployer pays about 74.6 M gas (2.24 ETH at 30 gwei); ops
   signs one transaction (custody `acceptOwnership`).
 - Stopped (a kill, a refused signature, an RPC error)? Run the same line
   again: recorded transactions print `   ⏭️  #N …: skipped (recorded, code hash ok)`
-  and the rest is sent; on a complete deploy `(66 from the record, 0 sent now; …)`.
-  A record the chain contradicts (a code hash, a deployer transaction
-  outside it), a changed config or flow is refused; the replay reads past
-  blocks (an archive RPC).
+  and the rest is sent; on a complete deploy `(74 from the record, 0 sent now; …)`.
+  A record the chain contradicts, or a changed config or flow, is
+  refused; the replay reads past blocks (an archive RPC).
 - After section 3 the ceremony runs through the same signer
-  (`npx hardhat run scripts/handover.ts --network remote`) and closes
-  with seven warnings: the three deployer-trusted issuer
-  keys, the three deployer-era nodes (section 4) and
-  `   ⚠️  config "escrowWalletFactory" is null and governance derives none: …`
-  (option 1a deploys no escrow factory).
+  (`npx hardhat run scripts/handover.ts --network remote`), takes the
+  escrow factory by vote and closes with seven warnings: the three
+  deployer-trusted issuer keys, the three deployer-era nodes (section 4)
+  and `   ⚠️  0x… is investorLimitExempt (set before the handover): …`
+  (the escrow fee wallet); nothing mints the deployer VSC, so no
+  "deployer still holds" line.
 
 ## 3. Voter registration (D25)
 
