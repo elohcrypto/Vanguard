@@ -167,7 +167,7 @@ describe("Production deploy record (Task 5.7)", function () {
     expect(await nonce()).to.equal(rec.txs[0].nonce + 4);
   });
 
-  it("refuses a tampered code hash or a send outside the record, sending nothing", async function () {
+  it("refuses a tampered code hash, a lost send or one outside the record, sending nothing", async function () {
     await run(await fresh(), () => flow());
     const good = fs.readFileSync(file, "utf8");
     const rec = JSON.parse(good);
@@ -178,6 +178,13 @@ describe("Production deploy record (Task 5.7)", function () {
       /record entry #2 \(new KeyManager\) says 0x[0-9a-fA-F]{40} has code hash 0x0{64}; the chain has 0x[0-9a-f]{64}: refusing \(never deploys over a recorded contract\)/,
     );
     expect(await nonce()).to.equal(before);
+    // A sent transaction the node does not know: refused, not awaited.
+    const lost = JSON.parse(good);
+    Object.assign(lost.txs[3], { status: "sent", hash: ethers.ZeroHash });
+    fs.writeFileSync(file, JSON.stringify(lost));
+    await expect(run(loadRecord(file)!, () => flow())).to.be.rejectedWith(
+      `transaction ${ethers.ZeroHash} is unknown to the node`,
+    );
     fs.writeFileSync(file, good);
     const [d] = await ethers.getSigners();
     await (await d.sendTransaction({ to: d.address })).wait();

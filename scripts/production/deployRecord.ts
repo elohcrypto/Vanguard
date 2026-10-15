@@ -326,14 +326,21 @@ export class Recorder {
     }
   }
 
-  /** The receipt of `e` once it has `confirmations`; null when unknown. */
-  private async receipt(hash: string, wait: boolean): Promise<any> {
+  /**
+   * The receipt of `hash` once it has `confirmations`; a transaction the
+   * node no longer knows (dropped, replaced) is a refusal, not a hang.
+   */
+  private async receipt(hash: string): Promise<any> {
     for (;;) {
       const r = await this.raw("eth_getTransactionReceipt", [hash]);
       if (r) {
         const head = Number(await this.raw("eth_blockNumber"));
         if (head - Number(r.blockNumber) + 1 >= this.confirmations) return r;
-      } else if (!wait) return null;
+      } else if (!(await this.raw("eth_getTransactionByHash", [hash]))) {
+        throw new RecordRefusal(
+          `transaction ${hash} is unknown to the node (dropped or replaced): find what took its nonce, then re-run`,
+        );
+      }
       await new Promise((ok) => setTimeout(ok, 1000));
     }
   }
@@ -355,7 +362,7 @@ export class Recorder {
     if (!this.last) return;
     const e = this.last;
     this.last = null;
-    await this.confirm(e, await this.receipt(e.hash!, true));
+    await this.confirm(e, await this.receipt(e.hash!));
   }
 
   /** The mined transaction from `e.from` at `e.nonce` since `e.block`. */
@@ -427,7 +434,7 @@ export class Recorder {
         );
       }
       if (e.status === "sent")
-        await this.confirm(e, await this.receipt(e.hash!, true));
+        await this.confirm(e, await this.receipt(e.hash!));
     }
     this.save();
     const own = this.rec.txs.filter((e) => same(e.from, this.rec.deployer));
