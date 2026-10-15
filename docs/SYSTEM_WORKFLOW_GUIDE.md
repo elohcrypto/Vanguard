@@ -61,7 +61,7 @@ before them is redeployed, not upgraded (there are no proxies).
 | Investor custody               | InvestorRequestManager, MultiSigWallet                           | 23, 51                    |
 | Escrow payment                 | EscrowWalletFactory, MultiSigEscrowWallet                        | 61-73b                    |
 | Burning                        | Token                                                            | (agent call, below)       |
-| Governance                     | GovernanceToken, VanguardGovernance                              | 74-83e                    |
+| Governance                     | GovernanceToken, VanguardGovernance                              | 74-83f                    |
 
 ## User Onboarding
 
@@ -416,7 +416,9 @@ fund, 76 proposes, 77 votes, 78 executes, 78a claims a deposit back
 (keyed by identity; the wallet must control it, Task 5.2), 79 waits, 80 is
 the dashboard, 82 runs one ComplianceRules proposal from creation to
 execution, 83b accepts the registry by vote, 83c-83e are the ceremony
-(from governance; 83c removes strays or refuses). Rules: `docs/TESTNET_CEREMONY.md`.
+(from governance; 83c removes strays or refuses), 83f the day-2 audit
+(`HANDOVER_PHASE=audit` from the demo's state, Task 5.12). Rules:
+`docs/TESTNET_CEREMONY.md`.
 
 ## Errors a user sees
 

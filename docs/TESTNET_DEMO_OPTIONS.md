@@ -204,8 +204,18 @@ a 30-day whitelist entry and an emergency listing on throwaway
 addresses, and says which owner-only steps it skips after the handover.
 Option 76, type 2
 (OracleParameters), proposes pause, unpause, removeOracle,
-setEmergencyOracle, setConsensusThreshold or setOperator for governance
-to vote (77, 78), from the first wallet among 0-8 that may propose. `demo-drive.sh --strict 1 21 31 32 33a 34a 35a 39 40`
+setEmergencyOracle, setConsensusThreshold, setOperator or (action 7,
+Task 5.12) registerOracle for governance
+to vote (77, 78), from the first wallet among 0-8 that may propose.
+Action 7 takes the next free demo wallet (allocated, never reserved, so
+later onboarding moves to the next one) or a typed address (a node with
+no demo key), and refuses a registered address before any VGT is spent.
+The node prompts and the rounds (33a, 34a, 35a, 37) use the nodes
+registered on chain, so after a rotation by vote (D50: register the new
+nodes, then remove wallets 1-3) the new nodes answer; a node with no demo
+key is listed as one that cannot answer, and 35a needs exactly three.
+Option 83f is the day-2 audit after such votes (section 10 of
+[OPERATOR_RUNBOOK](OPERATOR_RUNBOOK.md#10-upgrades-and-the-day-2-audit)). `demo-drive.sh --strict 1 21 31 32 33a 34a 35a 39 40`
 runs with no error; 33, 34, 35 and 37 ask sub-prompts, which a drive
 answers only when the argument carries them (`37:<sub-option>:...`).
 A whitelist query names a tier T (Task 4.12; 37 -> 1 asks 1-4, 5 is the

@@ -133,7 +133,7 @@ recovers identities.
   rules, oracles, token, system, list update, identity registry, VGT,
   escrow factory, identity factory, privacy, verifier (EmergencyAction has
   no target and cannot be proposed).
-- Demo options 74-83e; dynamic lists 84-89.
+- Demo options 74-83f; dynamic lists 84-89.
 
 ### 8. Escrow
 
@@ -149,7 +149,7 @@ recovers identities.
 
 ### 9. Interactive demo
 
-- 116 menu entries (89 numbered options and 27 sub-options such as 1a,
+- 117 menu entries (89 numbered options and 28 sub-options such as 1a,
   33a, 83c), from `demo/core/MenuSystem.js`. CI drives a scripted smoke
   of it (`scripts/ci/demo-smoke.sh`) and regression drives
   (`scripts/ci/strict-drive.sh`).

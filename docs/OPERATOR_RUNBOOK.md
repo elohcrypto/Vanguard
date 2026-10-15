@@ -173,27 +173,49 @@ the 66% bar (`TooFewNodes`, `SingleNodeQuorum`).
    with the ceremony's snapshot, so after any vote it fails for good
    (`   ❌ appeared after the preflight, not granted by the ceremony: 0x… in OracleManager nodes, …`).
 
-2. Then remove each deployer-era node by an OracleParameters vote: demo
-   option 76, type 2, action 3 (`removeOracle`; after the ceremony 76
-   proposes from the first eligible wallet but 0), then 77 per other
-   voter (77 approves the voter's fee), 79 and 78. Option 76 registers no
-   node, so the drive is a removal-only illustration on a reset chain
-   (option 31's three nodes to two); publicly step 1 comes first. Local:
-   reset.
+2. Then remove each deployer-era node by an OracleParameters vote. The
+   demo track does the whole rotation, add before remove (Task 5.12):
+   option 76, type 2, action 7 (`registerOracle`, reputation 500) per new
+   node, 77 per voter (77 approves the voter's fee), 79, 78; then action
+   3 (`removeOracle`) for wallets 1-3 (all three proposed before any runs,
+   so they are node indices 0-2), 77, 79, 78. Six, five, four, then three
+   nodes: two always remain and none alone reaches the bar. Action 7
+   takes the next free demo wallet on Enter; with the rehearsal's twelve
+   wallets only wallet 8 is free, so it says so and two nodes are typed
+   (keys the demo does not hold: they cannot answer rounds; publicly
+   `<NODE_2>`, `<NODE_3>`). After the ceremony 76 proposes from the first
+   eligible wallet but 0 and 78 executes from the proposer. Option 83f,
+   before and after, is section 10's audit (`HANDOVER_PHASE=audit`, the
+   same code) run from the demo's in-memory state; it acknowledges what
+   the demo made: option 31's nodes, the nodes 76 proposed and option 1's
+   attestor key. Local: reset.
 
    ```bash
    reset   # local
-   npm run demo:drive -- --strict --timeout 1800 --log $RB/d50.log 1 21 51 31 74 24:1:Alice 24:1:Bob 24:1:Carol 24:1:Dave 75a:4:1000:y 75a:5:1000:y 75a:6:1000:y 75a:7:1000:y 22 32 83c:y 83d 83e 35a "76:2:3:2:D50 rotation" 77:11:5:y: 77:11:6:y: 77:11:7:y: 79:y 78:11:y 39 0
+   npm run demo:drive -- --strict --timeout 2400 --log $RB/d50.log 1 21 51 31 74 24:1:Alice 24:1:Bob 24:1:Carol 24:1:Dave 75a:4:1000:y 75a:5:1000:y 75a:6:1000:y 75a:7:1000:y 22 32 83c:y 83d 83e 35a 83f 76:2:7:NODE_4:: 76:2:7:NODE_5::0x1111111111111111111111111111111111111111: 76:2:7:NODE_6::0x2222222222222222222222222222222222222222: 77:11:5:y: 77:11:6:y: 77:11:7:y: 77:12:5:y: 77:12:6:y: 77:12:7:y: 77:13:5:y: 77:13:6:y: 77:13:7:y: 79:y 78:11:y 78:12:y 78:13:y "76:2:3:0:D50 rotation" "76:2:3:1:D50 rotation" "76:2:3:2:D50 rotation" 77:14:5:y: 77:14:6:y: 77:14:7:y: 77:15:5:y: 77:15:6:y: 77:15:7:y: 77:16:5:y: 77:16:6:y: 77:16:7:y: 79:y 78:14:y 78:15:y 78:16:y 39 83f 0
+   awk '/HANDOVER STEP 4/{n++} n==2' $RB/d50.log | grep -E "registered by the deployer|acknowledged in oracleNodes|Audit passed"
    ```
 
    The log (`$RB/d50.log`) shows
-   `   Call: OracleManager.removeOracle(0x90F79bf6EB2c4f870365E785982E1f101E93b906, D50 rotation)`,
+   `   Call: OracleManager.registerOracle(0x23618e81E3f5cdF7f54C3d65f7FBc0aBf5B21E8f, NODE_4, registered by an OracleParameters vote, 500)`
+   (wallet 8), twice `   ⚠️  no free demo wallet: type the node's address`,
+   `   Call: OracleManager.removeOracle(0x70997970C51812dc3A010C7d01b50e0d17dc79C8, D50 rotation)`
+   (and wallets 2 and 3),
    `   Proposer: 0x15d34AAf54267DB7D7c367839AAf71A00a2C6A65` (wallet 4),
-   three `✅ VOTE CAST SUCCESSFULLY!`,
-   `   Executing from 0x15d34AAf54267DB7D7c367839AAf71A00a2C6A65 (the proposer)`,
-   `✅ PROPOSAL EXECUTED — callData ran, locked VGT burned` and option
-   39's `   Total Oracles: 2`; the drive's own summary (stdout, not the
-   log) ends `✓ demo ran to completion`.
+   18 `✅ VOTE CAST SUCCESSFULLY!`, six times
+   `   Executing from 0x15d34AAf54267DB7D7c367839AAf71A00a2C6A65 (the proposer)`
+   and `✅ PROPOSAL EXECUTED — callData ran, locked VGT burned`, and
+   option 39's `   Total Oracles: 3`. The first 83f lists the three
+   deployer-era nodes (`   ⚠️  OracleManager node 0x70997970C51812dc3A010C7d01b50e0d17dc79C8 (KYC_ORACLE) was registered by the deployer at block 53: …`).
+   The `awk` prints only
+   `   ✅ every registered OracleManager node is acknowledged in oracleNodes (3 registered, 6 acknowledged)`
+   and `⚠️  Audit passed with warnings: see above.`: no deployer-era node
+   line, and a node a governance execution registered prints none
+   (R-56c-1). The warnings left are option 1's attestor key and the
+   deployer's VSC exemption. The drive's own summary (stdout, not the
+   log) ends `✓ demo ran to completion`; it ran 6:28 locally. CI runs the
+   same rotation with free wallets, a 33a round answered by the new nodes
+   only (`scripts/ci/regression-drives.sh`, drive `rotate`).
 
 Ops pauses a misbehaving node at once (35a above pauses two:
 `   ⏸️  ops paused node 3 0x90F79bf6EB2c4f870365E785982E1f101E93b906`,
@@ -382,7 +404,8 @@ one subject per clearing otherwise.
   power, sends nothing: what it checks, passes and fails is in
   [TESTNET_CEREMONY](TESTNET_CEREMONY.md#runbook-rules-for-the-ceremony-and-after-plan-2f).
   Audit between votes (an open proposal on a plan contract fails it).
-  Local: section 9's L0 chain.
+  Local: section 9's L0 chain. Demo option 83f runs the same audit from
+  the demo's in-memory state (section 4).
 
   ```bash
   HANDOVER_PHASE=audit npx hardhat run scripts/handover.ts --network $NET > $RB/audit.log 2>&1; tail -1 $RB/audit.log
