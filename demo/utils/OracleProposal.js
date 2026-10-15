@@ -19,6 +19,13 @@ const SignerManager = require("./SignerManager");
 const ORACLE_PARAMETERS = 2; // ProposalType.OracleParameters
 const REPUTATION = 500; // option 31's, and the runbook's
 const DESCRIPTION = "registered by an OracleParameters vote";
+/** Wallets with a role (section 1 of the runbook): never a node key. */
+const ROLE_WALLETS = {
+  0: "the deployer",
+  9: "the issuer admin",
+  10: "ops",
+  11: "the guardian",
+};
 
 /** [label, function, () => args prompt] for each action. */
 const ACTIONS = [
@@ -82,6 +89,15 @@ async function askNewNode(state, prompt) {
   }
   if (!ethers.isAddress(a)) return (displayError(`Not an address: ${a}`), null);
   a = ethers.getAddress(a);
+  const i = state.signers.findIndex((s) => s.address === a);
+  if (ROLE_WALLETS[i]) {
+    return (
+      displayError(
+        `${a} is wallet ${i} (${ROLE_WALLETS[i]}): a node needs its own key`,
+      ),
+      null
+    );
+  }
   if (await om.isRegisteredOracle(a)) {
     return (
       displayError(`${a} is already a registered node: nothing to propose`),
@@ -135,7 +151,9 @@ async function createOracleParametersProposal(state, prompt) {
   if (!om)
     return (displayError("Deploy the oracle system first (option 31)"), null);
   const owner = await om.owner();
-  if (owner.toLowerCase() !== (await gov.getAddress()).toLowerCase()) {
+  const governed =
+    owner.toLowerCase() === (await gov.getAddress()).toLowerCase();
+  if (!governed) {
     // The call would revert at execution: governance cannot act as owner yet.
     console.log(
       `   ⚠️  OracleManager is owned by ${owner}, not governance: the proposal executes only after the handover (option 83c)`,
@@ -173,8 +191,16 @@ async function createOracleParametersProposal(state, prompt) {
       )
   ).wait();
   const id = await gov.proposalCount();
-  // The operator stands behind a node it proposed: 83f acknowledges it.
-  if (fn === "registerOracle") (state.proposedNodes ??= []).push(args[0]);
+  // The operator stands behind a node it proposed: 83c/83e/83f acknowledge
+  // it, only once governance owns the manager (review L-1: before, the
+  // deployer could register the same address directly and pass 83c).
+  if (fn === "registerOracle" && governed) {
+    (state.proposedNodes ??= []).push(args[0]);
+  } else if (fn === "registerOracle") {
+    console.log(
+      "   ⚠️  not acknowledged: only a node proposed after the handover counts for 83c/83e/83f",
+    );
+  }
   console.log(`   Proposer: ${proposer.address}`);
   displaySuccess("ORACLEPARAMETERS PROPOSAL CREATED!");
   console.log(`   Proposal: #${id}`);
