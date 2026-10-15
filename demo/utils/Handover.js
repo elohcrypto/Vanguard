@@ -370,8 +370,46 @@ async function findStrays(o) {
   ];
 }
 
+/**
+ * The day-2 audit (Task 5.6b), shared by HANDOVER_PHASE=audit
+ * (scripts/handover.ts) and demo option 83f (Task 5.12): the completion
+ * lines against the state governance derives now; sends nothing. Refused
+ * before the ceremony completed (governance does not own every plan
+ * contract); throws after the lines when a check fails.
+ */
+async function auditHandover(args, log = console.log) {
+  const o = await withBoundRegistry(await withDerivedContracts(args));
+  const govAddr = (await o.governance.getAddress()).toLowerCase();
+  const missing = [];
+  for (const e of planFor(o)) {
+    if ((await o[e.key].owner()).toLowerCase() !== govAddr)
+      missing.push(e.label);
+  }
+  if (missing.length) {
+    throw new Error(
+      `HANDOVER_PHASE=audit: the ceremony has not completed: governance does not own ${missing.join(", ")}; run the full phase (or HANDOVER_PHASE=accept) first`,
+    );
+  }
+  log(
+    "🔍 Handover audit: every completion line against the state governance derives now (no snapshot, no voting window)",
+  );
+  const { ok, checks, warnings, residual } = await assertHandoverComplete({
+    ...args,
+    audit: true,
+  });
+  for (const c of checks) log(`   ${c.ok ? "✅" : "❌"} ${c.label}`);
+  for (const w of warnings) log(`   ⚠️  ${w}`);
+  if (!ok) throw new Error("audit failed (see ❌ above)");
+  log(
+    residual.length
+      ? "\n⚠️  Audit passed with warnings: see above."
+      : "\n✅ Audit passed: the deployer holds no power.",
+  );
+}
+
 module.exports = {
   ACCEPTANCE_PLAN,
+  auditHandover,
   findStrays,
   handoverDeployerPowers,
   proposeCall,

@@ -81,6 +81,7 @@ const ORACLE_ABI = [
 
 const {
   ACCEPTANCE_PLAN,
+  auditHandover,
   handoverDeployerPowers,
   acceptAllByVote,
   pendingRegistryProposals,
@@ -276,7 +277,9 @@ export async function runHandover(
   };
 
   const snapshotPath = `${path}.snapshot.json`;
-  if (phase === "audit") return audit(args);
+  // HANDOVER_PHASE=audit (Task 5.6b): Handover.auditHandover, which demo
+  // option 83f runs too (Task 5.12).
+  if (phase === "audit") return auditHandover(args);
   let registryProposals: any[];
   if (phase === "accept") {
     console.log("⏭️  HANDOVER_PHASE=accept: deployer steps skipped");
@@ -399,41 +402,6 @@ export async function runHandover(
     residual.length
       ? "\n⚠️  Handover complete with warnings: see above."
       : "\n✅ Handover complete: the deployer holds no power.",
-  );
-}
-
-/**
- * HANDOVER_PHASE=audit (Task 5.6b): the completion lines against the
- * state governance derives now; sends nothing. Refused before the
- * ceremony completed (governance does not own every plan contract).
- */
-async function audit(args: Record<string, any>): Promise<void> {
-  const o = await withBoundRegistry(await withDerivedContracts(args));
-  const govAddr = (await o.governance.getAddress()).toLowerCase();
-  const missing = [];
-  for (const e of planFor(o)) {
-    if ((await o[e.key].owner()).toLowerCase() !== govAddr)
-      missing.push(e.label);
-  }
-  if (missing.length) {
-    throw new Error(
-      `HANDOVER_PHASE=audit: the ceremony has not completed: governance does not own ${missing.join(", ")}; run the full phase (or HANDOVER_PHASE=accept) first`,
-    );
-  }
-  console.log(
-    "🔍 Handover audit: every completion line against the state governance derives now (no snapshot, no voting window)",
-  );
-  const { ok, checks, warnings, residual } = await assertHandoverComplete({
-    ...args,
-    audit: true,
-  });
-  for (const c of checks) console.log(`   ${c.ok ? "✅" : "❌"} ${c.label}`);
-  for (const w of warnings) console.log(`   ⚠️  ${w}`);
-  if (!ok) throw new Error("audit failed (see ❌ above)");
-  console.log(
-    residual.length
-      ? "\n⚠️  Audit passed with warnings: see above."
-      : "\n✅ Audit passed: the deployer holds no power.",
   );
 }
 

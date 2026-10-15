@@ -170,6 +170,9 @@ function displayMenu(mod) {
     "83d. Handover step 2: governance accepts ownership by vote (all nominated contracts)",
   );
   console.log("83e. Handover step 3: verify the deployer holds no power");
+  console.log(
+    "83f. Day-2 audit (HANDOVER_PHASE=audit): after a vote, e.g. a node rotation",
+  );
   console.log("");
   console.log("📋 === DYNAMIC LIST MANAGEMENT (Options 84-88) ===");
   console.log("84. Deploy Dynamic List Manager");

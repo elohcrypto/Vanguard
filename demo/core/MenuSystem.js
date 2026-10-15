@@ -413,6 +413,9 @@ class MenuSystem {
         case "83e":
           await handover.verifyHandover();
           break;
+        case "83f":
+          await handover.auditHandover();
+          break;
 
         // Dynamic List (84-89)
         case "84":

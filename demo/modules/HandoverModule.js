@@ -1,7 +1,8 @@
 /**
  * @fileoverview Handover ceremony module
  * @module HandoverModule
- * @description Menu options 83c/83d/83e (plan v2 Task 2C.1) and the one
+ * @description Menu options 83c/83d/83e (plan v2 Task 2C.1), the day-2
+ * audit 83f (Task 5.12) and the one
  * accept-ownership-by-vote flow that option 83b also uses. The ceremony
  * itself lives in demo/utils/Handover.js, shared with scripts/handover.ts,
  * the demo smoke and test/production/Handover.test.ts.
@@ -22,6 +23,7 @@ const {
   castAcceptanceVotes,
   settleProposal,
   assertHandoverComplete,
+  auditHandover,
 } = require("../utils/Handover");
 const { pickVoters } = require("../utils/VoterPicker");
 const { attestorPublicKey } = require("../../scripts/zk/attest");
@@ -99,7 +101,11 @@ class HandoverModule {
         `IdentityRegistry deploy block not recorded: scanning from the ComplianceRules deploy (block ${fromBlock}); a registry agent added before it would be missed`,
       );
     }
-    const oracleNodes = [...s.oracleConfig.values()].map((x) => x.address);
+    // Task 5.12: and the nodes option 76 -> 2 -> 7 proposed by vote.
+    const oracleNodes = [
+      ...[...s.oracleConfig.values()].map((x) => x.address),
+      ...(s.proposedNodes || []),
+    ];
     const attestors = s.attestorKey
       ? [(await attestorPublicKey(s.attestorKey)).Ax.toString()]
       : [];
@@ -344,6 +350,27 @@ class HandoverModule {
       );
     } catch (error) {
       console.log(`   ⚠️  Verification could not read state: ${error.message}`);
+    }
+  }
+
+  /**
+   * Option 83f (Task 5.12): the day-2 audit, scripts/handover.ts's
+   * HANDOVER_PHASE=audit (Handover.auditHandover) run from this session's
+   * state and acknowledgements; read-only. Its block counts as a handover
+   * step for demo-drive.sh --strict.
+   */
+  async auditHandover() {
+    displaySection("HANDOVER STEP 4: DAY-2 AUDIT (HANDOVER_PHASE=audit)", "🔍");
+    const args = await this._ceremonyArgs();
+    if (!args) return;
+    try {
+      await auditHandover(args);
+    } catch (error) {
+      if (/^HANDOVER_PHASE=audit: /.test(error.message)) {
+        console.log(
+          `   ⛔ Audit refused: ${error.message.replace(/^HANDOVER_PHASE=audit: /, "")}`,
+        );
+      } else console.log(`❌ Handover failed: ${error.message}`);
     }
   }
 
