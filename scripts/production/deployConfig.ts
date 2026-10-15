@@ -12,6 +12,8 @@
  *     "lockAmounts": ["2000", "4000", "8000"],  // D45: VSC, Retail /
  *                                               // Accredited / Institutional
  *     "proposer": "0x..", "voters": ["0x..", "0x.."],
+ *     "escrowFeeWallet": "0x..",                // the escrow factory's owner
+ *                                               // fee wallet (a verified human)
  *     "attestor": { "Ax": "..", "Ay": ".." },   // the issuer's EdDSA key
  *     "logChunk": 5000,                         // optional eth_getLogs range
  *     "confirmations": 3                        // optional, per transaction
@@ -19,7 +21,8 @@
  * The ops identity for KeyManager (Task 4.2) stays OPS_IDENTITY.
  * On a local dev chain (31337, 1337) and Sepolia an absent role defaults
  * to the signer's account at its docs/TESTNET_SETUP.md index (nodes 1-3,
- * proposer 4, voters 5 and 6, issuer admin 9, ops 10, guardian 11), the
+ * escrow fee wallet 1 as the demo's, proposer 4, voters 5 and 6, issuer
+ * admin 9, ops 10, guardian 11), the
  * operator to ops and the lock amounts to the engineering default (cap/4,
  * cap/2, cap; Q2). Mainnet (chain 1) and any other chain take explicit
  * values only. The attestor public key is always explicit: a demo key
@@ -93,6 +96,7 @@ export interface DeployInputs {
   lockAmounts: bigint[] | null;
   proposer: string;
   voters: string[];
+  escrowFeeWallet: string;
   attestor: { Ax: string; Ay: string };
   logChunk?: number;
   confirmations: number;
@@ -109,6 +113,7 @@ const KEYS = new Set([
   "lockAmounts",
   "proposer",
   "voters",
+  "escrowFeeWallet",
   "attestor",
   "logChunk",
   "confirmations",
@@ -118,6 +123,7 @@ const INDEX: Record<string, number | number[]> = {
   oracleNodes: [1, 2, 3],
   proposer: 4,
   voters: [5, 6],
+  escrowFeeWallet: 1,
   issuerAdmin: 9,
   ops: 10,
   guardian: 11,
@@ -188,6 +194,7 @@ export function resolveInputs(
   const oracleNodes: string[] = role("oracleNodes");
   const proposer = role("proposer");
   const voters: string[] = role("voters");
+  const escrowFeeWallet: string = role("escrowFeeWallet");
   if (oracleNodes.length !== 3 || new Set(oracleNodes).size !== 3) {
     throw bad('"oracleNodes" must name three distinct node keys (D50, Q4)');
   }
@@ -235,6 +242,9 @@ export function resolveInputs(
       "deployer, ops, guardian and issuerAdmin must be four different keys (D25 b)",
     );
   }
+  if (escrowFeeWallet === deployer) {
+    throw bad("the escrow fee wallet may not be the deployer");
+  }
   if (oracleNodes.includes(deployer)) {
     throw bad("a node key may not be the deployer (D50)");
   }
@@ -269,6 +279,7 @@ export function resolveInputs(
     chainId,
     ...people,
     oracleNodes,
+    escrowFeeWallet,
     lockAmounts: lockAmounts && lockAmounts.map(String),
     attestor,
     opsIdentity: process.env.OPS_IDENTITY ?? null,
@@ -284,6 +295,7 @@ export function resolveInputs(
     lockAmounts,
     proposer,
     voters,
+    escrowFeeWallet,
     attestor,
     logChunk,
     confirmations,

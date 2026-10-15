@@ -92,7 +92,12 @@ async function onboard(state, address, opts = {}) {
       take(
         "deploy",
         await (
-          await factory.deployOnchainID(address, ethers.randomBytes(32))
+          await factory.deployOnchainID(
+            address,
+            // A production deploy replays its record (Task 5.7): its salt
+            // is stable per wallet (DemoState.production), else random.
+            state.production?.identitySalt?.(address) ?? ethers.randomBytes(32),
+          )
         ).wait(),
       );
       identity = await factory.getIdentityByOwner(address);

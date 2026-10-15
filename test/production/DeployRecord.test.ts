@@ -39,6 +39,7 @@ describe("Production deploy record (Task 5.7)", function () {
       configDigest: "test",
       deployer: d.address,
       fromBlock: await ethers.provider.getBlockNumber(),
+      salt: ethers.ZeroHash,
       txs: [],
       contracts: {},
       complete: false,
@@ -216,21 +217,19 @@ describe("Production deploy record (Task 5.7)", function () {
     expect(await nonce()).to.equal(before);
   });
 
-  it("never signs in this process, and no dev-node call off a dev chain", async function () {
+  it("sends no transaction around the record, and no dev-node call off a dev chain", async function () {
     const r = new Recorder(file, await fresh(), 1, quiet);
     await r.install();
     const [d] = await ethers.getSigners();
     try {
       for (const [method, params] of [
-        ["eth_sign", [d.address, "0x00"]],
-        ["personal_sign", ["0x00", d.address]],
+        ["eth_signTransaction", [{ from: d.address }]],
         ["eth_sendRawTransaction", ["0x00"]],
-        ["eth_signTypedData_v4", [d.address, "{}"]],
       ] as const) {
         await expect(
           network.provider.request({ method, params: [...params] }),
         ).to.be.rejectedWith(
-          `the deploy process never signs (${method} refused)`,
+          `the deploy sends only through its record and the external signer (${method} refused)`,
         );
       }
     } finally {

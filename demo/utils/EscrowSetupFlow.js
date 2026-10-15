@@ -45,7 +45,9 @@ async function deployEscrowSystem(mod) {
     }
 
     const signers = mod.state.signers;
-    const ownerWallet = signers[1]; // Owner's wallet for receiving fees
+    // Owner's wallet for receiving fees: wallet 1, or the production
+    // deploy's configured fee wallet (Task 5.7, DemoState.production).
+    const ownerWallet = mod.state.production?.escrowFeeWallet ?? signers[1];
 
     // The owner fee wallet is a human party: escrow wallets pay it fees,
     // so it must be a verified identity (only contracts are trusted).

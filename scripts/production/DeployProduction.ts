@@ -13,7 +13,8 @@
  * (deployConfig.ts). The deploy is demo option 1a's flows, unchanged
  * (demo/core/ContractDeployer.js deployEverything: identity layer and
  * privacy pair, VSC with ComplianceRules, the oracle system, the investor
- * type registry with custody, governance); the config's roles reach them
+ * type registry with custody, governance), then option 61's escrow
+ * factory; the config's roles reach them
  * as the wallets of docs/TESTNET_SETUP.md (DemoState.production carries
  * the attestor key and the D45 lock amounts). Every transaction goes to
  * deployments/<chainId>.json before the next one; a re-run replays the
@@ -52,6 +53,7 @@ const DemoState = require("../../demo/core/DemoState");
 const ContractDeployer = require("../../demo/core/ContractDeployer");
 const InvestorTypeModule = require("../../demo/modules/InvestorTypeModule");
 const GovernanceModule = require("../../demo/modules/GovernanceModule");
+const EscrowModule = require("../../demo/modules/EscrowModule");
 const { EnhancedLogger } = require("../../demo/logging");
 
 /** What a complete deploy holds (DemoState keys). */
@@ -73,14 +75,18 @@ const EXPECTED = [
   "investorRequestManager",
   "governanceToken",
   "vanguardGovernance",
+  "escrowFactory",
 ];
 
 /** Demo option 1a for `inputs`, roles at their TESTNET_SETUP wallets. */
-async function deployStack(inputs: DeployInputs): Promise<any> {
+async function deployStack(inputs: DeployInputs, salt: string): Promise<any> {
   const state = new DemoState();
   state.production = {
     attestor: inputs.attestor,
     lockRequirements: inputs.lockAmounts,
+    escrowFeeWallet: await ethers.getSigner(inputs.escrowFeeWallet),
+    identitySalt: (wallet: string) =>
+      ethers.solidityPackedKeccak256(["bytes32", "address"], [salt, wallet]),
   };
   const at = (a: string) => ethers.getSigner(a);
   state.signers = new Array(12);
@@ -100,6 +106,9 @@ async function deployStack(inputs: DeployInputs): Promise<any> {
     investorType: new InvestorTypeModule(state, logger, ask),
     governance: new GovernanceModule(state, logger, ask),
   });
+  // Option 61 after 74, as the escrowdlm drive: the escrow factory, a
+  // ComplianceRules registrar on VSC; the ceremony hands it over by vote.
+  if (ok) await new EscrowModule(state, logger, ask).deployEscrowSystem();
   const missing = EXPECTED.filter((k) => !state.getContract(k));
   if (!ok || missing.length) {
     throw new Error(
@@ -168,6 +177,7 @@ async function main(): Promise<void> {
       configDigest: inputs.digest,
       deployer: inputs.deployer,
       fromBlock: await ethers.provider.getBlockNumber(),
+      salt: ethers.hexlify(ethers.randomBytes(32)),
       txs: [],
       contracts: {},
       complete: false,
@@ -186,7 +196,7 @@ async function main(): Promise<void> {
   await recorder.install();
   let state: any;
   try {
-    state = await deployStack(inputs);
+    state = await deployStack(inputs, rec.salt);
     await configureKeyManager(
       state.getContract("keyManager"),
       { address: inputs.deployer },

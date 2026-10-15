@@ -45,6 +45,8 @@ export interface DeployRecord {
   deployer: string;
   /** The block before the first deploy transaction: the scans' start. */
   fromBlock: number;
+  /** Random, made with the record: identity salts derive from it. */
+  salt: string;
   txs: TxEntry[];
   contracts: Record<string, string>;
   complete: boolean;
@@ -203,14 +205,14 @@ export class Recorder {
   }
 
   private async dispatch(method: string, params: any[]): Promise<any> {
+    // Every transaction goes through the record: none signed elsewhere.
+    // Messages (the issuers' claim signatures) are the signer's to sign.
     if (
-      /^eth_(sign|signTransaction|signTypedData|sendRawTransaction)/.test(
-        method,
-      ) ||
-      method === "personal_sign"
+      method === "eth_signTransaction" ||
+      method === "eth_sendRawTransaction"
     ) {
       throw new RecordRefusal(
-        `the deploy process never signs (${method} refused): keys live in the external signer`,
+        `the deploy sends only through its record and the external signer (${method} refused)`,
       );
     }
     if (

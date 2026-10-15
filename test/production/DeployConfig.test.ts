@@ -117,6 +117,7 @@ describe("Production deploy inputs and key refusal (Task 5.7)", function () {
         accounts.slice(9, 12),
       );
       expect(i.oracleOperator).to.equal(i.ops);
+      expect(i.escrowFeeWallet).to.equal(accounts[1]);
       expect(i.lockAmounts).to.equal(null);
     }
     expect(
@@ -141,6 +142,7 @@ describe("Production deploy inputs and key refusal (Task 5.7)", function () {
       lockAmounts: ["2000", "4000", "8000"],
       proposer: accounts[4],
       voters: accounts.slice(5, 7),
+      escrowFeeWallet: accounts[1],
       attestor: ATTESTOR,
     };
     for (const chain of [1, 137]) {
@@ -188,6 +190,9 @@ describe("Production deploy inputs and key refusal (Task 5.7)", function () {
         oracleNodes: [accounts[1], accounts[1], accounts[2]],
       }),
     ).to.throw("three distinct node keys");
+    expect(r({ attestor: ATTESTOR, escrowFeeWallet: accounts[0] })).to.throw(
+      "the escrow fee wallet may not be the deployer",
+    );
   });
 });
 

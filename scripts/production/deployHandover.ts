@@ -7,10 +7,10 @@
  * transaction (the record keeps it from the first run); logChunk is the
  * largest eth_getLogs range the provider serves, unless the config sets
  * it. The contracts governance cannot derive before the ceremony binds
- * them are named (R-413-2): the OnchainIDFactory and the privacy pair by
- * address, the escrow factory as null (option 1a deploys none). The
- * acknowledgements are what the deploy itself created: the D50 nodes and
- * the attestor key it trusted (R-413-9). An existing file with other
+ * them are named (R-413-2): the OnchainIDFactory, the privacy pair and the
+ * escrow factory by address. The acknowledgements are what the deploy
+ * itself created: the D50 nodes, the attestor key it trusted (R-413-9)
+ * and the escrow factory's fee wallet (D54). An existing file with other
  * content is never overwritten.
  */
 import * as fs from "fs";
@@ -71,10 +71,12 @@ export function handoverConfig(
     onchainIDFactory: contracts.onchainIDFactory,
     privacyManager: contracts.privacyManager,
     zkVerifier: contracts.zkVerifierIntegrated,
-    escrowWalletFactory: null,
+    escrowWalletFactory: contracts.escrowFactory,
     oracleNodes: inputs.oracleNodes,
     attestors: [inputs.attestor.Ax],
     extraTrusted: [],
+    // The escrow factory's owner fee wallet, acknowledged (D54).
+    feeWallets: [inputs.escrowFeeWallet],
   };
 }
 

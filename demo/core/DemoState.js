@@ -171,8 +171,10 @@ class DemoState {
      * @property {Object|null} production - The production deploy's inputs
      *   (plan v2 Task 5.7, scripts/production/DeployProduction.ts), null in
      *   the demo: { attestor: { Ax, Ay } } trusted instead of attestorKey's,
-     *   lockRequirements (D45, wei) for custody, and no wallet-1 compliance
-     *   officer on the investor type registry
+     *   lockRequirements (D45, wei) for custody, escrowFeeWallet (a signer)
+     *   for the escrow factory, identitySalt(wallet) (a salt that is stable
+     *   across a resumed deploy, for the identities it onboards), and no
+     *   wallet-1 compliance officer on the investor type registry
      * @type {Object|null}
      */
     this.production = null;
