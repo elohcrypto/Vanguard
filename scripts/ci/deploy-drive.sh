@@ -6,16 +6,19 @@
 # deploy process has none. The node runs on another mnemonic and funds
 # the role wallets by hardhat_setBalance, so it cannot sign for them
 # either (checked). In order:
-#   1. deploy, killed (SIGKILL) once the record holds KILL_AT transactions
+#   1. deploy, killed (SIGKILL) once the record holds KILL_AT transactions,
+#      resumed and killed again at KILL_AGAIN
 #   2. resume: the record is replayed (code hashes checked), the rest sent,
 #      handover.json written and its preflight passed; the deployer's
 #      nonce equals the record's count (nothing sent twice)
 #   3. a tampered code hash in the record: refused, nothing sent
 #   4. a re-run of the complete deploy sends nothing
 #   5. voters registered (scripts/ci/deploy-voters.js), then the ceremony
-#      (scripts/handover.ts) completes with exactly the residual set:
-#      3 deployer-trusted PrivacyManager issuer keys, 3 deployer-era nodes
-#      (D50), the null escrow factory (R-413-12), and the banner
+#      (scripts/handover.ts) completes with exactly R-413-12's residual
+#      set: 3 deployer-trusted PrivacyManager issuer keys, 3 deployer-era
+#      nodes (D50), one exempt holder (the escrow fee wallet, exempted by
+#      option 61; nothing mints the deployer VSC) and the banner; the
+#      escrow factory moved to governance by vote
 #
 # USAGE  scripts/ci/deploy-drive.sh   (nodes on DEPLOY_NODE_PORT 8547 and
 #        DEPLOY_SIGNER_PORT 8549; exit 1 on failure)
@@ -25,6 +28,7 @@ cd "$(dirname "$0")/../.."
 NODE_PORT=${DEPLOY_NODE_PORT:-8547}
 SIGNER_PORT=${DEPLOY_SIGNER_PORT:-8549}
 KILL_AT=${KILL_AT:-30}
+KILL_AGAIN=${KILL_AGAIN:-67}
 NODE_URL=http://127.0.0.1:$NODE_PORT
 OUT=$(mktemp -d "${TMPDIR:-/tmp}/deploy-drive.XXXXXX")
 ROLES="test test test test test test test test test test test junk"
@@ -83,19 +87,28 @@ txs() { node -e 'try { console.log(require(process.argv[1]).txs.length) } catch 
 nonce() { rpc "$NODE_URL" eth_getTransactionCount "[\"$DEPLOYER\",\"latest\"]" | sed -E 's/.*"result":"([^"]+)".*/\1/'; }
 recorded() { node -e 'const r = require(process.argv[1]); console.log(r.txs.filter((t) => t.from.toLowerCase() === process.argv[2].toLowerCase()).length)' "$DEPLOY_RECORD" "$DEPLOYER"; }
 
-# 1. Deploy, killed mid-way.
-setsid npx hardhat run scripts/production/DeployProduction.ts --network remote \
-  >"$OUT/deploy1.log" 2>&1 &
-D=$!
-for _ in $(seq 1 1200); do [[ $(txs) -ge $KILL_AT ]] && break; sleep 0.2; done
-kill -9 -- "-$D"
-wait "$D" 2>/dev/null || true
+# 1. Deploy, killed mid-way twice: at KILL_AT, then in the resumed run
+#    at KILL_AGAIN, inside the escrow fee wallet's onboarding (identity
+#    salt, claim signatures), so the replay crosses every flow.
+killed_at() {
+  setsid npx hardhat run scripts/production/DeployProduction.ts --network remote \
+    >"$OUT/$2" 2>&1 &
+  local d=$!
+  for _ in $(seq 1 1200); do [[ $(txs) -ge $1 ]] && break; sleep 0.2; done
+  kill -9 -- "-$d"
+  wait "$d" 2>/dev/null || true
+  [[ $(txs) -ge $1 ]] || fail "the deploy recorded $(txs) transactions, not $1"
+  grep -q "Preflight passed" "$OUT/$2" && fail "the deploy finished before the kill"
+  echo "   killed with $(txs) transactions recorded"
+}
+killed_at "$KILL_AT" deploy1.log
 KILLED=$(txs)
-[[ $KILLED -ge $KILL_AT ]] || fail "the deploy recorded $KILLED transactions, not $KILL_AT"
-grep -q "Preflight passed" "$OUT/deploy1.log" && fail "the deploy finished before the kill"
-echo "1. killed with $KILLED transactions recorded"
+killed_at "$KILL_AGAIN" deploy1b.log
+grep -q "skipped (recorded" "$OUT/deploy1b.log" || fail "the first resume replayed nothing"
+echo "1. killed twice ($KILLED, then $(txs) recorded)"
 
 # 2. Resume.
+KILLED=$(txs)
 deploy >"$OUT/deploy2.log" 2>&1 || fail "the resumed deploy failed"
 SKIPPED=$(grep -c "skipped (recorded" "$OUT/deploy2.log" || true)
 [[ $SKIPPED -ge $((KILLED - 1)) ]] || fail "resume replayed $SKIPPED of $KILLED"
@@ -132,7 +145,16 @@ count() { grep -cE "$1" <<<"$V" || true; }
 [[ $(count '^\s+⚠️') -eq 7 ]] || fail "$(count '^\s+⚠️') warnings, not 7"
 [[ $(count '^\s+⚠️  PrivacyManager issuer key .* was trusted by the deployer') -eq 3 ]] || fail "issuer-key warnings"
 [[ $(count '^\s+⚠️  OracleManager node .* was registered by the deployer') -eq 3 ]] || fail "D50 node warnings"
-[[ $(count '^\s+⚠️  config "escrowWalletFactory" is null') -eq 1 ]] || fail "escrow null warning"
+[[ $(count 'escrowWalletFactory" is null') -eq 0 ]] || fail "no escrow factory deployed"
+FEE=$(node -e 'console.log((require(process.argv[1]).feeWallets || ["none"])[0])' "$HANDOVER_CONFIG")
+[[ $(count "^\s+⚠️  $FEE is investorLimitExempt \(set before the handover\)") -eq 1 ]] \
+  || fail "no exempt-holder line for the escrow fee wallet"
 [[ $(count '^⚠️  Handover complete with warnings: see above\.$') -eq 1 ]] || fail "no closing banner"
-echo "5. ceremony complete: 3 issuer keys, 3 D50 nodes, null escrow factory, banner"
+OWNER=$(node -e 'const { JsonRpcProvider, Contract } = require("ethers");
+  const h = require(process.argv[1]); const p = new JsonRpcProvider(process.argv[2]);
+  new Contract(h.escrowWalletFactory, ["function owner() view returns (address)"], p).owner()
+    .then((o) => console.log(o.toLowerCase() === h.governance.toLowerCase() ? "governance" : o));' \
+  "$HANDOVER_CONFIG" "$NODE_URL")
+[[ $OWNER == governance ]] || fail "the escrow factory is owned by $OWNER, not governance"
+echo "5. ceremony complete: 3 issuer keys, 3 D50 nodes, exempt fee wallet, banner; escrow factory governance's"
 echo "deploy drive PASS in $((SECONDS - START))s (logs $OUT)"
