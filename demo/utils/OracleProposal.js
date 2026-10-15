@@ -5,14 +5,20 @@
  * (GovernanceModule._createComplianceRulesProposal): prompt, encode the
  * OracleManager call, createProposal(2, ...) from the first wallet that
  * may propose (GovernedCalls.pickProposer), then 77/78.
+ * Task 5.12 (D50, R-56-2): action 7 registers a node, so the deployer-era
+ * nodes rotate out add-before-remove; the node prompts list the nodes
+ * registered on chain, and option 83f acknowledges a node proposed here.
  */
 
 const { ethers } = require("hardhat");
 const { displayError, displaySuccess } = require("./DisplayHelpers");
-const { nodeSigners, opsSigner } = require("./OracleLifecycleFlow");
+const { registeredNodes, opsSigner } = require("./OracleLifecycleFlow");
 const { pickProposer } = require("./GovernedCalls");
+const SignerManager = require("./SignerManager");
 
 const ORACLE_PARAMETERS = 2; // ProposalType.OracleParameters
+const REPUTATION = 500; // option 31's, and the runbook's
+const DESCRIPTION = "registered by an OracleParameters vote";
 
 /** [label, function, () => args prompt] for each action. */
 const ACTIONS = [
@@ -30,16 +36,64 @@ const ACTIONS = [
     "percent",
   ],
   ["Set the operator", "setOperator", "address"],
+  ["Register a node", "registerOracle", "newnode"],
 ];
 
-/** A node address: a node index 0-2 or a typed address; null if invalid. */
+/** A node address: an index into the chain's list or a typed address. */
 async function askNode(state, prompt) {
-  nodeSigners(state).forEach((n, i) =>
-    console.log(`   ${i}: ${n.address} (wallet ${i + 1})`),
-  );
-  const a = (await prompt("Node (0-2 or 0x address): ")).trim();
-  if (/^[0-2]$/.test(a)) return nodeSigners(state)[Number(a)].address;
+  const nodes = await registeredNodes(state);
+  nodes.forEach((n, i) => {
+    const key = n.signer
+      ? `wallet ${state.signers.indexOf(n.signer)}`
+      : "no demo key";
+    console.log(`   ${i}: ${n.address} (${key})`);
+  });
+  const a = (
+    await prompt(`Node (0-${nodes.length - 1} or 0x address): `)
+  ).trim();
+  if (/^\d+$/.test(a)) return nodes[Number(a)]?.address ?? null;
   return ethers.isAddress(a) ? ethers.getAddress(a) : null;
+}
+
+/**
+ * registerOracle's [address, name, description, 500], or null after an
+ * error line. Enter takes the next free demo wallet, allocated on demand
+ * (never reserved); with none free, or for a key the demo does not hold,
+ * the address is typed. A registered address is refused before any VGT.
+ */
+async function askNewNode(state, prompt) {
+  const om = state.getContract("oracleManager");
+  const dflt = `NODE_${(await om.getRegisteredOracles()).length + 1}`;
+  const name = (await prompt(`Node name [${dflt}]: `)).trim() || dflt;
+  let a = (
+    await prompt("Node address (Enter: next free demo wallet): ")
+  ).trim();
+  let wallet = null;
+  if (!a) {
+    wallet = new SignerManager(state).getNextAvailableSigner(
+      "oracle node",
+      name,
+    );
+    if (wallet) a = wallet.signer.address;
+    else {
+      console.log("   ⚠️  no free demo wallet: type the node's address");
+      a = (await prompt("Node address: ")).trim();
+    }
+  }
+  if (!ethers.isAddress(a)) return (displayError(`Not an address: ${a}`), null);
+  a = ethers.getAddress(a);
+  if (await om.isRegisteredOracle(a)) {
+    return (
+      displayError(`${a} is already a registered node: nothing to propose`),
+      null
+    );
+  }
+  const desc =
+    (await prompt(`Description [${DESCRIPTION}]: `)).trim() || DESCRIPTION;
+  console.log(
+    `   New node ${a}: ${wallet ? `wallet ${wallet.index}` : "no demo key, it cannot answer rounds"}`,
+  );
+  return [a, name, desc, REPUTATION];
 }
 
 /** The args for `kind`, or null after an error line. */
@@ -58,6 +112,7 @@ async function askArgs(state, prompt, kind) {
       return (displayError(`Not an address: ${a}`), null);
     return [ethers.getAddress(a)];
   }
+  if (kind === "newnode") return askNewNode(state, prompt);
   const node = await askNode(state, prompt);
   if (!node) return (displayError("Invalid node"), null);
   if (kind === "node") return [node];
@@ -118,6 +173,8 @@ async function createOracleParametersProposal(state, prompt) {
       )
   ).wait();
   const id = await gov.proposalCount();
+  // The operator stands behind a node it proposed: 83f acknowledges it.
+  if (fn === "registerOracle") (state.proposedNodes ??= []).push(args[0]);
   console.log(`   Proposer: ${proposer.address}`);
   displaySuccess("ORACLEPARAMETERS PROPOSAL CREATED!");
   console.log(`   Proposal: #${id}`);

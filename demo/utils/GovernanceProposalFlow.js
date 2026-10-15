@@ -82,7 +82,7 @@ async function createProposal(mod) {
     console.log("0. InvestorTypeConfig - Update investor type limits");
     console.log("1. ComplianceRules - Update compliance parameters");
     console.log(
-      "2. OracleParameters - Pause/unpause/remove a node, emergency designation, threshold, operator",
+      "2. OracleParameters - Register/pause/unpause/remove a node, emergency designation, threshold, operator",
     );
     console.log("3. TokenParameters - Update token settings");
     console.log("4. SystemParameters - Update system settings");
