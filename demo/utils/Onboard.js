@@ -89,17 +89,14 @@ async function onboard(state, address, opts = {}) {
   if (same(identity, ZERO)) {
     identity = await factory.getIdentityByOwner(address);
     if (same(identity, ZERO)) {
-      take(
-        "deploy",
-        await (
-          await factory.deployOnchainID(
-            address,
-            // A production deploy replays its record (Task 5.7): its salt
-            // is stable per wallet (DemoState.production), else random.
-            state.production?.identitySalt?.(address) ?? ethers.randomBytes(32),
-          )
-        ).wait(),
+      const rc = await deployIdentity(
+        factory,
+        address,
+        // A production deploy replays its record (Task 5.7): its salt is
+        // stable per wallet (DemoState.production), else random.
+        state.production?.identitySalt?.(address) ?? ethers.randomBytes(32),
       );
+      if (rc) take("deploy", rc);
       identity = await factory.getIdentityByOwner(address);
       created = true;
     }
@@ -182,6 +179,37 @@ async function onboard(state, address, opts = {}) {
 }
 
 /**
+ * The factory's deployOnchainID for `address` with `salt`: its receipt, or
+ * null when another sender's copy of the call mined first (Task 5.7, M-1:
+ * the factory is permissionless and the salt is visible while pending).
+ * That identity is accepted only if it is the factory's own, owned by
+ * `address`, whose one MANAGEMENT key is `address`'s, pinned to the
+ * factory's recovery manager (I-2); anything else rethrows the failure.
+ */
+async function deployIdentity(factory, address, salt) {
+  try {
+    return await (await factory.deployOnchainID(address, salt)).wait();
+  } catch (e) {
+    const id = await factory.getIdentityByOwner(address);
+    if (same(id, ZERO) || !(await factory.isOnchainID(id))) throw e;
+    const oid = await ethers.getContractAt("OnchainID", id);
+    const key = ethers.solidityPackedKeccak256(["address"], [address]);
+    const keys = await oid.getKeysByPurpose(1);
+    const pinned = await factory.recoveryManager();
+    if (
+      !same(await oid.owner(), address) ||
+      keys.length !== 1 ||
+      keys[0] !== key ||
+      same(pinned, ZERO) ||
+      !same(await oid.recoveryManager(), pinned)
+    ) {
+      throw e;
+    }
+    return null;
+  }
+}
+
+/**
  * Whether `issuer` holds a live claim on (identity, topic) that does not
  * expire within `renewWithin` seconds of `now` (0: any live claim counts).
  */
@@ -194,4 +222,10 @@ async function claimLive(issuer, identity, topic, now, renewWithin = 0) {
   return claim.validTo === 0n || Number(claim.validTo) - now > renewWithin;
 }
 
-module.exports = { onboard, defaultCountry, registryAgent, claimLive };
+module.exports = {
+  onboard,
+  deployIdentity,
+  defaultCountry,
+  registryAgent,
+  claimLive,
+};
