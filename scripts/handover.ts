@@ -56,6 +56,10 @@
  * HANDOVER_SNAPSHOT_SHA256, which it requires (the printed digest;
  * demo/utils/HandoverSnapshotFile.js).
  *
+ * HANDOVER_PHASE=preflight (Task 5.7) runs the full phase's checks up to
+ * its first transaction and sends nothing: "✅ Preflight passed" or the
+ * refusal. The production deploy runs it on the handover.json it writes.
+ *
  * HANDOVER_PHASE=audit is the day-2 re-check: read-only, it runs every
  * completion line against the state governance derives now, with the
  * acknowledgements in the config and no snapshot or voting window, so a
@@ -97,6 +101,51 @@ const {
   readSnapshotFile,
   sidecarOf,
 } = require("../demo/utils/HandoverSnapshotFile");
+
+/** Task 5.7: what the preflight phase's deployer throws at its first send. */
+export class PreflightStop extends Error {
+  name = "PreflightStop";
+}
+
+/** `signer`, refusing every transaction with PreflightStop. */
+function stopAtFirstSend(signer: any): any {
+  return new Proxy(signer, {
+    get(t, p) {
+      if (p === "sendTransaction") {
+        return async () => {
+          throw new PreflightStop("stopped before the first transaction");
+        };
+      }
+      if (p === "connect") return (pr: any) => stopAtFirstSend(t.connect(pr));
+      const v = Reflect.get(t, p, t);
+      return typeof v === "function" ? v.bind(t) : v;
+    },
+  });
+}
+
+/**
+ * HANDOVER_PHASE=preflight (Task 5.7): the full phase's deployer steps
+ * with a deployer that refuses to send, so every check the ceremony makes
+ * before its first transaction runs and nothing is sent. Passes only when
+ * the run stops at that refusal; any other error is the verdict. Voters
+ * are not checked (they register later, D25; the full phase checks them).
+ */
+export async function preflightOnly(
+  args: any,
+  powers: (o: any) => Promise<unknown> = handoverDeployerPowers,
+): Promise<void> {
+  const log = (m: string) => (/⚠️/.test(m) ? console.log(m) : undefined);
+  try {
+    await powers({ ...args, deployer: stopAtFirstSend(args.deployer), log });
+  } catch (e) {
+    if (!(e instanceof PreflightStop)) throw e;
+    console.log(
+      "✅ Preflight passed: every check before the ceremony's first transaction holds (voters are checked by the full phase)",
+    );
+    return;
+  }
+  throw new Error("preflight: the deployer steps ended without a transaction");
+}
 
 /**
  * The whole CLI run for a parsed handover.json (`path` names it in errors).
@@ -188,9 +237,9 @@ export async function runHandover(
   ) {
     throw new Error(`${path}: "logChunk" must be a block count >= 100`);
   }
-  if (!["full", "accept", "audit"].includes(phase)) {
+  if (!["full", "accept", "audit", "preflight"].includes(phase)) {
     throw new Error(
-      `HANDOVER_PHASE must be "accept", "audit" or unset, got "${phase}"`,
+      `HANDOVER_PHASE must be "accept", "audit", "preflight" or unset, got "${phase}"`,
     );
   }
   if (!Array.isArray(cfg.voters) || cfg.voters.length === 0) {
@@ -280,6 +329,8 @@ export async function runHandover(
   // HANDOVER_PHASE=audit (Task 5.6b): Handover.auditHandover, which demo
   // option 83f runs too (Task 5.12).
   if (phase === "audit") return auditHandover(args);
+  // HANDOVER_PHASE=preflight (Task 5.7): the full phase's checks, no send.
+  if (phase === "preflight") return preflightOnly(args);
   let registryProposals: any[];
   if (phase === "accept") {
     console.log("⏭️  HANDOVER_PHASE=accept: deployer steps skipped");
