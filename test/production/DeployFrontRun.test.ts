@@ -58,7 +58,7 @@ describe("Production deploy: a front-run identity deploy (Task 5.7, M-1)", funct
             );
             // Outside the deploy: past the record's hook, as another node's
             // sender would be.
-            copy = await outside({
+            copy = (await outside({
               method: "eth_sendTransaction",
               params: [
                 {
@@ -71,7 +71,7 @@ describe("Production deploy: a front-run identity deploy (Task 5.7, M-1)", funct
                   gas: p[0].gas,
                 },
               ],
-            });
+            })) as string;
           } finally {
             // Both in the next blocks, the attacker's first (higher fee).
             for (let i = 0; i < 5; i++) {
