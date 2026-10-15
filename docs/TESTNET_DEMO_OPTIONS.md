@@ -209,11 +209,14 @@ Task 5.12) registerOracle for governance
 to vote (77, 78), from the first wallet among 0-8 that may propose.
 Action 7 takes the next free demo wallet (allocated, never reserved, so
 later onboarding moves to the next one) or a typed address (a node with
-no demo key), and refuses a registered address before any VGT is spent.
+no demo key), and refuses a registered address or a role wallet (0, 9,
+10, 11) before any VGT is spent; only a node proposed after the handover
+is acknowledged by 83c, 83e and 83f.
 The node prompts and the rounds (33a, 34a, 35a, 37) use the nodes
 registered on chain, so after a rotation by vote (D50: register the new
 nodes, then remove wallets 1-3) the new nodes answer; a node with no demo
-key is listed as one that cannot answer, and 35a needs exactly three.
+key or a paused node is listed as one that cannot answer, and 35a needs
+exactly three registered nodes, all with a demo key.
 Option 83f is the day-2 audit after such votes (section 10 of
 [OPERATOR_RUNBOOK](OPERATOR_RUNBOOK.md#10-upgrades-and-the-day-2-audit)). `demo-drive.sh --strict 1 21 31 32 33a 34a 35a 39 40`
 runs with no error; 33, 34, 35 and 37 ask sub-prompts, which a drive

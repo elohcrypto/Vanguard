@@ -27,8 +27,11 @@
 #              registers three demo wallets by vote, then 76 -> 2 -> 3
 #              removes wallets 1-3 by vote (6, 5, 4, 3 nodes: never
 #              TooFewNodes or SingleNodeQuorum); 33a is answered by the new
-#              nodes only, and 83f again shows no deployer-era node line
-#              (the voted nodes are skipped as governance-registered)
+#              nodes only, and 83f again shows no deployer-era node line.
+#              The proposer executes, so the voted nodes carry no warning
+#              either way; that the audit skips a node a governance
+#              execution registered even when the deployer sent it (M-1)
+#              is proven by test/production/HandoverAudit.test.ts, not here
 #
 # Every ceremony drive (one carrying 83e) must print the success line
 # (`^\s+(✅|⚠️)\s+Handover complete`) and no "Handover incomplete".

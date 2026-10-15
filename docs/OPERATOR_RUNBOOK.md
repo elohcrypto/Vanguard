@@ -187,8 +187,8 @@ the 66% bar (`TooFewNodes`, `SingleNodeQuorum`).
    eligible wallet but 0 and 78 executes from the proposer. Option 83f,
    before and after, is section 10's audit (`HANDOVER_PHASE=audit`, the
    same code) run from the demo's in-memory state; it acknowledges what
-   the demo made: option 31's nodes, the nodes 76 proposed and option 1's
-   attestor key. Local: reset.
+   the demo made: option 31's nodes, the nodes 76 proposed after the
+   handover and option 1's attestor key. Local: reset.
 
    ```bash
    reset   # local
