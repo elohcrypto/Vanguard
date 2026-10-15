@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 #
 # Regression drives of the interactive demo (Task 4.17; the sixth since
-# Task 5.10): six strict drives through scripts/demo-drive.sh, each with
+# Task 5.10, the seventh since 5.12): strict drives through
+# scripts/demo-drive.sh, each with
 # the needles that pin what it exists to show. One PASS/FAIL line per
 # drive; exits 1 when any drive fails.
 #
@@ -21,6 +22,13 @@
 #              both to governance by vote and the verifier reads each
 #              back as governance-owned (the deployer keeps no factory
 #              role)
+#   rotate     5.12 (D50, R-56-2): after the ceremony 83f audits (wallets
+#              1-3 "registered by the deployer"), option 76 -> 2 -> 7
+#              registers three demo wallets by vote, then 76 -> 2 -> 3
+#              removes wallets 1-3 by vote (6, 5, 4, 3 nodes: never
+#              TooFewNodes or SingleNodeQuorum); 33a is answered by the new
+#              nodes only, and 83f again shows no deployer-era node line
+#              (the voted nodes are skipped as governance-registered)
 #
 # Every ceremony drive (one carrying 83e) must print the success line
 # (`^\s+(✅|⚠️)\s+Handover complete`) and no "Handover incomplete".
@@ -79,6 +87,15 @@ drive() {
 }
 
 count() { grep -cE -- "$1" "$LOG" 2>/dev/null || true; }
+
+# bcount <start> <n> <needle>: needle lines in the nth block that opens
+# with a line matching start and ends at the next menu prompt.
+bcount() {
+  # The start regex goes through ENVIRON: -v would eat its backslashes.
+  tr -d '\r' < "$LOG" | S="$1" awk -v n="$2" '
+    $0 ~ ENVIRON["S"] { k++; b = (k == n) } /Select an option: / { b = 0 } b' \
+    | grep -cE -- "$3" || true
+}
 
 ceremony() {
   need "$(count '^\s+(✅|⚠️)\s+Handover complete')" 1 "Handover complete"
@@ -151,5 +168,49 @@ need "$(count '^\s+✅ DynamicListManager owned by governance\s*$')" 1 \
   "list manager verified"
 ceremony
 verdict escrowdlm
+
+# rotate: the ceremony uses proposals #1-#10, so the three registrations
+# are #11-#13 and the three removals #14-#16 (created before any removal
+# runs, so node indices 0-2 are wallets 1-3). Voters 5-7; the proposer
+# (wallet 4) executes. Measured 6:24 locally.
+votes() { for p in "$@"; do for w in 5 6 7; do echo "77:$p:$w:y:"; done; done; }
+mapfile -t REG_VOTES < <(votes 11 12 13)
+mapfile -t RM_VOTES < <(votes 14 15 16)
+drive rotate 1 21 51 31 74 "${CEREMONY_VOTERS[@]}" 22 32 83c:y 83d 83e 83f \
+  76:2:7:NODE_4:: 76:2:7:NODE_5:: 76:2:7:NODE_6:: "${REG_VOTES[@]}" 79:y \
+  78:11:y 78:12:y 78:13:y "76:2:3:0:D50 rotation" "76:2:3:1:D50 rotation" \
+  "76:2:3:2:D50 rotation" "${RM_VOTES[@]}" 79:y 78:14:y 78:15:y 78:16:y \
+  33a 83f 39 0
+ceremony
+AUDIT='HANDOVER STEP 4: DAY-2 AUDIT'
+DEPLOYER_NODE='^\s+⚠️  OracleManager node 0x[0-9a-fA-F]{40} \(\w+\) was registered by the deployer'
+PASSED='^⚠️  Audit passed with warnings: see above\.$'
+need "$(bcount "$AUDIT" 1 "$DEPLOYER_NODE")" 3 "audit before: deployer-era node lines"
+need "$(bcount "$AUDIT" 1 "$PASSED")" 1 "audit before: passed"
+need "$(count '^\s+Call: OracleManager\.registerOracle\(0x[0-9a-fA-F]{40}, NODE_[456], ')" 3 \
+  "registerOracle proposals"
+need "$(count '^\s+Call: OracleManager\.removeOracle\(0x(70997970C51812dc3A010C7d01b50e0d17dc79C8|3C44CdDdB6a900fa2b585dd299e03d12FA4293BC|90F79bf6EB2c4f870365E785982E1f101E93b906), D50 rotation\)')" 3 \
+  "removeOracle proposals for wallets 1-3"
+need "$(count '^\s+Executing from 0x15d34AAf54267DB7D7c367839AAf71A00a2C6A65 \(the proposer\)')" 6 \
+  "executed by the proposer"
+need "$(count '^✅ PROPOSAL EXECUTED')" 6 "executions"
+ROUND='WHITELIST BY CONSENSUS \(OPTION 33a\)'
+need "$(bcount "$ROUND" 1 '^\s+🗳️  0x[0-9a-fA-F]{6}…[0-9a-fA-F]{4} answered YES')" 2 "33a answers"
+need "$(bcount "$ROUND" 1 '^\s+✅ 0x[0-9a-fA-F]{40} by the verdict: listed at tier 4')" 1 \
+  "33a verdict applied"
+old=$(bcount "$ROUND" 1 '0x(709979|3C44Cd|90F79b)')
+[[ "${old:-0}" -eq 0 ]] || REASONS+=("33a: $old line(s) name a wallet 1-3 node")
+after=$(bcount "$AUDIT" 2 'registered by the deployer')
+[[ "${after:-0}" -eq 0 ]] || REASONS+=("audit after: $after deployer-era node line(s)")
+need "$(bcount "$AUDIT" 2 '^\s+✅ every registered OracleManager node is acknowledged in oracleNodes \(3 registered, 6 acknowledged\)')" 1 \
+  "audit after: three voted nodes"
+need "$(bcount "$AUDIT" 2 "$PASSED")" 1 "audit after: passed"
+need "$(bcount 'ORACLE SYSTEM DASHBOARD' 1 '^   Total Oracles: 3$')" 1 \
+  "option 39 after the rotation"
+need "$(bcount 'ORACLE SYSTEM DASHBOARD' 1 '^NODE_[456] \(wallet (8|12|13)\):$')" 3 \
+  "option 39 lists the voted nodes"
+quorum=$(count 'TooFewNodes|SingleNodeQuorum')
+[[ "${quorum:-0}" -eq 0 ]] || REASONS+=("$quorum TooFewNodes/SingleNodeQuorum line(s)")
+verdict rotate
 
 exit $failed
