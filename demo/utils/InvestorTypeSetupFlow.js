@@ -34,18 +34,22 @@ async function deployInvestorTypeSystem(mod) {
     mod.state.setContract("investorTypeRegistry", investorTypeRegistry);
     console.log(`✅ InvestorTypeRegistry deployed: ${registryAddress}`);
 
-    // Set up compliance officer
-    console.log("👮 Setting up compliance officers...");
-    try {
-      await investorTypeRegistry.setComplianceOfficer(
-        mod.state.signers[1].address,
-        true,
-      );
-      console.log(
-        `✅ Compliance officer configured: ${mod.state.signers[1].address}`,
-      );
-    } catch (error) {
-      console.log("⚠️ Compliance officer setup failed:", error.message);
+    // Set up compliance officer. Not in a production deploy (Task 5.7):
+    // wallet 1 is a node key there; the ceremony makes ops the officer.
+    const demoOfficer = !mod.state.production;
+    if (demoOfficer) console.log("👮 Setting up compliance officers...");
+    if (demoOfficer) {
+      try {
+        await investorTypeRegistry.setComplianceOfficer(
+          mod.state.signers[1].address,
+          true,
+        );
+        console.log(
+          `✅ Compliance officer configured: ${mod.state.signers[1].address}`,
+        );
+      } catch (error) {
+        console.log("⚠️ Compliance officer setup failed:", error.message);
+      }
     }
 
     // Check if VanguardGovernance is already deployed
@@ -82,10 +86,12 @@ async function deployInvestorTypeSystem(mod) {
     console.log("📊 System Status:");
     console.log(`   📋 InvestorTypeRegistry: ${registryAddress}`);
     // Read back, not assumed (R-47-2).
-    const officer = mod.state.signers[1].address;
-    console.log(
-      `   👮 Compliance officer ${officer}: ${(await investorTypeRegistry.isComplianceOfficer(officer)) ? "set" : "not set"}`,
-    );
+    if (demoOfficer) {
+      const officer = mod.state.signers[1].address;
+      console.log(
+        `   👮 Compliance officer ${officer}: ${(await investorTypeRegistry.isComplianceOfficer(officer)) ? "set" : "not set"}`,
+      );
+    }
 
     // Show governance status
     if (governance) {

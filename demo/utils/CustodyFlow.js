@@ -71,10 +71,12 @@ async function deployCustody(state, log = console.log) {
   log(`   ✅ InvestorRequestManager: ${mAddr} (bank = ops ${bank.address})`);
 
   const cap = (await types.getInvestorTypeConfig(0)).maxTransferAmount;
+  // D45: a production deploy's amounts (Task 5.7), else cap/4, cap/2, cap.
+  const set = state.production?.lockRequirements;
   const locks = [
-    [TYPES.RETAIL, cap / 4n],
-    [TYPES.ACCREDITED, cap / 2n],
-    [TYPES.INSTITUTIONAL, cap],
+    [TYPES.RETAIL, set ? set[0] : cap / 4n],
+    [TYPES.ACCREDITED, set ? set[1] : cap / 2n],
+    [TYPES.INSTITUTIONAL, set ? set[2] : cap],
   ];
   for (const [t, amount] of locks) {
     await (await m.updateLockRequirement(t, amount)).wait();

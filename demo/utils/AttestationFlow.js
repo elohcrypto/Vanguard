@@ -87,10 +87,17 @@ async function setupDemoAttestations({
   privacyManager: pm,
   log = console.log,
 }) {
-  const { Ax, Ay } = await attestorPublicKey(demoAttestorKey(state));
+  // Task 5.7: a production deploy trusts the issuer's key from its config;
+  // it makes no private key (state.production, DemoState).
+  const given = state.production?.attestor;
+  const { Ax, Ay } = given
+    ? { Ax: BigInt(given.Ax), Ay: BigInt(given.Ay) }
+    : await attestorPublicKey(demoAttestorKey(state));
   const id = attestorId(Ax, Ay);
   log(
-    "   🖋️  Demo attestation issuer (KYC issuer's EdDSA key; private key never shown):",
+    given
+      ? "   🖋️  Attestation issuer (the config's EdDSA public key):"
+      : "   🖋️  Demo attestation issuer (KYC issuer's EdDSA key; private key never shown):",
   );
   log(`      Ax ${Ax}`);
   log(`      Ay ${Ay}`);

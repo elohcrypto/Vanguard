@@ -168,6 +168,16 @@ class DemoState {
     this.attestorKey = null;
 
     /**
+     * @property {Object|null} production - The production deploy's inputs
+     *   (plan v2 Task 5.7, scripts/production/DeployProduction.ts), null in
+     *   the demo: { attestor: { Ax, Ay } } trusted instead of attestorKey's,
+     *   lockRequirements (D45, wei) for custody, and no wallet-1 compliance
+     *   officer on the investor type registry
+     * @type {Object|null}
+     */
+    this.production = null;
+
+    /**
      * @property {Object|null} whitelistRootFile - The commitments behind the
      *   last whitelist root the demo published (buildWhitelistRoot output);
      *   the blacklist proof (option 42 -> 2) proves inclusion under it
