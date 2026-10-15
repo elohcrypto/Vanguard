@@ -95,22 +95,26 @@ async function showDashboard(mod) {
     );
     console.log(`   Operator: ${await oracleManager.operator()}`);
 
-    // Individual Oracle Status
+    // Individual Oracle Status: the nodes registered on chain now (Task
+    // 5.12: after a rotation by vote, not option 31's wallets).
     console.log("\n👥 INDIVIDUAL ORACLE STATUS:");
-    for (const [key, config] of mod.state.oracleConfig) {
+    for (const { address, signer } of await Flow.registeredNodes(mod.state)) {
       try {
-        const oracleInfo = await oracleManager.getOracleInfo(config.address);
-        console.log(`\n${key.toUpperCase()} (${config.role}):`);
-        console.log(`   📍 Address: ${config.address}`);
+        const oracleInfo = await oracleManager.getOracleInfo(address);
+        const key = signer
+          ? `wallet ${mod.state.signers.indexOf(signer)}`
+          : "no demo key";
+        console.log(`\n${oracleInfo.name} (${key}):`);
+        console.log(`   📍 Address: ${address}`);
         console.log(`   🏆 Reputation: ${oracleInfo.reputation}`);
         console.log(`   ✅ Rewarded: ${oracleInfo.correctAttestations}`);
         console.log(`   🗳️ Answers: ${oracleInfo.totalAttestations}`);
         console.log(`   🔄 Active: ${oracleInfo.active ? "YES" : "NO"}`);
         console.log(
-          `   🚨 Emergency: ${(await oracleManager.isEmergencyOracle(config.address)) ? "YES" : "NO"}`,
+          `   🚨 Emergency: ${(await oracleManager.isEmergencyOracle(address)) ? "YES" : "NO"}`,
         );
       } catch (error) {
-        console.log(`\n${key.toUpperCase()}: ❌ Error retrieving info`);
+        console.log(`\n${address}: ❌ Error retrieving info`);
       }
     }
 

@@ -10,7 +10,8 @@
  * nodes; removal and parameters are the manager owner's (the deployer,
  * governance after the handover). Options 33a, 34a, 35a, 37 and 40 and
  * scripts/demo-smoke-oracles.js share these steps; every line printed is
- * read back from chain.
+ * read back from chain, the answering nodes too (Task 5.12: option 31's
+ * wallets 1-3 until a vote rotates them).
  * A whitelist query names (wallet, T): its data is abi.encode(T), 1..5,
  * fixed when raised (a node raises 1..4, only the owner 5). An approval
  * lists at T or raises a lower live entry to T (expiry capped at 365
@@ -22,8 +23,6 @@
 const { ethers } = require("hardhat");
 const { governOracleManager } = require("./GovernedCalls");
 
-/** KYC, AML and Compliance nodes (option 31 registers them). */
-const NODE_WALLETS = [1, 2, 3];
 const OPS_WALLET = 10;
 const THRESHOLD = 66;
 const QUERY = { WHITELIST: 1, BLACKLIST: 2, IDENTITY: 3, COMPLIANCE: 4 };
@@ -42,8 +41,33 @@ function opsSigner(state) {
   return state.signers[OPS_WALLET];
 }
 
-function nodeSigners(state) {
-  return NODE_WALLETS.map((i) => state.signers[i]);
+/**
+ * Task 5.12: [{ address, signer }] for every node registered on chain now
+ * (getRegisteredOracles), `signer` the demo wallet holding its key or null.
+ */
+async function registeredNodes(state) {
+  const om = state.getContract("oracleManager");
+  return (await om.getRegisteredOracles()).map((address) => ({
+    address,
+    signer: state.signers.find((s) => same(s.address, address)) || null,
+  }));
+}
+
+/**
+ * The demo signers of the registered nodes, in chain order: after a
+ * rotation by vote (D50) the rounds are answered by the nodes on chain.
+ * A node with no demo key is named, never skipped silently.
+ */
+async function nodeSigners(state, log = console.log) {
+  const out = [];
+  for (const n of await registeredNodes(state)) {
+    if (n.signer) out.push(n.signer);
+    else
+      log(
+        `   ⚠️  node ${n.address} (registered on chain): no demo key: cannot answer`,
+      );
+  }
+  return out;
 }
 
 /** A fresh address no demo wallet uses: rounds never touch real holders. */
@@ -161,11 +185,17 @@ async function applyVerdict(oracle, node, subject, q, result) {
 }
 
 /**
- * Raise a query by node 1 and let nodes 1 and 2 answer YES: the engine
- * resolves at two of three. Returns the tally.
+ * Raise a query by the first registered node and let the nodes answer YES
+ * in chain order until the engine resolves (two of three equal nodes).
+ * Returns the tally with the nodes, or null with fewer than two keys.
  */
 async function consensusRound(state, type, subject, data, log = console.log) {
-  const [n1, n2] = nodeSigners(state);
+  const nodes = await nodeSigners(state, log);
+  if (nodes.length < 2) {
+    log(`❌ ${nodes.length} node(s) with a demo key: a round needs two`);
+    return null;
+  }
+  const [n1] = nodes;
   const { engine } = oracleContracts(state);
   const q = await raiseQuery(state, n1, subject, type, data);
   log(`   📝 Query ${q}`);
@@ -175,14 +205,11 @@ async function consensusRound(state, type, subject, data, log = console.log) {
   const t = await answerUntilResolved(
     state,
     q,
-    [
-      [n1, true],
-      [n2, true],
-    ],
+    nodes.map((n) => [n, true]),
     log,
   );
   log(`   ⚖️  ${tallyLine(t)}`);
-  return t;
+  return { ...t, nodes };
 }
 
 /** What a whitelist approval at `tier` did, from entry reads before/after. */
@@ -215,10 +242,11 @@ async function runWhitelistRound(
     tierData(tier),
     log,
   );
+  if (!t) return null;
   log(`   🏷️  The query's tier (chain, getQueryData): ${t.tier}`);
   if (!t.hasResult) return (log("❌ The query did not resolve"), null);
   const before = await c.wl.getWhitelistInfo(subject);
-  await applyVerdict(c.wl, nodeSigners(state)[0], subject, t.q, true);
+  await applyVerdict(c.wl, t.nodes[0], subject, t.q, true);
   const listed = await c.wl.isWhitelisted(subject);
   const info = await c.wl.getWhitelistInfo(subject);
   const listedTier = Number(info.tier);
@@ -239,8 +267,9 @@ async function runBlacklistRound(state, log = console.log) {
   const data = ethers.AbiCoder.defaultAbiCoder().encode(["uint8"], [2]);
   log("   Severity HIGH is fixed when the query is raised (R-2F3-2)");
   const t = await consensusRound(state, QUERY.BLACKLIST, subject, data, log);
+  if (!t) return null;
   if (!t.hasResult) return (log("❌ The query did not resolve"), null);
-  await applyVerdict(c.bl, nodeSigners(state)[0], subject, t.q, true);
+  await applyVerdict(c.bl, t.nodes[0], subject, t.q, true);
   const e = await c.bl.getBlacklistInfo(subject);
   const listed = await c.bl.isBlacklisted(subject);
   const days = Number(e.expiryTime - e.timestamp) / 86400;
@@ -308,9 +337,16 @@ async function runLifecycle(state, log = console.log) {
   if (!c) return null;
   const { om, bl } = c;
   const ops = opsSigner(state);
-  const [n1, n2, n3] = nodeSigners(state);
+  const nodes = await nodeSigners(state, log);
+  const [n1, n2, n3] = nodes;
   const out = { done: false };
   log("\n🔁 ORACLE LIFECYCLE (OPTION 35a)");
+  if (nodes.length !== 3) {
+    log(
+      `❌ 35a not started: ${nodes.length} node(s) with a demo key; it pauses two of three`,
+    );
+    return out;
+  }
   for (const [n, label] of [
     [n2, "node 2"],
     [n3, "node 3"],
@@ -437,7 +473,6 @@ async function removeThrowawayNode(state, log) {
 }
 
 module.exports = {
-  NODE_WALLETS,
   OPS_WALLET,
   THRESHOLD,
   QUERY,
@@ -445,6 +480,7 @@ module.exports = {
   WHITELIST_TIER,
   tierData,
   opsSigner,
+  registeredNodes,
   nodeSigners,
   throwawaySubject,
   oracleContracts,

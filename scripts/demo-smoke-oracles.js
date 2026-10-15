@@ -99,7 +99,7 @@ async function runOracleSmoke(state, failures) {
     );
 
     const [l, lLines] = await quietly((log) => Flow.runLifecycle(state, log));
-    const [n1, n2, n3] = Flow.nodeSigners(state);
+    const [n1, n2, n3] = await Flow.nodeSigners(state);
     check(`35a: finished [${lLines.at(-1)}]`, l && l.done);
     check(
       "35a: the operator is ops",

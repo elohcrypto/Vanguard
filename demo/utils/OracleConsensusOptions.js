@@ -25,10 +25,15 @@ const TYPE_NAMES = ["", "Whitelist", "Blacklist", "Identity", "Compliance"];
 const typeLabel = (t) =>
   t.tier ? `${TYPE_NAMES[t.type]}, tier ${t.tier}` : TYPE_NAMES[t.type];
 
-function printNodes(state) {
-  nodeSigners(state).forEach((n, i) =>
-    console.log(`   ${i}: node ${n.address} (wallet ${i + 1})`),
+/** A registered node with a demo key, picked by index (Task 5.12). */
+async function pickNode(state, prompt, label) {
+  const nodes = await nodeSigners(state);
+  nodes.forEach((n, i) =>
+    console.log(
+      `   ${i}: node ${n.address} (wallet ${state.signers.indexOf(n)})`,
+    ),
   );
+  return nodes[Number(await prompt(`${label} (0-${nodes.length - 1}): `))];
 }
 
 /** A queryId typed by the user, or null after explaining the format. */
@@ -67,8 +72,7 @@ async function createQueryInteractive(state, prompt) {
     if (!(tier >= 1 && tier <= 4)) return displayError("Tier must be 1-4");
     data = tierData(tier);
   }
-  printNodes(state);
-  const raiser = nodeSigners(state)[Number(await prompt("Raised by (0-2): "))];
+  const raiser = await pickNode(state, prompt, "Raised by");
   if (!raiser) return displayError("Invalid node");
   const q = await raiseQuery(state, raiser, subject.owner, type, data);
   const t = await tally(state, q);
@@ -88,8 +92,7 @@ async function voteInteractive(state, prompt) {
   if (!c) return null;
   const q = await askQueryId(prompt);
   if (!q) return null;
-  printNodes(state);
-  const node = nodeSigners(state)[Number(await prompt("Node (0-2): "))];
+  const node = await pickNode(state, prompt, "Node");
   if (!node) return displayError("Invalid node");
   const vote = (await prompt("Answer (1=YES, 0=NO): ")).trim() === "1";
   try {
