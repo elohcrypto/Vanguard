@@ -112,6 +112,26 @@ describe("Production deploy record: resume and refusals (Task 5.7)", function ()
     });
   });
 
+  // Re-review L-b: the same calldata at the nonce with another value is
+  // another transaction, never the entry.
+  it("refuses a mined transaction at its nonce that differs only in value", async function () {
+    const pay = async () =>
+      (
+        await (await signer(0)).sendTransaction({ to: h.AGENT, value: 1n })
+      ).wait();
+    await run(await h.fresh(box.file), pay);
+    const rec = load();
+    Object.assign(rec.txs[0], {
+      hash: ethers.id("replaced"),
+      status: "sent",
+      value: "2",
+    });
+    write(rec);
+    await expect(h.settle(box.file, load())).to.be.rejectedWith(
+      /record entry #0 \(.*\): 0x[0-9a-f]{64} is unknown to the node and 0x[0-9a-fA-F]{40}'s nonce \d+ went to 0x[0-9a-f]{64}, another transaction: refusing/,
+    );
+  });
+
   describe("each check refuses (M-3)", function () {
     it("a record for another chain", async function () {
       const rec = await h.fresh(box.file);

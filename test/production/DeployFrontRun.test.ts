@@ -127,4 +127,52 @@ describe("Production deploy: a front-run identity deploy (Task 5.7, M-1)", funct
       deployIdentity(factory, s[3].address, ethers.id("b")),
     ).to.be.rejectedWith("OnchainIDFactory: Salt already used");
   });
+
+  // Re-review L-a: each acceptance check refuses a copy it exists for.
+  // isOnchainID is not reachable: the factory sets isOnchainID[identity]
+  // in the same statement block as ownerToIdentity[owner] on all three
+  // deploy paths, so getIdentityByOwner never names a non-factory identity.
+  it("refuses a copy with no recovery manager, a stale one, or another owner", async function () {
+    const s = await ethers.getSigners();
+    const salt = ethers.id("copied");
+    const used = "OnchainIDFactory: Salt already used";
+    const copyFirst = async (factory: any, w: string) =>
+      (await factory.connect(s[7]).deployOnchainID(w, salt)).wait();
+
+    // No recovery manager pinned on the factory: nothing to match.
+    const bare = await (
+      await ethers.getContractFactory("OnchainIDFactory")
+    ).deploy(s[0].address, ethers.ZeroHash);
+    await copyFirst(bare, s[1].address);
+    await expect(deployIdentity(bare, s[1].address, salt)).to.be.rejectedWith(
+      used,
+    );
+
+    // The factory's recovery manager changed after the copy was pinned.
+    const { factory } = await factoryWithKeyManager();
+    await copyFirst(factory, s[2].address);
+    const km2 = await (await ethers.getContractFactory("KeyManager")).deploy();
+    await (await factory.setRecoveryManager(await km2.getAddress())).wait();
+    await expect(
+      deployIdentity(factory, s[2].address, salt),
+    ).to.be.rejectedWith(used);
+
+    // The wallet's identity now has another owner, keyed by the wallet
+    // alone (the new owner re-added the wallet's key, removed its own).
+    const f2 = (await factoryWithKeyManager()).factory;
+    const [w, x] = [s[3], s[5]];
+    await copyFirst(f2, w.address);
+    const id = await ethers.getContractAt(
+      "OnchainID",
+      await f2.getIdentityByOwner(w.address),
+    );
+    await (await id.connect(w).transferOwnership(x.address)).wait();
+    await (await id.connect(x).acceptOwnership()).wait();
+    const key = (a: string) => ethers.solidityPackedKeccak256(["address"], [a]);
+    await (await id.connect(x).addKey(key(w.address), 1, 1)).wait();
+    await (await id.connect(x).removeKey(key(x.address), 1)).wait();
+    expect(await id.getKeysByPurpose(1)).to.deep.equal([key(w.address)]);
+    expect(await id.owner()).to.equal(x.address);
+    await expect(deployIdentity(f2, w.address, salt)).to.be.rejectedWith(used);
+  });
 });
