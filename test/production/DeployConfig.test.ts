@@ -84,7 +84,7 @@ describe("Production deploy inputs and key refusal (Task 5.7)", function () {
       { network: "hardhat", chainId: 31337, accounts: {}, env: {} },
       {
         network: "localhost",
-        chainId: 1337,
+        chainId: 31337,
         accounts: [key],
         env: env({ PRIVATE_KEY: key }),
       },
@@ -117,7 +117,7 @@ describe("Production deploy inputs and key refusal (Task 5.7)", function () {
         accounts.slice(9, 12),
       );
       expect(i.oracleOperator).to.equal(i.ops);
-      expect(i.escrowFeeWallet).to.equal(accounts[1]);
+      expect(i.escrowFeeWallet).to.equal(accounts[8]);
       expect(i.lockAmounts).to.equal(null);
     }
     expect(
@@ -142,7 +142,7 @@ describe("Production deploy inputs and key refusal (Task 5.7)", function () {
       lockAmounts: ["2000", "4000", "8000"],
       proposer: accounts[4],
       voters: accounts.slice(5, 7),
-      escrowFeeWallet: accounts[1],
+      escrowFeeWallet: accounts[8],
       attestor: ATTESTOR,
     };
     for (const chain of [1, 137]) {
@@ -190,9 +190,34 @@ describe("Production deploy inputs and key refusal (Task 5.7)", function () {
         oracleNodes: [accounts[1], accounts[1], accounts[2]],
       }),
     ).to.throw("three distinct node keys");
-    expect(r({ attestor: ATTESTOR, escrowFeeWallet: accounts[0] })).to.throw(
-      "the escrow fee wallet may not be the deployer",
-    );
+    // L-1: the fee wallet is a party of its own (never a role or a node).
+    for (const i of [0, 1, 9, 10, 11]) {
+      expect(
+        r({ attestor: ATTESTOR, escrowFeeWallet: accounts[i] }),
+        `${i}`,
+      ).to.throw(
+        "the escrow fee wallet must be its own key: not the deployer, ops, guardian, issuer admin or a node",
+      );
+    }
+    // M-3: a node key may not be the deployer.
+    expect(
+      r({
+        attestor: ATTESTOR,
+        oracleNodes: [accounts[0], accounts[2], accounts[3]],
+      }),
+    ).to.throw("a node key may not be the deployer (D50)");
+    // L-4: 1337 is no local chain here (nothing in the repo runs one).
+    expect(() =>
+      resolveInputs({ attestor: ATTESTOR }, 1337, accounts),
+    ).to.throw('"ops" is required on chain 1337 (no defaults)');
+    expect(() =>
+      refuseLocalKeys({
+        network: "localhost",
+        chainId: 1337,
+        accounts: {},
+        env: {},
+      }),
+    ).to.throw("chain 1337 is not a local dev chain (31337)");
   });
 });
 

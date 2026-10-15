@@ -29,7 +29,7 @@ async function main() {
   const rec = JSON.parse(fs.readFileSync(process.env.DEPLOY_RECORD, "utf8"));
   const cfg = JSON.parse(fs.readFileSync(process.env.HANDOVER_CONFIG, "utf8"));
   if (!rec.complete) throw new Error("the deploy record is not complete");
-  if (![31337, 1337].includes(rec.chainId)) {
+  if (rec.chainId !== 31337) {
     throw new Error(`a dev-node drive; chain ${rec.chainId} refused`);
   }
   const state = new DemoState();

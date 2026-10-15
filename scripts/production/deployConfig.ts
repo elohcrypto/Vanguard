@@ -19,10 +19,10 @@
  *     "confirmations": 3                        // optional, per transaction
  *   }
  * The ops identity for KeyManager (Task 4.2) stays OPS_IDENTITY.
- * On a local dev chain (31337, 1337) and Sepolia an absent role defaults
+ * On the local dev chain (31337) and Sepolia an absent role defaults
  * to the signer's account at its docs/TESTNET_SETUP.md index (nodes 1-3,
- * escrow fee wallet 1 as the demo's, proposer 4, voters 5 and 6, issuer
- * admin 9, ops 10, guardian 11), the
+ * proposer 4, voters 5 and 6, escrow fee wallet 8 (its own party, never
+ * a role or a node), issuer admin 9, ops 10, guardian 11), the
  * operator to ops and the lock amounts to the engineering default (cap/4,
  * cap/2, cap; Q2). Mainnet (chain 1) and any other chain take explicit
  * values only. The attestor public key is always explicit: a demo key
@@ -31,10 +31,10 @@
 import { createHash } from "crypto";
 import { getAddress, isAddress, parseEther } from "ethers";
 
-/** Local dev chains: Hardhat (31337) and Ganache-style (1337). */
-export const LOCAL_CHAINS = new Set([31337, 1337]);
+/** The local dev chain: Hardhat (31337); nothing here runs another. */
+export const LOCAL_CHAINS = new Set([31337]);
 /** Chains where an absent value takes its default (Q2-Q4). */
-const DEFAULTS_ALLOWED = new Set([31337, 1337, 11155111]);
+const DEFAULTS_ALLOWED = new Set([31337, 11155111]);
 /** Network names that may hold a local key (on a local chain only). */
 const LOCAL_NAMES = new Set(["hardhat", "localhost", "devnode"]);
 const KEY_ENV = ["PRIVATE_KEY", "MNEMONIC"];
@@ -63,7 +63,7 @@ export function refuseLocalKeys(p: {
   }
   if (!local && p.accounts !== "remote") {
     throw new Error(
-      `refusing to deploy: network "${p.network}" holds local accounts and chain ${p.chainId} is not a local dev chain (31337, 1337); deploy through the external signer: SIGNER_RPC_URL=<signer endpoint> --network remote`,
+      `refusing to deploy: network "${p.network}" holds local accounts and chain ${p.chainId} is not a local dev chain (31337); deploy through the external signer: SIGNER_RPC_URL=<signer endpoint> --network remote`,
     );
   }
 }
@@ -123,7 +123,7 @@ const INDEX: Record<string, number | number[]> = {
   oracleNodes: [1, 2, 3],
   proposer: 4,
   voters: [5, 6],
-  escrowFeeWallet: 1,
+  escrowFeeWallet: 8,
   issuerAdmin: 9,
   ops: 10,
   guardian: 11,
@@ -242,8 +242,14 @@ export function resolveInputs(
       "deployer, ops, guardian and issuerAdmin must be four different keys (D25 b)",
     );
   }
-  if (escrowFeeWallet === deployer) {
-    throw bad("the escrow fee wallet may not be the deployer");
+  if (
+    [deployer, ops, guardian, issuerAdmin, ...oracleNodes].includes(
+      escrowFeeWallet,
+    )
+  ) {
+    throw bad(
+      "the escrow fee wallet must be its own key: not the deployer, ops, guardian, issuer admin or a node",
+    );
   }
   if (oracleNodes.includes(deployer)) {
     throw bad("a node key may not be the deployer (D50)");

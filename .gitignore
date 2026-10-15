@@ -150,4 +150,3 @@ config/mainnet.json
 # (scripts/production/DeployProduction.ts); a public chain's record is
 # committed on purpose.
 deployments/31337.*
-deployments/1337.*
