@@ -64,7 +64,7 @@ Vanguard/
 │   └── index.js                 # Main demo entry point
 ├── scripts/                     # Deployment & Utility Scripts
 │   ├── ci/                      # CI step bodies and gates (.github/workflows/ci.yml)
-│   ├── production/              # DeployProduction.ts, RunProductionTests.ts, opsKeyManager.ts
+│   ├── production/              # DeployProduction.ts (+ deploy* modules), RunProductionTests.ts, opsKeyManager.ts
 │   ├── zk/                      # Whitelist root, proof and attestation CLIs
 │   ├── demo-smoke*.js           # Demo smoke test (CI) and its legs
 │   ├── demo-drive.sh            # Drives the interactive demo (npm run demo:drive)

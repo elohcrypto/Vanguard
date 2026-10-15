@@ -222,7 +222,9 @@ cannot derive them, before step 3 binds them (R-413-2); any other key is refused
 the full phase printed, recorded outside the run directory: the directory holding the snapshot and
 its sidecar must not hold the only copy, R-56c-2) and refuses a snapshot whose sha256 differs from it or the sidecar (B-6). `HANDOVER_PHASE=audit` is the day-2
 re-check: every completion line against the state governance derives now, no snapshot or window
-([OPERATOR_RUNBOOK](OPERATOR_RUNBOOK.md) section 10). The preflight (and 83e, as failing lines) also
+([OPERATOR_RUNBOOK](OPERATOR_RUNBOOK.md) section 10). `HANDOVER_PHASE=preflight` (Task 5.7) runs the full phase's
+checks up to its first transaction and sends nothing; the production deploy runs it on the handover.json it writes
+([OPERATOR_RUNBOOK](OPERATOR_RUNBOOK.md) section 2). The preflight (and 83e, as failing lines) also
 refuses, from the event scans: any agent but the deployer, ops, governance (VGT) and the tokens
 (registry), a missing governance or token agent; any InvestorTypeRegistry officer wallet but
 ops, a token other than VSC authorized, a registry or whitelist oracle on VGT (D56), a Token

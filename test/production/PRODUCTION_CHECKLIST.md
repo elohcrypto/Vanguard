@@ -1,6 +1,6 @@
 # 🚀 Production Deployment Checklist (template)
 
-A template for the checks before a production deploy. Nothing here is checked by code; a box is ticked by the people doing the deploy. `scripts/production/DeployProduction.ts` deploys the identity side only (KeyManager, claim issuers, IdentityRegistry, ComplianceRules, OnchainIDFactory); the token, custody, governance and the handover ceremony are deployed by other paths (docs/TESTNET_CEREMONY.md).
+A template for the checks before a production deploy. Nothing here is checked by code; a box is ticked by the people doing the deploy. `scripts/production/DeployProduction.ts` deploys the whole stack through an external signer and writes the handover ceremony's config (docs/OPERATOR_RUNBOOK.md, section 2); the ceremony itself is docs/TESTNET_CEREMONY.md.
 
 ## 📋 Pre-Deployment Validation
 
@@ -74,7 +74,7 @@ A template for the checks before a production deploy. Nothing here is checked by
 - [ ] **Deployment Scripts**: Production deployment tested
 
   ```bash
-  OPS_IDENTITY=<ops OnchainID> npx hardhat run scripts/production/DeployProduction.ts --network sepolia
+  OPS_IDENTITY=<ops OnchainID> SIGNER_RPC_URL=<signer endpoint> DEPLOY_CONFIG=<deploy.json> npx hardhat run scripts/production/DeployProduction.ts --network remote
   ```
   - [ ] KeyManager authorized on the ops identity: the deploy sends
         `authorizeManager(KeyManager)` itself only when the deploying
@@ -141,9 +141,9 @@ A template for the checks before a production deploy. Nothing here is checked by
 
 ### Deploy settings (scripts/production/DeployProduction.ts)
 
-- Deployment fee 0.01 ETH per identity, gas price 20 gwei, gas limit
-  `DEPLOY_GAS_LIMIT` or 10,000,000, 3 confirmations off the hardhat
-  network.
+- No identity fee; gas price and limits from the signer; 1 confirmation
+  per transaction on a dev chain, 3 elsewhere (`confirmations` in the
+  config); about 64.3 M gas in all.
 - Timelocks are on chain, not configuration: `RECOVERY_TIMELOCK` is a
   48-hour constant; the rotation timelock defaults to 24 hours and an
   identity may set 1 hour to 7 days (`setCustomTimelock`).
@@ -151,11 +151,11 @@ A template for the checks before a production deploy. Nothing here is checked by
 ### Environment variables the code reads
 
 ```bash
-MNEMONIC=...            # or PRIVATE_KEY (hardhat.config.ts)
-MAINNET_RPC_URL=...     # or SEPOLIA_RPC_URL
-ETHERSCAN_API_KEY=...
+SIGNER_RPC_URL=...      # the external signer (network remote); no MNEMONIC / PRIVATE_KEY
+DEPLOY_CONFIG=...       # DeployProduction: roles, nodes, lock amounts, attestor key
 OPS_IDENTITY=0x...      # DeployProduction: the ops OnchainID
-DEPLOY_GAS_LIMIT=...    # optional
+MAINNET_RPC_URL=...     # or SEPOLIA_RPC_URL (other scripts)
+ETHERSCAN_API_KEY=...
 ```
 
 ## 🚨 Final Pre-Deployment Steps
@@ -195,7 +195,7 @@ echo "⛽ Current gas price should be < 50 gwei for deployment"
 
 ```bash
 # Deploy to mainnet (FINAL STEP)
-npx hardhat run scripts/production/DeployProduction.ts --network mainnet
+SIGNER_RPC_URL=<signer endpoint> DEPLOY_CONFIG=<deploy.json> npx hardhat run scripts/production/DeployProduction.ts --network remote
 
 # Verify deployment
 npx hardhat verify --network mainnet FACTORY_ADDRESS "CONSTRUCTOR_ARGS"

@@ -1,7 +1,7 @@
 # Production-simulation and handover-ceremony tests
 
 Tests that rehearse production conditions on the local Hardhat network:
-the identity side's production deploy, onboarding and resilience
+the production deploy's inputs and record, onboarding and resilience
 simulations, the custody flow, and the handover ceremony (preflight,
 window scan, completion). Nothing here runs against a public network.
 
@@ -14,6 +14,8 @@ test/production/
 ├── ProductionOnboarding.test.ts  # Corporate, individual and institutional onboarding
 ├── ProductionResilience.test.ts  # Recovery, congestion, performance, security probes
 ├── ProductionDeployOps.test.ts   # DeployProduction's ops-identity step
+├── DeployConfig.test.ts          # Deploy inputs, key refusals, CLI refusals
+├── DeployRecord.test.ts          # The deploy record: resume, replay, tamper
 ├── OpsKeyManager.test.ts         # scripts/production/opsKeyManager.ts
 ├── Onboard.test.ts               # The shared onboarding helper
 ├── CustodyFlow.test.ts           # Custody (InvestorRequestManager, MultiSigWallet)
@@ -44,15 +46,12 @@ The summary file is
 `{ "timestamp": ..., "results": [{ "name", "passed", "failed", "pending", "exitCode", "seconds" }] }`;
 there is no HTML report.
 
-```bash
-# The production deploy script on the in-process network
-npx hardhat run scripts/production/DeployProduction.ts --network hardhat
-```
-
-`DeployProduction.ts` deploys the identity side (KeyManager, claim
-issuers, IdentityRegistry, ComplianceRules, OnchainIDFactory), not the
-token, custody, governance or the ceremony. A testnet deploy with
-external signers is Phase 5 Task 5.7 (not done).
+`scripts/production/DeployProduction.ts` (Task 5.7) deploys the whole
+stack through an external signer, records it in
+`deployments/<chainId>.json` and writes the ceremony's handover.json;
+`scripts/ci/deploy-drive.sh` runs it end to end on a local node with a
+second process as the signer. The commands:
+[OPERATOR_RUNBOOK](../../docs/OPERATOR_RUNBOOK.md), section 2.
 
 ## What the simulation covers
 
@@ -79,8 +78,10 @@ environment variable or config file changes either.
 ## Environment variables the code reads
 
 `MNEMONIC` or `PRIVATE_KEY` (signers), `SEPOLIA_RPC_URL` /
-`MAINNET_RPC_URL`, `ETHERSCAN_API_KEY` (hardhat.config.ts),
-`DEPLOY_GAS_LIMIT` and `OPS_IDENTITY` (DeployProduction.ts).
+`MAINNET_RPC_URL`, `ETHERSCAN_API_KEY`, `SIGNER_RPC_URL` (the `remote`
+network; hardhat.config.ts), `DEPLOY_GAS_LIMIT` (ProductionEnvironment),
+`DEPLOY_CONFIG`, `DEPLOY_RECORD`, `HANDOVER_CONFIG` and `OPS_IDENTITY`
+(DeployProduction.ts, which refuses `MNEMONIC` / `PRIVATE_KEY`).
 
 ## Related
 

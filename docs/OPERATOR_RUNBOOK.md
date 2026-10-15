@@ -9,8 +9,8 @@ line it prints when it worked. The rules and their reasons:
 ([transfer](DEEP_DIVE_TRANSFER.md), [identity](DEEP_DIVE_IDENTITY.md),
 [ZK](DEEP_DIVE_ZK.md)).
 
-Status: draft (Task 5.6; audit and digest since 5.6b). Section 2 is final
-after Task 5.7 (external signer), the rest after the Sepolia run (5.8).
+Status: draft (Task 5.6; audit and digest since 5.6b). Section 2 final
+since Task 5.7 (external signer), the rest after the Sepolia run (5.8).
 
 ## Conventions and the local rehearsal
 
@@ -68,8 +68,10 @@ stand for an address and a number that differ between runs.
 | Nodes        | oracle consensus votes                                                                              | three independent node keys (Q4, D50)             |
 | Deployer     | everything until the ceremony; in the voting window only votes; afterwards nothing                  | external signer (Task 5.7)                        |
 
-- No single `PRIVATE_KEY` on a public network (R-2F6-6); `hardhat.config.ts`
-  falls back to it for `sepolia` (and `mainnet`) until 5.7: never set it.
+- No key in the deploying process (R-2F6-6, D48 a): section 2's deploy
+  refuses `PRIVATE_KEY` / `MNEMONIC` and local accounts off a dev chain;
+  `hardhat.config.ts` still reads them for `sepolia` and `mainnet`
+  (other scripts): never set them publicly.
 - No key is both an IdentityRegistry agent and an issuer owner or signer
   (D25 b); ops, guardian, issuer admin: three holders, none the deployer
   or governance. The preflight refuses either. Check the wallets:
@@ -80,25 +82,49 @@ npx hardhat run scripts/print-role-wallets.js --network $NET
 
 prints one row per role, locally
 ` 10  ops                                0xBcd4042DE499D14e55001CcbB24a551F3b954096  10000.0 ETH` (on Sepolia
-the balances to fund; amounts pending 5.7).
+the balances to fund: section 2).
 
-## 2. Deploy (final after Task 5.7)
+## 2. Deploy
 
-- `scripts/production/DeployProduction.ts` deploys the identity layer
-  only (OnchainIDFactory, KeyManager, KYC and AML issuers,
-  IdentityRegistry, ComplianceRules) from `signers[0]`, no `handover.json`.
-  Local: in-process (over RPC it waits forever for 3 confirmations):
+`scripts/production/DeployProduction.ts` deploys the whole stack (demo
+option 1a's flows) through an external signer holding every key the
+ceremony uses: Frame publicly (any endpoint answering `eth_accounts`,
+`eth_sendTransaction`, `personal_sign`), `scripts/ci/remote-signer.js`
+locally; unsigned-transaction files (air-gapped, KMS) are not built. The
+config (`DEPLOY_CONFIG`, keys in `scripts/production/deployConfig.ts`)
+names the roles, D50 nodes, D47 operator (ops), D45 lock amounts and the
+issuer's EdDSA public key; on Sepolia absent values take section 1's
+wallets and cap/4, cap/2, cap; mainnet requires every value. Local:
 
-  ```bash
-  npx hardhat run scripts/production/DeployProduction.ts --network hardhat > $RB/deploy-identity.log 2>&1; grep "Complete!" $RB/deploy-identity.log
-  ```
+```bash
+SIGNER_UPSTREAM=$DEMO_RPC_URL node scripts/ci/remote-signer.js 8549 > $RB/signer.log 2>&1 &   # local; publicly Frame
+export SIGNER_RPC_URL=http://127.0.0.1:8549   # publicly the signer's endpoint
+node -e 'require("./scripts/zk/attest").attestorPublicKey("0x" + "11".repeat(32)).then((k) => console.log(JSON.stringify({ attestor: { Ax: String(k.Ax), Ay: String(k.Ay) } })))' > $RB/deploy.json   # local; publicly <AX>, <AY> and the roles
+env -u MNEMONIC DEPLOY_CONFIG=$RB/deploy.json DEPLOY_RECORD=$RB/deploy-record.json HANDOVER_CONFIG=$RB/deploy-handover.json npx hardhat run scripts/production/DeployProduction.ts --network remote > $RB/deploy.log 2>&1; grep -E "^✅ (Deployed|Preflight)" $RB/deploy.log
+```
 
-  prints `✅ System Configuration Complete!` and `🎉 Production Deployment Complete!`.
+prints
+`✅ Deployed: 66 transactions in /tmp/vanguard-runbook/deploy-record.json (0 from the record, 66 sent now; 64,266,178 gas)`
+and
+`✅ Preflight passed: every check before the ceremony's first transaction holds (voters are checked by the full phase)`.
 
-- The full stack is deployed today only by the demo (option 1 or 1a,
-  then 21, 51, 31, 74) or locally by the fixture (L0); Task 5.7 adds the
-  deploy writing `handover.json` (do not improvise one publicly; its keys:
-  [TESTNET_CEREMONY](TESTNET_CEREMONY.md#handover-ceremony)).
+- Publicly drop `DEPLOY_RECORD` and `HANDOVER_CONFIG`: the record goes to
+  `deployments/<chainId>.json` (keep it), the ceremony's config to
+  `deployments/<chainId>.handover.json` (roles as the signer's wallet
+  indices). The deployer pays about 64.3 M gas (1.93 ETH at 30 gwei); ops
+  signs one transaction (custody `acceptOwnership`).
+- Stopped (a kill, a refused signature, an RPC error)? Run the same line
+  again: recorded transactions print `   ⏭️  #N …: skipped (recorded, code hash ok)`
+  and the rest is sent; on a complete deploy `(66 from the record, 0 sent now; …)`.
+  A record the chain contradicts (a code hash, a deployer transaction
+  outside it), a changed config or flow is refused; the replay reads past
+  blocks (an archive RPC).
+- After section 3 the ceremony runs through the same signer
+  (`npx hardhat run scripts/handover.ts --network remote`) and closes
+  with seven warnings: the three deployer-trusted issuer
+  keys, the three deployer-era nodes (section 4) and
+  `   ⚠️  config "escrowWalletFactory" is null and governance derives none: …`
+  (option 1a deploys no escrow factory).
 
 ## 3. Voter registration (D25)
 
@@ -324,7 +350,7 @@ deploying wallet owns `OPS_IDENTITY`, else prints the calls the ops key
 must send. Local: after section 2's run:
 
 ```bash
-grep -E "OPS_IDENTITY|must send" $RB/deploy-identity.log
+grep -E "OPS_IDENTITY|must send" $RB/deploy.log
 ```
 
 With `OPS_IDENTITY` unset it prints

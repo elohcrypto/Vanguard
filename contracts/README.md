@@ -30,8 +30,9 @@ The abstract bases each contract is built on are listed in
 4. Test: `npm test`
 5. Deploy locally: `npm run node`, then `npm run demo:interactive:proof`
    and option 1a (or 1 and the options after it).
-   `scripts/production/DeployProduction.ts` deploys the identity side
-   (KeyManager, issuers, IdentityRegistry, ComplianceRules, factory).
+   `scripts/production/DeployProduction.ts` deploys the whole stack
+   through an external signer and writes the ceremony's handover.json
+   (docs/OPERATOR_RUNBOOK.md, section 2).
 
 ## Networks
 
