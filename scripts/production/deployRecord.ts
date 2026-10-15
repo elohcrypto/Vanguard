@@ -22,7 +22,7 @@ import { DeployRecord, saveRecord, TxEntry } from "./deployRecordFile";
 
 const same = (a?: string | null, b?: string | null) =>
   String(a ?? "").toLowerCase() === String(b ?? "").toLowerCase();
-const LOCAL = new Set([31337, 1337]);
+const LOCAL = new Set([31337]);
 const READS_AT = new Set([
   "eth_call",
   "eth_getCode",
@@ -263,23 +263,63 @@ export class Recorder {
     }
   }
 
+  /** `t` (a mined transaction) is record entry `e` in every field. */
+  private sameTx(e: TxEntry, t: any): boolean {
+    return (
+      same(t.from, e.from) &&
+      Number(t.nonce) === e.nonce &&
+      same(t.to, e.to) &&
+      BigInt(t.value) === BigInt(e.value) &&
+      ethers.keccak256(t.input) === e.dataHash
+    );
+  }
+
   /**
-   * The receipt of `hash` once it has `confirmations`; a transaction the
-   * node no longer knows (dropped, replaced) is a refusal, not a hang.
+   * The receipt of `e` once it has `confirmations`. A hash the node no
+   * longer knows (replaced, evicted; M-2): the transaction mined at its
+   * nonce is adopted when it is this entry in every field; with the nonce
+   * unused and nothing pending there, null (never mined: unsent again);
+   * anything else is a refusal naming the reason.
    */
-  private async receipt(hash: string): Promise<any> {
+  private async receipt(e: TxEntry): Promise<any> {
     for (;;) {
-      const r = await this.raw("eth_getTransactionReceipt", [hash]);
+      const r = await this.raw("eth_getTransactionReceipt", [e.hash]);
       if (r) {
         const head = Number(await this.raw("eth_blockNumber"));
         if (head - Number(r.blockNumber) + 1 >= this.confirmations) return r;
-      } else if (!(await this.raw("eth_getTransactionByHash", [hash]))) {
-        throw new RecordRefusal(
-          `transaction ${hash} is unknown to the node (dropped or replaced): find what took its nonce, then re-run`,
-        );
+      } else if (!(await this.raw("eth_getTransactionByHash", [e.hash]))) {
+        const why = `record entry #${this.rec.txs.indexOf(e)} (${e.label}): ${e.hash} is unknown to the node and ${e.from}'s nonce ${e.nonce}`;
+        const count = async (tag: string) =>
+          Number(await this.raw("eth_getTransactionCount", [e.from, tag]));
+        if ((await count("latest")) > e.nonce) {
+          const t = await this.findMined(e);
+          if (!t || !this.sameTx(e, t)) {
+            throw new RecordRefusal(
+              `${why} went to ${t ? t.hash : "a transaction past the scan"}, another transaction: refusing`,
+            );
+          }
+          this.log(`   ↪️  ${e.label}: mined as ${t.hash}; adopted`);
+          e.hash = t.hash;
+          continue;
+        }
+        if ((await count("pending")) > e.nonce) {
+          throw new RecordRefusal(
+            `${why} is pending with another transaction: wait for it to mine, then re-run`,
+          );
+        }
+        return null;
       }
       await new Promise((ok) => setTimeout(ok, 1000));
     }
+  }
+
+  /** `e` was never mined (evicted): out of the record, sent again later. */
+  private unsend(e: TxEntry): void {
+    this.rec.txs.splice(this.rec.txs.indexOf(e), 1);
+    this.save();
+    this.log(
+      `   ↩️  ${e.label}: never mined (nonce ${e.nonce} unused); unsent`,
+    );
   }
 
   private async confirm(e: TxEntry, r: any): Promise<void> {
@@ -299,7 +339,14 @@ export class Recorder {
     if (!this.last) return;
     const e = this.last;
     this.last = null;
-    await this.confirm(e, await this.receipt(e.hash!));
+    const r = await this.receipt(e);
+    if (!r) {
+      this.unsend(e);
+      throw new RecordRefusal(
+        `${e.label} (${e.hash}) was evicted before it mined: re-run to send it again`,
+      );
+    }
+    await this.confirm(e, r);
   }
 
   /** The mined transaction from `e.from` at `e.nonce` since `e.block`. */
@@ -341,10 +388,7 @@ export class Recorder {
             await this.raw("eth_getTransactionCount", [e.from, "latest"]),
           ) > e.nonce;
         const t = used ? await this.findMined(e) : null;
-        if (
-          used &&
-          (!t || !same(t.to, e.to) || ethers.keccak256(t.input) !== e.dataHash)
-        ) {
+        if (used && (!t || !this.sameTx(e, t))) {
           throw new RecordRefusal(
             `${e.from} used nonce ${e.nonce} for a transaction that is not record entry #${this.rec.txs.indexOf(e)} (${e.label}): refusing`,
           );
@@ -370,8 +414,11 @@ export class Recorder {
           `   ↪️  ${e.label}: sent before the stop (${t.hash}); adopted`,
         );
       }
-      if (e.status === "sent")
-        await this.confirm(e, await this.receipt(e.hash!));
+      if (e.status === "sent") {
+        const r = await this.receipt(e);
+        if (r) await this.confirm(e, r);
+        else this.unsend(e);
+      }
     }
     this.save();
     const own = this.rec.txs.filter((e) => same(e.from, this.rec.deployer));
@@ -386,12 +433,7 @@ export class Recorder {
     let contracts = 0;
     for (const [n, e] of this.rec.txs.entries()) {
       const t = await this.raw("eth_getTransactionByHash", [e.hash]);
-      if (
-        !t ||
-        !same(t.from, e.from) ||
-        Number(t.nonce) !== e.nonce ||
-        ethers.keccak256(t.input) !== e.dataHash
-      ) {
+      if (!t || !this.sameTx(e, t)) {
         throw new RecordRefusal(
           `record entry #${n} (${e.label}): transaction ${e.hash} is not on chain as recorded: refusing`,
         );

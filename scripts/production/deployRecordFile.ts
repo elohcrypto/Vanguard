@@ -55,6 +55,34 @@ export function saveRecord(file: string, rec: DeployRecord): void {
     fs.closeSync(fd);
   }
   fs.renameSync(tmp, file);
+  // L-3: the rename itself survives a crash once its directory is synced.
+  const dir = fs.openSync(path.dirname(file), "r");
+  try {
+    fs.fsyncSync(dir);
+  } finally {
+    fs.closeSync(dir);
+  }
+}
+
+/**
+ * Hold `file` for this process (L-2): `<file>.lock`, created exclusively,
+ * holds the pid. A second process is refused with the holder's pid; a
+ * lock left by a killed deploy stays until the operator removes it.
+ * Returns the release.
+ */
+export function lockRecord(file: string): () => void {
+  const lock = `${file}.lock`;
+  fs.mkdirSync(path.dirname(file), { recursive: true });
+  try {
+    fs.writeFileSync(lock, `${process.pid}\n`, { flag: "wx" });
+  } catch (e: any) {
+    if (e.code !== "EEXIST") throw e;
+    const pid = fs.readFileSync(lock, "utf8").trim();
+    throw new Error(
+      `${lock} is held by pid ${pid}: another deploy on this record? If none is running, remove it (rm ${lock}) and re-run`,
+    );
+  }
+  return () => fs.rmSync(lock, { force: true });
 }
 
 export function loadRecord(file: string): DeployRecord | null {

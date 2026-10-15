@@ -38,6 +38,7 @@ import { Recorder } from "./deployRecord";
 import {
   DeployRecord,
   loadRecord,
+  lockRecord,
   recordPath,
   saveRecord,
 } from "./deployRecordFile";
@@ -159,6 +160,21 @@ async function main(): Promise<void> {
   );
 
   const file = recordPath(chainId);
+  const release = lockRecord(file);
+  try {
+    await deployOn(file, inputs, accounts, chainId);
+  } finally {
+    release();
+  }
+}
+
+/** The deploy on the locked record `file`, then handover.json. */
+async function deployOn(
+  file: string,
+  inputs: DeployInputs,
+  accounts: string[],
+  chainId: number,
+): Promise<void> {
   let rec = loadRecord(file);
   if (rec && rec.configDigest !== inputs.digest) {
     throw new Error(
