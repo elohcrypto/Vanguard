@@ -101,6 +101,9 @@ OPS_FILE=$OUT/31337.ops-transactions.json
 [[ $(rc deploy1.log hh scripts/production/DeployProduction.ts) -eq 3 ]] || fail "deploy: no pause (exit 3)"
 grep -qF "⏸️  awaiting 1 ops transaction: $OPS_FILE" "$OUT/deploy1.log" || fail "no awaiting line"
 grep -q "Preflight passed" "$OUT/deploy1.log" && fail "the deploy ran past the pause"
+for r in "ops $OPS" "issuerAdmin $ADMIN"; do  # review LOW-5: owners read, no deployer
+  grep -qF "ℹ️  $r is a 2-of-2 multisig; the deployer is no owner" "$OUT/deploy1.log" || fail "$r: owners not checked"
+done
 PAUSED=$(txs) N0=$(($(nonce)))
 [[ $N0 -eq $(recorded) && $(recorded) -eq $PAUSED ]] || fail "nonce $N0, record $PAUSED: not the deployer's alone"
 [[ $(rc deploy1b.log hh scripts/production/DeployProduction.ts) -eq 3 ]] || fail "re-run: no pause"

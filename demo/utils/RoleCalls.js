@@ -46,15 +46,57 @@ function externalRole(address, label) {
 }
 
 /**
- * `x` as a role: an address is external; a signer whose address holds
- * code (a contract wallet) is external too; any other signer as given.
+ * `x` as a role: an address is external; a signer as given. A signer
+ * (a wallet index) whose address holds code is refused (review LOW-2):
+ * a contract or an EIP-7702 delegated account is written as an address.
  */
 async function resolveRole(x, label) {
   if (x == null) return x;
   if (typeof x === "string") return externalRole(x, label);
   const a = await x.getAddress();
   if ((await ethers.provider.getCode(a)) === "0x") return x;
-  return externalRole(a, label);
+  throw new Error(
+    `${label} is a wallet index but ${a} has code (a contract, or an EIP-7702 delegated account): write it as an address`,
+  );
+}
+
+const SAFE_ABI = [
+  "function getOwners() view returns (address[])",
+  "function getThreshold() view returns (uint256)",
+];
+
+/**
+ * Review LOW-5: an external ops or issuer admin with code is read as a
+ * Safe (getOwners, getThreshold): refused when the deployer is an owner,
+ * a named warning when it cannot be read. Prints one line per role.
+ */
+async function vetRole(r, deployer, log = console.log) {
+  if (!r?.external) return;
+  const head = `${r.label} ${r.address}`;
+  const tail = "its calls are exported for its owners, never sent here";
+  const vetted = ["ops", "issuerAdmin"].includes(r.label);
+  if (!vetted || (await ethers.provider.getCode(r.address)) === "0x")
+    return log(`ℹ️  ${head} is external: ${tail}`);
+  const safe = await ethers.getContractAt(SAFE_ABI, r.address);
+  let owners;
+  let threshold;
+  try {
+    [owners, threshold] = await Promise.all([
+      safe.getOwners(),
+      safe.getThreshold(),
+    ]);
+  } catch {
+    return log(
+      `⚠️  ${head} has code but no readable getOwners()/getThreshold(): the deployer's ownership of it is unchecked; ${tail}`,
+    );
+  }
+  if (owners.some((o) => sameAddr(o, deployer)))
+    throw new Error(
+      `${head} lists the deployer ${deployer} as an owner: the deployer neither owns nor executes a role multisig (Task 5.13)`,
+    );
+  log(
+    `ℹ️  ${head} is a ${threshold}-of-${owners.length} multisig; the deployer is no owner: ${tail}`,
+  );
 }
 
 /** The first of `names` whose compiled code `addr` runs, else `fallback`. */
@@ -289,6 +331,7 @@ module.exports = {
   RoleCallsPending,
   externalRole,
   resolveRole,
+  vetRole,
   compiledName,
   callOf,
   callLine,

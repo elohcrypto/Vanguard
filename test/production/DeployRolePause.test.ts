@@ -8,7 +8,10 @@ import { Recorder } from "../../scripts/production/deployRecord";
 import { loadRecord } from "../../scripts/production/deployRecordFile";
 import { resolveInputs } from "../../scripts/production/deployConfig";
 import { handoverConfig } from "../../scripts/production/deployHandover";
-import { rolePause } from "../../scripts/production/DeployProduction";
+import {
+  rolePause,
+  vetExternalRoles,
+} from "../../scripts/production/DeployProduction";
 
 const Custody = require("../../demo/utils/CustodyFlow");
 const { batchProblems } = require("../../demo/utils/RoleCalls");
@@ -64,6 +67,21 @@ describe("Production deploy with a multisig ops (Task 5.13)", function () {
     // handover.json names an external role by address, others by index.
     const cfg = handoverConfig(coded, {}, accounts, 0, 100);
     expect([cfg.ops, cfg.guardian, cfg.issuerAdmin]).to.deep.equal([ms, 11, 9]);
+  });
+
+  it("a defaulted role whose account has code is refused (LOW-2)", function () {
+    // Its default is a wallet index of the signer: a contract or an
+    // EIP-7702 delegated account is written as an address instead.
+    expect(() =>
+      resolveInputs(
+        { attestor: ATTESTOR },
+        31337,
+        accounts,
+        new Set([accounts[10].toLowerCase()]),
+      ),
+    ).to.throw(
+      /"ops" defaults to the signer's account 10, whose address has code .*write it as an address/,
+    );
   });
 
   describe("custody pause and resume on the record", function () {
@@ -140,6 +158,30 @@ describe("Production deploy with a multisig ops (Task 5.13)", function () {
     }
     const officer = async (m: string) =>
       f.c.investorTypeRegistry.isComplianceOfficer(m);
+
+    it("refuses a multisig ops the deployer owns; warns on an unreadable one (LOW-5)", async function () {
+      const lines: string[] = [];
+      const log = (m: string) => void lines.push(m);
+      const at: any = { external: ["ops"], deployer: f.deployer.address };
+      await vetExternalRoles({ ...at, ops: await ms.getAddress() }, log);
+      expect(lines.pop()).to.include(
+        "is a 2-of-2 multisig; the deployer is no owner",
+      );
+      const t = await (await ethers.getContractFactory("MockTarget")).deploy();
+      await vetExternalRoles({ ...at, ops: await t.getAddress() }, log);
+      expect(lines.pop()).to.include(
+        `⚠️  ops ${await t.getAddress()} has code but no readable getOwners()/getThreshold()`,
+      );
+      const [a] = await owners();
+      const mine = await (
+        await ethers.getContractFactory("TestMultisig")
+      ).deploy([a.address, f.deployer.address], 2);
+      await expect(
+        vetExternalRoles({ ...at, ops: await mine.getAddress() }, log),
+      ).to.be.rejectedWith(
+        `lists the deployer ${f.deployer.address} as an owner`,
+      );
+    });
 
     it("refuses a send from an external role the signer holds a key for (LOW-1)", async function () {
       const ops = (await ethers.getSigners())[10];

@@ -105,7 +105,11 @@ const {
   readSnapshotFile,
   sidecarOf,
 } = require("../demo/utils/HandoverSnapshotFile");
-const { resolveRole, requireEffects } = require("../demo/utils/RoleCalls");
+const {
+  resolveRole,
+  requireEffects,
+  vetRole,
+} = require("../demo/utils/RoleCalls");
 const {
   refuseFullRerun,
   stepsFromSnapshot,
@@ -256,10 +260,7 @@ export async function runHandover(
       typeof cfg[k] === "string" ? cfg[k] : wallet(cfg[k]),
       k,
     );
-    if (r.external)
-      console.log(
-        `ℹ️  ${k} ${r.address} is external (an address or a contract): its calls are exported for its owners, never sent here`,
-      );
+    await vetRole(r, wallet(0).address); // review LOW-5
     return r;
   };
 

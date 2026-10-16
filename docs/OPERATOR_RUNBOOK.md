@@ -125,15 +125,17 @@ prints (about 74.6 M gas; 2.24 ETH at 30 gwei)
 
 **Multisig ops and issuer admin (Task 5.13, Q11 = B).** A role at an address
 with code (a Safe) or in the config's `"externalRoles"` is external: nothing is
-sent for it. Its calls go to a Safe Transaction Builder batch (import it in the
-Safe app; `meta.description` names each call's step, contract and purpose:
-approve nothing else; format source in `demo/utils/RoleCalls.js`) with
-`⏸️  awaiting N <role> transaction(s): <file>`, exit 3: paused, not done. The
+sent for it (a wallet index with code, e.g. an EIP-7702 account, is refused:
+write it as an address). The deployer neither owns nor executes a role multisig:
+one whose `getOwners()` lists it is refused, one that cannot be read warns
+(`⚠️  ops 0x… has code but no readable getOwners()/getThreshold(): …`). Its calls go
+to a Safe Transaction Builder batch (import it in the Safe app; `meta.description`
+names each call's step, contract and purpose; source in `demo/utils/RoleCalls.js`)
+with `⏸️  awaiting N <role> transaction(s): <file>`, exit 3: paused, not done. The
 next run checks each effect on chain and goes on, pauses again (`   ❌ not executed: [<step>] …`,
-only those re-written) or refuses another effect by name (exit 1). Locally the
-owners of `TestMultisig` (a test stand-in, not a Safe; ops: wallets 10 and 12,
-issuer admin: 9 and 13) act through `scripts/ci/multisig-exec.js`. Local:
-reset; the ceremony after section 3.
+only those re-written) or refuses another effect by name (exit 1). Locally
+`TestMultisig` (a test stand-in, not a Safe; owners: ops 10 and 12, issuer admin
+9 and 13) is driven by `scripts/ci/multisig-exec.js`. Local: reset; section 3 first.
 
 ```bash
 reset; pkill -f remote-signer.js; SIGNER_COUNT=14 SIGNER_UPSTREAM=$DEMO_RPC_URL node scripts/ci/remote-signer.js 8549 > $RB/signer.log 2>&1 &   # local
@@ -156,14 +158,12 @@ The deploy prints `exit 3` and
 `⏸️  awaiting 1 ops transaction: /tmp/vanguard-runbook/ms-record.ops-transactions.json`
 twice (the re-run sends nothing and adds
 `   ❌ not executed: [deploy.custody.accept] InvestorRequestManager 0x….acceptOwnership(): …`),
-`executed 1 calls on 0x…`, `exit 0`,
-`   ✅ 1 role transaction effect(s) hold on chain` and the preflight line.
+`executed 1 calls on 0x…`, `exit 0`, `   ✅ 1 role transaction effect(s) hold on chain` and the preflight line.
 The ceremony pauses after its snapshot, before any vote: `exit 3`,
 `⏸️  awaiting 4 issuerAdmin transactions: /tmp/vanguard-runbook/ms-handover.json.issuer-admin-transactions.json`,
 `⏸️  awaiting 1 ops transaction: /tmp/vanguard-runbook/ms-handover.json.ops-transactions.json`;
-then `executed 1 calls on 0x…`, `executed 4 calls on 0x…`, `exit 0`,
-`   ✅ 5 role transaction effect(s) hold on chain` and
-`⚠️  Handover complete with warnings: see above.` (the seven warnings above).
+then `executed 1 calls on 0x…`, `executed 4 calls on 0x…`, `exit 0`, `   ✅ 5 role transaction effect(s) hold on chain`
+and `⚠️  Handover complete with warnings: see above.` (the seven warnings above).
 Before execution the accept phase exits 3 naming each call and a full re-run is
 refused (`… a full re-run would send them again …`, exit 1), sending nothing.
 

@@ -242,7 +242,7 @@ describe("Handover with a multisig ops and issuer admin (Task 5.13)", function (
     await runHandover(cfg, "preflight", cfgPath);
     expect(out.join("\n")).to.include("✅ Preflight passed");
     expect(out.join("\n")).to.include(
-      `ℹ️  issuerAdmin ${cfg.issuerAdmin} is external`,
+      `ℹ️  issuerAdmin ${cfg.issuerAdmin} is a 2-of-2 multisig; the deployer is no owner`,
     );
     // Not marked external (a bare address, as before 5.13): refused.
     await expect(
@@ -285,6 +285,48 @@ describe("Handover with a multisig ops and issuer admin (Task 5.13)", function (
     const after = (await lines()).filter(([, ok]) => !ok).map(([l]) => l);
     expect(after.join("\n")).to.not.include(await stray.getAddress());
     expect(after.join("\n")).to.not.include(cfg.ops);
+  });
+
+  it("a wallet-index role whose address has code is refused (LOW-2)", async function () {
+    const s = await ethers.getSigners();
+    expect(await resolveRole(s[15], "ops")).to.equal(s[15]);
+    // An EIP-7702 delegated EOA: 0xef0100 followed by the delegate.
+    const delegated = "0xef0100" + (await ms.ops.getAddress()).slice(2);
+    await ethers.provider.send("hardhat_setCode", [s[2].address, delegated]);
+    try {
+      await expect(resolveRole(s[2], "guardian")).to.be.rejectedWith(
+        /guardian is a wallet index but 0x[0-9a-fA-F]{40} has code .*write it as an address/,
+      );
+      await expect(runHandover(cfg, "preflight", cfgPath)).to.be.rejectedWith(
+        "write it as an address",
+      );
+      expect(out.join("\n")).to.not.include("Preflight passed");
+    } finally {
+      // A wallet with code cannot send (EIP-3607): leave it as found.
+      await ethers.provider.send("hardhat_setCode", [s[2].address, "0x"]);
+    }
+  });
+
+  it("refuses a multisig the deployer owns; warns when its owners are unreadable (LOW-5)", async function () {
+    const s = await ethers.getSigners();
+    const target = await (
+      await ethers.getContractFactory("MockTarget")
+    ).deploy();
+    const t = await target.getAddress();
+    await runHandover({ ...cfg, issuerAdmin: t }, "preflight", cfgPath);
+    expect(out.join("\n")).to.include(
+      `⚠️  issuerAdmin ${t} has code but no readable getOwners()/getThreshold()`,
+    );
+    expect(out.join("\n")).to.include("✅ Preflight passed");
+    const mine = await (
+      await ethers.getContractFactory("TestMultisig")
+    ).deploy([s[12].address, f.deployer.address], 2);
+    const m = await mine.getAddress();
+    await expect(
+      runHandover({ ...cfg, issuerAdmin: m }, "preflight", cfgPath),
+    ).to.be.rejectedWith(
+      `issuerAdmin ${m} lists the deployer ${f.deployer.address} as an owner`,
+    );
   });
 
   it("ops as a trusted registrar is still self-checked (LOW-3)", async function () {
@@ -335,20 +377,6 @@ describe("Handover with a multisig ops and issuer admin (Task 5.13)", function (
     ).to.be.rejectedWith(
       new RegExp(`found none of the holders it must see \\([^)]*${cfg.ops} on`),
     );
-  });
-
-  it("a signer is external only when its address holds code", async function () {
-    const s = await ethers.getSigners();
-    expect(await resolveRole(s[15], "ops")).to.equal(s[15]);
-    await ethers.provider.send("hardhat_setCode", [s[15].address, "0x00"]);
-    const r = await resolveRole(s[15], "ops");
-    expect(r).to.deep.equal({
-      address: s[15].address,
-      external: true,
-      label: "ops",
-    });
-    // A wallet with code cannot send (EIP-3607): leave it as found.
-    await ethers.provider.send("hardhat_setCode", [s[15].address, "0x"]);
   });
 
   it("the batch file is checked like Safe's import", async function () {

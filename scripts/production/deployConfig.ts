@@ -187,6 +187,12 @@ export function resolveInputs(
           `"${k}" defaults to the signer's account ${i}, which it does not expose; name it`,
         );
       }
+      // Review LOW-2: as scripts/handover.ts refuses a wallet index with code.
+      if (EXTERNAL.includes(k) && coded.has(accounts[i].toLowerCase())) {
+        throw bad(
+          `"${k}" defaults to the signer's account ${i}, whose address has code (a contract, or an EIP-7702 delegated account): write it as an address`,
+        );
+      }
       return getAddress(accounts[i]);
     };
     const ix = INDEX[k];

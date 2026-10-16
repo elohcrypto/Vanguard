@@ -64,6 +64,7 @@ const {
   acceptStatus,
   externalRole,
   requireEffects,
+  vetRole,
 } = require("../../demo/utils/RoleCalls");
 const ContractDeployer = require("../../demo/core/ContractDeployer");
 const InvestorTypeModule = require("../../demo/modules/InvestorTypeModule");
@@ -161,9 +162,11 @@ async function main(): Promise<void> {
     method: "eth_accounts",
   })) as string[];
   const raw = JSON.parse(fs.readFileSync(cfgFile, "utf8"));
-  const coded = new Set<string>(); // Task 5.13: a role with code is external
-  for (const k of ["ops", "issuerAdmin", "guardian"]) {
-    const a = raw[k];
+  // Task 5.13: a role address with code is external; a default (a wallet
+  // index) with code is refused (review LOW-2).
+  const coded = new Set<string>();
+  const candidates = ["ops", "issuerAdmin", "guardian"].map((k) => raw[k]);
+  for (const a of [...candidates, ...accounts]) {
     if (ethers.isAddress(a) && (await ethers.provider.getCode(a)) !== "0x")
       coded.add(String(a).toLowerCase());
   }
@@ -177,10 +180,7 @@ async function main(): Promise<void> {
   console.log(
     `   nodes (D50) ${inputs.oracleNodes.join(", ")}; operator (D47) ops`,
   );
-  if (inputs.external.length)
-    console.log(
-      `   external (Task 5.13: exported, never sent here): ${inputs.external.join(", ")}`,
-    );
+  await vetExternalRoles(inputs);
   console.log(
     `   lock amounts (D45) ${inputs.lockAmounts ? inputs.lockAmounts.map((x) => ethers.formatEther(x)).join(" / ") + " VSC" : "default: cap/4, cap/2, cap"}`,
   );
@@ -276,6 +276,20 @@ async function deployOn(
   );
   console.log(`📝 handover.json: ${out} (logChunk ${logChunk})`);
   await preflightHandover(out);
+}
+
+/**
+ * Task 5.13 (review LOW-5): one line per external role; refused when the
+ * deployer owns the ops or issuer-admin multisig (RoleCalls.vetRole).
+ */
+export async function vetExternalRoles(
+  inputs: DeployInputs,
+  log: (m: string) => void = console.log,
+): Promise<void> {
+  for (const k of inputs.external) {
+    const a = (inputs as any)[k];
+    await vetRole(externalRole(a, k), inputs.deployer, log);
+  }
 }
 
 /**

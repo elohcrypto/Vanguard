@@ -48,6 +48,16 @@ contract TestMultisig {
         _;
     }
 
+    /// @notice The owners, as a Safe names them (Task 5.13 review LOW-5).
+    function getOwners() external view returns (address[] memory) {
+        return owners;
+    }
+
+    /// @notice The approvals a batch needs, as a Safe names it.
+    function getThreshold() external view returns (uint256) {
+        return threshold;
+    }
+
     /// @notice The hash owners approve: this wallet, chain, nonce, calls.
     function hashOf(Call[] calldata calls) public view returns (bytes32) {
         return keccak256(abi.encode(address(this), block.chainid, nonce, calls));
