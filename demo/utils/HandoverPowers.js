@@ -27,7 +27,10 @@ const {
 } = require("./HandoverScans");
 const { escrowSteps } = require("./HandoverEscrow");
 const { wiredPrivacy } = require("./HandoverPrivacy");
-const { deployerListOracles } = require("./HandoverOracles");
+const {
+  deployerListOracles,
+  preflightListOracles,
+} = require("./HandoverOracles");
 
 const ZERO = ethers.ZeroAddress;
 const MANAGEMENT_KEY = 1;
@@ -62,7 +65,7 @@ const send = async (p) => (await p).wait();
  * ComplianceRules wires (`privacy`, which `factories` takes when type 11 is
  * unbound), the escrow factories that created trusted escrows (M-2),
  * and (Task 5.14) the list oracles the deployer holds, bound or not
- * (`heldOracles`; `nominatedOracles` names a stranger's nomination).
+ * (`heldOracles`; the rest in `listOracles`, HandoverOracles.js).
  */
 async function derivePowers(o) {
   const rules = o.complianceRules;
@@ -106,7 +109,7 @@ async function derivePowers(o) {
     privacy,
     escrowFactories: await escrowFactoriesFromChain(o),
     heldOracles: lists.held,
-    nominatedOracles: lists.nominated,
+    listOracles: lists,
   };
 }
 
@@ -123,6 +126,8 @@ async function derivePowers(o) {
 async function withDerivedPowers(o, log = () => {}, { strict = true } = {}) {
   const d = await derivePowers(o);
   const out = { ...o, derived: d };
+  // Task 5.14 review I-3, L-2: before the "omits" refusal below.
+  if (strict) await preflightListOracles(d, o.oracles || [], log);
   // Task 5.14: a list oracle the deployer holds is required too.
   const bound = (a) => d.oracles.some((b) => same(a, b));
   const kinds = [
@@ -160,11 +165,6 @@ async function withDerivedPowers(o, log = () => {}, { strict = true } = {}) {
     out[key] = [...given, ...extra];
   }
   if (!strict) return out;
-  for (const { oracle, by } of d.nominatedOracles) {
-    log(
-      `   ⚠️  list oracle ${oracle} names the deployer as pending owner, nominated by ${by}: not handed over (no power until it accepts)`,
-    );
-  }
   await checkFromBlock(out, log);
   return out;
 }

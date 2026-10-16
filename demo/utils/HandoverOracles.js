@@ -20,12 +20,12 @@
  * refuses one the deployer still owns.
  */
 
-const { ethers } = require("hardhat");
+const { ethers, artifacts } = require("hardhat");
 const { addrOf, same, fail } = require("./HandoverChecks");
 const {
   codeHash,
   expectedHash,
-  maskedCodeHash,
+  immutableRanges,
 } = require("./HandoverCodeHash");
 const { uniq, scanLogs } = require("./HandoverScans");
 
@@ -170,103 +170,231 @@ const LIST_ORACLE_ABI = [
   "function oracleManager() view returns (address)",
   "function owner() view returns (address)",
   "function pendingOwner() view returns (address)",
+  "function listManager() view returns (address)",
 ];
-// eth_getLogs over every contract, in scanLogs's chunks.
-const ANY_CONTRACT = {
-  queryFilter: (filter, fromBlock, toBlock) =>
-    ethers.provider.getLogs({ ...filter, fromBlock, toBlock }),
-};
-const noAnswer = (e) =>
-  e.code === "CALL_EXCEPTION" ||
-  e.code === "BAD_DATA" ||
-  /revert/i.test(e.message);
+const CAP =
+  /block range|range too large|exceeds.*(range|limit)|too many (blocks|results)|query returned more than/i;
+const topicAddr = (t) => ethers.getAddress(ethers.dataSlice(t, 12));
 
-/** True when `a` runs the compiled WhitelistOracle or BlacklistOracle. */
-async function isListOracle(a) {
+const compiled = new Map();
+/** True when `code` is the compiled WhitelistOracle or BlacklistOracle. */
+async function isListOracleCode(code) {
+  const b = ethers.getBytes(code);
   for (const n of ["WhitelistOracle", "BlacklistOracle"]) {
-    if ((await maskedCodeHash(a, n)) === (await expectedHash(n))) return true;
+    if (!compiled.has(n)) {
+      const art = await artifacts.readArtifact(n);
+      compiled.set(n, {
+        size: ethers.dataLength(art.deployedBytecode),
+        hash: await expectedHash(n),
+        ranges: await immutableRanges(n),
+      });
+    }
+    const k = compiled.get(n);
+    if (b.length !== k.size) continue;
+    const m = Uint8Array.from(b);
+    for (const r of k.ranges) m.fill(0, r.start, r.start + r.length);
+    if (ethers.keccak256(m) === k.hash) return true;
   }
   return false;
 }
 
 /**
- * Task 5.14: { held, nominated } for the list oracles serving the plan's
- * OracleManager that name the deployer. ListOracleBase is OZ
- * Ownable2Step: every owner change (the constructor's included) emits
- * OwnershipTransferred(_, newOwner), every nomination
- * OwnershipTransferStarted(_, pending); both index the new address. Its
- * constructor requires the manager's code, so the event lies after the
- * manager's deploy, which checkFromBlock proves is inside the scan.
- * Candidates are the emitters of either event naming the deployer
- * (eth_getLogs with no address); one counts only with the compiled
- * oracle code and the plan's manager, so a stranger's look-alike is
- * ignored. `held`: the deployer owns it, or is its pending owner by a
- * nomination it sent. `nominated`: pending by someone else's nomination
- * ({ oracle, by }); the deployer holds nothing until it accepts, which
- * it never does after the ceremony (R-56-5). R-413-6: every oracle in
- * `mustSee` that names the deployer must be among the emitters.
+ * Review M-1: best effort. Every event naming the deployer as new owner
+ * or nominee, any contract (eth_getLogs with no address), chunked; a
+ * range the provider caps even at one block is skipped and recorded in
+ * `capped` (a flood must not stop the ceremony).
+ */
+async function scanNamingDeployer(o, dAddr) {
+  const filter = {
+    topics: [[MOVED, STARTED], null, ethers.zeroPadValue(dAddr, 32)],
+  };
+  const latest = Number.isInteger(o.toBlock)
+    ? o.toBlock
+    : await ethers.provider.getBlockNumber();
+  const max = o.logChunk || 5000;
+  const [logs, capped] = [[], []];
+  for (let b = o.fromBlock || 0, chunk = max; b <= latest;) {
+    const to = Math.min(b + chunk - 1, latest);
+    try {
+      logs.push(
+        ...(await ethers.provider.getLogs({
+          ...filter,
+          fromBlock: b,
+          toBlock: to,
+        })),
+      );
+      [b, chunk] = [to + 1, Math.min(max, chunk * 2)];
+    } catch (e) {
+      if (!CAP.test(e.message)) throw e;
+      if (chunk > 1) chunk = Math.max(1, Math.floor(chunk / 2));
+      else capped.push(b++);
+    }
+  }
+  return { logs, capped };
+}
+
+/**
+ * Task 5.14: the list oracles serving the plan's OracleManager that name
+ * the deployer, from address-bound reads (review M-1). Authoritative
+ * candidates: every address the deployer CREATEd since fromBlock (its
+ * nonce there to its nonce now; a contract a deployer-made factory
+ * created is reached only when named or bound), and the named and bound
+ * oracles. ListOracleBase is OZ
+ * Ownable2Step: the deployer becomes owner only by its own CREATE or its
+ * own acceptOwnership, which a named or bound oracle shows directly.
+ * Best effort: the emitters of OwnershipTransferred/Started naming the
+ * deployer (scanNamingDeployer). Review H-1: a candidate is called only
+ * when its runtime code is the compiled oracle's. Returns { held,
+ * pendingOwn, nominated, managed, managedOther, capped }: `held` the
+ * deployer owns it or is pending by its own nomination (`pendingOwn`:
+ * { oracle, owner }, the nominating owner is the deployer or one it
+ * created, or the deployer sent it); `nominated` pending by a stranger
+ * ({ oracle, by }, no power until it accepts, never after the ceremony,
+ * R-56-5); `managed` (L-2) a deployer-created, named or bound oracle the
+ * deployer does not own whose listManager is the deployer ({ oracle,
+ * owner }); `managedOther` the same found only by the scan (a stranger
+ * can name the deployer on its own oracle: a warning). R-413-6: a named
+ * or bound oracle naming the deployer must be in an uncapped scan.
  */
 async function deployerListOracles(o, mustSee = []) {
-  const out = { held: [], nominated: [] };
+  const out = { held: [], pendingOwn: [], nominated: [], managed: [] };
+  Object.assign(out, { managedOther: [], capped: [] });
   if (!o.oracleManager) return out;
   const [dAddr, om] = await Promise.all(
     [o.deployer, o.oracleManager].map(addrOf),
   );
-  const filter = {
-    topics: [[MOVED, STARTED], null, ethers.zeroPadValue(dAddr, 32)],
-  };
-  const logs = await scanLogs(ANY_CONTRACT, filter, o);
+  // Before fromBlock the manager had no code, so no oracle of it was
+  // created (checkFromBlock proves the manager's deploy is in range).
+  const from = Number(o.fromBlock || 0);
+  const first =
+    from > 0 ? await ethers.provider.getTransactionCount(dAddr, from - 1) : 0;
+  const nonce = await ethers.provider.getTransactionCount(dAddr);
+  const created = [];
+  for (let n = first; n < nonce; n++)
+    created.push(ethers.getCreateAddress({ from: dAddr, nonce: n }));
+  const authoritative = uniq([...created, ...mustSee]);
+  const { logs, capped } = await scanNamingDeployer(o, dAddr);
+  out.capped = capped;
   const emitters = uniq(logs.map((l) => l.address));
-  const names = async (c) =>
-    same(await c.owner(), dAddr) || same(await c.pendingOwner(), dAddr);
+  const read = async (a) => {
+    const code = await ethers.provider.getCode(a);
+    if (code === "0x" || !(await isListOracleCode(code))) return null;
+    const c = await ethers.getContractAt(LIST_ORACLE_ABI, a);
+    if (!same(await c.oracleManager(), om)) return null;
+    return { c, owner: await c.owner(), pending: await c.pendingOwner() };
+  };
   const missed = [];
   for (const a of uniq(mustSee)) {
-    const c = await ethers.getContractAt(LIST_ORACLE_ABI, a);
-    if (!emitters.some((e) => same(e, a)) && (await names(c))) missed.push(a);
+    const r = await read(a);
+    const names = r && (same(r.owner, dAddr) || same(r.pending, dAddr));
+    if (names && !capped.length && !emitters.some((e) => same(e, a)))
+      missed.push(a);
   }
   if (missed.length) {
     fail(
       `OwnershipTransferred/OwnershipTransferStarted event scan found none of the holders it must see (${missed.join(", ")} name the deployer): fromBlock, logChunk or the RPC is wrong; nothing can be concluded from it`,
     );
   }
-  for (const a of emitters) {
-    const c = await ethers.getContractAt(LIST_ORACLE_ABI, a);
-    const served = await c.oracleManager().catch((e) => {
-      if (noAnswer(e)) return null;
-      throw e;
-    });
-    if (!served || !same(served, om) || !(await isListOracle(a))) continue;
-    if (same(await c.owner(), dAddr)) {
+  for (const a of uniq([...authoritative, ...emitters])) {
+    const r = await read(a);
+    if (!r) continue;
+    const mine = authoritative.some((x) => same(x, a));
+    if (same(r.owner, dAddr)) {
       out.held.push(a);
       continue;
     }
-    if (!same(await c.pendingOwner(), dAddr)) continue;
-    const ev = logs
-      .filter((l) => same(l.address, a) && l.topics[0] === STARTED)
-      .at(-1);
+    if (same(await r.c.listManager(), dAddr))
+      out[mine ? "managed" : "managedOther"].push({
+        oracle: a,
+        owner: r.owner,
+      });
+    if (!same(r.pending, dAddr)) continue;
+    const ev = (
+      await scanLogs(
+        {
+          queryFilter: (f, b, t) =>
+            ethers.provider.getLogs({
+              ...f,
+              address: a,
+              fromBlock: b,
+              toBlock: t,
+            }),
+        },
+        { topics: [STARTED, null, ethers.zeroPadValue(dAddr, 32)] },
+        o,
+      )
+    ).at(-1);
+    // Review L-1: the event's previous owner nominated (msg.sender of
+    // transferOwnership); the sending key is an extra signal only.
+    const by = ev ? topicAddr(ev.topics[1]) : null;
     const tx = ev && (await ethers.provider.getTransaction(ev.transactionHash));
-    // A nomination the scan cannot attribute counts as the deployer's.
-    if (!tx || same(tx.from, dAddr)) out.held.push(a);
-    else out.nominated.push({ oracle: a, by: tx.from });
+    const own =
+      !by ||
+      same(by, dAddr) ||
+      created.some((x) => same(x, by)) ||
+      Boolean(tx && same(tx.from, dAddr));
+    if (own) {
+      out.held.push(a);
+      out.pendingOwn.push({ oracle: a, owner: r.owner });
+    } else out.nominated.push({ oracle: a, by });
   }
   return out;
 }
 
-/** Task 5.14 completion lines from o.derived; stranger nominations warn. */
-async function heldOracleLines(o, warnings) {
-  const om = o.oracleManager ? await addrOf(o.oracleManager) : "(none)";
-  const { heldOracles: held, nominatedOracles: nominated } = o.derived;
-  for (const { oracle, by } of nominated) {
-    warnings.push(
-      `list oracle ${oracle} names the deployer as pending owner, nominated by ${by}, not the deployer: no power until it accepts, and the deployer sends nothing after the ceremony (R-56-5); its owner can cancel with transferOwnership(${ethers.ZeroAddress})`,
+const cappedLine = (c) =>
+  `scan for other list oracles naming the deployer was capped at block ${c[0]}${c.length > 1 ? ` and ${c.length - 1} more` : ""}: not checked`;
+const nominatedLine = ({ oracle, by }) =>
+  `list oracle ${oracle} names the deployer as pending owner, nominated by ${by}, not the deployer: no power until it accepts, and the deployer sends nothing after the ceremony (R-56-5); its owner can cancel with transferOwnership(${ethers.ZeroAddress})`;
+const otherLine = ({ oracle, owner }) =>
+  `list oracle ${oracle} (owner ${owner}, not created, named or bound) makes the deployer its listManager: it writes a list no token reads; its owner can setListManager(...)`;
+
+/**
+ * Preflight, from withDerivedPowers' derivation `d` and the config's
+ * `oracles`: refuses an own pending nomination (I-3) and a kept
+ * listManager (L-2); logs the rest.
+ */
+async function preflightListOracles(d, oracles, log) {
+  const l = d.listOracles;
+  const named = await Promise.all(oracles.map(addrOf));
+  for (const { oracle, owner } of l.pendingOwn) {
+    fail(
+      `list oracle ${oracle} names the deployer as pending owner, nominated by its owner ${owner} (created by the deployer, or the deployer sent it): before the handover the deployer accepts it (acceptOwnership; the ceremony then hands it to ops) or ${owner} cancels it (transferOwnership(${ethers.ZeroAddress}))`,
     );
   }
+  for (const { oracle, owner } of l.managed) {
+    // A named one: HandoverChecks.preflight refuses it in its own words.
+    if (named.some((x) => same(x, oracle))) continue;
+    fail(
+      `list oracle ${oracle} keeps the deployer as listManager (owner ${owner}): it would keep writing that list; its owner must setListManager(...) away from the deployer first`,
+    );
+  }
+  for (const n of l.nominated)
+    log(`   ⚠️  ${nominatedLine(n)}: not handed over`);
+  for (const m of l.managedOther) log(`   ⚠️  ${otherLine(m)}`);
+  if (l.capped.length) log(`   ⚠️  ${cappedLine(l.capped)}`);
+}
+
+/** Task 5.14 completion lines from o.derived; the rest warn. */
+async function heldOracleLines(o, warnings) {
+  const om = o.oracleManager ? await addrOf(o.oracleManager) : "(none)";
+  const { held, nominated, managed, managedOther, capped } =
+    o.derived.listOracles;
+  for (const n of nominated) warnings.push(nominatedLine(n));
+  for (const m of managedOther) warnings.push(otherLine(m));
+  if (capped.length) warnings.push(cappedLine(capped));
+  const kept = managed.map((m) => m.oracle);
   return [
     [
       held.length
         ? `the deployer still owns (or has pending by its own nomination) list oracle(s) ${held.join(", ")} serving OracleManager ${om}`
         : `the deployer owns no list oracle serving OracleManager ${om} (owner, or pending by its own nomination)`,
       held.length === 0,
+    ],
+    [
+      kept.length
+        ? `list oracle(s) ${kept.join(", ")} serving OracleManager ${om} keep the deployer as listManager`
+        : `no list oracle the deployer created, or named or bound, keeps the deployer as listManager`,
+      kept.length === 0,
     ],
   ];
 }
@@ -277,5 +405,6 @@ module.exports = {
   oracleSteps,
   oracleLines,
   deployerListOracles,
+  preflightListOracles,
   heldOracleLines,
 };

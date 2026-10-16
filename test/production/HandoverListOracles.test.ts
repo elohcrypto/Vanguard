@@ -185,4 +185,152 @@ describe("Handover: list oracles the deployer holds (Task 5.14)", function () {
       new RegExp(`event scan found none of the holders it must see \\(${wl}`),
     );
   });
+
+  /** A contract `from` deploys whose constructor emits OwnershipTransferred(0, deployer) and whose runtime is `runtime` (hex, at most 32 bytes). */
+  async function emitter(from: any, runtime: string) {
+    const sig = ethers.id("OwnershipTransferred(address,address)").slice(2);
+    const d = ethers.zeroPadValue(f.deployer.address, 32).slice(2);
+    const n = runtime.length / 2;
+    const init =
+      "0x7f" +
+      d +
+      "6000" +
+      "7f" +
+      sig +
+      "60006000a3" +
+      ethers.toBeHex(0x5f + n, 1).slice(2) +
+      runtime +
+      "600052" +
+      ethers.toBeHex(n, 1).slice(2).padStart(2, "0").replace(/^/, "60") +
+      ethers
+        .toBeHex(32 - n, 1)
+        .slice(2)
+        .replace(/^/, "60") +
+      "f3";
+    const tx = await from.sendTransaction({ data: init });
+    const rc = await tx.wait();
+    expect(await ethers.provider.getCode(rc!.contractAddress!)).to.equal(
+      "0x" + runtime,
+    );
+    return rc!.contractAddress!;
+  }
+
+  it("H-1: a gas-burning or invalid-opcode emitter is ignored; the ceremony completes", async function () {
+    const burner = await emitter(f.stranger, "5b600056"); // JUMPDEST; JUMP(0)
+    const invalid = await emitter(f.stranger, "fe");
+    const d = await deployerListOracles(f.args);
+    expect(d.held).to.not.include(burner);
+    expect(d.held).to.not.include(invalid);
+    await ceremony();
+    expect((await assertHandoverComplete(f.args)).ok).to.equal(true);
+  });
+
+  /** ethers.provider.getLogs refusing every address-less query (a flood past the provider's cap). */
+  async function flooded<T>(fn: () => Promise<T>): Promise<T> {
+    const p: any = ethers.provider;
+    const real = p.getLogs;
+    p.getLogs = async (flt: any) => {
+      if (!flt.address)
+        throw new Error("query returned more than 10000 results");
+      return real.call(p, flt);
+    };
+    try {
+      return await fn();
+    } finally {
+      p.getLogs = real;
+    }
+  }
+
+  it("M-1: a flooded scan warns and does not refuse; the ceremony completes", async function () {
+    const lines: string[] = [];
+    const res = await flooded(async () => {
+      await ceremony(f.args, (m) => lines.push(m));
+      return assertHandoverComplete(f.args);
+    });
+    expect(res.ok).to.equal(true);
+    const re =
+      /scan for other list oracles naming the deployer was capped at block \d+.*: not checked/;
+    expect(lines.some((l) => re.test(l))).to.equal(true);
+    expect(res.warnings.some((w: string) => re.test(w))).to.equal(true);
+    expect(await f.args.oracles[0].owner()).to.equal(f.ops.address);
+  });
+
+  it("M-1: with the scan capped, an omitted deployer-created oracle is still refused", async function () {
+    await flooded(async () => {
+      await expect(
+        handoverDeployerPowers({ ...f.args, oracles: [], log: () => {} }),
+      ).to.be.rejectedWith(new RegExp(`config "oracles" omits ${wl}`));
+    });
+  });
+
+  it("L-1: a nomination is attributed by the event's previous owner, not the transaction", async function () {
+    const theirs = await newOracle(f.stranger);
+    await theirs.transferOwnership(f.deployer.address);
+    const p: any = ethers.provider;
+    const real = p.getTransaction;
+    p.getTransaction = async () => null;
+    try {
+      const d = await deployerListOracles(f.args);
+      expect(d.held).to.not.include(await theirs.getAddress());
+      expect(d.nominated).to.deep.equal([
+        { oracle: await theirs.getAddress(), by: f.stranger.address },
+      ]);
+    } finally {
+      p.getTransaction = real;
+    }
+  });
+
+  it("L-2: a deployer-created oracle that keeps the deployer as listManager fails", async function () {
+    const kept = await newOracle(f.deployer);
+    await kept.setListManager(f.deployer.address);
+    await kept.transferOwnership(f.stranger.address);
+    await kept.connect(f.stranger).acceptOwnership();
+    const ka = await kept.getAddress();
+    await expect(
+      handoverDeployerPowers({ ...f.args, log: () => {} }),
+    ).to.be.rejectedWith(
+      new RegExp(`list oracle ${ka} keeps the deployer as listManager`),
+    );
+    const { failures } = await assertHandoverComplete(f.args);
+    expect(
+      failures.some(
+        (l: string) =>
+          l.includes(`list oracle(s) ${ka}`) && l.includes("listManager"),
+      ),
+    ).to.equal(true);
+  });
+
+  it("I-3: a nomination by the deployer's own multisig is refused: accept or cancel", async function () {
+    // 2-of-2 of the deployer and the stranger; the stranger executes.
+    const ms = await (
+      await ethers.getContractFactory("TestMultisig")
+    ).deploy([f.deployer.address, f.stranger.address], 2);
+    const own = await newOracle(f.deployer);
+    const oa = await own.getAddress();
+    await own.transferOwnership(await ms.getAddress());
+    const run = async (data: string) => {
+      const calls = [{ to: oa, value: 0, data }];
+      const h = await ms.hashOf(calls);
+      await ms.approve(h);
+      await ms.connect(f.stranger).approve(h);
+      await ms.connect(f.stranger).execute(calls);
+    };
+    await run(own.interface.encodeFunctionData("acceptOwnership"));
+    await run(
+      own.interface.encodeFunctionData("transferOwnership", [
+        f.deployer.address,
+      ]),
+    );
+    const nonce = await ethers.provider.getTransactionCount(f.deployer.address);
+    await expect(
+      handoverDeployerPowers({ ...f.args, log: () => {} }),
+    ).to.be.rejectedWith(
+      new RegExp(
+        `list oracle ${oa} names the deployer as pending owner, nominated by its owner ${await ms.getAddress()} \\(created by the deployer.*acceptOwnership.*transferOwnership\\(0x0{40}\\)`,
+      ),
+    );
+    expect(
+      await ethers.provider.getTransactionCount(f.deployer.address),
+    ).to.equal(nonce);
+  });
 });
