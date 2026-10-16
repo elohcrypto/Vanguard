@@ -12,7 +12,9 @@ Deployed only by the tests; no deploy path uses them.
   double `scripts/deploy-helpers.ts` refuses, `YesCompliance`), tokens (`MockToken`,
   `MockTypedToken`, `MockPolicyToken`), oracles and engines
   (`MockQueryManager`, `RawWhitelistOracle`, `ShortWhitelistOracle`,
-  `WeightlessEngine`, `MockWhitelistBinder`) and `RefusingFeeRecipient`.
+  `WeightlessEngine`, `MockWhitelistBinder`), `RefusingFeeRecipient` and
+  `TestMultisig` (a 2-of-2 stand-in for a Safe as ops or the issuer
+  admin, Task 5.13; not the production recommendation).
 
 TypeScript test helpers live in `test/helpers/`; deployment helpers in
 `scripts/deploy-helpers.ts`.
