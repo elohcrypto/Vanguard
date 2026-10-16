@@ -14,7 +14,9 @@
  * The probe is a fresh Token on the demo's IdentityRegistry with its own
  * ComplianceRules (OracleOnly), WhitelistOracle and InvestorTypeRegistry,
  * all owned by the runner: the sender is Accredited (tier 3+), listed at
- * tier 2 it is refused, re-listed at tier 3 it sends.
+ * tier 2 it is refused, re-listed at tier 3 it sends. The probe oracle
+ * serves an OracleManager of its own: a list oracle of the plan's manager
+ * the deployer owns is refused by the handover (Task 5.14).
  */
 const { ethers } = require("hardhat");
 const { canJumpTime, advancePast } = require("./ChainTime");
@@ -195,9 +197,10 @@ async function proveTier(state, pair, log = console.log) {
     idReg.target,
     rules.target,
   );
+  const probeManager = await deploy("OracleManager");
   const oracle = await deploy(
     "WhitelistOracle",
-    om.target,
+    probeManager.target,
     "Tier probe",
     "Task 4.10",
   );
