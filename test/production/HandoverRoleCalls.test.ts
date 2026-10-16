@@ -297,6 +297,8 @@ describe("Handover with a multisig ops and issuer admin (Task 5.13)", function (
       external: true,
       label: "ops",
     });
+    // A wallet with code cannot send (EIP-3607): leave it as found.
+    await ethers.provider.send("hardhat_setCode", [s[15].address, "0x"]);
   });
 
   it("the batch file is checked like Safe's import", async function () {
