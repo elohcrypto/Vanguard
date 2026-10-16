@@ -141,6 +141,25 @@ describe("Production deploy with a multisig ops (Task 5.13)", function () {
     const officer = async (m: string) =>
       f.c.investorTypeRegistry.isComplianceOfficer(m);
 
+    it("refuses a send from an external role the signer holds a key for (LOW-1)", async function () {
+      const ops = (await ethers.getSigners())[10];
+      const r = new Recorder(box.file, await h.fresh(box.file), 1, () => {});
+      r.refuseFrom({ ops: ops.address });
+      await r.install();
+      try {
+        const n = await ethers.provider.getTransactionCount(ops.address);
+        await expect(
+          ops.sendTransaction({ to: ops.address }),
+        ).to.be.rejectedWith(`ops ${ops.address} is external`);
+        expect(await ethers.provider.getTransactionCount(ops.address)).to.equal(
+          n,
+        );
+        expect(loadRecord(box.file)!.txs).to.have.length(0);
+      } finally {
+        r.remove();
+      }
+    });
+
     it("pauses at the acceptance, resumes once executed, replays across it", async function () {
       const rec = await h.fresh(box.file);
       const e = await deploy(rec).catch((x) => x);

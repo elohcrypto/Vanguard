@@ -129,6 +129,14 @@ export class Recorder {
   /** The first refusal stays: a flow that catches it sends nothing more. */
   private refused: Error | null = null;
 
+  /** Task 5.13 (review LOW-1): external roles' addresses, by role. */
+  private external: Record<string, string> = {};
+
+  /** Refuse any send from these roles, whatever keys the signer holds. */
+  refuseFrom(roles: Record<string, string>): void {
+    this.external = { ...roles };
+  }
+
   /** Task 5.13: a role pause (or refusal) stops every later send too. */
   halt(e: Error): void {
     this.refused ??= e;
@@ -210,6 +218,13 @@ export class Recorder {
   }
 
   private async sendTx(tx: any): Promise<string> {
+    for (const [role, a] of Object.entries(this.external)) {
+      if (same(a, tx.from)) {
+        throw new RecordRefusal(
+          `${role} ${ethers.getAddress(a)} is external: the deploy never sends as it (its calls are exported for its owners)`,
+        );
+      }
+    }
     await this.confirmLast();
     const live = this.live();
     const next = live[this.cursor];

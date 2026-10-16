@@ -237,6 +237,9 @@ async function deployOn(
   const recorder = new Recorder(file, rec, inputs.confirmations);
   await recorder.install();
   const roles = rolePause(inputs, file, recorder);
+  recorder.refuseFrom(
+    Object.fromEntries(inputs.external.map((k) => [k, (inputs as any)[k]])),
+  );
   let state: any;
   try {
     state = await deployStack(inputs, rec.salt, roles);
