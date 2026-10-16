@@ -100,8 +100,7 @@ node -e 'require("./scripts/zk/attest").attestorPublicKey("0x" + "11".repeat(32)
 env -u MNEMONIC DEPLOY_CONFIG=$RB/deploy.json DEPLOY_RECORD=$RB/deploy-record.json HANDOVER_CONFIG=$RB/deploy-handover.json npx hardhat run scripts/production/DeployProduction.ts --network remote > $RB/deploy.log 2>&1; grep -E "^✅ (Deployed|Preflight)" $RB/deploy.log
 ```
 
-prints (about 74.6 M gas; 2.24 ETH at 30 gwei)
-`✅ Deployed: 74 transactions in /tmp/vanguard-runbook/deploy-record.json (0 from the record, 74 sent now; N gas)` and
+prints (about 74.6 M gas; 2.24 ETH at 30 gwei) `✅ Deployed: 74 transactions in /tmp/vanguard-runbook/deploy-record.json (0 from the record, 74 sent now; N gas)` and
 `✅ Preflight passed: every check before the ceremony's first transaction holds (voters are checked by the full phase)`.
 
 - Publicly drop `DEPLOY_RECORD` and `HANDOVER_CONFIG`: the record goes to
@@ -124,8 +123,12 @@ prints (about 74.6 M gas; 2.24 ETH at 30 gwei)
   keys, the three deployer-era nodes (section 4) and
   `   ⚠️  0x… is investorLimitExempt (set before the handover): …` (the escrow
   fee wallet; nothing mints the deployer VSC). A list oracle of the plan's
-  OracleManager the deployer still holds (an `eth_getLogs` with no address
-  over ownership events) fails it; an `"oracles"` omitting one is refused.
+  OracleManager the deployer holds (found among its creations since
+  `fromBlock`, the named and bound oracles, and a best-effort log scan)
+  fails it; an `"oracles"` omitting one is refused. A stranger's nomination
+  of the deployer adds one named warning to that set by design
+  (`   ⚠️  list oracle 0x… names the deployer as pending owner, nominated by 0x…, not the deployer: …`),
+  as does a capped scan (`   ⚠️  scan for other list oracles naming the deployer was capped at block N…: not checked`).
 
 **Multisig ops and issuer admin (Task 5.13, Q11 = B).** A role at an address
 with code (a Safe) or in the config's `"externalRoles"` is external: nothing is
@@ -253,8 +256,7 @@ the 66% bar (`TooFewNodes`, `SingleNodeQuorum`).
    awk '/HANDOVER STEP 4/{n++} n==2' $RB/d50.log | grep -E "registered by the deployer|acknowledged in oracleNodes|Audit passed"
    ```
 
-   The log (`$RB/d50.log`) shows
-   `   Call: OracleManager.registerOracle(0x23618e81E3f5cdF7f54C3d65f7FBc0aBf5B21E8f, NODE_4, registered by an OracleParameters vote, 500)`
+   The log (`$RB/d50.log`) shows `   Call: OracleManager.registerOracle(0x23618e81E3f5cdF7f54C3d65f7FBc0aBf5B21E8f, NODE_4, registered by an OracleParameters vote, 500)`
    (wallet 8), twice `   ⚠️  no free demo wallet: type the node's address`,
    `   Call: OracleManager.removeOracle(0x70997970C51812dc3A010C7d01b50e0d17dc79C8, D50 rotation)`
    (and wallets 2, 3), `   Proposer: 0x15d34AAf54267DB7D7c367839AAf71A00a2C6A65`
@@ -263,8 +265,7 @@ the 66% bar (`TooFewNodes`, `SingleNodeQuorum`).
    and `✅ PROPOSAL EXECUTED — callData ran, locked VGT burned`, and option
    39's `   Total Oracles: 3`. The first 83f lists the three deployer-era
    nodes (`   ⚠️  OracleManager node 0x70997970C51812dc3A010C7d01b50e0d17dc79C8 (KYC_ORACLE) was registered by the deployer at block 53: …`).
-   The `awk` prints only
-   `   ✅ every registered OracleManager node is acknowledged in oracleNodes (3 registered, 6 acknowledged)`
+   The `awk` prints only `   ✅ every registered OracleManager node is acknowledged in oracleNodes (3 registered, 6 acknowledged)`
    and `⚠️  Audit passed with warnings: see above.`: no deployer-era node
    line; a node a governance execution registered prints none (R-56c-1).
    The warnings left: option 1's attestor key and the deployer's VSC
@@ -397,8 +398,7 @@ grep "rule administrator" $RB/handover.log
 
 No deploy binds a WhitelistOracle to VSC; binding one turns on the
 investor-type tier rule for every holder, so list every holder at its
-tier first, then bind (a ComplianceRules vote on
-`ComplianceRules.setWhitelistOracle(VSC, oracle)`). On Sepolia ops
+tier first, then bind (a ComplianceRules vote on `ComplianceRules.setWhitelistOracle(VSC, oracle)`). On Sepolia ops
 operates it (Q3; the ceremony hands it to ops, bound or not). Demo option
 38a does both and votes the bind (`38a:y`), listing as the owner, never
 wallet 0 after the ceremony; with a multisig ops it sends nothing
