@@ -27,7 +27,7 @@ const {
   expectedHash,
   immutableRanges,
 } = require("./HandoverCodeHash");
-const { uniq, scanLogs } = require("./HandoverScans");
+const { uniq } = require("./HandoverScans");
 
 const ENGINE_ABI = ["function oracleManager() view returns (address)"];
 const THRESHOLD = 66n; // the demo and deploy default: two of three
@@ -172,9 +172,6 @@ const LIST_ORACLE_ABI = [
   "function pendingOwner() view returns (address)",
   "function listManager() view returns (address)",
 ];
-const CAP =
-  /block range|range too large|exceeds.*(range|limit)|too many (blocks|results)|query returned more than/i;
-const topicAddr = (t) => ethers.getAddress(ethers.dataSlice(t, 12));
 
 const compiled = new Map();
 /** True when `code` is the compiled WhitelistOracle or BlacklistOracle. */
@@ -201,8 +198,8 @@ async function isListOracleCode(code) {
 /**
  * Review M-1: best effort. Every event naming the deployer as new owner
  * or nominee, any contract (eth_getLogs with no address), chunked; a
- * range the provider caps even at one block is skipped and recorded in
- * `capped` (a flood must not stop the ceremony).
+ * range the provider refuses even at one block, for any reason, is
+ * skipped and recorded in `capped` (a flood must not stop the ceremony).
  */
 async function scanNamingDeployer(o, dAddr) {
   const filter = {
@@ -225,7 +222,7 @@ async function scanNamingDeployer(o, dAddr) {
       );
       [b, chunk] = [to + 1, Math.min(max, chunk * 2)];
     } catch (e) {
-      if (!CAP.test(e.message)) throw e;
+      // Review LOW-2: any refusal at one block is a skipped block.
       if (chunk > 1) chunk = Math.max(1, Math.floor(chunk / 2));
       else capped.push(b++);
     }
@@ -247,8 +244,8 @@ async function scanNamingDeployer(o, dAddr) {
  * when its runtime code is the compiled oracle's. Returns { held,
  * pendingOwn, nominated, managed, managedOther, capped }: `held` the
  * deployer owns it or is pending by its own nomination (`pendingOwn`:
- * { oracle, owner }, the nominating owner is the deployer or one it
- * created, or the deployer sent it); `nominated` pending by a stranger
+ * { oracle, owner }, the owner, who alone nominates, is a contract the
+ * deployer created); `nominated` pending by a stranger
  * ({ oracle, by }, no power until it accepts, never after the ceremony,
  * R-56-5); `managed` (L-2) a deployer-created, named or bound oracle the
  * deployer does not own whose listManager is the deployer ({ oracle,
@@ -309,30 +306,11 @@ async function deployerListOracles(o, mustSee = []) {
         owner: r.owner,
       });
     if (!same(r.pending, dAddr)) continue;
-    const ev = (
-      await scanLogs(
-        {
-          queryFilter: (f, b, t) =>
-            ethers.provider.getLogs({
-              ...f,
-              address: a,
-              fromBlock: b,
-              toBlock: t,
-            }),
-        },
-        { topics: [STARTED, null, ethers.zeroPadValue(dAddr, 32)] },
-        o,
-      )
-    ).at(-1);
-    // Review L-1: the event's previous owner nominated (msg.sender of
-    // transferOwnership); the sending key is an extra signal only.
-    const by = ev ? topicAddr(ev.topics[1]) : null;
-    const tx = ev && (await ethers.provider.getTransaction(ev.transactionHash));
-    const own =
-      !by ||
-      same(by, dAddr) ||
-      created.some((x) => same(x, by)) ||
-      Boolean(tx && same(tx.from, dAddr));
+    // Review M-2: OZ Ownable2Step sets _pendingOwner only in the owner's
+    // transferOwnership and clears it on every owner change (ListOracleBase
+    // overrides neither), so the current owner made this nomination.
+    const own = created.some((x) => same(x, r.owner));
+    const by = r.owner;
     if (own) {
       out.held.push(a);
       out.pendingOwn.push({ oracle: a, owner: r.owner });
@@ -358,7 +336,7 @@ async function preflightListOracles(d, oracles, log) {
   const named = await Promise.all(oracles.map(addrOf));
   for (const { oracle, owner } of l.pendingOwn) {
     fail(
-      `list oracle ${oracle} names the deployer as pending owner, nominated by its owner ${owner} (created by the deployer, or the deployer sent it): before the handover the deployer accepts it (acceptOwnership; the ceremony then hands it to ops) or ${owner} cancels it (transferOwnership(${ethers.ZeroAddress}))`,
+      `list oracle ${oracle} names the deployer as pending owner, nominated by its owner ${owner} (created by the deployer): before the handover the deployer accepts it (acceptOwnership; the ceremony then hands it to ops) or ${owner} cancels it (transferOwnership(${ethers.ZeroAddress}))`,
     );
   }
   for (const { oracle, owner } of l.managed) {

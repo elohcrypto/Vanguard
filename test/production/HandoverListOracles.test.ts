@@ -263,7 +263,7 @@ describe("Handover: list oracles the deployer holds (Task 5.14)", function () {
     });
   });
 
-  it("L-1: a nomination is attributed by the event's previous owner, not the transaction", async function () {
+  it("L-1: a nomination is attributed to the oracle's owner, not the transaction", async function () {
     const theirs = await newOracle(f.stranger);
     await theirs.transferOwnership(f.deployer.address);
     const p: any = ethers.provider;
@@ -332,5 +332,73 @@ describe("Handover: list oracles the deployer holds (Task 5.14)", function () {
     expect(
       await ethers.provider.getTransactionCount(f.deployer.address),
     ).to.equal(nonce);
+  });
+
+  /** getLogs refusing any result over `cap` entries, as a provider does. */
+  async function capped<T>(cap: number, fn: () => Promise<T>): Promise<T> {
+    const p: any = ethers.provider;
+    const real = p.getLogs;
+    p.getLogs = async (flt: any) => {
+      const out = await real.call(p, flt);
+      if (out.length > cap)
+        throw new Error(`query returned more than ${cap} results`);
+      return out;
+    };
+    try {
+      return await fn();
+    } finally {
+      p.getLogs = real;
+    }
+  }
+
+  it("M-2: 350 stranger nominations in one block do not stop the ceremony", async function () {
+    const theirs = await newOracle(f.stranger);
+    const ta = await theirs.getAddress();
+    // One nomination the scan sees, then a flood in one block past the cap.
+    await theirs.transferOwnership(f.deployer.address);
+    await network.provider.send("evm_setAutomine", [false]);
+    try {
+      for (let i = 0; i < 350; i++)
+        await theirs.transferOwnership(f.deployer.address, { gasLimit: 80000 });
+      await network.provider.send("evm_mine", []);
+    } finally {
+      await network.provider.send("evm_setAutomine", [true]);
+    }
+    const lines: string[] = [];
+    const res = await capped(300, async () => {
+      await ceremony(f.args, (m) => lines.push(m));
+      return assertHandoverComplete(f.args);
+    });
+    expect(res.failures).to.deep.equal([]);
+    expect(lines.some((l) => /capped at block \d+/.test(l))).to.equal(true);
+    expect(
+      res.warnings.some((w: string) =>
+        w.startsWith(
+          `list oracle ${ta} names the deployer as pending owner, nominated by ${f.stranger.address}`,
+        ),
+      ),
+    ).to.equal(true);
+  });
+
+  it("LOW-2: any error of the address-less scan at one block warns, never refuses", async function () {
+    const p: any = ethers.provider;
+    const real = p.getLogs;
+    p.getLogs = async (flt: any) => {
+      if (!flt.address) throw new Error("upstream said no");
+      return real.call(p, flt);
+    };
+    const lines: string[] = [];
+    try {
+      await ceremony(f.args, (m) => lines.push(m));
+    } finally {
+      p.getLogs = real;
+    }
+    expect(
+      lines.some((l) =>
+        /scan for other list oracles naming the deployer was capped at block \d+/.test(
+          l,
+        ),
+      ),
+    ).to.equal(true);
   });
 });
