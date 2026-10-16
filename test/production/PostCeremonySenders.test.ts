@@ -12,7 +12,11 @@ const {
   postCeremonyOf,
   guardDeployerKey,
 } = require("../../demo/utils/PostCeremony");
-const { bindWhitelistToToken } = require("../../demo/utils/WhitelistBindFlow");
+const {
+  bindWhitelistToToken,
+  listSigner,
+  noSignerReason,
+} = require("../../demo/utils/WhitelistBindFlow");
 const { runCompleteWorkflow } = require("../../demo/utils/GovernanceWorkflow");
 import { captured, cliConfig } from "../helpers/handoverCli";
 import { runHandover } from "../../scripts/handover";
@@ -107,6 +111,43 @@ describe("No transaction from wallet 0 after the ceremony (Task 5.6b)", function
     const senders = await sendersSince(from);
     expect(senders.size).to.be.greaterThan(0);
     expect([...senders]).to.not.include(f.deployer.address);
+  });
+
+  it("38a lists as ops after the ceremony, never as wallet 0 (Task 5.14)", async function () {
+    const wl = f.args.oracles[0];
+    expect((await listSigner(state, wl)).address).to.equal(f.deployer.address);
+    await ceremony();
+    expect((await listSigner(state, wl)).address).to.equal(f.ops.address);
+    // A list oracle wallet 0 still owns: no signer, and the reason says so.
+    const om = await f.c.oracleManager.getAddress();
+    const mine = await (
+      await ethers.getContractFactory("WhitelistOracle", f.deployer)
+    ).deploy(om, "late", "");
+    expect(await listSigner(state, mine)).to.equal(null);
+    expect(await noSignerReason(state, mine)).to.match(
+      /still owns the oracle and sends nothing after the ceremony \(R-56-5\)/,
+    );
+    // A multisig ops: the fill is its batch; nothing is sent.
+    const ms = await (
+      await ethers.getContractFactory("TestMultisig", f.ops)
+    ).deploy([f.ops.address], 1);
+    const theirs = await (
+      await ethers.getContractFactory("WhitelistOracle", f.ops)
+    ).deploy(om, "multisig", "");
+    await theirs.transferOwnership(await ms.getAddress());
+    const calls = [
+      {
+        to: await theirs.getAddress(),
+        value: 0,
+        data: theirs.interface.encodeFunctionData("acceptOwnership"),
+      },
+    ];
+    await ms.approve(await ms.hashOf(calls));
+    await ms.execute(calls);
+    expect(await listSigner(state, theirs)).to.equal(null);
+    expect(await noSignerReason(state, theirs)).to.equal(
+      `the oracle's owner ${await ms.getAddress()} is a contract (a multisig ops): listing is ops's batch or manual step; nothing sent`,
+    );
   });
 
   it("82 runs a vote to execution with no transaction from wallet 0", async function () {

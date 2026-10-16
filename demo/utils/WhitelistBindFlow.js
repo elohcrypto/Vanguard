@@ -6,7 +6,8 @@
  *   1. Fill: every current VSC holder (Transfer scan, trusted contracts
  *      left out) is listed on the whitelist oracle at the tier its
  *      investor type requires, by the oracle's owner or list manager
- *      (the deployer before the handover, ops after it).
+ *      (the deployer before the handover, ops after it; never wallet 0
+ *      after it, and a multisig ops lists by its own batch).
  *   2. Preflight (HandoverHolders.js, the ceremony's rule): in OracleOnly
  *      an unlisted holder refuses the bind, in Either it warns.
  *   3. Bind: ComplianceRules.setWhitelistOracle(VSC, oracle) directly
@@ -29,6 +30,7 @@ const {
   settleProposal,
 } = require("./HandoverVotes");
 const { pickVoters } = require("./VoterPicker");
+const { postCeremonyOf } = require("./PostCeremony");
 
 const same = (a, b) => a.toLowerCase() === b.toLowerCase();
 
@@ -45,15 +47,33 @@ function ceremonyView(state) {
   };
 }
 
-/** The demo signer allowed to list on `oracle`: its owner or list manager. */
+/**
+ * The demo signer allowed to list on `oracle`: its owner or list manager,
+ * never wallet 0 after the ceremony (R-56-5; Task 5.14).
+ */
 async function listSigner(state, oracle) {
   const owner = await oracle.owner();
   const manager = await oracle.listManager();
+  const d = (await postCeremonyOf(state)) ? state.signers[0] : null;
   return (
     state.signers.find(
-      (s) => same(s.address, owner) || same(s.address, manager),
+      (s) =>
+        !(d && same(s.address, d.address)) &&
+        (same(s.address, owner) || same(s.address, manager)),
     ) || null
   );
+}
+
+/** Why no loaded wallet may list on `oracle` (Task 5.14). */
+async function noSignerReason(state, oracle) {
+  const owner = await oracle.owner();
+  if ((await ethers.provider.getCode(owner)) !== "0x") {
+    return `the oracle's owner ${owner} is a contract (a multisig ops): listing is ops's batch or manual step; nothing sent`;
+  }
+  if (same(owner, state.signers[0].address)) {
+    return `the deployer ${owner} still owns the oracle and sends nothing after the ceremony (R-56-5): the ceremony hands it to ops`;
+  }
+  return "no loaded wallet owns or manages the oracle";
 }
 
 /**
@@ -64,13 +84,12 @@ async function fillOracle(state, oracle, log = console.log) {
   const o = ceremonyView(state);
   const s = await holderStanding(o, oracle);
   const signer = await listSigner(state, oracle);
+  const why = signer ? null : await noSignerReason(state, oracle);
   let listed = 0;
   for (const h of s.holders) {
     if (h.ok) continue;
     if (!signer) {
-      log(
-        `   ⛔ ${h.address} not listed: no loaded wallet owns or manages the oracle`,
-      );
+      log(`   ⛔ ${h.address} not listed: ${why}`);
       continue;
     }
     const tier = Math.max(1, h.required);
@@ -268,5 +287,6 @@ module.exports = {
   bindPreflight,
   printStanding,
   listSigner,
+  noSignerReason,
   listedHolders,
 };
