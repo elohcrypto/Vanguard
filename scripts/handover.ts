@@ -485,7 +485,7 @@ if (require.main === module) {
   main().catch((e) => {
     if (e.name === "RoleCallsPending") {
       // Task 5.13: paused, not done (exit 3): execute, then resume.
-      console.log(e.message);
+      console.log(e.lines.join("\n"));
       console.log(
         "   execute each file in its multisig, then run HANDOVER_PHASE=accept (with HANDOVER_SNAPSHOT_SHA256)",
       );

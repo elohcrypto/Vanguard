@@ -321,7 +321,7 @@ if (require.main === module) {
   main().catch((e) => {
     if (e.name === "RoleCallsPending") {
       // Task 5.13: paused, not done (exit 3).
-      console.log(e.message);
+      console.log(e.lines.join("\n"));
       console.log(
         "   execute it in the multisig, then run the deploy again: it checks the effect on chain and continues",
       );

@@ -33,7 +33,7 @@ const sameAddr = (a, b) => String(a).toLowerCase() === String(b).toLowerCase();
 /** Thrown when role calls wait for their owners; exit EXIT_AWAITING. */
 class RoleCallsPending extends Error {
   constructor(lines, files = []) {
-    super(lines.join("\n"));
+    super(`paused: awaiting role transactions in ${files.join(", ")}`);
     this.name = "RoleCallsPending";
     this.lines = lines;
     this.files = files;
