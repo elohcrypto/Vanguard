@@ -37,7 +37,7 @@ const { privacyLines } = require("./HandoverPrivacy");
 const { keyManagerLines } = require("./HandoverKeys");
 const { registrarLines, custodyOwnerLines } = require("./HandoverRegistrars");
 const { holderLines } = require("./HandoverHolders");
-const { oracleLines } = require("./HandoverOracles");
+const { oracleLines, heldOracleLines } = require("./HandoverOracles");
 const { withDerivedContracts, linkLines } = require("./HandoverDerive");
 const { roleLines } = require("./HandoverRoles");
 const { trustLines } = require("./HandoverTrust");
@@ -317,6 +317,8 @@ async function assertHandoverComplete(o) {
     if (lm)
       add(`oracle ${a} listManager is not the deployer`, !same(lm, dAddr));
   }
+  // Task 5.14: bound or not, no list oracle stays the deployer's.
+  await lines("list oracles", heldOracleLines(o, warnings));
   add(
     "deployer is not a trusted contract on VSC or VGT",
     !(await rules["isTrustedContract(address,address)"](vsc, dAddr)) &&

@@ -137,8 +137,13 @@ describe("Handover: escrow investors, fee wallet and the voting window (4.17)", 
 
   it("PB5: the list manager writes the bound oracles, before and after the ceremony", async function () {
     const om = await c.oracleManager.getAddress();
+    // A stranger's: a deployer-owned one is refused first (Task 5.14).
     const deploy = async (n: string) =>
-      (await ethers.getContractFactory(n)).deploy(om, "x", "y") as any;
+      (await ethers.getContractFactory(n, f.stranger)).deploy(
+        om,
+        "x",
+        "y",
+      ) as any;
     const [W, B] = [
       await deploy("WhitelistOracle"),
       await deploy("BlacklistOracle"),

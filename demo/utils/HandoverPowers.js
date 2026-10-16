@@ -27,6 +27,7 @@ const {
 } = require("./HandoverScans");
 const { escrowSteps } = require("./HandoverEscrow");
 const { wiredPrivacy } = require("./HandoverPrivacy");
+const { deployerListOracles } = require("./HandoverOracles");
 
 const ZERO = ethers.ZeroAddress;
 const MANAGEMENT_KEY = 1;
@@ -59,7 +60,9 @@ const send = async (p) => (await p).wait();
  * governance is bound to, the contracts bound to types 9-12 (factories,
  * PrivacyManager, ZKVerifierIntegrated; `bound`), the PrivacyManager
  * ComplianceRules wires (`privacy`, which `factories` takes when type 11 is
- * unbound), and the escrow factories that created trusted escrows (M-2).
+ * unbound), the escrow factories that created trusted escrows (M-2),
+ * and (Task 5.14) the list oracles the deployer holds, bound or not
+ * (`heldOracles`; `nominatedOracles` names a stranger's nomination).
  */
 async function derivePowers(o) {
   const rules = o.complianceRules;
@@ -70,6 +73,9 @@ async function derivePowers(o) {
       await rules.blacklistOracle(t),
     );
   }
+  // R-413-6: the bound and the named oracles must be in the scan.
+  const named = await Promise.all((o.oracles || []).map(addrOf));
+  const lists = await deployerListOracles(o, [...oracles, ...named]);
   const reg = o.identityRegistry;
   const issuers = [];
   for (const topic of await reg.getClaimTopics()) {
@@ -99,6 +105,8 @@ async function derivePowers(o) {
     bound,
     privacy,
     escrowFactories: await escrowFactoriesFromChain(o),
+    heldOracles: lists.held,
+    nominatedOracles: lists.nominated,
   };
 }
 
@@ -115,15 +123,24 @@ async function derivePowers(o) {
 async function withDerivedPowers(o, log = () => {}, { strict = true } = {}) {
   const d = await derivePowers(o);
   const out = { ...o, derived: d };
+  // Task 5.14: a list oracle the deployer holds is required too.
+  const bound = (a) => d.oracles.some((b) => same(a, b));
   const kinds = [
-    ["oracles", ORACLE_ABI, "an oracle ComplianceRules binds to VSC or VGT"],
-    ["issuers", "ClaimIssuer", "a trusted issuer of the IdentityRegistry"],
+    ["oracles", ORACLE_ABI, uniq([...d.oracles, ...d.heldOracles])],
+    ["issuers", "ClaimIssuer", d.issuers],
   ];
-  for (const [key, abi, what] of kinds) {
+  const why = (key, a) =>
+    key === "issuers"
+      ? "a trusted issuer of the IdentityRegistry"
+      : bound(a)
+        ? "an oracle ComplianceRules binds to VSC or VGT"
+        : "a list oracle serving the plan's OracleManager that the deployer owns or has pending";
+  for (const [key, abi, need] of kinds) {
     const given = o[key] || [];
     const addrs = await Promise.all(given.map(addrOf));
-    const missing = d[key].filter((a) => !addrs.some((g) => same(g, a)));
+    const missing = need.filter((a) => !addrs.some((g) => same(g, a)));
     if (o[key] != null && strict && missing.length) {
+      const what = [...new Set(missing.map((a) => why(key, a)))].join("; ");
       fail(
         `config "${key}" omits ${missing.join(", ")} (${what}): the deployer would keep it; list every one, or leave "${key}" out to use the set read from chain`,
       );
@@ -143,6 +160,11 @@ async function withDerivedPowers(o, log = () => {}, { strict = true } = {}) {
     out[key] = [...given, ...extra];
   }
   if (!strict) return out;
+  for (const { oracle, by } of d.nominatedOracles) {
+    log(
+      `   ⚠️  list oracle ${oracle} names the deployer as pending owner, nominated by ${by}: not handed over (no power until it accepts)`,
+    );
+  }
   await checkFromBlock(out, log);
   return out;
 }
