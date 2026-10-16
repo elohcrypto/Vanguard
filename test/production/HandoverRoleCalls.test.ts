@@ -307,6 +307,11 @@ describe("Handover with a multisig ops and issuer admin (Task 5.13)", function (
     expect(b.version).to.equal("1.0");
     expect(b.chainId).to.equal("31337");
     expect(b.meta.checksum).to.equal(checksumOf(b));
+    // Review LOW-4: no claim that anything else is refused.
+    expect(b.meta.description).to.include(
+      "the CLI checks these effects and the watched events; approve nothing else",
+    );
+    expect(b.meta.description).to.not.include("is refused");
     const edited = { ...b, transactions: [{ ...b.transactions[0], value: 0 }] };
     expect(batchProblems(edited)).to.include.members([
       "transactions[0].value is not a string",

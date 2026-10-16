@@ -138,7 +138,7 @@ function batchFile(chainId, calls, title) {
     meta: {
       name: `${title}: ${first.role} ${first.from}`,
       description: [
-        `Execute these ${calls.length} call(s) from ${first.role} ${first.from} on chain ${chainId}, in this order, as one batch. The CLI then checks each effect on chain before it continues; a batch that does anything else is refused.`,
+        `Execute these ${calls.length} call(s) from ${first.role} ${first.from} on chain ${chainId}, in this order, as one batch. Before it continues the CLI checks these effects and the watched events; approve nothing else.`,
         ...lines,
       ].join("\n"),
       createdFromSafeAddress: first.from,
