@@ -155,7 +155,7 @@ describe("Production deploy with a multisig ops (Task 5.13)", function () {
       );
       const paused = loadRecord(box.file)!;
       const m = paused.txs.find((t) => t.contract)!.contract!;
-      expect(paused.txs.map((t) => t.status).at(-1)).to.equal("confirmed");
+      expect(paused.txs[paused.txs.length - 1].status).to.equal("confirmed");
       expect(paused.txs.every((t) => t.from === f.deployer.address)).to.equal(
         true,
       );
