@@ -16,8 +16,13 @@
  *                                               // fee wallet (a verified human)
  *     "attestor": { "Ax": "..", "Ay": ".." },   // the issuer's EdDSA key
  *     "logChunk": 5000,                         // optional eth_getLogs range
- *     "confirmations": 3                        // optional, per transaction
+ *     "confirmations": 3,                       // optional, per transaction
+ *     "externalRoles": ["ops", "issuerAdmin"]   // optional (Task 5.13)
  *   }
+ * Task 5.13: ops, issuerAdmin or guardian at an address holding code (a
+ * multisig), or listed in "externalRoles", is external: it need not be a
+ * signer account; its calls are exported as a Safe batch and the deploy
+ * and the ceremony pause for them (demo/utils/RoleCalls.js).
  * The ops identity for KeyManager (Task 4.2) stays OPS_IDENTITY.
  * On the local dev chain (31337) and Sepolia an absent role defaults
  * to the signer's account at its docs/TESTNET_SETUP.md index (nodes 1-3,
@@ -100,6 +105,8 @@ export interface DeployInputs {
   attestor: { Ax: string; Ay: string };
   logChunk?: number;
   confirmations: number;
+  /** Task 5.13: the roles this signer does not send for (a multisig). */
+  external: string[];
   /** sha256 of the values that shape the deploy (resume must match). */
   digest: string;
 }
@@ -117,7 +124,10 @@ const KEYS = new Set([
   "attestor",
   "logChunk",
   "confirmations",
+  "externalRoles",
 ]);
+/** Task 5.13: the roles that may be external (never the voters). */
+const EXTERNAL = ["ops", "issuerAdmin", "guardian"];
 /** docs/TESTNET_SETUP.md role wallets: the defaults where allowed. */
 const INDEX: Record<string, number | number[]> = {
   oracleNodes: [1, 2, 3],
@@ -135,12 +145,14 @@ const FIELD = /^(0x[0-9a-fA-F]+|[0-9]+)$/;
  * `accounts` the external signer's eth_accounts (deployer = the first).
  * Throws before any transaction on a missing, malformed or unsupported
  * value, and when a role the ceremony sends from is not a signer account
- * (scripts/handover.ts names roles by wallet index).
+ * (scripts/handover.ts names roles by wallet index) and is not external:
+ * `coded` holds the lowercased config addresses that hold code.
  */
 export function resolveInputs(
   raw: Record<string, any>,
   chainId: number,
   accounts: string[],
+  coded: Set<string> = new Set(),
 ): DeployInputs {
   const bad = (m: string) => new Error(`deploy config: ${m}`);
   for (const k of Object.keys(raw)) {
@@ -254,19 +266,28 @@ export function resolveInputs(
   if (oracleNodes.includes(deployer)) {
     throw bad("a node key may not be the deployer (D50)");
   }
-  // scripts/handover.ts reads every role below as a wallet index of the
-  // signer it runs with; the ceremony sends as the deployer and ops.
+  const marked = raw.externalRoles ?? [];
+  if (
+    !Array.isArray(marked) ||
+    marked.some((k: unknown) => !EXTERNAL.includes(String(k)))
+  ) {
+    throw bad(`"externalRoles" must list roles among ${EXTERNAL.join(", ")}`);
+  }
+  const roles: Record<string, string> = { ops, guardian, issuerAdmin };
+  const external = EXTERNAL.filter(
+    (k) => marked.includes(k) || coded.has(roles[k].toLowerCase()),
+  );
+  // scripts/handover.ts reads every other role below as a wallet index of
+  // the signer it runs with; the ceremony sends as the deployer and ops.
   const held = new Set(accounts.map((x) => getAddress(x)));
   for (const [k, v] of Object.entries({
-    ops,
-    guardian,
-    issuerAdmin,
+    ...roles,
     proposer,
     ...Object.fromEntries(voters.map((x, i) => [`voters[${i}]`, x])),
   })) {
-    if (!held.has(v)) {
+    if (!held.has(v) && !external.includes(k)) {
       throw bad(
-        `${k} ${v} is not an account of the external signer: the ceremony (scripts/handover.ts) names it by wallet index`,
+        `${k} ${v} is not an account of the external signer: the ceremony (scripts/handover.ts) names it by wallet index${EXTERNAL.includes(k) ? '; a multisig has code at its address, or list it in "externalRoles"' : ""}`,
       );
     }
   }
@@ -289,6 +310,8 @@ export function resolveInputs(
     lockAmounts: lockAmounts && lockAmounts.map(String),
     attestor,
     opsIdentity: process.env.OPS_IDENTITY ?? null,
+    // Absent when empty: a signer-held deploy's digest is unchanged.
+    ...(external.length ? { external } : {}),
   };
   return {
     chainId,
@@ -305,6 +328,7 @@ export function resolveInputs(
     attestor,
     logChunk,
     confirmations,
+    external,
     digest: createHash("sha256").update(JSON.stringify(shaped)).digest("hex"),
   };
 }

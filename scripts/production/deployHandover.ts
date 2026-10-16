@@ -3,7 +3,8 @@
  * ceremony (scripts/handover.ts), and the preflight run on it.
  *
  * Roles are wallet indices of the external signer's accounts (the CLI
- * reads them that way); fromBlock is the block before the deploy's first
+ * reads them that way); an external role (Task 5.13, a multisig) is its
+ * address, which the CLI reads as external; fromBlock is the block before the deploy's first
  * transaction (the record keeps it from the first run); logChunk is the
  * largest eth_getLogs range the provider serves, unless the config sets
  * it. The contracts governance cannot derive before the ceremony binds
@@ -59,11 +60,13 @@ export function handoverConfig(
   if (ix(inputs.deployer) !== 0) {
     throw new Error("the deployer must be the signer's first account");
   }
+  const role = (k: "ops" | "guardian" | "issuerAdmin") =>
+    inputs.external.includes(k) ? inputs[k] : ix(inputs[k]);
   return {
     governance: contracts.vanguardGovernance,
-    ops: ix(inputs.ops),
-    guardian: ix(inputs.guardian),
-    issuerAdmin: ix(inputs.issuerAdmin),
+    ops: role("ops"),
+    guardian: role("guardian"),
+    issuerAdmin: role("issuerAdmin"),
     proposer: ix(inputs.proposer),
     voters: inputs.voters.map(ix),
     fromBlock,

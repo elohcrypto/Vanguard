@@ -25,6 +25,15 @@
  *
  * Unsigned-transaction files for an air-gapped or KMS signer: not built
  * (Task 5.7 builds the remote JSON-RPC signer first).
+ *
+ * Task 5.13: with ops external (a multisig; deployConfig.ts) the deploy
+ * sends the custody nomination, then exports ops's acceptOwnership as a
+ * Safe batch (deployments/<chainId>.ops-transactions.json), halts the
+ * record (nothing more is sent) and exits 3. A re-run replays the record
+ * and checks the effect on chain (owner ops, no pending owner): it
+ * continues, pauses again while the call is not executed, or refuses
+ * another effect. Only the deployer's transactions are recorded, so the
+ * record's nonce rule holds across the pause.
  */
 import * as fs from "fs";
 import { ethers, network } from "hardhat";
@@ -51,6 +60,11 @@ import {
 import { configureKeyManager } from "./opsKeyManager";
 
 const DemoState = require("../../demo/core/DemoState");
+const {
+  acceptStatus,
+  externalRole,
+  requireEffects,
+} = require("../../demo/utils/RoleCalls");
 const ContractDeployer = require("../../demo/core/ContractDeployer");
 const InvestorTypeModule = require("../../demo/modules/InvestorTypeModule");
 const GovernanceModule = require("../../demo/modules/GovernanceModule");
@@ -80,9 +94,14 @@ const EXPECTED = [
 ];
 
 /** Demo option 1a for `inputs`, roles at their TESTNET_SETUP wallets. */
-async function deployStack(inputs: DeployInputs, salt: string): Promise<any> {
+async function deployStack(
+  inputs: DeployInputs,
+  salt: string,
+  roles: unknown,
+): Promise<any> {
   const state = new DemoState();
   state.production = {
+    roles,
     attestor: inputs.attestor,
     lockRequirements: inputs.lockAmounts,
     escrowFeeWallet: await ethers.getSigner(inputs.escrowFeeWallet),
@@ -141,11 +160,14 @@ async function main(): Promise<void> {
   const accounts = (await network.provider.request({
     method: "eth_accounts",
   })) as string[];
-  const inputs = resolveInputs(
-    JSON.parse(fs.readFileSync(cfgFile, "utf8")),
-    chainId,
-    accounts,
-  );
+  const raw = JSON.parse(fs.readFileSync(cfgFile, "utf8"));
+  const coded = new Set<string>(); // Task 5.13: a role with code is external
+  for (const k of ["ops", "issuerAdmin", "guardian"]) {
+    const a = raw[k];
+    if (ethers.isAddress(a) && (await ethers.provider.getCode(a)) !== "0x")
+      coded.add(String(a).toLowerCase());
+  }
+  const inputs = resolveInputs(raw, chainId, accounts, coded);
   console.log(
     `🚀 Production deploy on ${network.name} (chain ${chainId}) from ${inputs.deployer}`,
   );
@@ -155,6 +177,10 @@ async function main(): Promise<void> {
   console.log(
     `   nodes (D50) ${inputs.oracleNodes.join(", ")}; operator (D47) ops`,
   );
+  if (inputs.external.length)
+    console.log(
+      `   external (Task 5.13: exported, never sent here): ${inputs.external.join(", ")}`,
+    );
   console.log(
     `   lock amounts (D45) ${inputs.lockAmounts ? inputs.lockAmounts.map((x) => ethers.formatEther(x)).join(" / ") + " VSC" : "default: cap/4, cap/2, cap"}`,
   );
@@ -210,9 +236,10 @@ async function deployOn(
   }
   const recorder = new Recorder(file, rec, inputs.confirmations);
   await recorder.install();
+  const roles = rolePause(inputs, file, recorder);
   let state: any;
   try {
-    state = await deployStack(inputs, rec.salt);
+    state = await deployStack(inputs, rec.salt, roles);
     await configureKeyManager(
       state.getContract("keyManager"),
       { address: inputs.deployer },
@@ -220,6 +247,10 @@ async function deployOn(
       {},
     );
     await recorder.finish();
+  } catch (e) {
+    if (!roles.stop) throw e;
+    await recorder.confirmLast(); // the nomination's receipt, then stop
+    throw roles.stop;
   } finally {
     recorder.remove();
   }
@@ -244,8 +275,59 @@ async function deployOn(
   await preflightHandover(out);
 }
 
+/**
+ * Task 5.13: the external ops's custody acceptance (CustodyFlow.js), as
+ * a role step: done, exported (pause, exit 3) or refused, never sent.
+ */
+export function rolePause(
+  inputs: DeployInputs,
+  file: string,
+  recorder: Recorder,
+) {
+  const base = file.replace(/\.json$/, "");
+  const roles = {
+    stop: null as Error | null,
+    isExternal: (a: string) =>
+      inputs.external.some(
+        (k) => (inputs as any)[k].toLowerCase() === a.toLowerCase(),
+      ),
+    acceptCustody: async (m: any) => {
+      const step = {
+        id: "deploy.custody.accept",
+        role: externalRole(inputs.ops, "ops"),
+        roleLabel: "ops",
+        contract: m,
+        name: "InvestorRequestManager",
+        fn: "acceptOwnership",
+        args: [],
+        purpose:
+          "ops takes the custody manager the deployer nominated it for, before the manager gains any power (Task 4.3 L1, Q7)",
+        status: () => acceptStatus(m, inputs.deployer, inputs.ops, "ops"),
+      };
+      const fresh = !fs.existsSync(`${base}.ops-transactions.json`);
+      try {
+        await requireEffects([step], base, "Vanguard deploy", { fresh });
+      } catch (e) {
+        roles.stop = e as Error;
+        recorder.halt(e as Error); // nothing is sent after the pause
+        throw e;
+      }
+    },
+  };
+  return roles;
+}
+
 if (require.main === module) {
   main().catch((e) => {
+    if (e.name === "RoleCallsPending") {
+      // Task 5.13: paused, not done (exit 3).
+      console.log(e.message);
+      console.log(
+        "   execute it in the multisig, then run the deploy again: it checks the effect on chain and continues",
+      );
+      process.exitCode = 3;
+      return;
+    }
     console.error(`❌ Deploy failed: ${e.message}`);
     process.exitCode = 1;
   });

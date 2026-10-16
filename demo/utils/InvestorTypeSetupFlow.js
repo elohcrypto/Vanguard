@@ -153,6 +153,7 @@ async function deployInvestorTypeSystem(mod) {
         );
         await deployCustody(mod.state);
       } catch (error) {
+        if (error.name === "RoleCallsPending") throw error; // Task 5.13
         console.log(
           `⚠️ Failed to connect InvestorTypeRegistry to token: ${error.message}`,
         );
@@ -163,6 +164,7 @@ async function deployInvestorTypeSystem(mod) {
       );
     }
   } catch (error) {
+    if (error.name === "RoleCallsPending") throw error; // Task 5.13: paused
     displayError(`Investor Type System deployment failed: ${error.message}`);
   }
 }

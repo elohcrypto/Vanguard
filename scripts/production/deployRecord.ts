@@ -127,7 +127,12 @@ export class Recorder {
   }
 
   /** The first refusal stays: a flow that catches it sends nothing more. */
-  private refused: RecordRefusal | null = null;
+  private refused: Error | null = null;
+
+  /** Task 5.13: a role pause (or refusal) stops every later send too. */
+  halt(e: Error): void {
+    this.refused ??= e;
+  }
 
   private async handle(method: string, params: any[]): Promise<any> {
     if (this.refused && method === "eth_sendTransaction") throw this.refused;

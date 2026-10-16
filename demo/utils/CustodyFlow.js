@@ -88,7 +88,11 @@ async function deployCustody(state, log = console.log) {
   // registrar), so a failure below never leaves a deployer-owned officer.
   // Task 5.1 (Q7): the manager is Ownable2Step; ops nominated, ops accepts.
   await (await m.transferOwnership(bank.address)).wait();
-  await (await m.connect(bank).acceptOwnership()).wait();
+  // Task 5.13: a multisig ops accepts from the batch the production deploy
+  // exports; the deploy pauses here (exit 3) and its resume checks this.
+  const roles = state.production?.roles;
+  if (roles?.isExternal(bank.address)) await roles.acceptCustody(m);
+  else await (await m.connect(bank).acceptOwnership()).wait();
   if (!same(await m.owner(), bank.address)) {
     throw new Error("InvestorRequestManager owner did not move to ops");
   }
