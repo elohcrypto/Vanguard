@@ -18,7 +18,8 @@
 #      set: 3 deployer-trusted PrivacyManager issuer keys, 3 deployer-era
 #      nodes (D50), one exempt holder (the escrow fee wallet, exempted by
 #      option 61; nothing mints the deployer VSC) and the banner; the
-#      escrow factory moved to governance by vote
+#      escrow factory moved to governance by vote; ops owns both list
+#      oracles, the unbound whitelist oracle included (Task 5.14)
 #
 # USAGE  scripts/ci/deploy-drive.sh   (nodes on DEPLOY_NODE_PORT 8547 and
 #        DEPLOY_SIGNER_PORT 8549; exit 1 on failure)
@@ -162,5 +163,14 @@ OWNER=$(node -e 'const { JsonRpcProvider, Contract } = require("ethers");
     .then((o) => console.log(o.toLowerCase() === h.governance.toLowerCase() ? "governance" : o));' \
   "$HANDOVER_CONFIG" "$NODE_URL")
 [[ $OWNER == governance ]] || fail "the escrow factory is owned by $OWNER, not governance"
-echo "5. ceremony complete: 3 issuer keys, 3 D50 nodes, exempt fee wallet, banner; escrow factory governance's"
+OPS=$(echo "$WALLETS" | sed -n "$(($(node -e 'console.log(require(process.argv[1]).ops)' "$HANDOVER_CONFIG") + 1))p")
+for k in whitelistOracle blacklistOracle; do
+  O=$(node -e 'const { JsonRpcProvider, Contract } = require("ethers");
+    new Contract(require(process.argv[1]).contracts[process.argv[2]], ["function owner() view returns (address)"],
+      new JsonRpcProvider(process.argv[3])).owner().then((o) => console.log(o));' "$DEPLOY_RECORD" "$k" "$NODE_URL")
+  [[ ${O,,} == "${OPS,,}" ]] || fail "$k is owned by $O, not ops $OPS"
+done
+[[ $(count '^\s+✅ the deployer owns no list oracle serving OracleManager') -eq 1 ]] \
+  || fail "no line: the deployer owns no list oracle"
+echo "5. ceremony complete: 3 issuer keys, 3 D50 nodes, exempt fee wallet, banner; escrow factory governance's; ops owns both list oracles"
 echo "deploy drive PASS in $((SECONDS - START))s (logs $OUT)"

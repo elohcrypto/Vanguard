@@ -11,13 +11,14 @@
 #      before execution pauses again and sends nothing
 #   2. the owners execute the batch; the deploy resumes to its preflight;
 #      a re-run replays across the pause and sends nothing
-#   3. ceremony full phase: pauses after the snapshot (exit 3, 1 ops and
+#   3. ceremony full phase: pauses after the snapshot (exit 3, 2 ops and
 #      4 issuer-admin transactions) before any vote; the accept phase and a
 #      full re-run before execution send nothing (exit 3, exit 1)
 #   4. the owners execute; the accept phase proves every effect, votes,
 #      and completes with exactly the R-57-8 set; governance owns the plan
-#      contracts, the ops multisig the bound list oracle and custody, the
-#      admin multisig both issuers
+#      contracts, the ops multisig both list oracles (the unbound
+#      whitelist oracle too, Task 5.14) and custody, the admin multisig
+#      both issuers
 #
 # USAGE  scripts/ci/multisig-drive.sh   (nodes on MULTISIG_NODE_PORT 8547
 #        and MULTISIG_SIGNER_PORT 8549; exit 1 on failure)
@@ -127,23 +128,23 @@ echo "2. executed by the owners; resumed ($(grep -oE '[0-9]+ sent now' "$OUT/dep
 hh scripts/ci/deploy-voters.js >"$OUT/voters.log" 2>&1 || fail "voter registration failed"
 C_OPS=$HANDOVER_CONFIG.ops-transactions.json C_ADMIN=$HANDOVER_CONFIG.issuer-admin-transactions.json
 [[ $(rc ceremony1.log hh scripts/handover.ts) -eq 3 ]] || fail "ceremony: no pause (exit 3)"
-grep -qF "⏸️  awaiting 1 ops transaction: $C_OPS" "$OUT/ceremony1.log" || fail "no ops awaiting line"
+grep -qF "⏸️  awaiting 2 ops transactions: $C_OPS" "$OUT/ceremony1.log" || fail "no ops awaiting line"
 grep -qF "⏸️  awaiting 4 issuerAdmin transactions: $C_ADMIN" "$OUT/ceremony1.log" || fail "no admin awaiting line"
 grep -q "governance accepts by vote" "$OUT/ceremony1.log" && fail "a vote ran before the pause"
 export HANDOVER_SNAPSHOT_SHA256=$(sed -n 's/.*snapshot sha256: \([0-9a-f]\{64\}\).*/\1/p' "$OUT/ceremony1.log" | head -1)
 B0=$(($(block)))
 [[ $(HANDOVER_PHASE=accept rc ceremony2.log hh scripts/handover.ts) -eq 3 ]] || fail "accept before execution: no exit 3"
-[[ $(grep -c "❌ not executed: \[handover\." "$OUT/ceremony2.log") -eq 5 ]] || fail "accept: the 5 calls not named"
+[[ $(grep -c "❌ not executed: \[handover\." "$OUT/ceremony2.log") -eq 6 ]] || fail "accept: the 6 calls not named"
 [[ $(rc ceremony3.log hh scripts/handover.ts) -eq 1 ]] || fail "a full re-run was not refused"
 grep -q "a full re-run would send them again" "$OUT/ceremony3.log" || fail "no full re-run refusal"
 [[ $(($(block))) -eq $B0 ]] || fail "a paused ceremony re-run sent a transaction"
-echo "3. ceremony paused after the snapshot (1 ops, 4 issuer-admin calls); accept and full re-runs sent nothing"
+echo "3. ceremony paused after the snapshot (2 ops, 4 issuer-admin calls); accept and full re-runs sent nothing"
 
 # 4. Execute both batches; the accept phase completes.
-execute "$C_OPS" 10,12 exec2.log 1
+execute "$C_OPS" 10,12 exec2.log 2
 execute "$C_ADMIN" 9,13 exec3.log 4
 [[ $(HANDOVER_PHASE=accept rc ceremony4.log hh scripts/handover.ts) -eq 0 ]] || fail "the accept phase failed"
-grep -q "✅ 5 role transaction effect(s) hold on chain" "$OUT/ceremony4.log" || fail "no effect check"
+grep -q "✅ 6 role transaction effect(s) hold on chain" "$OUT/ceremony4.log" || fail "no effect check"
 V=$(sed -n '/Handover: verify/,$p' "$OUT/ceremony4.log")
 grep -q "❌" <<<"$V" && fail "a failed completion check"
 count() { grep -cE "$1" <<<"$V" || true; }
@@ -153,17 +154,18 @@ count() { grep -cE "$1" <<<"$V" || true; }
 FEE=$(node -e 'console.log(require(process.argv[1]).feeWallets[0])' "$HANDOVER_CONFIG")
 [[ $(count "^\s+⚠️  $FEE is investorLimitExempt \(set before the handover\)") -eq 1 ]] || fail "no exempt fee wallet line"
 [[ $(count '^⚠️  Handover complete with warnings: see above\.$') -eq 1 ]] || fail "no closing banner"
+[[ $(count '^\s+✅ the deployer owns no list oracle serving OracleManager') -eq 1 ]] || fail "no list-oracle line"
 GOV=$(lc "$(node -e 'console.log(require(process.argv[1]).governance)' "$HANDOVER_CONFIG")")
 C() { node -e 'console.log(require(process.argv[1]).contracts[process.argv[2]])' "$DEPLOY_RECORD" "$1"; }
 for k in digitalToken governanceToken identityRegistry complianceRules oracleManager \
   investorTypeRegistry escrowFactory onchainIDFactory privacyManager zkVerifierIntegrated; do
   [[ $(owner "$(C $k)") == "$GOV" ]] || fail "$k is not governance's"
 done
-for k in blacklistOracle investorRequestManager; do
+for k in whitelistOracle blacklistOracle investorRequestManager; do
   [[ $(owner "$(C $k)") == $(lc "$OPS") ]] || fail "$k is not the ops multisig's"
 done
 for k in kycIssuer amlIssuer; do
   [[ $(owner "$(C $k)") == $(lc "$ADMIN") ]] || fail "$k is not the admin multisig's"
 done
-echo "4. executed; ceremony complete: 3 issuer keys, 3 D50 nodes, exempt fee wallet, banner; governance owns 10 plan contracts, ops multisig the bound list oracle and custody, admin multisig both issuers"
+echo "4. executed; ceremony complete: 3 issuer keys, 3 D50 nodes, exempt fee wallet, banner; governance owns 10 plan contracts, ops multisig both list oracles and custody, admin multisig both issuers"
 echo "multisig drive PASS in $((SECONDS - START))s (logs $OUT)"

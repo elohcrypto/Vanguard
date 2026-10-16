@@ -9,7 +9,9 @@
  * largest eth_getLogs range the provider serves, unless the config sets
  * it. The contracts governance cannot derive before the ceremony binds
  * them are named (R-413-2): the OnchainIDFactory, the privacy pair and the
- * escrow factory by address. The acknowledgements are what the deploy
+ * escrow factory by address, and both list oracles (Task 5.14: the
+ * whitelist oracle is unbound until a vote binds it, D47, and still goes
+ * to ops). The acknowledgements are what the deploy
  * itself created: the D50 nodes, the attestor key it trusted (R-413-9)
  * and the escrow factory's fee wallet (D54). An existing file with other
  * content is never overwritten.
@@ -75,6 +77,9 @@ export function handoverConfig(
     privacyManager: contracts.privacyManager,
     zkVerifier: contracts.zkVerifierIntegrated,
     escrowWalletFactory: contracts.escrowFactory,
+    oracles: [contracts.whitelistOracle, contracts.blacklistOracle].filter(
+      Boolean,
+    ),
     oracleNodes: inputs.oracleNodes,
     attestors: [inputs.attestor.Ax],
     extraTrusted: [],
