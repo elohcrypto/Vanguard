@@ -21,6 +21,7 @@ contract TestMultisig {
     uint256 public threshold;
     uint256 public nonce;
     mapping(address => bool) public isOwner;
+    address[] private modules;
     mapping(bytes32 => mapping(address => bool)) public approved;
 
     error NotOwner();
@@ -56,6 +57,16 @@ contract TestMultisig {
     /// @notice The approvals a batch needs, as a Safe names it.
     function getThreshold() external view returns (uint256) {
         return threshold;
+    }
+
+    /// @notice Test-only: enable a module, as a Safe can (review LOW-5).
+    function setModule(address m) external {
+        modules.push(m);
+    }
+
+    /// @notice The enabled modules, as a Safe pages them (one page).
+    function getModulesPaginated(address, uint256) external view returns (address[] memory, address) {
+        return (modules, address(1));
     }
 
     /// @notice The hash owners approve: this wallet, chain, nonce, calls.

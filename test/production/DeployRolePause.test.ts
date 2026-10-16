@@ -165,7 +165,7 @@ describe("Production deploy with a multisig ops (Task 5.13)", function () {
       const at: any = { external: ["ops"], deployer: f.deployer.address };
       await vetExternalRoles({ ...at, ops: await ms.getAddress() }, log);
       expect(lines.pop()).to.include(
-        "is a 2-of-2 multisig; the deployer is no owner",
+        "is a 2-of-2 multisig; the deployer is no listed owner",
       );
       const t = await (await ethers.getContractFactory("MockTarget")).deploy();
       await vetExternalRoles({ ...at, ops: await t.getAddress() }, log);

@@ -63,39 +63,89 @@ async function resolveRole(x, label) {
 const SAFE_ABI = [
   "function getOwners() view returns (address[])",
   "function getThreshold() view returns (uint256)",
+  "function getModulesPaginated(address,uint256) view returns (address[],address)",
 ];
+const DEPTH = 2; // nested multisigs read below the role
+const is7702 = (code) => code.toLowerCase().startsWith("0xef0100");
+
+/**
+ * `addr` read as a Safe: { owners, threshold, modules } (modules null when
+ * the contract has no getModulesPaginated), or null when unreadable.
+ */
+async function readSafe(addr) {
+  const safe = await ethers.getContractAt(SAFE_ABI, addr);
+  try {
+    const [owners, threshold] = await Promise.all([
+      safe.getOwners(),
+      safe.getThreshold(),
+    ]);
+    const page = await safe
+      .getModulesPaginated("0x0000000000000000000000000000000000000001", 10)
+      .catch(() => null);
+    return { owners: [...owners], threshold, modules: page && [...page[0]] };
+  } catch {
+    return null;
+  }
+}
 
 /**
  * Review LOW-5: an external ops or issuer admin with code is read as a
- * Safe (getOwners, getThreshold): refused when the deployer is an owner,
- * a named warning when it cannot be read. Prints one line per role.
+ * Safe. Refused: an EIP-7702 delegated account (its own key acts alone),
+ * or the deployer listed as an owner at the role or at any of DEPTH
+ * nested multisig levels. Warned by name: an unreadable multisig, an
+ * enabled module (it executes without the owners), a contract owner past
+ * DEPTH. The check sees listed owners only: the operator makes sure the
+ * deployer neither owns nor executes it any other way (runbook section 2).
  */
 async function vetRole(r, deployer, log = console.log) {
   if (!r?.external) return;
   const head = `${r.label} ${r.address}`;
   const tail = "its calls are exported for its owners, never sent here";
-  const vetted = ["ops", "issuerAdmin"].includes(r.label);
-  if (!vetted || (await ethers.provider.getCode(r.address)) === "0x")
+  const code = await ethers.provider.getCode(r.address);
+  if (!["ops", "issuerAdmin"].includes(r.label) || code === "0x")
     return log(`ℹ️  ${head} is external: ${tail}`);
-  const safe = await ethers.getContractAt(SAFE_ABI, r.address);
-  let owners;
-  let threshold;
-  try {
-    [owners, threshold] = await Promise.all([
-      safe.getOwners(),
-      safe.getThreshold(),
-    ]);
-  } catch {
+  if (is7702(code))
+    throw new Error(
+      `${head} is an EIP-7702 delegated account: its own key acts alone, so it is no multisig; use a multisig contract`,
+    );
+  const top = await readSafe(r.address);
+  if (!top)
     return log(
       `⚠️  ${head} has code but no readable getOwners()/getThreshold(): the deployer's ownership of it is unchecked; ${tail}`,
     );
+  // Breadth-first over nested multisig owners, `path` the multisigs between.
+  const queue = [{ safe: top, addr: r.address, path: [] }];
+  while (queue.length) {
+    const { safe, addr, path } = queue.shift();
+    const via = path.length ? ` (through ${path.join(", ")})` : "";
+    if (safe.modules?.length)
+      log(
+        `⚠️  ${head}${addr === r.address ? "" : `: owner ${addr}${via}`} has module(s) enabled (${safe.modules.join(", ")}): a module executes without the owners`,
+      );
+    for (const o of safe.owners) {
+      if (sameAddr(o, deployer))
+        throw new Error(
+          `${head} lists the deployer ${deployer} as an owner${via}: the deployer neither owns nor executes a role multisig (Task 5.13)`,
+        );
+      const c = await ethers.provider.getCode(o);
+      if (c === "0x" || is7702(c)) continue; // a key
+      const next = [...path, o];
+      if (path.length >= DEPTH) {
+        log(
+          `⚠️  ${head}: owner ${o} (through ${path.join(", ")}) has code past ${DEPTH} levels: not read`,
+        );
+        continue;
+      }
+      const inner = await readSafe(o);
+      if (inner) queue.push({ safe: inner, addr: o, path: next });
+      else
+        log(
+          `⚠️  ${head}: owner ${o}${via} has code but no readable getOwners(): not checked`,
+        );
+    }
   }
-  if (owners.some((o) => sameAddr(o, deployer)))
-    throw new Error(
-      `${head} lists the deployer ${deployer} as an owner: the deployer neither owns nor executes a role multisig (Task 5.13)`,
-    );
   log(
-    `ℹ️  ${head} is a ${threshold}-of-${owners.length} multisig; the deployer is no owner: ${tail}`,
+    `ℹ️  ${head} is a ${top.threshold}-of-${top.owners.length} multisig; the deployer is no listed owner: ${tail}`,
   );
 }
 

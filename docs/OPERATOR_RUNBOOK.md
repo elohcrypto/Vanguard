@@ -126,9 +126,9 @@ prints (about 74.6 M gas; 2.24 ETH at 30 gwei)
 **Multisig ops and issuer admin (Task 5.13, Q11 = B).** A role at an address
 with code (a Safe) or in the config's `"externalRoles"` is external: nothing is
 sent for it (a wallet index with code, e.g. an EIP-7702 account, is refused:
-write it as an address). The deployer neither owns nor executes a role multisig:
-one whose `getOwners()` lists it is refused, one that cannot be read warns
-(`⚠️  ops 0x… has code but no readable getOwners()/getThreshold(): …`). Its calls go
+write it as an address). Refused: a 7702 account, the deployer as a listed owner (or two nested levels down); warned: an
+unreadable multisig, a deeper contract owner, a module (`⚠️  ops 0x… has module(s) enabled (…): …`). It sees listed owners
+only: you ensure the deployer neither owns nor executes it, directly or through other contracts or modules. Its calls go
 to a Safe Transaction Builder batch (import it in the Safe app; `meta.description`
 names each call's step, contract and purpose; source in `demo/utils/RoleCalls.js`)
 with `⏸️  awaiting N <role> transaction(s): <file>`, exit 3: paused, not done. The

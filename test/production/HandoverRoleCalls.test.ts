@@ -242,7 +242,7 @@ describe("Handover with a multisig ops and issuer admin (Task 5.13)", function (
     await runHandover(cfg, "preflight", cfgPath);
     expect(out.join("\n")).to.include("✅ Preflight passed");
     expect(out.join("\n")).to.include(
-      `ℹ️  issuerAdmin ${cfg.issuerAdmin} is a 2-of-2 multisig; the deployer is no owner`,
+      `ℹ️  issuerAdmin ${cfg.issuerAdmin} is a 2-of-2 multisig; the deployer is no listed owner`,
     );
     // Not marked external (a bare address, as before 5.13): refused.
     await expect(
@@ -327,6 +327,59 @@ describe("Handover with a multisig ops and issuer admin (Task 5.13)", function (
     ).to.be.rejectedWith(
       `issuerAdmin ${m} lists the deployer ${f.deployer.address} as an owner`,
     );
+  });
+
+  it("vetRole: nested owners, a 7702 role and enabled modules (LOW-5 probes)", async function () {
+    const { vetRole, externalRole } = require("../../demo/utils/RoleCalls");
+    const s = await ethers.getSigners();
+    const d = f.deployer.address;
+    const MS = await ethers.getContractFactory("TestMultisig");
+    const lines: string[] = [];
+    const log = (m: string) => void lines.push(m);
+    const role = async (c: any) => externalRole(await c.getAddress(), "ops");
+    await vetRole(await role(ms.ops), d, log);
+    expect(lines.pop()).to.include(
+      "is a 2-of-2 multisig; the deployer is no listed owner",
+    );
+    // The deployer listed one level down: refused, the path named.
+    const inner = await MS.deploy([d, s[12].address], 2);
+    const outer = await MS.deploy([await inner.getAddress(), s[13].address], 2);
+    await expect(vetRole(await role(outer), d, log)).to.be.rejectedWith(
+      `lists the deployer ${d} as an owner (through ${await inner.getAddress()})`,
+    );
+    // Past two levels: a contract owner not read is named.
+    const leaf = await MS.deploy(
+      [await ms.admin.getAddress(), s[14].address],
+      2,
+    );
+    const mid = await MS.deploy([await leaf.getAddress(), s[15].address], 2);
+    const head = await MS.deploy([await mid.getAddress(), s[16].address], 2);
+    lines.length = 0;
+    await vetRole(await role(head), d, log);
+    expect(lines.join("\n")).to.include(
+      `⚠️  ops ${await head.getAddress()}: owner ${await ms.admin.getAddress()} (through ${await mid.getAddress()}, ${await leaf.getAddress()}) has code past 2 levels: not read`,
+    );
+    // An enabled module executes without the owners: warned by name.
+    await (await ms.admin.setModule(s[17].address)).wait();
+    lines.length = 0;
+    await vetRole(
+      externalRole(await ms.admin.getAddress(), "issuerAdmin"),
+      d,
+      log,
+    );
+    expect(lines.join("\n")).to.include(
+      `⚠️  issuerAdmin ${await ms.admin.getAddress()} has module(s) enabled (${s[17].address}): a module executes without the owners`,
+    );
+    // An EIP-7702 delegated EOA: its own key acts alone.
+    const delegated = "0xef0100" + (await ms.ops.getAddress()).slice(2);
+    await ethers.provider.send("hardhat_setCode", [s[18].address, delegated]);
+    try {
+      await expect(
+        vetRole(externalRole(s[18].address, "ops"), d, log),
+      ).to.be.rejectedWith("an EIP-7702 delegated account");
+    } finally {
+      await ethers.provider.send("hardhat_setCode", [s[18].address, "0x"]);
+    }
   });
 
   it("ops as a trusted registrar is still self-checked (LOW-3)", async function () {
