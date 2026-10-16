@@ -54,12 +54,8 @@ async function trustFacts(o) {
   // is a registrar candidate read directly, beside the escrow factory.
   const reg0 = o.investorTypeRegistry;
   const officerContracts = [];
-  // Task 5.13: ops is the officer by the ceremony's step 1, whatever its
-  // kind; a multisig ops is no registrar or custody contract.
-  const ops = await addrOf(o.ops);
   if (reg0) {
     for (const a of (await liveOfficers(reg0, o)).live) {
-      if (same(a, ops)) continue;
       if ((await ethers.provider.getCode(a)) !== "0x") officerContracts.push(a);
     }
   }
@@ -82,7 +78,14 @@ async function trustFacts(o) {
   for (const r of registrars) {
     created[r.registrar] = await registrarWallets(r.registrar, r.wallet, o);
   }
-  const custody = [...registrars.map((r) => r.registrar), ...officerContracts];
+  // Task 5.13 (review LOW-3): ops is the officer by the ceremony's step 1,
+  // whatever its kind: no custody contract as an officer. It stays a
+  // registrar candidate above, and a registrar ops is judged like any.
+  const ops = await addrOf(o.ops);
+  const custody = [
+    ...registrars.map((r) => r.registrar),
+    ...officerContracts.filter((a) => !same(a, ops)),
+  ];
   const kinds = [];
   for (const addr of uniq(custody)) {
     let kind = null;

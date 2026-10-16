@@ -287,6 +287,56 @@ describe("Handover with a multisig ops and issuer admin (Task 5.13)", function (
     expect(after.join("\n")).to.not.include(cfg.ops);
   });
 
+  it("ops as a trusted registrar is still self-checked (LOW-3)", async function () {
+    const { trustLines } = require("../../demo/utils/HandoverTrust");
+    const { withDerivedContracts } = require("../../demo/utils/HandoverDerive");
+    const { withBoundRegistry } = require("../../demo/utils/HandoverChecks");
+    const { externalRole } = require("../../demo/utils/RoleCalls");
+    const { addRegistrar } = require("../helpers/registrars");
+    await addRegistrar(
+      f.c.complianceRules,
+      f.c.token,
+      cfg.ops,
+      "MultiSigWallet",
+    );
+    // As after step 1: ops is a compliance officer too.
+    await (
+      await f.c.investorTypeRegistry.setComplianceOfficer(cfg.ops, true)
+    ).wait();
+    const o = await withBoundRegistry(
+      await withDerivedContracts({
+        ...f.args,
+        ops: externalRole(cfg.ops, "ops"),
+      }),
+    );
+    const bad = (await trustLines(o)).filter(([, ok]) => !ok).map(([l]) => l);
+    expect(bad.join("\n")).to.include(
+      `registrar / officer contract ${cfg.ops} code matches the compiled`,
+    );
+    // A scan that misses ops's TrustedRegistrarSet (a filter that matches
+    // nothing) is proven wrong by reading ops directly (R-413-6).
+    const rules = o.complianceRules;
+    const blind = new Proxy(rules, {
+      get(t: any, p) {
+        if (p !== "filters") {
+          const v = Reflect.get(t, p);
+          return typeof v === "function" ? v.bind(t) : v;
+        }
+        return new Proxy(t.filters, {
+          get: (ft: any, fp) =>
+            fp === "TrustedRegistrarSet"
+              ? () => ft.TrustedRegistrarSet(ethers.ZeroAddress)
+              : Reflect.get(ft, fp),
+        });
+      },
+    });
+    await expect(
+      trustLines({ ...o, complianceRules: blind }),
+    ).to.be.rejectedWith(
+      new RegExp(`found none of the holders it must see \\([^)]*${cfg.ops} on`),
+    );
+  });
+
   it("a signer is external only when its address holds code", async function () {
     const s = await ethers.getSigners();
     expect(await resolveRole(s[15], "ops")).to.equal(s[15]);
