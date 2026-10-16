@@ -53,6 +53,7 @@ const { preflightParams, paramSteps } = require("./HandoverParams");
 const { snapshotFacts, preflightSnapshots } = require("./HandoverSnapshot");
 const { preflightEscrow } = require("./HandoverEscrow");
 const { recordingSigner } = require("./HandoverWindow");
+const { oracleAccept, queueRoleCall } = require("./HandoverRoleCalls");
 const { roleStrays } = require("./HandoverRoles");
 const { trustStrays } = require("./HandoverTrust");
 const { nodeStrays } = require("./HandoverNodes");
@@ -106,7 +107,7 @@ async function handoverDeployerPowers(o) {
   const ops = await addrOf(o.ops);
   const guardian = await addrOf(o.guardian);
   const govAddr = await addrOf(o.governance);
-  const report = { steps: [], registryProposals: [] };
+  const report = { steps: [], registryProposals: [], roleCalls: [] };
   const ok = (m) => {
     report.steps.push(m);
     log(`   ✅ ${m}`);
@@ -222,6 +223,11 @@ async function handoverDeployerPowers(o) {
       if (!same(await oracle.pendingOwner(), ops)) {
         await send(oracle.connect(d).transferOwnership(ops));
       }
+      // Task 5.13: a multisig ops accepts after the pause (accept phase).
+      if (o.ops.external) {
+        await queueRoleCall(ctx, await oracleAccept(o, oracle));
+        continue;
+      }
       await send(oracle.connect(o.ops).acceptOwnership());
     }
     check(same(await oracle.owner(), ops), `oracle ${a} owner is not ops`);
@@ -278,6 +284,8 @@ async function handoverDeployerPowers(o) {
     // Factories: bound to their type now, while the deployer owns governance.
     if (e.bind) await bindFactory(ctx, e);
   }
+  // Task 5.13: the external roles' calls, under the snapshot's digest.
+  if (report.roleCalls.length) report.snapshot.roleCalls = report.roleCalls;
   return report;
 }
 

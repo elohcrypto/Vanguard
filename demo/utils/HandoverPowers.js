@@ -326,7 +326,8 @@ async function hasLiveManagementKey(issuer, wallet) {
  * live MANAGEMENT_KEY), then the deployer's key is revoked. Never ops: ops
  * is a registry agent (D25 b).
  */
-async function handOverIssuers({ o, d, dAddr, ok, log }) {
+async function handOverIssuers(ctx) {
+  const { o, d, dAddr, ok, log } = ctx;
   for (const issuer of o.issuers || []) {
     const label = await issuerLabel(issuer);
     const isOwner = same(await issuer.owner(), dAddr);
@@ -351,6 +352,13 @@ async function handOverIssuers({ o, d, dAddr, ok, log }) {
       same(await issuer.pendingOwner(), admin),
       `${label} pendingOwner is not issuerAdmin`,
     );
+    // Task 5.13: a multisig issuer admin accepts and revokes after the pause.
+    if (o.issuerAdmin.external) {
+      const rc = require("./HandoverRoleCalls");
+      await rc.queueRoleCall(ctx, await rc.issuerAccept(o, issuer));
+      if (hasKey) await rc.queueRoleCall(ctx, await rc.issuerRevoke(o, issuer));
+      continue;
+    }
     await send(issuer.connect(o.issuerAdmin).acceptOwnership());
     check(
       same(await issuer.owner(), admin),

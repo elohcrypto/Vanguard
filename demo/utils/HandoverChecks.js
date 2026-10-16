@@ -355,7 +355,12 @@ async function preflight(o, { acceptOnly = false } = {}) {
       );
     }
     if (!hasKey && !same(owner, dAddr)) continue;
-    if (typeof o.issuerAdmin?.signMessage !== "function") {
+    // Task 5.13: an external issuer admin (a multisig) accepts after the
+    // pause from the exported batch; any other must be a signer here.
+    if (
+      !o.issuerAdmin?.external &&
+      typeof o.issuerAdmin?.signMessage !== "function"
+    ) {
       fail(`issuerAdmin must be a signer to accept ownership of ${label}`);
     }
     // addIssuerKey reverts "Key already exists" for any issuerAdmin key that

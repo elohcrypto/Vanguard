@@ -112,7 +112,9 @@ async function custodyOwnerLines(o, dAddr, ops, govAddr) {
     const evs = await scanLogs(reg, reg.filters.ComplianceOfficerUpdated(), o);
     for (const ev of evs) {
       const a = ev.args[0];
-      if (same(a, govAddr) || owned.some((x) => same(x, a))) continue;
+      // Task 5.13: ops (a multisig too) is the officer by step 1.
+      if (same(a, govAddr) || same(a, ops) || owned.some((x) => same(x, a)))
+        continue;
       if ((await ethers.provider.getCode(a)) === "0x") continue;
       if (await reg.isComplianceOfficer(a)) owned.push(ethers.getAddress(a));
     }

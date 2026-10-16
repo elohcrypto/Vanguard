@@ -9,7 +9,7 @@
  *   {
  *     "governance": "0x..",                   // the one root: every other
  *                                             // contract is derived from it
- *     "ops": 10, "guardian": 11, "issuerAdmin": 9,
+ *     "ops": 10, "guardian": 11, "issuerAdmin": 9,  // or a multisig address
  *     "proposer": 1, "voters": [2, 3, 6],
  *     "fromBlock": 1234567,                   // optional, before every deploy
  *     "logChunk": 5000,                       // optional, eth_getLogs range
@@ -21,51 +21,51 @@
  *   }
  *
  * The full phase writes `<config>.snapshot.json` (what the preflight
- * found, with the governance address, the chain id and the block the
- * preflight read); `HANDOVER_PHASE=accept` requires it, refuses another
- * chain or a block after step 1's first transaction, and the completion
- * check then proves nothing appeared since step 1 (M-1, L-9). Re-running
- * the full phase refreshes the preflight: a chain prepared between an
- * aborted preflight and the re-run is judged by the re-run. A key set to `null` asserts the
- * contract does not exist: refused when governance derives one, a
- * residual warning when it cannot (R-413-12).
+ * found, the governance address, the chain id and the block the preflight
+ * read); `HANDOVER_PHASE=accept` requires it, refuses another chain or a
+ * block after step 1's first transaction, and the completion check then
+ * proves nothing appeared since step 1 (M-1, L-9). Re-running the full
+ * phase refreshes the preflight. A key set to `null` asserts the contract
+ * does not exist: refused when governance derives one, a residual warning
+ * when it cannot (R-413-12).
  *
  * The three acknowledgement lists default to empty: on a first handover
- * nothing is acknowledged and any registered node, trusted attestor key
- * or trusted contract outside governance and the registrars' wallets is
- * refused. An address key of an older config ("token", "governanceToken",
- * "identityRegistry", "complianceRules", "oracleManager",
- * "investorTypeRegistry", "dynamicListManager", "escrowWalletFactory",
- * "onchainIDFactory", "privacyManager", "zkVerifier", "keyManager", and
- * the "oracles" / "issuers" lists) is still accepted as an assertion:
- * refused when it differs from what governance derives (R-413-1). The
- * OnchainIDFactory, an escrow factory that is no registrar yet, an unwired
- * privacy pair and a KeyManager nothing pins are unreachable from
- * governance before step 3 binds them, so those may still be named
- * (R-413-2). Any other key is refused. The ceremony itself, every
+ * any registered node, trusted attestor key or trusted contract outside
+ * governance and the registrars' wallets is refused. An address key of an
+ * older config ("token", "governanceToken", "identityRegistry",
+ * "complianceRules", "oracleManager", "investorTypeRegistry",
+ * "dynamicListManager", "escrowWalletFactory", "onchainIDFactory",
+ * "privacyManager", "zkVerifier", "keyManager", the "oracles" / "issuers"
+ * lists) is an assertion: refused when it differs from what governance
+ * derives (R-413-1). The OnchainIDFactory, an escrow factory that is no
+ * registrar yet, an unwired privacy pair and a KeyManager nothing pins are
+ * unreachable from governance before step 3 binds them, so those may
+ * still be named (R-413-2). Any other key is refused. The ceremony, every
  * refusal and every completion line: demo/utils/Handover*.js.
  *
  * HANDOVER_PHASE=accept resumes after a partial run: it skips the deployer
  * steps and only votes the acceptances (and registry proposals) still
  * pending, then verifies. Before any transaction the proposer and every
- * voter must be verified and hold the VGT fees for every proposal.
+ * voter must be verified and hold the VGT fees for every proposal. Task
+ * 5.6b (B-6): the full phase also writes `<config>.snapshot.json.sha256`
+ * and prints the digest; the accept phase requires HANDOVER_SNAPSHOT_SHA256
+ * and refuses a snapshot whose digest differs (HandoverSnapshotFile.js).
  *
- * Task 5.6b (B-6): the full phase also writes
- * `<config>.snapshot.json.sha256` and prints the digest; the accept phase
- * refuses a snapshot whose digest differs from it or from
- * HANDOVER_SNAPSHOT_SHA256, which it requires (the printed digest;
- * demo/utils/HandoverSnapshotFile.js).
+ * Task 5.13: ops, guardian or issuerAdmin given as an address, or at an
+ * address holding code, is external (a multisig). The full phase sends
+ * none of its calls: after the snapshot it writes them as Safe batch files
+ * (`<config>.<role>-transactions.json`) and exits 3, before any vote; the
+ * accept phase proves each effect on chain first (demo/utils/RoleCalls.js,
+ * HandoverRoleCalls.js).
  *
  * HANDOVER_PHASE=preflight (Task 5.7) runs the full phase's checks up to
  * its first transaction and sends nothing: "✅ Preflight passed" or the
  * refusal. The production deploy runs it on the handover.json it writes.
- *
- * HANDOVER_PHASE=audit is the day-2 re-check: read-only, it runs every
- * completion line against the state governance derives now, with the
- * acknowledgements in the config and no snapshot or voting window, so a
- * change made by vote (a node rotation, a rule administrator) passes and
- * any deployer power or unacknowledged holder fails. It refuses to run
- * while governance does not own every plan contract.
+ * HANDOVER_PHASE=audit is the day-2 re-check: read-only, every completion
+ * line against the state governance derives now, with the config's
+ * acknowledgements and no snapshot or voting window, so a change made by
+ * vote passes and any deployer power or unacknowledged holder fails. It
+ * refuses while governance does not own every plan contract.
  */
 // ponytail: a JSON file via HANDOVER_CONFIG is the ceiling (hardhat run has no
 // argv passthrough); a typed CLI can replace it later.
@@ -93,7 +93,11 @@ const {
   checkVoters,
   assertHandoverComplete,
 } = require("../demo/utils/Handover");
-const { planFor, withBoundRegistry } = require("../demo/utils/HandoverChecks");
+const {
+  addrOf,
+  planFor,
+  withBoundRegistry,
+} = require("../demo/utils/HandoverChecks");
 const { withDerivedContracts } = require("../demo/utils/HandoverDerive");
 const {
   reserveSnapshotFile,
@@ -101,6 +105,11 @@ const {
   readSnapshotFile,
   sidecarOf,
 } = require("../demo/utils/HandoverSnapshotFile");
+const { resolveRole, requireEffects } = require("../demo/utils/RoleCalls");
+const {
+  refuseFullRerun,
+  stepsFromSnapshot,
+} = require("../demo/utils/HandoverRoleCalls");
 
 /** Task 5.7: what the preflight phase's deployer throws at its first send. */
 export class PreflightStop extends Error {
@@ -156,29 +165,13 @@ export async function runHandover(
   phase = "full",
   path = "handover.json",
 ): Promise<void> {
-  const ADDRESS_KEYS = [
-    "token",
-    "governanceToken",
-    "identityRegistry",
-    "complianceRules",
-    "oracleManager",
-    "investorTypeRegistry",
-    "dynamicListManager",
-    "escrowWalletFactory",
-    "onchainIDFactory",
-    "privacyManager",
-    "zkVerifier",
-    "keyManager",
-    "keyManagerIdentity",
-  ];
-  const LIST_KEYS = [
-    "oracles",
-    "issuers",
-    "feeWallets",
-    "oracleNodes",
-    "attestors",
-    "extraTrusted",
-  ];
+  const ADDRESS_KEYS = (
+    "token governanceToken identityRegistry complianceRules oracleManager " +
+    "investorTypeRegistry dynamicListManager escrowWalletFactory " +
+    "onchainIDFactory privacyManager zkVerifier keyManager keyManagerIdentity"
+  ).split(" ");
+  const LIST_KEYS =
+    "oracles issuers feeWallets oracleNodes attestors extraTrusted".split(" ");
   const allowed = new Set([
     "governance",
     "ops",
@@ -221,12 +214,16 @@ export async function runHandover(
       );
     }
   }
-  for (const k of ["ops", "guardian", "proposer"]) {
-    if (!Number.isInteger(cfg[k]))
-      throw new Error(`${path}: "${k}" must be a wallet index`);
-  }
-  if (cfg.issuerAdmin !== undefined && !Number.isInteger(cfg.issuerAdmin)) {
-    throw new Error(`${path}: "issuerAdmin" must be a wallet index`);
+  if (!Number.isInteger(cfg.proposer))
+    throw new Error(`${path}: "proposer" must be a wallet index`);
+  // Task 5.13: a role the CLI does not sign for (a multisig) is an address.
+  for (const k of ["ops", "guardian", "issuerAdmin"]) {
+    const v = cfg[k];
+    if (k === "issuerAdmin" && v === undefined) continue;
+    if (!Number.isInteger(v) && !(typeof v === "string" && ethers.isAddress(v)))
+      throw new Error(
+        `${path}: "${k}" must be a wallet index, or the address of a role this signer does not hold (a multisig)`,
+      );
   }
   if (cfg.fromBlock !== undefined && !Number.isInteger(cfg.fromBlock)) {
     throw new Error(`${path}: "fromBlock" must be a block number`);
@@ -253,6 +250,18 @@ export async function runHandover(
     return signers[i];
   };
   const at = (name: string, a: string) => ethers.getContractAt(name, a);
+  const role = async (k: string) => {
+    if (cfg[k] === undefined) return undefined;
+    const r = await resolveRole(
+      typeof cfg[k] === "string" ? cfg[k] : wallet(cfg[k]),
+      k,
+    );
+    if (r.external)
+      console.log(
+        `ℹ️  ${k} ${r.address} is external (an address or a contract): its calls are exported for its owners, never sent here`,
+      );
+    return r;
+  };
 
   const ARTIFACT: Record<string, string> = {
     token: "Token",
@@ -273,10 +282,9 @@ export async function runHandover(
     fromBlock: cfg.fromBlock,
     logChunk: cfg.logChunk,
     deployer: wallet(0),
-    ops: wallet(cfg.ops),
-    guardian: wallet(cfg.guardian),
-    issuerAdmin:
-      cfg.issuerAdmin === undefined ? undefined : wallet(cfg.issuerAdmin),
+    ops: await role("ops"),
+    guardian: await role("guardian"),
+    issuerAdmin: await role("issuerAdmin"),
     feeWallets: cfg.feeWallets,
     oracleNodes: cfg.oracleNodes || [],
     attestors: cfg.attestors || [],
@@ -372,7 +380,7 @@ export async function runHandover(
     const { scanLogs } = require("../demo/utils/HandoverScans");
     const grants = await scanLogs(
       token,
-      token.filters.AgentAdded(await args.ops.getAddress()),
+      token.filters.AgentAdded(await addrOf(args.ops)),
       args,
     );
     if (!grants.length) {
@@ -392,6 +400,9 @@ export async function runHandover(
       console.log,
     );
     await preflight(o, { acceptOnly: true });
+    // Task 5.13: every external role call's effect, before any vote.
+    const steps = await stepsFromSnapshot(o, snap.snapshot.roleCalls);
+    await requireEffects(steps, path, "Vanguard handover");
     registryProposals = await pendingRegistryProposals(o);
     await checkVoters(
       o,
@@ -400,6 +411,7 @@ export async function runHandover(
       (await acceptances(o)) + registryProposals.length,
     );
   } else {
+    refuseFullRerun(snapshotPath, cfg.governance);
     const o = await withBoundRegistry(await withDerivedContracts(args));
     const reg = o.investorTypeRegistry;
     // Registry calls become proposals only when governance already owns it.
@@ -429,6 +441,11 @@ export async function runHandover(
     console.log(
       `   snapshot sha256: ${digest} (in ${sidecarOf(snapshotPath)}; record this line outside the run directory)`,
     );
+    // Task 5.13: external roles' calls go to their owners; stop (exit 3).
+    if (report.snapshot.roleCalls) {
+      const steps = await stepsFromSnapshot(args, report.snapshot.roleCalls);
+      await requireEffects(steps, path, "Vanguard handover", { fresh: true });
+    }
   }
 
   console.log("\n🏛️  Handover: governance accepts by vote");
@@ -466,6 +483,15 @@ async function main(): Promise<void> {
 // `hardhat run` executes this file as the main module; a test imports it.
 if (require.main === module) {
   main().catch((e) => {
+    if (e.name === "RoleCallsPending") {
+      // Task 5.13: paused, not done (exit 3): execute, then resume.
+      console.log(e.message);
+      console.log(
+        "   execute each file in its multisig, then run HANDOVER_PHASE=accept (with HANDOVER_SNAPSHOT_SHA256)",
+      );
+      process.exitCode = 3;
+      return;
+    }
     console.error(`❌ Handover failed: ${e.message}`);
     process.exitCode = 1;
   });

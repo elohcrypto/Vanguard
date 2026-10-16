@@ -54,8 +54,12 @@ async function trustFacts(o) {
   // is a registrar candidate read directly, beside the escrow factory.
   const reg0 = o.investorTypeRegistry;
   const officerContracts = [];
+  // Task 5.13: ops is the officer by the ceremony's step 1, whatever its
+  // kind; a multisig ops is no registrar or custody contract.
+  const ops = await addrOf(o.ops);
   if (reg0) {
     for (const a of (await liveOfficers(reg0, o)).live) {
+      if (same(a, ops)) continue;
       if ((await ethers.provider.getCode(a)) !== "0x") officerContracts.push(a);
     }
   }

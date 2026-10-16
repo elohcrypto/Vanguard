@@ -30,7 +30,13 @@ export async function ageVoters(governance: any): Promise<void> {
  * and custody is deployed (Task 4.16, W-2). Shared by the handover
  * preflight, completion and CLI tests.
  */
-export async function handoverFixture({ recordGovernanceToken = true } = {}) {
+export async function handoverFixture({
+  recordGovernanceToken = true,
+  // Task 5.13: custody's bank when ops is a contract (a multisig), with
+  // the step that makes it accept the manager's ownership.
+  bank = undefined as
+    undefined | { address: string; accept: (m: any) => Promise<void> },
+} = {}) {
   const signers = await ethers.getSigners();
   const [deployer, ops, guardian, stranger, alice, bob, carol, issuerAdmin] =
     signers;
@@ -152,7 +158,7 @@ export async function handoverFixture({ recordGovernanceToken = true } = {}) {
   await token.setInvestorTypeRegistry(await investorTypeRegistry.getAddress());
   const custody = await deploy(
     "InvestorRequestManager",
-    ops.address,
+    bank ? bank.address : ops.address,
     await token.getAddress(),
     await investorTypeRegistry.getAddress(),
     idRegAddr,
@@ -163,8 +169,9 @@ export async function handoverFixture({ recordGovernanceToken = true } = {}) {
     true,
   );
   // Task 5.1 (Q7): the manager is Ownable2Step; ops accepts.
-  await custody.transferOwnership(ops.address);
-  await custody.connect(ops).acceptOwnership();
+  await custody.transferOwnership(bank ? bank.address : ops.address);
+  if (bank) await bank.accept(custody);
+  else await custody.connect(ops).acceptOwnership();
   for (const w of [alice, bob, carol]) {
     const id = await deployIdentity(factory, w.address);
     await identityRegistry.registerIdentity(w.address, id, 840);
