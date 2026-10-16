@@ -9,8 +9,8 @@ line it prints when it worked. The rules and their reasons:
 ([transfer](DEEP_DIVE_TRANSFER.md), [identity](DEEP_DIVE_IDENTITY.md),
 [ZK](DEEP_DIVE_ZK.md)).
 
-Status: draft (Task 5.6; audit and digest since 5.6b). Section 2 final
-since Task 5.7 (external signer), the rest after the Sepolia run (5.8).
+Status: draft (Task 5.6; audit and digest since 5.6b). Section 2 final since
+Task 5.7 (external signer) and 5.13 (multisig roles); the rest after 5.8.
 
 ## Conventions and the local rehearsal
 
@@ -43,26 +43,24 @@ stand for an address and a number that differ between runs.
 > l0() { l0deploy; npx hardhat run scripts/handover.ts --network $NET > $RB/handover.log 2>&1; tail -1 $RB/handover.log; }
 > ```
 >
-> `reset` prints `{"jsonrpc":"2.0","id":1,"result":true}`; `l0deploy`
-> adds `handover fixture deployed; config written to /tmp/vanguard-runbook/handover.json`;
-> `l0` adds `✅ Handover complete: the deployer holds no power.`
-> Skip lines marked `# local` on a public network. When the rehearsal ends:
-> `unset MNEMONIC PRIVATE_KEY` (`sepolia` and `mainnet` refuse the phrase).
+> `reset` prints `{"jsonrpc":"2.0","id":1,"result":true}`; `l0deploy` adds
+> `handover fixture deployed; config written to /tmp/vanguard-runbook/handover.json`;
+> `l0` adds `✅ Handover complete: the deployer holds no power.` Skip `# local`
+> lines publicly; at the end `unset MNEMONIC PRIVATE_KEY` (public networks refuse it).
 >
-> **Two tracks.** The ceremony CLI (`scripts/handover.ts`) is the
-> production path; locally it runs on the handover fixture
-> (`test/production/deployHandoverFixture.ts`: ops 1, guardian 2, proposer
-> 4, voters 5 and 6, issuer admin 7). The demo (`npm run demo:drive`) shows
-> the other steps with section 1's roles (ops 10, guardian 11, issuer
-> admin 9); its state is in memory, so each drive starts from a reset.
+> **Two tracks.** The ceremony CLI (`scripts/handover.ts`) is the production
+> path; locally it runs on the handover fixture (`test/production/deployHandoverFixture.ts`:
+> ops 1, guardian 2, proposer 4, voters 5 and 6, issuer admin 7). The demo
+> (`npm run demo:drive`) shows the other steps with section 1's roles (ops 10,
+> guardian 11, issuer admin 9); its state is in memory: each drive resets.
 
 ## 1. Roles and keys
 
 | Role         | Holds                                                                                               | Key on a public network                           |
 | ------------ | --------------------------------------------------------------------------------------------------- | ------------------------------------------------- |
 | Governance   | owner of every core contract after the ceremony; acts only by vote                                  | a contract (no key)                               |
-| Ops          | agent roles, compliance officer, list oracles, OracleManager operator, `listOperator`, escrow admin | multisig; on Sepolia the owner's own signer (Q11) |
-| Guardian     | `Token.pause()` on VSC, nothing else                                                                | multisig; on Sepolia the owner's own signer (Q11) |
+| Ops          | agent roles, compliance officer, list oracles, OracleManager operator, `listOperator`, escrow admin | multisig, Sepolia too (Q11 = B; section 2)        |
+| Guardian     | `Token.pause()` on VSC, nothing else                                                                | multisig, Sepolia too (Q11 = B; never sends here) |
 | Issuer admin | owner and only key of every trusted claim issuer                                                    | multisig, held by a party that is not ops (D25 b) |
 | Issuers      | claim signing for their topic                                                                       | the issuer admin's key                            |
 | Nodes        | oracle consensus votes                                                                              | three independent node keys (Q4, D50)             |
@@ -80,9 +78,8 @@ stand for an address and a number that differ between runs.
 npx hardhat run scripts/print-role-wallets.js --network $NET
 ```
 
-prints one row per role, locally
-` 10  ops                                0xBcd4042DE499D14e55001CcbB24a551F3b954096  10000.0 ETH` (on Sepolia
-the balances to fund: section 2).
+prints one row per role, locally (on Sepolia the balances to fund: section 2)
+` 10  ops                                0xBcd4042DE499D14e55001CcbB24a551F3b954096  10000.0 ETH`.
 
 ## 2. Deploy
 
@@ -103,14 +100,14 @@ node -e 'require("./scripts/zk/attest").attestorPublicKey("0x" + "11".repeat(32)
 env -u MNEMONIC DEPLOY_CONFIG=$RB/deploy.json DEPLOY_RECORD=$RB/deploy-record.json HANDOVER_CONFIG=$RB/deploy-handover.json npx hardhat run scripts/production/DeployProduction.ts --network remote > $RB/deploy.log 2>&1; grep -E "^✅ (Deployed|Preflight)" $RB/deploy.log
 ```
 
-prints
-`✅ Deployed: 74 transactions in /tmp/vanguard-runbook/deploy-record.json (0 from the record, 74 sent now; N gas)`
-(about 74.6 M; 2.24 ETH at 30 gwei) and
+prints (about 74.6 M gas; 2.24 ETH at 30 gwei)
+`✅ Deployed: 74 transactions in /tmp/vanguard-runbook/deploy-record.json (0 from the record, 74 sent now; N gas)` and
 `✅ Preflight passed: every check before the ceremony's first transaction holds (voters are checked by the full phase)`.
 
 - Publicly drop `DEPLOY_RECORD` and `HANDOVER_CONFIG`: the record goes to
   `deployments/<chainId>.json` (keep it), the ceremony's config to
-  `deployments/<chainId>.handover.json`. Ops signs custody `acceptOwnership`.
+  `deployments/<chainId>.handover.json`. Ops signs custody `acceptOwnership`
+  (a multisig ops: below).
 - Stopped? Re-run the line (`   ⏭️  #N …: skipped (recorded, code hash ok)`,
   the rest sent; complete: `(74 from the record, 0 sent now; …)`). It reads
   past blocks (archive RPC); a contradicting record, config or flow is
@@ -125,6 +122,50 @@ prints
   deployer-trusted issuer keys, the three deployer-era nodes (section 4)
   and `   ⚠️  0x… is investorLimitExempt (set before the handover): …`
   (the escrow fee wallet; nothing mints the deployer VSC).
+
+**Multisig ops and issuer admin (Task 5.13, Q11 = B).** A role at an address
+with code (a Safe) or in the config's `"externalRoles"` is external: nothing is
+sent for it. Its calls go to a Safe Transaction Builder batch (import it in the
+Safe app; `meta.description` names each call's step, contract and purpose:
+approve nothing else; format source in `demo/utils/RoleCalls.js`) with
+`⏸️  awaiting N <role> transaction(s): <file>`, exit 3: paused, not done. The
+next run checks each effect on chain and goes on, pauses again (`   ❌ not executed: [<step>] …`,
+only those re-written) or refuses another effect by name (exit 1). Locally the
+owners of `TestMultisig` (a test stand-in, not a Safe; ops: wallets 10 and 12,
+issuer admin: 9 and 13) act through `scripts/ci/multisig-exec.js`. Local:
+reset; the ceremony after section 3.
+
+```bash
+reset; pkill -f remote-signer.js; SIGNER_COUNT=14 SIGNER_UPSTREAM=$DEMO_RPC_URL node scripts/ci/remote-signer.js 8549 > $RB/signer.log 2>&1 &   # local
+for a in 0xFABB0ac9d68B0B445fB7357272Ff202C5651694a 0x1CBd3b2770909D4e10f157cABC84C7264073C9Ec; do curl -s -X POST -H 'Content-Type: application/json' --data "{\"jsonrpc\":\"2.0\",\"method\":\"hardhat_setBalance\",\"params\":[\"$a\",\"0x56BC75E2D63100000\"],\"id\":1}" $DEMO_RPC_URL > /dev/null; done   # local: owners 12, 13
+ms() { MULTISIG_OWNERS=$1 npx hardhat run scripts/ci/multisig-exec.js --network remote | sed -n 's/^multisig //p'; }   # local
+exe() { BATCH=$1 MULTISIG_OWNERS=$2 npx hardhat run scripts/ci/multisig-exec.js --network remote; }   # local; publicly the Safe app
+export OPS=$(ms 10,12) ADMIN=$(ms 9,13)   # local; publicly the two Safes
+node -e 'require("./scripts/zk/attest").attestorPublicKey("0x" + "11".repeat(32)).then((k) => console.log(JSON.stringify({ attestor: { Ax: String(k.Ax), Ay: String(k.Ay) }, ops: process.env.OPS, issuerAdmin: process.env.ADMIN })))' > $RB/ms.json   # local
+export DEPLOY_CONFIG=$RB/ms.json DEPLOY_RECORD=$RB/ms-record.json HANDOVER_CONFIG=$RB/ms-handover.json
+dep() { env -u MNEMONIC npx hardhat run scripts/production/DeployProduction.ts --network remote > $RB/ms-deploy.log 2>&1; echo "exit $?"; grep -E "^⏸️|not executed|effect|^✅ Preflight" $RB/ms-deploy.log; }
+dep; dep; exe $RB/ms-record.ops-transactions.json 10,12; dep
+env -u MNEMONIC npx hardhat run scripts/ci/deploy-voters.js --network remote > $RB/ms-voters.log 2>&1   # local: section 3
+env -u MNEMONIC npx hardhat run scripts/handover.ts --network remote > $RB/ms-full.log 2>&1; echo "exit $?"; grep "^⏸️" $RB/ms-full.log
+export TICKET_SHA256=$(awk '/snapshot sha256:/ {print $3}' $RB/ms-full.log)   # section 6
+exe $RB/ms-handover.json.ops-transactions.json 10,12; exe $RB/ms-handover.json.issuer-admin-transactions.json 9,13
+env -u MNEMONIC HANDOVER_SNAPSHOT_SHA256=$TICKET_SHA256 HANDOVER_PHASE=accept npx hardhat run scripts/handover.ts --network remote > $RB/ms-accept.log 2>&1; echo "exit $?"; grep "effect(s) hold" $RB/ms-accept.log; tail -1 $RB/ms-accept.log
+```
+
+The deploy prints `exit 3` and
+`⏸️  awaiting 1 ops transaction: /tmp/vanguard-runbook/ms-record.ops-transactions.json`
+twice (the re-run sends nothing and adds
+`   ❌ not executed: [deploy.custody.accept] InvestorRequestManager 0x….acceptOwnership(): …`),
+`executed 1 calls on 0x…`, `exit 0`,
+`   ✅ 1 role transaction effect(s) hold on chain` and the preflight line.
+The ceremony pauses after its snapshot, before any vote: `exit 3`,
+`⏸️  awaiting 4 issuerAdmin transactions: /tmp/vanguard-runbook/ms-handover.json.issuer-admin-transactions.json`,
+`⏸️  awaiting 1 ops transaction: /tmp/vanguard-runbook/ms-handover.json.ops-transactions.json`;
+then `executed 1 calls on 0x…`, `executed 4 calls on 0x…`, `exit 0`,
+`   ✅ 5 role transaction effect(s) hold on chain` and
+`⚠️  Handover complete with warnings: see above.` (the seven warnings above).
+Before execution the accept phase exits 3 naming each call and a full re-run is
+refused (`… a full re-run would send them again …`, exit 1), sending nothing.
 
 ## 3. Voter registration (D25)
 
@@ -144,8 +185,7 @@ grep "minVoterAge" $RB/handover.log
 
 A young identity stops it with
 `❌ Handover failed: Handover: voter 0x… has an identity younger than minVoterAge (Ns); governance refuses it ("Identity too new to vote"): …`;
-L0 prints
-`   ✅ governance minVoterAge 420s is at least 7 days / TIME_SCALE (420s)`.
+L0 prints `   ✅ governance minVoterAge 420s is at least 7 days / TIME_SCALE (420s)`.
 
 ## 4. Oracle nodes (D50, Q4)
 
@@ -163,20 +203,11 @@ the 66% bar (`TooFewNodes`, `SingleNodeQuorum`).
    ```bash
    l0   # local
    npx hardhat console --network $NET <<'EOF'
-   const fs = await import("fs");
-   const cfg = JSON.parse(fs.readFileSync(process.env.HANDOVER_CONFIG, "utf8"));
-   const s = await ethers.getSigners();
-   const { proposeCall, castAcceptanceVotes, settleProposal } = await import("./demo/utils/HandoverVotes.js");
-   const g = await ethers.getContractAt("VanguardGovernance", cfg.governance, s[cfg.proposer]);
-   const om = await ethers.getContractAt("OracleManager", await g.boundTarget(2));
-   const nodes = [s[9].address, s[10].address, s[11].address];
-   for (const [i, n] of nodes.entries()) { const id = await proposeCall(g, s[cfg.proposer], 2, om, om.interface.encodeFunctionData("registerOracle", [n, `NODE_${i + 1}`, "production node", 500]), `Register node ${i + 1}`, "runbook 4"); await castAcceptanceVotes(g, id, cfg.voters.map((v) => s[v])); await settleProposal(g, id); }
-   console.log("registered nodes:", (await om.getRegisteredOracles()).join(" "));
+   const fs = await import("fs"); const cfg = JSON.parse(fs.readFileSync(process.env.HANDOVER_CONFIG, "utf8")); const s = await ethers.getSigners(); const { proposeCall, castAcceptanceVotes, settleProposal } = await import("./demo/utils/HandoverVotes.js"); const g = await ethers.getContractAt("VanguardGovernance", cfg.governance, s[cfg.proposer]); const om = await ethers.getContractAt("OracleManager", await g.boundTarget(2)); const nodes = [s[9].address, s[10].address, s[11].address]; for (const [i, n] of nodes.entries()) { const id = await proposeCall(g, s[cfg.proposer], 2, om, om.interface.encodeFunctionData("registerOracle", [n, `NODE_${i + 1}`, "production node", 500]), `Register node ${i + 1}`, "runbook 4"); await castAcceptanceVotes(g, id, cfg.voters.map((v) => s[v])); await settleProposal(g, id); } console.log("registered nodes:", (await om.getRegisteredOracles()).join(" "));
    EOF
    ```
 
-   prints one `   ⏩ proposal #N: voting period + execution delay: jumped Ns (dev node)`
-   per node, then
+   prints one `   ⏩ proposal #N: voting period + execution delay: jumped Ns (dev node)` per node, then
    `registered nodes: 0xa0Ee7A142d267C1f36714E4a8F75612F20a79720 0xBcd4042DE499D14e55001CcbB24a551F3b954096 0x71bE63f3384f5fb98995898A86B02Fb2426c5788`.
    Acknowledge them in `handover.json` (`oracleNodes`):
 
@@ -202,19 +233,18 @@ the 66% bar (`TooFewNodes`, `SingleNodeQuorum`).
 2. Then remove each deployer-era node by an OracleParameters vote. The
    demo track does the whole rotation, add before remove (Task 5.12):
    option 76, type 2, action 7 (`registerOracle`, reputation 500) per new
-   node, 77 per voter (77 approves the voter's fee), 79, 78; then action
-   3 (`removeOracle`) for wallets 1-3 (all three proposed before any runs,
-   so they are node indices 0-2), 77, 79, 78. Six, five, four, then three
-   nodes: two always remain and none alone reaches the bar. Action 7
-   takes the next free demo wallet on Enter; with the rehearsal's twelve
-   wallets only wallet 8 is free, so it says so and two nodes are typed
-   (keys the demo does not hold: they cannot answer rounds; publicly
-   `<NODE_2>`, `<NODE_3>`). After the ceremony 76 proposes from the first
-   eligible wallet but 0 and 78 executes from the proposer. Option 83f,
-   before and after, is section 10's audit (`HANDOVER_PHASE=audit`, the
-   same code) run from the demo's in-memory state; it acknowledges what
-   the demo made: option 31's nodes, the nodes 76 proposed after the
-   handover and option 1's attestor key. Local: reset.
+   node, 77 per voter (it approves the voter's fee), 79, 78; then action 3
+   (`removeOracle`) for wallets 1-3 (all proposed before any runs: node
+   indices 0-2), 77, 79, 78. Six, five, four, then three nodes: two always
+   remain, none alone reaches the bar. Action 7 takes the next free demo
+   wallet on Enter; of the rehearsal's twelve only wallet 8 is free, so it
+   says so and two nodes are typed (keys the demo lacks: they cannot answer
+   rounds; publicly `<NODE_2>`, `<NODE_3>`). After the ceremony 76 proposes
+   from the first eligible wallet but 0, 78 executes from the proposer.
+   Option 83f, before and after, is section 10's audit (the same code) on
+   the demo's in-memory state; it acknowledges option 31's nodes, the
+   nodes 76 proposed after the handover and option 1's attestor key.
+   Local: reset.
 
    ```bash
    reset   # local
@@ -226,22 +256,21 @@ the 66% bar (`TooFewNodes`, `SingleNodeQuorum`).
    `   Call: OracleManager.registerOracle(0x23618e81E3f5cdF7f54C3d65f7FBc0aBf5B21E8f, NODE_4, registered by an OracleParameters vote, 500)`
    (wallet 8), twice `   ⚠️  no free demo wallet: type the node's address`,
    `   Call: OracleManager.removeOracle(0x70997970C51812dc3A010C7d01b50e0d17dc79C8, D50 rotation)`
-   (and wallets 2 and 3),
-   `   Proposer: 0x15d34AAf54267DB7D7c367839AAf71A00a2C6A65` (wallet 4),
-   18 `✅ VOTE CAST SUCCESSFULLY!`, six times
+   (and wallets 2, 3), `   Proposer: 0x15d34AAf54267DB7D7c367839AAf71A00a2C6A65`
+   (wallet 4), 18 `✅ VOTE CAST SUCCESSFULLY!`, six times
    `   Executing from 0x15d34AAf54267DB7D7c367839AAf71A00a2C6A65 (the proposer)`
-   and `✅ PROPOSAL EXECUTED — callData ran, locked VGT burned`, and
-   option 39's `   Total Oracles: 3`. The first 83f lists the three
-   deployer-era nodes (`   ⚠️  OracleManager node 0x70997970C51812dc3A010C7d01b50e0d17dc79C8 (KYC_ORACLE) was registered by the deployer at block 53: …`).
+   and `✅ PROPOSAL EXECUTED — callData ran, locked VGT burned`, and option
+   39's `   Total Oracles: 3`. The first 83f lists the three deployer-era
+   nodes (`   ⚠️  OracleManager node 0x70997970C51812dc3A010C7d01b50e0d17dc79C8 (KYC_ORACLE) was registered by the deployer at block 53: …`).
    The `awk` prints only
    `   ✅ every registered OracleManager node is acknowledged in oracleNodes (3 registered, 6 acknowledged)`
    and `⚠️  Audit passed with warnings: see above.`: no deployer-era node
-   line, and a node a governance execution registered prints none
-   (R-56c-1). The warnings left are option 1's attestor key and the
-   deployer's VSC exemption. The drive's own summary (stdout, not the
-   log) ends `✓ demo ran to completion`; it ran 6:28 locally. CI runs the
-   same rotation with free wallets, a 33a round answered by the new nodes
-   only (`scripts/ci/regression-drives.sh`, drive `rotate`).
+   line; a node a governance execution registered prints none (R-56c-1).
+   The warnings left: option 1's attestor key and the deployer's VSC
+   exemption. The drive's summary (stdout) ends `✓ demo ran to completion`
+   (6:28 locally). CI runs the rotation with free wallets and a 33a round
+   answered by the new nodes only (`scripts/ci/regression-drives.sh`,
+   drive `rotate`).
 
 Ops pauses a misbehaving node at once (35a above pauses two:
 `   ⏸️  ops paused node 3 0x90F79bf6EB2c4f870365E785982E1f101E93b906`,
@@ -266,9 +295,9 @@ and its digest (section 6), `🏛️  Handover: governance accepts by vote`
 `🔍 Handover: verify`, and ends
 `✅ Handover complete: the deployer holds no power.` (or
 `⚠️  Handover complete with warnings: see above.`). A failure ends
-`❌ Handover failed: <reason>`, exit 1; the preflight refuses before the
-first transaction. Demo options 83c, 83d, 83e run the same ceremony
-(`scripts/ci/strict-drive.sh`), ending with the warnings line.
+`❌ Handover failed: <reason>`, exit 1 (the preflight refuses before the
+first transaction); a multisig role pauses it, exit 3 (section 2). Demo
+options 83c, 83d, 83e run it too (`scripts/ci/strict-drive.sh`).
 
 The rules for the window and after (the deployer key sends only votes
 and VGT `approve(governance)` in the window and nothing after it; no
@@ -288,34 +317,25 @@ npx hardhat console --network $NET <<'EOF'   # local
 const fs = await import("fs"); const cfg = JSON.parse(fs.readFileSync(process.env.HANDOVER_CONFIG, "utf8")); const s = await ethers.getSigners(); await (await (await ethers.getContractAt("InvestorRequestManager", process.env.IRM)).connect(s[cfg.ops]).transferOwnership(cfg.governance)).wait();
 EOF
 npx hardhat console --network $NET <<'EOF'
-const fs = await import("fs");
-const cfg = JSON.parse(fs.readFileSync(process.env.HANDOVER_CONFIG, "utf8"));
-const s = await ethers.getSigners();
-const irm = await ethers.getContractAt("InvestorRequestManager", process.env.IRM);
-console.log("owner:", await irm.owner(), "pendingOwner:", await irm.pendingOwner());
-if ((await irm.pendingOwner()) !== ethers.ZeroAddress) await (await irm.connect(s[cfg.ops]).transferOwnership(ethers.ZeroAddress)).wait();
-console.log("pendingOwner:", await irm.pendingOwner());
+const fs = await import("fs"); const cfg = JSON.parse(fs.readFileSync(process.env.HANDOVER_CONFIG, "utf8")); const s = await ethers.getSigners(); const irm = await ethers.getContractAt("InvestorRequestManager", process.env.IRM); console.log("owner:", await irm.owner(), "pendingOwner:", await irm.pendingOwner()); if ((await irm.pendingOwner()) !== ethers.ZeroAddress) await (await irm.connect(s[cfg.ops]).transferOwnership(ethers.ZeroAddress)).wait(); console.log("pendingOwner:", await irm.pendingOwner());
 EOF
 ```
 
 prints `owner: 0x70997970C51812dc3A010C7d01b50e0d17dc79C8 pendingOwner: 0x9A676e781A523b5d0C0e43731313A708CB607508`
-(ops; governance pending), then
-`pendingOwner: 0x0000000000000000000000000000000000000000`.
+(ops; governance pending), then `pendingOwner: 0x0000000000000000000000000000000000000000`.
 
 ## 6. The snapshot (B-6)
 
-The full phase writes `$HANDOVER_CONFIG.snapshot.json`, its sha256
-beside it (`….snapshot.json.sha256`) and prints the digest.
-`HANDOVER_PHASE=accept` requires that digest in `HANDOVER_SNAPSHOT_SHA256`
-and refuses a file whose hash differs from it or the sidecar. Whoever can
-rewrite `$RB` can rewrite the snapshot, the sidecar and any digest kept
-there together, so `$RB` must not hold the only copy. Local: L0.
+The full phase writes `$HANDOVER_CONFIG.snapshot.json`, its sha256 beside
+it (`….snapshot.json.sha256`) and prints the digest. `HANDOVER_PHASE=accept`
+requires that digest in `HANDOVER_SNAPSHOT_SHA256` and refuses a file whose
+hash differs from it or the sidecar. Whoever can rewrite `$RB` can rewrite
+all three, so `$RB` must not hold the only copy. Local: L0.
 
 1. Right after the full phase, record the digest it printed
    (`   snapshot sha256: <64 hex> (in …snapshot.json.sha256; record this line outside the run directory)`)
    outside `$RB` (the ceremony ticket, a signed message, a second person);
-   locally a shell variable stands in:
-   `export TICKET_SHA256=$(awk '/snapshot sha256:/ {print $3}' $RB/handover.log)`.
+   locally `export TICKET_SHA256=$(awk '/snapshot sha256:/ {print $3}' $RB/handover.log)`.
 
 2. Before every accept run, take the digest from that record, not `$RB`:
 
@@ -357,8 +377,7 @@ With `OPS_IDENTITY` unset it prints
 `   ⚠️  OPS_IDENTITY not set: KeyManager is authorized on no identity yet.` and
 `   The ops key must send: OnchainID(<ops identity>).authorizeManager(0x…) from the identity owner <ops key>`.
 With `OPS_IDENTITY=<ops OnchainID>` owned by the ops key it prints the
-`authorizeManager` call and
-`   The ops key must also send: OnchainID(<ops OnchainID>).pinRecoveryManager(0x…) from the identity owner 0x…`
+`authorizeManager` call and `   The ops key must also send: OnchainID(<ops OnchainID>).pinRecoveryManager(0x…) from the identity owner 0x…`
 (not driven locally); send both from the ops key (a pin is final). Then
 remove every MANAGEMENT key you do not know and seat at least two
 recovery agents (`setupKeyRecovery`, threshold at least 2).
@@ -368,8 +387,7 @@ recovery agents (`setupKeyRecovery`, threshold at least 2).
 The role (it sets the token's jurisdiction rule) is per token. Step 1
 makes governance the rule administrator on VSC and VGT
 (`   ✅ ComplianceRules rule administrator on VSC: governance 0x…`), step 5
-removes the deployer
-(`   ✅ deployer removed as ComplianceRules rule administrator on VSC`).
+removes the deployer (`   ✅ deployer removed as ComplianceRules rule administrator on VSC`).
 Afterwards only governance and ops hold it; a change is a ComplianceRules
 vote on `setRuleAdministrator(token, account, bool)`. Every completion
 prints `   ✅ no ComplianceRules rule administrator but governance and ops`.
@@ -393,8 +411,7 @@ reset   # local
 npm run demo:drive -- --strict --timeout 1800 --log $RB/d47.log 1 21 51 31 74 24:1:Alice 24:1:Bob 24:1:Carol 24:1:Dave 75a:4:1000:y 75a:5:1000:y 75a:6:1000:y 75a:7:1000:y 22 32 83c:y 83d 83e 38a:y 0
 ```
 
-The log shows `   ✅ no holder would be frozen by the bind`,
-`   ✅ proposal #11 executed` and
+The log shows `   ✅ no holder would be frozen by the bind`, `   ✅ proposal #11 executed` and
 `   ✅ rules.whitelistOracle(VSC) = 0x36C02dA8a0983159322a80FFE9F24b1acfF8B570`;
 a holder the bind would freeze stops it at `   ⛔ Bind refused: <reason>`.
 
@@ -406,13 +423,7 @@ must be able to re-list within hours. Local: L0.
 ```bash
 l0   # local
 npx hardhat console --network $NET <<'EOF'
-const fs = await import("fs");
-const cfg = JSON.parse(fs.readFileSync(process.env.HANDOVER_CONFIG, "utf8"));
-const g = await ethers.getContractAt("VanguardGovernance", cfg.governance);
-const rules = await ethers.getContractAt("ComplianceRules", await g.boundTarget(1));
-const bl = await ethers.getContractAt("BlacklistOracle", await rules.blacklistOracle(await g.boundTarget(3)));
-const ev = (await bl.queryFilter(bl.filters.BlacklistUpdated(), cfg.fromBlock ?? 0)).filter((e) => e.args.reason === "Oracle consensus clearing");
-console.log("consensus clearings:", ev.length, ev.map((e) => `${e.args.subject} @${e.blockNumber}`));
+const fs = await import("fs"); const cfg = JSON.parse(fs.readFileSync(process.env.HANDOVER_CONFIG, "utf8")); const g = await ethers.getContractAt("VanguardGovernance", cfg.governance); const rules = await ethers.getContractAt("ComplianceRules", await g.boundTarget(1)); const bl = await ethers.getContractAt("BlacklistOracle", await rules.blacklistOracle(await g.boundTarget(3))); const ev = (await bl.queryFilter(bl.filters.BlacklistUpdated(), cfg.fromBlock ?? 0)).filter((e) => e.args.reason === "Oracle consensus clearing"); console.log("consensus clearings:", ev.length, ev.map((e) => `${e.args.subject} @${e.blockNumber}`));
 EOF
 ```
 
@@ -474,18 +485,7 @@ one subject per clearing otherwise.
   ```bash
   l0   # local
   npx hardhat console --network $NET <<'EOF'
-  const fs = await import("fs");
-  const cfg = JSON.parse(fs.readFileSync(process.env.HANDOVER_CONFIG, "utf8"));
-  const s = await ethers.getSigners();
-  const { proposeCall, castAcceptanceVotes, settleProposal } = await import("./demo/utils/HandoverVotes.js");
-  const g = await ethers.getContractAt("VanguardGovernance", cfg.governance, s[cfg.proposer]);
-  const vsc = await ethers.getContractAt("Token", await g.boundTarget(3));
-  await (await vsc.connect(s[cfg.guardian]).pause()).wait();
-  console.log("VSC paused:", await vsc.paused());
-  const id = await proposeCall(g, s[cfg.proposer], 3, vsc, vsc.interface.encodeFunctionData("unpause"), "Unpause VSC", "runbook 12");
-  await castAcceptanceVotes(g, id, cfg.voters.map((v) => s[v]));
-  await settleProposal(g, id, "unpause VSC");
-  console.log("VSC paused:", await vsc.paused());
+  const fs = await import("fs"); const cfg = JSON.parse(fs.readFileSync(process.env.HANDOVER_CONFIG, "utf8")); const s = await ethers.getSigners(); const { proposeCall, castAcceptanceVotes, settleProposal } = await import("./demo/utils/HandoverVotes.js"); const g = await ethers.getContractAt("VanguardGovernance", cfg.governance, s[cfg.proposer]); const vsc = await ethers.getContractAt("Token", await g.boundTarget(3)); await (await vsc.connect(s[cfg.guardian]).pause()).wait(); console.log("VSC paused:", await vsc.paused()); const id = await proposeCall(g, s[cfg.proposer], 3, vsc, vsc.interface.encodeFunctionData("unpause"), "Unpause VSC", "runbook 12"); await castAcceptanceVotes(g, id, cfg.voters.map((v) => s[v])); await settleProposal(g, id, "unpause VSC"); console.log("VSC paused:", await vsc.paused());
   EOF
   ```
 
