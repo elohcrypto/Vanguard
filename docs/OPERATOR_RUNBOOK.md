@@ -10,7 +10,7 @@ line it prints when it worked. The rules and their reasons:
 [ZK](DEEP_DIVE_ZK.md)).
 
 Status: draft (Task 5.6; audit and digest since 5.6b). Section 2 final since
-Task 5.7 (external signer) and 5.13 (multisig roles); the rest after 5.8.
+Task 5.7 (external signer), 5.13 (multisig roles) and 5.14 (list oracles); the rest after 5.8.
 
 ## Conventions and the local rehearsal
 
@@ -118,10 +118,14 @@ prints (about 74.6 M gas; 2.24 ETH at 30 gwei)
   transaction on an explorer and fix the record by hand.
 - After section 3 the ceremony runs through the same signer
   (`npx hardhat run scripts/handover.ts --network remote`), takes the
-  escrow factory by vote and closes with seven warnings: the three
-  deployer-trusted issuer keys, the three deployer-era nodes (section 4)
-  and `   ⚠️  0x… is investorLimitExempt (set before the handover): …`
-  (the escrow fee wallet; nothing mints the deployer VSC).
+  escrow factory by vote, hands both list oracles (`"oracles"`; the unbound
+  whitelist oracle prints `   ⚠️  oracle 0x… is not bound on chain; handed over anyway`)
+  to ops and closes with seven warnings: the three deployer-trusted issuer
+  keys, the three deployer-era nodes (section 4) and
+  `   ⚠️  0x… is investorLimitExempt (set before the handover): …` (the escrow
+  fee wallet; nothing mints the deployer VSC). A list oracle of the plan's
+  OracleManager the deployer still holds (an `eth_getLogs` with no address
+  over ownership events) fails it; an `"oracles"` omitting one is refused.
 
 **Multisig ops and issuer admin (Task 5.13, Q11 = B).** A role at an address
 with code (a Safe) or in the config's `"externalRoles"` is external: nothing is
@@ -154,15 +158,13 @@ exe $RB/ms-handover.json.ops-transactions.json 10,12; exe $RB/ms-handover.json.i
 env -u MNEMONIC HANDOVER_SNAPSHOT_SHA256=$TICKET_SHA256 HANDOVER_PHASE=accept npx hardhat run scripts/handover.ts --network remote > $RB/ms-accept.log 2>&1; echo "exit $?"; grep "effect(s) hold" $RB/ms-accept.log; tail -1 $RB/ms-accept.log
 ```
 
-The deploy prints `exit 3` and
-`⏸️  awaiting 1 ops transaction: /tmp/vanguard-runbook/ms-record.ops-transactions.json`
-twice (the re-run sends nothing and adds
-`   ❌ not executed: [deploy.custody.accept] InvestorRequestManager 0x….acceptOwnership(): …`),
+The deploy prints `exit 3` and `⏸️  awaiting 1 ops transaction: /tmp/vanguard-runbook/ms-record.ops-transactions.json`
+twice (the re-run sends nothing and adds `   ❌ not executed: [deploy.custody.accept] InvestorRequestManager 0x….acceptOwnership(): …`),
 `executed 1 calls on 0x…`, `exit 0`, `   ✅ 1 role transaction effect(s) hold on chain` and the preflight line.
 The ceremony pauses after its snapshot, before any vote: `exit 3`,
 `⏸️  awaiting 4 issuerAdmin transactions: /tmp/vanguard-runbook/ms-handover.json.issuer-admin-transactions.json`,
-`⏸️  awaiting 1 ops transaction: /tmp/vanguard-runbook/ms-handover.json.ops-transactions.json`;
-then `executed 1 calls on 0x…`, `executed 4 calls on 0x…`, `exit 0`, `   ✅ 5 role transaction effect(s) hold on chain`
+`⏸️  awaiting 2 ops transactions: /tmp/vanguard-runbook/ms-handover.json.ops-transactions.json` (both list oracles' `acceptOwnership`);
+then `executed 2 calls on 0x…`, `executed 4 calls on 0x…`, `exit 0`, `   ✅ 6 role transaction effect(s) hold on chain`
 and `⚠️  Handover complete with warnings: see above.` (the seven warnings above).
 Before execution the accept phase exits 3 naming each call and a full re-run is
 refused (`… a full re-run would send them again …`, exit 1), sending nothing.
@@ -183,8 +185,7 @@ l0   # local
 grep "minVoterAge" $RB/handover.log
 ```
 
-A young identity stops it with
-`❌ Handover failed: Handover: voter 0x… has an identity younger than minVoterAge (Ns); governance refuses it ("Identity too new to vote"): …`;
+A young identity stops it with `❌ Handover failed: Handover: voter 0x… has an identity younger than minVoterAge (Ns); governance refuses it ("Identity too new to vote"): …`;
 L0 prints `   ✅ governance minVoterAge 420s is at least 7 days / TIME_SCALE (420s)`.
 
 ## 4. Oracle nodes (D50, Q4)
@@ -292,8 +293,7 @@ It prints `🔑 Handover: deployer powers` (steps 1, 2, 5, 3),
 `   snapshot written: /tmp/vanguard-runbook/handover.json.snapshot.json`
 and its digest (section 6), `🏛️  Handover: governance accepts by vote`
 (one `   ✅ Token: owned by governance (proposal #1)` line per contract),
-`🔍 Handover: verify`, and ends
-`✅ Handover complete: the deployer holds no power.` (or
+`🔍 Handover: verify`, and ends `✅ Handover complete: the deployer holds no power.` (or
 `⚠️  Handover complete with warnings: see above.`). A failure ends
 `❌ Handover failed: <reason>`, exit 1 (the preflight refuses before the
 first transaction); a multisig role pauses it, exit 3 (section 2). Demo
@@ -304,11 +304,9 @@ and VGT `approve(governance)` in the window and nothing after it; no
 governance nomination on an InvestorRequestManager or list oracle;
 factory-made identities only; re-sign claims after a revocation
 (`Signer does not have claim signer key`); exempt the treasury and fee
-wallets first) and their reasons:
-[TESTNET_CEREMONY](TESTNET_CEREMONY.md#runbook-rules-for-the-ceremony-and-after-plan-2f).
+wallets first) and their reasons: [TESTNET_CEREMONY](TESTNET_CEREMONY.md#runbook-rules-for-the-ceremony-and-after-plan-2f).
 Check and clear a nomination on the InvestorRequestManager from ops;
-`IRM` is the address the completion names in
-`   ✅ registrar / officer contract 0x… code matches the compiled InvestorRequestManager`.
+`IRM` is the address the completion names in `   ✅ registrar / officer contract 0x… code matches the compiled InvestorRequestManager`.
 The `# local` lines plant one to clear:
 
 ```bash
@@ -357,8 +355,7 @@ all three, so `$RB` must not hold the only copy. Local: L0.
    (sidecar rewritten too: `… but HANDOVER_SNAPSHOT_SHA256 is <hex>: …`).
 4. A full re-run writes a new pair (a read-only old file is replaced:
    `   (replaced a snapshot with sha256 <hex>)`; record the old pair first).
-   An unwritable directory stops it before step 1
-   (`❌ Handover failed: EACCES: permission denied, open '…snapshot.json.tmp'`).
+   An unwritable directory stops it before step 1 (`❌ Handover failed: EACCES: permission denied, open '…snapshot.json.tmp'`).
 
 ## 7. The KeyManager ops identity
 
@@ -373,8 +370,7 @@ must send. Local: after section 2's run:
 grep -E "OPS_IDENTITY|must send" $RB/deploy.log
 ```
 
-With `OPS_IDENTITY` unset it prints
-`   ⚠️  OPS_IDENTITY not set: KeyManager is authorized on no identity yet.` and
+With `OPS_IDENTITY` unset it prints `   ⚠️  OPS_IDENTITY not set: KeyManager is authorized on no identity yet.` and
 `   The ops key must send: OnchainID(<ops identity>).authorizeManager(0x…) from the identity owner <ops key>`.
 With `OPS_IDENTITY=<ops OnchainID>` owned by the ops key it prints the
 `authorizeManager` call and `   The ops key must also send: OnchainID(<ops OnchainID>).pinRecoveryManager(0x…) from the identity owner 0x…`
@@ -403,8 +399,10 @@ No deploy binds a WhitelistOracle to VSC; binding one turns on the
 investor-type tier rule for every holder, so list every holder at its
 tier first, then bind (a ComplianceRules vote on
 `ComplianceRules.setWhitelistOracle(VSC, oracle)`). On Sepolia ops
-operates it (Q3). Demo option 38a does both and votes the bind
-(`38a:y`). Local: reset.
+operates it (Q3; the ceremony hands it to ops, bound or not). Demo option
+38a does both and votes the bind (`38a:y`), listing as the owner, never
+wallet 0 after the ceremony; with a multisig ops it sends nothing
+(`   ⛔ 0x… not listed: the oracle's owner 0x… is a contract (a multisig ops): listing is ops's batch or manual step; nothing sent`). Local: reset.
 
 ```bash
 reset   # local
@@ -453,6 +451,8 @@ one subject per clearing otherwise.
   failing: `❌ Handover failed: audit failed (see ❌ above)`) and has
   `🔍 Handover audit: every completion line against the state governance derives now (no snapshot, no voting window)`.
   Before the ceremony: `❌ Handover failed: HANDOVER_PHASE=audit: the ceremony has not completed: governance does not own Token, …; run the full phase (or HANDOVER_PHASE=accept) first`.
+  A list oracle the deployer owns fails it (`   ❌ the deployer still owns (or has pending by its own nomination) list oracle(s) 0x… serving OracleManager 0x…`);
+  a stranger's nomination of the deployer only warns.
 
 ## 11. Recovery drills
 
