@@ -351,7 +351,8 @@ describe("Handover with a multisig ops and issuer admin (Task 5.13)", function (
         ops: externalRole(cfg.ops, "ops"),
       }),
     );
-    const bad = (await trustLines(o)).filter(([, ok]) => !ok).map(([l]) => l);
+    const all: [string, boolean][] = await trustLines(o);
+    const bad = all.filter(([, ok]) => !ok).map(([l]) => l);
     expect(bad.join("\n")).to.include(
       `registrar / officer contract ${cfg.ops} code matches the compiled`,
     );
