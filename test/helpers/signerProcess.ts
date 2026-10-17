@@ -121,5 +121,6 @@ export async function rpc(
     },
     body: JSON.stringify({ jsonrpc: "2.0", id: 1, method, params }),
   });
-  return { status: r.status, headers: r.headers, body: await r.json() };
+  const body: any = await r.json();
+  return { status: r.status, headers: r.headers, body };
 }
