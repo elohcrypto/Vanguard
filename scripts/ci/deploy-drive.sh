@@ -28,6 +28,9 @@
 #      option 61; nothing mints the deployer VSC) and the banner; the
 #      escrow factory moved to governance by vote; ops owns both list
 #      oracles, the unbound whitelist oracle included (Task 5.14)
+#   8. the post-ceremony votes (Task 5.15, Q15 = A, Q20 = B): round 1
+#      production nodes in and the attestor key re-approved, round 2 the
+#      deployer-era nodes out; the day-2 audit shows none
 #
 # USAGE  scripts/ci/deploy-drive.sh   (nodes on DEPLOY_NODE_PORT 8547 and
 #        DEPLOY_SIGNER_PORT 8549; exit 1 on failure)
@@ -289,4 +292,35 @@ done
 [[ $(count '^\s+✅ the deployer owns no list oracle serving OracleManager') -eq 1 ]] \
   || fail "no line: the deployer owns no list oracle"
 echo "7. ceremony complete: 3 issuer keys, 3 D50 nodes, exempt fee wallet, banner; escrow factory governance's; ops owns both list oracles"
+
+# 8. Post-ceremony votes (Q15 = A, Q20 = B; two rounds): round 1
+#    registers three production nodes (role-phrase wallets 12-14, keys
+#    unused here) and re-approves the deployer-trusted issuer key for its
+#    three circuits; round 2, once all three are registered, removes the
+#    three deployer-era nodes; the day-2 audit then has no deployer-era
+#    node or attestor line, only the exempt fee wallet's warning.
+NEW=$(MNEMONIC="$ROLES" node -e 'const { HDNodeWallet, Mnemonic } = require("ethers");
+  const m = Mnemonic.fromPhrase(process.env.MNEMONIC);
+  console.log([12, 13, 14].map((i, k) => HDNodeWallet.fromMnemonic(m, `m/44'"'"'/60'"'"'/0'"'"'/0/${i}`).address + ":NODE_" + (k + 1)).join(","));')
+NEW_NODES=$NEW npx hardhat run scripts/production/postCeremonyVotes.ts --network remote >"$OUT/post.log" 2>&1 \
+  || fail "the post-ceremony votes failed"
+grep -q "🗳️  round 1: 6 proposal(s), registrations and re-approvals" "$OUT/post.log" || fail "no round 1 of 6"
+grep -q "🗳️  round 2: 3 removal(s), every production node registered" "$OUT/post.log" || fail "no round 2 of 3"
+[[ $(sed -n '/round 2: /,$p' "$OUT/post.log" | grep -c "✅ register production node") -eq 0 ]] \
+  || fail "a registration settled in round 2"
+[[ $(grep -c "✅ register production node" "$OUT/post.log") -eq 3 ]] || fail "registrations"
+[[ $(grep -c "✅ re-approve issuer key" "$OUT/post.log") -eq 3 ]] || fail "re-approvals"
+[[ $(grep -c "✅ remove deployer-era node" "$OUT/post.log") -eq 3 ]] || fail "removals"
+NODES=$(grep -oE 'set handover.json "oracleNodes" to \[.*\]' "$OUT/post.log" | sed -E 's/.* to //')
+node -e 'const fs = require("fs"); const f = process.argv[1]; const c = JSON.parse(fs.readFileSync(f));
+  c.oracleNodes = JSON.parse(process.argv[2]); fs.writeFileSync(f, JSON.stringify(c, null, 2));' "$HANDOVER_CONFIG" "$NODES"
+HANDOVER_PHASE=audit npx hardhat run scripts/handover.ts --network remote >"$OUT/audit.log" 2>&1 \
+  || fail "the day-2 audit failed after the post-ceremony votes"
+A=$(sed -n '/Handover audit/,$p' "$OUT/audit.log")
+grep -q "❌" <<<"$A" && fail "a failed audit line"
+[[ $(grep -c "registered by the deployer" <<<"$A") -eq 0 ]] || fail "a deployer-era node line remains"
+[[ $(grep -c "was trusted by the deployer" <<<"$A") -eq 0 ]] || fail "a deployer-trusted attestor line remains"
+[[ $(grep -cE '^\s+⚠️' <<<"$A") -eq 1 && $(grep -cE "^\s+⚠️  $FEE is investorLimitExempt" <<<"$A") -eq 1 ]] \
+  || fail "the audit's warnings are not just the exempt fee wallet"
+echo "8. post-ceremony votes: round 1 (3 registrations, 3 re-approvals), then round 2 (3 removals); audit: no deployer-era node or attestor line, one warning (the exempt fee wallet)"
 echo "deploy drive PASS in $((SECONDS - START))s (logs $OUT)"
