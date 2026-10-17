@@ -293,10 +293,25 @@ async function registerInvestor(mod) {
       investorWallet = selectedInvestor.bank;
       console.log(`\n💡 Using investor's bank address as fee wallet`);
     } else {
-      // Create a new wallet for fees (use next available signer)
-      // Use signer[3] as default fee wallet (different from investor)
-      investorWallet = mod.state.signers[3].address;
-      console.log(`\n💡 Creating new fee wallet for investor`);
+      // Readiness review L-2: no silent default (wallet 3 is the
+      // compliance oracle node); the operator names the fee wallet.
+      const given = String(
+        await mod.promptUser(
+          "Fee wallet address (the investor's MultiSigWallet is preferred: option 23 -> 4): ",
+        ),
+      ).trim();
+      if (!ethers.isAddress(given)) {
+        displayError(
+          `No fee wallet: "${given}" is not an address; create the investor's MultiSigWallet (option 23 -> 4) or give a wallet`,
+        );
+        return;
+      }
+      if (given.toLowerCase() === String(investorAddress).toLowerCase()) {
+        displayError("The fee wallet must not be the investor's own address");
+        return;
+      }
+      investorWallet = ethers.getAddress(given);
+      console.log(`\n💡 Using the given fee wallet ${investorWallet}`);
     }
 
     const admin = await mod._investorAdmin(escrowFactory);

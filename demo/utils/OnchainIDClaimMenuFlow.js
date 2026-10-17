@@ -21,6 +21,7 @@ const {
   issuerOwnerSigner,
 } = require("./Kyc");
 const { onboard } = require("./Onboard");
+const ChainTime = require("./ChainTime");
 
 /**
  * Option 6: Manage KYC claims
@@ -238,6 +239,15 @@ async function demoClaimExpiry(mod) {
   displaySection("DEMO: KYC CLAIM EXPIRY", "⏳");
   if (mod.state.identities.size === 0) {
     displayError("Please create OnchainID first (option 3)");
+    return;
+  }
+  // Readiness review L-2: the demo jumps the clock 120 s, which only a dev
+  // node can; elsewhere it refuses before sending anything. Read through
+  // the module so a test can stand in for a public chain.
+  if (!(await ChainTime.canJumpTime())) {
+    displayError(
+      "Option 11 needs a dev node (it jumps the clock past a 60 s claim); on a public chain issue a short claim (option 6) and read it after expiry (option 8)",
+    );
     return;
   }
   const identityArray = Array.from(mod.state.identities.values());
