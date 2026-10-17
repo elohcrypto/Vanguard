@@ -101,11 +101,13 @@ async function proposeAcceptOwnership(
   );
 }
 
+/** Every voter votes yes; one that already voted (a re-run) is skipped. */
 async function castAcceptanceVotes(governance, proposalId, voters) {
   const vgt = await vgtOf(governance);
   const govAddr = await governance.getAddress();
   const cost = await governance.votingCost();
   for (const v of voters) {
+    if (await governance.hasVoted(proposalId, await addrOf(v))) continue;
     await send(vgt.connect(v).approve(govAddr, cost));
     await send(
       governance.connect(v).castVote(proposalId, true, "Support handover"),
@@ -143,9 +145,109 @@ async function settleProposal(
   return status;
 }
 
+const ACTIVE = 1;
+
+/** Every proposal `proposer` made: { id, p, canExecute, voting }. */
+async function proposalsBy(governance, proposer) {
+  const pAddr = await addrOf(proposer);
+  const now = (await ethers.provider.getBlock("latest")).timestamp;
+  const out = [];
+  for (let id = 1; id <= Number(await governance.proposalCount()); id++) {
+    const [p, , , canExecute] = await governance.getProposal(id);
+    if (!same(p.proposer, pAddr)) continue;
+    const active = Number(p.status) === ACTIVE;
+    out.push({ id, p, canExecute, voting: active && now <= p.votingEnds });
+  }
+  return out;
+}
+
+/**
+ * Task 5.15 (H-1, Q14 = A): `items` ({ label, ok?, title?, proposalType,
+ * target, callData, verify? }) are proposed together, every voter votes on
+ * each, then they are settled in the given order, so the whole set takes
+ * one voting period and delay, not one per item. The first that does not
+ * pass or execute stops the run: those executed stay, and a re-run adopts
+ * the proposals still open. Adopted only: the same proposer's proposal of
+ * the same type, target and calldata, still voting or passed but not
+ * executed; one that ended without passing is reported, never adopted.
+ */
+async function voteAll({ governance, proposer, voters, items, log }) {
+  const mine = await proposalsBy(governance, proposer);
+  const taken = new Set();
+  const open = [];
+  for (const it of items) {
+    const target = await addrOf(it.target);
+    const matches = mine.filter(
+      (m) =>
+        !taken.has(m.id) &&
+        Number(m.p.proposalType) === Number(it.proposalType) &&
+        same(m.p.target, target) &&
+        same(m.p.callData, it.callData) &&
+        Number(m.p.status) === ACTIVE,
+    );
+    const live = matches.filter((m) => m.voting || m.canExecute).pop();
+    // Past its vote without passing: settled (Rejected, deposits
+    // refundable) so no open proposal is left on a plan contract.
+    for (const m of matches.filter((x) => !x.voting && !x.canExecute)) {
+      await send(governance.connect(proposer).executeProposal(m.id));
+      log(
+        `   ⚠️  proposal #${m.id} (${it.label}) is past its vote without passing: not adopted; settled as ${STATUS[Number((await governance.getProposal(m.id))[0].status)]}, a new one is proposed`,
+      );
+    }
+    let id;
+    if (live) {
+      id = live.id;
+      taken.add(id);
+      log(`   ↪️  ${it.label}: proposal #${id} already open; adopted`);
+    } else {
+      id = await proposeCall(
+        governance,
+        proposer,
+        it.proposalType,
+        it.target,
+        it.callData,
+        it.title || it.label,
+      );
+    }
+    open.push({ ...it, id });
+  }
+  if (!open.length) return;
+  log(
+    `   🗳️  ${open.length} proposal(s) open at once: ${open.map((o) => `#${o.id}`).join(", ")}`,
+  );
+  const now = async () => (await ethers.provider.getBlock("latest")).timestamp;
+  for (const o of open) {
+    const [p] = await governance.getProposal(o.id);
+    if ((await now()) <= p.votingEnds) {
+      await module.exports.castAcceptanceVotes(governance, o.id, voters);
+    }
+  }
+  const [first] = await governance.getProposal(open[0].id);
+  for (const o of open) {
+    // Through module.exports, so a test can stop the run part-way.
+    try {
+      // R-56c-3: executed by the proposer, never the default wallet 0.
+      await module.exports.settleProposal(
+        governance.connect(proposer),
+        o.id,
+        o.label,
+      );
+    } catch (e) {
+      e.message += `; stopped here: proposals settled before it stay, a re-run finishes the rest (${open.length - open.indexOf(o)} left)`;
+      throw e;
+    }
+    if (o.verify) await o.verify();
+    log(`   ✅ ${o.ok || o.label} (proposal #${o.id})`);
+  }
+  log(
+    `   ⏱️  ${open.length} proposal(s) settled ${(await now()) - Number(first.createdAt)} s of chain time after #${open[0].id} was created`,
+  );
+}
+
 /**
  * Step 4 for every ACCEPTANCE_PLAN contract nominated to governance, then
- * any queued registry proposals. `contracts` maps plan keys to contracts.
+ * any queued registry proposals, all in one parallel vote (voteAll).
+ * `contracts` maps plan keys to contracts.
  */
 async function acceptAllByVote({
   governance,
@@ -162,11 +264,7 @@ async function acceptAllByVote({
   contracts = await withBoundRegistry(
     await withDerivedContracts({ ...contracts, governance }),
   );
-  const vote = async (id, label) => {
-    await castAcceptanceVotes(governance, id, voters);
-    // R-56c-3: executed by the proposer, never the default wallet 0.
-    await settleProposal(governance.connect(proposer), id, label);
-  };
+  const items = [];
   for (const e of planFor(contracts)) {
     const c = contracts[e.key];
     check(c, `no contract given for ${e.label}`);
@@ -178,32 +276,22 @@ async function acceptAllByVote({
       same(await c.pendingOwner(), govAddr),
       `${e.label} has not nominated governance`,
     );
-    const id = await proposeAcceptOwnership(
-      governance,
-      proposer,
-      c,
-      e.proposalType,
-      e.label,
-    );
-    await vote(id, e.label);
-    check(
-      same(await c.owner(), govAddr),
-      `${e.label} owner is not governance after the vote`,
-    );
-    log(`   ✅ ${e.label}: owned by governance (proposal #${id})`);
+    items.push({
+      label: e.label,
+      ok: `${e.label}: owned by governance`,
+      title: `Accept ownership of ${e.label}`,
+      proposalType: e.proposalType,
+      target: c,
+      callData: OWNABLE.encodeFunctionData("acceptOwnership"),
+      verify: async () =>
+        check(
+          same(await c.owner(), govAddr),
+          `${e.label} owner is not governance after the vote`,
+        ),
+    });
   }
-  for (const r of registryProposals) {
-    const id = await proposeCall(
-      governance,
-      proposer,
-      r.proposalType,
-      r.target,
-      r.callData,
-      r.label,
-    );
-    await vote(id, r.label);
-    log(`   ✅ ${r.label} (proposal #${id})`);
-  }
+  for (const r of registryProposals) items.push({ ...r });
+  await voteAll({ governance, proposer, voters, items, log });
 }
 
 /**
@@ -277,6 +365,7 @@ async function checkVoters(o, proposer, voters, count) {
 }
 
 module.exports = {
+  voteAll,
   proposeCall,
   proposeAcceptOwnership,
   castAcceptanceVotes,

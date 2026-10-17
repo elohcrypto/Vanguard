@@ -52,6 +52,155 @@ describe("Handover parallel acceptance (Q14 = A)", function () {
   const text = () => out.join("\n");
   const adopted = () => (text().match(/already open; adopted/g) || []).length;
 
+  it("proposes every acceptance before the first vote ends and settles them all", async function () {
+    await captured(out, () => runHandover(cfg, "full", cfgPath));
+    const ps = await accepts();
+    expect(ps.length).to.be.at.least(5);
+    const made = ps.map((p: any) => Number(p.createdAt));
+    const ends = ps.map((p: any) => Number(p.votingEnds));
+    // Every acceptance existed before any of their votes closed.
+    expect(Math.max(...made)).to.be.lessThan(Math.min(...ends));
+    expect(executed(ps)).to.equal(ps.length);
+    expect(text()).to.match(
+      new RegExp(`🗳️  ${ps.length} proposal\\(s\\) open at once`),
+    );
+    expect(text()).to.match(/⏱️  \d+ proposal\(s\) settled \d+ s of chain/);
+    expect(text()).to.contain("Handover complete");
+  });
+
+  it("stops at the first acceptance that does not pass; a re-run finishes the rest", async function () {
+    let third = 0;
+    let n = 0;
+    Votes.castAcceptanceVotes = async (gov: any, id: number, v: any[]) => {
+      if (++n === 3) return void (third = id); // nobody votes on it
+      return realVote(gov, id, v);
+    };
+    const err: any = await captured(out, () =>
+      runHandover(cfg, "full", cfgPath),
+    ).catch((e) => e);
+    expect(err?.code).to.equal("NOT_PASSED");
+    expect(err.message).to.match(
+      /stopped here: proposals settled before it stay, a re-run finishes the rest \(\d+ left\)/,
+    );
+    const before = await accepts();
+    expect(executed(before)).to.equal(2);
+
+    Votes.castAcceptanceVotes = realVote;
+    useDigest();
+    out.length = 0;
+    await captured(out, () => runHandover(cfg, "accept", cfgPath));
+    expect(text()).to.match(
+      new RegExp(
+        `proposal #${third} \\(.*\\) is past its vote without passing: not adopted; settled as Rejected, a new one is proposed`,
+      ),
+    );
+    expect(adopted()).to.equal(before.length - 3);
+    const after = await accepts();
+    expect(after.length).to.equal(before.length + 1);
+    expect(executed(after)).to.equal(before.length);
+    expect(text()).to.contain("Handover complete");
+  });
+
+  it("a run stopped mid-settlement resumes without a second proposal or vote", async function () {
+    let n = 0;
+    Votes.settleProposal = async (...a: any[]) => {
+      if (++n === 2) throw new Error("killed");
+      return realSettle(...a);
+    };
+    const err: any = await captured(out, () =>
+      runHandover(cfg, "full", cfgPath),
+    ).catch((e) => e);
+    expect(err?.message).to.match(/^killed; stopped here/);
+    const votes = async () =>
+      (await accepts()).reduce(
+        (v: number, p: any) => v + Number(p.votesFor),
+        0,
+      );
+    const count = (await accepts()).length;
+    const cast = await votes();
+    Votes.settleProposal = realSettle;
+    useDigest();
+    out.length = 0;
+    await captured(out, () => runHandover(cfg, "accept", cfgPath));
+    expect((await accepts()).length).to.equal(count);
+    expect(await votes()).to.equal(cast);
+    expect(adopted()).to.equal(count - 1);
+    expect(text()).to.contain("Handover complete");
+  });
+
+  it("a run stopped mid-vote resumes; no voter votes twice", async function () {
+    let n = 0;
+    Votes.castAcceptanceVotes = async (...a: any[]) => {
+      if (++n === 3) throw new Error("killed");
+      return realVote(...a);
+    };
+    const err: any = await captured(out, () =>
+      runHandover(cfg, "full", cfgPath),
+    ).catch((e) => e);
+    expect(err?.message).to.equal("killed");
+    const count = (await accepts()).length;
+    Votes.castAcceptanceVotes = realVote;
+    useDigest();
+    out.length = 0;
+    await captured(out, () => runHandover(cfg, "accept", cfgPath));
+    expect(adopted()).to.equal(count);
+    const ps = await accepts();
+    expect(ps.length).to.equal(count);
+    for (const p of ps) expect(Number(p.votesFor), p.title).to.equal(2);
+    expect(text()).to.contain("Handover complete");
+  });
+
+  it("adopts only the same proposer's open proposal of the same call", async function () {
+    await captured(out, () => runHandover(cfg, "full", cfgPath));
+    const gov = g();
+    const call = (vgt: number) =>
+      gov.interface.encodeFunctionData("setVotingCost", [
+        ethers.parseEther(String(vgt)),
+      ]);
+    const SYSTEM = 4;
+    const mine = await Votes.proposeCall(
+      gov,
+      f.proposer,
+      SYSTEM,
+      gov,
+      call(10),
+      "t",
+    );
+    await Votes.proposeCall(gov, f.voters[0], SYSTEM, gov, call(12), "t");
+    await Votes.proposeCall(gov, f.proposer, SYSTEM, gov, call(11), "t");
+    const before = Number(await gov.proposalCount());
+    out.length = 0;
+    await captured(out, () =>
+      Votes.voteAll({
+        governance: gov,
+        proposer: f.proposer,
+        voters: f.voters,
+        log: console.log,
+        items: [
+          {
+            label: "same call",
+            proposalType: SYSTEM,
+            target: gov,
+            callData: call(10),
+          },
+          {
+            label: "another's call",
+            proposalType: SYSTEM,
+            target: gov,
+            callData: call(12),
+          },
+        ],
+      }),
+    );
+    expect(text()).to.contain(
+      `same call: proposal #${mine} already open; adopted`,
+    );
+    expect(adopted()).to.equal(1);
+    // A new proposal for the call only another proposer had made.
+    expect(Number(await gov.proposalCount())).to.equal(before + 1);
+    expect(await gov.votingCost()).to.equal(ethers.parseEther("12"));
+  });
+
   it("refuses every phase up front on an RPC without historical state", async function () {
     const real = ethers.provider.getBalance.bind(ethers.provider);
     (ethers.provider as any).getBalance = async (a: any, tag?: any) => {
