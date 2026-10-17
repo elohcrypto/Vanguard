@@ -1,4 +1,5 @@
-import { HardhatUserConfig, extendEnvironment } from "hardhat/config";
+import { HardhatUserConfig, extendEnvironment, subtask } from "hardhat/config";
+import { TASK_TEST_GET_TEST_FILES } from "hardhat/builtin-tasks/task-names";
 import { HDNodeWallet, Wallet } from "ethers";
 import "@nomicfoundation/hardhat-toolbox";
 import "hardhat-contract-sizer";
@@ -40,6 +41,17 @@ export function refuseTestKeys(network: string, accounts: any): void {
 extendEnvironment((hre) =>
   refuseTestKeys(hre.network.name, (hre.network.config as any).accounts),
 );
+
+// Task 5.15 (L-6): TEST_SHARD=<i>/<n> runs shard i of n of the test files
+// (`hardhat test` and `hardhat coverage` both collect them here), as
+// scripts/ci/test-shards.js deals them; TEST_SHARD_RUN=coverage balances
+// by the coverage run's weights. A file the shards miss is an error.
+subtask(TASK_TEST_GET_TEST_FILES).setAction(async (args, hre, runSuper) => {
+  const files: string[] = await runSuper(args);
+  if (!process.env.TEST_SHARD) return files;
+  const { shardOf } = require("./scripts/ci/test-shards.js");
+  return shardOf(process.env.TEST_SHARD, process.env.TEST_SHARD_RUN, files);
+});
 
 const config: HardhatUserConfig = {
   solidity: {

@@ -36,7 +36,21 @@
 #
 # Leaves coverage.json for scripts/ci/branch-floors.js (run "contracts").
 #
-# USAGE  scripts/ci/coverage-ratchet.sh   (exit 1 on a finding)
+# Task 5.15 (L-6): CI runs it in shards (scripts/ci/test-shards.js), each a
+# job of its own with the run's gates, then merges them
+# (scripts/ci/coverage-merge.js sums every hit count) and applies the line
+# baseline and the branch floors to the merge. Measured at 76ab084
+# against an unsharded run of the same tree: 1861 passing and 170 pending
+# in both, lines 97.61 in both, every contract floor's figure equal;
+# overall branches 91.88 merged for 91.85, one arm (GovernanceProposals.sol
+# :141, `target != expected`) hit in both shards and 0 times unsharded.
+#
+# USAGE  scripts/ci/coverage-ratchet.sh   (the whole suite; exit 1 on a finding)
+#        scripts/ci/coverage-ratchet.sh --shard <i> <n>
+#          shard i of n: tests pass and the near-timeout guard; no line
+#          check (its own figure is printed)
+#        scripts/ci/coverage-ratchet.sh --merged <shard coverage.json>...
+#          merges the shards into coverage.json, then the line check
 #        scripts/ci/coverage-ratchet.sh --from <log> <timings>
 #          checks a saved run's log and timings without running it
 
@@ -45,35 +59,58 @@ cd "$(dirname "$0")/../.."
 BASELINE=97
 LOG=coverage.log
 TIMINGS=coverage-timings.log
-if [ "${1:-}" = "--from" ]; then
-  LOG=${2:?--from <log> <timings>}
-  TIMINGS=${3:?--from <log> <timings>}
-  run=0
-  grep -qE '^\s+[0-9]+ failing' "$LOG" && run=1
-else
-  rm -f "$TIMINGS"
-  run=0
-  ZK_PROOFS=0 MOCHA_TIMINGS="$PWD/$TIMINGS" npm run test:coverage > "$LOG" 2>&1 || run=$?
-fi
-# Informational: mocha's "N passing (10m)" carries a suffix, and a run
-# with no pending or failing line is the normal case.
-grep -E '^\s+[0-9]+ (passing|failing|pending)' "$LOG" || true
-# A run (or a replayed log) passes only if mocha summarised it: a crash,
-# or a mocha that stalled and let hardhat exit 0, leaves no "N passing".
-if ! grep -qE '^\s+[0-9]+ passing' "$LOG"; then
-  echo "::error::no mocha summary in $LOG: the run stopped before mocha finished"
-  run=1
-fi
-slow=0
-node scripts/ci/mocha-log.js durations "$TIMINGS" || slow=1
-if [ "$run" -ne 0 ]; then
-  echo "::error::the instrumented test run failed; see $LOG"
-  node scripts/ci/mocha-log.js failures "$LOG" 200
-  tail -20 "$LOG"
+SHARD=
+MODE=${1:-}
+run=0
+case "$MODE" in
+  --from)
+    LOG=${2:?--from <log> <timings>}
+    TIMINGS=${3:?--from <log> <timings>}
+    grep -qE '^\s+[0-9]+ failing' "$LOG" && run=1
+    ;;
+  --merged)
+    shift
+    LOG=coverage-merge.log
+    node scripts/ci/coverage-merge.js coverage.json "$@" > "$LOG" || run=1
+    cat "$LOG"
+    ;;
+  *)
+    if [ "${1:-}" = "--shard" ]; then
+      SHARD="${2:?--shard <i> <n>}/${3:?--shard <i> <n>}"
+      export TEST_SHARD=$SHARD TEST_SHARD_RUN=coverage # hardhat.config.ts
+    fi
+    rm -f "$TIMINGS"
+    ZK_PROOFS=0 MOCHA_TIMINGS="$PWD/$TIMINGS" npm run test:coverage > "$LOG" 2>&1 || run=$?
+    ;;
+esac
+if [ "$MODE" != "--merged" ]; then
+  # Informational: mocha's "N passing (10m)" carries a suffix, and a run
+  # with no pending or failing line is the normal case.
+  grep -E '^\s+[0-9]+ (passing|failing|pending)' "$LOG" || true
+  # A run (or a replayed log) passes only if mocha summarised it: a crash,
+  # or a mocha that stalled and let hardhat exit 0, leaves no "N passing".
+  if ! grep -qE '^\s+[0-9]+ passing' "$LOG"; then
+    echo "::error::no mocha summary in $LOG: the run stopped before mocha finished"
+    run=1
+  fi
+  slow=0
+  node scripts/ci/mocha-log.js durations "$TIMINGS" || slow=1
+  if [ "$run" -ne 0 ]; then
+    echo "::error::the instrumented test run failed; see $LOG"
+    node scripts/ci/mocha-log.js failures "$LOG" 200
+    tail -20 "$LOG"
+    exit 1
+  fi
+  [ "$slow" -eq 0 ] || { echo "::error::the near-timeout guard failed (above)"; exit 1; }
+elif [ "$run" -ne 0 ]; then
+  echo "::error::the shard merge failed (above)"
   exit 1
 fi
-[ "$slow" -eq 0 ] || { echo "::error::the near-timeout guard failed (above)"; exit 1; }
 lines=$(grep -E '^All files' "$LOG" | awk -F'|' '{gsub(/ /,"",$5); print $5}')
+if [ -n "$SHARD" ]; then
+  echo "shard $SHARD line coverage: ${lines:-<none>}% (the baseline applies to the merge)"
+  exit 0
+fi
 echo "line coverage: ${lines:-<none>}% (baseline $BASELINE)"
 if [ -z "$lines" ]; then
   echo "::error::coverage summary line not found; see $LOG"

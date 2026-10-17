@@ -22,15 +22,16 @@ env:
   CIRCOM_VERSION: v2.2.3
 
 # WALL-TIME TARGET: 40 minutes per run (owner decision Q12, plan v2 Task
-# 5.10). One job ran every step in sequence until Task 5.10: 60-67 min
-# (runs 38310673082, 38364942042: tests 18:01, coverage 19:52, proof
-# coverage 12:03, demo stages 15:06, the rest ~2 min). Now `compile`
-# builds once and uploads the contract artifacts; `gates` needs nothing;
-# tests, coverage, zk-coverage and demo run in parallel after compile.
-# The critical path is compile (~2 min) + coverage (~22 min). Each job
-# rebuilds the circuits (scripts/ci/zk-circuits.sh, ~30 s) rather than
-# download ~400 MB of zkeys. Step bodies live in scripts/ci/; each job's
-# timeout-minutes is a hang guard, not a pace target.
+# 5.10). One job ran every step in sequence until Task 5.10: 60-67 min.
+# Now `compile` builds once and uploads the contract artifacts; `gates`
+# needs nothing; tests, coverage, zk-coverage and demo run in parallel
+# after compile, each starting with .github/actions/prepare. At 76ab084
+# (run 38939602184) the run took 45:27: compile 2:14, coverage 43:07,
+# tests 36:06, zk-coverage 25:10, demo 24:21. Since Task 5.15 tests and
+# coverage run in two shards each and coverage-merge applies the
+# coverage gates to the merge, so the critical path is compile plus the
+# slowest of a shard (+ the ~1.5 min merge), zk-coverage and demo. Step
+# bodies live in scripts/ci/; each job's timeout-minutes is a hang guard.
 #
 # Actions are pinned by commit SHA and updated by hand (no Dependabot
 # here). Re-resolve a pin with `gh api repos/<owner>/<repo>/git/ref/tags/
@@ -128,46 +129,69 @@ jobs:
       - name: Audit ratchet (no NEW high vulnerabilities)
         run: node scripts/ci/audit-ratchet.js
 
+  # Task 5.15 (L-6): the suite and the coverage run each in two shards
+  # (scripts/ci/test-shards.js: every test file in exactly one shard).
   tests:
     needs: compile
     runs-on: ubuntu-latest
     timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix: { shard: [1, 2] }
+    name: tests (${{ matrix.shard }}/2)
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with: { persist-credentials: false }
-      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
-        with: { node-version: "22", cache: npm }
-      - name: Install dependencies
-        run: npm ci
-      - name: Download compiled contracts
-        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
-        with: { name: contracts }
-      - name: Restore circom binary
-        uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
-        with:
-          path: ~/.cargo/bin/circom
-          key: circom-${{ runner.os }}-${{ env.CIRCOM_VERSION }}
-          fail-on-cache-miss: true
-      - name: Restore Powers of Tau
-        uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
-        with:
-          path: build/circuits/powersOfTau28_hez_final_15.ptau
-          key: ptau-hez-final-15-982372c8
-      - name: Build and verify ZK circuits
-        run: scripts/ci/zk-circuits.sh
-      - name: Run tests
-        run: npm test
+      - uses: ./.github/actions/prepare
+      - name: Run tests (this shard's files)
+        run: TEST_SHARD=${{ matrix.shard }}/2 npm test
       # Task 4.15: the transfer-gas table (scripts/gas-analysis.ts) as a
       # recorded-baseline ratchet: a scenario more than 1,500 gas above its
       # recorded figure fails, a drop prints a notice. The hard gate stays
       # the in-test bound (VerificationCache: E <= A + 40,000).
       - name: Gas ratchet (transfer gas table)
+        if: matrix.shard == 1
         run: npm run gas:claims
 
   coverage:
     needs: compile
     runs-on: ubuntu-latest
     timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix: { shard: [1, 2] }
+    name: coverage (${{ matrix.shard }}/2)
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with: { persist-credentials: false }
+      - uses: ./.github/actions/prepare
+      # The run itself is a gate (no `|| true`); a test over 75% of its
+      # mocha timeout fails it (scripts/ci/mocha-log.js).
+      - name: Coverage shard (tests pass, near-timeout guard)
+        run: scripts/ci/coverage-ratchet.sh --shard ${{ matrix.shard }} 2
+      - name: Upload shard coverage
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: coverage-shard-${{ matrix.shard }}
+          path: coverage.json
+          if-no-files-found: error
+          retention-days: 1
+      - name: Upload coverage logs (on failure)
+        if: failure()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: coverage-logs-${{ matrix.shard }}
+          path: |
+            coverage.log
+            coverage-timings.log
+          retention-days: 7
+
+  # Baseline 97 lines and the per-contract floors
+  # (scripts/ci/branch-floors.json) on the shards' merged coverage.json.
+  coverage-merge:
+    needs: coverage
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with: { persist-credentials: false }
@@ -175,39 +199,12 @@ jobs:
         with: { node-version: "22", cache: npm }
       - name: Install dependencies
         run: npm ci
-      - name: Download compiled contracts
-        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
-        with: { name: contracts }
-      - name: Restore circom binary
-        uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
-        with:
-          path: ~/.cargo/bin/circom
-          key: circom-${{ runner.os }}-${{ env.CIRCOM_VERSION }}
-          fail-on-cache-miss: true
-      - name: Restore Powers of Tau
-        uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
-        with:
-          path: build/circuits/powersOfTau28_hez_final_15.ptau
-          key: ptau-hez-final-15-982372c8
-      # ZKSystemIntegration proves under ZK_PROOFS=0 too.
-      - name: Build and verify ZK circuits
-        run: scripts/ci/zk-circuits.sh
-      # Baseline 95 lines; the run itself is a gate (no `|| true`); a test
-      # over 75% of its mocha timeout fails it (scripts/ci/mocha-log.js).
-      - name: Coverage ratchet (tests pass; no DROP in line coverage)
-        run: scripts/ci/coverage-ratchet.sh
-      # Per-contract floors (scripts/ci/branch-floors.json), this run's json.
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with: { pattern: coverage-shard-*, path: shards }
+      - name: Coverage ratchet (no DROP in merged line coverage)
+        run: scripts/ci/coverage-ratchet.sh --merged shards/*/coverage.json
       - name: Branch floors (contract run)
         run: node scripts/ci/branch-floors.js contracts coverage.json
-      - name: Upload coverage logs (on failure)
-        if: failure()
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
-        with:
-          name: coverage-logs
-          path: |
-            coverage.log
-            coverage-timings.log
-          retention-days: 7
 
   zk-coverage:
     needs: compile
@@ -216,26 +213,7 @@ jobs:
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with: { persist-credentials: false }
-      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
-        with: { node-version: "22", cache: npm }
-      - name: Install dependencies
-        run: npm ci
-      - name: Download compiled contracts
-        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
-        with: { name: contracts }
-      - name: Restore circom binary
-        uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
-        with:
-          path: ~/.cargo/bin/circom
-          key: circom-${{ runner.os }}-${{ env.CIRCOM_VERSION }}
-          fail-on-cache-miss: true
-      - name: Restore Powers of Tau
-        uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
-        with:
-          path: build/circuits/powersOfTau28_hez_final_15.ptau
-          key: ptau-hez-final-15-982372c8
-      - name: Build and verify ZK circuits
-        run: scripts/ci/zk-circuits.sh
+      - uses: ./.github/actions/prepare
       # PrivacyManager's proof-gated branches run only on real proofs.
       - name: Proof suites under coverage (ZK_PROOFS=1)
         run: scripts/ci/zk-coverage.sh
@@ -264,26 +242,7 @@ jobs:
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with: { persist-credentials: false }
-      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
-        with: { node-version: "22", cache: npm }
-      - name: Install dependencies
-        run: npm ci
-      - name: Download compiled contracts
-        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
-        with: { name: contracts }
-      - name: Restore circom binary
-        uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
-        with:
-          path: ~/.cargo/bin/circom
-          key: circom-${{ runner.os }}-${{ env.CIRCOM_VERSION }}
-          fail-on-cache-miss: true
-      - name: Restore Powers of Tau
-        uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
-        with:
-          path: build/circuits/powersOfTau28_hez_final_15.ptau
-          key: ptau-hez-final-15-982372c8
-      - name: Build and verify ZK circuits
-        run: scripts/ci/zk-circuits.sh
+      - uses: ./.github/actions/prepare
       - name: Demo deployment smoke test
         run: scripts/ci/demo-smoke.sh
       - name: Whitelist root + proof CLI
