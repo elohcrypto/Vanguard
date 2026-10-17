@@ -105,13 +105,20 @@ export async function runSigner(
   });
 }
 
+/** What rpc() answers: the HTTP status, headers (lower-case) and body. */
+export type RpcAnswer = {
+  status: number;
+  headers: Record<string, string>;
+  body: any;
+};
+
 /** One JSON-RPC call: its HTTP status, headers and body. */
 export async function rpc(
   live: Live,
   method: string,
   params: unknown[] = [],
   headers: Record<string, string> = {},
-) {
+): Promise<RpcAnswer> {
   const r = await fetch(live.url, {
     method: "POST",
     headers: {
@@ -122,5 +129,5 @@ export async function rpc(
     body: JSON.stringify({ jsonrpc: "2.0", id: 1, method, params }),
   });
   const body: any = await r.json();
-  return { status: r.status, headers: r.headers, body };
+  return { status: r.status, headers: Object.fromEntries(r.headers), body };
 }
