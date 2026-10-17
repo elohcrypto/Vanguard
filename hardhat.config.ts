@@ -54,12 +54,18 @@ subtask(TASK_TEST_GET_TEST_FILES).setAction(async (args, hre, runSuper) => {
   return shardOf(process.env.TEST_SHARD, process.env.TEST_SHARD_RUN, files);
 });
 
-/** { Authorization } for the signer at `url`, when its token file exists. */
-function signerAuth(url: string): Record<string, string> {
-  const { tokenFileFor } = require("./scripts/production/rpcGuard.js");
+/**
+ * { Authorization } for the signer at `url`, when its token file exists;
+ * a token file not this user's own 0600 file is refused (review L-3).
+ */
+export function signerAuth(url: string): Record<string, string> {
+  const {
+    tokenFileFor,
+    readToken,
+  } = require("./scripts/production/rpcGuard.js");
   const file = tokenFileFor(new URL(url).port || "80");
   if (!fs.existsSync(file)) return {};
-  return { Authorization: `Bearer ${fs.readFileSync(file, "utf8").trim()}` };
+  return { Authorization: `Bearer ${readToken(file)}` };
 }
 
 const config: HardhatUserConfig = {

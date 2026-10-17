@@ -5,6 +5,7 @@ import * as http from "http";
 import * as os from "os";
 import * as path from "path";
 import { fakeUpstream, Live, rpc, runSigner } from "../helpers/signerProcess";
+import { signerAuth } from "../../hardhat.config";
 
 /**
  * Task 5.15 (the lead's security requirement): who may talk to the local
@@ -92,6 +93,40 @@ describe("Signer request guard (rpcGuard.js)", function () {
       "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266",
     ],
   ];
+
+  it("the CLIs read a token only from this user's own 0600 file (review L-3)", function () {
+    const E = "SIGNER_TOKEN_FILE";
+    const was = process.env[E];
+    const url = "http://127.0.0.1:8549";
+    try {
+      const f = path.join(dir, "cli.token");
+      fs.writeFileSync(f, "a".repeat(64) + "\n", { mode: 0o600 });
+      process.env[E] = f;
+      expect(signerAuth(url)).to.deep.equal({
+        Authorization: `Bearer ${"a".repeat(64)}`,
+      });
+      fs.chmodSync(f, 0o644);
+      expect(() => signerAuth(url)).to.throw(
+        /must be this user's own file, mode 0600/,
+      );
+      const link = path.join(dir, "cli-link.token");
+      fs.chmodSync(f, 0o600);
+      fs.symlinkSync(f, link);
+      process.env[E] = link;
+      expect(() => signerAuth(url)).to.throw(/must be this user's own file/);
+      process.env[E] = path.join(dir, "absent.token");
+      expect(signerAuth(url)).to.deep.equal({});
+      // The default lives in this user's 0700 directory.
+      delete process.env[E];
+      const { tokenFileFor } = require("../../scripts/production/rpcGuard");
+      const def = tokenFileFor(1, {}, true);
+      expect(path.basename(def)).to.equal("1.token");
+      expect(fs.statSync(path.dirname(def)).mode & 0o777).to.equal(0o700);
+    } finally {
+      if (was === undefined) delete process.env[E];
+      else process.env[E] = was;
+    }
+  });
 
   for (const [script, envOf] of SIGNERS) {
     it(`${path.basename(script)}: a malformed call or a dead upstream is an error answer, never a crash (review L-1)`, async function () {

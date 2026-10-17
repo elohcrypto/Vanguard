@@ -12,8 +12,10 @@
  *    rebinding);
  *  - carry `Authorization: Bearer <token>`, the random 32-byte token the
  *    signer wrote at start to a 0600 file (SIGNER_TOKEN_FILE, default
- *    tokenFileFor(port)); compared in constant time. The CLIs send it
- *    through the `remote` network's httpHeaders (hardhat.config.ts);
+ *    tokenFileFor(port): this user's 0700 directory under the temp dir);
+ *    compared in constant time. The CLIs send it through the `remote`
+ *    network's httpHeaders (hardhat.config.ts), reading it only from a
+ *    file this user owns with mode 0600 (readToken);
  *  - stay under MAX_BODY and call an allowed JSON-RPC method.
  */
 "use strict";
@@ -53,12 +55,40 @@ const OWN = [
   "eth_sign",
 ];
 
-/** The token file for a signer on `port` (SIGNER_TOKEN_FILE overrides). */
-function tokenFileFor(port, env = process.env) {
-  return (
-    env.SIGNER_TOKEN_FILE ||
-    path.join(os.tmpdir(), `vanguard-signer-${port}.token`)
-  );
+/** Refuse anything but this user's own plain file or dir, no group/other bits. */
+function ownedPrivate(p, dir = false) {
+  const st = fs.lstatSync(p);
+  const kind = dir ? st.isDirectory() : st.isFile();
+  if (!kind || st.uid !== process.getuid() || st.mode & 0o077) {
+    throw new Error(
+      `${p} must be this user's own ${dir ? "directory, mode 0700" : "file, mode 0600"} (review L-3): refusing`,
+    );
+  }
+}
+
+/**
+ * The token file for a signer on `port`: SIGNER_TOKEN_FILE, else
+ * <tmp>/vanguard-signer-<uid>/<port>.token in this user's 0700 directory
+ * (made when `make`, checked always).
+ */
+function tokenFileFor(port, env = process.env, make = false) {
+  if (env.SIGNER_TOKEN_FILE) return env.SIGNER_TOKEN_FILE;
+  const d = path.join(os.tmpdir(), `vanguard-signer-${process.getuid()}`);
+  if (make) {
+    try {
+      fs.mkdirSync(d, { mode: 0o700 });
+    } catch (e) {
+      if (e.code !== "EEXIST") throw e;
+    }
+  }
+  if (fs.existsSync(d)) ownedPrivate(d, true);
+  return path.join(d, `${port}.token`);
+}
+
+/** The token in `file`, refused unless the file is this user's, 0600. */
+function readToken(file) {
+  ownedPrivate(file);
+  return fs.readFileSync(file, "utf8").trim();
 }
 
 /**
@@ -219,7 +249,7 @@ async function guardedServer(handle, opts) {
     throw new Error(`bound to ${addr.address}, not 127.0.0.1: refusing`);
   }
   port = addr.port;
-  const tokenFile = opts.tokenFile || tokenFileFor(port);
+  const tokenFile = opts.tokenFile || tokenFileFor(port, process.env, true);
   token = writeToken(tokenFile);
   return { server, port, tokenFile };
 }
@@ -228,6 +258,7 @@ module.exports = {
   MAX_BODY,
   READS,
   tokenFileFor,
+  readToken,
   writeToken,
   refusal,
   allowed,
