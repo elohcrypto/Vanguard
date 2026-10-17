@@ -158,6 +158,39 @@ async function privacySteps({ o, d, dAddr, ok, log }) {
 }
 
 /**
+ * The issuer keys PrivacyManager still trusts by the deployer's own call:
+ * the last TrustedAttestorSet per (circuit, key) set it trusted with `by`
+ * the deployer. [{ circuitId, name, ax, ay }]. A governance vote that sets
+ * the same key trusted again (setTrustedAttestor(..., true): no state or
+ * epoch change) makes governance the last setter (Q20 = B, Task 5.15:
+ * scripts/production/postCeremonyVotes.ts).
+ */
+async function deployerTrustedAttestors(o, dAddr, c = o.privacyManager) {
+  const logs = await scanLogs(c, c.filters.TrustedAttestorSet(), o);
+  const last = new Map();
+  for (const e of logs) last.set(`${e.args.circuitId}:${e.args.attestor}`, e);
+  const out = [];
+  for (const e of last.values()) {
+    const named = ATTESTATION_CIRCUITS.find(
+      ([, id]) => id === e.args.circuitId,
+    );
+    if (
+      e.args.trusted &&
+      same(e.args.by, dAddr) &&
+      (await c.trustedAttestor(e.args.circuitId, e.args.attestor))
+    ) {
+      out.push({
+        circuitId: e.args.circuitId,
+        name: named ? named[0] : e.args.circuitId,
+        ax: e.args.ax,
+        ay: e.args.ay,
+      });
+    }
+  }
+  return out;
+}
+
+/**
  * Completion lines: [label, pass] for both privacy contracts, including the
  * code-hash pins and the trusted attestor count per attestation circuit.
  * Pushes to `warnings` (review 3.3 LOW-3) when the current whitelist root
@@ -218,24 +251,10 @@ async function privacyLines(
     }
     // Review 3.7b L2, like the deployer-root warning: a key the deployer
     // trusted lets it keep vouching for attestations after the handover.
-    const trustLogs = await scanLogs(c, c.filters.TrustedAttestorSet(), o);
-    const lastTrust = new Map();
-    for (const e of trustLogs) {
-      lastTrust.set(`${e.args.circuitId}:${e.args.attestor}`, e);
-    }
-    for (const e of lastTrust.values()) {
-      const name = ATTESTATION_CIRCUITS.find(
-        ([, id]) => id === e.args.circuitId,
-      );
-      if (
-        e.args.trusted &&
-        same(e.args.by, dAddr) &&
-        (await c.trustedAttestor(e.args.circuitId, e.args.attestor))
-      ) {
-        const w = `PrivacyManager issuer key (Ax ${e.args.ax}) for ${name ? name[0] : e.args.circuitId} was trusted by the deployer: re-approve it by a PrivacyParameters vote or untrust it`;
-        warnings.push(w);
-        residual.push(w);
-      }
+    for (const k of await deployerTrustedAttestors(o, dAddr, c)) {
+      const w = `PrivacyManager issuer key (Ax ${k.ax}) for ${k.name} was trusted by the deployer: re-approve it by a PrivacyParameters vote or untrust it`;
+      warnings.push(w);
+      residual.push(w);
     }
     used = await c.zkVerifier();
     const v = await ethers.getContractAt("ZKVerifierIntegrated", used);
@@ -287,4 +306,10 @@ async function privacyLines(
   return lines;
 }
 
-module.exports = { wiredPrivacy, preflightPrivacy, privacySteps, privacyLines };
+module.exports = {
+  wiredPrivacy,
+  preflightPrivacy,
+  privacySteps,
+  privacyLines,
+  deployerTrustedAttestors,
+};
