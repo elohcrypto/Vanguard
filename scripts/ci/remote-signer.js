@@ -12,7 +12,11 @@
  *
  * The wallets are the mnemonic's first SIGNER_COUNT (12) keys, the role
  * wallets of docs/TESTNET_SETUP.md. Test tooling only: a production
- * deploy uses a real signer (Frame, a hardware wallet behind it).
+ * deploy uses a real signer (scripts/production/signer.js, or Frame).
+ *
+ * Readiness review L-3: it refuses an upstream chain other than 31337
+ * unless SIGNER_ALLOW_CHAIN names that chain id, and the published
+ * Hardhat phrase off 31337 always (its keys are anyone's). Exit 3.
  */
 "use strict";
 
@@ -103,33 +107,63 @@ async function answer(call) {
   }
 }
 
-http
-  .createServer((req, res) => {
-    let body = "";
-    req.on("data", (c) => (body += c));
-    req.on("end", async () => {
-      let out;
-      try {
-        const call = JSON.parse(body);
-        out = Array.isArray(call)
-          ? await Promise.all(call.map(answer))
-          : await answer(call);
-      } catch (e) {
-        out = {
-          jsonrpc: "2.0",
-          id: null,
-          error: { code: -32700, message: e.message },
-        };
-      }
-      res.setHeader("content-type", "application/json");
-      res.end(JSON.stringify(out));
-    });
-  })
-  .listen(port, "127.0.0.1", () =>
-    console.log(
-      `remote signer on 127.0.0.1:${port}: ${wallets.length} keys, upstream ${upstream}`,
-    ),
-  );
+const HARDHAT_PHRASE =
+  "test test test test test test test test test test test junk";
+
+/** L-3: the upstream's chain id, refused unless 31337 or allowed. */
+async function guardChain() {
+  const r = await forward({ jsonrpc: "2.0", id: 1, method: "eth_chainId" });
+  const chain = Number(r.result);
+  if (!r.result) throw new Error(`upstream ${upstream}: no chain id`);
+  const allowed = process.env.SIGNER_ALLOW_CHAIN;
+  if (chain !== 31337 && String(chain) !== String(allowed ?? "").trim()) {
+    throw new Error(
+      `upstream ${upstream} is chain ${chain}: this test signer serves only 31337 (set SIGNER_ALLOW_CHAIN=${chain} to allow it; a deployment uses scripts/production/signer.js)`,
+    );
+  }
+  const words = phrase.trim().toLowerCase().split(/\s+/).join(" ");
+  if (chain !== 31337 && words === HARDHAT_PHRASE) {
+    throw new Error(
+      `refusing chain ${chain}: MNEMONIC is the published Hardhat test phrase, whose keys anyone holds`,
+    );
+  }
+  return chain;
+}
+
+guardChain().then(serve, (e) => {
+  console.error(`remote signer: ${e.shortMessage || e.message}`);
+  process.exit(3);
+});
+
+function serve(chain) {
+  http
+    .createServer((req, res) => {
+      let body = "";
+      req.on("data", (c) => (body += c));
+      req.on("end", async () => {
+        let out;
+        try {
+          const call = JSON.parse(body);
+          out = Array.isArray(call)
+            ? await Promise.all(call.map(answer))
+            : await answer(call);
+        } catch (e) {
+          out = {
+            jsonrpc: "2.0",
+            id: null,
+            error: { code: -32700, message: e.message },
+          };
+        }
+        res.setHeader("content-type", "application/json");
+        res.end(JSON.stringify(out));
+      });
+    })
+    .listen(port, "127.0.0.1", () =>
+      console.log(
+        `remote signer on 127.0.0.1:${port}: ${wallets.length} keys, upstream ${upstream} (chain ${chain})`,
+      ),
+    );
+}
 process.on("SIGTERM", () => {
   console.log(`remote signer: ${signed} transactions signed`);
   process.exit(0);

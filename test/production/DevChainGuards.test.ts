@@ -1,5 +1,8 @@
 import { expect } from "chai";
 import { ethers } from "hardhat";
+import { spawn } from "child_process";
+import * as http from "http";
+import { AddressInfo } from "net";
 
 /**
  * Task 5.15 slice A (readiness review L-2, L-3): what only a dev node may
@@ -114,6 +117,92 @@ describe("Dev-chain guards (options 11 and 62, the CI remote signer)", function 
       const fee = ethers.Wallet.createRandom().address;
       const ok = await run(() => ["0", fee]);
       expect(ok.calls).to.deep.equal([[ok.user, fee]]);
+    });
+  });
+
+  describe("scripts/ci/remote-signer.js (L-3)", function () {
+    /** A fake upstream answering eth_chainId with `chain`. */
+    async function upstream(chain: number): Promise<[http.Server, string]> {
+      const s = http.createServer((req, res) => {
+        let body = "";
+        req.on("data", (c) => (body += c));
+        req.on("end", () => {
+          const { id } = JSON.parse(body);
+          res.setHeader("content-type", "application/json");
+          res.end(
+            JSON.stringify({
+              jsonrpc: "2.0",
+              id,
+              result: ethers.toQuantity(chain),
+            }),
+          );
+        });
+      });
+      await new Promise<void>((ok) => s.listen(0, "127.0.0.1", ok));
+      return [s, `http://127.0.0.1:${(s.address() as AddressInfo).port}`];
+    }
+
+    /** Run the signer (port 0: an ephemeral one); its exit code and output. */
+    async function signer(chain: number, env: Record<string, string>) {
+      const [s, url] = await upstream(chain);
+      try {
+        return await new Promise<{ code: number | null; out: string }>((ok) => {
+          const p = spawn(
+            process.execPath,
+            ["scripts/ci/remote-signer.js", "0"],
+            {
+              env: { ...process.env, SIGNER_UPSTREAM: url, ...env },
+            },
+          );
+          let out = "";
+          const add = (d: Buffer) => {
+            out += d;
+            if (/remote signer on 127\.0\.0\.1/.test(out)) p.kill("SIGTERM");
+          };
+          p.stdout.on("data", add);
+          p.stderr.on("data", add);
+          p.on("exit", (code) => ok({ code, out }));
+        });
+      } finally {
+        s.close();
+      }
+    }
+    const OWN =
+      "candy maple cake sugar pudding cream honey rich smooth crumble sweet treat";
+
+    it("refuses a chain other than 31337 unless SIGNER_ALLOW_CHAIN names it", async function () {
+      const r = await signer(11155111, {
+        MNEMONIC: OWN,
+        SIGNER_ALLOW_CHAIN: "",
+      });
+      expect(r.code).to.equal(3);
+      expect(r.out).to.contain(
+        "is chain 11155111: this test signer serves only 31337",
+      );
+      const other = await signer(11155111, {
+        MNEMONIC: OWN,
+        SIGNER_ALLOW_CHAIN: "1",
+      });
+      expect(other.code).to.equal(3);
+      const ok = await signer(11155111, {
+        MNEMONIC: OWN,
+        SIGNER_ALLOW_CHAIN: "11155111",
+      });
+      expect(ok.out).to.contain("(chain 11155111)");
+    });
+
+    it("refuses the published Hardhat phrase off 31337, even when the chain is allowed", async function () {
+      const r = await signer(11155111, {
+        MNEMONIC: PHRASE,
+        SIGNER_ALLOW_CHAIN: "11155111",
+      });
+      expect(r.code).to.equal(3);
+      expect(r.out).to.contain("published Hardhat test phrase");
+      const local = await signer(31337, {
+        MNEMONIC: PHRASE,
+        SIGNER_ALLOW_CHAIN: "",
+      });
+      expect(local.out).to.contain("(chain 31337)");
     });
   });
 });
