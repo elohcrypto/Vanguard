@@ -49,8 +49,8 @@
 #        scripts/ci/coverage-ratchet.sh --shard <i> <n>
 #          shard i of n: tests pass and the near-timeout guard; no line
 #          check (its own figure is printed)
-#        scripts/ci/coverage-ratchet.sh --merged <shard coverage.json>...
-#          merges the shards into coverage.json, then the line check
+#        scripts/ci/coverage-ratchet.sh --merged <n> <shard coverage.json>...
+#          merges the n shards into coverage.json, then the line check
 #        scripts/ci/coverage-ratchet.sh --from <log> <timings>
 #          checks a saved run's log and timings without running it
 
@@ -71,7 +71,7 @@ case "$MODE" in
   --merged)
     shift
     LOG=coverage-merge.log
-    node scripts/ci/coverage-merge.js coverage.json "$@" > "$LOG" || run=1
+    node scripts/ci/coverage-merge.js coverage.json "$@" > "$LOG" 2>&1 || run=1
     cat "$LOG"
     ;;
   *)

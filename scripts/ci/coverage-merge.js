@@ -11,7 +11,11 @@
 // one solidity-coverage prints), which scripts/ci/coverage-ratchet.sh
 // reads (lines is the fifth column).
 //
-//   node scripts/ci/coverage-merge.js <out.json> <shard.json>...
+// Refused (exit 1, review L-5): another number of shard files than
+// expected, or shards that instrumented different contracts (one run on
+// another tree, or one that lost files, must not pass as the whole run).
+//
+//   node scripts/ci/coverage-merge.js <out.json> <expected n> <shard.json>...
 const fs = require("fs");
 const istanbul = require("sc-istanbul");
 
@@ -48,10 +52,33 @@ function summaryRow(cov) {
 }
 
 if (require.main === module) {
-  const [out, ...files] = process.argv.slice(2);
-  if (!out || !files.length) {
-    console.error("usage: coverage-merge.js <out.json> <shard.json>...");
+  const [out, expected, ...files] = process.argv.slice(2);
+  if (!out || !/^[1-9][0-9]*$/.test(expected || "") || !files.length) {
+    console.error(
+      "usage: coverage-merge.js <out.json> <expected n> <shard.json>...",
+    );
     process.exit(1);
+  }
+  if (files.length !== Number(expected)) {
+    console.error(
+      `::error::coverage merge: ${files.length} shard file(s), expected ${expected}`,
+    );
+    process.exit(1);
+  }
+  const keys = files.map((f) =>
+    Object.keys(JSON.parse(fs.readFileSync(f, "utf8"))).sort(),
+  );
+  for (const [i, k] of keys.entries()) {
+    const extra = [
+      ...k.filter((x) => !keys[0].includes(x)),
+      ...keys[0].filter((x) => !k.includes(x)),
+    ];
+    if (extra.length) {
+      console.error(
+        `::error::coverage merge: ${files[i]} and ${files[0]} instrumented other contracts (${extra.join(", ")})`,
+      );
+      process.exit(1);
+    }
   }
   const cov = merge(files);
   fs.writeFileSync(out, JSON.stringify(cov));
