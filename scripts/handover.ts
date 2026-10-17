@@ -74,6 +74,7 @@ import * as fs from "fs";
 import { validateHandoverConfig } from "./handoverConfig";
 
 const { installRetry } = require("../demo/utils/RpcRetry");
+const { requireArchive } = require("../demo/utils/HandoverScans");
 
 // Whitelist/Blacklist oracles have listManager(); an oracle without it
 // reverts, which the ceremony treats as "no writer role".
@@ -234,6 +235,9 @@ export async function runHandover(
     // R-413-12: null is an assertion of absence and must reach the ceremony.
     if (k in cfg) args[k] = cfg[k] === null ? null : await at(name, cfg[k]);
   }
+  // Task 5.15 (M-3): every phase reads old state; a pruned RPC is refused
+  // before anything else is read.
+  await requireArchive(args);
   // R-413-2: a contract unreachable from governance before step 3 binds it
   // must be stated (an address, or null for "not deployed") unless derived.
   const derived = await withDerivedContracts(args);
