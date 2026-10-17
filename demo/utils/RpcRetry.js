@@ -145,6 +145,17 @@ function installRetry(provider, opts = {}) {
       tx.nonce = await read("eth_getTransactionCount", [tx.from, "pending"]);
     }
     const nonce = Number(tx.nonce);
+    // Review L-2: a pending count behind the mined one (a lagging node
+    // behind a load balancer) would let an unknown outcome adopt an
+    // earlier identical transaction; such a nonce is refused unsent.
+    const mined = Number(
+      await read("eth_getTransactionCount", [tx.from, "latest"]),
+    );
+    if (mined > nonce) {
+      throw new Error(
+        `${tx.from} nonce ${nonce} is already mined (${mined} mined): the RPC's pending count is stale; not sent`,
+      );
+    }
     const start = Number(await read("eth_blockNumber", []));
     let unsure = false;
     for (let i = 0; ; i++) {

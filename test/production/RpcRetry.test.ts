@@ -220,14 +220,42 @@ describe("RpcRetry (bounded retry, no double send)", function () {
     expect(c.sends.length).to.equal(1);
   });
 
+  it("refuses a nonce already mined before the first send: a stale pending count (review L-2)", async function () {
+    const c = chain();
+    const real = c.request;
+    // A load-balanced RPC whose pending view lags its mined count.
+    c.request = async (a: any) =>
+      a.method === "eth_getTransactionCount" && a.params[1] === "pending"
+        ? "0x6"
+        : real(a);
+    hook(c);
+    let thrown: any;
+    await c
+      .request({ method: "eth_sendTransaction", params: [tx] })
+      .catch((e: any) => (thrown = e));
+    expect(thrown?.message).to.match(
+      /nonce 6 is already mined \(7 mined\).*not sent/,
+    );
+    expect(c.sends.length).to.equal(0);
+  });
+
   it("a first-attempt 'nonce too low' is not ours to adopt: it is thrown", async function () {
     const c = chain();
+    // Another process's transaction holds nonce 7, pending.
+    c.pending.push({
+      from: FROM,
+      nonce: "0x7",
+      to: TO,
+      value: "0x0",
+      input: "0xbeef",
+      hash: "0xother",
+    });
     hook(c);
     let thrown: any;
     await c
       .request({
         method: "eth_sendTransaction",
-        params: [{ ...tx, nonce: "0x1" }],
+        params: [{ ...tx, nonce: "0x7" }],
       })
       .catch((e: any) => (thrown = e));
     expect(thrown?.message).to.equal("nonce too low");
