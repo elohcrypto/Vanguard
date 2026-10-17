@@ -24,6 +24,7 @@ const { ethers } = require("hardhat");
 const { addrOf, same, keyOf, fail } = require("./HandoverChecks");
 const { uniq, scanLogs } = require("./HandoverScans");
 const { registryGovernors } = require("./HandoverPowers");
+const { claimSignerFacts } = require("./HandoverClaimSigners");
 
 const MANAGEMENT_KEY = 1;
 const CLAIM_SIGNER_KEY = 3;
@@ -319,6 +320,10 @@ async function issuerKeyChecks(o, f, pre) {
     ...agents.map((a) => [a, `registry agent ${a}`]),
     ...f.nodes.map((n) => [n, `oracle node ${n}`]),
   ];
+  // Task 5.15 (Q17 = A): the audit's acknowledged claim signers.
+  const signers = await claimSignerFacts(o, f);
+  for (const [label, ok] of signers.lines)
+    out.push({ label, ok, fix: label, strays: [] });
   for (const i of f.issuers) {
     const held = [];
     for (const k of i.keys) {
@@ -334,7 +339,11 @@ async function issuerKeyChecks(o, f, pre) {
     const mine = same(i.owner, dAddr);
     const adminOwned = issuerAdmin !== null && same(i.owner, issuerAdmin);
     const okOwner = adminOwned || (pre && mine);
-    const known = [issuerAdmin && keyOf(issuerAdmin), pre && keyOf(dAddr)];
+    const known = [
+      issuerAdmin && keyOf(issuerAdmin),
+      pre && keyOf(dAddr),
+      ...(signers.accepted.get(await addrOf(i.issuer)) || []),
+    ];
     const unknown = i.keys.filter((k) => !known.includes(k.hash));
     out.push({
       label: `${i.label}: owned by ${pre ? "the deployer or " : ""}issuerAdmin and every live key is ${pre ? "the deployer's or " : ""}issuerAdmin's`,

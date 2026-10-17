@@ -20,7 +20,9 @@ export function validateHandoverConfig(
     "onchainIDFactory privacyManager zkVerifier keyManager keyManagerIdentity"
   ).split(" ");
   const LIST_KEYS =
-    "oracles issuers feeWallets oracleNodes attestors extraTrusted".split(" ");
+    "oracles issuers feeWallets oracleNodes attestors extraTrusted claimSigners".split(
+      " ",
+    );
   const allowed = new Set([
     "governance",
     "ops",
@@ -162,6 +164,10 @@ export async function handoverArgs(
     oracleNodes: cfg.oracleNodes || [],
     attestors: cfg.attestors || [],
     extraTrusted: cfg.extraTrusted || [],
+    // Task 5.15 (Q17 = A): claim signers the day-2 audit accepts, and the
+    // voters, whose keys may not be one of them.
+    claimSigners: cfg.claimSigners || [],
+    voterWallets: [cfg.proposer, ...cfg.voters].map(wallet),
     governance: await at("VanguardGovernance", cfg.governance),
     keyManagerIdentity: cfg.keyManagerIdentity,
     // Assertions (R-413-1): what an older config names is checked against
