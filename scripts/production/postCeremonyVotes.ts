@@ -1,27 +1,31 @@
 /**
  * The governance votes just after the ceremony (plan v2 Task 5.15; owner
- * Q15 = A, D50 / R-56-2, and Q20 = B), by the ceremony's vote engine
- * (demo/utils/HandoverVotes.js openAll / settleAll):
- *   1. registerOracle for each production node (NEW_NODES);
- *   2. setTrustedAttestor(circuit, Ax, Ay, true) for each issuer key the
- *      day-2 audit flags as trusted by the deployer (the same key,
- *      re-approved by governance: the deployer no longer vouches);
- *   3. removeOracle for each node the deployer registered (D50).
- * 1 and 2 are proposed together; 3 a gap later (an hour divided by
- * TIME_SCALE), so every removal matures after every registration even if
- * someone else executes it (executeProposal is anyone's). All are voted
- * in the same voting period, then settled in that order: registrations
- * first, each confirmed registered; each removal is checked just before
- * it executes against the nodes then registered (MIN_NODES left, none
- * alone at the consensus bar), and not executed otherwise. The first
- * failure stops the run; a re-run adopts what is open, in the same order.
+ * Q15 = A, D50 / R-56-2, and Q20 = B), in TWO ROUNDS (the lead's ruling):
+ * executeProposal is anyone's and removeOracle checks no node minimum, so
+ * a removal that has passed can be executed by a stranger before the
+ * registrations; no off-chain order can prevent that.
+ *   Round 1: registerOracle for each production node (NEW_NODES) and
+ *     setTrustedAttestor(circuit, Ax, Ay, true) for each issuer key the
+ *     day-2 audit flags as the deployer's (the same key, re-approved by
+ *     governance), proposed together, voted, settled; the first failure
+ *     stops the run.
+ *   Round 2: only once every production node is registered (read from
+ *     the chain, not from round 1), removeOracle for each deployer-era
+ *     node, proposed only when EVERY order and subset of the removals
+ *     leaves MIN_NODES nodes with none alone at the consensus bar; each
+ *     is checked again just before this CLI executes it.
+ * The phase is the chain's: a re-run runs round 1 while anything of it is
+ * missing (adopting its open proposals), never proposes a removal while a
+ * production node is missing, and adopts open removals by the same rules
+ * (demo/utils/HandoverVotes.js openAll / settleAll). Calendar: two voting
+ * periods and delays (about 20 days at TIME_SCALE 1), not one.
  *
  * Refused before any proposal: a handover.json snapshot from another
  * chain; an unfinished ceremony; a NEW_NODES entry that is not a
  * checksummed address, is zero, repeated, the deployer, governance, a
- * role, a voter, the proposer or a claim signer, or a node the vote did
- * not register; a final node set below MIN_NODES or with one node at the
- * bar. A new node a vote already registered is skipped (a re-run).
+ * role, a voter, the proposer or a claim signer, or a node no vote
+ * registered; a final node set below MIN_NODES or with one node at the
+ * bar. A production node a vote already registered is skipped (a re-run).
  *
  *   NEW_NODES=0xA:NAME,0xB:NAME HANDOVER_CONFIG=<handover.json> \
  *     npx hardhat run scripts/production/postCeremonyVotes.ts --network remote
@@ -38,7 +42,6 @@ const Votes = require("../../demo/utils/HandoverVotes");
 const { withDerivedContracts } = require("../../demo/utils/HandoverDerive");
 const { addrOf, same } = require("../../demo/utils/HandoverChecks");
 const { nodeFacts } = require("../../demo/utils/HandoverNodes");
-const { advancePast } = require("../../demo/utils/ChainTime");
 const {
   deployerTrustedAttestors,
 } = require("../../demo/utils/HandoverPrivacy");
@@ -90,12 +93,23 @@ async function setRefusal(
   return null;
 }
 
+/** The registered nodes, the deployer-era ones, the facts. */
+async function nodesNow(o: any) {
+  const f = await nodeFacts(o);
+  const dAddr = await addrOf(o.deployer);
+  const old = f.nodes.filter(
+    (n: any) =>
+      !n.byGovernance && n.registeredBy && same(n.registeredBy, dAddr),
+  );
+  return { f, live: f.nodes.map((n: any) => n.addr), old };
+}
+
 /**
- * The proposals in two waves ({ wave1, wave2 }: registrations and
- * re-approvals, then removals), refused before any is made when a rule in
- * the header fails. `voters` holds the proposer and the voters.
+ * Round 1's proposals (registrations of the production nodes not yet
+ * registered, then the re-approvals), after every refusal in the header.
+ * `voters` holds the proposer and the voters.
  */
-export async function postCeremonyItems(
+export async function roundOneItems(
   o: any,
   nodes: any[],
   cfg: any,
@@ -113,8 +127,7 @@ export async function postCeremonyItems(
       );
     }
   }
-  const f = await nodeFacts(o);
-  const live = f.nodes.map((n: any) => n.addr);
+  const { f, live, old } = await nodesNow(o);
   const taken = [dAddr, govAddr, ...(cfg.claimSigners || [])];
   for (const r of [o.ops, o.guardian, o.issuerAdmin, ...voters])
     if (r) taken.push(await addrOf(r));
@@ -131,10 +144,6 @@ export async function postCeremonyItems(
       );
     if (!known) fresh.push(n);
   }
-  const old = f.nodes.filter(
-    (n: any) =>
-      !n.byGovernance && n.registeredBy && same(n.registeredBy, dAddr),
-  );
   const after = [
     ...live.filter((a: string) => !old.some((n: any) => same(n.addr, a))),
     ...fresh.map((n) => n.address),
@@ -146,9 +155,7 @@ export async function postCeremonyItems(
     );
   const om = o.oracleManager;
   const pm = o.privacyManager;
-  const registered = async (a: string) =>
-    (await om.getRegisteredOracles()).some((x: string) => same(x, a));
-  const wave1: any[] = fresh.map((n) => ({
+  const items: any[] = fresh.map((n) => ({
     label: `register production node ${n.address} (${n.name})`,
     title: `D50: register node ${n.name}`,
     proposalType: ORACLE_PARAMETERS,
@@ -159,13 +166,9 @@ export async function postCeremonyItems(
       "production node (D50)",
       500,
     ]),
-    verify: async () => {
-      if (!(await registered(n.address)))
-        throw new Error(`${n.address} is not a node after its vote`);
-    },
   }));
   for (const k of await deployerTrustedAttestors(o, dAddr)) {
-    wave1.push({
+    items.push({
       label: `re-approve issuer key Ax ${k.ax} for ${k.name} (Q20)`,
       title: `Q20: re-approve the ${k.name} issuer key`,
       proposalType: PRIVACY_PARAMETERS,
@@ -178,7 +181,37 @@ export async function postCeremonyItems(
       ]),
     });
   }
-  const wave2 = old.map((n: any) => ({
+  return items;
+}
+
+/**
+ * Round 2's proposals: a removal per deployer-era node, refused unless
+ * every production node is registered now and every subset of the
+ * removals leaves a valid set (anyone may execute them in any order).
+ */
+export async function roundTwoItems(o: any, nodes: any[]) {
+  const { f, live, old } = await nodesNow(o);
+  const missing = nodes.filter(
+    (n) => !live.some((a: string) => same(a, n.address)),
+  );
+  if (missing.length) {
+    throw new Error(
+      `round 2 not proposed: production node(s) ${missing.map((n) => n.address).join(", ")} not registered on chain`,
+    );
+  }
+  for (let mask = 1; mask < 1 << old.length; mask++) {
+    const gone = old.filter((_: any, i: number) => mask & (1 << i));
+    const left = live.filter(
+      (a: string) => !gone.some((n: any) => same(n.addr, a)),
+    );
+    const why = await setRefusal(o, left, f);
+    if (why)
+      throw new Error(
+        `round 2 not proposed: removing ${gone.map((n: any) => n.addr).join(", ")} ${why}`,
+      );
+  }
+  const om = o.oracleManager;
+  return old.map((n: any) => ({
     label: `remove deployer-era node ${n.addr} (${n.name})`,
     title: `D50: remove deployer-era node ${n.name}`,
     proposalType: ORACLE_PARAMETERS,
@@ -187,19 +220,14 @@ export async function postCeremonyItems(
       n.addr,
       "D50 rotation after the ceremony",
     ]),
-    // Read just before it executes: the nodes then registered.
+    // Read just before this CLI executes it: the nodes then registered.
     precheck: async () => {
       const now = await om.getRegisteredOracles();
       const left = now.filter((a: string) => !same(a, n.addr));
       const no = await setRefusal(o, left, await nodeFacts(o));
       if (no) throw new Error(`removing ${n.addr} now: ${no}; not executed`);
     },
-    verify: async () => {
-      if (await registered(n.addr))
-        throw new Error(`${n.addr} is still a node after its vote`);
-    },
   }));
-  return { wave1, wave2 };
 }
 
 /** The handover.json snapshot's chain is the connected one. */
@@ -215,39 +243,42 @@ export function requireSameChain(path: string, chainId: number) {
   }
 }
 
-/** Both waves opened (the gap between them) and settled in order. */
+/** Round 1, then round 2, each from the chain's state. */
 export async function runPostCeremony(
   o: any,
   proposer: any,
   voters: any[],
-  waves: any,
+  nodes: any[],
+  cfg: any,
   log = console.log,
 ) {
-  const gov = o.governance;
-  const args = { governance: gov, proposer, voters, log };
-  const open1 = await Votes.openAll({ ...args, items: waves.wave1 });
-  let open2: any[] = [];
-  if (waves.wave2.length) {
-    if (open1.length) {
-      const made = [];
-      for (const x of open1)
-        made.push(Number((await gov.getProposal(x.id))[0].createdAt));
-      const gap = Math.max(
-        60,
-        Math.floor(3600 / Number(await gov.TIME_SCALE())),
-      );
-      await advancePast(
-        Math.max(...made) + gap,
-        `removals proposed ${gap} s after the registrations`,
-        { margin: 0 },
-      );
-    }
-    open2 = await Votes.openAll({ ...args, items: waves.wave2 });
+  const args = { governance: o.governance, proposer, voters, log };
+  const one = await roundOneItems(o, nodes, cfg, [proposer, ...voters]);
+  if (one.length) {
+    await Votes.checkVoters(o, proposer, voters, one.length);
+    log(
+      `   🗳️  round 1: ${one.length} proposal(s), registrations and re-approvals`,
+    );
+    await Votes.settleAll({
+      ...args,
+      open: await Votes.openAll({ ...args, items: one }),
+    });
   }
-  log(
-    `   🗳️  ${open1.length + open2.length} proposal(s) open together (${open1.length}, then ${open2.length} removals)`,
-  );
-  await Votes.settleAll({ ...args, open: [...open1, ...open2] });
+  const two = await roundTwoItems(o, nodes);
+  if (two.length) {
+    await Votes.checkVoters(o, proposer, voters, two.length);
+    log(
+      `   🗳️  round 2: ${two.length} removal(s), every production node registered`,
+    );
+    await Votes.settleAll({
+      ...args,
+      open: await Votes.openAll({ ...args, items: two }),
+    });
+  }
+  if (!one.length && !two.length)
+    log(
+      "✅ nothing to vote: no deployer-era node or deployer-trusted issuer key, no new node",
+    );
 }
 
 async function main(): Promise<void> {
@@ -258,23 +289,14 @@ async function main(): Promise<void> {
   requireSameChain(path, Number((await ethers.provider.getNetwork()).chainId));
   const { args, wallet } = await handoverArgs(cfg, "audit", path);
   const o = await withDerivedContracts(args);
-  const proposer = wallet(cfg.proposer);
-  const voters = cfg.voters.map(wallet);
-  const waves = await postCeremonyItems(
+  const nodes = parseNodes(process.env.NEW_NODES);
+  await runPostCeremony(
     o,
-    parseNodes(process.env.NEW_NODES),
+    wallet(cfg.proposer),
+    cfg.voters.map(wallet),
+    nodes,
     cfg,
-    [proposer, ...voters],
   );
-  const n = waves.wave1.length + waves.wave2.length;
-  if (!n) {
-    console.log(
-      "✅ nothing to vote: no deployer-era node or deployer-trusted issuer key, no new node",
-    );
-    return;
-  }
-  await Votes.checkVoters(o, proposer, voters, n);
-  await runPostCeremony(o, proposer, voters, waves);
   const live = await o.oracleManager.getRegisteredOracles();
   console.log(`✅ post-ceremony votes executed; nodes now ${live.join(", ")}`);
   console.log(

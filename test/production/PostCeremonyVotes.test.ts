@@ -2,13 +2,14 @@ import { expect } from "chai";
 import { ethers } from "hardhat";
 import * as fs from "fs";
 import { handoverFixture } from "../helpers/governanceFixture";
-import { captured, cliConfig } from "../helpers/handoverCli";
+import { byVote, captured, cliConfig } from "../helpers/handoverCli";
 import { runHandover } from "../../scripts/handover";
 import { handoverArgs } from "../../scripts/handoverConfig";
 import {
   parseNodes,
-  postCeremonyItems,
   requireSameChain,
+  roundOneItems,
+  roundTwoItems,
   runPostCeremony,
 } from "../../scripts/production/postCeremonyVotes";
 
@@ -16,13 +17,14 @@ const Votes = require("../../demo/utils/HandoverVotes");
 const { withDerivedContracts } = require("../../demo/utils/HandoverDerive");
 
 /**
- * Task 5.15 (owner Q15 = A, D50 / R-56-2; Q20 = B): just after the
- * ceremony the production nodes are registered, the issuer keys the
- * deployer trusted re-approved, and the deployer-era nodes removed, by
- * one voting period; the removals are proposed a gap later, settled after
- * every registration, and checked just before each executes. The day-2
- * audit then shows neither deployer-era line. Inputs are refused before
- * any proposal.
+ * Task 5.15 (owner Q15 = A, D50 / R-56-2; Q20 = B; the lead's two-round
+ * ruling): round 1 registers the production nodes and re-approves the
+ * issuer keys the deployer trusted; round 2, proposed only once every
+ * production node is registered on chain and only when every subset of
+ * the removals leaves a valid node set, removes the deployer-era nodes
+ * (anyone may execute a passed proposal, in any order). The phase is the
+ * chain's; the day-2 audit then shows neither deployer-era line. Inputs
+ * are refused before any proposal.
  */
 describe("Post-ceremony votes (D50 rotation, attestor re-approval)", function () {
   this.timeout(600_000);
@@ -68,15 +70,45 @@ describe("Post-ceremony votes (D50 rotation, attestor re-approval)", function ()
     const o = await withDerivedContracts(args);
     return { o, voters: [cfg.proposer, ...cfg.voters].map(wallet) };
   };
-  const waves = async (nodes: string) => {
+  const roundOne = async (nodes: string) => {
     const { o, voters } = await derive();
-    return postCeremonyItems(o, parseNodes(nodes), cfg, voters);
+    return roundOneItems(o, parseNodes(nodes), cfg, voters);
   };
   const NEW = async () =>
     (await addrs([13, 14, 15])).map((a, k) => `${a}:NODE_${k + 1}`).join(",");
-  const run = async (w: any) => {
+  const run = async (nodes: string) => {
     const { o } = await derive();
-    return captured(out, () => runPostCeremony(o, f.proposer, f.voters, w));
+    return captured(out, () =>
+      runPostCeremony(o, f.proposer, f.voters, parseNodes(nodes), cfg),
+    );
+  };
+  /** Proposals since `from`, by title pattern. */
+  const proposals = async (from: number, title: RegExp) => {
+    const ps = [];
+    for (
+      let id = from + 1;
+      id <= Number(await f.c.governance.proposalCount());
+      id++
+    ) {
+      const [p] = await f.c.governance.getProposal(id);
+      if (title.test(p.title)) ps.push(p);
+    }
+    return ps;
+  };
+  /** A stranger executes every removal proposal it can (anyone may). */
+  const strangerExecutes = async () => {
+    const stranger = await signer(18);
+    let n = 0;
+    for (const p of await proposals(0, /remove deployer-era/)) {
+      const [, , , can] = await f.c.governance.getProposal(p.id);
+      if (Number(p.status) === 1 && can) {
+        await (
+          await f.c.governance.connect(stranger).executeProposal(p.id)
+        ).wait();
+        n++;
+      }
+    }
+    return n;
   };
   const executedIds = async (): Promise<number[]> =>
     (
@@ -109,7 +141,7 @@ describe("Post-ceremony votes (D50 rotation, attestor re-approval)", function ()
   });
 
   it("refuses before the ceremony, and a role, voter, claim signer or deployer-era node as new", async function () {
-    await expect(waves(await NEW())).to.be.rejectedWith(
+    await expect(roundOne(await NEW())).to.be.rejectedWith(
       /finish the ceremony first/,
     );
     await ceremony();
@@ -121,74 +153,67 @@ describe("Post-ceremony votes (D50 rotation, attestor re-approval)", function ()
       f.issuerAdmin.address,
       f.proposer.address,
     ]) {
-      await expect(waves(`${bad}:X`)).to.be.rejectedWith(
+      await expect(roundOne(`${bad}:X`)).to.be.rejectedWith(
         /a node is a key of its own/,
       );
     }
     cfg.claimSigners = [(await signer(16)).address];
-    await expect(waves(`${cfg.claimSigners[0]}:CS`)).to.be.rejectedWith(
+    await expect(roundOne(`${cfg.claimSigners[0]}:CS`)).to.be.rejectedWith(
       /a node is a key of its own/,
     );
     const [old] = await addrs([9]);
-    await expect(waves(`${old}:OLD`)).to.be.rejectedWith(
+    await expect(roundOne(`${old}:OLD`)).to.be.rejectedWith(
       /already a node, not one a vote registered/,
     );
-    await expect(waves("")).to.be.rejectedWith(
+    await expect(roundOne("")).to.be.rejectedWith(
       /0 node\(s\) would remain, below MIN_NODES \(2\)/,
     );
     const [one] = await addrs([13]);
-    await expect(waves(`${one}:ONE`)).to.be.rejectedWith(
+    await expect(roundOne(`${one}:ONE`)).to.be.rejectedWith(
       /1 node\(s\) would remain/,
     );
     expect(await f.c.governance.proposalCount()).to.equal(made);
   });
 
-  it("registers and re-approves, removes a gap later, settles in order; the audit then shows no deployer era", async function () {
+  it("round 1 registers and re-approves; round 2, after every node is in, removes; the audit then shows no deployer era", async function () {
     await ceremony();
     const before = Number(await f.c.governance.proposalCount());
-    const w = await waves(await NEW());
-    expect(w.wave1.map((i: any) => i.label.split(" ")[0])).to.deep.equal([
-      "register",
-      "register",
-      "register",
-      "re-approve",
-    ]);
-    expect(w.wave2.length).to.equal(3);
-    await run(w);
-    expect(out.join("\n")).to.contain(
-      "🗳️  7 proposal(s) open together (4, then 3 removals)",
+    await run(await NEW());
+    const text0 = out.join("\n");
+    expect(text0).to.contain(
+      "round 1: 4 proposal(s), registrations and re-approvals",
     );
-    const ps = [];
-    for (
-      let id = before + 1;
-      id <= Number(await f.c.governance.proposalCount());
-      id++
-    )
-      ps.push((await f.c.governance.getProposal(id))[0]);
-    expect(ps.length).to.equal(7);
-    // Voted in one period: every proposal existed before any vote closed.
-    expect(Math.max(...ps.map((p: any) => Number(p.createdAt)))).to.be.lessThan(
-      Math.min(...ps.map((p: any) => Number(p.votingEnds))),
+    expect(text0).to.contain(
+      "round 2: 3 removal(s), every production node registered",
     );
-    // Each removal matures a gap (an hour / TIME_SCALE, at least 60 s)
-    // after every registration.
-    const regs = ps.filter((p: any) => /register node/.test(p.title));
-    const rms = ps.filter((p: any) => /remove deployer-era/.test(p.title));
-    const gap = Math.max(
-      60,
-      Math.floor(3600 / Number(await f.c.governance.TIME_SCALE())),
+    const regs = await proposals(before, /register node/);
+    const rms = await proposals(before, /remove deployer-era/);
+    expect([regs.length, rms.length]).to.deep.equal([3, 3]);
+    // Round 2 was proposed only after every registration executed.
+    const g = f.c.governance;
+    const at = async (filter: any, id: any) =>
+      (await g.queryFilter(filter(id)))[0].blockNumber;
+    const lastReg = Math.max(
+      ...(await Promise.all(
+        regs.map((p: any) => at(g.filters.ProposalExecuted, p.id)),
+      )),
     );
-    expect(
-      Math.min(...rms.map((p: any) => Number(p.executionTime))) -
-        Math.max(...regs.map((p: any) => Number(p.executionTime))),
-    ).to.be.at.least(gap);
-    // Executed in order: registrations, re-approval, removals.
-    const order = (await executedIds()).filter((id) => id > before);
-    expect(order).to.deep.equal(ps.map((p: any) => Number(p.id)));
+    const firstRm = Math.min(
+      ...(await Promise.all(
+        rms.map((p: any) => at(g.filters.ProposalCreated, p.id)),
+      )),
+    );
+    expect(firstRm).to.be.greaterThan(lastReg);
+    for (const p of [...regs, ...rms]) {
+      expect(Number((await g.getProposal(p.id))[0].status), p.title).to.equal(
+        4,
+      );
+    }
     expect(await nodesNow()).to.deep.equal((await addrs([13, 14, 15])).sort());
     // A re-run finds nothing to vote; the audit passes clean.
-    const again = await waves(await NEW());
-    expect([...again.wave1, ...again.wave2]).to.deep.equal([]);
+    out.length = 0;
+    await run(await NEW());
+    expect(out.join("\n")).to.contain("nothing to vote");
     cfg.oracleNodes = await addrs([13, 14, 15]);
     out.length = 0;
     await captured(out, () => runHandover(cfg, "audit", cfgPath));
@@ -198,42 +223,124 @@ describe("Post-ceremony votes (D50 rotation, attestor re-approval)", function ()
     expect(out).to.include(PASSED);
   });
 
-  it("a failed registration stops the run before any removal; a re-run resumes in order", async function () {
+  it("a defeated registration: no removal is ever proposed, so none can be executed early; a re-run resumes", async function () {
     await ceremony();
-    const before = Number(await f.c.governance.proposalCount());
     let n = 0;
     Votes.castAcceptanceVotes = async (...a: any[]) => {
       if (++n === 1) return; // nobody votes on the first registration
       return realVote(...a);
     };
-    const err: any = await run(await waves(await NEW())).catch((e) => e);
+    const err: any = await run(await NEW()).catch((e) => e);
     expect(err?.code).to.equal("NOT_PASSED");
-    expect(err.message).to.match(/stopped here/);
+    // A stranger finds no passed removal to execute: none exists.
+    expect(await proposals(0, /remove deployer-era/)).to.deep.equal([]);
+    expect(await strangerExecutes()).to.equal(0);
     expect(await nodesNow()).to.deep.equal((await addrs([9, 10, 11])).sort());
+    // Round 2 is refused while a production node is missing.
+    const { o } = await derive();
+    await expect(roundTwoItems(o, parseNodes(await NEW()))).to.be.rejectedWith(
+      /round 2 not proposed: production node\(s\) (0x[0-9a-fA-F]{40}(, )?){3} not registered on chain/,
+    );
+    // The re-run: round 1 again (the defeated one re-proposed), then round 2.
     Votes.castAcceptanceVotes = realVote;
     out.length = 0;
-    await run(await waves(await NEW()));
+    await run(await NEW());
     expect(out.join("\n")).to.match(
       /is past its vote without passing: not adopted; settled as Rejected/,
     );
-    const ids = (await executedIds()).filter((id) => id > before);
-    const titles = await Promise.all(ids.map(titleOf));
-    const firstRemoval = titles.findIndex((t) => /remove deployer-era/.test(t));
-    const lastRegistration = titles
-      .map((t) => /register node/.test(t))
-      .lastIndexOf(true);
-    expect(firstRemoval).to.be.greaterThan(lastRegistration);
     expect(await nodesNow()).to.deep.equal((await addrs([13, 14, 15])).sort());
   });
 
-  it("a removal is checked just before it executes, and not executed when it would leave too few nodes", async function () {
+  it("a run stopped in round 2 resumes by adopting the open removals", async function () {
     await ceremony();
-    const w = await waves(await NEW());
-    // The registrations never run here: the removals meet three nodes.
-    const err: any = await run({ wave1: [], wave2: w.wave2 }).catch((e) => e);
+    const realSettle = Votes.settleProposal;
+    let removals = 0;
+    Votes.settleProposal = async (...a: any[]) => {
+      if (/remove deployer-era/.test(a[2]) && ++removals === 2)
+        throw new Error("killed");
+      return realSettle(...a);
+    };
+    try {
+      const err: any = await run(await NEW()).catch((e) => e);
+      expect(err?.message).to.match(/^killed; stopped here/);
+    } finally {
+      Votes.settleProposal = realSettle;
+    }
+    const before = (await proposals(0, /remove deployer-era/)).length;
+    out.length = 0;
+    await run(await NEW());
+    expect(out.join("\n")).to.match(
+      /remove deployer-era node .*: proposal #\d+ already open; adopted/,
+    );
+    expect((await proposals(0, /remove deployer-era/)).length).to.equal(before);
+    expect(await nodesNow()).to.deep.equal((await addrs([13, 14, 15])).sort());
+  });
+
+  it("round 2 is refused when some order of the removals leaves a node alone at the bar", async function () {
+    await ceremony();
+    const { o, voters } = await derive();
+    const one = await roundOneItems(o, parseNodes(await NEW()), cfg, voters);
+    const args = {
+      governance: o.governance,
+      proposer: f.proposer,
+      voters: f.voters,
+      log: () => {},
+    };
+    await Votes.settleAll({
+      ...args,
+      open: await Votes.openAll({ ...args, items: one }),
+    });
+    // A deployer-era node made heavy by vote: 600 of 1,100 now (54%), but
+    // with the other two removed first it would hold 600 of 900 (66.7%).
+    const [heavy] = await addrs([9]);
+    const om = f.c.oracleManager;
+    await byVote(
+      f,
+      2,
+      om,
+      om.interface.encodeFunctionData("setOracleWeight", [heavy, 600]),
+    );
+    await expect(roundTwoItems(o, parseNodes(await NEW()))).to.be.rejectedWith(
+      /round 2 not proposed: removing 0x[0-9a-fA-F]{40}, 0x[0-9a-fA-F]{40} 4 node\(s\) would remain, one alone at the 66% bar/,
+    );
+  });
+
+  it("a removal is checked again just before this CLI executes it", async function () {
+    await ceremony();
+    const { o, voters } = await derive();
+    const args = {
+      governance: o.governance,
+      proposer: f.proposer,
+      voters: f.voters,
+      log: () => {},
+    };
+    const one = await roundOneItems(o, parseNodes(await NEW()), cfg, voters);
+    await Votes.settleAll({
+      ...args,
+      open: await Votes.openAll({ ...args, items: one }),
+    });
+    const open = await Votes.openAll({
+      ...args,
+      items: await roundTwoItems(o, parseNodes(await NEW())),
+    });
+    // Meanwhile two production nodes leave by other votes.
+    const om = f.c.oracleManager;
+    const [a, b, c] = await addrs([13, 14, 15]);
+    for (const x of [a, b])
+      await byVote(
+        f,
+        2,
+        om,
+        om.interface.encodeFunctionData("removeOracle", [x, "test"]),
+      );
+    const err: any = await Votes.settleAll({ ...args, open }).catch(
+      (e: any) => e,
+    );
     expect(err?.message).to.match(
       /removing 0x[0-9a-fA-F]{40} now: 1 node\(s\) would remain, below MIN_NODES \(2\); not executed; stopped here/,
     );
-    expect((await nodesNow()).length).to.equal(2);
+    const left = await nodesNow();
+    expect(left.length).to.equal(2);
+    expect(left).to.include(c);
   });
 });
