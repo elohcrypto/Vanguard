@@ -135,6 +135,29 @@ guardChain().then(serve, (e) => {
   process.exit(3);
 });
 
+// Task 5.15, drives only: SIGNER_FAULTS=<n> faults every n-th request, in
+// turn a rate-limit answer (-32005, not forwarded), a connection dropped
+// before forwarding, and one dropped AFTER answering it (a send's outcome
+// unknown to its caller); SIGNER_FAULT_SENDS=<k> drops the reply to every
+// k-th eth_sendTransaction after sending it; SIGNER_SEND_DELAY_MS slows
+// each send.
+const every = Number(process.env.SIGNER_FAULTS || 0);
+const sendEvery = Number(process.env.SIGNER_FAULT_SENDS || 0);
+const delay = Number(process.env.SIGNER_SEND_DELAY_MS || 0);
+const faults = { seen: 0, sends: 0, rate: 0, drop: 0, dropAfter: 0 };
+const KINDS = ["rate", "drop", "dropAfter"];
+
+/** The fault for request number n (method `m`), or null. */
+function faultOf(n, m) {
+  if (
+    m === "eth_sendTransaction" &&
+    sendEvery &&
+    ++faults.sends % sendEvery === 0
+  )
+    return "dropAfter";
+  return every && n % every === 0 ? KINDS[(n / every) % 3] : null;
+}
+
 function serve(chain) {
   http
     .createServer((req, res) => {
@@ -142,11 +165,25 @@ function serve(chain) {
       req.on("data", (c) => (body += c));
       req.on("end", async () => {
         let out;
+        let kind = null;
         try {
           const call = JSON.parse(body);
-          out = Array.isArray(call)
-            ? await Promise.all(call.map(answer))
-            : await answer(call);
+          kind = faultOf(++faults.seen, call.method);
+          if (kind) faults[kind]++;
+          if (kind === "drop") return req.socket.destroy();
+          if (kind === "rate") {
+            out = {
+              jsonrpc: "2.0",
+              id: call.id,
+              error: { code: -32005, message: "rate limit exceeded (fault)" },
+            };
+          } else {
+            if (delay && call.method === "eth_sendTransaction")
+              await new Promise((ok) => setTimeout(ok, delay));
+            out = Array.isArray(call)
+              ? await Promise.all(call.map(answer))
+              : await answer(call);
+          }
         } catch (e) {
           out = {
             jsonrpc: "2.0",
@@ -154,6 +191,7 @@ function serve(chain) {
             error: { code: -32700, message: e.message },
           };
         }
+        if (kind === "dropAfter") return req.socket.destroy();
         res.setHeader("content-type", "application/json");
         res.end(JSON.stringify(out));
       });
@@ -166,5 +204,6 @@ function serve(chain) {
 }
 process.on("SIGTERM", () => {
   console.log(`remote signer: ${signed} transactions signed`);
+  if (every) console.log(`remote signer faults: ${JSON.stringify(faults)}`);
   process.exit(0);
 });
