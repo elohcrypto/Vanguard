@@ -19,6 +19,9 @@
 #      contracts, the ops multisig both list oracles (the unbound
 #      whitelist oracle too, Task 5.14) and custody, the admin multisig
 #      both issuers
+#   5. claim signers (Task 5.15, Q17 = A): the admin multisig's batch adds
+#      a KYC and a separate AML EOA key; their claims verify; the day-2
+#      audit passes once handover.json lists them
 #
 # USAGE  scripts/ci/multisig-drive.sh   (nodes on MULTISIG_NODE_PORT 8547
 #        and MULTISIG_SIGNER_PORT 8549; exit 1 on failure)
@@ -74,12 +77,12 @@ PIDS+=($!)
 up "$NODE_URL"
 WALLETS=$(MNEMONIC="$ROLES" node -e 'const { HDNodeWallet, Mnemonic } = require("ethers");
   const m = Mnemonic.fromPhrase(process.env.MNEMONIC);
-  for (let i = 0; i < 14; i++) console.log(HDNodeWallet.fromMnemonic(m, `m/44'"'"'/60'"'"'/0'"'"'/0/${i}`).address);')
+  for (let i = 0; i < 16; i++) console.log(HDNodeWallet.fromMnemonic(m, `m/44'"'"'/60'"'"'/0'"'"'/0/${i}`).address);')
 for a in $WALLETS; do
   rpc "$NODE_URL" hardhat_setBalance "[\"$a\",\"0x21E19E0C9BAB2400000\"]" >/dev/null
 done
 DEPLOYER=$(echo "$WALLETS" | head -1)
-MNEMONIC="$ROLES" SIGNER_COUNT=14 SIGNER_UPSTREAM=$NODE_URL setsid node \
+MNEMONIC="$ROLES" SIGNER_COUNT=16 SIGNER_UPSTREAM=$NODE_URL setsid node \
   scripts/ci/remote-signer.js "$SIGNER_PORT" >"$OUT/signer.log" 2>&1 &
 PIDS+=($!)
 sup
@@ -181,4 +184,26 @@ for k in kycIssuer amlIssuer; do
   [[ $(owner "$(C $k)") == $(lc "$ADMIN") ]] || fail "$k is not the admin multisig's"
 done
 echo "4. executed; ceremony complete: 3 issuer keys, 3 D50 nodes, exempt fee wallet, banner; governance owns 10 plan contracts, ops multisig both list oracles and custody, admin multisig both issuers"
+
+# 5. Claim signers (Q17 = A, M-2): the admin multisig's batch adds a KYC
+#    and a separate AML EOA CLAIM_SIGNER key (wallets 14, 15); exit 3 until
+#    its owners execute it; then each key's claim verifies; the day-2
+#    audit fails until handover.json lists them, then passes.
+KYC=$(echo "$WALLETS" | sed -n 15p) AML=$(echo "$WALLETS" | sed -n 16p)
+export CLAIM_SIGNERS="kyc:$KYC,aml:$AML"
+CS_FILE=$HANDOVER_CONFIG.claim-signers.issuer-admin-transactions.json
+[[ $(rc signers1.log hh scripts/production/claimSigners.ts) -eq 3 ]] || fail "claim signers: no pause (exit 3)"
+grep -qF "⏸️  awaiting 2 issuerAdmin transactions: $CS_FILE" "$OUT/signers1.log" || fail "no claim-signer batch"
+execute "$CS_FILE" 9,13 exec4.log 2
+[[ $(rc signers2.log hh scripts/production/claimSigners.ts) -eq 0 ]] || fail "claim signers: the re-run failed"
+grep -q "✅ 2 role transaction effect(s) hold on chain" "$OUT/signers2.log" || fail "claim signers: no effect check"
+[[ $(grep -c "✅ a claim signed by 0x[0-9a-fA-F]* verifies on" "$OUT/signers2.log") -eq 2 ]] || fail "claim signers: no verified claim"
+[[ $(HANDOVER_PHASE=audit rc audit1.log hh scripts/handover.ts) -eq 1 ]] || fail "the audit passed unlisted claim signers"
+grep -qE "❌ .*every live key is issuerAdmin's" "$OUT/audit1.log" || fail "no unlisted-key line"
+node -e 'const fs = require("fs"); const f = process.argv[1]; const c = JSON.parse(fs.readFileSync(f));
+  c.claimSigners = process.argv.slice(2); fs.writeFileSync(f, JSON.stringify(c, null, 2));' "$HANDOVER_CONFIG" "$KYC" "$AML"
+[[ $(HANDOVER_PHASE=audit rc audit2.log hh scripts/handover.ts) -eq 0 ]] || fail "the audit failed with the claim signers listed"
+[[ $(grep -c "✅ claimSigners 0x[0-9a-fA-F]*: a CLAIM_SIGNER key the issuer admin added after the ceremony" "$OUT/audit2.log") -eq 2 ]] \
+  || fail "the audit did not name both claim signers"
+echo "5. claim signers: the admin multisig's batch (2 calls) executed; both keys' claims verify; the audit failed unlisted, passed listed"
 echo "multisig drive PASS in $((SECONDS - START))s (logs $OUT)"
