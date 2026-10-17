@@ -8,9 +8,9 @@ import { AddressInfo } from "net";
  * Task 5.15: the two local signers (scripts/production/signer.js,
  * scripts/ci/remote-signer.js) as child processes on port 0, against a
  * fake upstream on an ephemeral 127.0.0.1 port that records every raw
- * transaction it is sent.
+ * transaction it is sent and answers eth_getCode with `code`.
  */
-export async function fakeUpstream(chain: number) {
+export async function fakeUpstream(chain: number, code = "0x") {
   const raws: string[] = [];
   const H = `0x${"11".repeat(32)}`;
   const answers: Record<string, (p: any[]) => unknown> = {
@@ -39,6 +39,7 @@ export async function fakeUpstream(chain: number) {
       return ethers.keccak256(p[0]);
     },
     eth_getTransactionByHash: () => null,
+    eth_getCode: () => code,
   };
   const one = (c: any) =>
     answers[c.method]

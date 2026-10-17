@@ -29,26 +29,27 @@
  * the CLIs read the same path), the Host checked, browser requests (Origin,
  * Referer, preflight, other content types) refused, methods allowlisted.
  *
- * SIGNER_PROMPT=1: every transaction and message is shown on the
- * terminal (from, to, value, nonce, the call's selector, chain) and sent
- * only on "y". It refuses to start unless stdin and stdout are a
- * terminal. A request repeating an earlier one (same sender, nonce, call:
- * a retry after a lost reply, demo/utils/RpcRetry.js) is shown as a
- * RETRY of it, never as a new transaction.
+ * Every transaction and message is shown first (./signerPrompt.js: the
+ * signed transaction's own fields, the call decoded only for a contract
+ * whose code is a compiled artifact's, every field escaped and capped).
+ * SIGNER_PROMPT=1 asks on the controlling terminal (/dev/tty) and signs
+ * only on the exact token shown; it refuses to start without one. A
+ * request repeating an earlier one with a pinned nonce (a retry after a
+ * lost reply, demo/utils/RpcRetry.js) is shown as a RETRY of it.
  */
 "use strict";
 
 const fs = require("fs");
 const path = require("path");
 const readline = require("readline");
-const {
-  HDNodeWallet,
-  Interface,
-  JsonRpcProvider,
-  Wallet,
-  getBytes,
-} = require("ethers");
+const { HDNodeWallet, JsonRpcProvider, Wallet, getBytes } = require("ethers");
 const { guardedServer } = require("./rpcGuard");
+const {
+  describeMessage,
+  describeTx,
+  hasTty,
+  askTty,
+} = require("./signerPrompt");
 
 const SEPOLIA = 11155111;
 const HARDHAT_PHRASE =
@@ -135,44 +136,6 @@ async function create(dir, names) {
   }
 }
 
-let calls = null;
-
-/**
- * What `data` calls, decoded by the compiled ABIs (SIGNER_ABI_DIR, default
- * artifacts/contracts) when one matches its selector: "call name(args)";
- * else the selector and size (review L-4).
- */
-function describeCall(to, data) {
-  if (!to) return `create (${(data.length - 2) / 2} bytes)`;
-  if (calls === null) {
-    calls = new Map();
-    const walk = (d) => {
-      for (const e of fs.existsSync(d)
-        ? fs.readdirSync(d, { withFileTypes: true })
-        : []) {
-        const f = path.join(d, e.name);
-        if (e.isDirectory()) walk(f);
-        else if (f.endsWith(".json") && !f.endsWith(".dbg.json")) {
-          try {
-            const i = new Interface(
-              JSON.parse(fs.readFileSync(f, "utf8")).abi || [],
-            );
-            i.forEachFunction((fn) => calls.set(fn.selector, i));
-          } catch {
-            // not an artifact
-          }
-        }
-      }
-    };
-    walk(process.env.SIGNER_ABI_DIR || "artifacts/contracts");
-  }
-  const i = calls.get(data.slice(0, 10));
-  const t = i && i.parseTransaction({ data });
-  if (!t) return `call ${data.slice(0, 10)} (${(data.length - 2) / 2} bytes)`;
-  const args = t.args.map((a) => String(a)).join(", ");
-  return `call ${t.name}(${args.length > 300 ? `${args.slice(0, 300)}...` : args})`;
-}
-
 /** The upstream's chain id: Sepolia, or 31337 with SIGNER_TEST=1. */
 async function guardChain(provider) {
   const chain = Number((await provider.send("eth_chainId", [])).toString());
@@ -185,15 +148,6 @@ async function guardChain(provider) {
   return chain;
 }
 
-/** A terminal question answered y/N (SIGNER_PROMPT=1). */
-function confirm(rl, text) {
-  return new Promise((ok) =>
-    rl.question(`${text}\n   approve? [y/N] `, (a) =>
-      ok(/^y(es)?$/i.test(a.trim())),
-    ),
-  );
-}
-
 async function serve() {
   const port = Number(process.argv[2] || 1248);
   const upstream = process.env.SIGNER_UPSTREAM;
@@ -201,9 +155,9 @@ async function serve() {
   if (!upstream || !dir)
     throw new Error("set SIGNER_UPSTREAM and SIGNER_KEYSTORE_DIR");
   const prompt = process.env.SIGNER_PROMPT === "1";
-  if (prompt && !(process.stdin.isTTY && process.stdout.isTTY)) {
+  if (prompt && !hasTty()) {
     throw new Error(
-      "SIGNER_PROMPT=1 needs this process on a terminal (stdin and stdout)",
+      "SIGNER_PROMPT=1 needs a controlling terminal (/dev/tty) to ask on",
     );
   }
   const provider = new JsonRpcProvider(upstream, undefined, {
@@ -229,9 +183,6 @@ async function serve() {
       k.wallet.connect(provider),
     ]),
   );
-  const rl = prompt
-    ? readline.createInterface({ input: process.stdin, output: process.stdout })
-    : null;
   const seen = []; // requests shown, for "RETRY of #n"
   let queue = Promise.resolve(); // one prompt at a time
   let signed = 0;
@@ -242,26 +193,25 @@ async function serve() {
     return w;
   };
   /**
-   * Show the request and, with SIGNER_PROMPT, ask. A request repeating an
+   * Show the request (scripts/production/signerPrompt.js) and, with
+   * SIGNER_PROMPT, ask for its token on /dev/tty. A request repeating an
    * earlier `key` is shown as its RETRY; a null key (a transaction with no
    * pinned nonce, review L-4) never is.
    */
-  const approve = (key, text) => {
+  const approve = async (key, kind, d) => {
     const k = key === null ? null : JSON.stringify(key);
     const was = k === null ? -1 : seen.indexOf(k);
     if (was < 0) seen.push(k);
     const n = was < 0 ? seen.length : was + 1;
-    const line =
+    const head =
       was < 0
-        ? `#${n} ${text}`
-        : `#${n} RETRY of #${n} (same request): ${text}`;
-    if (!rl) return (console.log(`   ${line}`), Promise.resolve());
-    const p = queue.then(() => confirm(rl, line));
-    queue = p.catch(() => undefined);
-    return p.then((ok) => {
-      if (!ok)
-        throw new Error(`refused by the operator (${line.split(":")[0]})`);
-    });
+        ? `#${n} ${kind}`
+        : `#${n} RETRY of #${n} (same request): ${kind}`;
+    const text = [head, ...d.lines].join("\n");
+    if (!prompt) return console.log(`   ${text}`);
+    const asked = queue.then(() => askTty(text, d.token));
+    queue = asked.catch(() => undefined);
+    if (!(await asked)) throw new Error(`refused by the operator (#${n})`);
   };
 
   async function sendTransaction(tx) {
@@ -280,13 +230,17 @@ async function serve() {
       if (tx[from]) req[to] = tx[from];
     }
     if (tx.nonce !== undefined) req.nonce = Number(tx.nonce);
+    // What is shown is what is signed: the populated transaction.
+    const full = await w.populateTransaction(req);
+    const code = full.to ? await provider.getCode(full.to) : "0x";
     await approve(
       req.nonce === undefined
         ? null
         : ["tx", w.address, req.nonce, req.to, String(req.value), req.data],
-      `send from ${w.address} to ${req.to ?? "(create)"} value ${BigInt(req.value)} nonce ${req.nonce ?? "next"} ${describeCall(req.to, req.data)} on chain ${chain}`,
+      "send",
+      describeTx({ ...full, from: w.address }, chain, code),
     );
-    const sent = await w.sendTransaction(req);
+    const sent = await w.sendTransaction(full);
     signed++;
     return sent.hash;
   }
@@ -294,7 +248,8 @@ async function serve() {
     const w = holder(address);
     await approve(
       ["msg", w.address, data],
-      `sign a ${(data.length - 2) / 2}-byte message (a claim digest) as ${w.address}`,
+      "sign",
+      describeMessage(w.address, data),
     );
     signed++;
     return w.signMessage(getBytes(data));

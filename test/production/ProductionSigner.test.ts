@@ -147,7 +147,7 @@ describe("Production signer (scripts/production/signer.js)", function () {
     const r = await signer(11155111, { SIGNER_PROMPT: "1" });
     expect(r.code).to.equal(3);
     expect(r.out).to.contain(
-      "SIGNER_PROMPT=1 needs this process on a terminal",
+      "SIGNER_PROMPT=1 needs a controlling terminal (/dev/tty)",
     );
   });
 
@@ -186,13 +186,15 @@ describe("Production signer (scripts/production/signer.js)", function () {
     );
     expect(r.raws.length).to.equal(4);
     expect(ethers.Transaction.from(r.raws[0]).nonce).to.equal(7);
+    // The signed fields (scripts/production/signerPrompt.js); no artifact
+    // runs at the fake chain's addresses, so no call is decoded.
     expect(r.out).to.match(
-      /#2 send from 0x[0-9a-fA-F]{40} to 0x[0-9a-fA-F]{40} value 1 nonce 7/,
+      /#2 send\n\s+unknown contract: selector 0x\n\s+to 0x[0-9a-fA-F]{40} \| value 0\.000000000000000001 ETH \(1 wei\) \| nonce 7 \|/,
     );
-    expect(r.out).to.match(/#2 RETRY of #2 \(same request\): send from/);
-    // No pinned nonce: never a retry (review L-4); a known call decoded.
+    expect(r.out).to.match(/#2 RETRY of #2 \(same request\): send/);
+    // No pinned nonce: never a retry (review L-4).
     expect(r.out).to.match(
-      /#\d+ send from .* nonce next call transfer\(0x[0-9a-fA-F]{40}, 5\)/,
+      /#\d+ send\n\s+unknown contract: selector 0xa9059cbb\n\s+to .* nonce 5 \|/,
     );
     expect(r.out.match(/RETRY/g)?.length).to.equal(1);
     for (const k of keys) expect(r.out).to.not.contain(k.privateKey.slice(2));
