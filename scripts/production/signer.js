@@ -24,7 +24,10 @@
  *
  * Chain guard: the upstream must be Sepolia (11155111); 31337 only with
  * SIGNER_TEST=1 (the CI drives). Listens on 127.0.0.1 only (default port
- * 1248, Frame's).
+ * 1248, Frame's), behind ./rpcGuard.js: a bearer token written to a 0600
+ * file at start (SIGNER_TOKEN_FILE, else /tmp/vanguard-signer-<port>.token;
+ * the CLIs read the same path), the Host checked, browser requests (Origin,
+ * Referer, preflight, other content types) refused, methods allowlisted.
  *
  * SIGNER_PROMPT=1: every transaction and message is shown on the
  * terminal (from, to, value, nonce, the call's selector, chain) and sent
@@ -36,10 +39,10 @@
 "use strict";
 
 const fs = require("fs");
-const http = require("http");
 const path = require("path");
 const readline = require("readline");
 const { HDNodeWallet, JsonRpcProvider, Wallet, getBytes } = require("ethers");
+const { guardedServer } = require("./rpcGuard");
 
 const SEPOLIA = 11155111;
 const HARDHAT_PHRASE =
@@ -249,15 +252,9 @@ async function serve() {
   }
   const OWN = {
     eth_accounts: async () => keys.map((k) => k.wallet.address),
-    eth_requestAccounts: async () => keys.map((k) => k.wallet.address),
     eth_sendTransaction: (p) => sendTransaction(p[0]),
     personal_sign: (p) => signMessage(p[1], p[0]),
     eth_sign: (p) => signMessage(p[0], p[1]),
-    eth_signTransaction: async () => {
-      throw new Error(
-        "eth_signTransaction refused: send through eth_sendTransaction",
-      );
-    },
   };
   /** Any other call goes upstream as it came; a failure keeps its words. */
   async function forward(call) {
@@ -294,30 +291,12 @@ async function serve() {
       };
     }
   }
-  const server = http.createServer((req, res) => {
-    let body = "";
-    req.on("data", (c) => (body += c));
-    req.on("end", async () => {
-      let out;
-      try {
-        const call = JSON.parse(body);
-        out = Array.isArray(call)
-          ? await Promise.all(call.map(answer))
-          : await answer(call);
-      } catch (e) {
-        out = {
-          jsonrpc: "2.0",
-          id: null,
-          error: { code: -32700, message: e.message },
-        };
-      }
-      res.setHeader("content-type", "application/json");
-      res.end(JSON.stringify(out));
-    });
+  const { port: at, tokenFile } = await guardedServer(answer, {
+    port,
+    tokenFile: process.env.SIGNER_TOKEN_FILE,
   });
-  await new Promise((ok) => server.listen(port, "127.0.0.1", ok));
   console.log(
-    `signer on 127.0.0.1:${server.address().port}: ${keys.length} key(s), chain ${chain}${prompt ? ", every request asked" : ""}`,
+    `signer on 127.0.0.1:${at}: ${keys.length} key(s), chain ${chain}${prompt ? ", every request asked" : ""}; token in ${tokenFile}`,
   );
   for (const [i, k] of keys.entries())
     console.log(`   ${i} ${k.name} ${k.wallet.address}`);

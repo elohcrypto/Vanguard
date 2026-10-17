@@ -20,8 +20,8 @@
  */
 "use strict";
 
-const http = require("http");
 const { HDNodeWallet, JsonRpcProvider, Mnemonic, getBytes } = require("ethers");
+const { guardedServer } = require("../production/rpcGuard");
 
 const port = Number(process.argv[2] || 8549);
 const upstream = process.env.SIGNER_UPSTREAM;
@@ -130,10 +130,12 @@ async function guardChain() {
   return chain;
 }
 
-guardChain().then(serve, (e) => {
-  console.error(`remote signer: ${e.shortMessage || e.message}`);
-  process.exit(3);
-});
+guardChain()
+  .then(serve)
+  .catch((e) => {
+    console.error(`remote signer: ${e.shortMessage || e.message}`);
+    process.exit(3);
+  });
 
 // Task 5.15, drives only: SIGNER_FAULTS=<n> faults every n-th request, in
 // turn a rate-limit answer (-32005, not forwarded), a connection dropped
@@ -158,49 +160,33 @@ function faultOf(n, m) {
   return every && n % every === 0 ? KINDS[(n / every) % 3] : null;
 }
 
-function serve(chain) {
-  http
-    .createServer((req, res) => {
-      let body = "";
-      req.on("data", (c) => (body += c));
-      req.on("end", async () => {
-        let out;
-        let kind = null;
-        try {
-          const call = JSON.parse(body);
-          kind = faultOf(++faults.seen, call.method);
-          if (kind) faults[kind]++;
-          if (kind === "drop") return req.socket.destroy();
-          if (kind === "rate") {
-            out = {
-              jsonrpc: "2.0",
-              id: call.id,
-              error: { code: -32005, message: "rate limit exceeded (fault)" },
-            };
-          } else {
-            if (delay && call.method === "eth_sendTransaction")
-              await new Promise((ok) => setTimeout(ok, delay));
-            out = Array.isArray(call)
-              ? await Promise.all(call.map(answer))
-              : await answer(call);
-          }
-        } catch (e) {
-          out = {
-            jsonrpc: "2.0",
-            id: null,
-            error: { code: -32700, message: e.message },
-          };
-        }
-        if (kind === "dropAfter") return req.socket.destroy();
-        res.setHeader("content-type", "application/json");
-        res.end(JSON.stringify(out));
-      });
-    })
-    .listen(port, "127.0.0.1", () =>
-      console.log(
-        `remote signer on 127.0.0.1:${port}: ${wallets.length} keys, upstream ${upstream} (chain ${chain})`,
-      ),
-    );
+/** One call, with this run's fault (if any) applied. */
+async function faulted(call, req) {
+  const kind = faultOf(++faults.seen, call.method);
+  if (kind) faults[kind]++;
+  if (kind === "drop") return void req.socket.destroy();
+  if (kind === "rate") {
+    const error = { code: -32005, message: "rate limit exceeded (fault)" };
+    return { jsonrpc: "2.0", id: call.id, error };
+  }
+  if (delay && call.method === "eth_sendTransaction")
+    await new Promise((ok) => setTimeout(ok, delay));
+  const out = await answer(call);
+  if (kind === "dropAfter") return void req.socket.destroy();
+  return out;
+}
+
+// Behind the same guard as the production signer (rpcGuard.js: token,
+// Host, no browser requests), with a dev node's evm_/hardhat_ methods.
+async function serve(chain) {
+  const { port: at, tokenFile } = await guardedServer(faulted, {
+    port,
+    tokenFile: process.env.SIGNER_TOKEN_FILE,
+    extra: (m) => /^(evm_|hardhat_)/.test(m),
+  });
+  console.log(
+    `remote signer on 127.0.0.1:${at}: ${wallets.length} keys, upstream ${upstream} (chain ${chain}); token in ${tokenFile}`,
+  );
 }
 process.on("SIGTERM", () => {
   console.log(`remote signer: ${signed} transactions signed`);

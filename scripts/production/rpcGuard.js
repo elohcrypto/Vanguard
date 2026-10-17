@@ -1,0 +1,207 @@
+/**
+ * Who may talk to a local signer (plan v2 Task 5.15; the lead's security
+ * requirement after a scanner flagged it): scripts/production/signer.js
+ * and, with the dev-node methods allowed, scripts/ci/remote-signer.js.
+ * A signer on 127.0.0.1 is otherwise reachable by any web page in the
+ * operator's browser (a cross-site POST, or a hostname rebound to
+ * 127.0.0.1), which could have it sign. So every request must:
+ *  - be a POST with Content-Type application/json, and no Origin or
+ *    Referer header (a browser sends one on every cross-site request; an
+ *    OPTIONS preflight gets 403 and no Access-Control-Allow-* header ever);
+ *  - name the signer by Host: 127.0.0.1:<port> or localhost:<port> (DNS
+ *    rebinding);
+ *  - carry `Authorization: Bearer <token>`, the random 32-byte token the
+ *    signer wrote at start to a 0600 file (SIGNER_TOKEN_FILE, default
+ *    tokenFileFor(port)); compared in constant time. The CLIs send it
+ *    through the `remote` network's httpHeaders (hardhat.config.ts);
+ *  - stay under MAX_BODY and call an allowed JSON-RPC method.
+ */
+"use strict";
+
+const crypto = require("crypto");
+const fs = require("fs");
+const os = require("os");
+const path = require("path");
+
+const MAX_BODY = 2 * 1024 * 1024;
+/** Reads forwarded to the chain, besides the signer's own methods. */
+const READS = [
+  "eth_chainId",
+  "net_version",
+  "web3_clientVersion",
+  "eth_syncing",
+  "eth_blockNumber",
+  "eth_call",
+  "eth_estimateGas",
+  "eth_gasPrice",
+  "eth_maxPriorityFeePerGas",
+  "eth_feeHistory",
+  "eth_getBalance",
+  "eth_getCode",
+  "eth_getStorageAt",
+  "eth_getTransactionCount",
+  "eth_getTransactionByHash",
+  "eth_getTransactionReceipt",
+  "eth_getBlockByNumber",
+  "eth_getBlockByHash",
+  "eth_getLogs",
+];
+const OWN = [
+  "eth_accounts",
+  "eth_sendTransaction",
+  "personal_sign",
+  "eth_sign",
+];
+
+/** The token file for a signer on `port` (SIGNER_TOKEN_FILE overrides). */
+function tokenFileFor(port, env = process.env) {
+  return (
+    env.SIGNER_TOKEN_FILE ||
+    path.join(os.tmpdir(), `vanguard-signer-${port}.token`)
+  );
+}
+
+/**
+ * A fresh token written to `file` (owner-only, created anew: an existing
+ * file is replaced only if this user owns it). Returns the token.
+ */
+function writeToken(file) {
+  try {
+    const st = fs.lstatSync(file);
+    if (st.uid !== process.getuid() || !st.isFile()) {
+      throw new Error(
+        `${file} exists and is not this user's plain file: refusing`,
+      );
+    }
+    fs.unlinkSync(file);
+  } catch (e) {
+    if (e.code !== "ENOENT") throw e;
+  }
+  const token = crypto.randomBytes(32).toString("hex");
+  const fd = fs.openSync(file, "wx", 0o600);
+  try {
+    fs.writeSync(fd, `${token}\n`);
+  } finally {
+    fs.closeSync(fd);
+  }
+  return token;
+}
+
+const digest = (s) => crypto.createHash("sha256").update(String(s)).digest();
+
+/**
+ * Why `req` (headers read only) is refused, as [status, message], or null.
+ * `port` is the signer's own; `token` its secret.
+ */
+function refusal(req, port, token) {
+  const h = req.headers;
+  if (req.method === "OPTIONS") return [403, "no cross-origin requests"];
+  if (req.method !== "POST") return [405, "POST only"];
+  if (h.origin !== undefined || h.referer !== undefined) {
+    return [
+      403,
+      "a request with Origin or Referer (a browser page) is refused",
+    ];
+  }
+  if (!/^application\/json(\s*;|$)/i.test(String(h["content-type"] || ""))) {
+    return [415, "Content-Type must be application/json"];
+  }
+  const host = String(h.host || "").toLowerCase();
+  if (host !== `127.0.0.1:${port}` && host !== `localhost:${port}`) {
+    return [403, `Host must be 127.0.0.1:${port} or localhost:${port}`];
+  }
+  const m = /^Bearer (\S+)$/.exec(String(h.authorization || ""));
+  if (!m || !crypto.timingSafeEqual(digest(m[1]), digest(token))) {
+    return [401, "missing or wrong bearer token (SIGNER_TOKEN_FILE)"];
+  }
+  return null;
+}
+
+/** JSON-RPC methods `call` may use: OWN, READS, and `extra` (a predicate). */
+function allowed(method, extra = () => false) {
+  return OWN.includes(method) || READS.includes(method) || extra(method);
+}
+
+/**
+ * Serve `handle(call) -> answer` behind every check above on 127.0.0.1;
+ * `opts` { port, tokenFile, extra (more methods), log }. Resolves to
+ * { server, port, tokenFile } once listening and the token is written.
+ */
+async function guardedServer(handle, opts) {
+  const http = require("http");
+  let port = opts.port;
+  let token = null;
+  const send = (res, status, body) => {
+    res.statusCode = status;
+    res.setHeader("content-type", "application/json");
+    res.end(JSON.stringify(body));
+  };
+  const server = http.createServer((req, res) => {
+    const no = token ? refusal(req, port, token) : [503, "starting"];
+    if (no) {
+      req.resume();
+      return send(res, no[0], {
+        jsonrpc: "2.0",
+        id: null,
+        error: { code: -32001, message: no[1] },
+      });
+    }
+    let body = "";
+    let size = 0;
+    req.on("data", (c) => {
+      size += c.length;
+      if (size > MAX_BODY) req.destroy();
+      else body += c;
+    });
+    req.on("end", async () => {
+      let call;
+      try {
+        call = JSON.parse(body);
+      } catch (e) {
+        return send(res, 400, {
+          jsonrpc: "2.0",
+          id: null,
+          error: { code: -32700, message: e.message },
+        });
+      }
+      const one = async (c) =>
+        allowed(c.method, opts.extra)
+          ? handle(c, req, res)
+          : {
+              jsonrpc: "2.0",
+              id: c.id,
+              error: {
+                code: -32601,
+                message: `${c.method} is not allowed by this signer`,
+              },
+            };
+      const out = Array.isArray(call)
+        ? await Promise.all(call.map(one))
+        : await one(call);
+      if (out !== undefined && !res.writableEnded) send(res, 200, out);
+    });
+  });
+  await new Promise((ok, ko) => {
+    server.once("error", ko);
+    server.listen(opts.port, "127.0.0.1", ok);
+  });
+  const addr = server.address();
+  if (addr.address !== "127.0.0.1") {
+    server.close();
+    throw new Error(`bound to ${addr.address}, not 127.0.0.1: refusing`);
+  }
+  port = addr.port;
+  const tokenFile = opts.tokenFile || tokenFileFor(port);
+  token = writeToken(tokenFile);
+  return { server, port, tokenFile };
+}
+
+module.exports = {
+  MAX_BODY,
+  READS,
+  tokenFileFor,
+  writeToken,
+  refusal,
+  allowed,
+  guardedServer,
+};

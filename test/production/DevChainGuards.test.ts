@@ -3,6 +3,7 @@ import { ethers } from "hardhat";
 import { spawn } from "child_process";
 import * as http from "http";
 import { AddressInfo } from "net";
+import * as os from "os";
 
 /**
  * Task 5.15 slice A (readiness review L-2, L-3): what only a dev node may
@@ -151,7 +152,12 @@ describe("Dev-chain guards (options 11 and 62, the CI remote signer)", function 
             process.execPath,
             ["scripts/ci/remote-signer.js", "0"],
             {
-              env: { ...process.env, SIGNER_UPSTREAM: url, ...env },
+              env: {
+                ...process.env,
+                SIGNER_UPSTREAM: url,
+                SIGNER_TOKEN_FILE: `${os.tmpdir()}/dcg-${process.pid}.token`,
+                ...env,
+              },
             },
           );
           let out = "";

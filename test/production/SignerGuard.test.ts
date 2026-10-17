@@ -1,0 +1,199 @@
+import { expect } from "chai";
+import { ethers } from "ethers";
+import * as fs from "fs";
+import * as http from "http";
+import * as os from "os";
+import * as path from "path";
+import { fakeUpstream, Live, rpc, runSigner } from "../helpers/signerProcess";
+
+/**
+ * Task 5.15 (the lead's security requirement): who may talk to the local
+ * signers (scripts/production/rpcGuard.js), for both
+ * scripts/production/signer.js and scripts/ci/remote-signer.js. A web
+ * page in the operator's browser must not get a transaction signed: no
+ * token, a wrong token, a foreign Host (DNS rebinding), an Origin or
+ * Referer, a preflight, another content type, an oversized body or a
+ * method off the list is refused, and nothing reaches the chain.
+ */
+describe("Signer request guard (rpcGuard.js)", function () {
+  this.timeout(120_000);
+  const PASS = "a long enough test password";
+  const key = ethers.Wallet.createRandom();
+  let dir: string;
+
+  before(async function () {
+    dir = fs.mkdtempSync(path.join(os.tmpdir(), "guard-"));
+    fs.mkdirSync(path.join(dir, "keys"));
+    const json = await ethers.encryptKeystoreJson(
+      { address: key.address, privateKey: key.privateKey },
+      PASS,
+      { scrypt: { N: 1 << 10 } },
+    );
+    fs.writeFileSync(path.join(dir, "keys", "a.json"), json, { mode: 0o600 });
+    fs.writeFileSync(path.join(dir, "pass"), PASS, { mode: 0o600 });
+  });
+  after(() => fs.rmSync(dir, { recursive: true, force: true }));
+
+  /** A raw request (Host and method set by hand); status, headers, body. */
+  function raw(
+    live: Live,
+    opts: { method?: string; headers?: Record<string, string>; body?: string },
+  ): Promise<{
+    status: number;
+    headers: http.IncomingHttpHeaders;
+    body: string;
+  }> {
+    return new Promise((ok, ko) => {
+      const req = http.request(
+        {
+          host: "127.0.0.1",
+          port: live.port,
+          method: opts.method || "POST",
+          headers: {
+            "content-type": "application/json",
+            authorization: `Bearer ${live.token}`,
+            ...opts.headers,
+          },
+        },
+        (res) => {
+          let body = "";
+          res.on("data", (c) => (body += c));
+          res.on("end", () =>
+            ok({ status: res.statusCode!, headers: res.headers, body }),
+          );
+        },
+      );
+      req.on("error", ko);
+      req.end(
+        opts.body ??
+          JSON.stringify({ jsonrpc: "2.0", id: 1, method: "eth_accounts" }),
+      );
+    });
+  }
+
+  const SIGNERS: [string, (url: string) => Record<string, string>, string][] = [
+    [
+      "scripts/production/signer.js",
+      (url) => ({
+        SIGNER_UPSTREAM: url,
+        SIGNER_KEYSTORE_DIR: path.join(dir, "keys"),
+        SIGNER_PASSWORD_FILE: path.join(dir, "pass"),
+        SIGNER_TEST: "1",
+      }),
+      key.address,
+    ],
+    [
+      "scripts/ci/remote-signer.js",
+      (url) => ({
+        SIGNER_UPSTREAM: url,
+        MNEMONIC: "test test test test test test test test test test test junk",
+        SIGNER_COUNT: "1",
+      }),
+      "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266",
+    ],
+  ];
+
+  for (const [script, envOf, from] of SIGNERS) {
+    it(`${path.basename(script)}: only a token-bearing, same-host, non-browser JSON request is served`, async function () {
+      const up = await fakeUpstream(31337);
+      const tokenFile = path.join(dir, `${path.basename(script)}.token`);
+      const tx = { from, to: from, value: "0x1", nonce: "0x5" };
+      const send = JSON.stringify({
+        jsonrpc: "2.0",
+        id: 1,
+        method: "eth_sendTransaction",
+        params: [tx],
+      });
+      try {
+        const r = await runSigner(
+          script,
+          { ...envOf(up.url), SIGNER_TOKEN_FILE: tokenFile },
+          async (live) => {
+            expect(fs.statSync(tokenFile).mode & 0o777).to.equal(0o600);
+            expect(live.token).to.match(/^[0-9a-f]{64}$/);
+            const refused = async (
+              o: Parameters<typeof raw>[1],
+              status: number,
+              why: RegExp,
+            ) => {
+              const res = await raw(live, { body: send, ...o });
+              expect(res.status, JSON.stringify(o)).to.equal(status);
+              expect(res.body, JSON.stringify(o)).to.match(why);
+              for (const h of Object.keys(res.headers))
+                expect(h, "no CORS header").to.not.match(/^access-control-/);
+            };
+            await refused(
+              { headers: { authorization: "" } },
+              401,
+              /bearer token/,
+            );
+            await refused(
+              { headers: { authorization: `Bearer ${"0".repeat(64)}` } },
+              401,
+              /bearer token/,
+            );
+            await refused(
+              { headers: { authorization: `Bearer ${live.token}x` } },
+              401,
+              /bearer token/,
+            );
+            await refused(
+              { headers: { host: `attacker.example:${live.port}` } },
+              403,
+              /Host must be/,
+            );
+            await refused(
+              { headers: { host: "127.0.0.1:1" } },
+              403,
+              /Host must be/,
+            );
+            await refused(
+              { headers: { origin: "https://attacker.example" } },
+              403,
+              /Origin or Referer/,
+            );
+            await refused(
+              { headers: { referer: "https://attacker.example/x" } },
+              403,
+              /Origin or Referer/,
+            );
+            await refused(
+              { headers: { "content-type": "text/plain" } },
+              415,
+              /application\/json/,
+            );
+            await refused({ method: "OPTIONS" }, 403, /cross-origin/);
+            const big = await raw(live, {
+              body: "x".repeat(3 * 1024 * 1024),
+            }).catch((e) => e);
+            expect(
+              big instanceof Error || big.status !== 200,
+              "oversized body served",
+            ).to.equal(true);
+            const off = await rpc(live, "debug_traceTransaction", ["0x00"]);
+            expect(off.body.error.message).to.contain(
+              "is not allowed by this signer",
+            );
+            expect(up.raws, "nothing reached the chain").to.deep.equal([]);
+            // The same request, properly made, is served.
+            const ok = await raw(live, {
+              headers: { host: `localhost:${live.port}` },
+              body: send,
+            });
+            expect(ok.status).to.equal(200);
+            expect(JSON.parse(ok.body).result).to.match(/^0x[0-9a-f]{64}$/);
+            expect(up.raws.length).to.equal(1);
+          },
+        );
+        expect(r.out).to.not.contain(
+          fs.existsSync(tokenFile)
+            ? fs.readFileSync(tokenFile, "utf8").trim()
+            : "-",
+        );
+        expect(r.out).to.contain(`token in ${tokenFile}`);
+      } finally {
+        up.server.close();
+      }
+    });
+  }
+});

@@ -6,6 +6,7 @@ import "hardhat-contract-sizer";
 import "hardhat-gas-reporter";
 import "solidity-coverage";
 import * as dotenv from "dotenv";
+import * as fs from "fs";
 
 dotenv.config();
 
@@ -52,6 +53,14 @@ subtask(TASK_TEST_GET_TEST_FILES).setAction(async (args, hre, runSuper) => {
   const { shardOf } = require("./scripts/ci/test-shards.js");
   return shardOf(process.env.TEST_SHARD, process.env.TEST_SHARD_RUN, files);
 });
+
+/** { Authorization } for the signer at `url`, when its token file exists. */
+function signerAuth(url: string): Record<string, string> {
+  const { tokenFileFor } = require("./scripts/production/rpcGuard.js");
+  const file = tokenFileFor(new URL(url).port || "80");
+  if (!fs.existsSync(file)) return {};
+  return { Authorization: `Bearer ${fs.readFileSync(file, "utf8").trim()}` };
+}
 
 const config: HardhatUserConfig = {
   solidity: {
@@ -117,12 +126,15 @@ const config: HardhatUserConfig = {
     // style: it holds the keys, signs eth_sendTransaction and forwards
     // the rest to its chain); this process holds no key. Absent unless
     // set. Long timeout: a person may approve each transaction.
+    // Task 5.15: the signer's bearer token (scripts/production/rpcGuard.js)
+    // from SIGNER_TOKEN_FILE, else the path the signer prints by default.
     ...(process.env.SIGNER_RPC_URL
       ? {
           remote: {
             url: process.env.SIGNER_RPC_URL,
             accounts: "remote" as const,
             timeout: 600_000,
+            httpHeaders: signerAuth(process.env.SIGNER_RPC_URL),
           },
         }
       : {}),

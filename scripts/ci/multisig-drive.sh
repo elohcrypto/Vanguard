@@ -54,6 +54,19 @@ up() {
   fail "no node at $1"
 }
 rpc "$NODE_URL" eth_chainId "[]" | grep -q result && fail "port $NODE_PORT in use"
+export SIGNER_TOKEN_FILE=$OUT/signer.token
+# The signer answers only with its bearer token (scripts/production/
+# rpcGuard.js), written to SIGNER_TOKEN_FILE once it listens.
+sup() {
+  for _ in $(seq 1 60); do
+    [[ -s $SIGNER_TOKEN_FILE ]] && curl -s -m 30 -X POST -H "Content-Type: application/json" \
+      -H "Authorization: Bearer $(cat "$SIGNER_TOKEN_FILE")" \
+      --data '{"jsonrpc":"2.0","id":1,"method":"eth_chainId","params":[]}' \
+      "http://127.0.0.1:$SIGNER_PORT" | grep -q result && return 0
+    sleep 1
+  done
+  fail "no signer at $SIGNER_PORT"
+}
 
 MNEMONIC="$NODE_PHRASE" setsid node_modules/.bin/hardhat node --port "$NODE_PORT" \
   >"$OUT/node.log" 2>&1 &
@@ -69,7 +82,7 @@ DEPLOYER=$(echo "$WALLETS" | head -1)
 MNEMONIC="$ROLES" SIGNER_COUNT=14 SIGNER_UPSTREAM=$NODE_URL setsid node \
   scripts/ci/remote-signer.js "$SIGNER_PORT" >"$OUT/signer.log" 2>&1 &
 PIDS+=($!)
-up "http://127.0.0.1:$SIGNER_PORT"
+sup
 unset MNEMONIC PRIVATE_KEY
 export SIGNER_RPC_URL=http://127.0.0.1:$SIGNER_PORT DEPLOY_RECORD=$OUT/31337.json \
   HANDOVER_CONFIG=$OUT/handover.json
