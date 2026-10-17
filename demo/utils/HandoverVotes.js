@@ -163,15 +163,17 @@ async function proposalsBy(governance, proposer) {
 
 /**
  * Task 5.15 (H-1, Q14 = A): `items` ({ label, ok?, title?, proposalType,
- * target, callData, verify? }) are proposed together, every voter votes on
- * each, then they are settled in the given order, so the whole set takes
- * one voting period and delay, not one per item. The first that does not
- * pass or execute stops the run: those executed stay, and a re-run adopts
- * the proposals still open. Adopted only: the same proposer's proposal of
- * the same type, target and calldata, still voting or passed but not
- * executed; one that ended without passing is reported, never adopted.
+ * target, callData, precheck?, verify? }) are proposed together and every
+ * voter votes on each (openAll), then they are settled in the given order
+ * (settleAll), so the whole set takes one voting period and delay, not one
+ * per item. The first that does not pass or execute, or whose precheck
+ * throws (read just before it executes), stops the run: those executed
+ * stay, and a re-run adopts the proposals still open. Adopted only: the
+ * same proposer's proposal of the same type, target and calldata, still
+ * voting or passed but not executed; one that ended without passing is
+ * settled as Rejected, reported, never adopted.
  */
-async function voteAll({ governance, proposer, voters, items, log }) {
+async function openAll({ governance, proposer, voters, items, log }) {
   const mine = await proposalsBy(governance, proposer);
   const taken = new Set();
   const open = [];
@@ -211,21 +213,29 @@ async function voteAll({ governance, proposer, voters, items, log }) {
     }
     open.push({ ...it, id });
   }
-  if (!open.length) return;
+  if (!open.length) return open;
   log(
     `   🗳️  ${open.length} proposal(s) open at once: ${open.map((o) => `#${o.id}`).join(", ")}`,
   );
-  const now = async () => (await ethers.provider.getBlock("latest")).timestamp;
   for (const o of open) {
     const [p] = await governance.getProposal(o.id);
-    if ((await now()) <= p.votingEnds) {
+    if ((await chainNow()) <= p.votingEnds) {
       await module.exports.castAcceptanceVotes(governance, o.id, voters);
     }
   }
+  return open;
+}
+
+const chainNow = async () =>
+  (await ethers.provider.getBlock("latest")).timestamp;
+
+async function settleAll({ governance, proposer, open, log }) {
+  if (!open.length) return;
   const [first] = await governance.getProposal(open[0].id);
   for (const o of open) {
     // Through module.exports, so a test can stop the run part-way.
     try {
+      if (o.precheck) await o.precheck();
       // R-56c-3: executed by the proposer, never the default wallet 0.
       await module.exports.settleProposal(
         governance.connect(proposer),
@@ -240,8 +250,13 @@ async function voteAll({ governance, proposer, voters, items, log }) {
     log(`   ✅ ${o.ok || o.label} (proposal #${o.id})`);
   }
   log(
-    `   ⏱️  ${open.length} proposal(s) settled ${(await now()) - Number(first.createdAt)} s of chain time after #${open[0].id} was created`,
+    `   ⏱️  ${open.length} proposal(s) settled ${(await chainNow()) - Number(first.createdAt)} s of chain time after #${open[0].id} was created`,
   );
+}
+
+/** openAll, then settleAll: the ceremony's acceptances (Q14 = A). */
+async function voteAll(args) {
+  await settleAll({ ...args, open: await openAll(args) });
 }
 
 /**
@@ -366,6 +381,8 @@ async function checkVoters(o, proposer, voters, count) {
 
 module.exports = {
   voteAll,
+  openAll,
+  settleAll,
   proposeCall,
   proposeAcceptOwnership,
   castAcceptanceVotes,
