@@ -15,7 +15,9 @@
 #      (nothing sent twice)
 #   3. a tampered code hash in the record: refused, nothing sent
 #   4. a re-run of the complete deploy sends nothing
-#   5. voters registered (scripts/ci/deploy-voters.js)
+#   5. voters onboarded by scripts/production/onboardVoters.ts through
+#      scripts/production/signer.js (no clock jump in the CLI; a re-run
+#      sends nothing); the drive moves the dev clock
 #   6. the ceremony (scripts/handover.ts) through the faulting signer: all
 #      acceptances open at once, the full phase killed after the first
 #      settles, the accept phase adopts the rest; no sender sent twice,
@@ -178,9 +180,43 @@ deploy >"$OUT/deploy4.log" 2>&1 || fail "the re-run failed"
 grep -qE "\(([0-9]+) from the record, 0 sent now;" "$OUT/deploy4.log" || fail "the re-run sent"
 echo "4. re-run: $(grep -oE '[0-9]+ from the record, 0 sent now' "$OUT/deploy4.log")"
 
-# 5. Voters on this deploy.
-npx hardhat run scripts/ci/deploy-voters.js --network remote >"$OUT/voters.log" 2>&1 \
-  || fail "voter registration failed"
+# 5. Voters on this deploy (H-2, Q16 = A): the production onboarding CLI
+#    through the production signer (scripts/production/signer.js, its
+#    keystores made here, 31337 by SIGNER_TEST=1). The CLI moves no clock;
+#    the drive jumps the dev node past the time it printed. A re-run sends
+#    nothing.
+KS=$OUT/keystores
+mkdir -m 700 "$KS"
+(umask 077; printf '%s\n' "drive-only keystore password" >"$OUT/password")
+MNEMONIC="$ROLES" node -e 'const { HDNodeWallet, Mnemonic, encryptKeystoreJson } = require("ethers");
+  const fs = require("fs"); const m = Mnemonic.fromPhrase(process.env.MNEMONIC);
+  (async () => { for (let i = 0; i < 12; i++) {
+    const w = HDNodeWallet.fromMnemonic(m, `m/44'"'"'/60'"'"'/0'"'"'/0/${i}`);
+    const j = await encryptKeystoreJson(w, "drive-only keystore password", { scrypt: { N: 1024 } });
+    fs.writeFileSync(`${process.argv[1]}/${String(i).padStart(2, "0")}.json`, j, { mode: 0o600 });
+  } })();' "$KS"
+kill -- "-$SIGNER_PID" 2>/dev/null || true
+wait "$SIGNER_PID" 2>/dev/null || true
+SIGNER_TEST=1 SIGNER_KEYSTORE_DIR=$KS SIGNER_PASSWORD_FILE=$OUT/password SIGNER_UPSTREAM=$NODE_URL \
+  setsid node scripts/production/signer.js "$SIGNER_PORT" >"$OUT/prod-signer.log" 2>&1 &
+SIGNER_PID=$!
+PIDS+=($!)
+sup
+grep -q "12 key(s), chain 31337" "$OUT/prod-signer.log" || fail "the production signer did not load 12 keys"
+onboard() { npx hardhat run scripts/production/onboardVoters.ts --network remote >"$OUT/$1" 2>&1 \
+  || fail "voter onboarding failed ($1)"; }
+onboard voters.log
+WAIT=$(grep -oE "[0-9]+ s to wait" "$OUT/voters.log" | grep -oE "^[0-9]+" || true)
+[[ -n $WAIT ]] || fail "no eligibility time printed"
+B0=$(($(rpc "$NODE_URL" eth_blockNumber "[]" | sed -E 's/.*"result":"([^"]+)".*/\1/')))
+onboard voters2.log
+[[ $(grep -c "(already onboarded)" "$OUT/voters2.log") -eq 3 ]] || fail "the re-run onboarded again"
+[[ $(($(rpc "$NODE_URL" eth_blockNumber "[]" | sed -E 's/.*"result":"([^"]+)".*/\1/'))) -eq $B0 ]] \
+  || fail "the onboarding re-run sent a transaction"
+rpc "$NODE_URL" evm_increaseTime "[$((WAIT + 1))]" >/dev/null
+rpc "$NODE_URL" evm_mine "[]" >/dev/null
+echo "5. voters onboarded through the production signer (no clock jump; eligible in $WAIT s); a re-run sent nothing; the drive moved the dev clock"
+signer 0
 # 6. The ceremony, its acceptances in parallel (Task 5.15, H-1, Q14 = A),
 #    through the faulting signer (sends slowed): the full phase is killed
 #    once its first acceptance settles; the accept phase finishes the rest,

@@ -1,55 +1,39 @@
 /**
- * Voter registration for the CI deploy drive (plan v2 Task 5.7; runbook
- * section 3, D25), on the deploy scripts/production/DeployProduction.ts
- * recorded: the handover.json's proposer and voters become verified
- * identities through the demo's one onboarding path (demo/utils/
- * Onboard.js), the deployer mints each 1,000 VGT (it is a VGT agent until
- * the ceremony), and a dev node's clock passes governance.minVoterAge.
+ * Voter registration for the CI drives and the local rehearsal (plan v2
+ * Task 5.7; runbook section 3, D25): the production CLI
+ * (scripts/production/onboardVoters.ts, any chain, no clock jump), then a
+ * dev node's clock moved past the youngest voter's minVoterAge. The jump
+ * is the only dev-node part, so this refuses chains other than 31337; on
+ * a public chain run the production CLI and wait the time it prints.
  *
  *   DEPLOY_RECORD=<record> HANDOVER_CONFIG=<handover.json> \
  *     npx hardhat run scripts/ci/deploy-voters.js --network remote
  */
 const fs = require("fs");
 const { ethers, network } = require("hardhat");
-const DemoState = require("../../demo/core/DemoState");
-const { onboard } = require("../../demo/utils/Onboard");
-
-const ARTIFACT = {
-  onchainIDFactory: "OnchainIDFactory",
-  identityRegistry: "IdentityRegistry",
-  kycIssuer: "ClaimIssuer",
-  amlIssuer: "ClaimIssuer",
-  complianceRules: "ComplianceRules",
-  digitalToken: "Token",
-  governanceToken: "GovernanceToken",
-  vanguardGovernance: "VanguardGovernance",
-};
+const { onboardVoters } = require("../production/onboardVoters");
+const { installRetry } = require("../../demo/utils/RpcRetry");
 
 async function main() {
-  const rec = JSON.parse(fs.readFileSync(process.env.DEPLOY_RECORD, "utf8"));
-  const cfg = JSON.parse(fs.readFileSync(process.env.HANDOVER_CONFIG, "utf8"));
-  if (!rec.complete) throw new Error("the deploy record is not complete");
-  if (rec.chainId !== 31337) {
-    throw new Error(`a dev-node drive; chain ${rec.chainId} refused`);
+  installRetry(network.provider);
+  const chain = Number((await ethers.provider.getNetwork()).chainId);
+  if (chain !== 31337) {
+    throw new Error(
+      `a dev-node drive; chain ${chain} refused (use scripts/production/onboardVoters.ts)`,
+    );
   }
-  const state = new DemoState();
-  state.signers = await ethers.getSigners();
-  for (const [k, name] of Object.entries(ARTIFACT)) {
-    state.setContract(k, await ethers.getContractAt(name, rec.contracts[k]));
-  }
-  const vgt = state.getContract("governanceToken");
-  for (const i of [cfg.proposer, ...cfg.voters]) {
-    const w = state.signers[i].address;
-    const r = await onboard(state, w, { label: `voter ${i}` });
-    if (!r.verified) throw new Error(`wallet ${i} ${w} did not verify`);
-    await (await vgt.mint(w, ethers.parseEther("1000"))).wait();
-    console.log(`   ✅ wallet ${i} ${w}: verified, 1,000 VGT`);
-  }
-  const gov = state.getContract("vanguardGovernance");
-  const age = Number(await gov.minVoterAge()) + 1;
+  const read = (k) => JSON.parse(fs.readFileSync(process.env[k], "utf8"));
+  const last = await onboardVoters(
+    read("DEPLOY_RECORD"),
+    read("HANDOVER_CONFIG"),
+  );
+  const now = (await ethers.provider.getBlock("latest")).timestamp;
+  const age = Math.max(0, last - now) + 1;
   await network.provider.send("evm_increaseTime", [age]);
   await network.provider.send("evm_mine", []);
-  console.log(`✅ voters registered; clock moved ${age}s past minVoterAge`);
+  console.log(
+    `✅ dev node: clock moved ${age}s, past every voter's minVoterAge`,
+  );
 }
 
 main().catch((e) => {
