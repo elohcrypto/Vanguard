@@ -93,6 +93,46 @@ describe("Signer request guard (rpcGuard.js)", function () {
     ],
   ];
 
+  for (const [script, envOf] of SIGNERS) {
+    it(`${path.basename(script)}: a malformed call or a dead upstream is an error answer, never a crash (review L-1)`, async function () {
+      const up = await fakeUpstream(31337);
+      const tokenFile = path.join(dir, `${path.basename(script)}.l1.token`);
+      try {
+        const r = await runSigner(
+          script,
+          { ...envOf(up.url), SIGNER_TOKEN_FILE: tokenFile },
+          async (live) => {
+            for (const body of [
+              "null",
+              "[null]",
+              "[1]",
+              '{"method":5}',
+              '"x"',
+              "[]",
+            ]) {
+              const res = await raw(live, { body });
+              expect(res.status, body).to.be.oneOf([200, 400]);
+              expect(res.body, body).to.match(/Invalid Request|-32600/);
+            }
+            // The upstream goes away: a forwarded read is an error answer.
+            await new Promise<void>((ok) => up.server.close(() => ok()));
+            up.server.closeAllConnections?.();
+            const down = await rpc(live, "eth_blockNumber");
+            expect(down.body.error.message).to.match(
+              /upstream|fetch failed|ECONNREFUSED/,
+            );
+            // Still serving.
+            const acc = await rpc(live, "eth_accounts");
+            expect(acc.body.result.length).to.be.greaterThan(0);
+          },
+        );
+        expect(r.code, "no crash").to.equal(0);
+      } finally {
+        up.server.close();
+      }
+    });
+  }
+
   for (const [script, envOf, from] of SIGNERS) {
     it(`${path.basename(script)}: only a token-bearing, same-host, non-browser JSON request is served`, async function () {
       const up = await fakeUpstream(31337);
@@ -184,6 +224,9 @@ describe("Signer request guard (rpcGuard.js)", function () {
             expect(JSON.parse(ok.body).result).to.match(/^0x[0-9a-f]{64}$/);
             expect(up.raws.length).to.equal(1);
           },
+        );
+        expect(r.code, "the signer stayed up and exited on SIGTERM").to.equal(
+          0,
         );
         expect(r.out).to.not.contain(
           fs.existsSync(tokenFile)

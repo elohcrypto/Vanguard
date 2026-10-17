@@ -164,20 +164,48 @@ async function guardedServer(handle, opts) {
           error: { code: -32700, message: e.message },
         });
       }
-      const one = async (c) =>
-        allowed(c.method, opts.extra)
-          ? handle(c, req, res)
-          : {
-              jsonrpc: "2.0",
-              id: c.id,
-              error: {
-                code: -32601,
-                message: `${c.method} is not allowed by this signer`,
-              },
-            };
-      const out = Array.isArray(call)
-        ? await Promise.all(call.map(one))
-        : await one(call);
+      // Review L-1: each call is checked and answered on its own; a
+      // malformed one, or a handler that throws (an upstream down), is an
+      // error answer, never an unhandled rejection that ends the process.
+      const bad = (id, message) => ({
+        jsonrpc: "2.0",
+        id: id ?? null,
+        error: { code: -32600, message: `Invalid Request: ${message}` },
+      });
+      const one = async (c) => {
+        if (!c || typeof c !== "object" || Array.isArray(c))
+          return bad(null, "not a call object");
+        if (typeof c.method !== "string") return bad(c.id, "no method");
+        if (!allowed(c.method, opts.extra)) {
+          return {
+            jsonrpc: "2.0",
+            id: c.id,
+            error: {
+              code: -32601,
+              message: `${c.method} is not allowed by this signer`,
+            },
+          };
+        }
+        try {
+          return await handle(c, req, res);
+        } catch (e) {
+          return {
+            jsonrpc: "2.0",
+            id: c.id,
+            error: { code: -32603, message: e.message },
+          };
+        }
+      };
+      let out;
+      if (Array.isArray(call)) {
+        out = call.length
+          ? await Promise.all(call.map(one))
+          : bad(null, "an empty batch");
+      } else if (call && typeof call === "object") {
+        out = await one(call);
+      } else {
+        out = bad(null, "not a call object");
+      }
       if (out !== undefined && !res.writableEnded) send(res, 200, out);
     });
   });
