@@ -71,21 +71,10 @@
 // argv passthrough); a typed CLI can replace it later.
 import { ethers, network } from "hardhat";
 import * as fs from "fs";
-import { validateHandoverConfig } from "./handoverConfig";
+import { handoverArgs } from "./handoverConfig";
 
 const { installRetry } = require("../demo/utils/RpcRetry");
 const { requireArchive } = require("../demo/utils/HandoverScans");
-
-// Whitelist/Blacklist oracles have listManager(); an oracle without it
-// reverts, which the ceremony treats as "no writer role".
-const ORACLE_ABI = [
-  "function owner() view returns (address)",
-  "function pendingOwner() view returns (address)",
-  "function transferOwnership(address)",
-  "function acceptOwnership()",
-  "function listManager() view returns (address)",
-  "function setListManager(address)",
-];
 
 const {
   ACCEPTANCE_PLAN,
@@ -109,11 +98,7 @@ const {
   readSnapshotFile,
   sidecarOf,
 } = require("../demo/utils/HandoverSnapshotFile");
-const {
-  resolveRole,
-  requireEffects,
-  vetRole,
-} = require("../demo/utils/RoleCalls");
+const { requireEffects } = require("../demo/utils/RoleCalls");
 const {
   refuseFullRerun,
   stepsFromSnapshot,
@@ -173,68 +158,8 @@ export async function runHandover(
   phase = "full",
   path = "handover.json",
 ): Promise<void> {
-  validateHandoverConfig(cfg, phase, path);
-
-  const signers = await ethers.getSigners();
-  const wallet = (i: number) => {
-    if (!signers[i])
-      throw new Error(`wallet ${i} is not configured on this network`);
-    return signers[i];
-  };
+  const { args, wallet } = await handoverArgs(cfg, phase, path);
   const at = (name: string, a: string) => ethers.getContractAt(name, a);
-  const role = async (k: string) => {
-    if (cfg[k] === undefined) return undefined;
-    const r = await resolveRole(
-      typeof cfg[k] === "string" ? cfg[k] : wallet(cfg[k]),
-      k,
-    );
-    await vetRole(r, wallet(0).address); // review LOW-5
-    return r;
-  };
-
-  const ARTIFACT: Record<string, string> = {
-    token: "Token",
-    governanceToken: "GovernanceToken",
-    identityRegistry: "IdentityRegistry",
-    complianceRules: "ComplianceRules",
-    oracleManager: "OracleManager",
-    investorTypeRegistry: "InvestorTypeRegistry",
-    dynamicListManager: "DynamicListManager",
-    escrowWalletFactory: "EscrowWalletFactory",
-    onchainIDFactory: "OnchainIDFactory",
-    privacyManager: "PrivacyManager",
-    zkVerifier: "ZKVerifierIntegrated",
-    keyManager: "KeyManager",
-  };
-  const args: Record<string, any> = {
-    // Start of the event scans (read in chunks from here to the latest block).
-    fromBlock: cfg.fromBlock,
-    logChunk: cfg.logChunk,
-    deployer: wallet(0),
-    ops: await role("ops"),
-    guardian: await role("guardian"),
-    issuerAdmin: await role("issuerAdmin"),
-    feeWallets: cfg.feeWallets,
-    oracleNodes: cfg.oracleNodes || [],
-    attestors: cfg.attestors || [],
-    extraTrusted: cfg.extraTrusted || [],
-    governance: await at("VanguardGovernance", cfg.governance),
-    keyManagerIdentity: cfg.keyManagerIdentity,
-    // Assertions (R-413-1): what an older config names is checked against
-    // the derivation; a key left out is derived.
-    oracles: cfg.oracles
-      ? await Promise.all(
-          cfg.oracles.map((a: string) => ethers.getContractAt(ORACLE_ABI, a)),
-        )
-      : undefined,
-    issuers: cfg.issuers
-      ? await Promise.all(cfg.issuers.map((a: string) => at("ClaimIssuer", a)))
-      : undefined,
-  };
-  for (const [k, name] of Object.entries(ARTIFACT)) {
-    // R-413-12: null is an assertion of absence and must reach the ceremony.
-    if (k in cfg) args[k] = cfg[k] === null ? null : await at(name, cfg[k]);
-  }
   // Task 5.15 (M-3): every phase reads old state; a pruned RPC is refused
   // before anything else is read.
   await requireArchive(args);
