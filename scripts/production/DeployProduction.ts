@@ -60,6 +60,7 @@ import {
 import { configureKeyManager } from "./opsKeyManager";
 
 const DemoState = require("../../demo/core/DemoState");
+const { installRetry } = require("../../demo/utils/RpcRetry");
 const {
   acceptStatus,
   externalRole,
@@ -140,6 +141,9 @@ async function deployStack(
 }
 
 async function main(): Promise<void> {
+  // Task 5.15 (M-3): transient RPC errors retried below the record, which
+  // keeps its own intent and adoption rules (demo/utils/RpcRetry.js).
+  installRetry(network.provider);
   const accountsCfg = (network.config as any).accounts;
   refuseLocalKeys({
     network: network.name,
