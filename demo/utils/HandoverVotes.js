@@ -147,16 +147,37 @@ async function settleProposal(
 
 const ACTIVE = 1;
 
-/** Every proposal `proposer` made: { id, p, canExecute, voting }. */
+/**
+ * Whether proposal `p` clears its type's quorum and approval with the
+ * votes cast, as executeProposal judges it (review M-1: in the execution
+ * delay canExecute is false for a passing proposal too).
+ */
+async function passes(governance, p) {
+  const t = await governance.proposalThresholds(p.proposalType);
+  const total = p.votesFor + p.votesAgainst;
+  const eligible = p.eligibleVotersAtCreation;
+  return (
+    total > 0n &&
+    eligible > 0n &&
+    total * 10000n >= eligible * t.quorumPercentage &&
+    (p.votesFor * 10000n) / total >= t.approvalPercentage
+  );
+}
+
+/**
+ * Every Active proposal `proposer` made: { id, p, live }. Live: still
+ * voting, or its vote over and passing (waiting for, or past, its
+ * execution delay); otherwise it ended without passing.
+ */
 async function proposalsBy(governance, proposer) {
   const pAddr = await addrOf(proposer);
   const now = (await ethers.provider.getBlock("latest")).timestamp;
   const out = [];
   for (let id = 1; id <= Number(await governance.proposalCount()); id++) {
-    const [p, , , canExecute] = await governance.getProposal(id);
-    if (!same(p.proposer, pAddr)) continue;
-    const active = Number(p.status) === ACTIVE;
-    out.push({ id, p, canExecute, voting: active && now <= p.votingEnds });
+    const [p] = await governance.getProposal(id);
+    if (!same(p.proposer, pAddr) || Number(p.status) !== ACTIVE) continue;
+    const voting = now <= p.votingEnds;
+    out.push({ id, p, live: voting || (await passes(governance, p)) });
   }
   return out;
 }
@@ -184,13 +205,12 @@ async function openAll({ governance, proposer, voters, items, log }) {
         !taken.has(m.id) &&
         Number(m.p.proposalType) === Number(it.proposalType) &&
         same(m.p.target, target) &&
-        same(m.p.callData, it.callData) &&
-        Number(m.p.status) === ACTIVE,
+        same(m.p.callData, it.callData),
     );
-    const live = matches.filter((m) => m.voting || m.canExecute).pop();
+    const live = matches.filter((m) => m.live).pop();
     // Past its vote without passing: settled (Rejected, deposits
     // refundable) so no open proposal is left on a plan contract.
-    for (const m of matches.filter((x) => !x.voting && !x.canExecute)) {
+    for (const m of matches.filter((x) => !x.live)) {
       await send(governance.connect(proposer).executeProposal(m.id));
       log(
         `   ⚠️  proposal #${m.id} (${it.label}) is past its vote without passing: not adopted; settled as ${STATUS[Number((await governance.getProposal(m.id))[0].status)]}, a new one is proposed`,

@@ -128,6 +128,33 @@ describe("Handover parallel acceptance (Q14 = A)", function () {
     expect(text()).to.contain("Handover complete");
   });
 
+  it("a re-run inside the execution delay waits for passed proposals (review M-1)", async function () {
+    Votes.settleProposal = async () => {
+      throw new Error("killed");
+    };
+    const err: any = await captured(out, () =>
+      runHandover(cfg, "full", cfgPath),
+    ).catch((e) => e);
+    expect(err?.message).to.match(/^killed; stopped here/);
+    const ps = await accepts();
+    // Into the window: every vote over, execution delays not all met.
+    const ends = Math.max(...ps.map((p: any) => Number(p.votingEnds)));
+    const now = (await ethers.provider.getBlock("latest"))!.timestamp;
+    await ethers.provider.send("evm_increaseTime", [ends - now + 1]);
+    await ethers.provider.send("evm_mine", []);
+    const t = (await ethers.provider.getBlock("latest"))!.timestamp;
+    const waiting = ps.filter((p: any) => t < Number(p.executionTime));
+    expect(waiting.length).to.be.greaterThan(0);
+    Votes.settleProposal = realSettle;
+    useDigest();
+    out.length = 0;
+    await captured(out, () => runHandover(cfg, "accept", cfgPath));
+    expect(adopted()).to.equal(ps.length);
+    expect((await accepts()).length).to.equal(ps.length);
+    expect(executed(await accepts())).to.equal(ps.length);
+    expect(text()).to.contain("Handover complete");
+  });
+
   it("a run stopped mid-vote resumes; no voter votes twice", async function () {
     let n = 0;
     Votes.castAcceptanceVotes = async (...a: any[]) => {
