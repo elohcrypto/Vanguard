@@ -123,6 +123,22 @@ export async function claimSignerSteps(
   return steps;
 }
 
+/**
+ * Whether `issuer` accepts a claim `signer` signs (ClaimIssuer.verifyClaim,
+ * a read): a probe claim on `identity`, signed through the external
+ * signer, nothing issued.
+ */
+export async function probeSignature(
+  issuer: any,
+  signer: any,
+  identity: string,
+): Promise<boolean> {
+  const { signClaim } = require("../../demo/utils/Kyc");
+  const data = ethers.toUtf8Bytes("claim-signer probe");
+  const sig = await signClaim(signer, issuer, identity, 6, data, {});
+  return issuer.verifyClaim(identity, 6, 1, data, "", 0, sig);
+}
+
 async function main(): Promise<void> {
   installRetry(network.provider);
   const read = (k: string) => {
@@ -152,6 +168,25 @@ async function main(): Promise<void> {
   const fresh = !fs.existsSync(`${base}.issuer-admin-transactions.json`);
   await requireEffects(steps, base, "Vanguard claim signers", { fresh });
   for (const s of steps) console.log(`   ✅ ${s.purpose}: live`);
+  // The issuer accepts each new key's signature, where the signer holds it.
+  const held = (await ethers.getSigners()).map((x) => x.address.toLowerCase());
+  const probe = await addrOf(voters[0]);
+  for (const s of steps) {
+    const who = s.purpose.match(/signed by (0x[0-9a-fA-F]{40})/)![1];
+    if (!held.includes(who.toLowerCase())) {
+      console.log(`   ℹ️  probe skipped: the signer does not hold ${who}`);
+      continue;
+    }
+    const ok = await probeSignature(
+      s.contract,
+      await ethers.getSigner(who),
+      probe,
+    );
+    if (!ok) throw new Error(`the issuer refuses a claim signed by ${who}`);
+    console.log(
+      `   ✅ a claim signed by ${who} verifies on ${await s.contract.getAddress()} (verifyClaim)`,
+    );
+  }
   console.log(
     `   add both to handover.json: "claimSigners": ${JSON.stringify(Object.values(parseSigners(process.env.CLAIM_SIGNERS)))} (the day-2 audit accepts them there)`,
   );

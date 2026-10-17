@@ -8,6 +8,7 @@ import { handoverArgs } from "../../scripts/handoverConfig";
 import {
   claimSignerSteps,
   parseSigners,
+  probeSignature,
 } from "../../scripts/production/claimSigners";
 
 const { attestKyc } = require("../../demo/utils/Kyc");
@@ -92,6 +93,17 @@ describe("Claim signers after the ceremony (Q17 = A)", function () {
       "done",
       "done",
     ]);
+    // The issuer accepts the new key's signature (the CLI's probe) and no
+    // stranger's.
+    const probeId = await f.c.identityRegistry.identity(f.voters[0].address);
+    expect(await probeSignature(f.kycIssuer, kyc, probeId)).to.equal(true);
+    expect(
+      await probeSignature(
+        f.kycIssuer,
+        (await ethers.getSigners())[18],
+        probeId,
+      ),
+    ).to.equal(false);
     // A claim the new KYC key signs is issued and live.
     const id = await f.c.identityRegistry.identity(f.voters[0].address);
     await attestKyc(f.kycIssuer, kyc, id, "renewed by the claim signer");
