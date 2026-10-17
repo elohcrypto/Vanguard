@@ -69,9 +69,11 @@
  */
 // ponytail: a JSON file via HANDOVER_CONFIG is the ceiling (hardhat run has no
 // argv passthrough); a typed CLI can replace it later.
-import { ethers } from "hardhat";
+import { ethers, network } from "hardhat";
 import * as fs from "fs";
 import { validateHandoverConfig } from "./handoverConfig";
+
+const { installRetry } = require("../demo/utils/RpcRetry");
 
 // Whitelist/Blacklist oracles have listManager(); an oracle without it
 // reverts, which the ceremony treats as "no writer role".
@@ -403,6 +405,9 @@ async function main(): Promise<void> {
   const path = process.env.HANDOVER_CONFIG;
   if (!path) throw new Error("set HANDOVER_CONFIG to the handover JSON file");
   const cfg = JSON.parse(fs.readFileSync(path, "utf8"));
+  // Task 5.15 (M-3): rate limits and dropped connections are retried; a
+  // send is never repeated (demo/utils/RpcRetry.js).
+  installRetry(network.provider);
   await runHandover(cfg, process.env.HANDOVER_PHASE || "full", path);
 }
 
