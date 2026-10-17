@@ -168,6 +168,12 @@ describe("Production signer (scripts/production/signer.js)", function () {
       sig = (await rpc(live, "personal_sign", [msg, keys[0].address])).body
         .result;
       for (let i = 0; i < 2; i++) await rpc(live, "eth_sendTransaction", [tx]);
+      const data = new ethers.Interface([
+        "function transfer(address,uint256)",
+      ]).encodeFunctionData("transfer", [keys[0].address, 5]);
+      const unpinned = { from: keys[1].address, to: keys[0].address, data };
+      for (let i = 0; i < 2; i++)
+        await rpc(live, "eth_sendTransaction", [unpinned]);
       const other = await rpc(live, "eth_sendTransaction", [
         { ...tx, from: ethers.ZeroAddress },
       ]);
@@ -178,12 +184,17 @@ describe("Production signer (scripts/production/signer.js)", function () {
     expect(ethers.verifyMessage(ethers.getBytes(msg), sig)).to.equal(
       keys[0].address,
     );
-    expect(r.raws.length).to.equal(2);
+    expect(r.raws.length).to.equal(4);
     expect(ethers.Transaction.from(r.raws[0]).nonce).to.equal(7);
     expect(r.out).to.match(
       /#2 send from 0x[0-9a-fA-F]{40} to 0x[0-9a-fA-F]{40} value 1 nonce 7/,
     );
     expect(r.out).to.match(/#2 RETRY of #2 \(same request\): send from/);
+    // No pinned nonce: never a retry (review L-4); a known call decoded.
+    expect(r.out).to.match(
+      /#\d+ send from .* nonce next call transfer\(0x[0-9a-fA-F]{40}, 5\)/,
+    );
+    expect(r.out.match(/RETRY/g)?.length).to.equal(1);
     for (const k of keys) expect(r.out).to.not.contain(k.privateKey.slice(2));
     expect(r.out).to.not.contain(PASS);
     expect(r.out).to.not.contain(token);

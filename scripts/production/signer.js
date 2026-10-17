@@ -41,7 +41,13 @@
 const fs = require("fs");
 const path = require("path");
 const readline = require("readline");
-const { HDNodeWallet, JsonRpcProvider, Wallet, getBytes } = require("ethers");
+const {
+  HDNodeWallet,
+  Interface,
+  JsonRpcProvider,
+  Wallet,
+  getBytes,
+} = require("ethers");
 const { guardedServer } = require("./rpcGuard");
 
 const SEPOLIA = 11155111;
@@ -129,6 +135,44 @@ async function create(dir, names) {
   }
 }
 
+let calls = null;
+
+/**
+ * What `data` calls, decoded by the compiled ABIs (SIGNER_ABI_DIR, default
+ * artifacts/contracts) when one matches its selector: "call name(args)";
+ * else the selector and size (review L-4).
+ */
+function describeCall(to, data) {
+  if (!to) return `create (${(data.length - 2) / 2} bytes)`;
+  if (calls === null) {
+    calls = new Map();
+    const walk = (d) => {
+      for (const e of fs.existsSync(d)
+        ? fs.readdirSync(d, { withFileTypes: true })
+        : []) {
+        const f = path.join(d, e.name);
+        if (e.isDirectory()) walk(f);
+        else if (f.endsWith(".json") && !f.endsWith(".dbg.json")) {
+          try {
+            const i = new Interface(
+              JSON.parse(fs.readFileSync(f, "utf8")).abi || [],
+            );
+            i.forEachFunction((fn) => calls.set(fn.selector, i));
+          } catch {
+            // not an artifact
+          }
+        }
+      }
+    };
+    walk(process.env.SIGNER_ABI_DIR || "artifacts/contracts");
+  }
+  const i = calls.get(data.slice(0, 10));
+  const t = i && i.parseTransaction({ data });
+  if (!t) return `call ${data.slice(0, 10)} (${(data.length - 2) / 2} bytes)`;
+  const args = t.args.map((a) => String(a)).join(", ");
+  return `call ${t.name}(${args.length > 300 ? `${args.slice(0, 300)}...` : args})`;
+}
+
 /** The upstream's chain id: Sepolia, or 31337 with SIGNER_TEST=1. */
 async function guardChain(provider) {
   const chain = Number((await provider.send("eth_chainId", [])).toString());
@@ -197,10 +241,14 @@ async function serve() {
     if (!w) throw new Error(`the signer holds no key for ${a}`);
     return w;
   };
-  /** Show the request (or its retry) and, with SIGNER_PROMPT, ask. */
+  /**
+   * Show the request and, with SIGNER_PROMPT, ask. A request repeating an
+   * earlier `key` is shown as its RETRY; a null key (a transaction with no
+   * pinned nonce, review L-4) never is.
+   */
   const approve = (key, text) => {
-    const k = JSON.stringify(key);
-    const was = seen.indexOf(k);
+    const k = key === null ? null : JSON.stringify(key);
+    const was = k === null ? -1 : seen.indexOf(k);
     if (was < 0) seen.push(k);
     const n = was < 0 ? seen.length : was + 1;
     const line =
@@ -232,10 +280,11 @@ async function serve() {
       if (tx[from]) req[to] = tx[from];
     }
     if (tx.nonce !== undefined) req.nonce = Number(tx.nonce);
-    const sel = req.data.slice(0, 10);
     await approve(
-      ["tx", w.address, req.nonce ?? null, req.to, String(req.value), req.data],
-      `send from ${w.address} to ${req.to ?? "(create)"} value ${BigInt(req.value)} nonce ${req.nonce ?? "next"} call ${sel} (${(req.data.length - 2) / 2} bytes) on chain ${chain}`,
+      req.nonce === undefined
+        ? null
+        : ["tx", w.address, req.nonce, req.to, String(req.value), req.data],
+      `send from ${w.address} to ${req.to ?? "(create)"} value ${BigInt(req.value)} nonce ${req.nonce ?? "next"} ${describeCall(req.to, req.data)} on chain ${chain}`,
     );
     const sent = await w.sendTransaction(req);
     signed++;
