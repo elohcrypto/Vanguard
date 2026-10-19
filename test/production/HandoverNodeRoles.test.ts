@@ -6,6 +6,7 @@ const {
   assertHandoverComplete,
   handoverDeployerPowers,
 } = require("../../demo/utils/Handover");
+const { roleOf } = require("../../demo/utils/HandoverNodes");
 
 /**
  * Task 5.17 slice C, the node checks of the preflight, completion and
@@ -23,7 +24,7 @@ describe("Handover node checks: role keys and MIN_NODES (M-4, M-5)", function ()
   let f: Awaited<ReturnType<typeof handoverFixture>>;
   let args: Record<string, any>;
   const ROLE_LINE =
-    "no OracleManager node is ops, the guardian, the issuer admin, the proposer, a voter or a registry/VGT agent";
+    "no OracleManager node is ops, the guardian, the issuer admin, the proposer, a voter, a claim signer, a fee wallet, the manager operator, a registry/VGT/VSC agent or a ClaimIssuer key";
 
   beforeEach(async function () {
     f = await handoverFixture();
@@ -62,6 +63,57 @@ describe("Handover node checks: role keys and MIN_NODES (M-4, M-5)", function ()
     const { failures } = await assertHandoverComplete(args);
     expect(failures).to.include(ROLE_LINE);
   });
+
+  // Slice C review L-2: the roles roleOf missed.
+  for (const [who, setup] of [
+    [
+      "a claim signer",
+      async (a: string) => {
+        args.claimSigners = [a];
+      },
+    ],
+    [
+      "an escrow fee wallet",
+      async (a: string) => {
+        args.feeWallets = [...args.feeWallets, a];
+      },
+    ],
+    [
+      "the OracleManager operator",
+      async (a: string) => {
+        await om().setOperator(a);
+      },
+    ],
+    [
+      "a VSC agent",
+      async (a: string) => {
+        await f.c.token.addAgent(a);
+      },
+    ],
+    [
+      "a claim key of ClaimIssuer",
+      async (a: string) => {
+        const key = ethers.keccak256(ethers.solidityPacked(["address"], [a]));
+        await args.issuers[0].connect(f.deployer).addIssuerKey(key, 3, 1);
+      },
+    ],
+  ] as const) {
+    it(`refuses ${who} as a node (slice C review L-2)`, async function () {
+      const a = f.stranger.address;
+      await setup(a);
+      await om().registerOracle(a, "ROLE", "", 500);
+      args.oracleNodes = [a];
+      expect(await roleOf(args, a)).to.match(new RegExp(`^${who}`));
+      // A VSC agent or issuer key the config does not name fails an
+      // earlier preflight line; completion still names the role row.
+      if (!/VSC|ClaimIssuer/.test(who))
+        await expect(handoverDeployerPowers(args)).to.be.rejectedWith(
+          `OracleManager node(s) ${a} (${who}`,
+        );
+      const { failures } = await assertHandoverComplete(args);
+      expect(failures).to.include(ROLE_LINE);
+    });
+  }
 
   it("fails completion below MIN_NODES (weight share n/a); no such line at three", async function () {
     const signers = await ethers.getSigners();

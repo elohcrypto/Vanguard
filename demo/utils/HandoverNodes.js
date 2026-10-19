@@ -17,9 +17,10 @@
  * 0 nodes, before production nodes are voted in, stays a warning), print
  * each node's weight share (n/a below MIN_NODES) and fail when one node
  * alone reaches the bar (Task 5.1, A1F-4: the engine then opens no
- * query). No node may be the deployer, or (deep review M-5, D25 b: a
- * node is a key of its own) ops, the guardian, the issuer admin, the
- * proposer, a voter, or an IdentityRegistry or VGT agent. Each list oracle bound to VSC
+ * query). No node may be the deployer, or hold another role key (deep
+ * review M-5, D25 b: a node is a key of its own; HandoverNodeKeys.js). Each
+ * list oracle's minimumConsensusOracles must be reachable by the fewest
+ * registered nodes that reach the bar (deep review contracts L-2). Each list oracle bound to VSC
  * or VGT must carry the compiled WhitelistOracle or BlacklistOracle
  * code, not be paused, require at least two consensus oracles and keep a
  * sane maxVerdictAge; its manager link is HandoverDerive.js.
@@ -28,6 +29,7 @@
 const { ethers } = require("hardhat");
 const { addrOf, same, fail } = require("./HandoverChecks");
 const { scanLogs } = require("./HandoverScans");
+const { roleOf } = require("./HandoverNodeKeys");
 const {
   pinChecks,
   codeHashLabel,
@@ -137,34 +139,6 @@ function weightShares(f) {
   };
 }
 
-/**
- * M-5 (D25 b): the role `a` holds besides being a node, or null: ops,
- * the guardian, the issuer admin, the proposer or a voter (`o.voterWallets`,
- * the proposer first), or an IdentityRegistry or VGT agent. The deployer
- * has its own row. Shared with scripts/production/postCeremonyVotes.ts.
- */
-async function roleOf(o, a) {
-  for (const [k, role] of [
-    ["ops", "ops"],
-    ["guardian", "the guardian"],
-    ["issuerAdmin", "the issuer admin"],
-  ]) {
-    if (o[k] && same(await addrOf(o[k]), a)) return role;
-  }
-  const vw = o.voterWallets || [];
-  for (const [i, v] of vw.entries()) {
-    if (same(await addrOf(v), a)) return i === 0 ? "the proposer" : "a voter";
-  }
-  for (const [k, role] of [
-    ["identityRegistry", "an IdentityRegistry agent"],
-    ["governanceToken", "a VGT agent"],
-  ]) {
-    const c = o[k];
-    if (c && (await c.isAgent(a).catch(() => false))) return role;
-  }
-  return null;
-}
-
 /** [{ label, ok, fix, strays }] for the nodes and designations. */
 async function nodeChecks(o, f = null) {
   f = f || (await nodeFacts(o));
@@ -186,7 +160,7 @@ async function nodeChecks(o, f = null) {
   }
   out.push({
     label:
-      "no OracleManager node is ops, the guardian, the issuer admin, the proposer, a voter or a registry/VGT agent",
+      "no OracleManager node is ops, the guardian, the issuer admin, the proposer, a voter, a claim signer, a fee wallet, the manager operator, a registry/VGT/VSC agent or a ClaimIssuer key",
     ok: roles.length === 0,
     fix: `OracleManager node(s) ${list(roles)} hold a role key: a node is a key of its own (D25 b), or one key both runs the system and votes its verdicts; the manager owner must removeOracle(node, ...) and register a node key of its own first`,
     strays: [],
