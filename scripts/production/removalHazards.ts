@@ -201,7 +201,7 @@ export async function holdForForeignHazards(
       `#${r.id} (${r.node}, by ${r.p.proposer}: ${why}; ${over ? "its vote is over and it passed: anyone may execute it" : "still voting"})`,
   );
   throw new Error(
-    `round 2 held: open removal proposal(s) ${named.join("; ")} pass on the votes cast now and would leave an invalid node set with this run's removals; a re-run votes against one still voting and cancels one whose vote is over by a cancelProposal vote (cancelCandidates), then re-run`,
+    `round 2 held: open removal proposal(s) ${named.join("; ")} pass on the votes cast now and would leave an invalid node set with this run's removals. The guards are this run's votes against one still voting and the precheck before each of this run's removals executes; a passed one anyone may execute 2 days after its vote, before a cancel vote (7 + 2 days, the mainnet schedule) could land, so a re-run's cancelProposal vote (cancelCandidates) clears only a passed removal nobody has executed. Vote them down while they vote, then re-run`,
   );
 }
 

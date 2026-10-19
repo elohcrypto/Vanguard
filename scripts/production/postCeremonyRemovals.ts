@@ -68,7 +68,7 @@ export async function cancelHazards(
   if (!ids.length) return ids;
   for (const id of ids)
     log(
-      `   ⚠️  STANDING HAZARD: proposal #${id} (a removal) would leave an invalid node set if anyone executed it now; a cancelProposal vote follows`,
+      `   ⚠️  STANDING HAZARD: proposal #${id} (a removal) would leave an invalid node set if anyone executed it now; a cancelProposal vote follows, which clears it only if nobody executes it first (executeProposal is anyone's)`,
     );
   const items = ids.map((id) => ({
     label: `cancel hazardous removal #${id}`,
