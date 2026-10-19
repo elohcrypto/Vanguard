@@ -253,6 +253,7 @@ async function deployOn(
       { address: inputs.deployer },
       process.env.OPS_IDENTITY,
       {},
+      roles,
     );
     await recorder.finish();
   } catch (e) {
@@ -307,6 +308,18 @@ export function rolePause(
   recorder: Recorder,
 ) {
   const base = file.replace(/\.json$/, "");
+  /** Run role `steps` under `tag`: done, exported (pause, exit 3) or refused. */
+  const pause = async (steps: any[], tag: string) => {
+    const at = `${base}${tag}`;
+    const fresh = !fs.existsSync(`${at}.ops-transactions.json`);
+    try {
+      await requireEffects(steps, at, "Vanguard deploy", { fresh });
+    } catch (e) {
+      roles.stop = e as Error;
+      recorder.halt(e as Error); // nothing is sent after the pause
+      throw e;
+    }
+  };
   const roles = {
     stop: null as Error | null,
     isExternal: (a: string) =>
@@ -326,15 +339,11 @@ export function rolePause(
           "ops takes the custody manager the deployer nominated it for, before the manager gains any power (Task 4.3 L1, Q7)",
         status: () => acceptStatus(m, inputs.deployer, inputs.ops, "ops"),
       };
-      const fresh = !fs.existsSync(`${base}.ops-transactions.json`);
-      try {
-        await requireEffects([step], base, "Vanguard deploy", { fresh });
-      } catch (e) {
-        roles.stop = e as Error;
-        recorder.halt(e as Error); // nothing is sent after the pause
-        throw e;
-      }
+      await pause([step], "");
     },
+    // Deep review ceremony L-1: the ops identity's pin and authorization
+    // when its owner is the ops multisig (opsKeyManager.ts).
+    opsIdentity: (steps: any[]) => pause(steps, ".ops-identity"),
   };
   return roles;
 }

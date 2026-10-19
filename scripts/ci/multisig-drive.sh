@@ -9,8 +9,12 @@
 # transactions", never success: every pause is asserted by its code.
 #   1. deploy: pauses at custody (exit 3, one ops transaction); a re-run
 #      before execution pauses again and sends nothing
-#   2. the owners execute the batch; the deploy resumes to its preflight;
-#      a re-run replays across the pause and sends nothing
+#   2. the owners execute the batch; the deploy resumes and pauses again
+#      at the ops identity (Task 5.17, ceremony L-1: an OnchainID the ops
+#      multisig owns, OPS_IDENTITY; its pinRecoveryManager and
+#      authorizeManager as one 2-call batch); executed, it resumes to its
+#      preflight with both effects checked on chain; a re-run replays
+#      across both pauses and sends nothing
 #   3. ceremony full phase: pauses after the snapshot (exit 3, 2 ops and
 #      4 issuer-admin transactions) before any vote; the accept phase and a
 #      full re-run before execution send nothing (exit 3, exit 1)
@@ -115,7 +119,15 @@ node -e 'require("./scripts/zk/attest").attestorPublicKey("0x" + "11".repeat(32)
   .then((k) => console.log(JSON.stringify({ attestor: { Ax: String(k.Ax), Ay: String(k.Ay) },
     ops: process.argv[1], issuerAdmin: process.argv[2] })))' "$OPS" "$ADMIN" >"$OUT/deploy.json"
 export DEPLOY_CONFIG=$OUT/deploy.json
-echo "0. ops multisig $OPS, issuer admin multisig $ADMIN (2-of-2 TestMultisig)"
+# The ops identity: an OnchainID the ops multisig owns (a node account deploys it).
+export OPS_IDENTITY
+OPS_IDENTITY=$(node -e 'const { ContractFactory, JsonRpcProvider } = require("ethers");
+  const a = require("./artifacts/contracts/onchain_id/OnchainID.sol/OnchainID.json");
+  (async () => { const s = await new JsonRpcProvider(process.argv[2]).getSigner(0);
+    const c = await new ContractFactory(a.abi, a.bytecode, s).deploy(process.argv[1]);
+    await c.waitForDeployment(); console.log(await c.getAddress()); })();' "$OPS" "$NODE_URL")
+[[ $(owner "$OPS_IDENTITY") == $(lc "$OPS") ]] || fail "the ops identity is not the ops multisig's"
+echo "0. ops multisig $OPS, issuer admin multisig $ADMIN (2-of-2 TestMultisig); ops identity $OPS_IDENTITY"
 
 B_DEPLOY=$(($(block) + 1))
 # 1. The deploy pauses at custody; a re-run before execution sends nothing.
@@ -133,17 +145,30 @@ grep -q "❌ not executed: \[deploy.custody.accept\]" "$OUT/deploy1b.log" || fai
 [[ $(txs) -eq $PAUSED && $(($(nonce))) -eq $N0 ]] || fail "the paused re-run sent"
 echo "1. deploy paused at custody ($PAUSED recorded, all the deployer's); a re-run paused again, sending nothing"
 
-# 2. Execute, resume, re-run.
+# 2. Execute, resume (a second pause at the ops identity), execute, re-run.
 execute "$OPS_FILE" 10,12 exec1.log 1
+ID_FILE=$OUT/31337.ops-identity.ops-transactions.json
+[[ $(rc deploy2a.log hh scripts/production/DeployProduction.ts) -eq 3 ]] || fail "deploy: no ops-identity pause (exit 3)"
+grep -qF "⏸️  awaiting 2 ops transactions: $ID_FILE" "$OUT/deploy2a.log" || fail "no ops-identity awaiting line"
+grep -q "Preflight passed" "$OUT/deploy2a.log" && fail "the deploy ran past the ops-identity pause"
+execute "$ID_FILE" 10,12 exec1b.log 2
 [[ $(rc deploy2.log hh scripts/production/DeployProduction.ts) -eq 0 ]] || fail "the resumed deploy failed"
 grep -q "✅ 1 role transaction effect(s) hold on chain" "$OUT/deploy2.log" || fail "no effect check"
+grep -q "✅ 2 role transaction effect(s) hold on chain" "$OUT/deploy2.log" || fail "no ops-identity effect check"
+KM=$(node -e 'console.log(require(process.argv[1]).contracts.keyManager)' "$DEPLOY_RECORD")
+IDS=$(node -e 'const { JsonRpcProvider, Contract } = require("ethers");
+  const c = new Contract(process.argv[1], ["function recoveryManager() view returns (address)",
+    "function authorizedManagers(address) view returns (bool)"], new JsonRpcProvider(process.argv[3]));
+  Promise.all([c.recoveryManager(), c.authorizedManagers(process.argv[2])])
+    .then(([m, a]) => console.log(m.toLowerCase() === process.argv[2].toLowerCase() && a));' "$OPS_IDENTITY" "$KM" "$NODE_URL")
+[[ $IDS == true ]] || fail "KeyManager is not pinned and authorized on the ops identity"
 grep -qE "^✅ Preflight passed" "$OUT/deploy2.log" || fail "no preflight pass"
 [[ $(($(nonce))) -eq $(recorded) && $(recorded) -eq $(txs) ]] || fail "deployer nonce != record"
 [[ $(rc deploy3.log hh scripts/production/DeployProduction.ts) -eq 0 ]] || fail "the re-run failed"
 grep -qE "\(([0-9]+) from the record, 0 sent now;" "$OUT/deploy3.log" || fail "the re-run sent"
 CUSTODY=$(node -e 'console.log(require(process.argv[1]).contracts.investorRequestManager)' "$DEPLOY_RECORD")
 [[ $(owner "$CUSTODY") == $(lc "$OPS") ]] || fail "custody not owned by the ops multisig"
-echo "2. executed by the owners; resumed ($(grep -oE '[0-9]+ sent now' "$OUT/deploy2.log")); re-run: $(grep -oE '[0-9]+ from the record, 0 sent now' "$OUT/deploy3.log")"
+echo "2. executed by the owners; paused at the ops identity, executed (2 calls; KeyManager pinned and authorized on it); resumed ($(grep -oE '[0-9]+ sent now' "$OUT/deploy2.log")); re-run: $(grep -oE '[0-9]+ from the record, 0 sent now' "$OUT/deploy3.log")"
 
 B_CEREMONY=$(($(block) + 1))
 # 3. Ceremony: full phase pauses before any vote; nothing sends until executed.

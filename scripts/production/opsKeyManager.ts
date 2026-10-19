@@ -15,6 +15,12 @@ import { KeyManager, OnchainIDFactory } from "../../typechain-types";
  * its recovery manager. The deploy pins it when the deploying wallet owns
  * the identity, prints the pinRecoveryManager call for another owner, and
  * refuses an identity already pinned to another manager (a pin is final).
+ * Task 5.17 (deep review, ceremony L-1; readiness L-4): when the identity's
+ * owner is an external role (the ops multisig, Task 5.13) both calls are
+ * role steps (demo/utils/RoleCalls.js): exported as a Safe batch, the
+ * deploy pauses (exit 3), and a re-run proves their effects on chain
+ * (recoveryManager() == KeyManager, authorizedManagers(KeyManager))
+ * before it finishes. Owned by another key, they are printed as before.
  *
  * The KeyManager steps of scripts/production/DeployProduction.ts live
  * here too: the code hash the factory accepts, the deploy, and the
@@ -80,6 +86,7 @@ export async function configureKeyManager(
   deployer: { address: string },
   opsIdentity: string | undefined,
   overrides: Record<string, unknown>,
+  roles?: OpsIdentityRoles,
 ): Promise<{
   recoveryTimelock: bigint;
   keyRotationTimelock: bigint;
@@ -97,8 +104,57 @@ export async function configureKeyManager(
     deployer,
     opsIdentity,
     overrides,
+    roles,
   );
   return { recoveryTimelock, keyRotationTimelock, opsKeyManager };
+}
+
+/**
+ * The deploy's external roles (DeployProduction.rolePause): whether an
+ * address is one, and the pause that exports role steps and checks them.
+ */
+export interface OpsIdentityRoles {
+  isExternal: (a: string) => boolean;
+  opsIdentity: (steps: any[]) => Promise<void>;
+}
+
+/** The pin and the authorization as role steps of `owner` (external). */
+function opsIdentitySteps(id: any, owner: string, keyManager: string) {
+  const { externalRole } = require("../../demo/utils/RoleCalls");
+  const role = externalRole(owner, "ops");
+  const same = (a: string) => a.toLowerCase() === keyManager.toLowerCase();
+  return [
+    {
+      id: "deploy.opsIdentity.pinRecoveryManager",
+      role,
+      roleLabel: "ops",
+      contract: id,
+      name: "OnchainID (ops identity)",
+      fn: "pinRecoveryManager",
+      args: [keyManager],
+      purpose:
+        "the ops identity pins KeyManager as its one recovery manager (Task 4.11, R-411-18; a pin is final)",
+      status: async () => {
+        const m: string = await id.recoveryManager();
+        if (same(m)) return "done";
+        if (m === ethers.ZeroAddress) return "pending";
+        return `recoveryManager is ${m}, not KeyManager ${keyManager}`;
+      },
+    },
+    {
+      id: "deploy.opsIdentity.authorizeManager",
+      role,
+      roleLabel: "ops",
+      contract: id,
+      name: "OnchainID (ops identity)",
+      fn: "authorizeManager",
+      args: [keyManager],
+      purpose:
+        "the ops identity opts in to KeyManager's rotation and recovery (Task 4.2)",
+      status: async () =>
+        (await id.authorizedManagers(keyManager)) ? "done" : "pending",
+    },
+  ];
 }
 export interface OpsKeyManagerResult {
   opsIdentity: string | null;
@@ -116,6 +172,7 @@ export async function authorizeKeyManagerOnOps(
   deployer: { address: string },
   opsIdentity: string | undefined,
   overrides: Record<string, unknown> = {},
+  roles?: OpsIdentityRoles,
 ): Promise<OpsKeyManagerResult> {
   const call = (id: string, owner: string) =>
     `OnchainID(${id}).authorizeManager(${keyManager}) from the identity owner ${owner}`;
@@ -136,6 +193,24 @@ export async function authorizeKeyManagerOnOps(
     );
   }
   const id = await ethers.getContractAt("OnchainID", opsIdentity);
+  const idOwner: string = await id.owner();
+  if (roles?.isExternal(idOwner)) {
+    // A pin to another manager is refused before anything is exported.
+    const pinned: string = await id.recoveryManager();
+    if (
+      pinned !== ethers.ZeroAddress &&
+      pinned.toLowerCase() !== keyManager.toLowerCase()
+    ) {
+      throw new Error(
+        `ops identity ${opsIdentity} pins recovery manager ${pinned}, not KeyManager ${keyManager}; a pin is final: use another ops identity`,
+      );
+    }
+    await roles.opsIdentity(opsIdentitySteps(id, idOwner, keyManager));
+    console.log(
+      `   ✅ KeyManager pinned and authorized on ops identity ${opsIdentity} (by its owner ${idOwner})`,
+    );
+    return { opsIdentity, authorized: true, pending: null };
+  }
   const pinPending = await pinOnOps(
     id,
     opsIdentity,

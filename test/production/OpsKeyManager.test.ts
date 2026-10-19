@@ -66,4 +66,54 @@ describe("opsKeyManager: pending calls (Task 4.16)", function () {
     expect(r.opsIdentity).to.equal(null);
     expect(r.pending).to.include("<ops identity>");
   });
+  // Task 5.17 (deep review, ceremony L-1): an identity owned by an
+  // external role (the ops multisig) gets both calls as role steps, so
+  // the deploy exports them, pauses and proves their effects.
+  it("an external owner's identity: both calls are role steps with effect checks", async function () {
+    const { deployer, ops, km, OnchainID } = await deploy();
+    const id = await OnchainID.deploy(ops.address);
+    let steps: any[] = [];
+    const roles = {
+      isExternal: (a: string) => a.toLowerCase() === ops.address.toLowerCase(),
+      opsIdentity: async (s: any[]) => {
+        steps = s;
+        const st = await Promise.all(s.map((x) => x.status()));
+        if (st.some((x) => x !== "done")) throw new Error("paused");
+      },
+    };
+    await expect(
+      authorizeKeyManagerOnOps(km, deployer, await id.getAddress(), {}, roles),
+    ).to.be.rejectedWith("paused");
+    expect(
+      steps.map((x) => [x.id, x.fn, x.args, x.role.address]),
+    ).to.deep.equal([
+      [
+        "deploy.opsIdentity.pinRecoveryManager",
+        "pinRecoveryManager",
+        [km],
+        ops.address,
+      ],
+      [
+        "deploy.opsIdentity.authorizeManager",
+        "authorizeManager",
+        [km],
+        ops.address,
+      ],
+    ]);
+    expect(await Promise.all(steps.map((x) => x.status()))).to.deep.equal([
+      "pending",
+      "pending",
+    ]);
+    // The owners execute the batch: both effects hold; nothing is pending.
+    await id.connect(ops).pinRecoveryManager(km);
+    await id.connect(ops).authorizeManager(km);
+    const r = await authorizeKeyManagerOnOps(
+      km,
+      deployer,
+      await id.getAddress(),
+      {},
+      roles,
+    );
+    expect(r).to.deep.include({ authorized: true, pending: null });
+  });
 });
