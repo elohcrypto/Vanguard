@@ -11,6 +11,11 @@ const {
   refuseRpcArg,
   rpcFromEnv,
 } = require("../../scripts/zk/zkChain");
+const { describeProofs } = require("../helpers/zkProofs");
+const {
+  buildWhitelistRoot,
+  computeCommitment,
+} = require("../../scripts/zk/build-whitelist-root");
 
 /**
  * Task 5.17 slice B (deep review L-4): the zk CLIs (attest.js,
@@ -116,5 +121,84 @@ describe("zk CLIs: RPC from env, no published key off 31337 (L-4)", function () 
       up.server.close();
       fs.rmSync(dir, { recursive: true, force: true });
     }
+  });
+  // Task 5.17 (R-515-10, a security review of slice B): every zk CLI's
+  // final error print scrubs every known RPC URL; prove-whitelist did not.
+  describeProofs("prove-whitelist --submit: a failing upstream", function () {
+    it("prints the upstream's error without the key in its URL", async function () {
+      this.timeout(300_000);
+      const KEY = "zkS3cretK3y0123456789abcdef";
+      const http = require("http");
+      // Answers the chain id; every other call is an HTTP 500 whose body
+      // echoes the key (ethers then prints the request URL and the body).
+      const server = http.createServer((req: any, res: any) => {
+        let body = "";
+        req.on("data", (c: string) => (body += c));
+        req.on("end", () => {
+          const c = JSON.parse(body);
+          if (!Array.isArray(c) && c.method === "eth_chainId") {
+            res.setHeader("content-type", "application/json");
+            return res.end(
+              JSON.stringify({ jsonrpc: "2.0", id: c.id, result: "0x7a69" }),
+            );
+          }
+          res.statusCode = 500;
+          res.end(`backend down for /v3/${KEY}`);
+        });
+      });
+      await new Promise<void>((ok) => server.listen(0, "127.0.0.1", ok));
+      const url = `http://127.0.0.1:${server.address().port}/v3/${KEY}`;
+      const dir = fs.mkdtempSync(path.join(os.tmpdir(), "zk-submit-"));
+      try {
+        const w = HDNodeWallet.createRandom();
+        const identity = "0x1234";
+        const secret = "0x" + "11".repeat(31);
+        const commitment = await computeCommitment(identity, secret);
+        const root = await buildWhitelistRoot([
+          { identity, commitment: commitment.toString() },
+        ]);
+        fs.writeFileSync(path.join(dir, "root.json"), JSON.stringify(root));
+        fs.writeFileSync(path.join(dir, "secret"), secret, { mode: 0o600 });
+        const r = await new Promise<{ status: number | null; stderr: string }>(
+          (ok) => {
+            const p = spawn(
+              process.execPath,
+              [
+                "scripts/zk/prove-whitelist.js",
+                "--root",
+                path.join(dir, "root.json"),
+                "--identity",
+                identity,
+                "--wallet",
+                w.address,
+                "--secret-file",
+                path.join(dir, "secret"),
+                "--submit",
+                "--privacy-manager",
+                "0x000000000000000000000000000000000000dEaD",
+              ],
+              {
+                env: {
+                  ...process.env,
+                  ZK_RPC_URL: url,
+                  WHITELIST_WALLET_KEY: w.privateKey,
+                },
+              },
+            );
+            let stderr = "";
+            p.stderr.on("data", (d) => (stderr += d));
+            p.on("exit", (status) => ok({ status, stderr }));
+          },
+        );
+        expect(r.status, r.stderr).to.equal(1);
+        const last = r.stderr.trim().split("\n").pop()!;
+        expect(last).to.match(/^prove-whitelist: /);
+        expect(last).to.contain("<redacted>");
+        expect(r.stderr).to.not.contain(KEY);
+      } finally {
+        server.close();
+        fs.rmSync(dir, { recursive: true, force: true });
+      }
+    });
   });
 });

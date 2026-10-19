@@ -43,6 +43,7 @@ const {
   revertReason,
   publisherOf,
 } = require("./build-whitelist-root");
+const { scrubKnown } = require("../production/redact");
 const { guardedWallet, refuseRpcArg, rpcFromEnv } = require("./zkChain");
 
 const VKEY = path.join(
@@ -348,7 +349,8 @@ if (require.main === module) {
           msg = msg.split(f).join("<secret>");
         }
       }
-      console.error(`prove-whitelist: ${msg}`);
+      // Task 5.17 (R-515-10): every known RPC URL scrubbed (ZK_RPC_URL).
+      console.error(`prove-whitelist: ${scrubKnown(msg)}`);
       process.exit(1);
     },
   );
