@@ -68,7 +68,10 @@ function install() {
       // without it the next runnable is never scheduled and the run
       // ends silently with exit 0) and must always fail the process.
       try {
-        if (!err && typeof this.duration === "number") {
+        // Slice B review L-3: a test that called this.skip() finishes
+        // without an error too; it did not pass, so it is not recorded.
+        const skipped = this.type !== "hook" && this.isPending();
+        if (!err && !skipped && typeof this.duration === "number") {
           const rec = {
             kind: this.type === "hook" ? "hook" : "test",
             title: this.fullTitle(),

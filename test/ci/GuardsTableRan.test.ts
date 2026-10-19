@@ -20,6 +20,8 @@ describe("guards-table --ran: tested rows bound to passing tests", function () {
       { file: "t/a.ts", test: "plain", site: "s2" },
       { file: "t/b.ts", test: "plain", site: "s3" },
       { file: "t/a.ts", test: "hooked", site: "s4" },
+      // INFO-1: all template, no literal text: bound to nothing.
+      { file: "t/b.ts", test: "${name}", site: "s5" },
     ];
     const ran = [
       pass("t/a.ts", "a VGT recovery reverts"),
@@ -29,6 +31,7 @@ describe("guards-table --ran: tested rows bound to passing tests", function () {
     expect(notPassed(rows, ran).map((r: any) => r.site)).to.deep.equal([
       "s2",
       "s4",
+      "s5",
     ]);
   });
 
@@ -76,6 +79,48 @@ describe("guards-table --ran: tested rows bound to passing tests", function () {
         some.stderr.match(/did not pass in the recorded test runs/g),
       ).to.have.length(missing);
       expect(some.stderr).to.contain(`(${gone}) did not pass`);
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+  // Slice B review L-3: a test that skips itself synchronously finishes
+  // without an error; the recorder must not list it as passed.
+  it("the recorder lists passing tests only, not a this.skip() one", function () {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "ran-skip-"));
+    try {
+      const spec = path.join(dir, "s.spec.js");
+      fs.writeFileSync(
+        spec,
+        [
+          'it("passes", function () {});',
+          'it("skips itself", function () { this.skip(); });',
+          'it("skips itself async", async function () { this.skip(); });',
+        ].join("\n"),
+      );
+      const out = path.join(dir, "t.log");
+      const run = spawnSync(
+        process.execPath,
+        [
+          "-e",
+          `const path = require("path");
+           const Mocha = require(require.resolve("mocha", { paths: [path.dirname(require.resolve("hardhat/package.json"))] }));
+           const m = new Mocha({ rootHooks: require(process.argv[1]).mochaHooks, reporter: "dot" });
+           m.addFile(process.argv[2]);
+           m.run((f) => process.exit(f));`,
+          path.resolve("scripts/ci/mocha-log.js"),
+          spec,
+        ],
+        { env: { ...process.env, MOCHA_TIMINGS: out }, encoding: "utf8" },
+      );
+      expect(run.status, run.stderr + run.stdout).to.equal(0);
+      const tests = fs
+        .readFileSync(out, "utf8")
+        .split("\n")
+        .filter(Boolean)
+        .map((l) => JSON.parse(l))
+        .filter((r) => r.kind === "test")
+        .map((r) => r.name);
+      expect(tests).to.deep.equal(["passes"]);
     } finally {
       fs.rmSync(dir, { recursive: true, force: true });
     }
