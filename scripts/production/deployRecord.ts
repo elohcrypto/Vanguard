@@ -214,6 +214,18 @@ export class Recorder {
     const nonce = Number(
       await this.raw("eth_getTransactionCount", [from, "pending"]),
     );
+    // Deep review M-1: a lagging RPC (a load-balanced backend behind the
+    // others) can answer a pending count below the mined one. That nonce
+    // is used already; recorded as an intent, every resume would refuse
+    // it. A hard stop before anything is saved or sent.
+    const mined = Number(
+      await this.raw("eth_getTransactionCount", [from, "latest"]),
+    );
+    if (nonce < mined) {
+      throw new RecordRefusal(
+        `the RPC reports ${from}'s pending nonce ${nonce} below its mined nonce ${mined}: a lagging or inconsistent node; nothing was recorded or sent, re-run against a synced RPC`,
+      );
+    }
     const block = Number(await this.raw("eth_blockNumber"));
     const e: TxEntry = {
       from,
@@ -357,6 +369,21 @@ export class Recorder {
   }
 
   /**
+   * Deep review M-1: `e` (an intent) took its nonce from a stale pending
+   * count, so the nonce is an EARLIER record entry's, whose transaction is
+   * mined as recorded. RpcRetry's stale check refused that send, so `e`
+   * never left the process (a record written before the sendTx check).
+   */
+  private async staleIntent(e: TxEntry): Promise<boolean> {
+    const earlier = this.rec.txs
+      .slice(0, this.rec.txs.indexOf(e))
+      .find((x) => x.hash && same(x.from, e.from) && x.nonce === e.nonce);
+    if (!earlier) return false;
+    const t = await this.raw("eth_getTransactionByHash", [earlier.hash]);
+    return !!t?.blockNumber && this.sameTx(earlier, t);
+  }
+
+  /**
    * Before any flow runs: adopt or drop each unfinished entry, check that
    * the deployer's nonce is fully accounted for, and every recorded
    * transaction and contract against the chain.
@@ -369,6 +396,13 @@ export class Recorder {
       );
     }
     for (const e of [...this.rec.txs]) {
+      if (e.status === "sending" && (await this.staleIntent(e))) {
+        this.rec.txs.splice(this.rec.txs.indexOf(e), 1); // never sent
+        this.log(
+          `   ↩️  ${e.label}: its nonce ${e.nonce} is record entry #${this.rec.txs.findIndex((x) => same(x.from, e.from) && x.nonce === e.nonce)}'s (an intent read from a lagging RPC, never sent); dropped from the record`,
+        );
+        continue;
+      }
       if (e.status === "sending") {
         const used =
           Number(
