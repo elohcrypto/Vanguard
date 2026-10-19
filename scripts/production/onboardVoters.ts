@@ -79,6 +79,14 @@ export async function onboardVoters(
     deployer: rec.deployer,
     chainId: rec.chainId,
   });
+  // Task 5.17 (deep review M-3): nothing of the deployer's or a voter's
+  // in flight before the onboarding reads what is missing.
+  await awaitSettledNonces(
+    [0, cfg.proposer, ...cfg.voters]
+      .filter((i: number) => state.signers[i])
+      .map((i: number) => state.signers[i]),
+    "voter onboarding",
+  );
   for (const [k, name] of Object.entries(ARTIFACT)) {
     state.setContract(k, await ethers.getContractAt(name, rec.contracts[k]));
   }
@@ -142,20 +150,21 @@ async function main(): Promise<void> {
   const rec = read("DEPLOY_RECORD");
   const cfg = read("HANDOVER_CONFIG");
   const signers = await ethers.getSigners();
-  // R-56-5: wallet 0 sends nothing once governance owns VSC.
+  // The pins first (as onboardVoters checks them), then R-56-5: wallet 0
+  // sends nothing once governance owns VSC.
+  checkWallets(
+    cfg,
+    signers,
+    "handover.json",
+    Number((await ethers.provider.getNetwork()).chainId),
+    { file: "the deploy record", deployer: rec.deployer, chainId: rec.chainId },
+  );
   guardDeployer(
     signers[0],
     await ethers.getContractAt(
       "VanguardGovernance",
       rec.contracts.vanguardGovernance,
     ),
-  );
-  // Task 5.17 (deep review M-3): nothing of the deployer's or a voter's
-  // in flight before the onboarding reads what is missing.
-  const ix = [0, cfg.proposer, ...cfg.voters].filter((i: number) => signers[i]);
-  await awaitSettledNonces(
-    ix.map((i: number) => signers[i]),
-    "voter onboarding",
   );
   await onboardVoters(rec, cfg);
 }
