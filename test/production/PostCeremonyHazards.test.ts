@@ -173,6 +173,21 @@ describe("Post-ceremony votes: hazardous open removals (L-3)", function () {
         `removal #${theirs}: ${f.proposer.address} skipped, its free VGT .* keeps .* for this run's ${big} own proposal\\(s\\)`,
       ),
     );
+    // Slice D review INFO-7: "voting against" only when a vote goes.
+    expect(log.some((l) => /voting against/.test(l))).to.equal(false);
+    log.length = 0;
+    await R().voteAgainstHazards(o, f.proposer, f.voters, (l: string) =>
+      log.push(l),
+    );
+    expect(await votes(theirs)).to.deep.equal([1n, 1n]);
+    expect(log.join("\n")).to.contain(`removal #${theirs} (`);
+    expect(log.join("\n")).to.contain("voting against while it votes");
+    log.length = 0;
+    await R().voteAgainstHazards(o, f.proposer, f.voters, (l: string) =>
+      log.push(l),
+    );
+    expect(log.join("\n")).to.contain("this run's wallets already voted on it");
+    expect(log.some((l) => /voting against/.test(l))).to.equal(false);
   });
 
   it("a passing foreign hazard holds round 2 with its id and stops an own removal's precheck; cancelled, the hold lifts", async function () {

@@ -158,21 +158,32 @@ export async function voteAgainstHazards(
       );
       continue;
     }
-    log(
-      `   ⚠️  removal #${r.id} (${r.node}${r.own ? "" : `, proposed by ${r.p.proposer}`}) ${hazards.get(r.id)}: voting against while it votes (a cancel vote is no guard once it has passed)`,
-    );
+    const what = `removal #${r.id} (${r.node}${r.own ? "" : `, proposed by ${r.p.proposer}`}) ${hazards.get(r.id)}`;
     const mine = [];
+    const skipped = [];
+    let left = 0;
     for (const v of [proposer, ...voters]) {
       const a = await addrOf(v);
       if (same(a, r.p.proposer) || (await gov.hasVoted(r.id, a))) continue;
+      left++;
       const keep = BigInt(reserve) * (same(a, me) ? make : vote);
       const free = await o.governanceToken.getFreeBalance(a);
       if (free >= keep + vote) mine.push(v);
       else
-        log(
+        skipped.push(
           `   ⚠️  removal #${r.id}: ${a} skipped, its free VGT ${ethers.formatEther(free)} keeps ${ethers.formatEther(keep)} for this run's ${reserve} own proposal(s)`,
         );
     }
+    // Slice D review INFO-7: say "voting against" only when a vote goes.
+    if (!left) {
+      log(`   ℹ️  ${what}: this run's wallets already voted on it`);
+      continue;
+    }
+    if (mine.length)
+      log(
+        `   ⚠️  ${what}: voting against while it votes (a cancel vote is no guard once it has passed)`,
+      );
+    for (const l of skipped) log(l);
     await Votes.castAcceptanceVotes(gov, r.id, mine, false);
   }
 }
