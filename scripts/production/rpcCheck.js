@@ -5,12 +5,13 @@
  * what the ceremony needs from an RPC, measured, for one or more URLs.
  *
  *   RPC_CHECK_URLS=<url>,<url> (or RPC_CHECK_URLS_FILE=<0600 file>) \
- *     node scripts/production/rpcCheck.js [--chain 11155111]
+ *     node scripts/production/rpcCheck.js --chain 11155111
  *     [--address 0x..] [--old-block N]
  * A URL on the command line is refused (shell history, ps).
  *
  * Per URL:
- *  - chain id (refused if not --chain);
+ *  - chain id (refused if not --chain, which is required: Task 5.17, deep
+ *    review L-7; a check that passes any chain proves nothing);
  *  - archive: eth_getBalance at --old-block (default latest - 200,000,
  *    beyond any full node's ~128 recent blocks) — every ceremony phase
  *    reads state from fromBlock on;
@@ -183,9 +184,9 @@ async function main(argv) {
     else if (a === "--old-block") opts.oldBlock = Number(argv[++i]);
     else throw new Error(`unknown argument "${redactUrl(a)}"`);
   }
-  if (!urls.length) {
+  if (!urls.length || !Number.isSafeInteger(opts.chain) || opts.chain <= 0) {
     console.error(
-      "usage: RPC_CHECK_URLS=<url>,<url> (or RPC_CHECK_URLS_FILE, 0600) rpcCheck.js [--chain id] [--address 0x..] [--old-block N]",
+      "usage: RPC_CHECK_URLS=<url>,<url> (or RPC_CHECK_URLS_FILE, 0600) rpcCheck.js --chain <id> [--address 0x..] [--old-block N] (--chain is required)",
     );
     return 1;
   }

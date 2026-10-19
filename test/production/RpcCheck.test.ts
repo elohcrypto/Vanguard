@@ -203,9 +203,11 @@ describe("rpc-check (scripts/production/rpcCheck.js)", function () {
     const u = `http://user:pa55word@127.0.0.1:${port}/v3/${KEY}?apikey=${ENC}`;
     try {
       const out = await new Promise<string>((ok) => {
-        const p = spawn(process.execPath, ["scripts/production/rpcCheck.js"], {
-          env: { ...process.env, RPC_CHECK_URLS: u },
-        });
+        const p = spawn(
+          process.execPath,
+          ["scripts/production/rpcCheck.js", "--chain", "31337"],
+          { env: { ...process.env, RPC_CHECK_URLS: u } },
+        );
         let t = "";
         p.stdout.on("data", (d) => (t += d));
         p.stderr.on("data", (d) => (t += d));
@@ -322,7 +324,11 @@ describe("rpc-check (scripts/production/rpcCheck.js)", function () {
       "RPC_CHECK_URLS_FILE must be this user's own file, mode 0600",
     );
     fs.chmodSync(f, 0o600);
-    const ok = run([], { RPC_CHECK_URLS_FILE: f });
+    const ok = run(["--chain", "11155111"], { RPC_CHECK_URLS_FILE: f });
     expect(ok.stdout).to.contain("RPC http://127.0.0.1:1");
+    // Task 5.17 (deep review L-7): --chain is required.
+    const any = run([], { RPC_CHECK_URLS_FILE: f });
+    expect(any.status).to.equal(1);
+    expect(any.stderr).to.contain("(--chain is required)");
   });
 });
