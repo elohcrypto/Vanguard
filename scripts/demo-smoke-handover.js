@@ -189,8 +189,13 @@ async function runHandoverSmoke(state, failures) {
   for (const f of result.failures) failures.push(`handover: ${f}`);
   // Task 4.13: the residual warnings are exactly the deployer-era facts
   // the smoke created: the root it published, the three attestor keys
-  // option 1 trusted, and the three nodes option 31 registered.
+  // option 1 trusted, and the three nodes option 31 registered; and
+  // (Task 5.17, owner ruling on slice C review L-2) node wallet 1 doubling
+  // as the escrow owner fee wallet: 8 expected, 7 before.
   const expectRes = [
+    new RegExp(
+      `^node ${s[1].address} is also an escrow fee wallet \\(uncapped holder that votes verdicts\\): use a separate key in production$`,
+    ),
     new RegExp(
       `^PrivacyManager whitelist root ${root} \\(version \\d+\\) was published by the deployer`,
     ),

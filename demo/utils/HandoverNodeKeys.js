@@ -10,8 +10,8 @@ const { addrOf, same } = require("./HandoverChecks");
 /**
  * M-5 (D25 b): the role `a` holds besides being a node, or null: ops,
  * the guardian, the issuer admin, the proposer or a voter (`o.voterWallets`,
- * the proposer first), a claim signer (`o.claimSigners`), an escrow fee
- * wallet (`o.feeWallets`), the OracleManager operator, an IdentityRegistry,
+ * the proposer first), a claim signer (`o.claimSigners`), the
+ * OracleManager operator, an IdentityRegistry,
  * VGT or VSC agent, or a management or claim key of a ClaimIssuer
  * (`o.issuers`; slice C review L-2). The deployer has its own row. Shared
  * with scripts/production/postCeremonyVotes.ts.
@@ -28,10 +28,7 @@ async function roleOf(o, a) {
   for (const [i, v] of vw.entries()) {
     if (same(await addrOf(v), a)) return i === 0 ? "the proposer" : "a voter";
   }
-  for (const [k, role] of [
-    ["claimSigners", "a claim signer"],
-    ["feeWallets", "an escrow fee wallet"],
-  ]) {
+  for (const [k, role] of [["claimSigners", "a claim signer"]]) {
     for (const x of o[k] || []) if (same(await addrOf(x), a)) return role;
   }
   const om = o.oracleManager;

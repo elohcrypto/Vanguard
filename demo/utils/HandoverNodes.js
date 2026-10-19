@@ -160,7 +160,7 @@ async function nodeChecks(o, f = null) {
   }
   out.push({
     label:
-      "no OracleManager node is ops, the guardian, the issuer admin, the proposer, a voter, a claim signer, a fee wallet, the manager operator, a registry/VGT/VSC agent or a ClaimIssuer key",
+      "no OracleManager node is ops, the guardian, the issuer admin, the proposer, a voter, a claim signer, the manager operator, a registry/VGT/VSC agent or a ClaimIssuer key",
     ok: roles.length === 0,
     fix: `OracleManager node(s) ${list(roles)} hold a role key: a node is a key of its own (D25 b), or one key both runs the system and votes its verdicts; the manager owner must removeOracle(node, ...) and register a node key of its own first`,
     strays: [],
@@ -402,6 +402,16 @@ async function nodeLines(o, dAddr, warnings = [], residual = []) {
       residual.push(w);
     }
   }
+  // Slice C review L-2, owner ruling (b): an escrow fee wallet receives
+  // fees and runs nothing, so it is no role key (D25 b); a node that is
+  // one is a residual warning, not a failure.
+  const fee = await Promise.all((o.feeWallets || []).map(addrOf));
+  for (const n of f.nodes)
+    if (fee.some((a) => same(a, n.addr))) {
+      const w = `node ${n.addr} is also an escrow fee wallet (uncapped holder that votes verdicts): use a separate key in production`;
+      warnings.push(w);
+      residual.push(w);
+    }
   // M-4: a partial set (a removal too many) freezes every list: no query
   // opens. None at all is the first handover's state, before production
   // nodes are voted in (D50): a warning.

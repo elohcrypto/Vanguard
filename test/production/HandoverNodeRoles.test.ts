@@ -24,7 +24,7 @@ describe("Handover node checks: role keys and MIN_NODES (M-4, M-5)", function ()
   let f: Awaited<ReturnType<typeof handoverFixture>>;
   let args: Record<string, any>;
   const ROLE_LINE =
-    "no OracleManager node is ops, the guardian, the issuer admin, the proposer, a voter, a claim signer, a fee wallet, the manager operator, a registry/VGT/VSC agent or a ClaimIssuer key";
+    "no OracleManager node is ops, the guardian, the issuer admin, the proposer, a voter, a claim signer, the manager operator, a registry/VGT/VSC agent or a ClaimIssuer key";
 
   beforeEach(async function () {
     f = await handoverFixture();
@@ -73,12 +73,6 @@ describe("Handover node checks: role keys and MIN_NODES (M-4, M-5)", function ()
       },
     ],
     [
-      "an escrow fee wallet",
-      async (a: string) => {
-        args.feeWallets = [...args.feeWallets, a];
-      },
-    ],
-    [
       "the OracleManager operator",
       async (a: string) => {
         await om().setOperator(a);
@@ -114,6 +108,21 @@ describe("Handover node checks: role keys and MIN_NODES (M-4, M-5)", function ()
       expect(failures).to.include(ROLE_LINE);
     });
   }
+
+  // Owner ruling (b) on slice C review L-2: a fee wallet runs nothing, so
+  // a node that is one is a residual warning, not a failure.
+  it("warns, not fails, when a node is also an escrow fee wallet", async function () {
+    const a = f.stranger.address;
+    args.feeWallets = [...args.feeWallets, a];
+    await om().registerOracle(a, "FEE", "", 500);
+    args.oracleNodes = [a];
+    expect(await roleOf(args, a)).to.equal(null);
+    const r = await assertHandoverComplete(args);
+    expect(r.failures).to.not.include(ROLE_LINE);
+    const w = `node ${a} is also an escrow fee wallet (uncapped holder that votes verdicts): use a separate key in production`;
+    expect(r.warnings).to.include(w);
+    expect(r.residual).to.include(w);
+  });
 
   it("fails completion below MIN_NODES (weight share n/a); no such line at three", async function () {
     const signers = await ethers.getSigners();
