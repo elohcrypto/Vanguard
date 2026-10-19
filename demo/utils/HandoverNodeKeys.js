@@ -11,7 +11,8 @@ const { addrOf, same } = require("./HandoverChecks");
  * M-5 (D25 b): the role `a` holds besides being a node, or null: ops,
  * the guardian, the issuer admin, the proposer or a voter (`o.voterWallets`,
  * the proposer first), a claim signer (`o.claimSigners`), the
- * OracleManager operator, an IdentityRegistry,
+ * OracleManager operator, an InvestorTypeRegistry governor or compliance
+ * officer (slice D review LOW-4), an IdentityRegistry,
  * VGT or VSC agent, or a management or claim key of a ClaimIssuer
  * (`o.issuers`; slice C review L-2). The deployer has its own row. Shared
  * with scripts/production/postCeremonyVotes.ts.
@@ -41,6 +42,22 @@ async function roleOf(o, a) {
   ]) {
     const c = o[k];
     if (c && (await c.isAgent(a).catch(() => false))) return role;
+  }
+  // Slice D review LOW-4: InvestorTypeRegistry's governors and
+  // compliance officers.
+  const itr = o.investorTypeRegistry;
+  if (itr) {
+    const r = await ethers.getContractAt(
+      [
+        "function isGovernor(address) view returns (bool)",
+        "function isComplianceOfficer(address) view returns (bool)",
+      ],
+      await addrOf(itr),
+    );
+    if (await r.isGovernor(a).catch(() => false))
+      return "an InvestorTypeRegistry governor";
+    if (await r.isComplianceOfficer(a).catch(() => false))
+      return "an InvestorTypeRegistry compliance officer";
   }
   const key = ethers.keccak256(ethers.solidityPacked(["address"], [a]));
   for (const iss of o.issuers || []) {

@@ -24,7 +24,7 @@ describe("Handover node checks: role keys and MIN_NODES (M-4, M-5)", function ()
   let f: Awaited<ReturnType<typeof handoverFixture>>;
   let args: Record<string, any>;
   const ROLE_LINE =
-    "no OracleManager node is ops, the guardian, the issuer admin, the proposer, a voter, a claim signer, the manager operator, a registry/VGT/VSC agent or a ClaimIssuer key";
+    "no OracleManager node is ops, the guardian, the issuer admin, the proposer, a voter, a claim signer, the manager operator, an InvestorTypeRegistry governor or officer, a registry/VGT/VSC agent or a ClaimIssuer key";
 
   beforeEach(async function () {
     f = await handoverFixture();
@@ -79,6 +79,18 @@ describe("Handover node checks: role keys and MIN_NODES (M-4, M-5)", function ()
       },
     ],
     [
+      "an InvestorTypeRegistry governor",
+      async (a: string) => {
+        await f.c.investorTypeRegistry.setGovernor(a, true, 1);
+      },
+    ],
+    [
+      "an InvestorTypeRegistry compliance officer",
+      async (a: string) => {
+        await f.c.investorTypeRegistry.setComplianceOfficer(a, true);
+      },
+    ],
+    [
       "a VSC agent",
       async (a: string) => {
         await f.c.token.addAgent(a);
@@ -98,9 +110,10 @@ describe("Handover node checks: role keys and MIN_NODES (M-4, M-5)", function ()
       await om().registerOracle(a, "ROLE", "", 500);
       args.oracleNodes = [a];
       expect(await roleOf(args, a)).to.match(new RegExp(`^${who}`));
-      // A VSC agent or issuer key the config does not name fails an
-      // earlier preflight line; completion still names the role row.
-      if (!/VSC|ClaimIssuer/.test(who))
+      // A VSC agent, issuer key or InvestorTypeRegistry role the config
+      // does not name fails an earlier preflight line (a stray);
+      // completion still names the role row.
+      if (!/VSC|ClaimIssuer|InvestorTypeRegistry/.test(who))
         await expect(handoverDeployerPowers(args)).to.be.rejectedWith(
           `OracleManager node(s) ${a} (${who}`,
         );

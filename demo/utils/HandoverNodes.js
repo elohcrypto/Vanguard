@@ -160,7 +160,7 @@ async function nodeChecks(o, f = null) {
   }
   out.push({
     label:
-      "no OracleManager node is ops, the guardian, the issuer admin, the proposer, a voter, a claim signer, the manager operator, a registry/VGT/VSC agent or a ClaimIssuer key",
+      "no OracleManager node is ops, the guardian, the issuer admin, the proposer, a voter, a claim signer, the manager operator, an InvestorTypeRegistry governor or officer, a registry/VGT/VSC agent or a ClaimIssuer key",
     ok: roles.length === 0,
     fix: `OracleManager node(s) ${list(roles)} hold a role key: a node is a key of its own (D25 b), or one key both runs the system and votes its verdicts; the manager owner must removeOracle(node, ...) and register a node key of its own first`,
     strays: [],
