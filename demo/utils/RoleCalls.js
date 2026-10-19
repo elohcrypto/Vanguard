@@ -169,6 +169,26 @@ async function acceptStatus(c, dAddr, to, who) {
 }
 
 /**
+ * `v` as Safe Transaction Builder's contractInputsValues string for
+ * parameter `p` (Task 5.17, deep review: String(array) gave "a,b"): an
+ * array or tuple is the JSON array of its elements (numbers as decimal
+ * strings, nested the same way), a scalar its plain string.
+ */
+function safeValue(p, v) {
+  const json = (x) =>
+    Array.isArray(x)
+      ? x.map(json)
+      : typeof x === "boolean"
+        ? x
+        : typeof x === "bigint"
+          ? x.toString()
+          : String(x);
+  if (p.baseType === "array" || p.baseType === "tuple")
+    return JSON.stringify(json(Array.isArray(v) ? [...v] : v));
+  return String(v);
+}
+
+/**
  * The call `step` describes ({ role, roleLabel, contract, name, fn,
  * args, purpose, id }), as the batch file and the refusals print it.
  */
@@ -189,7 +209,7 @@ async function callOf(step) {
       name: p.name || `arg${i}`,
       type: p.type,
     })),
-    args: step.args.map(String),
+    args: step.args.map((a, i) => safeValue(f.inputs[i], a)),
     purpose: step.purpose,
   };
 }
@@ -385,6 +405,7 @@ module.exports = {
   compiledName,
   callOf,
   callLine,
+  safeValue,
   checksumOf,
   batchFile,
   batchProblems,
