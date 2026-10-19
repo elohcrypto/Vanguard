@@ -8,6 +8,10 @@
  * Task 5.12 (D50, R-56-2): action 7 registers a node, so the deployer-era
  * nodes rotate out add-before-remove; the node prompts list the nodes
  * registered on chain, and option 83f acknowledges a node proposed here.
+ * Task 5.17 (deep review M-4): action 3 counts the nodes a removal would
+ * leave, net of the removals already open: below ConsensusOracle.MIN_NODES
+ * it refuses (no query could open, every list freezes; removeOracle checks
+ * no floor), below RECOMMENDED_NODES (3, owner Q4) it asks for "yes".
  */
 
 const { ethers } = require("hardhat");
@@ -26,6 +30,57 @@ const ROLE_WALLETS = {
   10: "ops",
   11: "the guardian",
 };
+
+/** Q4: three independent nodes; fewer is allowed only on a typed "yes". */
+const RECOMMENDED_NODES = 3;
+
+/**
+ * M-4: the nodes left if `node` and every node under an open (Active)
+ * removeOracle proposal went: { left, open, minNodes }.
+ */
+async function nodesLeftAfter(state, node) {
+  const om = state.getContract("oracleManager");
+  const gov = state.getContract("vanguardGovernance");
+  const target = (await om.getAddress()).toLowerCase();
+  const sel = om.interface.getFunction("removeOracle").selector;
+  const gone = new Set([node.toLowerCase()]);
+  const open = [];
+  for (let id = 1; id <= Number(await gov.proposalCount()); id++) {
+    const [p] = await gov.getProposal(id);
+    if (Number(p.status) !== 1 || p.target.toLowerCase() !== target) continue;
+    if (!String(p.callData).startsWith(sel)) continue;
+    const [n] = om.interface.decodeFunctionData("removeOracle", p.callData);
+    gone.add(n.toLowerCase());
+    open.push(`#${id} (${n})`);
+  }
+  const live = await om.getRegisteredOracles();
+  const left = live.filter((a) => !gone.has(a.toLowerCase())).length;
+  const engine = await ethers.getContractAt(
+    ["function MIN_NODES() view returns (uint256)"],
+    await om.consensusEngine(),
+  );
+  return { left, open, minNodes: Number(await engine.MIN_NODES()) };
+}
+
+/** M-4: whether a removal of `node` may be proposed (prompts below 3). */
+async function removalAllowed(state, prompt, node) {
+  const { left, open, minNodes } = await nodesLeftAfter(state, node);
+  const also = open.length ? `, with open removal(s) ${open.join(", ")}` : "";
+  if (left < minNodes) {
+    displayError(
+      `removing ${node} would leave ${left} node(s)${also}: below ConsensusOracle.MIN_NODES (${minNodes}) no query opens and every list freezes; register a node first (action 7)`,
+    );
+    return false;
+  }
+  if (left >= RECOMMENDED_NODES) return true;
+  console.log(
+    `   ⚠️  removing ${node} would leave ${left} node(s)${also}, fewer than the ${RECOMMENDED_NODES} independent nodes the deployment runs (Q4)`,
+  );
+  const yes = (await prompt('Type "yes" to propose it anyway: ')).trim();
+  if (yes === "yes") return true;
+  displayError("Not proposed");
+  return false;
+}
 
 /** [label, function, () => args prompt] for each action. */
 const ACTIONS = [
@@ -133,6 +188,7 @@ async function askArgs(state, prompt, kind) {
   if (!node) return (displayError("Invalid node"), null);
   if (kind === "node") return [node];
   if (kind === "node+reason") {
+    if (!(await removalAllowed(state, prompt, node))) return null;
     return [node, (await prompt("Reason: ")).trim() || "governance vote"];
   }
   const yn = (await prompt("Designate (y) or clear (n)? "))
@@ -210,4 +266,4 @@ async function createOracleParametersProposal(state, prompt) {
   return id;
 }
 
-module.exports = { createOracleParametersProposal, ACTIONS };
+module.exports = { createOracleParametersProposal, ACTIONS, nodesLeftAfter };

@@ -126,6 +126,31 @@ describe("Option 76 registers a node by vote; rounds follow the chain (Task 5.12
     );
   });
 
+  // Task 5.17 (deep review M-4): action 3 counts the nodes a removal
+  // leaves, net of open removals: below MIN_NODES refused, below 3 a
+  // typed "yes".
+  it("action 3 refuses a removal below MIN_NODES net of open removals, asks below 3", async function () {
+    const om = f.c.oracleManager;
+    const nodes = [s[13], s[14], s[15]].map((w) => w.address);
+    for (const a of nodes) await om.registerOracle(a, "N", "node", 500);
+    const before = await f.c.governance.proposalCount();
+    // 3 -> 2: below the recommended 3, so it asks; "no" proposes nothing.
+    expect(await propose(["3", nodes[0], "no"])).to.equal(null);
+    expect(out.join("\n")).to.include(
+      `removing ${nodes[0]} would leave 2 node(s), fewer than the 3 independent nodes`,
+    );
+    expect(await f.c.governance.proposalCount()).to.equal(before);
+    const id = await propose(["3", nodes[0], "yes", "rotate"]);
+    expect(id).to.equal(before + 1n);
+    // Another removal while #id is open would leave 1: refused outright.
+    out.length = 0;
+    expect(await propose(["3", nodes[1]])).to.equal(null);
+    expect(out.join("\n")).to.include(
+      `removing ${nodes[1]} would leave 1 node(s), with open removal(s) #${id} (${nodes[0]}): below ConsensusOracle.MIN_NODES (2)`,
+    );
+    expect(await f.c.governance.proposalCount()).to.equal(id);
+  });
+
   it("nodeSigners reads the registered nodes from chain, also after a removal", async function () {
     const om = f.c.oracleManager;
     const keyless = ethers.Wallet.createRandom().address;
