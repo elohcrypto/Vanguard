@@ -60,11 +60,14 @@ up() {
 rpc "$NODE_URL" eth_chainId "[]" | grep -q result && fail "port $NODE_PORT in use"
 export SIGNER_TOKEN_FILE=$OUT/signer.token
 # The signer answers only with its bearer token (scripts/production/
-# rpcGuard.js), written to SIGNER_TOKEN_FILE once it listens.
+# rpcGuard.js), written to SIGNER_TOKEN_FILE once it listens. Task 5.17
+# (deep review L-7): curl reads it from a 0600 header file, never argv
+# (ps shows a process's arguments to every user).
 sup() {
   for _ in $(seq 1 60); do
-    [[ -s $SIGNER_TOKEN_FILE ]] && curl -s -m 30 -X POST -H "Content-Type: application/json" \
-      -H "Authorization: Bearer $(cat "$SIGNER_TOKEN_FILE")" \
+    [[ -s $SIGNER_TOKEN_FILE ]] \
+      && (umask 077 && printf 'Authorization: Bearer %s\n' "$(<"$SIGNER_TOKEN_FILE")" >"$OUT/signer.header") \
+      && curl -s -m 30 -X POST -H "Content-Type: application/json" -H @"$OUT/signer.header" \
       --data '{"jsonrpc":"2.0","id":1,"method":"eth_chainId","params":[]}' \
       "http://127.0.0.1:$SIGNER_PORT" | grep -q result && return 0
     sleep 1
