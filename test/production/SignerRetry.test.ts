@@ -135,6 +135,36 @@ describe("Signer: a failed broadcast's retry, fee bumps, forget (M-1)", function
     }
   });
 
+  it("a lower requested fee is re-signed as such, not called a fee bump (slice D review INFO-5)", async function () {
+    const up = await fakeUpstream(11155111);
+    try {
+      const r = await runSigner(
+        "scripts/production/signer.js",
+        env(up.url),
+        async (live) => {
+          const fee = {
+            maxFeePerGas: "0x77359400",
+            maxPriorityFeePerGas: "0x1",
+          };
+          await rpc(live, "eth_sendTransaction", [{ ...tx(), ...fee }]);
+          const again = await rpc(live, "eth_sendTransaction", [
+            { ...tx(), ...fee, maxFeePerGas: "0x3b9aca00" },
+          ]);
+          expect(again.body.result, JSON.stringify(again.body)).to.match(
+            /^0x[0-9a-f]{64}$/,
+          );
+        },
+      );
+      expect(r.code, r.out).to.equal(0);
+      expect(r.out).to.contain(
+        "re-signed with the requested fees, nonce 7, same transaction (its maxFeePerGas moved)",
+      );
+      expect(r.out).to.not.contain("fee bump");
+    } finally {
+      up.server.close();
+    }
+  });
+
   it("another transaction at a recorded nonce is refused; forget drops the entry", async function () {
     const up = await fakeUpstream(11155111);
     try {

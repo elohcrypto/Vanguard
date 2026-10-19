@@ -56,6 +56,7 @@ const {
   clears,
   differs,
   regas,
+  lowersFee,
   raisedFees,
   fieldsOf,
   promptMode,
@@ -198,8 +199,11 @@ async function serve() {
             `nonce ${full.nonce} of ${w.address} was already signed for another transaction (${why}): refused; never to be mined? run: signer.js forget ${w.address} ${full.nonce}`,
           );
         const moved = regas(before.raw, req);
+        // Slice D review INFO-5: a lower fee is no bump.
         if (moved)
-          kind = `fee bump of nonce ${full.nonce}, same transaction (its ${moved} moved)`;
+          kind = lowersFee(before.raw, req)
+            ? `re-signed with the requested fees, nonce ${full.nonce}, same transaction (its ${moved} moved)`
+            : `fee bump of nonce ${full.nonce}, same transaction (its ${moved} moved)`;
         else if (await clears(before.raw, provider)) {
           const t = fieldsOf(before.raw);
           shown = describeTx(

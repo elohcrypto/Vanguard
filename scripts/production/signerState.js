@@ -160,6 +160,15 @@ async function clears(raw, provider) {
   return (t.maxFeePerGas ?? t.gasPrice ?? 0n) >= base;
 }
 
+/** Whether a fee the caller of `req` set is below recorded `raw`'s. */
+function lowersFee(raw, req) {
+  const { Transaction } = require("ethers");
+  const t = Transaction.from(raw);
+  return ["maxFeePerGas", "maxPriorityFeePerGas", "gasPrice"].some(
+    (k) => req[k] !== undefined && BigInt(req[k]) < BigInt(t[k] ?? 0),
+  );
+}
+
 /**
  * Slice C review L-5: the fees of a replacement for recorded `raw` (stuck
  * in the mempool): each at least 1/8 above the recorded one (nodes
@@ -206,6 +215,7 @@ module.exports = {
   signedStore,
   differs,
   regas,
+  lowersFee,
   raisedFees,
   clears,
   fieldsOf,
