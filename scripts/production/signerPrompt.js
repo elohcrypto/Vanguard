@@ -18,13 +18,23 @@
  *    hide what is signed.
  *  - SIGNER_PROMPT=1 asks on the controlling terminal (/dev/tty), never
  *    stdin, and approves only on the exact token printed (the last four
- *    hex digits of the data's hash); anything else refuses.
+ *    hex digits of the unsigned transaction's hash, or of the signer and
+ *    the message's EIP-191 hash); input typed ahead is discarded.
  */
 "use strict";
 
 const fs = require("fs");
 const path = require("path");
-const { Interface, formatEther, getAddress, keccak256 } = require("ethers");
+const {
+  Interface,
+  Transaction,
+  concat,
+  formatEther,
+  getAddress,
+  getBytes,
+  hashMessage,
+  keccak256,
+} = require("ethers");
 
 const UNSAFE =
   /[\u0000-\u001f\u007f-\u009f\u061c\u200b-\u200f\u202a-\u202e\u2060-\u2069\ufeff]/g;
@@ -41,6 +51,25 @@ function clean(v, max = MAX) {
   return s.length > max
     ? `${s.slice(0, max)}...(truncated, ${s.length} chars)`
     : s;
+}
+
+/** `v` cleaned, and every other non-ASCII character as \u{...} (L-1). */
+function ascii(v, max = MAX) {
+  const s = clean(v, Infinity).replace(
+    /[^\x20-\x7e]/gu,
+    (c) => `\\u{${c.codePointAt(0).toString(16)}}`,
+  );
+  return s.length > max
+    ? `${s.slice(0, max)}...(truncated, ${s.length} chars)`
+    : s;
+}
+
+/** One decoded argument as `name: type = JSON` (L-2: array bounds explicit). */
+function arg(param, value) {
+  const json = JSON.stringify(value, (_, x) =>
+    typeof x === "bigint" ? x.toString() : x,
+  );
+  return `${ascii(param.name || "_")}: ${param.type} = ${ascii(json)}`;
 }
 
 let artifacts = null;
@@ -126,30 +155,57 @@ function describeTx(tx, chain, code) {
   else {
     const t = known.iface.parseTransaction({ data });
     call = t
-      ? `${clean(known.name)}.${clean(t.name)}(${t.args.map((a) => clean(a)).join(", ")})`
+      ? `${clean(known.name)}.${clean(t.name)}(${t.fragment.inputs.map((p, i) => arg(p, t.args.toArray ? t.args.toArray(true)[i] : t.args[i])).join(", ")})`
       : `${clean(known.name)}: selector ${clean(data.slice(0, 10))} not in its ABI`;
   }
   const value = BigInt(tx.value || 0);
   const fees = tx.maxFeePerGas
     ? `maxFee ${BigInt(tx.maxFeePerGas)} wei, tip ${BigInt(tx.maxPriorityFeePerGas || 0)} wei`
     : `gasPrice ${BigInt(tx.gasPrice || 0)} wei`;
+  // M-1: the token binds the whole unsigned transaction.
+  const unsigned = unsignedHash(tx);
   return {
-    token: hash.slice(-4),
+    token: unsigned.slice(-6),
+    unsigned,
     lines: [
       `   ${call}`,
       `   to ${to ?? "(create)"} | value ${formatEther(value)} ETH (${value} wei) | nonce ${tx.nonce} | gas ${tx.gasLimit} | ${fees} | chain ${chain}`,
       `   from ${getAddress(tx.from)} | data keccak256 ${hash} (${(data.length - 2) / 2} bytes)`,
+      `   unsigned transaction hash ${unsigned}`,
     ],
   };
 }
+
+/** The hash the signature commits to for `tx` (no `from`). */
+function unsignedHash(tx) {
+  const t = { ...tx };
+  delete t.from;
+  return Transaction.from(t).unsignedHash;
+}
+
+/** A token bound to the signer and the message's EIP-191 hash (M-1). */
+const messageToken = (from, data) =>
+  keccak256(concat([getAddress(from), hashMessage(getBytes(data))])).slice(-6);
 
 /** The lines and token for a message signature by `from`. */
 function describeMessage(from, data) {
   const hash = keccak256(data);
   return {
-    token: hash.slice(-4),
+    token: messageToken(from, data),
     lines: [
       `   sign a message as ${getAddress(from)}: keccak256 ${hash} (${(data.length - 2) / 2} bytes; a claim digest is 32)`,
+    ],
+  };
+}
+
+/** The lines and token for a claim digest recomputed from its fields (L-3). */
+function describeClaim(from, c, digest) {
+  return {
+    token: messageToken(from, digest),
+    lines: [
+      `   sign a claim as ${getAddress(from)}: issuer ${getAddress(c.issuer)} | identity ${getAddress(c.identity)} | topic ${ascii(c.topic)} | scheme ${ascii(c.scheme)}`,
+      `   data ${ascii(c.data)} | uri ${ascii(c.uri)} | validTo ${ascii(c.validTo)} | chain ${ascii(c.chainId)} | revocation epoch ${ascii(c.epoch)}`,
+      `   digest (recomputed) ${digest}`,
     ],
   };
 }
@@ -164,14 +220,36 @@ function hasTty() {
   }
 }
 
-/** Ask on /dev/tty; true only when the line typed is exactly `token`. */
+/** Discard whatever was typed ahead on `fd` (M-1: tcflush(TCIFLUSH)). */
+function drain(fd) {
+  const nb = fs.openSync(
+    "/dev/tty",
+    fs.constants.O_RDONLY | fs.constants.O_NONBLOCK,
+  );
+  const buf = Buffer.alloc(256);
+  try {
+    for (;;) if (fs.readSync(nb, buf, 0, buf.length, null) <= 0) break;
+  } catch {
+    // EAGAIN: nothing left
+  } finally {
+    fs.closeSync(nb);
+  }
+  void fd;
+}
+
+/**
+ * Ask on /dev/tty; true only when a line typed AFTER the prompt is exactly
+ * `token`. Input typed ahead is discarded before and after the prompt.
+ */
 function askTty(text, token) {
   const fd = fs.openSync("/dev/tty", "r+");
   try {
+    drain(fd);
     fs.writeSync(
       fd,
       `${text}\n   type ${token} to sign, anything else refuses: `,
     );
+    drain(fd);
     const buf = Buffer.alloc(64);
     let line = "";
     while (!line.includes("\n")) {
@@ -187,8 +265,11 @@ function askTty(text, token) {
 
 module.exports = {
   clean,
+  ascii,
   describeTx,
   describeMessage,
+  describeClaim,
+  unsignedHash,
   knownContract,
   hasTty,
   askTty,

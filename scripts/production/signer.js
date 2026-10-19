@@ -42,10 +42,20 @@
 const fs = require("fs");
 const path = require("path");
 const readline = require("readline");
-const { HDNodeWallet, JsonRpcProvider, Wallet, getBytes } = require("ethers");
+const {
+  AbiCoder,
+  Contract,
+  HDNodeWallet,
+  JsonRpcProvider,
+  Transaction,
+  Wallet,
+  getBytes,
+  keccak256,
+} = require("ethers");
 const { guardedServer } = require("./rpcGuard");
 const { scrub } = require("./redact");
 const {
+  describeClaim,
   describeMessage,
   describeTx,
   hasTty,
@@ -185,7 +195,8 @@ async function serve() {
     ]),
   );
   const seen = []; // requests shown, for "RETRY of #n"
-  let queue = Promise.resolve(); // one prompt at a time
+  const byNonce = new Map(); // "addr:nonce" -> { unsigned, raw } (L-5)
+  let queue = Promise.resolve(); // one request at a time, populate included
   let signed = 0;
 
   const holder = (a) => {
@@ -193,13 +204,19 @@ async function serve() {
     if (!w) throw new Error(`the signer holds no key for ${a}`);
     return w;
   };
+  /** `fn` after every earlier request is answered (L-5). */
+  const inTurn = (fn) => {
+    const run = queue.then(fn);
+    queue = run.catch(() => undefined);
+    return run;
+  };
   /**
    * Show the request (scripts/production/signerPrompt.js) and, with
    * SIGNER_PROMPT, ask for its token on /dev/tty. A request repeating an
    * earlier `key` is shown as its RETRY; a null key (a transaction with no
-   * pinned nonce, review L-4) never is.
+   * pinned nonce, review L-4) never is. Runs inside inTurn.
    */
-  const approve = async (key, kind, d) => {
+  const approve = (key, kind, d) => {
     const k = key === null ? null : JSON.stringify(key);
     const was = k === null ? -1 : seen.indexOf(k);
     if (was < 0) seen.push(k);
@@ -210,12 +227,11 @@ async function serve() {
         : `#${n} RETRY of #${n} (same request): ${kind}`;
     const text = [head, ...d.lines].join("\n");
     if (!prompt) return console.log(`   ${text}`);
-    const asked = queue.then(() => askTty(text, d.token));
-    queue = asked.catch(() => undefined);
-    if (!(await asked)) throw new Error(`refused by the operator (#${n})`);
+    if (!askTty(text, d.token))
+      throw new Error(`refused by the operator (#${n})`);
   };
 
-  async function sendTransaction(tx) {
+  function sendTransaction(tx) {
     const w = holder(tx.from);
     const req = {
       to: tx.to || null,
@@ -231,35 +247,118 @@ async function serve() {
       if (tx[from]) req[to] = tx[from];
     }
     if (tx.nonce !== undefined) req.nonce = Number(tx.nonce);
-    // What is shown is what is signed: the populated transaction.
-    const full = await w.populateTransaction(req);
-    const code = full.to ? await provider.getCode(full.to) : "0x";
-    await approve(
-      req.nonce === undefined
-        ? null
-        : ["tx", w.address, req.nonce, req.to, String(req.value), req.data],
-      "send",
-      describeTx({ ...full, from: w.address }, chain, code),
-    );
-    const sent = await w.sendTransaction(full);
-    signed++;
-    return sent.hash;
+    return inTurn(async () => {
+      // What is shown is what is signed (I-1): the populated transaction,
+      // populated after every earlier request was answered (L-5).
+      const full = await w.populateTransaction(req);
+      const d = describeTx(
+        { ...full, from: w.address },
+        chain,
+        full.to ? await provider.getCode(full.to) : "0x",
+      );
+      const slot = `${w.address}:${full.nonce}`;
+      const before = byNonce.get(slot);
+      if (before && before.unsigned !== d.unsigned) {
+        throw new Error(
+          `nonce ${full.nonce} of ${w.address} was already signed for another transaction: refused`,
+        );
+      }
+      approve(
+        req.nonce === undefined
+          ? null
+          : ["tx", w.address, req.nonce, req.to, String(req.value), req.data],
+        "send",
+        d,
+      );
+      const raw = before ? before.raw : await w.signTransaction(full);
+      if (Transaction.from(raw).unsignedHash !== d.unsigned) {
+        throw new Error("the signed transaction is not the one shown: refused");
+      }
+      byNonce.set(slot, { unsigned: d.unsigned, raw });
+      const sent = await provider.broadcastTransaction(raw);
+      signed++;
+      return sent.hash;
+    });
   }
-  async function signMessage(address, data) {
+  function signMessage(address, data) {
     const w = holder(address);
-    await approve(
-      ["msg", w.address, data],
-      "sign",
-      describeMessage(w.address, data),
-    );
-    signed++;
-    return w.signMessage(getBytes(data));
+    return inTurn(async () => {
+      // L-3: with a prompt, only a claim whose digest this signer
+      // recomputes and shows (vanguard_signClaim); never opaque bytes.
+      if (prompt) {
+        throw new Error(
+          "personal_sign/eth_sign refused with SIGNER_PROMPT=1: sign claims through vanguard_signClaim",
+        );
+      }
+      approve(
+        ["msg", w.address, data],
+        "sign",
+        describeMessage(w.address, data),
+      );
+      signed++;
+      return w.signMessage(getBytes(data));
+    });
+  }
+  /**
+   * vanguard_signClaim [address, { issuer, identity, topic, scheme, data,
+   * uri, validTo, chainId }]: the digest ClaimIssuer.claimDigest computes,
+   * recomputed here with the issuer's revocation epoch read from chain,
+   * shown field by field, then signed (EIP-191) as Kyc.signClaim would.
+   */
+  function signClaim(address, c) {
+    const w = holder(address);
+    return inTurn(async () => {
+      if (!c || Number(c.chainId) !== chain)
+        throw new Error(
+          `a claim for chain ${c && c.chainId}, not ${chain}: refused`,
+        );
+      const iss = new Contract(
+        c.issuer,
+        ["function revocationEpoch(address,uint256) view returns (uint256)"],
+        provider,
+      );
+      const epoch = await iss.revocationEpoch(c.identity, c.topic);
+      const digest = keccak256(
+        AbiCoder.defaultAbiCoder().encode(
+          [
+            "uint256",
+            "address",
+            "uint256",
+            "address",
+            "uint256",
+            "uint256",
+            "bytes",
+            "string",
+            "uint256",
+          ],
+          [
+            chain,
+            c.issuer,
+            epoch,
+            c.identity,
+            c.topic,
+            c.scheme,
+            c.data,
+            c.uri,
+            c.validTo,
+          ],
+        ),
+      );
+      approve(
+        ["claim", w.address, digest],
+        "sign",
+        describeClaim(w.address, { ...c, epoch }, digest),
+      );
+      signed++;
+      return w.signMessage(getBytes(digest));
+    });
   }
   const OWN = {
     eth_accounts: async () => keys.map((k) => k.wallet.address),
     eth_sendTransaction: (p) => sendTransaction(p[0]),
     personal_sign: (p) => signMessage(p[1], p[0]),
     eth_sign: (p) => signMessage(p[0], p[1]),
+    vanguard_signClaim: (p) => signClaim(p[0], p[1]),
   };
   /** Any other call goes upstream as it came; a failure keeps its words. */
   async function forward(call) {

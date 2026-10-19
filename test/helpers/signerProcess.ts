@@ -40,6 +40,7 @@ export async function fakeUpstream(chain: number, code = "0x") {
     },
     eth_getTransactionByHash: () => null,
     eth_getCode: () => code,
+    eth_call: () => `0x${"00".repeat(32)}`,
   };
   let echoed: string | null = null;
   const one = (c: any) =>

@@ -64,6 +64,34 @@ async function signClaim(
 ) {
   const chain = chainId ?? (await signer.provider.getNetwork()).chainId;
   const at = typeof issuer === "string" ? issuer : await issuer.getAddress();
+  // Task 5.15 (L-3): an external signer that shows claims field by field
+  // (scripts/production/signer.js vanguard_signClaim) recomputes the digest
+  // itself; any other signer refuses the method and signs the bytes below.
+  if (chainId === undefined && epoch === undefined && !signer.privateKey) {
+    try {
+      return await signer.provider.send("vanguard_signClaim", [
+        await signer.getAddress(),
+        {
+          issuer: at,
+          identity: identityAddress,
+          topic: Number(topic),
+          scheme,
+          data: ethers.hexlify(data),
+          uri,
+          validTo: Number(validTo),
+          chainId: Number(chain),
+        },
+      ]);
+    } catch (e) {
+      const m = `${e.message} ${e.error?.message ?? ""}`;
+      if (
+        !/not allowed|not supported|does not exist|not found|-32601|unsupported method|Method .*not/i.test(
+          m,
+        )
+      )
+        throw e;
+    }
+  }
   // Review L-2: the (identity, topic)'s revocation epoch, read now.
   const ep =
     epoch ??

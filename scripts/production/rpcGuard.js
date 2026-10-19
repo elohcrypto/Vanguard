@@ -53,6 +53,7 @@ const OWN = [
   "eth_sendTransaction",
   "personal_sign",
   "eth_sign",
+  "vanguard_signClaim",
 ];
 
 /** Refuse anything but this user's own plain file or dir, no group/other bits. */
