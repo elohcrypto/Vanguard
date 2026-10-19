@@ -1,49 +1,38 @@
 import { expect } from "chai";
 
 /**
- * Task 5.17 slice A (deep review H-1): the coverage runs' pending gate
- * (scripts/ci/mocha-log.js pending): each loaded file's pending tests
- * equal scripts/ci/coverage-pending.json, on fixture records here.
+ * Task 5.17 (deep review H-1; slice A review L-1): the coverage runs'
+ * pending gate (scripts/ci/mocha-log.js pending). A pending test is
+ * allowed only under a suite whose title carries a marker of
+ * test/helpers/zkProofs.js (describeProofs' reason, describeUnlessCoverage's
+ * "skipped under coverage:"); any other fails, naming its file. On
+ * fixture suite trees and records here.
  */
 describe("mocha-log pending", function () {
   const { pendingFindings } = require("../../scripts/ci/mocha-log.js");
-  const listed = { "test/p/Proofs.test.js": 12 };
-  const tracked = ["test/p/Proofs.test.js", "test/r/Guards.test.ts"];
+  const { MARKERS, REASON } = require("../helpers/zkProofs");
 
-  it("passes a run whose pending counts equal the list", function () {
+  it("passes marked pending tests only", function () {
     const recorded = {
-      "test/p/Proofs.test.js": 12,
-      "test/r/Guards.test.ts": 0,
+      "test/p/Proofs.test.js": { marked: 12, unmarked: 0 },
+      "test/r/Guards.test.ts": { marked: 0, unmarked: 0 },
     };
-    expect(pendingFindings(recorded, listed, tracked)).to.deep.equal([]);
+    expect(pendingFindings(recorded)).to.deep.equal([]);
   });
 
-  it("fails a skipped suite outside the list", function () {
+  it("fails a skipped suite outside a marked one, naming the file", function () {
     const recorded = {
-      "test/p/Proofs.test.js": 12,
-      "test/r/Guards.test.ts": 24,
+      "test/p/Proofs.test.js": { marked: 12, unmarked: 0 },
+      "test/r/Guards.test.ts": { marked: 0, unmarked: 24 },
     };
-    expect(pendingFindings(recorded, listed, tracked)).to.deep.equal([
-      "test/r/Guards.test.ts: 24 pending, coverage-pending.json lists 0 (a skipped suite?)",
+    expect(pendingFindings(recorded)).to.deep.equal([
+      "test/r/Guards.test.ts: 24 pending test(s) outside a describeProofs / describeUnlessCoverage suite (a skipped suite?)",
     ]);
   });
 
-  it("fails a listed suite that no longer skips, and a listed file not tracked", function () {
-    const recorded = { "test/p/Proofs.test.js": 3 };
-    expect(
-      pendingFindings(recorded, listed, ["test/r/Guards.test.ts"]),
-    ).to.deep.equal([
-      "test/p/Proofs.test.js is listed in coverage-pending.json but not tracked",
-      "test/p/Proofs.test.js: 3 pending, coverage-pending.json lists 12 (update the list)",
-    ]);
-  });
-
-  it("lists only tracked files with a positive count", function () {
-    const { pending } = require("../../scripts/ci/coverage-pending.json");
-    const fs = require("fs");
-    for (const [f, n] of Object.entries(pending)) {
-      expect(fs.existsSync(f), f).to.equal(true);
-      expect(n as number, f).to.be.greaterThan(0);
-    }
+  it("the markers are the helpers' own titles", function () {
+    expect(MARKERS).to.deep.equal([REASON, "skipped under coverage:"]);
+    const { describeUnlessCoverage } = require("../helpers/zkProofs");
+    expect(describeUnlessCoverage.toString()).to.contain("COVERAGE_SKIP");
   });
 });

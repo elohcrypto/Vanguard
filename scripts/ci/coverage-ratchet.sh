@@ -42,9 +42,9 @@
 # Pending gate (deep review H-1): ZK_PROOFS=0 and the child-process
 # suites leave tests pending here on purpose, so this run cannot forbid
 # pending as the tests job does (hardhat.config.ts). Instead MOCHA_PENDING
-# records each loaded file's pending count and scripts/ci/mocha-log.js
-# pending checks it against scripts/ci/coverage-pending.json: any other
-# skip fails the run (a shard checks the files it loaded).
+# records each loaded file's pending tests and scripts/ci/mocha-log.js
+# pending fails any outside a suite marked by test/helpers/zkProofs.js
+# (describeProofs, describeUnlessCoverage; slice A review L-1).
 #
 # Leaves coverage.json for scripts/ci/branch-floors.js (run "contracts").
 #

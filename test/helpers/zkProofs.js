@@ -3,6 +3,12 @@
 // time there. The test step keeps proving everything (ci.yml).
 const REASON =
   "real proofs are covered by the test step; coverage instruments contracts";
+const COVERAGE_SKIP = "skipped under coverage:";
+/**
+ * The titles a coverage run may leave pending under (Task 5.17, slice A
+ * review L-1): scripts/ci/mocha-log.js pending fails any other.
+ */
+const MARKERS = [REASON, COVERAGE_SKIP];
 
 /** `describe`, or `describe.skip` with the reason when ZK_PROOFS=0. */
 function describeProofs(title, fn) {
@@ -30,7 +36,7 @@ function underCoverage() {
  */
 function describeUnlessCoverage(title, reason, fn) {
   if (underCoverage()) {
-    return describe.skip(`${title} (skipped under coverage: ${reason})`, fn);
+    return describe.skip(`${title} (${COVERAGE_SKIP} ${reason})`, fn);
   }
   return describe(title, fn);
 }
@@ -40,4 +46,5 @@ module.exports = {
   describeUnlessCoverage,
   underCoverage,
   REASON,
+  MARKERS,
 };

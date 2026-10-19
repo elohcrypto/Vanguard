@@ -204,8 +204,8 @@ const config: HardhatUserConfig = {
     // suite cannot pass as green. The coverage runs skip the proof suites
     // on purpose (ZK_PROOFS=0) and set MOCHA_PENDING instead: a root hook
     // records each file's pending tests there and
-    // scripts/ci/coverage-ratchet.sh checks them against the committed
-    // list (scripts/ci/coverage-pending.json).
+    // scripts/ci/coverage-ratchet.sh fails any outside a marked suite
+    // (test/helpers/zkProofs.js MARKERS).
     ...(process.env.CI
       ? { forbidOnly: true, forbidPending: !process.env.MOCHA_PENDING }
       : {}),
