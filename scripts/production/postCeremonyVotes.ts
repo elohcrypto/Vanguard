@@ -151,6 +151,10 @@ export async function roundOneItems(
     throw new Error(
       `after the rotation ${why}: register more production nodes (NEW_NODES)`,
     );
+  // Deep review contracts L-2: no list oracle's floor above the votes a
+  // query of the rotated set resolves with (TooFewVoters forever).
+  const floor = await floorRefusal(o, after, f);
+  if (floor) throw new Error(`after the rotation ${floor}`);
   const om = o.oracleManager;
   const pm = o.privacyManager;
   const items: any[] = fresh.map((n) => ({
@@ -180,6 +184,40 @@ export async function roundOneItems(
     });
   }
   return items;
+}
+
+/**
+ * Deep review contracts L-2: the first list oracle (the config's, and the
+ * ones ComplianceRules binds to VSC) whose minimumConsensusOracles is
+ * above the fewest of `after` that reach the bar, as its refusal; null.
+ */
+export async function floorRefusal(o: any, after: string[], f: any) {
+  const { fewestToReach, floorRow } = require("../../demo/utils/HandoverNodes");
+  const engine = await ethers.getContractAt(
+    ["function weightOf(address) view returns (uint256)"],
+    await o.oracleManager.consensusEngine(),
+  );
+  const ws = await Promise.all(after.map((a) => engine.weightOf(a)));
+  // Below MIN_NODES the rotation is refused by its own check.
+  const fewest =
+    after.length < f.minNodes ? null : fewestToReach(ws, f.threshold);
+  const list: Promise<string>[] = [...(o.oracles || [])].map(addrOf);
+  const vsc = o.token && (await addrOf(o.token));
+  for (const g of ["whitelistOracle", "blacklistOracle"])
+    if (vsc && o.complianceRules) list.push(o.complianceRules[g](vsc));
+  const seen = new Set<string>();
+  for (const a of await Promise.all(list)) {
+    if (a === ethers.ZeroAddress || seen.has(a.toLowerCase())) continue;
+    seen.add(a.toLowerCase());
+    const c = await ethers.getContractAt(
+      ["function minimumConsensusOracles() view returns (uint8)"],
+      a,
+    );
+    const min = await c.minimumConsensusOracles().catch(() => null);
+    const row = floorRow(`list oracle ${a}`, min, fewest, f.threshold);
+    if (row && !row.ok) return row.fix;
+  }
+  return null;
 }
 
 /**

@@ -230,8 +230,54 @@ async function nodeChecks(o, f = null) {
   return out;
 }
 
+/**
+ * Task 5.17 (deep review contracts L-2): the fewest of `weights` (bigint,
+ * the registered nodes') whose sum reaches `threshold`% of their total,
+ * the votes a query can resolve with; null with no node or no weight.
+ */
+function fewestToReach(weights, threshold) {
+  const total = weights.reduce((t, w) => t + w, 0n);
+  if (!weights.length || total === 0n || threshold === null) return null;
+  const desc = [...weights].sort((a, b) => (b > a ? 1 : b < a ? -1 : 0));
+  let sum = 0n;
+  for (const [i, w] of desc.entries()) {
+    sum += w;
+    if (sum * 100n >= total * BigInt(threshold)) return i + 1;
+  }
+  return desc.length;
+}
+
+/**
+ * L-2: a list oracle's floor above `fewest` freezes every verdict: support
+ * is fixed when the query resolves, and it resolves as soon as `fewest`
+ * nodes reach the bar (TooFewVoters forever). The row, or null when
+ * `fewest` is (below MIN_NODES nothing opens: that line covers it).
+ */
+function floorRow(label, min, fewest, threshold) {
+  if (fewest === null || min === null) return null;
+  return {
+    label: `${label} minimumConsensusOracles (${min}) <= ${fewest}, the fewest registered nodes that reach the ${threshold}% bar`,
+    ok: Number(min) <= fewest,
+    fix: `${label} minimumConsensusOracles is ${min} but ${fewest} registered node(s) reach the ${threshold}% bar: a query resolves at ${fewest} vote(s) and takes no more, so every verdict fails TooFewVoters; ${
+      fewest >= MIN_CONSENSUS
+        ? `its owner must setMinimumConsensusOracles(${fewest}) (or the node weights change) first`
+        : `no floor fits (it is at least ${MIN_CONSENSUS}): the node weights must change so no single node reaches the bar`
+    }`,
+  };
+}
+
 /** The list-oracle checks: [{ label, ok, fix }] plus the pins. */
-async function listOracleChecks(o) {
+async function listOracleChecks(o, f = null) {
+  f = f || (await nodeFacts(o));
+  // Below MIN_NODES no query opens: that line covers it (slice C ruling).
+  const unread =
+    f.nodes.length < f.minNodes || f.nodes.some((n) => n.weight === null);
+  const fewest = unread
+    ? null
+    : fewestToReach(
+        f.nodes.map((n) => n.weight),
+        f.threshold,
+      );
   const out = [];
   for (const oracle of o.oracles || []) {
     const a = await addrOf(oracle);
@@ -275,6 +321,8 @@ async function listOracleChecks(o) {
       ok: min !== null && Number(min) >= MIN_CONSENSUS,
       fix: `${label} minimumConsensusOracles is ${min}: below ${MIN_CONSENSUS} one attestation would be a verdict; its owner must setMinimumConsensusOracles(${MIN_CONSENSUS}) first`,
     });
+    const floor = floorRow(label, min, fewest, f.threshold);
+    if (floor) out.push(floor);
     const age = await c.maxVerdictAge().catch(() => null);
     const sane = age !== null && age >= 3600n && age <= 30n * 86400n;
     out.push({
@@ -331,8 +379,9 @@ async function listTargetChecks(o, pre) {
 
 /** Read-only, before the first transaction. */
 async function preflightNodes(o) {
-  for (const c of await nodeChecks(o)) if (!c.ok) fail(c.fix);
-  for (const c of await listOracleChecks(o)) if (!c.ok) fail(c.fix);
+  const f = await nodeFacts(o);
+  for (const c of await nodeChecks(o, f)) if (!c.ok) fail(c.fix);
+  for (const c of await listOracleChecks(o, f)) if (!c.ok) fail(c.fix);
   for (const c of await listTargetChecks(o, true)) if (!c.ok) fail(c.fix);
 }
 
@@ -394,7 +443,7 @@ async function nodeLines(o, dAddr, warnings = [], residual = []) {
       f.nodes.length >= f.minNodes,
     ]);
   for (const c of await nodeChecks(o, f)) lines.push([c.label, c.ok]);
-  for (const c of await listOracleChecks(o)) lines.push([c.label, c.ok]);
+  for (const c of await listOracleChecks(o, f)) lines.push([c.label, c.ok]);
   for (const c of await listTargetChecks(o, false)) lines.push([c.label, c.ok]);
   return lines;
 }
@@ -407,6 +456,8 @@ async function nodeStrays(o) {
 }
 
 module.exports = {
+  fewestToReach,
+  floorRow,
   roleOf,
   nodeFacts,
   nodeChecks,
