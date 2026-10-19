@@ -1,5 +1,6 @@
 import { expect } from "chai";
 import { ethers } from "hardhat";
+import { time } from "@nomicfoundation/hardhat-network-helpers";
 import { SignerWithAddress } from "@nomicfoundation/hardhat-ethers/signers";
 import { ClaimIssuer, OnchainID } from "../typechain-types";
 import { issueSigned, signClaim } from "./helpers/kyc";
@@ -120,9 +121,13 @@ describe("ClaimIssuer", function () {
         expect(await claimIssuer.isClaimValid(nonExistentClaimId)).to.be.false;
       });
 
+      // Task 5.17 (deep review, timing-dependent tests): the expiry came
+      // from the wall clock (Date.now()), which the chain's clock need not
+      // follow, and only the expired case was asserted. Expiry is now set
+      // on block time, and the claim is checked valid before it too.
       it("Should return false for expired claim", async function () {
-        // Issue a claim that expires in 1 second
-        const expiryTime = Math.floor(Date.now() / 1000) + 1;
+        const now = (await ethers.provider.getBlock("latest"))!.timestamp;
+        const expiryTime = now + 100;
         await issueSigned(
           claimIssuer,
           claimSigner,
@@ -136,10 +141,10 @@ describe("ClaimIssuer", function () {
         const amlClaimIds = await claimIssuer.getClaimsByTopic(AML_TOPIC);
         const expiredClaimId = amlClaimIds[0];
 
-        // Wait for expiry (simulate time passing)
-        await ethers.provider.send("evm_increaseTime", [2]);
-        await ethers.provider.send("evm_mine", []);
-
+        expect(await claimIssuer.isClaimValid(expiredClaimId)).to.be.true;
+        await time.increaseTo(expiryTime - 10);
+        expect(await claimIssuer.isClaimValid(expiredClaimId)).to.be.true;
+        await time.increaseTo(expiryTime + 1);
         expect(await claimIssuer.isClaimValid(expiredClaimId)).to.be.false;
       });
     });
