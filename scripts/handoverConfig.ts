@@ -7,6 +7,8 @@
  */
 import { ethers } from "hardhat";
 
+import { checkWallets, validatePins } from "./production/walletPins";
+
 const { resolveRole, vetRole } = require("../demo/utils/RoleCalls");
 
 export function validateHandoverConfig(
@@ -32,6 +34,7 @@ export function validateHandoverConfig(
     "voters",
     "fromBlock",
     "logChunk",
+    "accounts",
     ...ADDRESS_KEYS,
     ...LIST_KEYS,
   ]);
@@ -93,6 +96,7 @@ export function validateHandoverConfig(
   if (!Array.isArray(cfg.voters) || cfg.voters.length === 0) {
     throw new Error(`${path}: "voters" must list wallet indices`);
   }
+  validatePins(cfg, path); // deep review M-2 (checked against the signer in handoverArgs)
 }
 
 // Whitelist/Blacklist oracles have listManager(); an oracle without it
@@ -122,6 +126,14 @@ export async function handoverArgs(
 ): Promise<{ args: Record<string, any>; wallet: (i: number) => any }> {
   validateHandoverConfig(cfg, phase, path);
   const signers = await ethers.getSigners();
+  // Deep review M-2: the indices are the ones handover.json pinned, and
+  // wallet 0 is the named deploy record's deployer.
+  checkWallets(
+    cfg,
+    signers,
+    path,
+    Number((await ethers.provider.getNetwork()).chainId),
+  );
   const wallet = (i: number) => {
     if (!signers[i])
       throw new Error(`wallet ${i} is not configured on this network`);

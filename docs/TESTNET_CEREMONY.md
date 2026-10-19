@@ -209,7 +209,7 @@ non-zero on any failure. Since Task 4.13 the JSON has one root: the `governance`
 other contract is derived from it (its bound targets and VGT, the tokens' registry and rules,
 the rules' oracles, registrars and wired PrivacyManager, the registry's issuers, the manager's
 engine and nodes, the factory's KeyManager). It also holds the wallet indices `ops`, `guardian`,
-`issuerAdmin`, `proposer` and `voters`, the optional `fromBlock` (a block before option 1's
+`issuerAdmin`, `proposer` and `voters`, `accounts` (those indices and 0 pinned to their addresses, required off the dev chain or with a deploy record, whose deployer wallet 0 must be; another key at a pinned index is refused before any send, Task 5.17 M-2), the optional `fromBlock` (a block before option 1's
 first deploy; refused when any scanned contract already had code) and `logChunk`, the optional
 `keyManagerIdentity` and `feeWallets`, and three acknowledgement lists, empty by default:
 `oracleNodes` (every registered consensus node), `attestors` (the Ax of every trusted attestor

@@ -105,6 +105,7 @@ describeUnlessCoverage(
       const cfg = JSON.parse(fs.readFileSync(cfgPath, "utf8"));
       expect(Object.keys(cfg).sort()).to.deep.equal(
         [
+          "accounts", // Task 5.17 (M-2): the fixture pins its indices
           "attestors",
           "extraTrusted",
           "feeWallets",

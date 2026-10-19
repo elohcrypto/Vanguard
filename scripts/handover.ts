@@ -11,6 +11,8 @@
  *                                             // contract is derived from it
  *     "ops": 10, "guardian": 11, "issuerAdmin": 9,  // or a multisig address
  *     "proposer": 1, "voters": [2, 3, 6],
+ *     "accounts": { "0": "0x..", "1": "0x.." },  // each index used, pinned
+ *                                             // (production/walletPins.ts)
  *     "fromBlock": 1234567,                   // optional, before every deploy
  *     "logChunk": 5000,                       // optional, eth_getLogs range
  *     "keyManagerIdentity": "0x..",           // optional, the demo OnchainID

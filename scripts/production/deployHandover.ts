@@ -3,7 +3,8 @@
  * ceremony (scripts/handover.ts), and the preflight run on it.
  *
  * Roles are wallet indices of the external signer's accounts (the CLI
- * reads them that way); an external role (Task 5.13, a multisig) is its
+ * reads them that way), each pinned to its address in "accounts" (deep
+ * review M-2, walletPins.ts); an external role (Task 5.13, a multisig) is its
  * address, which the CLI reads as external; fromBlock is the block before the deploy's first
  * transaction (the record keeps it from the first run); logChunk is the
  * largest eth_getLogs range the provider serves, unless the config sets
@@ -20,6 +21,7 @@ import * as fs from "fs";
 import { ethers } from "hardhat";
 import { runHandover } from "../handover";
 import type { DeployInputs } from "./deployConfig";
+import { pinsFor } from "./walletPins";
 
 const CHUNKS = [10000, 5000, 2000, 1000, 500, 100];
 const same = (a: string, b: string) => a.toLowerCase() === b.toLowerCase();
@@ -64,13 +66,18 @@ export function handoverConfig(
   }
   const role = (k: "ops" | "guardian" | "issuerAdmin") =>
     inputs.external.includes(k) ? inputs[k] : ix(inputs[k]);
-  return {
-    governance: contracts.vanguardGovernance,
+  const indices = {
     ops: role("ops"),
     guardian: role("guardian"),
     issuerAdmin: role("issuerAdmin"),
     proposer: ix(inputs.proposer),
     voters: inputs.voters.map(ix),
+  };
+  return {
+    governance: contracts.vanguardGovernance,
+    ...indices,
+    // Deep review M-2: every index above pinned to its address.
+    accounts: pinsFor(indices, accounts),
     fromBlock,
     logChunk,
     onchainIDFactory: contracts.onchainIDFactory,

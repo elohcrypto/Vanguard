@@ -2,7 +2,8 @@
  * Deploys the handover fixture (test/helpers/governanceFixture.ts) on the
  * network `hardhat run` is pointed at and writes a handover.json for
  * scripts/handover.ts that names only the allowed keys (plan v2 Task
- * 4.13): governance, the wallet indices and the empty acknowledgement
+ * 4.13): governance, the wallet indices (pinned to their addresses,
+ * Task 5.17) and the empty acknowledgement
  * lists. The four contracts governance cannot derive before step 3 are
  * nominated and bound first, as a deployer rehearsing on a dev node
  * would, so the config need not name them. Driven by
@@ -12,7 +13,9 @@
  *     npx hardhat run test/production/deployHandoverFixture.ts --network devnode
  */
 import * as fs from "fs";
+import { ethers } from "hardhat";
 import { handoverFixture } from "../helpers/governanceFixture";
+import { pinsFor } from "../../scripts/production/walletPins";
 
 async function main(): Promise<void> {
   const out = process.env.HANDOVER_FIXTURE_OUT;
@@ -43,7 +46,12 @@ async function main(): Promise<void> {
     attestors: [],
     extraTrusted: [],
   };
-  fs.writeFileSync(out, JSON.stringify(cfg, null, 2));
+  // Deep review M-2: every index pinned to the node's account there.
+  const accounts = (await ethers.getSigners()).map((s) => s.address);
+  fs.writeFileSync(
+    out,
+    JSON.stringify({ ...cfg, accounts: pinsFor(cfg, accounts) }, null, 2),
+  );
   console.log(`handover fixture deployed; config written to ${out}`);
 }
 

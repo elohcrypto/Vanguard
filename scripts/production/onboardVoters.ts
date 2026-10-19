@@ -23,6 +23,8 @@
 import * as fs from "fs";
 import { ethers, network } from "hardhat";
 
+import { checkWallets } from "./walletPins";
+
 const DemoState = require("../../demo/core/DemoState");
 const { scrubKnown } = require("./redact");
 const { onboard } = require("../../demo/utils/Onboard");
@@ -67,6 +69,12 @@ export async function onboardVoters(
   }
   const state = new DemoState();
   state.signers = await ethers.getSigners();
+  // Deep review M-2: the indices are the ones handover.json pinned, and
+  // wallet 0 is the record's deployer; refused before any send.
+  checkWallets(cfg, state.signers, "handover.json", chainId, {
+    file: "the deploy record",
+    deployer: rec.deployer,
+  });
   for (const [k, name] of Object.entries(ARTIFACT)) {
     state.setContract(k, await ethers.getContractAt(name, rec.contracts[k]));
   }
