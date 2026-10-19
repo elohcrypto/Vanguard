@@ -138,7 +138,7 @@ killed_at() {
   for _ in $(seq 1 1200); do [[ $(txs) -ge $1 ]] && break; sleep 0.2; done
   kill -9 -- "-$d"
   wait "$d" 2>/dev/null || true
-  [[ $(txs) -ge $1 ]] || fail "the deploy recorded $(txs) transactions, not $1"
+  [[ $(txs) -ge $1 && $(txs) -le $(($1 + 1)) ]] || fail "the deploy recorded $(txs) transactions, not $1"
   grep -q "Preflight passed" "$OUT/$2" && fail "the deploy finished before the kill"
   # The killed run's lock stays: a second deploy is refused until the
   # operator, sure none runs, removes it (runbook section 2).
@@ -148,6 +148,11 @@ killed_at() {
   rm "$DEPLOY_RECORD.lock"
   echo "   killed with $(txs) transactions recorded; its lock refused a second run"
 }
+# Each send is slowed (400 ms at the signer) while the 0.2 s poll waits,
+# so the kill lands at exactly the count asked, never past it (CI run
+# 39205664146 raced to 72 of 74 and left the faulted resume 2 sends).
+[[ $KILL_AT -lt $KILL_AGAIN && $KILL_AGAIN -le 73 ]] || fail "KILL_AT < KILL_AGAIN <= 73"
+signer 0 0 400
 killed_at "$KILL_AT" deploy1.log
 KILLED=$(txs)
 killed_at "$KILL_AGAIN" deploy1b.log
@@ -155,14 +160,18 @@ grep -q "skipped (recorded" "$OUT/deploy1b.log" || fail "the first resume replay
 echo "1. killed twice ($KILLED, then $(txs) recorded)"
 
 # 2. Resume, through a signer that faults (Task 5.15, M-3): rate limits,
-#    dropped connections, and every 4th send's reply lost after sending.
+#    dropped connections, and EVERY send's reply lost after sending, so
+#    each send the resume makes (at least one: the kill is at <= 73 of 74)
+#    must be adopted from the chain, never sent twice.
 KILLED=$(txs)
-signer 6 4
+signer 6 1
 deploy >"$OUT/deploy2.log" 2>&1 || fail "the resumed deploy failed"
 signer 0
 RETRIES=$(grep -c "↻" "$OUT/deploy2.log" || true)
 ADOPTED=$(grep -c "adopted (not resent)" "$OUT/deploy2.log" || true)
-[[ $RETRIES -ge 3 && $ADOPTED -ge 1 ]] || fail "faulted resume: $RETRIES retries, $ADOPTED adoptions"
+SENT=$(grep -oE '[0-9]+ sent now' "$OUT/deploy2.log" | grep -oE '^[0-9]+')
+[[ $RETRIES -ge 3 && ${SENT:-0} -ge 1 && $ADOPTED -eq ${SENT:-0} ]] \
+  || fail "faulted resume: $RETRIES retries, $ADOPTED adoptions for ${SENT:-?} sends"
 SKIPPED=$(grep -c "skipped (recorded" "$OUT/deploy2.log" || true)
 [[ $SKIPPED -ge $((KILLED - 1)) ]] || fail "resume replayed $SKIPPED of $KILLED"
 grep -q "match the chain (code hashes)" "$OUT/deploy2.log" || fail "no record check"
