@@ -10,6 +10,8 @@
  *  - its latest IssuerKeyAdded comes after the IssuerKeyRevoked of the
  *    deployer's key (so the issuer admin added it after the ceremony; a
  *    key the deployer added, or any added before, still fails);
+ *  - that IssuerKeyAdded's transaction came from the issuer admin (sent
+ *    by it, or to its Safe);
  *  - the address is no voter or proposer (the D25 b line beside it
  *    refuses the deployer, roles, governance, agents and nodes).
  * The ceremony's own completion accepts none. A listed address no trusted
@@ -36,6 +38,7 @@ async function claimSignerFacts(o, f) {
   if (!listed.length) return { accepted, lines };
   const voters = await Promise.all((o.voterWallets || []).map(addrOf));
   const dKey = keyOf(f.dAddr);
+  const admin = o.issuerAdmin ? await addrOf(o.issuerAdmin) : null;
   for (const s of listed) {
     const where = [];
     const k = keyOf(s);
@@ -50,7 +53,12 @@ async function claimSignerFacts(o, f) {
         -1,
       );
       const revoked = await scanLogs(c, c.filters.IssuerKeyRevoked(dKey), o);
-      if (added && revoked.length && at(added) > at(revoked[0])) {
+      // Review I-5: added by the issuer admin (an EOA sending it, or a
+      // transaction to the admin's Safe), after the deployer key's revoke.
+      const tx = added && (await added.getTransaction());
+      const byAdmin =
+        tx && admin && (same(tx.from, admin) || same(tx.to, admin));
+      if (added && byAdmin && revoked.length && at(added) > at(revoked[0])) {
         const a = await addrOf(c);
         if (!accepted.has(a)) accepted.set(a, new Set());
         accepted.get(a).add(k);

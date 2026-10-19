@@ -154,9 +154,11 @@ describe("Claim signers after the ceremony (Q17 = A)", function () {
       ["address"],
       [f.deployer.address],
     );
+    let sender = f.issuerAdmin.address;
     const ev = (block: number, index: number) => ({
       blockNumber: block,
       index,
+      getTransaction: async () => ({ from: sender, to: ethers.ZeroAddress }),
     });
     const issuer = {
       filters: {
@@ -177,6 +179,7 @@ describe("Claim signers after the ceremony (Q17 = A)", function () {
     };
     const o = {
       audit: true,
+      issuerAdmin: f.issuerAdmin,
       claimSigners: [kyc.address],
       voterWallets: [],
       fromBlock: 0,
@@ -189,6 +192,10 @@ describe("Claim signers after the ceremony (Q17 = A)", function () {
       q.kind === "added" ? [ev(9, 1)] : q.kind === "revoked" ? [ev(9, 0)] : [];
     const after = await claimSignerFacts(o, facts);
     expect(after.lines[0][1]).to.equal(true);
+    // Added after the revocation but not by the issuer admin (review I-5).
+    sender = (await ethers.getSigners())[17].address;
+    expect((await claimSignerFacts(o, facts)).lines[0][1]).to.equal(false);
+    sender = f.issuerAdmin.address;
     // A voter's key, or a MANAGEMENT key, is never accepted.
     const voter = await claimSignerFacts({ ...o, voterWallets: [kyc] }, facts);
     expect(voter.lines[0][1]).to.equal(false);
