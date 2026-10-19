@@ -487,4 +487,5 @@ module.exports = {
   settleProposal,
   acceptAllByVote,
   checkVoters,
+  passes,
 };

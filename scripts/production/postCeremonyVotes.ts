@@ -43,11 +43,11 @@ import { ethers, network } from "hardhat";
 import { handoverArgs } from "../handoverConfig";
 import { guardDeployer } from "./cliGuards";
 import {
-  allOpenRemovals,
+  assessRemovals,
+  cancelCandidates,
   cancelHazards,
-  hazardousRemovals,
+  holdForForeignHazards,
   nodesNow,
-  openRemovals,
   refusalFor,
   removalPrecheck,
   setRefusal,
@@ -185,7 +185,11 @@ export async function roundOneItems(
  * every production node is registered now and every subset of the
  * removals leaves a valid set (anyone may execute them in any order).
  */
-export async function roundTwoItems(o: any, nodes: any[]) {
+export async function roundTwoItems(
+  o: any,
+  nodes: any[],
+  proposer: any = o.voterWallets?.[0],
+) {
   const { f, live, old } = await nodesNow(o);
   const missing = nodes.filter(
     (n) => !live.some((a: string) => same(a, n.address)),
@@ -227,9 +231,7 @@ export async function roundTwoItems(o: any, nodes: any[]) {
     precheck: removalPrecheck(o, n.addr),
     // L-3: and before its votes, with every open removal (anyone's).
     prevote: async (id: number) =>
-      (await hazardousRemovals(o, await allOpenRemovals(o))).has(id)
-        ? "with the other open removals it could leave an invalid node set"
-        : null,
+      (await assessRemovals(o, proposer)).hazards.get(id) ?? null,
   }));
 }
 
@@ -257,13 +259,13 @@ export async function runPostCeremony(
 ) {
   const args = { governance: o.governance, proposer, voters, log };
   // L-3: hazardous open removals still voting are voted against first.
-  await voteAgainstHazards(o, voters, log);
+  await voteAgainstHazards(o, proposer, voters, log);
   // A hazard left by a stopped run is settled first (final review L-1).
   await cancelHazards(
     o,
     proposer,
     voters,
-    await openRemovals(o, proposer),
+    await cancelCandidates(o, proposer),
     log,
   );
   const one = await roundOneItems(o, nodes, cfg, [proposer, ...voters]);
@@ -277,7 +279,9 @@ export async function runPostCeremony(
       open: await Votes.openAll({ ...args, items: one }),
     });
   }
-  const two = await roundTwoItems(o, nodes);
+  // Security review of L-3: never while another's hazardous removal is open.
+  await holdForForeignHazards(o, proposer);
+  const two = await roundTwoItems(o, nodes, proposer);
   if (two.length) {
     await Votes.checkVoters(o, proposer, voters, two.length);
     log(
