@@ -109,7 +109,9 @@ describe("Claim signers after the ceremony (Q17 = A)", function () {
     await attestKyc(f.kycIssuer, kyc, id, "renewed by the claim signer");
     expect(await f.kycIssuer.hasValidClaim(id, 6)).to.equal(true);
     const stranger = (await ethers.getSigners())[17];
-    await expect(attestKyc(f.kycIssuer, stranger, id, "no key")).to.be.rejected;
+    await expect(
+      attestKyc(f.kycIssuer, stranger, id, "no key"),
+    ).to.be.rejectedWith(/Sender does not have claim signer key/);
     // Unlisted: the audit fails on both keys.
     out.length = 0;
     await expect(run("audit")).to.be.rejectedWith(/audit failed/);
