@@ -13,11 +13,17 @@
  * when its own set is unsafe alone; fail closed past the first 12 distinct
  * nodes (own first; 2^12 subsets), named so.
  *
- * Holding round 2 (liveness: a stranger must not block the rotation with
- * proposals that cannot pass): only a foreign hazard that is executable
- * (its vote over and passing) or, still voting, can still pass with the
- * votes not yet cast; one past the cap holds only when passing. Every
- * foreign hazard still voting gets this run's votes against.
+ * Holding round 2 (liveness, slice C review H-1: a stranger must not
+ * block the rotation with proposals nobody votes for): only a foreign
+ * hazard that passes on the votes cast now, still voting or past its vote
+ * (then executable by anyone). The old "every uncast vote FOR" estimate
+ * held for any unvoted proposal while investors are registered (they
+ * count in eligibleVotersAtCreation and never vote), so it is gone. The
+ * precheck right before each own removal executes re-assesses this, the
+ * real guard against one that starts passing later. A foreign hazard
+ * still voting gets this run's votes against only when it passes now or
+ * has a FOR vote, and only from voters whose free VGT keeps this run's
+ * own proposals paid for: no stranger's spam locks the operator's VGT.
  */
 import { ethers } from "hardhat";
 import { nodesNow, refusalFor, weightsOf } from "./postCeremonyRemovals";
@@ -107,44 +113,28 @@ export async function assessRemovals(
   return { hazards, foreign, open };
 }
 
-/**
- * Whether proposal `p`, still voting, can still pass: every vote not yet
- * cast (one per eligible identity, frozen at creation) counted FOR.
- */
-export async function canStillPass(gov: any, p: any): Promise<boolean> {
-  const t = await gov.proposalThresholds(p.proposalType);
-  const eligible = BigInt(p.eligibleVotersAtCreation);
-  const cast = BigInt(p.votesFor) + BigInt(p.votesAgainst);
-  const left = eligible > cast ? eligible - cast : 0n;
-  const total = cast + left;
-  return (
-    eligible > 0n &&
-    total * 10000n >= eligible * BigInt(t.quorumPercentage) &&
-    total > 0n &&
-    ((BigInt(p.votesFor) + left) * 10000n) / total >=
-      BigInt(t.approvalPercentage)
-  );
-}
-
-/** The foreign hazards that hold round 2 (see the header): [{ r, why }]. */
+/** The foreign hazards that hold round 2 (see the header): [{ r, why, over }]. */
 async function holding(o: any, a: any) {
   const now = (await ethers.provider.getBlock("latest"))!.timestamp;
   const out = [];
-  for (const r of a.open.filter((x: any) => a.foreign.has(x.id))) {
-    const why = a.hazards.get(r.id);
-    const over = now > Number(r.p.votingEnds);
-    const live = over
-      ? await Votes.passes(o.governance, r.p)
-      : why !== CAPPED && (await canStillPass(o.governance, r.p));
-    if (live) out.push({ r, why });
-  }
+  for (const r of a.open.filter((x: any) => a.foreign.has(x.id)))
+    if (await Votes.passes(o.governance, r.p))
+      out.push({
+        r,
+        why: a.hazards.get(r.id),
+        over: now > Number(r.p.votingEnds),
+      });
   return out;
 }
 
 /**
  * Each hazardous open removal still voting gets this run's votes against
- * (the proposer's and the voters', none from the proposal's own proposer);
- * `planned` as in assessRemovals.
+ * (the proposer's and the voters', none from the proposal's own proposer):
+ * this proposer's own always, a foreign one only when it passes now or
+ * has a FOR vote (review H-1). A wallet votes only while its free VGT
+ * after the vote still pays for `reserve` own proposals of this run
+ * (proposalCreationCost each for the proposer, votingCost for a voter);
+ * the others are named as skipped. `planned` as in assessRemovals.
  */
 export async function voteAgainstHazards(
   o: any,
@@ -152,25 +142,45 @@ export async function voteAgainstHazards(
   voters: any[],
   log = console.log,
   planned: string[] = [],
+  reserve = 0,
 ) {
+  const gov = o.governance;
   const { hazards, open } = await assessRemovals(o, proposer, planned);
   const now = (await ethers.provider.getBlock("latest"))!.timestamp;
+  const me = await addrOf(proposer);
+  const vote = await gov.votingCost();
+  const make = await gov.proposalCreationCost();
   for (const r of open.filter((x) => hazards.has(x.id))) {
     if (now > Number(r.p.votingEnds)) continue;
+    if (!r.own && r.p.votesFor === 0n && !(await Votes.passes(gov, r.p))) {
+      log(
+        `   ℹ️  removal #${r.id} (${r.node}, by ${r.p.proposer}) ${hazards.get(r.id)}, but nobody voted for it: no vote against (the precheck before each removal re-checks)`,
+      );
+      continue;
+    }
     log(
       `   ⚠️  removal #${r.id} (${r.node}${r.own ? "" : `, proposed by ${r.p.proposer}`}) ${hazards.get(r.id)}: voting against while it votes (a cancel vote is no guard once it has passed)`,
     );
     const mine = [];
-    for (const v of [proposer, ...voters])
-      if (!same(await addrOf(v), r.p.proposer)) mine.push(v);
-    await Votes.castAcceptanceVotes(o.governance, r.id, mine, false);
+    for (const v of [proposer, ...voters]) {
+      const a = await addrOf(v);
+      if (same(a, r.p.proposer) || (await gov.hasVoted(r.id, a))) continue;
+      const keep = BigInt(reserve) * (same(a, me) ? make : vote);
+      const free = await o.governanceToken.getFreeBalance(a);
+      if (free >= keep + vote) mine.push(v);
+      else
+        log(
+          `   ⚠️  removal #${r.id}: ${a} skipped, its free VGT ${ethers.formatEther(free)} keeps ${ethers.formatEther(keep)} for this run's ${reserve} own proposal(s)`,
+        );
+    }
+    await Votes.castAcceptanceVotes(gov, r.id, mine, false);
   }
 }
 
 /**
- * Throws naming each foreign hazard that holds round 2 (executable, or
- * still able to pass); `planned` as in assessRemovals. One that cannot
- * pass is reported in the log only.
+ * Throws naming each foreign hazard that holds round 2 (passing on the
+ * votes cast now); `planned` as in assessRemovals. One that does not pass
+ * now is reported in the log only.
  */
 export async function holdForForeignHazards(
   o: any,
@@ -183,14 +193,15 @@ export async function holdForForeignHazards(
   for (const r of a.open.filter((x: any) => a.foreign.has(x.id)))
     if (!held.some((h: any) => h.r.id === r.id))
       log(
-        `   ℹ️  removal #${r.id} (${r.node}, by ${r.p.proposer}) ${a.hazards.get(r.id)}, but it cannot pass: not holding round 2`,
+        `   ℹ️  removal #${r.id} (${r.node}, by ${r.p.proposer}) ${a.hazards.get(r.id)}, but it does not pass on the votes cast now: not holding round 2 (the precheck before each removal re-checks)`,
       );
   if (!held.length) return;
   const named = held.map(
-    ({ r, why }: any) => `#${r.id} (${r.node}, by ${r.p.proposer}: ${why})`,
+    ({ r, why, over }: any) =>
+      `#${r.id} (${r.node}, by ${r.p.proposer}: ${why}; ${over ? "its vote is over and it passed: anyone may execute it" : "still voting"})`,
   );
   throw new Error(
-    `round 2 held: open removal proposal(s) ${named.join("; ")} would leave an invalid node set with this run's removals and can pass; vote them down or cancel them by vote (a re-run votes against a voting one and cancels a passed one), then re-run`,
+    `round 2 held: open removal proposal(s) ${named.join("; ")} pass on the votes cast now and would leave an invalid node set with this run's removals; a re-run votes against one still voting and cancels one whose vote is over by a cancelProposal vote (cancelCandidates), then re-run`,
   );
 }
 

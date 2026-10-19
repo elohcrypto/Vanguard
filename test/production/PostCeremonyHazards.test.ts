@@ -1,7 +1,8 @@
 import { expect } from "chai";
 import { ethers } from "hardhat";
 import * as fs from "fs";
-import { handoverFixture } from "../helpers/governanceFixture";
+import { ageVoters, handoverFixture } from "../helpers/governanceFixture";
+import { deployIdentity } from "../helpers/kyc";
 import { captured, cliConfig } from "../helpers/handoverCli";
 import { runHandover } from "../../scripts/handover";
 import { handoverArgs } from "../../scripts/handoverConfig";
@@ -79,18 +80,23 @@ describe("Post-ceremony votes: hazardous open removals (L-3)", function () {
   const NEW = async () =>
     (await addrs([16, 17, 18])).map((a, k) => `${a}:NODE_${k + 1}`).join(",");
 
-  it("a stranger's hazardous removal that cannot pass: voted against, round 2 not held and completes", async function () {
-    await ceremony();
-    const { o } = await derive();
+  // Review H-1: investors count in eligibleVotersAtCreation and never
+  // vote; two of them make the electorate five, not three.
+  const investors = async (n: number) => {
+    for (let k = 0; k < n; k++) {
+      const a = ethers.Wallet.createRandom().address;
+      const id = await deployIdentity(f.factory, a);
+      await f.c.identityRegistry.registerIdentity(a, id, 840);
+    }
+    await ageVoters(f.c.governance);
+  };
+  // Runs the CLI; once round 2's removals exist, `stranger` runs.
+  const runWith = async (o: any, stranger: () => Promise<void>) => {
     const realOpen = Votes.openAll;
-    const theirs: number[] = [];
-    // Once round 2's removals exist, a stranger proposes two more.
     Votes.openAll = async (args: any) => {
       const open = await realOpen(args);
-      if (/remove deployer-era/.test(args.items[0]?.label ?? "")) {
-        const [n16, n17] = await addrs([16, 17]);
-        theirs.push(await rm(f.voters[0], n16), await rm(f.voters[0], n17));
-      }
+      if (/remove deployer-era/.test(args.items[0]?.label ?? ""))
+        await stranger();
       return open;
     };
     const fresh = parseNodes(await NEW());
@@ -101,16 +107,72 @@ describe("Post-ceremony votes: hazardous open removals (L-3)", function () {
     } finally {
       Votes.openAll = realOpen;
     }
-    expect(theirs).to.have.length(2);
-    // The proposer and voters[1] vote against (voters[0] proposed them).
-    for (const id of theirs) expect(await votes(id)).to.deep.equal([0n, 2n]);
-    const text = out.join("\n");
-    expect(text).to.contain(`removal #${theirs[0]} (`);
-    expect(text).to.contain("voting against while it votes");
-    expect(text).to.contain("but it cannot pass: not holding round 2");
+  };
+  const rotated = async () =>
     expect(
       [...(await f.c.oracleManager.getRegisteredOracles())].sort(),
     ).to.deep.equal([...(await addrs([16, 17, 18]))].sort());
+
+  it("H-1: two unvoted stranger removals among five identities: no hold, no vote, round 2 completes", async function () {
+    await investors(2);
+    await ceremony();
+    const { o } = await derive();
+    const theirs: number[] = [];
+    await runWith(o, async () => {
+      for (const a of await addrs([16, 17]))
+        theirs.push(await rm(f.voters[0], a));
+    });
+    expect(theirs).to.have.length(2);
+    for (const id of theirs) expect(await votes(id)).to.deep.equal([0n, 0n]);
+    const text = out.join("\n");
+    expect(text).to.contain(`removal #${theirs[0]} (`);
+    expect(text).to.contain("but nobody voted for it: no vote against");
+    expect(text).to.not.contain("round 2 held");
+    await rotated();
+  });
+
+  it("H-1: ten unvoted spam removals lock nothing; one with a FOR vote is voted against, not passing, no hold", async function () {
+    await investors(2);
+    await ceremony();
+    const { o } = await derive();
+    const spam: number[] = [];
+    let voted = 0;
+    await runWith(o, async () => {
+      const n = await addrs([16, 17, 18]);
+      for (let k = 0; k < 10; k++) spam.push(await rm(f.voters[0], n[k % 3]));
+      voted = await rm(f.voters[0], n[0]);
+      await Votes.castAcceptanceVotes(f.c.governance, voted, [f.voters[1]]);
+    });
+    for (const id of spam) expect(await votes(id)).to.deep.equal([0n, 0n]);
+    // voters[1] voted for it; the proposer's vote against: 1 for, 1 against.
+    expect(await votes(voted)).to.deep.equal([1n, 1n]);
+    expect(out.join("\n")).to.not.contain("round 2 held");
+    await rotated();
+  });
+
+  it("H-1: a vote against never spends VGT this run's own proposals need; the skip is named", async function () {
+    await ceremony();
+    const { o } = await derive();
+    for (const a of nodes.slice(0, 3)) await rm(f.proposer, a);
+    const theirs = await rm(f.voters[0], nodes[3]);
+    await rm(f.voters[0], nodes[4]);
+    await Votes.castAcceptanceVotes(f.c.governance, theirs, [f.voters[1]]);
+    const log: string[] = [];
+    const big = 10n ** 9n; // own proposals no wallet here can pay for
+    await R().voteAgainstHazards(
+      o,
+      f.proposer,
+      f.voters,
+      (l: string) => log.push(l),
+      [],
+      big,
+    );
+    expect(await votes(theirs)).to.deep.equal([1n, 0n]);
+    expect(log.join("\n")).to.match(
+      new RegExp(
+        `removal #${theirs}: ${f.proposer.address} skipped, its free VGT .* keeps .* for this run's ${big} own proposal\\(s\\)`,
+      ),
+    );
   });
 
   it("a passing foreign hazard holds round 2 with its id and stops an own removal's precheck; cancelled, the hold lifts", async function () {
@@ -131,7 +193,7 @@ describe("Post-ceremony votes: hazardous open removals (L-3)", function () {
       R().holdForForeignHazards(o, f.proposer, [], () => {}),
     ).to.be.rejectedWith(
       new RegExp(
-        `^round 2 held: open removal proposal\\(s\\) #${theirs[0]} \\(${nodes[3]}, by ${f.voters[0].address}: .*can pass`,
+        `^round 2 held: open removal proposal\\(s\\) #${theirs[0]} \\(${nodes[3]}, by ${f.voters[0].address}: .*its vote is over and it passed: anyone may execute it\\).* pass on the votes cast now`,
       ),
     );
     const {

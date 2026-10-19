@@ -298,8 +298,15 @@ export async function runPostCeremony(
   log = console.log,
 ) {
   const args = { governance: o.governance, proposer, voters, log };
+  // Slice C review H-1: the votes against below keep this run's own
+  // proposals paid for, at most a registration per new node, a
+  // re-approval per deployer-trusted key and a removal per old node.
+  const own =
+    nodes.length +
+    (await deployerTrustedAttestors(o, await addrOf(o.deployer))).length +
+    (await nodesNow(o)).old.length;
   // L-3: hazardous open removals still voting are voted against first.
-  await voteAgainstHazards(o, proposer, voters, log);
+  await voteAgainstHazards(o, proposer, voters, log, [], own);
   // A hazard left by a stopped run is settled first (final review L-1).
   await cancelHazards(
     o,
@@ -320,9 +327,9 @@ export async function runPostCeremony(
     });
   }
   // Security reviews of L-3: round 2's removals, planned, judged with
-  // every open removal; held only for a foreign hazard that can pass.
+  // every open removal; held only for a foreign hazard passing now.
   const planned = (await nodesNow(o)).old.map((n: any) => n.addr);
-  await voteAgainstHazards(o, proposer, voters, log, planned);
+  await voteAgainstHazards(o, proposer, voters, log, planned, planned.length);
   await holdForForeignHazards(o, proposer, planned, log);
   const two = await roundTwoItems(o, nodes, proposer);
   if (two.length) {

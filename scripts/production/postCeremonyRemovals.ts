@@ -119,8 +119,9 @@ export async function nodesNow(o: any) {
 /**
  * Throws when removing `node` now would leave an invalid node set alone,
  * or (Task 5.17, the L-3 security review) when `proposer` is given and an
- * open foreign removal that is executable, or can still pass, would make
- * the open removals unsafe with it (removalHazards.ts).
+ * open foreign removal passing on the votes cast now (still voting, or
+ * executable by anyone) would make the open removals unsafe with it
+ * (removalHazards.ts, slice C review H-1).
  */
 export function removalPrecheck(o: any, node: string, proposer?: any) {
   return async () => {
