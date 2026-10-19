@@ -329,6 +329,9 @@ function notPassed(rows, ran) {
   }
   const esc = (x) => x.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
   return rows.filter((r) => {
+    // Slice B review INFO-1: a title that is all template would match any
+    // test of its file: it binds to none.
+    if (!r.test.replace(/\$\{[^}]*\}/g, "").trim()) return true;
     const re = new RegExp(
       `^${r.test
         .split(/\$\{[^}]*\}/)
