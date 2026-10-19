@@ -23,6 +23,7 @@
  */
 "use strict";
 
+const { execFileSync } = require("child_process");
 const fs = require("fs");
 const path = require("path");
 const {
@@ -220,21 +221,29 @@ function hasTty() {
   }
 }
 
-/** Discard whatever was typed ahead on `fd` (M-1: tcflush(TCIFLUSH)). */
+/**
+ * Discard whatever was typed ahead on the terminal `fd` (M-1), a partial
+ * line too (slice A review L-4). In canonical mode a line without its
+ * Enter stays in the terminal's line editor, where no read sees it, and
+ * would prefix the operator's answer ("abc" typed ahead + "123" typed
+ * after the prompt reads as "abc123"). So the terminal is switched to
+ * non-canonical mode with min 0, time 0 (a read returns whatever is
+ * buffered, partial line included, or nothing at once), drained, and its
+ * settings restored (stty -g), as tcflush(TCIFLUSH) would.
+ */
 function drain(fd) {
-  const nb = fs.openSync(
-    "/dev/tty",
-    fs.constants.O_RDONLY | fs.constants.O_NONBLOCK,
-  );
-  const buf = Buffer.alloc(256);
+  const stty = (...args) =>
+    execFileSync("stty", args, { stdio: [fd, "pipe", "pipe"] })
+      .toString()
+      .trim();
+  const saved = stty("-g");
+  stty("-icanon", "min", "0", "time", "0");
   try {
-    for (;;) if (fs.readSync(nb, buf, 0, buf.length, null) <= 0) break;
-  } catch {
-    // EAGAIN: nothing left
+    const buf = Buffer.alloc(256);
+    while (fs.readSync(fd, buf, 0, buf.length, null) > 0);
   } finally {
-    fs.closeSync(nb);
+    stty(saved);
   }
-  void fd;
 }
 
 /**

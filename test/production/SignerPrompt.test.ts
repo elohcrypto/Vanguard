@@ -320,6 +320,24 @@ describe("Signer prompt (signerPrompt.js)", function () {
       );
       expect(answer.error.message).to.match(/refused by the operator/);
       expect(up.raws.length).to.equal(1);
+      // Slice A review L-4: a PARTIAL line typed ahead (no Enter) is
+      // discarded too. Without that, its first three characters would
+      // prefix the rest typed after the prompt and read as the token.
+      p.stdin.write(t1.slice(0, 3));
+      at = text.length;
+      const third = rpc(live, "eth_sendTransaction", [tx]);
+      const t3 = (
+        await waitFor(/RETRY of #1[\s\S]*type ([0-9a-f]{6}) to sign/, at)
+      )[1];
+      expect(t3).to.equal(t1);
+      p.stdin.write(`${t1.slice(3)}\n`);
+      const reply = (await third).body;
+      expect(
+        reply.result,
+        "a partial typed-ahead line made the token",
+      ).to.equal(undefined);
+      expect(reply.error.message).to.match(/refused by the operator/);
+      expect(up.raws.length).to.equal(1);
       // Another transaction at a signed nonce is refused before any prompt.
       const other = await rpc(live, "eth_sendTransaction", [
         { ...tx, value: "0x2" },
