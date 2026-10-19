@@ -27,8 +27,9 @@ contract VanguardGovernance is GovernanceProposals {
     /// @notice The proposal failed a threshold; deposits are claimable.
     event ProposalRejected(uint256 indexed proposalId);
     event ProposalCancelled(uint256 indexed proposalId);
-    /// @notice A participant pulled their refund after settlement.
-    event RefundClaimed(uint256 indexed proposalId, address indexed claimant, uint256 amount);
+    /// @notice A participant pulled `identity`'s refund after settlement
+    ///         (one wallet may claim for several identities it controls).
+    event RefundClaimed(uint256 indexed proposalId, address indexed claimant, address indexed identity, uint256 amount);
     /// @notice executeProposal: the passed proposal's target ran out of gas.
     ///         The proposal stays Active; retry with a higher gas limit.
     error InsufficientExecutionGas();
@@ -273,7 +274,7 @@ contract VanguardGovernance is GovernanceProposals {
         require(_controls(msg.sender, id), "Wallet does not control its identity");
         _voterLockedTokens[proposalId][id] = 0;
         require(governanceToken.transfer(msg.sender, amount), "Refund transfer failed");
-        emit RefundClaimed(proposalId, msg.sender, amount);
+        emit RefundClaimed(proposalId, msg.sender, id, amount);
     }
 
     /**

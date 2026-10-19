@@ -221,10 +221,10 @@ describe("Hardening round 2 — contract changes", () => {
       );
       await expect(gov.connect(alice).claimRefund(id))
         .to.emit(gov, "RefundClaimed")
-        .withArgs(id, alice.address, ethers.parseEther("10"));
+        .withArgs(id, alice.address, ids.alice, ethers.parseEther("10"));
       await expect(gov.connect(carol).claimRefund(id))
         .to.emit(gov, "RefundClaimed")
-        .withArgs(id, carol.address, ethers.parseEther("10"));
+        .withArgs(id, carol.address, ids.carol, ethers.parseEther("10"));
       expect(await gt.balanceOf(alice.address)).to.equal(
         a0 + ethers.parseEther("10"),
       );

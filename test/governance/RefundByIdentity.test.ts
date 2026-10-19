@@ -64,7 +64,7 @@ describe("Refunds keyed by identity (Task 5.2, Q6)", function () {
     const b0 = await vgt.balanceOf(nw.address);
     await expect(gov.connect(nw).claimRefund(id))
       .to.emit(gov, "RefundClaimed")
-      .withArgs(id, nw.address, cost);
+      .withArgs(id, nw.address, idAddr, cost);
     expect(await vgt.balanceOf(nw.address)).to.equal(b0 + cost);
     await expect(gov.connect(nw).claimRefund(id)).to.be.revertedWith(
       "Nothing to claim",
@@ -83,7 +83,7 @@ describe("Refunds keyed by identity (Task 5.2, Q6)", function () {
     );
     await expect(gov.connect(nw).claimRefund(id))
       .to.emit(gov, "RefundClaimed")
-      .withArgs(id, nw.address, cost);
+      .withArgs(id, nw.address, idAddr, cost);
   });
 
   it("a bound wallet that no longer controls its identity cannot claim", async function () {

@@ -58,12 +58,61 @@ describe("Refund of a deleted identity's deposit (Task 5.17, contracts L-1)", fu
     const c0 = await vgt.balanceOf(carol.address);
     await expect(gov.connect(carol).claimRefundFor(id, idAddr))
       .to.emit(gov, "RefundClaimed")
-      .withArgs(id, carol.address, cost);
+      .withArgs(id, carol.address, idAddr, cost);
     expect(await vgt.balanceOf(carol.address)).to.equal(c0 + cost);
     expect(await gov.getClaimableRefund(id, idAddr)).to.equal(0n);
     await expect(
       gov.connect(carol).claimRefundFor(id, idAddr),
     ).to.be.revertedWith("Nothing to claim");
+  });
+
+  // Slice D review LOW-1 (b): the demo's claim menu (option 79's claim,
+  // GovernanceAdminFlow.claimRefund) reaches claimRefundFor by 'd'.
+  it("the demo's claim menu claims a deleted identity's deposit by its address", async function () {
+    const {
+      gov,
+      ir,
+      vgt,
+      id,
+      bob,
+      idAddr,
+      reject,
+      deployer,
+      voters,
+      proposer,
+      c,
+    } = await setup();
+    const cost = await gov.votingCost();
+    await reject();
+    await ir.connect(deployer).deleteIdentity(bob.address);
+    const carol = voters[1];
+    const oid = await ethers.getContractAt("OnchainID", idAddr);
+    await oid.connect(bob).addKey(keyOf(carol.address), ACTION_KEY, 1);
+    const answers = ["d", "2", idAddr, String(id)];
+    const mod = {
+      state: {
+        signers: [proposer, bob, carol],
+        getContract: (n: string) =>
+          ({
+            vanguardGovernance: gov,
+            governanceToken: vgt,
+            identityRegistry: c.identityRegistry,
+          })[n],
+      },
+      promptUser: async () => answers.shift() as string,
+    };
+    const { claimRefund } = require("../../demo/utils/GovernanceAdminFlow");
+    const c0 = await vgt.balanceOf(carol.address);
+    const quiet = console.log;
+    console.log = () => {};
+    try {
+      await claimRefund(mod);
+    } finally {
+      console.log = quiet;
+    }
+    expect(answers).to.deep.equal([]);
+    expect(await vgt.balanceOf(carol.address)).to.equal(c0 + cost);
+    expect(await gov.getClaimableRefund(id, idAddr)).to.equal(0n);
   });
 
   it("a wallet that does not control the identity cannot claim its deposit", async function () {
@@ -95,7 +144,7 @@ describe("Refund of a deleted identity's deposit (Task 5.17, contracts L-1)", fu
       .withArgs(idAddr, nw.address);
     await expect(gov.connect(nw).claimRefundFor(id, idAddr))
       .to.emit(gov, "RefundClaimed")
-      .withArgs(id, nw.address, await gov.votingCost());
+      .withArgs(id, nw.address, idAddr, await gov.votingCost());
   });
 
   it("refuses an unsettled proposal and an identity with nothing locked", async function () {

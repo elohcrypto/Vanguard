@@ -291,10 +291,19 @@ async function claimRefund(mod) {
       }
     }
 
+    // Task 5.17 (slice D review LOW-1 b): an identity an agent deleted is
+    // bound to no wallet, so the list above cannot show it; 'd' claims its
+    // deposit by its address (claimRefundFor) from a signer controlling it.
+    // That signer is a verified wallet of its own (the refund is a VGT
+    // transfer, compliance-checked), not the deleted wallet.
     if (claimable.length === 0) {
       displayInfo(
-        "Nothing to claim: no settled proposal holds a deposit for any signer",
+        "Nothing to claim for any signer's own identity: no settled proposal holds a deposit for one",
       );
+      const d = await mod.promptUser(
+        "Claim a deleted identity's deposit instead? (d, or Enter to leave): ",
+      );
+      if (d.trim().toLowerCase() === "d") await claimForIdentity(mod);
       return;
     }
 
@@ -305,7 +314,10 @@ async function claimRefund(mod) {
       );
     });
 
-    const pick = await mod.promptUser("\nClaim which (number, or 'all'): ");
+    const pick = await mod.promptUser(
+      "\nClaim which (number, 'all', or 'd' for a deleted identity's deposit): ",
+    );
+    if (pick.trim().toLowerCase() === "d") return await claimForIdentity(mod);
     const chosen =
       pick.trim().toLowerCase() === "all"
         ? claimable
@@ -337,6 +349,43 @@ async function claimRefund(mod) {
     }
   } catch (error) {
     displayError(`Claim failed: ${error.message}`);
+  }
+}
+
+/**
+ * claimRefundFor: the signer, the identity's address and the proposal are
+ * asked; the contract pays only a wallet that controls that identity
+ * (IdentityControl) while no wallet is bound to it, and VGT compliance
+ * needs that wallet verified.
+ */
+async function claimForIdentity(mod) {
+  const gov = mod.state.getContract("vanguardGovernance");
+  const signers = mod.state.signers;
+  const i = parseInt(
+    await mod.promptUser(`Claim as signer (0-${signers.length - 1}): `),
+  );
+  const identity = (
+    await mod.promptUser("Identity (OnchainID) address: ")
+  ).trim();
+  const id = parseInt(await mod.promptUser("Proposal id: "));
+  if (!signers[i] || !ethers.isAddress(identity) || !(id > 0)) {
+    displayError("Invalid choice");
+    return;
+  }
+  const owed = await gov.getClaimableRefund(id, identity);
+  if (owed === 0n) {
+    displayError(`Identity ${identity} is owed nothing by proposal ${id}`);
+    return;
+  }
+  try {
+    await (await gov.connect(signers[i]).claimRefundFor(id, identity)).wait();
+    displaySuccess(
+      `Signer ${i} claimed ${ethers.formatEther(owed)} VGT for identity ${identity} from proposal ${id}`,
+    );
+  } catch (error) {
+    displayError(
+      `Signer ${i} could not claim for ${identity} from proposal ${id}: ${error.message}`,
+    );
   }
 }
 
