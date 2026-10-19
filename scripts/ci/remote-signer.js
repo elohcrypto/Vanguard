@@ -22,7 +22,12 @@
 
 const { HDNodeWallet, JsonRpcProvider, Mnemonic, getBytes } = require("ethers");
 const { guardedServer } = require("../production/rpcGuard");
-const { redactUrl, scrub } = require("../production/redact");
+const {
+  fetchTarget,
+  redactUrl,
+  scrub,
+  scrubData,
+} = require("../production/redact");
 
 const port = Number(process.argv[2] || 8549);
 const upstream = process.env.SIGNER_UPSTREAM;
@@ -69,15 +74,21 @@ async function sendTransaction(tx) {
 
 /** Any other call goes upstream as it came, its answer back verbatim. */
 async function forward(call) {
-  const r = await fetch(upstream, {
+  // Task 5.17 (deep review L-3): credentials as Basic auth (fetchTarget).
+  const to = fetchTarget(upstream);
+  const r = await fetch(to.url, {
     method: "POST",
-    headers: { "content-type": "application/json" },
+    headers: { "content-type": "application/json", ...to.headers },
     body: JSON.stringify(call),
   });
   const out = await r.json();
-  // Task 5.15: the upstream's error text may echo its URL's key.
-  if (out && out.error && out.error.message)
-    out.error.message = scrub(out.error.message, upstream, 240);
+  // Task 5.15: the upstream's error text may echo its URL's key, in its
+  // message or (deep review L-1) its data.
+  if (out && out.error) {
+    if (out.error.message)
+      out.error.message = scrub(out.error.message, upstream, 240);
+    out.error.data = scrubData(out.error.data, upstream);
+  }
   return out;
 }
 
@@ -108,7 +119,11 @@ async function answer(call) {
     return {
       jsonrpc: "2.0",
       id,
-      error: { code: err.code ?? -32000, message: err.message, data: err.data },
+      error: {
+        code: err.code ?? -32000,
+        message: err.message,
+        data: scrubData(err.data, upstream),
+      },
     };
   }
 }

@@ -53,7 +53,7 @@ const {
   keccak256,
 } = require("ethers");
 const { guardedServer } = require("./rpcGuard");
-const { scrub, scrubKnown } = require("./redact");
+const { fetchTarget, scrub, scrubData, scrubKnown } = require("./redact");
 const {
   describeClaim,
   describeMessage,
@@ -363,10 +363,12 @@ async function serve() {
   /** Any other call goes upstream as it came; a failure keeps its words. */
   async function forward(call) {
     let r;
+    // Deep review L-3: fetch refuses a URL with credentials (Basic auth).
+    const to = fetchTarget(upstream);
     try {
-      r = await fetch(upstream, {
+      r = await fetch(to.url, {
         method: "POST",
-        headers: { "content-type": "application/json" },
+        headers: { "content-type": "application/json", ...to.headers },
         body: JSON.stringify(call),
       });
     } catch (e) {
@@ -384,9 +386,13 @@ async function serve() {
     try {
       if (!OWN[method]) {
         const out = await forward(call);
-        // The upstream's error text may echo its URL's API key.
-        if (out && out.error && out.error.message)
-          out.error.message = scrub(out.error.message, upstream, 240);
+        // The upstream's error text may echo its URL's API key, in its
+        // message or its data (deep review L-1).
+        if (out && out.error) {
+          if (out.error.message)
+            out.error.message = scrub(out.error.message, upstream, 240);
+          out.error.data = scrubData(out.error.data, upstream);
+        }
         return out;
       }
       return { jsonrpc: "2.0", id, result: await OWN[method](params) };
@@ -401,7 +407,11 @@ async function serve() {
       return {
         jsonrpc: "2.0",
         id,
-        error: { code: err.code ?? -32000, message, data: err.data },
+        error: {
+          code: err.code ?? -32000,
+          message,
+          data: scrubData(err.data, upstream),
+        },
       };
     }
   }

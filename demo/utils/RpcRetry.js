@@ -86,9 +86,11 @@ function installRetry(provider, opts = {}) {
   // API key: scrubbed of every form of the URL (scripts/production/
   // redact.js), the connected network's own by default.
   const url = opts.url ?? hardhatUrl();
-  const { scrub } = require("../../scripts/production/redact");
+  // Task 5.17 (deep review L-1): every RPC URL this process knows, not
+  // only its own (a signer's upstream may echo in e.data.message).
+  const { scrubKnown } = require("../../scripts/production/redact");
   const print = opts.log ?? console.log;
-  const log = (m) => print(scrub(m, url));
+  const log = (m) => print(scrubKnown(m, url ? [url] : []));
   const sleep = opts.sleep ?? ((ms) => new Promise((ok) => setTimeout(ok, ms)));
   const p = provider;
   const request = p.request.bind(p);

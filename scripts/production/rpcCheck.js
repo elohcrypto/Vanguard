@@ -36,6 +36,7 @@ const { RANGE_ERROR, isTransient } = require("../../demo/utils/RpcRetry");
 
 const {
   classify,
+  fetchTarget,
   redactUrl,
   scrub,
   secretsOf,
@@ -48,18 +49,11 @@ let nextId = 1;
 /** One JSON-RPC call to `url`: { result } or { error: text, status }. */
 async function call(url, method, params = []) {
   try {
-    // fetch refuses a URL with credentials: send them as Basic auth.
-    const u = new URL(url);
-    const headers = { "content-type": "application/json" };
-    if (u.username || u.password) {
-      const who = `${decodeURIComponent(u.username)}:${decodeURIComponent(u.password)}`;
-      headers.authorization = `Basic ${Buffer.from(who).toString("base64")}`;
-      u.username = "";
-      u.password = "";
-    }
-    const r = await fetch(u, {
+    // fetch refuses a URL with credentials: Basic auth (./redact.js).
+    const to = fetchTarget(url);
+    const r = await fetch(to.url, {
       method: "POST",
-      headers,
+      headers: { "content-type": "application/json", ...to.headers },
       body: JSON.stringify({ jsonrpc: "2.0", id: nextId++, method, params }),
     });
     const text = await r.text();

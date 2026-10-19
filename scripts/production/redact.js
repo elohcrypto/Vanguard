@@ -10,6 +10,8 @@
  *  - scrub(text, url, max): every secret form of `url` replaced by
  *    <redacted> in the FULL text, then truncated to `max` (never the other
  *    way round: a key cut at the edge would no longer match).
+ *  - fetchTarget: a URL with credentials as fetch() sends it (Basic auth).
+ *  - scrubData: a JSON-RPC error's data scrubbed as scrub does text.
  *  - classify: rate-limited | range-capped | missing state | unauthorized
  *    | other; shown(text, url, max) is "[class] scrubbed".
  */
@@ -54,12 +56,22 @@ const forms = (x) => {
  * Every secret form of `url`, longest first: the URL with and without its
  * credentials; username, password, the whole query, each &- or ;-separated
  * part whole and its value (names are not secrets), the fragment (3+
- * characters); the
- * whole path and each segment of 8+ characters (so "api", "eth", "v3"
- * stay); and every run of 8+ letters, digits, _ or - inside any of them
- * (a key in "ab+KEY"). Each raw, percent-decoded, form-decoded ('+' as a
- * space) and re-encoded. Matching is case-insensitive (scrub).
+ * characters); the whole path and each segment of PATH_MIN+ characters;
+ * and every run of 8+ letters, digits, _ or - inside any of them (a key in
+ * "ab+KEY"). Each raw, percent-decoded, form-decoded ('+' as a space) and
+ * re-encoded. Task 5.17 (deep review L-2): also the Basic credential
+ * fetchTarget sends (base64 of user:password) and every secret of
+ * PATH_MIN+ characters hex- and base64-encoded (an upstream may echo a request in
+ * error.data as hex or base64). Matching is case-insensitive (scrub).
+ *
+ * PATH_MIN = 6 (was 8): a provider key as short as 6 characters in a path
+ * segment is redacted; route words of 6+ letters ("sepolia", "mainnet")
+ * are too, an over-redaction on the safe side, while "api", "eth", "v3",
+ * "rpc" stay readable. A path key under 6 characters is not protected:
+ * at most 64^5 (about 10^9) values, it guards nothing a reader of the
+ * error text could not guess.
  */
+const PATH_MIN = 6;
 function secretsOf(url) {
   const out = new Set([String(url)]);
   try {
@@ -82,11 +94,55 @@ function secretsOf(url) {
       }
     };
     for (const x of short) add(x, 3);
-    for (const x of long) add(x, 8);
+    for (const x of long) add(x, PATH_MIN);
+    if (u.username || u.password) {
+      const basic = fetchTarget(u.href).headers.authorization.slice(6);
+      out.add(basic);
+      out.add(basic.replace(/=+$/, ""));
+    }
   } catch {
     // unparsable: the whole string only
   }
+  for (const x of [...out].filter((y) => y.length >= PATH_MIN)) {
+    const b = Buffer.from(x);
+    out.add(b.toString("hex"));
+    out.add(b.toString("base64").replace(/=+$/, ""));
+    out.add(b.toString("base64url"));
+  }
   return [...out].sort((a, b) => b.length - a.length);
+}
+
+/**
+ * `url` as fetch() can send it: node's fetch refuses a URL carrying
+ * credentials (ethers accepts them), so the userinfo moves to a Basic
+ * Authorization header. { url, headers } (deep review L-3: every place a
+ * tool fetches an RPC URL itself goes through this).
+ */
+function fetchTarget(url) {
+  const u = new URL(String(url));
+  const headers = {};
+  if (u.username || u.password) {
+    const who = `${decodeURIComponent(u.username)}:${decodeURIComponent(u.password)}`;
+    headers.authorization = `Basic ${Buffer.from(who).toString("base64")}`;
+    u.username = "";
+    u.password = "";
+  }
+  return { url: u.href, headers };
+}
+
+/**
+ * `data` (a JSON-RPC error's data: a string, an object or anything) with
+ * every secret of `url` scrubbed, kept in its shape (deep review L-1:
+ * the signers forwarded it unscrubbed).
+ */
+function scrubData(data, url) {
+  if (data === undefined || data === null) return data;
+  if (typeof data === "string") return scrub(data, url);
+  try {
+    return JSON.parse(scrub(JSON.stringify(data), url));
+  } catch {
+    return scrub(JSON.stringify(data), url);
+  }
 }
 
 const escape = (x) => x.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
@@ -182,6 +238,8 @@ function urlsFrom(name, argv = []) {
 }
 
 module.exports = {
+  fetchTarget,
+  scrubData,
   urlsFrom,
   redactUrl,
   secretsOf,

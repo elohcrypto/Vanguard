@@ -25,17 +25,19 @@ import { runHandover } from "../handover";
 
 const { installRetry } = require("../../demo/utils/RpcRetry");
 const { scrubKnown } = require("./redact");
-const { redactUrl, scrub } = require("./redact");
+const { fetchTarget, redactUrl, scrub } = require("./redact");
 
 type Reader = (method: string, params: any[]) => Promise<any>;
 
 /** A reader sending every call to `url` (errors keep their words). */
 export function urlReader(url: string): Reader {
   let id = 1;
+  // Deep review L-3: credentials as Basic auth (fetch refuses them).
+  const to = fetchTarget(url);
   return async (method, params) => {
-    const r = await fetch(url, {
+    const r = await fetch(to.url, {
       method: "POST",
-      headers: { "content-type": "application/json" },
+      headers: { "content-type": "application/json", ...to.headers },
       body: JSON.stringify({ jsonrpc: "2.0", id: id++, method, params }),
     });
     const body: any = await r.json();

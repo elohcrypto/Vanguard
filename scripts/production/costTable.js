@@ -20,13 +20,15 @@
 "use strict";
 
 const fs = require("fs");
-const { scrubKnown, urlsFrom } = require("./redact");
+const { fetchTarget, scrubKnown, urlsFrom } = require("./redact");
 
 let id = 1;
 async function rpc(url, method, params = []) {
-  const r = await fetch(url, {
+  // Deep review L-3: credentials as Basic auth (fetch refuses them).
+  const to = fetchTarget(url);
+  const r = await fetch(to.url, {
     method: "POST",
-    headers: { "content-type": "application/json" },
+    headers: { "content-type": "application/json", ...to.headers },
     body: JSON.stringify({ jsonrpc: "2.0", id: id++, method, params }),
   });
   const b = await r.json();
@@ -144,4 +146,4 @@ if (require.main === module) {
     },
   );
 }
-module.exports = { labels, measure, table };
+module.exports = { labels, measure, rpc, table };
