@@ -34,7 +34,9 @@
 // function gets ` #2`, ` #3`.
 // The gate fails if a site has no row, a row names a site that no
 // longer exists, a row is malformed, a tested row's title or reason is
-// missing from its file, or any test asserts a bare `.reverted` /
+// missing from its file, its it() never runs (under describe.skip,
+// xdescribe, context.skip, xcontext or a `.only`: disabledIts; deep
+// review H-1), or any test asserts a bare `.reverted` /
 // `.rejected` (one without its reason string or custom error; CF-8).
 // Exits 1 on any finding;
 // `node scripts/ci/guards-table.js`            the gate
@@ -163,10 +165,64 @@ function enumerateSites() {
 }
 
 const TITLE = /\bit\s*\(\s*(["'`])((?:\\.|(?!\1)[^\\])*)\1/g;
-/** it() titles of a test file, with their offsets; `.skip` excluded. */
-function titlesOf(src) {
+/**
+ * it() titles of a test file, with their offsets; `it.skip` and `xit`
+ * excluded. `off` names the form that keeps the test from counting
+ * (see disabledIts), "" for a live one.
+ */
+const parsed = new Map();
+function titlesOf(src, file = "test.ts") {
+  const memo = `${file}\0${src}`;
+  if (parsed.has(memo)) return parsed.get(memo);
+  const off = disabledIts(src, file);
   const out = [];
-  for (const m of src.matchAll(TITLE)) out.push({ title: m[2], at: m.index });
+  for (const m of src.matchAll(TITLE))
+    out.push({ title: m[2], at: m.index, off: off.get(m.index) || "" });
+  parsed.set(memo, out);
+  return out;
+}
+
+const SUITE = new Set(["describe", "context", "it", "specify"]);
+const XSUITE = new Set(["xdescribe", "xcontext", "xit", "xspecify"]);
+/**
+ * Deep review H-1: a tested row is evidence only if its it() runs, and
+ * the TITLE regex sees the it( text, not its scope. Parse the file (the
+ * TypeScript parser reads .js and .ts) and track describe/context
+ * nesting: an it() under `describe.skip`, `context.skip`, `xdescribe`
+ * or `xcontext` never runs, and one under `.only` (or an `it.only`) is
+ * a focus left in, which CI refuses (hardhat.config.ts forbidOnly).
+ * Returns: offset of the it() call -> the outermost such form.
+ */
+function disabledIts(src, file) {
+  const ts = require("typescript");
+  const kind = /\.ts$/.test(file) ? ts.ScriptKind.TS : ts.ScriptKind.JS;
+  const sf = ts.createSourceFile(file, src, ts.ScriptTarget.Latest, true, kind);
+  const form = (e) => {
+    if (ts.isIdentifier(e)) {
+      if (XSUITE.has(e.text)) return { base: e.text, off: e.text };
+      return SUITE.has(e.text) ? { base: e.text, off: "" } : null;
+    }
+    if (
+      ts.isPropertyAccessExpression(e) &&
+      ts.isIdentifier(e.expression) &&
+      SUITE.has(e.expression.text) &&
+      ["skip", "only"].includes(e.name.text)
+    )
+      return { base: e.expression.text, off: e.getText(sf) };
+    return null;
+  };
+  const out = new Map();
+  const walk = (node, off) => {
+    if (ts.isCallExpression(node)) {
+      const f = form(node.expression);
+      if (f) {
+        off = off || f.off;
+        if (f.base === "it" && off) out.set(node.getStart(sf), off);
+      }
+    }
+    ts.forEachChild(node, (c) => walk(c, off));
+  };
+  walk(sf, "");
   return out;
 }
 
@@ -200,13 +256,13 @@ function suggestTest(s, tests) {
   const fnCall = new RegExp(`\\.${s.fn.replace(/^modifier /, "")}\\s*\\(`);
   let fallback = null;
   for (const [file, src] of tests) {
-    const titles = titlesOf(src);
+    const titles = titlesOf(src, file);
     titles.forEach((t, i) => {
       const block = src.slice(
         t.at,
         i + 1 < titles.length ? titles[i + 1].at : src.length,
       );
-      if (!re.test(block)) return;
+      if (t.off || !re.test(block)) return;
       if (fnCall.test(block) && !fallback?.exact)
         fallback = { file, test: t.title, exact: true };
       else if (!fallback) fallback = { file, test: t.title, exact: false };
@@ -224,16 +280,21 @@ function suggestTest(s, tests) {
  * its call `fn(`, or `calls`, the entry the block drives it through (a
  * helper, a manager, a selector string). A constructor, modifier or
  * internal (`_x`) site is checked for `calls` only when the row gives
- * one. Returns what is missing, or "".
+ * one. A block under a skip or a focus (titlesOf `off`) is not evidence.
+ * Returns what is missing, or "".
  */
-function blockMisses(r, s, src) {
-  const titles = titlesOf(src);
+function blockMisses(r, s, src, file) {
+  const titles = titlesOf(src, file);
   const reason = r.asserts || s.named;
   const internal = /^(constructor|receive|fallback|modifier |_|<)/.test(s.fn);
   const call = r.calls || (internal ? "" : `${s.fn}(`);
   let why = "";
   for (let i = 0; i < titles.length; i++) {
     if (titles[i].title !== r.test) continue;
+    if (titles[i].off) {
+      why = why || `never runs: it sits in ${titles[i].off}`;
+      continue;
+    }
     const end = i + 1 < titles.length ? titles[i + 1].at : src.length;
     const block = src.slice(titles[i].at, end);
     if (r.via !== undefined && (r.via.length < 3 || !block.includes(r.via)))
@@ -298,8 +359,12 @@ function main() {
         errors.push(
           `tested row names no tracked test file "${r.file}": ${r.site}`,
         );
-      else if (!titlesOf(src).some((t) => t.title === r.test))
+      else if (!titlesOf(src, r.file).some((t) => t.title === r.test))
         errors.push(`no test titled "${r.test}" in ${r.file}: ${r.site}`);
+      else if (!titlesOf(src, r.file).some((t) => t.title === r.test && !t.off))
+        errors.push(
+          `"${r.test}" (${r.file}) never runs, it sits in ${titlesOf(src, r.file).find((t) => t.title === r.test).off}: ${r.site}`,
+        );
       else if (
         r.asserts !== undefined &&
         (r.asserts.length < 6 || !s.named.includes(r.asserts))
@@ -312,7 +377,7 @@ function main() {
           `${r.file} never names "${r.asserts || s.named}": ${r.site}`,
         );
       else {
-        const why = blockMisses(r, s, src);
+        const why = blockMisses(r, s, src, r.file);
         if (why) errors.push(`"${r.test}" (${r.file}) ${why}: ${r.site}`);
       }
     } else if (!r.reason || (r.class === "unreachable" && !r.mutant)) {
@@ -357,4 +422,4 @@ function main() {
 }
 
 if (require.main === module) main();
-else module.exports = { enumerateSites, TABLE_DIR };
+else module.exports = { enumerateSites, titlesOf, TABLE_DIR, SKIP };
