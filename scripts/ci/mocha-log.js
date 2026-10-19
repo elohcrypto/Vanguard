@@ -14,7 +14,10 @@
 // pending tests under a suite whose title carries a skip marker
 // (test/helpers/zkProofs.js MARKERS: describeProofs' reason,
 // describeUnlessCoverage's "skipped under coverage:") and the others
-// (deep review H-1).
+// (deep review H-1). With MOCHA_PENDING set (the coverage runs) the
+// root hooks also fingerprint artifacts/ at the start and fail the run
+// at the end when it changed: a child process recompiled the clean build
+// over the instrumented one (scripts/ci/artifactGuard.js, Task 5.17).
 //
 // AS A CLI:
 //   failures <log> [max]   print mocha's numbered failure blocks (title,
@@ -137,14 +140,27 @@ function pendingByFile(suite) {
   return counts;
 }
 
+const ARTIFACTS = path.join(process.cwd(), "artifacts");
+let artifactsAtStart = null;
+
 /** Root hooks: the first one installs the recorder. */
 const mochaHooks = {
   beforeAll() {
     install();
+    if (process.env.MOCHA_PENDING && !artifactsAtStart)
+      artifactsAtStart = require("./artifactGuard").fingerprint(ARTIFACTS);
   },
   afterAll() {
     const to = process.env.MOCHA_PENDING;
     if (!to) return;
+    const g = require("./artifactGuard");
+    const why = g.artifactsChanged(artifactsAtStart, g.fingerprint(ARTIFACTS));
+    if (why) {
+      console.error(`::error::${why}`);
+      process.on("exit", () => {
+        if (!process.exitCode) process.exitCode = 1;
+      });
+    }
     try {
       const counts = pendingByFile(this.test.parent);
       fs.writeFileSync(to, JSON.stringify(counts, null, 1) + "\n");
