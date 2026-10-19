@@ -372,7 +372,7 @@ function _claimRefund(uint256 proposalId, address id) private {
     uint256 amount = id == address(0) ? 0 : _voterLockedTokens[proposalId][id];
     require(amount > 0, "Nothing to claim");
     address bound = identityRegistry.walletOf(id);
-    require(bound == address(0) || bound == msg.sender, "Identity is bound to another wallet");
+    if (bound != address(0) && bound != msg.sender) revert IdentityBoundToAnotherWallet(id, bound);
     require(_controls(msg.sender, id), "Wallet does not control its identity");
     _voterLockedTokens[proposalId][id] = 0;
     require(governanceToken.transfer(msg.sender, amount), "Refund transfer failed");

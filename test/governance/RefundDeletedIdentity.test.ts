@@ -90,9 +90,9 @@ describe("Refund of a deleted identity's deposit (Task 5.17, contracts L-1)", fu
     await vgt.recoveryAddress(bob.address, nw.address, idAddr);
     await reject();
     // bob still owns the identity, but the registry binds it to nw.
-    await expect(
-      gov.connect(bob).claimRefundFor(id, idAddr),
-    ).to.be.revertedWith("Identity is bound to another wallet");
+    await expect(gov.connect(bob).claimRefundFor(id, idAddr))
+      .to.be.revertedWithCustomError(gov, "IdentityBoundToAnotherWallet")
+      .withArgs(idAddr, nw.address);
     await expect(gov.connect(nw).claimRefundFor(id, idAddr))
       .to.emit(gov, "RefundClaimed")
       .withArgs(id, nw.address, await gov.votingCost());

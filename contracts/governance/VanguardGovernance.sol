@@ -32,6 +32,10 @@ contract VanguardGovernance is GovernanceProposals {
     /// @notice executeProposal: the passed proposal's target ran out of gas.
     ///         The proposal stays Active; retry with a higher gas limit.
     error InsufficientExecutionGas();
+    /// @notice claimRefundFor: `identity` is bound to `wallet`, which alone
+    ///         claims its refunds (Q6: a recovery's lost wallet may still
+    ///         hold a key).
+    error IdentityBoundToAnotherWallet(address identity, address wallet);
     
     /**
      * @dev Constructor
@@ -265,7 +269,7 @@ contract VanguardGovernance is GovernanceProposals {
         // claims (a recovery moved it there: the lost wallet's keys may be in
         // other hands); unbound (deleted), any wallet controlling it does.
         address bound = identityRegistry.walletOf(id);
-        require(bound == address(0) || bound == msg.sender, "Identity is bound to another wallet");
+        if (bound != address(0) && bound != msg.sender) revert IdentityBoundToAnotherWallet(id, bound);
         require(_controls(msg.sender, id), "Wallet does not control its identity");
         _voterLockedTokens[proposalId][id] = 0;
         require(governanceToken.transfer(msg.sender, amount), "Refund transfer failed");
