@@ -344,8 +344,16 @@ export async function runPostCeremony(
     try {
       await Votes.settleAll({ ...args, open });
     } catch (e: any) {
+      // Review M-1: the candidates, not `open`: an own removal whose
+      // precheck failed only on a foreign hold is safe and stays.
       if (/ now: .* not executed/.test(e.message))
-        await cancelHazards(o, proposer, voters, open, log);
+        await cancelHazards(
+          o,
+          proposer,
+          voters,
+          await cancelCandidates(o, proposer),
+          log,
+        );
       throw e;
     }
   }

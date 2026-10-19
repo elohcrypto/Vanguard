@@ -216,6 +216,52 @@ describe("Post-ceremony votes: hazardous open removals (L-3)", function () {
     await R().holdForForeignHazards(o, f.proposer, [], () => {});
   });
 
+  it("M-1: a hazard pair passing mid-settlement holds the run; no own removal is cancelled; a re-run cancels the pair and finishes", async function () {
+    await ceremony();
+    const { o } = await derive();
+    const realSettle = Votes.settleAll;
+    const theirs: number[] = [];
+    // The reviewer's injection: the pair appears as round 2 settles, with
+    // enough FOR votes to pass.
+    Votes.settleAll = async (a: any) => {
+      if (/remove deployer-era/.test(a.open[0]?.label ?? "") && !theirs.length)
+        for (const n of await addrs([16, 17])) {
+          const id = await rm(f.voters[0], n);
+          await Votes.castAcceptanceVotes(f.c.governance, id, [
+            f.proposer,
+            f.voters[1],
+          ]);
+          theirs.push(id);
+        }
+      return realSettle(a);
+    };
+    const fresh = parseNodes(await NEW());
+    let own: number[] = [];
+    try {
+      await expect(
+        captured(out, () =>
+          runPostCeremony(o, f.proposer, f.voters, fresh, cfg),
+        ),
+      ).to.be.rejectedWith(/round 2 held: .*still voting/);
+      own = (await R().allOpenRemovals(o))
+        .filter((r: any) => !theirs.includes(r.id))
+        .map((r: any) => r.id);
+    } finally {
+      Votes.settleAll = realSettle;
+    }
+    expect(own).to.have.length(6);
+    const status = async (id: number) =>
+      Number((await f.c.governance.getProposal(id))[0].status);
+    for (const id of [...own, ...theirs]) expect(await status(id)).to.equal(1);
+    expect(out.join("\n")).to.not.contain("STANDING HAZARD");
+    await pastVote(theirs[1]);
+    await captured(out, () =>
+      runPostCeremony(o, f.proposer, f.voters, fresh, cfg),
+    );
+    for (const id of theirs) expect(await status(id)).to.equal(5);
+    await rotated();
+  });
+
   it("fails closed past 12 distinct nodes under removal; one node's duplicates count once", async function () {
     const extra = Array.from(
       { length: 8 },
