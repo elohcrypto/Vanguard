@@ -322,6 +322,7 @@ export function rolePause(
   };
   const roles = {
     stop: null as Error | null,
+    ops: inputs.ops,
     isExternal: (a: string) =>
       inputs.external.some(
         (k) => (inputs as any)[k].toLowerCase() === a.toLowerCase(),

@@ -74,6 +74,7 @@ describe("opsKeyManager: pending calls (Task 4.16)", function () {
     const id = await OnchainID.deploy(ops.address);
     let steps: any[] = [];
     const roles = {
+      ops: ops.address,
       isExternal: (a: string) => a.toLowerCase() === ops.address.toLowerCase(),
       opsIdentity: async (s: any[]) => {
         steps = s;
@@ -115,5 +116,26 @@ describe("opsKeyManager: pending calls (Task 4.16)", function () {
       roles,
     );
     expect(r).to.deep.include({ authorized: true, pending: null });
+  });
+
+  // Slice C review L-4: an identity another external role owns is refused.
+  it("an identity owned by another external role is refused, naming both", async function () {
+    const { deployer, ops, km, OnchainID } = await deploy();
+    const [, , , , , , , admin] = await ethers.getSigners();
+    const id = await OnchainID.deploy(admin.address);
+    let exported = false;
+    const roles = {
+      ops: ops.address,
+      isExternal: () => true, // ops and the issuer-admin multisig
+      opsIdentity: async () => {
+        exported = true;
+      },
+    };
+    await expect(
+      authorizeKeyManagerOnOps(km, deployer, await id.getAddress(), {}, roles),
+    ).to.be.rejectedWith(
+      `ops identity ${await id.getAddress()} is owned by ${admin.address}, not ops ${ops.address}`,
+    );
+    expect(exported).to.equal(false);
   });
 });

@@ -115,6 +115,8 @@ export async function configureKeyManager(
  */
 export interface OpsIdentityRoles {
   isExternal: (a: string) => boolean;
+  /** The configured ops address: the one external owner accepted. */
+  ops: string;
   opsIdentity: (steps: any[]) => Promise<void>;
 }
 
@@ -195,6 +197,12 @@ export async function authorizeKeyManagerOnOps(
   const id = await ethers.getContractAt("OnchainID", opsIdentity);
   const idOwner: string = await id.owner();
   if (roles?.isExternal(idOwner)) {
+    // Slice C review L-4: another external role (the issuer-admin
+    // multisig) owning it would sign "ops" steps it is not.
+    if (idOwner.toLowerCase() !== roles.ops.toLowerCase())
+      throw new Error(
+        `ops identity ${opsIdentity} is owned by ${idOwner}, not ops ${roles.ops}: name the ops OnchainID (OPS_IDENTITY)`,
+      );
     // A pin to another manager is refused before anything is exported.
     const pinned: string = await id.recoveryManager();
     if (
