@@ -21,8 +21,10 @@
  * that is not a canonical BN254 scalar field element, and commitment 0 (the
  * value of an empty leaf).
  *
- * Optional, for ops: --publish --rpc <url> --privacy-manager <addr> with the
- * listOperator's key in env WHITELIST_OPS_KEY sends publishWhitelistRoot.
+ * Optional, for ops: --publish --privacy-manager <addr> with the RPC URL in
+ * env ZK_RPC_URL (or ZK_RPC_URL_FILE, never argv; ./zkChain.js) and the
+ * listOperator's key in env WHITELIST_OPS_KEY (a published Hardhat key is
+ * refused off 31337) sends publishWhitelistRoot.
  * A root PrivacyManager published before (WhitelistRootPublished, read in
  * chunks from --from-block, default 0) is refused without --force: an old
  * root re-admits every commitment it held, investors removed since
@@ -33,6 +35,7 @@
 
 const fs = require("fs");
 const { scrubKnown } = require("../production/redact");
+const { guardedWallet, refuseRpcArg, rpcFromEnv } = require("./zkChain");
 const { MerkleTreeBuilder } = require("../../utils/merkle-tree-builder");
 
 /** Depth of the whitelist_membership circuit. */
@@ -357,11 +360,10 @@ function parseArgs(argv) {
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
     if (!a.startsWith("--")) throw new Error("unexpected positional argument");
+    refuseRpcArg(a);
     const key = a.slice(2);
     if (["publish", "help", "force"].includes(key)) args[key] = true;
-    else if (
-      ["in", "out", "rpc", "privacy-manager", "from-block"].includes(key)
-    ) {
+    else if (["in", "out", "privacy-manager", "from-block"].includes(key)) {
       if (i + 1 >= argv.length) throw new Error(`${a} needs a value`);
       args[key] = argv[++i];
     } else throw new Error(`unknown option ${a}`);
@@ -370,8 +372,9 @@ function parseArgs(argv) {
 }
 
 const USAGE = `Usage: node scripts/zk/build-whitelist-root.js --in <entries.json> [--out <root.json>]
-         [--publish --rpc <url> --privacy-manager <addr> [--from-block <n>] [--force]]
-         (key: env WHITELIST_OPS_KEY; --force republishes a root published before)
+         [--publish --privacy-manager <addr> [--from-block <n>] [--force]]
+         (RPC: env ZK_RPC_URL or ZK_RPC_URL_FILE; key: env WHITELIST_OPS_KEY;
+          --force republishes a root published before)
 entries.json: [{ "identity": "<decimal|0x>", "commitment": "<decimal|0x>" }]`;
 
 async function main() {
@@ -380,6 +383,7 @@ async function main() {
     console.log(USAGE);
     return;
   }
+  args.rpc = rpcFromEnv(process.argv.slice(2));
   if (!args.in) throw new Error(`--in is required\n${USAGE}`);
   const file = await buildWhitelistRoot(
     JSON.parse(fs.readFileSync(args.in, "utf8")),
@@ -414,7 +418,7 @@ async function main() {
       !process.env.WHITELIST_OPS_KEY
     ) {
       throw new Error(
-        "--publish needs --rpc, --privacy-manager and env WHITELIST_OPS_KEY",
+        "--publish needs env ZK_RPC_URL, --privacy-manager and env WHITELIST_OPS_KEY",
       );
     }
     const { ethers } = require("ethers");
@@ -423,8 +427,8 @@ async function main() {
       privacyManager: args["privacy-manager"],
       force: Boolean(args.force),
       fromBlock,
-      signer: new ethers.Wallet(
-        process.env.WHITELIST_OPS_KEY,
+      signer: await guardedWallet(
+        "WHITELIST_OPS_KEY",
         new ethers.JsonRpcProvider(args.rpc),
       ),
     });
@@ -441,9 +445,7 @@ if (require.main === module) {
   main().then(
     () => process.exit(0),
     (e) => {
-      console.error(
-        `build-whitelist-root: ${scrubKnown(e.message, [process.argv[process.argv.indexOf("--rpc") + 1]])}`,
-      );
+      console.error(`build-whitelist-root: ${scrubKnown(e.message)}`);
       process.exit(1);
     },
   );

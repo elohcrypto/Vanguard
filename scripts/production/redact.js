@@ -188,7 +188,12 @@ function knownUrls(extra = []) {
   const urls = [...extra];
   for (const k of ["SIGNER_UPSTREAM", "SEPOLIA_RPC_URL", "MAINNET_RPC_URL"])
     if (env[k]) urls.push(env[k]);
-  for (const k of ["SCAN_RPC_URLS", "RPC_CHECK_URLS", "COST_RPC_URL"]) {
+  for (const k of [
+    "SCAN_RPC_URLS",
+    "RPC_CHECK_URLS",
+    "COST_RPC_URL",
+    "ZK_RPC_URL",
+  ]) {
     try {
       urls.push(...urlsFrom(k));
     } catch {

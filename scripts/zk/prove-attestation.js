@@ -5,7 +5,7 @@
  *
  *   # policy and issuer trust read from PrivacyManager (recommended)
  *   node scripts/zk/prove-attestation.js --attestation att.json --wallet <0x..> \
- *        --rpc <url> --privacy-manager <addr> [--out proof.json] [--submit]
+ *        --privacy-manager <addr> [--out proof.json] [--submit]  (ZK_RPC_URL)
  *   # or offline, the policy given explicitly (no trust check possible)
  *        ... --mask <allowedMask> | --minimum <minimumAccreditation>
  *        | --policy <minimum,wK,wA,wJ,wAcc>
@@ -15,7 +15,7 @@
  * verify, an issuer key (Ax, Ay) PrivacyManager does not trust for the
  * circuit, an attestation signed for another chain or PrivacyManager than
  * the target (Task 3.8 M1), an attestation whose validUntil has passed (the
- * chain's time with --rpc, else the clock; Task 3.10), a policy given
+ * chain's time with ZK_RPC_URL, else the clock; Task 3.10), a policy given
  * explicitly that differs from the current one, and attributes that do not
  * meet the policy. The proof is verified locally with
  * the circuit's verification key before it is printed. --submit (key: env
@@ -26,6 +26,8 @@
  */
 
 const fs = require("fs");
+const { scrubKnown } = require("../production/redact");
+const { guardedWallet, refuseRpcArg, rpcFromEnv } = require("./zkChain");
 const path = require("path");
 const { ethers } = require("ethers");
 const { toField, revertReason } = require("./build-whitelist-root");
@@ -192,7 +194,7 @@ async function proveAttestation({
   }
   if (!p) {
     throw new Error(
-      "no policy: pass --rpc and --privacy-manager, or the policy",
+      "no policy: pass --privacy-manager (with env ZK_RPC_URL), or the policy",
     );
   }
   checkPolicy(att, p);
@@ -318,13 +320,13 @@ function parseArgs(argv) {
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
     if (!a.startsWith("--")) throw new Error("unexpected positional argument");
+    refuseRpcArg(a);
     const k = a.slice(2);
     if (["submit", "help"].includes(k)) args[k] = true;
     else if (
       [
         "attestation",
         "wallet",
-        "rpc",
         "privacy-manager",
         "mask",
         "minimum",
@@ -340,8 +342,9 @@ function parseArgs(argv) {
 }
 
 const USAGE = `Usage: node scripts/zk/prove-attestation.js --attestation <file> --wallet <addr>
-            (--rpc <url> --privacy-manager <addr> | --mask <m> | --minimum <m> | --policy <min,wK,wA,wJ,wAcc>)
+            (--privacy-manager <addr> | --mask <m> | --minimum <m> | --policy <min,wK,wA,wJ,wAcc>)
             [--out <proof.json>] [--submit]
+RPC (with --privacy-manager): env ZK_RPC_URL or ZK_RPC_URL_FILE (never argv).
 Submit key: env WHITELIST_WALLET_KEY (the --wallet's).`;
 
 async function main(box) {
@@ -356,21 +359,25 @@ async function main(box) {
   }
   box.attestation = JSON.parse(fs.readFileSync(args.attestation, "utf8"));
   const explicit = args.policy ?? args.mask ?? args.minimum;
-  const chain = Boolean(args.rpc || args["privacy-manager"]);
-  if (chain && (!args.rpc || !args["privacy-manager"])) {
-    throw new Error("--rpc and --privacy-manager go together");
+  // Task 5.17 (deep review L-4): the RPC URL is env's, never argv.
+  const chain = Boolean(args["privacy-manager"]);
+  const rpc = chain ? rpcFromEnv(process.argv.slice(2)) : undefined;
+  if (chain && !rpc) {
+    throw new Error(
+      "--privacy-manager needs env ZK_RPC_URL (the chain to read)",
+    );
   }
-  const provider = args.rpc ? new ethers.JsonRpcProvider(args.rpc) : undefined;
+  const provider = rpc ? new ethers.JsonRpcProvider(rpc) : undefined;
   // Everything --submit needs is checked before the proof is generated.
   let signer;
   if (args.submit) {
     const key = process.env.WHITELIST_WALLET_KEY;
     if (!chain || !key) {
       throw new Error(
-        "--submit needs --rpc, --privacy-manager and env WHITELIST_WALLET_KEY",
+        "--submit needs env ZK_RPC_URL, --privacy-manager and env WHITELIST_WALLET_KEY",
       );
     }
-    signer = new ethers.Wallet(key, provider);
+    signer = await guardedWallet("WHITELIST_WALLET_KEY", provider);
     if (signer.address !== walletOf(args.wallet)) {
       throw new Error(
         `WHITELIST_WALLET_KEY is for ${signer.address}, --wallet is ${walletOf(args.wallet)}`,
@@ -421,7 +428,7 @@ if (require.main === module) {
           }
         }
       }
-      console.error(`prove-attestation: ${msg}`);
+      console.error(`prove-attestation: ${scrubKnown(msg)}`);
       process.exit(1);
     },
   );

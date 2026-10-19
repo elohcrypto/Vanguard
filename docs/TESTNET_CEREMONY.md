@@ -365,13 +365,13 @@ node scripts/zk/prove-whitelist.js --commitment --identity <onchainID> --secret-
 
 # Operator (ops, the listOperator): entries.json is
 # [{ "identity": "<onchainID>", "commitment": "<0x..>" }, ...], one per identity
-WHITELIST_OPS_KEY=<ops key> node scripts/zk/build-whitelist-root.js \
-  --in entries.json --out root.json --publish --rpc <url> --privacy-manager <addr>
+ZK_RPC_URL=<url> WHITELIST_OPS_KEY=<ops key> node scripts/zk/build-whitelist-root.js \
+  --in entries.json --out root.json --publish --privacy-manager <addr>
 
 # Investor, with the published root.json: prove, bind the wallet, show the status
-WHITELIST_WALLET_KEY=<wallet key> node scripts/zk/prove-whitelist.js \
+ZK_RPC_URL=<url> WHITELIST_WALLET_KEY=<wallet key> node scripts/zk/prove-whitelist.js \
   --root root.json --identity <onchainID> --wallet <wallet> --secret-file secret.txt \
-  --out proof.json --submit --rpc <url> --privacy-manager <addr>
+  --out proof.json --submit --privacy-manager <addr>  # URLs: env only, never argv
 ```
 
 Leaf order is the order of `entries.json`, so the same file always gives
@@ -471,16 +471,16 @@ no oracle, an open whitelist, until it is configured.
 node scripts/zk/attest.js --new-key
 # Issuer: the public key for the setTrustedAttestor vote, then sign
 ATTESTOR_KEY=<key> node scripts/zk/attest.js --public-key
-ATTESTOR_KEY=<key> node scripts/zk/attest.js --sign --circuit jurisdiction \
-  --identity <onchainID> --country <ISO numeric> --rpc <url> \
+ZK_RPC_URL=<url> ATTESTOR_KEY=<key> node scripts/zk/attest.js --sign --circuit jurisdiction \
+  --identity <onchainID> --country <ISO numeric> \
   --privacy-manager <addr> --valid-days 365 --out att.json
 #   or --valid-until 2027-01-01 (ISO 8601 UTC); the expiry is required
 #   offline: --chain-id <id> --privacy-manager <addr> --mask <its bit>
 #   ... --circuit accreditation --amount <amount>
 #   ... --circuit compliance --scores <kyc,aml,jurisdiction,accreditation>
 # Investor: policy and issuer trust read from PrivacyManager
-WHITELIST_WALLET_KEY=<wallet key> node scripts/zk/prove-attestation.js \
-  --attestation att.json --wallet <wallet> --rpc <url> \
+ZK_RPC_URL=<url> WHITELIST_WALLET_KEY=<wallet key> node scripts/zk/prove-attestation.js \
+  --attestation att.json --wallet <wallet> \
   --privacy-manager <addr> --out proof.json --submit
 ```
 

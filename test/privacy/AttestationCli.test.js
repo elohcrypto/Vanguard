@@ -131,7 +131,7 @@ describeProofs("Attestation CLIs (Task 3.7b)", function () {
       ]);
       expect(att.identity).to.equal(BigInt(identity).toString());
       expect(att.attributes).to.deep.equal(["4"]);
-      // --valid-days 365 from the clock (offline: no --rpc).
+      // --valid-days 365 from the clock (offline: no ZK_RPC_URL).
       const year = Math.floor(Date.now() / 1000) + 365 * 86400;
       expect(Number(att.validUntil)).to.be.within(year - 60, year + 1);
       expect(s.stderr).to.match(/attestation expires \d{4}-\d\d-\d\dT/);
@@ -232,7 +232,10 @@ describeProofs("Attestation CLIs (Task 3.7b)", function () {
       // The deployment it is for is required (review 3.8 M1).
       for (const [args, re] of [
         [["--chain-id", "31337"], /--privacy-manager is required/],
-        [["--privacy-manager", PMX], /--chain-id or --rpc is required/],
+        [
+          ["--privacy-manager", PMX],
+          /--chain-id or env ZK_RPC_URL is required/,
+        ],
         [["--chain-id", "0", "--privacy-manager", PMX], /chainId: zero/],
         [["--chain-id", "1", "--privacy-manager", "0x12"], /not an address/],
       ]) {
@@ -357,7 +360,7 @@ describeProofs("Attestation CLIs (Task 3.7b)", function () {
         "--submit",
       ]);
       expect(sub.stderr).to.match(
-        /--submit needs --rpc, --privacy-manager and env WHITELIST_WALLET_KEY/,
+        /--submit needs env ZK_RPC_URL, --privacy-manager and env WHITELIST_WALLET_KEY/,
       );
       expect(sub.stdout).to.equal("");
     });

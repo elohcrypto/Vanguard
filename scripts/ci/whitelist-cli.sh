@@ -31,8 +31,8 @@ for i in 1 2 3; do
   c=$(node scripts/zk/prove-whitelist.js --commitment --identity "$(user $i onchainID)" --secret-file "$D/secret-$i")
   jq --arg id "$(user $i onchainID)" --arg c "$c" '. + [{identity: $id, commitment: $c}]' "$D/entries.json" > "$D/e" && mv "$D/e" "$D/entries.json"
 done
-WHITELIST_OPS_KEY=$(key 10) node scripts/zk/build-whitelist-root.js \
-  --in "$D/entries.json" --out "$D/root.json" --publish --rpc "$RPC" --privacy-manager "$PM"
+ZK_RPC_URL=$RPC WHITELIST_OPS_KEY=$(key 10) node scripts/zk/build-whitelist-root.js \
+  --in "$D/entries.json" --out "$D/root.json" --publish --privacy-manager "$PM"
 USER=$(user 2 wallet)
 gate() { node -e '
   const { ethers } = require("ethers");
@@ -43,9 +43,9 @@ gate() { node -e '
   (async () => console.log(`${await call(pm, "hasValidWhitelistProof")} ${await call(rules, "canReceive", vsc)}`))()
     .catch((e) => { console.error(e.message); process.exit(1); });' "$RPC" "$PM" "$RULES" "$VSC" "$USER"; }
 before=$(gate); echo "before: hasValidWhitelistProof canReceive = $before"
-WHITELIST_SECRET=$(cat "$D/secret-2") WHITELIST_WALLET_KEY=$(key 2) node scripts/zk/prove-whitelist.js \
+ZK_RPC_URL=$RPC WHITELIST_SECRET=$(cat "$D/secret-2") WHITELIST_WALLET_KEY=$(key 2) node scripts/zk/prove-whitelist.js \
   --root "$D/root.json" --identity "$(user 2 onchainID)" --wallet "$USER" --out "$D/proof.json" \
-  --submit --rpc "$RPC" --privacy-manager "$PM" > "$D/stdout" 2> "$D/stderr"
+  --submit --privacy-manager "$PM" > "$D/stdout" 2> "$D/stderr"
 cat "$D/stderr"
 after=$(gate); echo "after:  hasValidWhitelistProof canReceive = $after"
 for i in 1 2 3; do

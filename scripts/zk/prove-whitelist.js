@@ -13,7 +13,7 @@
  *   node scripts/zk/prove-whitelist.js --root root.json --identity <id> \
  *        --wallet <0x..> --secret-file <path> [--out proof.json]
  *   # optional: submit it (key: env WHITELIST_WALLET_KEY)
- *        ... --submit --rpc <url> --privacy-manager <addr>
+ *        ... --submit --privacy-manager <addr>  (env ZK_RPC_URL)
  *
  * The secret comes from --secret-file or env WHITELIST_SECRET, never from
  * argv (other processes can read argv), and is never printed; one below
@@ -43,6 +43,7 @@ const {
   revertReason,
   publisherOf,
 } = require("./build-whitelist-root");
+const { guardedWallet, refuseRpcArg, rpcFromEnv } = require("./zkChain");
 
 const VKEY = path.join(
   __dirname,
@@ -137,11 +138,10 @@ async function proveWhitelist({
  * @param {{proof: string[], signals: string[]}} p.calldata
  * @param {string} p.privacyManager - address
  * @param {Object} p.signer - ethers signer of the wallet (the CLI builds it)
- * @param {string} [p.rpc] - for the printed publish command only
  * @returns {Promise<{txHash, nullifier, version, expiresAt}>}; throws
  *          unless hasValidWhitelistProof reads true afterwards
  */
-async function submitWhitelistProof({ calldata, privacyManager, signer, rpc }) {
+async function submitWhitelistProof({ calldata, privacyManager, signer }) {
   const who = await signer.getAddress();
   const bound = ethers.getAddress(
     ethers.toBeHex(BigInt(calldata.signals[2]), 20),
@@ -155,7 +155,7 @@ async function submitWhitelistProof({ calldata, privacyManager, signer, rpc }) {
   if (current === ethers.ZeroHash) {
     throw new Error(
       `no whitelist root is published yet; ${await publisherOf(pm)} publishes ${root}:\n` +
-        `  WHITELIST_OPS_KEY=... node scripts/zk/build-whitelist-root.js --in <entries.json> --publish --rpc ${rpc || "<url>"} --privacy-manager ${privacyManager}`,
+        `  ZK_RPC_URL=<url> WHITELIST_OPS_KEY=... node scripts/zk/build-whitelist-root.js --in <entries.json> --publish --privacy-manager ${privacyManager}`,
     );
   }
   if (current !== root) {
@@ -233,6 +233,7 @@ function parseArgs(argv) {
     }
     // Not echoed: a mistyped secret would land in the logs.
     if (!a.startsWith("--")) throw new Error("unexpected positional argument");
+    refuseRpcArg(a);
     const key = a.slice(2);
     if (["submit", "commitment", "new-secret", "help"].includes(key))
       args[key] = true;
@@ -243,7 +244,6 @@ function parseArgs(argv) {
         "wallet",
         "secret-file",
         "out",
-        "rpc",
         "privacy-manager",
       ].includes(key)
     ) {
@@ -257,8 +257,9 @@ function parseArgs(argv) {
 const USAGE = `Usage: node scripts/zk/prove-whitelist.js --new-secret [--out <secret file>]
        node scripts/zk/prove-whitelist.js --commitment --identity <id>
        node scripts/zk/prove-whitelist.js --root <root.json> --identity <id> --wallet <addr>
-            [--out <proof.json>] [--submit --rpc <url> --privacy-manager <addr>]
-Secret: --secret-file <path> or env WHITELIST_SECRET. Submit key: env WHITELIST_WALLET_KEY.`;
+            [--out <proof.json>] [--submit --privacy-manager <addr>]
+Secret: --secret-file <path> or env WHITELIST_SECRET. Submit key: env WHITELIST_WALLET_KEY.
+RPC: env ZK_RPC_URL or ZK_RPC_URL_FILE (never argv).`;
 
 async function main(secretBox) {
   // Proof generation logs progress with console.log; stdout carries only
@@ -290,12 +291,16 @@ async function main(secretBox) {
   let signer;
   if (args.submit) {
     const key = process.env.WHITELIST_WALLET_KEY;
-    if (!args.rpc || !args["privacy-manager"] || !key) {
+    const rpc = rpcFromEnv(process.argv.slice(2));
+    if (!rpc || !args["privacy-manager"] || !key) {
       throw new Error(
-        "--submit needs --rpc, --privacy-manager and env WHITELIST_WALLET_KEY",
+        "--submit needs env ZK_RPC_URL, --privacy-manager and env WHITELIST_WALLET_KEY",
       );
     }
-    signer = new ethers.Wallet(key, new ethers.JsonRpcProvider(args.rpc));
+    signer = await guardedWallet(
+      "WHITELIST_WALLET_KEY",
+      new ethers.JsonRpcProvider(rpc),
+    );
     if (signer.address !== walletOf(args.wallet)) {
       throw new Error(
         `WHITELIST_WALLET_KEY is for ${signer.address}, --wallet is ${walletOf(args.wallet)}`,
@@ -315,7 +320,6 @@ async function main(secretBox) {
       calldata,
       privacyManager: args["privacy-manager"],
       signer,
-      rpc: args.rpc,
     });
     console.error(`submitted (tx ${b.txHash})`);
     console.error(

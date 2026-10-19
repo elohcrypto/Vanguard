@@ -14,7 +14,7 @@
  *   # sign an attestation for an investor
  *   ATTESTOR_KEY=0x.. node scripts/zk/attest.js --sign --circuit jurisdiction \
  *        --identity <OnchainID> --country <ISO 3166-1 numeric> \
- *        --rpc <url> --privacy-manager <addr> --valid-days 365 [--out att.json]
+ *        --privacy-manager <addr> --valid-days 365 [--out att.json]  (ZK_RPC_URL)
  *        (or --valid-until <YYYY-MM-DD[THH:MM[:SS]Z]>, UTC: the expiry is required)
  *        (offline: --mask <the code's PrivacyManager.jurisdictionBit>)
  *        ... --circuit accreditation --amount <amount>
@@ -27,11 +27,11 @@
  * compliance 3), so an attestation signed for one circuit never verifies in
  * another, and the chain id and PrivacyManager address (verifierContext) it
  * is for (--chain-id and --privacy-manager, or the chain id read from
- * --rpc): PrivacyManager refuses one signed for another chain or contract
+ * ZK_RPC_URL): PrivacyManager refuses one signed for another chain or contract
  * (Task 3.8 M1). validUntil (unix seconds) is the expiry the issuer sets
  * (Task 3.10): PrivacyManager refuses the proof from then on and no record
  * outlives it; a new attestation renews. --sign refuses without one and
- * refuses a date not in the future (the chain's time with --rpc). The salt
+ * refuses a date not in the future (the chain's time with ZK_RPC_URL). The salt
  * is 31 fresh random bytes. Output, the attestation handed to the investor
  * (it carries the salt and the signature: treat it as the investor's
  * secret): { circuit, chainId, privacyManager, validUntil, identity,
@@ -44,6 +44,8 @@
 
 const crypto = require("crypto");
 const fs = require("fs");
+const { scrubKnown } = require("../production/redact");
+const { guardKey, refuseRpcArg, rpcFromEnv } = require("./zkChain");
 const { ethers } = require("ethers");
 const {
   CIRCUITS,
@@ -288,6 +290,7 @@ function parseArgs(argv) {
     }
     // Not echoed: a mistyped key would land in the logs.
     if (!a.startsWith("--")) throw new Error("unexpected positional argument");
+    refuseRpcArg(a);
     const k = a.slice(2);
     if (["new-key", "public-key", "sign", "help"].includes(k)) args[k] = true;
     else if (
@@ -296,7 +299,6 @@ function parseArgs(argv) {
         "identity",
         "mask",
         "country",
-        "rpc",
         "privacy-manager",
         "chain-id",
         "valid-until",
@@ -316,10 +318,10 @@ function parseArgs(argv) {
 const USAGE = `Usage: node scripts/zk/attest.js --new-key
        node scripts/zk/attest.js --public-key
        node scripts/zk/attest.js --sign --circuit <jurisdiction|accreditation|compliance>
-            --identity <id> --privacy-manager <addr> (--rpc <url> | --chain-id <n>)
-            (--country <iso> (needs --rpc) | --mask <m> | --amount <a> | --scores <k,a,j,acc>)
+            --identity <id> --privacy-manager <addr> (env ZK_RPC_URL | --chain-id <n>)
+            (--country <iso> (needs ZK_RPC_URL) | --mask <m> | --amount <a> | --scores <k,a,j,acc>)
             (--valid-days <n> | --valid-until <YYYY-MM-DD[THH:MM[:SS]Z]>, UTC) [--out <file>]
-Key: env ATTESTOR_KEY (0x, 32 bytes).`;
+Key: env ATTESTOR_KEY (0x, 32 bytes). RPC: env ZK_RPC_URL or ZK_RPC_URL_FILE (never argv).`;
 
 function readKey(env) {
   if (!env.ATTESTOR_KEY) throw new Error("no issuer key: set env ATTESTOR_KEY");
@@ -359,19 +361,24 @@ async function main(keyBox) {
   if (!args["privacy-manager"]) {
     throw new Error(`--privacy-manager is required\n${USAGE}`);
   }
-  const provider = args.rpc ? new ethers.JsonRpcProvider(args.rpc) : null;
+  // Task 5.17 (deep review L-4): the RPC URL is env's, never argv.
+  const rpc = rpcFromEnv(process.argv.slice(2));
+  const provider = rpc ? new ethers.JsonRpcProvider(rpc) : null;
   let chainId = args["chain-id"];
   if (provider) {
     const live = (await provider.getNetwork()).chainId;
     if (chainId !== undefined && toChainId(chainId) !== live) {
-      throw new Error(`--chain-id ${chainId} is not --rpc's chain ${live}`);
+      throw new Error(
+        `--chain-id ${chainId} is not ZK_RPC_URL's chain ${live}`,
+      );
     }
     chainId = live;
   }
   if (chainId === undefined) {
-    throw new Error("--chain-id or --rpc is required");
+    throw new Error("--chain-id or env ZK_RPC_URL is required");
   }
-  // Task 3.10: the issuer sets the expiry; the chain's time with --rpc.
+  guardKey(keyBox.value, chainId, "ATTESTOR_KEY");
+  // Task 3.10: the issuer sets the expiry; the chain's time with ZK_RPC_URL.
   const now = provider
     ? (await provider.getBlock("latest")).timestamp
     : Math.floor(Date.now() / 1000);
@@ -387,7 +394,7 @@ async function main(keyBox) {
       );
     }
     if (!provider) {
-      throw new Error("--country needs --rpc (offline: --mask)");
+      throw new Error("--country needs env ZK_RPC_URL (offline: --mask)");
     }
     const c = await countryBit({
       country: args.country,
@@ -443,7 +450,7 @@ if (require.main === module) {
       if (k && k.length >= 4) {
         msg = msg.split(k).join("<key>").split(k.slice(2)).join("<key>");
       }
-      console.error(`attest: ${msg}`);
+      console.error(`attest: ${scrubKnown(msg)}`);
       process.exit(1);
     },
   );
