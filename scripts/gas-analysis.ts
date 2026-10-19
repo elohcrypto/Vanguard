@@ -33,13 +33,16 @@ const NO_COUNTRIES: number[] = [];
 // this never replaces.
 // Task 4.17 (D43 a): B, C and refresh +2,272 per issuer checked (the
 // issuer's isActive read in isClaimValid; D, E use the cache).
+// Task 5.17 (deep review, CI LOWs): re-recorded at dd7943f (2026-10-19;
+// two runs, equal). C sat 1,350 and refresh 1,343 under the old figures,
+// so either could rise about 2,850 before the 1,500 tolerance saw it.
 const BASELINE: Record<string, bigint> = {
-  A: 96_902n,
-  B: 144_868n,
-  C: 178_682n,
-  D: 105_896n,
-  E: 135_232n,
-  refresh: 104_403n,
+  A: 96_916n,
+  B: 144_222n,
+  C: 177_332n,
+  D: 105_954n,
+  E: 135_290n,
+  refresh: 103_060n,
 };
 const TOLERANCE = 1_500n;
 
