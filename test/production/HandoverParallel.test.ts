@@ -155,6 +155,32 @@ describe("Handover parallel acceptance (Q14 = A)", function () {
     expect(text()).to.contain("Handover complete");
   });
 
+  it("a proposal a stranger executed first is done, not a failure (review L-4)", async function () {
+    await captured(out, () => runHandover(cfg, "full", cfgPath));
+    const gov = g();
+    const data = gov.interface.encodeFunctionData("setVotingCost", [
+      ethers.parseEther("11"),
+    ]);
+    const id = await Votes.proposeCall(gov, f.proposer, 4, gov, data, "t");
+    await Votes.castAcceptanceVotes(gov, id, f.voters);
+    const [p] = await gov.getProposal(id);
+    const now = (await ethers.provider.getBlock("latest"))!.timestamp;
+    await ethers.provider.send("evm_increaseTime", [
+      Number(p.executionTime) - now + 1,
+    ]);
+    await ethers.provider.send("evm_mine", []);
+    const stranger = (await ethers.getSigners())[18];
+    await (await gov.connect(stranger).executeProposal(id)).wait();
+    out.length = 0;
+    const st = await captured(out, () =>
+      Votes.settleProposal(gov.connect(f.proposer), id, "t"),
+    );
+    expect(st).to.equal(4);
+    expect(text()).to.contain(
+      `proposal #${id} already executed by ${stranger.address}`,
+    );
+  });
+
   it("a run stopped mid-vote resumes; no voter votes twice", async function () {
     let n = 0;
     Votes.castAcceptanceVotes = async (...a: any[]) => {

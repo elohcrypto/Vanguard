@@ -129,7 +129,19 @@ async function settleProposal(
     p.executionTime > p.votingEnds ? p.executionTime : p.votingEnds,
     `${label}: voting period + execution delay`,
   );
-  const [, , , canExecute] = await governance.getProposal(proposalId);
+  const [now, , , canExecute] = await governance.getProposal(proposalId);
+  // Review L-4: executeProposal is anyone's; one already executed (by
+  // whoever) is done, its effect checked by the caller's verify.
+  if (Number(now.status) === EXECUTED) {
+    const [ev] = await governance.queryFilter(
+      governance.filters.ProposalExecuted(proposalId),
+    );
+    const tx = ev && (await ev.getTransaction());
+    console.log(
+      `   ↪️  ${label}: proposal #${proposalId} already executed by ${tx ? tx.from : "someone"}`,
+    );
+    return EXECUTED;
+  }
   const fail = (code, why) =>
     Object.assign(
       new Error(`Handover: proposal #${proposalId} (${label}) ${why}`),
