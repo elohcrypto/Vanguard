@@ -188,8 +188,10 @@ jobs:
             coverage-timings.log
           retention-days: 7
 
-  # Baseline 97 lines and the per-contract floors
-  # (scripts/ci/branch-floors.json) on the shards' merged coverage.json.
+  # Baselines 97.4 lines and 91 branches, the instrumented set equal to
+  # the tracked contracts minus .solcover.js skips (coverage-merge.js),
+  # and the per-contract floors (scripts/ci/branch-floors.json) on the
+  # shards' merged coverage.json.
   coverage-merge:
     needs: coverage
     runs-on: ubuntu-latest

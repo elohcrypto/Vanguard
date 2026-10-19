@@ -14,10 +14,25 @@
 // Refused (exit 1, review L-5): another number of shard files than
 // expected, or shards that instrumented different contracts (one run on
 // another tree, or one that lost files, must not pass as the whole run).
+// Also refused (deep review M-7): an instrumented set other than the
+// tracked contracts/**/*.sol minus .solcover.js skipFiles (a contract
+// that leaves coverage fails here, not silently), a skipFiles entry that
+// reaches a contract the guard table covers (only test doubles and the
+// generated verifiers may leave: scripts/ci/guards-table.js SKIP), and
+// merged branch coverage below BRANCH_BASELINE. The line baseline is
+// scripts/ci/coverage-ratchet.sh's, on the row printed here.
 //
 //   node scripts/ci/coverage-merge.js <out.json> <expected n> <shard.json>...
+const { execFileSync } = require("child_process");
 const fs = require("fs");
+const path = require("path");
 const istanbul = require("sc-istanbul");
+
+// Deep review M-7: 91.88% merged at dd7943f (CI run 39211556945), one
+// point under it rounded down; it was ungated, and zeroing every
+// non-first arm outside the seven floored contracts (91.88 -> 56.39)
+// passed. Measured: 2026-10-19.
+const BRANCH_BASELINE = 91;
 
 const add = (into, from) => {
   for (const [k, n] of Object.entries(from || {})) into[k] = (into[k] || 0) + n;
@@ -41,6 +56,37 @@ function merge(files) {
     }
   }
   return out;
+}
+
+/**
+ * The contracts the run must instrument: `tracked` (contracts/ .sol
+ * paths) minus those under a .solcover.js skipFiles entry, matched as
+ * solidity-coverage matches them (a path prefix under contracts/).
+ * `errors` names each skipped contract `production(file)` says the
+ * guard table covers.
+ */
+function expectedContracts(tracked, skipFiles, production) {
+  const skip = skipFiles.map((s) => path.posix.join("contracts", s));
+  const skipped = (f) => skip.some((p) => f.startsWith(p));
+  const errors = tracked
+    .filter((f) => skipped(f) && production(f))
+    .map((f) => `.solcover.js skipFiles drops ${f}, a covered contract`);
+  return { want: tracked.filter((f) => !skipped(f)).sort(), errors };
+}
+
+/** What `got` (instrumented) lacks or adds against `want`. */
+function setFindings(got, want) {
+  return [
+    ...want.filter((f) => !got.includes(f)).map((f) => `${f} not instrumented`),
+    ...got.filter((f) => !want.includes(f)).map((f) => `${f} not expected`),
+  ];
+}
+
+/** The tracked contracts/ .sol files, this repo's. */
+function trackedContracts() {
+  return execFileSync("git", ["ls-files", "contracts"], { encoding: "utf8" })
+    .split("\n")
+    .filter((f) => f.endsWith(".sol"));
 }
 
 /** solidity-coverage's "All files" row for `cov`. */
@@ -80,9 +126,28 @@ if (require.main === module) {
       process.exit(1);
     }
   }
+  const { SKIP } = require("./guards-table.js");
+  const { want, errors } = expectedContracts(
+    trackedContracts(),
+    require(path.resolve(".solcover.js")).skipFiles || [],
+    (f) => !SKIP.some((re) => re.test(f)),
+  );
+  errors.push(...setFindings(keys[0], want));
+  if (errors.length) {
+    for (const e of errors) console.error(`::error::coverage merge: ${e}`);
+    process.exit(1);
+  }
   const cov = merge(files);
   fs.writeFileSync(out, JSON.stringify(cov));
   console.log(`merged ${files.length} shard(s) into ${out}`);
   console.log(summaryRow(cov));
+  const branches = istanbul.utils.summarizeCoverage(cov).branches.pct;
+  console.log(`branch coverage: ${branches}% (baseline ${BRANCH_BASELINE})`);
+  if (branches < BRANCH_BASELINE) {
+    console.error(
+      `::error::coverage merge: branch coverage ${branches}% dropped below baseline ${BRANCH_BASELINE}%`,
+    );
+    process.exit(1);
+  }
 }
-module.exports = { merge, summaryRow };
+module.exports = { merge, summaryRow, expectedContracts, setFindings };
