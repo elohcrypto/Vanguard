@@ -15,6 +15,7 @@
  */
 
 const { ethers } = require("hardhat");
+const { scrubKnown } = require("./production/redact");
 const keys = require("./demo-smoke-keys");
 const DemoState = require("../demo/core/DemoState");
 const { onboard } = require("../demo/utils/Onboard");
@@ -487,6 +488,8 @@ async function main() {
 }
 
 main().catch((e) => {
-  console.error(`\n❌ Demo smoke test errored: ${e.message.split("\n")[0]}`);
+  console.error(
+    `\n❌ Demo smoke test errored: ${scrubKnown(e.message.split("\n")[0])}`,
+  );
   process.exit(1);
 });

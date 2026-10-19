@@ -14,6 +14,7 @@
  * to test-reports/production/ (the HTML report is gone: nothing read it).
  */
 import { spawnSync } from "child_process";
+const { scrubKnown } = require("./redact");
 import * as fs from "fs";
 import * as path from "path";
 
@@ -120,7 +121,7 @@ async function main(): Promise<void> {
 
 if (require.main === module) {
   main().catch((e) => {
-    console.error(`❌ ${e.message}`);
+    console.error(`❌ ${scrubKnown(e.message)}`);
     process.exitCode = 1;
   });
 }

@@ -10,6 +10,7 @@
  */
 
 const keyLifecycle = require("../utils/KeyLifecycleFlow");
+const { scrubKnown } = require("../../scripts/production/redact");
 const keyOptions = require("../utils/KeyLifecycleOptions");
 const keyRemoval = require("../utils/KeyRemovalFlow");
 const oracleFlow = require("../utils/OracleLifecycleFlow");
@@ -451,7 +452,7 @@ class MenuSystem {
       console.log("\n❌ ERROR EXECUTING MENU OPTION");
       console.log("=".repeat(50));
       console.log(`Option: ${choice}`);
-      console.log(`Error: ${error.message}`);
+      console.log(`Error: ${scrubKnown(error.message)}`);
       console.log("\nStack trace:");
       console.log(error.stack);
       console.log("=".repeat(50));

@@ -53,7 +53,7 @@ const {
   keccak256,
 } = require("ethers");
 const { guardedServer } = require("./rpcGuard");
-const { scrub } = require("./redact");
+const { scrub, scrubKnown } = require("./redact");
 const {
   describeClaim,
   describeMessage,
@@ -428,7 +428,7 @@ if (require.main === module) {
       ? create(process.argv[3], process.argv.slice(4))
       : serve();
   run.catch((e) => {
-    console.error(`signer: ${e.message}`);
+    console.error(`signer: ${scrubKnown(e.shortMessage || e.message)}`);
     process.exit(3);
   });
 }

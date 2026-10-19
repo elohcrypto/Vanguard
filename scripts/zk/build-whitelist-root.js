@@ -32,6 +32,7 @@
  */
 
 const fs = require("fs");
+const { scrubKnown } = require("../production/redact");
 const { MerkleTreeBuilder } = require("../../utils/merkle-tree-builder");
 
 /** Depth of the whitelist_membership circuit. */
@@ -440,7 +441,9 @@ if (require.main === module) {
   main().then(
     () => process.exit(0),
     (e) => {
-      console.error(`build-whitelist-root: ${e.message}`);
+      console.error(
+        `build-whitelist-root: ${scrubKnown(e.message, [process.argv[process.argv.indexOf("--rpc") + 1]])}`,
+      );
       process.exit(1);
     },
   );

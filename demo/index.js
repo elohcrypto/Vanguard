@@ -15,6 +15,7 @@
  */
 
 const { ethers } = require("hardhat");
+const { scrubKnown } = require("../scripts/production/redact");
 const readline = require("readline");
 const path = require("path");
 
@@ -140,7 +141,7 @@ class InteractiveDemo {
       console.log("✅ Demo system initialized successfully");
       console.log("");
     } catch (error) {
-      console.error("❌ Initialization failed:", error.message);
+      console.error("❌ Initialization failed:", scrubKnown(error.message));
       throw error;
     }
   }
@@ -303,14 +304,14 @@ async function main() {
   try {
     await demo.run();
   } catch (error) {
-    console.error("❌ Demo failed:", error);
+    console.error("❌ Demo failed:", scrubKnown(error.stack || error.message));
     process.exit(1);
   }
 }
 
 // Run if executed directly
 if (require.main === module) {
-  main().catch(console.error);
+  main().catch((e) => console.error(scrubKnown(e.stack || e.message)));
 }
 
 module.exports = { InteractiveDemo };

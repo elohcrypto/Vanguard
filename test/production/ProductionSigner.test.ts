@@ -1,6 +1,8 @@
 import { expect } from "chai";
 import { ethers } from "ethers";
 import { spawnSync } from "child_process";
+import * as http from "http";
+import { AddressInfo } from "net";
 import * as fs from "fs";
 import * as os from "os";
 import * as path from "path";
@@ -200,5 +202,37 @@ describe("Production signer (scripts/production/signer.js)", function () {
     for (const k of keys) expect(r.out).to.not.contain(k.privateKey.slice(2));
     expect(r.out).to.not.contain(PASS);
     expect(r.out).to.not.contain(token);
+  });
+
+  it("a startup failure echoing the upstream's key never reaches stderr", async function () {
+    const KEY = "STARTUPKEY4455667";
+    const srv = http.createServer((req, res) => {
+      res.setHeader("content-type", "application/json");
+      res.end(
+        JSON.stringify({
+          jsonrpc: "2.0",
+          id: 1,
+          error: {
+            code: -32000,
+            message: `invalid project ${KEY} for ${req.url}`,
+          },
+        }),
+      );
+    });
+    await new Promise<void>((ok) => srv.listen(0, "127.0.0.1", ok));
+    try {
+      const url = `http://127.0.0.1:${(srv.address() as AddressInfo).port}/v3/${KEY}`;
+      const r = await runSigner("scripts/production/signer.js", {
+        SIGNER_UPSTREAM: url,
+        SIGNER_KEYSTORE_DIR: path.join(dir, "ok"),
+        SIGNER_PASSWORD_FILE: passFile,
+        SIGNER_TOKEN_FILE: path.join(dir, "token-startup"),
+      });
+      expect(r.code).to.equal(3);
+      expect(r.out).to.match(/^signer: /m);
+      expect(r.out).to.not.contain(KEY);
+    } finally {
+      srv.close();
+    }
   });
 });

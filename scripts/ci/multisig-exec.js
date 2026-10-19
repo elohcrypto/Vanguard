@@ -15,6 +15,7 @@
  *     (meta.createdFromSafeAddress); prints "executed <n> calls"
  */
 const fs = require("fs");
+const { scrubKnown } = require("../production/redact");
 const { ethers } = require("hardhat");
 const { batchProblems } = require("../../demo/utils/RoleCalls");
 
@@ -57,6 +58,6 @@ async function main() {
 }
 
 main().catch((e) => {
-  console.error(`❌ ${e.message}`);
+  console.error(`❌ ${scrubKnown(e.message)}`);
   process.exitCode = 1;
 });
