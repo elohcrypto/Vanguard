@@ -263,7 +263,6 @@ describe("rpc-check (scripts/production/rpcCheck.js)", function () {
       "token=TOK999",
       "SESS777",
       "sess=SESS777",
-      "apikey",
       "flag",
     ])
       expect(sec, want).to.include(want);
@@ -275,5 +274,27 @@ describe("rpc-check (scripts/production/rpcCheck.js)", function () {
       "SESS777",
     ])
       expect(scrub(`bad ${echoed}!`, q)).to.equal("bad <redacted>!");
+  });
+
+  it("matches any case and encoding, finds keys in composite values, spares short path words (final review L-2)", function () {
+    const { scrub } = require("../../scripts/production/redact");
+    const u1 = "https://rpc.example/api/eth/v3/AbCdEfGh1234?key=ab+KEYKEY9876";
+    const t1 = scrub(
+      "abcdefgh1234 ABCDEFGH1234 KEYKEY9876 keykey9876 via api eth v3 monkey",
+      u1,
+    );
+    expect(t1).to.equal(
+      "<redacted> <redacted> <redacted> <redacted> via api eth v3 monkey",
+    );
+    const u2 = "https://rpc.example/?k=a/b=c12345678";
+    for (const echoed of [
+      "a%2Fb%3Dc12345678",
+      "a%2fb%3dc12345678",
+      "A%2FB%3DC12345678",
+    ])
+      expect(scrub(`x ${echoed} y`, u2)).to.equal("x <redacted> y");
+    expect(
+      scrub("pw hunter2 at user", "https://user:hunter2@rpc.example/"),
+    ).to.equal("pw <redacted> at <redacted>");
   });
 });

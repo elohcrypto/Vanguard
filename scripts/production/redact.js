@@ -29,27 +29,36 @@ function redactUrl(url) {
   }
 }
 
-const decodings = (x) => {
-  const out = [x];
+/** x raw, percent-decoded, form-decoded, and re-encoded (both hex cases). */
+const forms = (x) => {
+  const out = new Set([x]);
   for (const f of [
     (y) => decodeURIComponent(y),
     (y) => decodeURIComponent(y.replace(/\+/g, " ")),
   ]) {
     try {
-      out.push(f(x));
+      out.add(f(x));
     } catch {
       // not percent-encoded text
     }
   }
-  return out;
+  for (const y of [...out]) {
+    const enc = encodeURIComponent(y);
+    out.add(enc);
+    out.add(enc.replace(/%[0-9A-F]{2}/g, (h) => h.toLowerCase()));
+  }
+  return [...out];
 };
 
 /**
  * Every secret form of `url`, longest first: the URL with and without its
- * credentials, username, password, the whole path and each segment, the
- * whole query, each &- or ;-separated part whole and as name and value,
- * the fragment; each raw, percent-decoded and form-decoded ('+' as a
- * space). Tokens under 3 characters ("v3", "1") are not secrets and stay.
+ * credentials; username, password, the whole query, each &- or ;-separated
+ * part whole and its value (names are not secrets), the fragment (3+
+ * characters); the
+ * whole path and each segment of 8+ characters (so "api", "eth", "v3"
+ * stay); and every run of 8+ letters, digits, _ or - inside any of them
+ * (a key in "ab+KEY"). Each raw, percent-decoded, form-decoded ('+' as a
+ * space) and re-encoded. Matching is case-insensitive (scrub).
  */
 function secretsOf(url) {
   const out = new Set([String(url)]);
@@ -60,31 +69,34 @@ function secretsOf(url) {
     bare.password = "";
     out.add(bare.href);
     const q = u.search.slice(1);
-    const parts = [
-      u.username,
-      u.password,
-      u.pathname,
-      u.search,
-      q,
-      u.hash.slice(1),
-    ];
-    parts.push(...u.pathname.split("/"));
+    const short = [u.username, u.password, u.search, q, u.hash.slice(1)];
     for (const kv of q.split(/[&;]/)) {
       const at = kv.indexOf("=");
-      parts.push(kv, ...(at < 0 ? [] : [kv.slice(0, at), kv.slice(at + 1)]));
+      short.push(kv, ...(at < 0 ? [] : [kv.slice(at + 1)]));
     }
-    for (const x of parts)
-      for (const y of decodings(x)) if (y && y.length >= 3) out.add(y);
+    const long = [u.pathname, ...u.pathname.split("/")];
+    const add = (x, min) => {
+      for (const y of forms(x)) {
+        if (y && y.length >= min) out.add(y);
+        for (const run of y.match(/[A-Za-z0-9_-]{8,}/g) || []) out.add(run);
+      }
+    };
+    for (const x of short) add(x, 3);
+    for (const x of long) add(x, 8);
   } catch {
     // unparsable: the whole string only
   }
   return [...out].sort((a, b) => b.length - a.length);
 }
 
-/** `text` with every secret of `url` redacted, then capped at `max`. */
+const escape = (x) => x.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+
+/** `text` with every secret of `url` redacted (any case), then capped. */
 function scrub(text, url, max = Infinity) {
   let t = String(text);
-  if (url) for (const x of secretsOf(url)) t = t.split(x).join("<redacted>");
+  if (url)
+    for (const x of secretsOf(url))
+      t = t.replace(new RegExp(escape(x), "gi"), "<redacted>");
   return t.length > max ? `${t.slice(0, max)}...` : t;
 }
 
