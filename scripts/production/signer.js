@@ -56,7 +56,14 @@ const {
   keccak256,
 } = require("ethers");
 const { guardedServer } = require("./rpcGuard");
-const { promptMode, signedStore } = require("./signerState");
+const {
+  clears,
+  differs,
+  fieldsOf,
+  promptMode,
+  signedStore,
+} = require("./signerState");
+const { HELP, create, forgetCmd } = require("./signerCommands");
 const { fetchTarget, scrub, scrubData, scrubKnown } = require("./redact");
 const {
   describeClaim,
@@ -132,23 +139,6 @@ async function loadKeys(dir, pass) {
     out.push({ name: f.replace(/\.json$/, ""), wallet: w });
   }
   return out;
-}
-
-/** `new <dir> <name>...`: fresh keys, encrypted, 0600, addresses printed. */
-async function create(dir, names) {
-  if (!dir || !names.length)
-    throw new Error("usage: signer.js new <dir> <name>...");
-  fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
-  const pass = await password("password for the new keystores: ");
-  if (pass.length < 12)
-    throw new Error("use a password of 12 or more characters");
-  for (const name of names) {
-    const file = path.join(dir, `${name}.json`);
-    if (fs.existsSync(file)) throw new Error(`${file} exists; not overwritten`);
-    const w = Wallet.createRandom();
-    fs.writeFileSync(file, await w.encrypt(pass), { mode: 0o600, flag: "wx" });
-    console.log(`${name} ${w.address}`);
-  }
 }
 
 /** The upstream's chain id: Sepolia, or 31337 with SIGNER_TEST=1. */
@@ -268,23 +258,40 @@ async function serve() {
       );
       const slot = `${w.address}:${full.nonce}`;
       const before = byNonce.get(slot);
-      if (before && before.unsigned !== d.unsigned) {
-        throw new Error(
-          `nonce ${full.nonce} of ${w.address} was already signed for another transaction: refused`,
-        );
+      // Slice B review M-1: a recorded nonce takes the same transaction
+      // again (re-broadcast while its fee clears, else a fee bump), never
+      // another (signerState.js differs).
+      let raw = null;
+      let shown = d;
+      let kind = "send";
+      if (before) {
+        const why = differs(before.raw, req, chain, w.address);
+        if (why)
+          throw new Error(
+            `nonce ${full.nonce} of ${w.address} was already signed for another transaction (${why}): refused`,
+          );
+        if (await clears(before.raw, provider)) {
+          const t = fieldsOf(before.raw);
+          shown = describeTx(
+            t,
+            chain,
+            t.to ? await provider.getCode(t.to) : "0x",
+          );
+          raw = before.raw;
+        } else kind = `fee bump of nonce ${full.nonce}, same transaction`;
       }
       approve(
         req.nonce === undefined
           ? null
           : ["tx", w.address, req.nonce, req.to, String(req.value), req.data],
-        "send",
-        d,
+        kind,
+        shown,
       );
-      const raw = before ? before.raw : await w.signTransaction(full);
-      if (Transaction.from(raw).unsignedHash !== d.unsigned) {
+      raw ??= await w.signTransaction(full);
+      if (Transaction.from(raw).unsignedHash !== shown.unsigned) {
         throw new Error("the signed transaction is not the one shown: refused");
       }
-      byNonce.set(slot, { unsigned: d.unsigned, raw });
+      byNonce.set(slot, { unsigned: shown.unsigned, raw });
       const sent = await provider.broadcastTransaction(raw);
       signed++;
       return sent.hash;
@@ -449,10 +456,15 @@ async function serve() {
 module.exports = { privateFile, loadKeys, guardChain, PUBLISHED, SEPOLIA };
 
 if (require.main === module) {
+  const [cmd, a, b, c] = process.argv.slice(2);
   const run =
-    process.argv[2] === "new"
-      ? create(process.argv[3], process.argv.slice(4))
-      : serve();
+    cmd === "new"
+      ? create(a, process.argv.slice(4), password)
+      : cmd === "forget"
+        ? forgetCmd(a, b, c)
+        : cmd === "help" || cmd === "--help"
+          ? Promise.resolve(console.log(HELP))
+          : serve();
   run.catch((e) => {
     console.error(`signer: ${scrubKnown(e.shortMessage || e.message)}`);
     process.exit(3);

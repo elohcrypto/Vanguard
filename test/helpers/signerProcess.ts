@@ -12,6 +12,9 @@ import { AddressInfo } from "net";
  */
 export async function fakeUpstream(chain: number, code = "0x") {
   const raws: string[] = [];
+  // Task 5.17 (slice B review M-1): `fault.raw` broadcasts answer a rate
+  // limit before one is accepted; `fault.baseFee` is the latest base fee.
+  const fault = { raw: 0, baseFee: "0x3b9aca00" };
   const H = `0x${"11".repeat(32)}`;
   const answers: Record<string, (p: any[]) => unknown> = {
     eth_chainId: () => ethers.toQuantity(chain),
@@ -30,7 +33,7 @@ export async function fakeUpstream(chain: number, code = "0x") {
       gasUsed: "0x0",
       miner: ethers.ZeroAddress,
       extraData: "0x",
-      baseFeePerGas: "0x3b9aca00",
+      baseFeePerGas: fault.baseFee,
       timestamp: "0x1",
       transactions: [],
     }),
@@ -44,19 +47,25 @@ export async function fakeUpstream(chain: number, code = "0x") {
   };
   let echoed: string | null = null;
   const one = (c: any) =>
-    echoed !== null && c.method === "eth_getLogs"
-      ? { jsonrpc: "2.0", id: c.id, error: { code: -32000, message: echoed } }
-      : answers[c.method]
-        ? {
-            jsonrpc: "2.0",
-            id: c.id,
-            result: answers[c.method](c.params || []),
-          }
-        : {
-            jsonrpc: "2.0",
-            id: c.id,
-            error: { code: -32601, message: `no ${c.method}` },
-          };
+    c.method === "eth_sendRawTransaction" && fault.raw > 0 && fault.raw--
+      ? {
+          jsonrpc: "2.0",
+          id: c.id,
+          error: { code: -32005, message: "rate limit exceeded (fault)" },
+        }
+      : echoed !== null && c.method === "eth_getLogs"
+        ? { jsonrpc: "2.0", id: c.id, error: { code: -32000, message: echoed } }
+        : answers[c.method]
+          ? {
+              jsonrpc: "2.0",
+              id: c.id,
+              result: answers[c.method](c.params || []),
+            }
+          : {
+              jsonrpc: "2.0",
+              id: c.id,
+              error: { code: -32601, message: `no ${c.method}` },
+            };
   const server = http.createServer((req, res) => {
     let body = "";
     req.on("data", (c) => (body += c));
@@ -70,7 +79,7 @@ export async function fakeUpstream(chain: number, code = "0x") {
   const url = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
   /** From now on eth_getLogs answers an error with `text`. */
   const echo = (text: string) => void (echoed = text);
-  return { server, raws, url, echo };
+  return { server, raws, url, echo, fault };
 }
 
 export type Live = { url: string; port: number; token: string };
