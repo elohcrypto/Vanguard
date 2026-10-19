@@ -418,4 +418,56 @@ describe("Post-ceremony votes (D50 rotation, attestor re-approval)", function ()
       /13 deployer-era nodes; more than 12 cannot be checked/,
     );
   });
+
+  it("a re-run after a kill during the cancel vote settles that vote first (final review L-1)", async function () {
+    await ceremony();
+    const { o, voters } = await derive();
+    const args = {
+      governance: o.governance,
+      proposer: f.proposer,
+      voters: f.voters,
+      log: () => {},
+    };
+    const one = await roundOneItems(o, parseNodes(await NEW()), cfg, voters);
+    await Votes.settleAll({
+      ...args,
+      open: await Votes.openAll({ ...args, items: one }),
+    });
+    const open = await Votes.openAll({
+      ...args,
+      items: await roundTwoItems(o, parseNodes(await NEW())),
+    });
+    const om = f.c.oracleManager;
+    for (const x of await addrs([13, 14]))
+      await byVote(
+        f,
+        2,
+        om,
+        om.interface.encodeFunctionData("removeOracle", [x, "test"]),
+      );
+    await Votes.settleAll({ ...args, open }).catch(() => undefined);
+    const realSettle = Votes.settleProposal;
+    Votes.settleProposal = async (...a: any[]) => {
+      if (/cancel hazardous/.test(a[2])) throw new Error("killed");
+      return realSettle(...a);
+    };
+    try {
+      await expect(
+        cancelHazards(o, f.proposer, f.voters, open, () => {}),
+      ).to.be.rejectedWith(/killed/);
+    } finally {
+      Votes.settleProposal = realSettle;
+    }
+    out.length = 0;
+    await expect(
+      captured(out, () => runPostCeremony(o, f.proposer, f.voters, [], cfg)),
+    ).to.be.rejectedWith(/would remain/);
+    expect(out.join("\n")).to.match(
+      /cancel hazardous removal #\d+: proposal #\d+ already open; adopted/,
+    );
+    const st = [];
+    for (const x of open)
+      st.push(Number((await f.c.governance.getProposal(x.id))[0].status));
+    expect(st.filter((x) => x === 5).length).to.be.greaterThan(0);
+  });
 });

@@ -300,13 +300,45 @@ export async function roundTwoItems(o: any, nodes: any[]) {
       "D50 rotation after the ceremony",
     ]),
     // Read just before this CLI executes it: the nodes then registered.
-    precheck: async () => {
-      const now = await om.getRegisteredOracles();
-      const left = now.filter((a: string) => !same(a, n.addr));
-      const no = await setRefusal(o, left, await nodeFacts(o));
-      if (no) throw new Error(`removing ${n.addr} now: ${no}; not executed`);
-    },
+    precheck: removalPrecheck(o, n.addr),
   }));
+}
+
+/** Throws when removing `node` now would leave an invalid node set. */
+function removalPrecheck(o: any, node: string) {
+  return async () => {
+    const now = await o.oracleManager.getRegisteredOracles();
+    const left = now.filter((a: string) => !same(a, node));
+    const no = await setRefusal(o, left, await nodeFacts(o));
+    if (no) throw new Error(`removing ${node} now: ${no}; not executed`);
+  };
+}
+
+/**
+ * Review L-1 (final): this proposer's open removeOracle proposals, as
+ * items cancelHazards can judge, so a re-run after a kill during a
+ * cancel vote adopts and settles that vote before anything else.
+ */
+async function openRemovals(o: any, proposer: any) {
+  const gov = o.governance;
+  const om = o.oracleManager;
+  const me = await addrOf(proposer);
+  const target = await addrOf(om);
+  const sel = om.interface.getFunction("removeOracle").selector;
+  const out = [];
+  for (let id = 1; id <= Number(await gov.proposalCount()); id++) {
+    const [p] = await gov.getProposal(id);
+    if (
+      Number(p.status) !== 1 ||
+      !same(p.proposer, me) ||
+      !same(p.target, target)
+    )
+      continue;
+    if (!String(p.callData).startsWith(sel)) continue;
+    const [node] = om.interface.decodeFunctionData("removeOracle", p.callData);
+    out.push({ id, precheck: removalPrecheck(o, node) });
+  }
+  return out;
 }
 
 /** The handover.json snapshot's chain is the connected one. */
@@ -332,6 +364,14 @@ export async function runPostCeremony(
   log = console.log,
 ) {
   const args = { governance: o.governance, proposer, voters, log };
+  // A hazard left by a stopped run is settled first (final review L-1).
+  await cancelHazards(
+    o,
+    proposer,
+    voters,
+    await openRemovals(o, proposer),
+    log,
+  );
   const one = await roundOneItems(o, nodes, cfg, [proposer, ...voters]);
   if (one.length) {
     await Votes.checkVoters(o, proposer, voters, one.length);
