@@ -24,6 +24,7 @@ import * as fs from "fs";
 import { ethers, network } from "hardhat";
 
 import { checkWallets } from "./walletPins";
+import { validateHandoverConfig } from "../handoverConfig";
 import { guardDeployer } from "./cliGuards";
 
 const { awaitSettledNonces } = require("../../demo/utils/PendingNonces");
@@ -63,6 +64,10 @@ export async function onboardVoters(
   cfg: any,
   log: (m: string) => void = console.log,
 ): Promise<number> {
+  // Slice D review INFO-4: the handover config's own checks first (wallet
+  // 0, the deployer, as proposer or voter is refused there), as the
+  // ceremony runs them.
+  validateHandoverConfig(cfg, "preflight", "handover.json");
   if (!rec.complete) throw new Error("the deploy record is not complete");
   const chainId = Number((await ethers.provider.getNetwork()).chainId);
   if (rec.chainId !== chainId) {

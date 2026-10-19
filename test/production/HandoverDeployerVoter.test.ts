@@ -43,6 +43,16 @@ describe("Handover config: the deployer never votes (L-3)", function () {
       } finally {
         (ethers as any).getSigners = real;
       }
+      // Slice D review INFO-4: voter onboarding refuses it first too.
+      const {
+        onboardVoters,
+      } = require("../../scripts/production/onboardVoters");
+      const keepV = cfg.voters;
+      cfg.voters = [0, ...keepV];
+      await expect(
+        onboardVoters({ complete: true }, cfg, () => {}),
+      ).to.be.rejectedWith(byIndex);
+      cfg.voters = keepV;
       // The config as written passes.
       await handoverArgs(cfg, "full", cfgPath);
     } finally {
