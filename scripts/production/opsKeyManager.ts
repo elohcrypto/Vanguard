@@ -196,13 +196,16 @@ export async function authorizeKeyManagerOnOps(
   }
   const id = await ethers.getContractAt("OnchainID", opsIdentity);
   const idOwner: string = await id.owner();
+  // Slice C review L-4 and slice D review LOW-3: only ops owns the ops
+  // identity, an external ops (its multisig) or a key this signer holds;
+  // the deployer only until it transfers it. Another role (the
+  // issuer-admin multisig, the guardian's key) would sign "ops" steps.
+  const is = (a: string) => idOwner.toLowerCase() === a.toLowerCase();
+  if (roles && !is(roles.ops) && !is(deployer.address))
+    throw new Error(
+      `ops identity ${opsIdentity} is owned by ${idOwner}, not ops ${roles.ops}: name the ops OnchainID (OPS_IDENTITY)`,
+    );
   if (roles?.isExternal(idOwner)) {
-    // Slice C review L-4: another external role (the issuer-admin
-    // multisig) owning it would sign "ops" steps it is not.
-    if (idOwner.toLowerCase() !== roles.ops.toLowerCase())
-      throw new Error(
-        `ops identity ${opsIdentity} is owned by ${idOwner}, not ops ${roles.ops}: name the ops OnchainID (OPS_IDENTITY)`,
-      );
     // A pin to another manager is refused before anything is exported.
     const pinned: string = await id.recoveryManager();
     if (

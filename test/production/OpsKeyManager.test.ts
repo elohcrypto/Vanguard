@@ -138,4 +138,37 @@ describe("opsKeyManager: pending calls (Task 4.16)", function () {
     );
     expect(exported).to.equal(false);
   });
+
+  // Slice D review LOW-3: a plain key of another role is refused too;
+  // the deployer passes (it owns the identity until it transfers it).
+  it("an identity owned by another plain role key is refused; the deployer's passes", async function () {
+    const { deployer, ops, km, OnchainID } = await deploy();
+    const [, , guardian] = await ethers.getSigners();
+    const roles = {
+      ops: ops.address,
+      isExternal: () => false, // every role a key this signer holds
+      opsIdentity: async () => {},
+    };
+    const id = await OnchainID.deploy(guardian.address);
+    await expect(
+      authorizeKeyManagerOnOps(km, deployer, await id.getAddress(), {}, roles),
+    ).to.be.rejectedWith(
+      `ops identity ${await id.getAddress()} is owned by ${guardian.address}, not ops ${ops.address}`,
+    );
+    const mine = await OnchainID.deploy(deployer.address);
+    const quiet = console.log;
+    console.log = () => {};
+    try {
+      const r = await authorizeKeyManagerOnOps(
+        km,
+        deployer,
+        await mine.getAddress(),
+        {},
+        roles,
+      );
+      expect(r).to.deep.include({ authorized: true, pending: null });
+    } finally {
+      console.log = quiet;
+    }
+  });
 });
