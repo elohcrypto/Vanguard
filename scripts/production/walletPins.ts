@@ -120,7 +120,7 @@ export function checkWallets(
       }
       if (!got || !same(got, pin)) {
         throw new Error(
-          `${path}: wallet ${i} (${roles.join(", ")}) is ${got ?? "missing"} but "accounts" pins ${ethers.getAddress(pin)}: the signer's keystores changed (a file added, removed or renamed?); refusing before any send`,
+          `${path}: wallet ${i} (${roles.join(", ")}) is ${got ?? "missing"} but "accounts" pins ${ethers.getAddress(pin)}: the signer's keystores changed (a file added, removed or renamed?); refusing before any send. Name new keystores so they sort after the pinned ones (signer.js orders them by file name), or re-pin "accounts" (deployHandover.ts pinsFor) once the new order is the intended one`,
         );
       }
     }
