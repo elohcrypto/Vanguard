@@ -24,10 +24,47 @@
  *  - live gas: eth_gasPrice, eth_maxPriorityFeePerGas, the base fee.
  * Exits 1 when a URL fails the chain or archive check, or no getLogs range
  * works; the rest is information for the runbook's logChunk and budget.
+ * URLs are printed as scheme://host/... only (redactUrl), and an error
+ * text that echoes the URL or its key is scrubbed: provider keys live in
+ * the URL.
  */
 "use strict";
 
 const { RANGE_ERROR, isTransient } = require("../../demo/utils/RpcRetry");
+
+/**
+ * `url` safe to print: scheme://host[:port]/... only. Provider URLs carry
+ * API keys in the userinfo, the path or the query string; none of those
+ * is ever printed, logged or written. An unparsable URL is "(rpc)".
+ */
+function redactUrl(url) {
+  try {
+    const u = new URL(String(url));
+    const rest = u.pathname.length > 1 || u.search || u.hash ? "/..." : "";
+    return `${u.protocol}//${u.host}${rest}`;
+  } catch {
+    return "(rpc)";
+  }
+}
+
+/** `text` with every occurrence of `url` (and its parts) redacted. */
+function scrub(text, url) {
+  let t = String(text);
+  try {
+    const u = new URL(String(url));
+    const secrets = [
+      url,
+      u.username,
+      u.password,
+      u.pathname.slice(1),
+      u.search.slice(1),
+    ].filter((x) => x && x.length >= 6);
+    for (const x of secrets) t = t.split(x).join("<redacted>");
+  } catch {
+    t = t.split(String(url)).join("<redacted>");
+  }
+  return t;
+}
 
 let nextId = 1;
 /** One JSON-RPC call to `url`: { result } or { error: text, status }. */
@@ -50,13 +87,19 @@ async function call(url, method, params = []) {
     }
     if (body.error) {
       return {
-        error: `${body.error.code ?? ""} ${body.error.message ?? ""}`.trim(),
+        error: scrub(
+          `${body.error.code ?? ""} ${body.error.message ?? ""}`.trim(),
+          url,
+        ),
         status: r.status,
       };
     }
     return { result: body.result, status: r.status };
   } catch (e) {
-    return { error: `${e.message} (${e.cause?.code ?? "no code"})`, status: 0 };
+    return {
+      error: scrub(`${e.message} (${e.cause?.code ?? "no code"})`, url),
+      status: 0,
+    };
   }
 }
 
@@ -65,7 +108,7 @@ const gwei = (w) => `${(Number(BigInt(w)) / 1e9).toFixed(3)} gwei`;
 
 /** Every check for `url`; { lines, ok }. */
 async function checkUrl(url, opts = {}) {
-  const lines = [`RPC ${url}`];
+  const lines = [`RPC ${redactUrl(url)}`];
   let ok = true;
   const say = (pass, text) => {
     lines.push(`   ${pass === null ? "ℹ️ " : pass ? "✅" : "❌"} ${text}`);
@@ -180,4 +223,4 @@ async function main(argv) {
 if (require.main === module) {
   main(process.argv.slice(2)).then((c) => (process.exitCode = c));
 }
-module.exports = { checkUrl, call };
+module.exports = { checkUrl, call, redactUrl, scrub };

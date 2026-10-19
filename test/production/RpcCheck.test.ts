@@ -2,7 +2,8 @@ import { expect } from "chai";
 import * as http from "http";
 import { AddressInfo } from "net";
 
-const { checkUrl } = require("../../scripts/production/rpcCheck");
+const rpcCheck = require("../../scripts/production/rpcCheck");
+const { checkUrl } = rpcCheck;
 
 /**
  * Task 5.15 (owner Q18 = B): scripts/production/rpcCheck.js against two
@@ -120,6 +121,43 @@ describe("rpc-check (scripts/production/rpcCheck.js)", function () {
       );
     } finally {
       f.s.close();
+    }
+  });
+
+  it("never prints a URL's credentials, path token or query key", async function () {
+    const { redactUrl } = rpcCheck;
+    expect(
+      redactUrl(
+        "https://user:s3cretpass@eth.example:8443/v3/abcdef123456?key=QK999999#x",
+      ),
+    ).to.equal("https://eth.example:8443/...");
+    expect(redactUrl("http://127.0.0.1:8545")).to.equal(
+      "http://127.0.0.1:8545",
+    );
+    expect(redactUrl("not a url")).to.equal("(rpc)");
+    // A provider that echoes the URL and key in its error.
+    const key = "PATHKEY0123456789";
+    const s = http.createServer((req, res) => {
+      res.setHeader("content-type", "application/json");
+      res.end(
+        JSON.stringify({
+          jsonrpc: "2.0",
+          id: 1,
+          error: { code: -32000, message: `bad key ${key} for ${req.url}` },
+        }),
+      );
+    });
+    await new Promise<void>((ok) => s.listen(0, "127.0.0.1", ok));
+    try {
+      const url = `http://u:hunter2pass@127.0.0.1:${(s.address() as AddressInfo).port}/v3/${key}?apikey=QUERYKEY42`;
+      const r = await checkUrl(url, {});
+      const t = r.lines.join("\n");
+      for (const secret of [key, "hunter2pass", "QUERYKEY42", "/v3/"])
+        expect(t, secret).to.not.contain(secret);
+      expect(t).to.match(/^RPC http:\/\/127\.0\.0\.1:\d+\/\.\.\./);
+      expect(t).to.contain("<redacted>");
+    } finally {
+      s.close();
     }
   });
 });
