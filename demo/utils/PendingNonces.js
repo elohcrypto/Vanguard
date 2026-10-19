@@ -59,7 +59,7 @@ async function awaitSettledNonces(senders, what, opts = {}) {
       .join(", ");
     if ((Date.now() - t0) / 1000 >= timeoutS) {
       throw new Error(
-        `${what}: transactions still pending after ${timeoutS} s from ${list}; refusing to read the chain and send beside them (a re-run would duplicate them): wait for them to mine or drop, then re-run`,
+        `${what}: transactions still pending after ${timeoutS} s from ${list}; refusing to read the chain and send beside them (a re-run would duplicate them). Stuck at too low a fee? The production signer sends each again with higher fees: ${busy.map((b) => `node scripts/production/signer.js bump ${b.address} ${b.latest} [port]`).join("; ")}; then re-run`,
       );
     }
     if (!told) {

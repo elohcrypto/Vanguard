@@ -54,6 +54,7 @@ const OWN = [
   "personal_sign",
   "eth_sign",
   "vanguard_signClaim",
+  "vanguard_bump",
 ];
 
 /** Refuse anything but this user's own plain file or dir, no group/other bits. */

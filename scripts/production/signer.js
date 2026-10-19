@@ -56,11 +56,12 @@ const {
   clears,
   differs,
   regas,
+  raisedFees,
   fieldsOf,
   promptMode,
   signedStore,
 } = require("./signerState");
-const { HELP, create, forgetCmd } = require("./signerCommands");
+const { HELP, create, forgetCmd, bumpCmd } = require("./signerCommands");
 const {
   PUBLISHED,
   SEPOLIA,
@@ -226,6 +227,39 @@ async function serve() {
       return sent.hash;
     });
   }
+  /**
+   * Slice C review L-5 (`signer.js bump`): the transaction recorded at
+   * `nonce` of `address`, stuck in the mempool, signed again with higher
+   * fees (signerState.js raisedFees) and sent: the same transaction.
+   */
+  function bump(address, nonce) {
+    const w = holder(address);
+    return inTurn(async () => {
+      const slot = `${w.address}:${nonce}`;
+      const before = byNonce.get(slot);
+      if (!before)
+        throw new Error(
+          `no transaction recorded at nonce ${nonce} of ${w.address}: nothing to bump`,
+        );
+      const t = fieldsOf(before.raw);
+      delete t.from;
+      Object.assign(t, raisedFees(before.raw, await provider.getFeeData()));
+      const shown = describeTx(
+        { ...t, from: w.address },
+        chain,
+        t.to ? await provider.getCode(t.to) : "0x",
+      );
+      approve(
+        ["bump", w.address, nonce],
+        `fee bump of nonce ${nonce}, same transaction (signer.js bump)`,
+        shown,
+      );
+      const raw = await w.signTransaction(t);
+      byNonce.set(slot, { unsigned: Transaction.from(raw).unsignedHash, raw });
+      signed++;
+      return (await provider.broadcastTransaction(raw)).hash;
+    });
+  }
   function signMessage(address, data) {
     const w = holder(address);
     return inTurn(async () => {
@@ -305,6 +339,7 @@ async function serve() {
     personal_sign: (p) => signMessage(p[1], p[0]),
     eth_sign: (p) => signMessage(p[0], p[1]),
     vanguard_signClaim: (p) => signClaim(p[0], p[1]),
+    vanguard_bump: (p) => bump(p[0], Number(p[1])),
   };
   /** Any other call goes upstream as it came; a failure keeps its words. */
   async function forward(call) {
@@ -391,9 +426,11 @@ if (require.main === module) {
       ? create(a, process.argv.slice(4), password)
       : cmd === "forget"
         ? forgetCmd(a, b, c)
-        : cmd === "help" || cmd === "--help"
-          ? Promise.resolve(console.log(HELP))
-          : serve();
+        : cmd === "bump"
+          ? bumpCmd(a, b, c)
+          : cmd === "help" || cmd === "--help"
+            ? Promise.resolve(console.log(HELP))
+            : serve();
   run.catch((e) => {
     console.error(`signer: ${scrubKnown(e.shortMessage || e.message)}`);
     process.exit(3);

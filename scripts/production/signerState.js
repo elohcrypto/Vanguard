@@ -161,6 +161,30 @@ async function clears(raw, provider) {
 }
 
 /**
+ * Slice C review L-5: the fees of a replacement for recorded `raw` (stuck
+ * in the mempool): each at least 1/8 above the recorded one (nodes
+ * replace a pending transaction only for a 10% higher fee) and at least
+ * the market's `fee` (provider.getFeeData()).
+ */
+function raisedFees(raw, fee) {
+  const { Transaction } = require("ethers");
+  const t = Transaction.from(raw);
+  const up = (old, market) => {
+    const x = (BigInt(old ?? 0) * 9n) / 8n + 1n;
+    return market != null && BigInt(market) > x ? BigInt(market) : x;
+  };
+  return t.maxFeePerGas != null
+    ? {
+        maxFeePerGas: up(t.maxFeePerGas, fee.maxFeePerGas),
+        maxPriorityFeePerGas: up(
+          t.maxPriorityFeePerGas,
+          fee.maxPriorityFeePerGas,
+        ),
+      }
+    : { gasPrice: up(t.gasPrice, fee.gasPrice) };
+}
+
+/**
  * `forget <address> <nonce>`: drop that entry (on every chain) from the
  * record at `file`; returns the keys removed.
  */
@@ -182,6 +206,7 @@ module.exports = {
   signedStore,
   differs,
   regas,
+  raisedFees,
   clears,
   fieldsOf,
   forget,
