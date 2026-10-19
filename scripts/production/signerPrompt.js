@@ -16,10 +16,12 @@
  *    Below it, always: to (checksummed), value in ETH and wei, nonce, gas,
  *    chain, and keccak256(data) with its length, so a decoding cannot
  *    hide what is signed.
- *  - SIGNER_PROMPT=1 asks on the controlling terminal (/dev/tty), never
- *    stdin, and approves only on the exact token printed (the last four
+ *  - The prompt asks on the controlling terminal (/dev/tty), never
+ *    stdin, and approves only on the exact token printed (the last six
  *    hex digits of the unsigned transaction's hash, or of the signer and
- *    the message's EIP-191 hash); input typed ahead is discarded.
+ *    the message's EIP-191 hash); input typed ahead is discarded, a
+ *    partial line included. Off the dev chain asking is the default
+ *    (signerState.js promptMode).
  */
 "use strict";
 

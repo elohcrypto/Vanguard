@@ -150,3 +150,12 @@ config/mainnet.json
 # (scripts/production/DeployProduction.ts); a public chain's record is
 # committed on purpose.
 deployments/31337.*
+
+# Task 5.17 (deep review L-7): a production deploy's transient files: the
+# record's lock (deployRecordFile.ts), atomic-write temporaries
+# (<file>.tmp-<pid>) and the Safe batches exported for a multisig's owners
+# (*.ops-transactions.json, *.issuer-admin-transactions.json).
+deployments/*.lock
+*.tmp-[0-9]*
+*.ops-transactions.json
+*.issuer-admin-transactions.json
