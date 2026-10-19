@@ -22,6 +22,7 @@
 
 const { HDNodeWallet, JsonRpcProvider, Mnemonic, getBytes } = require("ethers");
 const { guardedServer } = require("../production/rpcGuard");
+const { redactUrl, scrub } = require("../production/redact");
 
 const port = Number(process.argv[2] || 8549);
 const upstream = process.env.SIGNER_UPSTREAM;
@@ -73,7 +74,11 @@ async function forward(call) {
     headers: { "content-type": "application/json" },
     body: JSON.stringify(call),
   });
-  return r.json();
+  const out = await r.json();
+  // Task 5.15: the upstream's error text may echo its URL's key.
+  if (out && out.error && out.error.message)
+    out.error.message = scrub(out.error.message, upstream, 240);
+  return out;
 }
 
 /** personal_sign [data, address] / eth_sign [address, data] (claims). */
@@ -99,6 +104,7 @@ async function answer(call) {
     return { jsonrpc: "2.0", id, result };
   } catch (e) {
     const err = e.info?.error || { message: e.shortMessage || e.message };
+    err.message = scrub(err.message, upstream, 240);
     return {
       jsonrpc: "2.0",
       id,
@@ -114,11 +120,12 @@ const HARDHAT_PHRASE =
 async function guardChain() {
   const r = await forward({ jsonrpc: "2.0", id: 1, method: "eth_chainId" });
   const chain = Number(r.result);
-  if (!r.result) throw new Error(`upstream ${upstream}: no chain id`);
+  if (!r.result)
+    throw new Error(`upstream ${redactUrl(upstream)}: no chain id`);
   const allowed = process.env.SIGNER_ALLOW_CHAIN;
   if (chain !== 31337 && String(chain) !== String(allowed ?? "").trim()) {
     throw new Error(
-      `upstream ${upstream} is chain ${chain}: this test signer serves only 31337 (set SIGNER_ALLOW_CHAIN=${chain} to allow it; a deployment uses scripts/production/signer.js)`,
+      `upstream ${redactUrl(upstream)} is chain ${chain}: this test signer serves only 31337 (set SIGNER_ALLOW_CHAIN=${chain} to allow it; a deployment uses scripts/production/signer.js)`,
     );
   }
   const words = phrase.trim().toLowerCase().split(/\s+/).join(" ");
@@ -133,7 +140,9 @@ async function guardChain() {
 guardChain()
   .then(serve)
   .catch((e) => {
-    console.error(`remote signer: ${e.shortMessage || e.message}`);
+    console.error(
+      `remote signer: ${scrub(e.shortMessage || e.message, upstream)}`,
+    );
     process.exit(3);
   });
 
@@ -185,7 +194,7 @@ async function serve(chain) {
     extra: (m) => /^(evm_|hardhat_)/.test(m),
   });
   console.log(
-    `remote signer on 127.0.0.1:${at}: ${wallets.length} keys, upstream ${upstream} (chain ${chain}); token in ${tokenFile}`,
+    `remote signer on 127.0.0.1:${at}: ${wallets.length} keys, upstream ${redactUrl(upstream)} (chain ${chain}); token in ${tokenFile}`,
   );
 }
 process.on("SIGTERM", () => {

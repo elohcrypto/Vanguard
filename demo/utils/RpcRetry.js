@@ -62,8 +62,18 @@ const same = (a, b) =>
 const big = (x) => BigInt(x ?? 0);
 const hexData = (tx) => String(tx.data ?? tx.input ?? "0x").toLowerCase();
 
+/** The URL of the network hardhat runs on, if any (never printed). */
+function hardhatUrl() {
+  try {
+    return require("hardhat").network.config.url;
+  } catch {
+    return undefined;
+  }
+}
+
 /**
- * Hook `provider` (request and send). Options: retries (6), baseMs (500),
+ * Hook `provider` (request and send). Options: url (scrubbed from log
+ * lines; default the hardhat network's), retries (6), baseMs (500),
  * maxMs (30000), waitMs (600000: how long a sent nonce may take to mine
  * before an adoption gives up), log, sleep. Returns the uninstaller.
  */
@@ -72,7 +82,13 @@ function installRetry(provider, opts = {}) {
   const baseMs = opts.baseMs ?? 500;
   const maxMs = opts.maxMs ?? 30000;
   const waitMs = opts.waitMs ?? 600000;
-  const log = opts.log ?? console.log;
+  // Retry lines carry provider error text, which may echo the RPC URL's
+  // API key: scrubbed of every form of the URL (scripts/production/
+  // redact.js), the connected network's own by default.
+  const url = opts.url ?? hardhatUrl();
+  const { scrub } = require("../../scripts/production/redact");
+  const print = opts.log ?? console.log;
+  const log = (m) => print(scrub(m, url));
   const sleep = opts.sleep ?? ((ms) => new Promise((ok) => setTimeout(ok, ms)));
   const p = provider;
   const request = p.request.bind(p);

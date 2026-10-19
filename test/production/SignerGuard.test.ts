@@ -129,6 +129,32 @@ describe("Signer request guard (rpcGuard.js)", function () {
   });
 
   for (const [script, envOf] of SIGNERS) {
+    it(`${path.basename(script)}: an upstream error echoing its URL's key reaches no client or log`, async function () {
+      const KEY = "UPSTREAMKEY7788";
+      const up = await fakeUpstream(31337);
+      // The same fake, reached through a path and query that carry the key.
+      const url = `${up.url}/v3/${KEY}?apikey=${KEY}`;
+      const tokenFile = path.join(dir, `${path.basename(script)}.key.token`);
+      try {
+        const r = await runSigner(
+          script,
+          { ...envOf(url), SIGNER_TOKEN_FILE: tokenFile },
+          async (live) => {
+            // eth_getLogs is allowed and the fake answers it with an error.
+            up.echo(`bad key ${KEY} at ${url}`);
+            const res = await rpc(live, "eth_getLogs", [{}]);
+            expect(JSON.stringify(res.body)).to.not.contain(KEY);
+            expect(res.body.error.message).to.contain("<redacted>");
+          },
+        );
+        expect(r.out).to.not.contain(KEY);
+      } finally {
+        up.server.close();
+      }
+    });
+  }
+
+  for (const [script, envOf] of SIGNERS) {
     it(`${path.basename(script)}: a malformed call or a dead upstream is an error answer, never a crash (review L-1)`, async function () {
       const up = await fakeUpstream(31337);
       const tokenFile = path.join(dir, `${path.basename(script)}.l1.token`);

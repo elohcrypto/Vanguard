@@ -41,14 +41,21 @@ export async function fakeUpstream(chain: number, code = "0x") {
     eth_getTransactionByHash: () => null,
     eth_getCode: () => code,
   };
+  let echoed: string | null = null;
   const one = (c: any) =>
-    answers[c.method]
-      ? { jsonrpc: "2.0", id: c.id, result: answers[c.method](c.params || []) }
-      : {
-          jsonrpc: "2.0",
-          id: c.id,
-          error: { code: -32601, message: `no ${c.method}` },
-        };
+    echoed !== null && c.method === "eth_getLogs"
+      ? { jsonrpc: "2.0", id: c.id, error: { code: -32000, message: echoed } }
+      : answers[c.method]
+        ? {
+            jsonrpc: "2.0",
+            id: c.id,
+            result: answers[c.method](c.params || []),
+          }
+        : {
+            jsonrpc: "2.0",
+            id: c.id,
+            error: { code: -32601, message: `no ${c.method}` },
+          };
   const server = http.createServer((req, res) => {
     let body = "";
     req.on("data", (c) => (body += c));
@@ -60,7 +67,9 @@ export async function fakeUpstream(chain: number, code = "0x") {
   });
   await new Promise<void>((ok) => server.listen(0, "127.0.0.1", ok));
   const url = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
-  return { server, raws, url };
+  /** From now on eth_getLogs answers an error with `text`. */
+  const echo = (text: string) => void (echoed = text);
+  return { server, raws, url, echo };
 }
 
 export type Live = { url: string; port: number; token: string };

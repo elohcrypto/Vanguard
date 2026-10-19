@@ -140,6 +140,22 @@ describe("RpcRetry (bounded retry, no double send)", function () {
     expect(d.reads).to.equal(3);
   });
 
+  it("scrubs the RPC URL's key from its retry lines", async function () {
+    const c = chain();
+    const url = "https://rpc.example/v3/APIKEY123456?k=QKEY99";
+    c.readFaults = [err(`Too Many Requests from ${url} (key APIKEY123456, QKEY99)`)];
+    const lines: string[] = [];
+    installRetry(c, {
+      url,
+      log: (m: string) => lines.push(m),
+      sleep: async () => {},
+    });
+    await c.request({ method: "eth_chainId" });
+    expect(lines.length).to.equal(1);
+    for (const x of ["APIKEY123456", "QKEY99", "/v3/"])
+      expect(lines[0]).to.not.contain(x);
+  });
+
   it("never retries a revert, a range cap or a missing-state error", async function () {
     for (const m of [
       "execution reverted",

@@ -44,6 +44,7 @@ const path = require("path");
 const readline = require("readline");
 const { HDNodeWallet, JsonRpcProvider, Wallet, getBytes } = require("ethers");
 const { guardedServer } = require("./rpcGuard");
+const { scrub } = require("./redact");
 const {
   describeMessage,
   describeTx,
@@ -276,18 +277,28 @@ async function serve() {
     try {
       return JSON.parse(text);
     } catch {
-      throw new Error(`upstream HTTP ${r.status}: ${text.slice(0, 120)}`);
+      throw new Error(`upstream HTTP ${r.status}: ${text}`);
     }
   }
   async function answer(call) {
     const { id, method, params = [] } = call;
     try {
-      if (!OWN[method]) return await forward(call);
+      if (!OWN[method]) {
+        const out = await forward(call);
+        // The upstream's error text may echo its URL's API key.
+        if (out && out.error && out.error.message)
+          out.error.message = scrub(out.error.message, upstream, 240);
+        return out;
+      }
       return { jsonrpc: "2.0", id, result: await OWN[method](params) };
     } catch (e) {
       const err = e.info?.error || e.error || {};
       // The upstream's own words (rate limit, nonce too low) reach the CLI.
-      const message = err.message || e.shortMessage || e.message;
+      const message = scrub(
+        err.message || e.shortMessage || e.message,
+        upstream,
+        240,
+      );
       return {
         jsonrpc: "2.0",
         id,
