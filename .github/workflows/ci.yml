@@ -145,8 +145,17 @@ jobs:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with: { persist-credentials: false }
       - uses: ./.github/actions/prepare
+      # Slice A review HIGH-1: every passing test recorded (mocha-log.js),
+      # so guard-runs binds the guard table's rows to tests that passed.
       - name: Run tests (this shard's files)
-        run: TEST_SHARD=${{ matrix.shard }}/2 npm test
+        run: TEST_SHARD=${{ matrix.shard }}/2 MOCHA_TIMINGS=$PWD/test-timings.log npm test
+      - name: Upload the passing-test record
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: test-timings-${{ matrix.shard }}
+          path: test-timings.log
+          if-no-files-found: error
+          retention-days: 1
       # Task 4.15: the transfer-gas table (scripts/gas-analysis.ts) as a
       # recorded-baseline ratchet: a scenario more than 1,500 gas above its
       # recorded figure fails, a drop prints a notice. The hard gate stays
@@ -154,6 +163,25 @@ jobs:
       - name: Gas ratchet (transfer gas table)
         if: matrix.shard == 1
         run: npm run gas:claims
+
+  # Slice A review HIGH-1: a tested guard row must name a test that
+  # PASSED in the tests job, not only text in a file (a guard file
+  # commented out, or a describe under `if (env)`, passed the static gate).
+  guard-runs:
+    needs: tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with: { persist-credentials: false }
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with: { node-version: "22", cache: npm }
+      - name: Install dependencies
+        run: npm ci
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with: { pattern: test-timings-*, path: runs }
+      - name: Guard table against the tests that passed
+        run: node scripts/ci/guards-table.js --ran runs/test-timings-1/test-timings.log runs/test-timings-2/test-timings.log
 
   coverage:
     needs: compile

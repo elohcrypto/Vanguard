@@ -38,8 +38,12 @@
 // xdescribe, context.skip, xcontext or a `.only`: disabledIts; deep
 // review H-1), or any test asserts a bare `.reverted` /
 // `.rejected` (one without its reason string or custom error; CF-8).
+// With --ran (the tests job's records), a tested row whose test did not
+// pass there fails too (notPassed; slice A review HIGH-1): CI runs that
+// after the tests job; the static checks stay the fast local gate.
 // Exits 1 on any finding;
 // `node scripts/ci/guards-table.js`            the gate
+// `node scripts/ci/guards-table.js --ran <timings>...`  and the runs
 // `node scripts/ci/guards-table.js --suggest`  rows for missing sites
 const { execFileSync } = require("child_process");
 const fs = require("fs");
@@ -307,8 +311,56 @@ function blockMisses(r, s, src, file) {
   return why;
 }
 
+/**
+ * Slice A review HIGH-1: a tested row is evidence only if its test RAN
+ * AND PASSED. The static checks read text, so a file commented out line
+ * by line, or a describe under `if (process.env.X)`, still passed them.
+ * `ran` are the tests job's MOCHA_TIMINGS records (scripts/ci/mocha-log.js:
+ * one line per passing test, {kind, name, file}; that job forbids pending,
+ * so every file it loads runs). Returns the rows whose (file, title) no
+ * passing test matches; a title holding `${...}` matches any expansion.
+ */
+function notPassed(rows, ran) {
+  const passed = new Map();
+  for (const r of ran) {
+    if (r.kind !== "test") continue;
+    if (!passed.has(r.file)) passed.set(r.file, []);
+    passed.get(r.file).push(r.name);
+  }
+  const esc = (x) => x.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  return rows.filter((r) => {
+    const re = new RegExp(
+      `^${r.test
+        .split(/\$\{[^}]*\}/)
+        .map(esc)
+        .join(".*")}$`,
+    );
+    return !(passed.get(r.file) || []).some((n) => re.test(n));
+  });
+}
+
+/** The MOCHA_TIMINGS records in `files` (JSON lines); empty files refused. */
+function readRan(files) {
+  const out = [];
+  for (const f of files) {
+    const recs = fs
+      .readFileSync(f, "utf8")
+      .split("\n")
+      .filter((l) => l.trim())
+      .map((l) => JSON.parse(l));
+    if (!recs.some((r) => r.kind === "test"))
+      throw new Error(`${f} records no passing test (no run?)`);
+    out.push(...recs);
+  }
+  return out;
+}
+
 function main() {
   const suggest = process.argv.includes("--suggest");
+  const ranAt = process.argv.indexOf("--ran");
+  const ran = ranAt < 0 ? null : readRan(process.argv.slice(ranAt + 1));
+  if (ran && ranAt + 1 >= process.argv.length)
+    throw new Error("--ran needs the tests job's MOCHA_TIMINGS files");
   const { sites, banned } = enumerateSites();
   const testFiles = tracked("test").filter((f) => /\.(ts|js)$/.test(f));
   const tests = new Map(testFiles.map((f) => [f, fs.readFileSync(f, "utf8")]));
@@ -386,6 +438,16 @@ function main() {
       );
     }
   }
+  if (ran) {
+    const tested = rows.filter((r) => r.class === "tested" && live.has(r.site));
+    for (const r of notPassed(tested, ran))
+      errors.push(
+        `"${r.test}" (${r.file}) did not pass in the recorded test runs: ${r.site}`,
+      );
+    console.log(
+      `ran: ${ran.filter((r) => r.kind === "test").length} passing tests recorded; ${tested.length} tested rows checked against them`,
+    );
+  }
   const bare = bareReverts(testFiles);
   for (const b of bare)
     errors.push(`bare .reverted/.rejected (assert the reason or error): ${b}`);
@@ -422,4 +484,4 @@ function main() {
 }
 
 if (require.main === module) main();
-else module.exports = { enumerateSites, titlesOf, TABLE_DIR, SKIP };
+else module.exports = { enumerateSites, titlesOf, notPassed, TABLE_DIR, SKIP };

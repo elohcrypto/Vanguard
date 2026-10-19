@@ -4,9 +4,11 @@
 //
 // AS A MODULE (hardhat.config.ts loads its root hooks when MOCHA_TIMINGS
 // names a file): one JSON line per passing test AND per hook ("before
-// each" and the rest; the 5.2 failure was a hook), {kind, title, file,
-// ms, timeout}, where timeout is that runnable's own effective mocha
-// timeout (this.timeout() in a suite overrides the config's). When
+// each" and the rest; the 5.2 failure was a hook), {kind, title, name,
+// file, ms, timeout}: title the full title, name the runnable's own,
+// timeout its own effective mocha timeout (this.timeout() in a suite
+// overrides the config's). The tests job records it too: the guard
+// table binds its tested rows to tests that passed there (Task 5.17). When
 // MOCHA_PENDING names a file, a root after-all hook writes there
 // {file: pending tests} for every test file the run loaded (0 included;
 // deep review H-1).
@@ -45,8 +47,8 @@ let installed = false;
 
 /**
  * Wrap mocha's Runnable#run (tests and hooks both run through it) so
- * every one that finishes without an error appends {kind, title, file,
- * ms, timeout} to MOCHA_TIMINGS. kind is "test" or "hook"; timeout is
+ * every one that finishes without an error appends {kind, title, name,
+ * file, ms, timeout} to MOCHA_TIMINGS. kind is "test" or "hook"; timeout is
  * the runnable's own effective timeout. The mocha patched is the one
  * hardhat loads (resolved from hardhat's directory).
  */
@@ -69,6 +71,7 @@ function install() {
           const rec = {
             kind: this.type === "hook" ? "hook" : "test",
             title: this.fullTitle(),
+            name: this.title, // its own title (guards-table.js --ran)
             file: this.file && path.relative(process.cwd(), this.file),
             ms: this.duration,
             timeout: this.timeout(),
