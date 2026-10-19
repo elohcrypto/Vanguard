@@ -47,6 +47,19 @@ describe("zk CLIs: RPC from env, no published key off 31337 (L-4)", function () 
       expect(() => rpcFromEnv([])).to.throw("ZK_RPC_URL must name one RPC URL");
       delete process.env.ZK_RPC_URL;
       expect(rpcFromEnv([])).to.equal(undefined);
+      // Slice B review L-2: the file form keeps the URL out of history.
+      const f = path.join(
+        fs.mkdtempSync(path.join(os.tmpdir(), "zkurl-")),
+        "u",
+      );
+      fs.writeFileSync(f, "http://127.0.0.1:1/f1l3k3y\n", { mode: 0o600 });
+      process.env.ZK_RPC_URL_FILE = f;
+      expect(rpcFromEnv([])).to.equal("http://127.0.0.1:1/f1l3k3y");
+      fs.chmodSync(f, 0o644);
+      expect(() => rpcFromEnv([])).to.throw(
+        /ZK_RPC_URL_FILE must be this user's own file, mode 0600/,
+      );
+      delete process.env.ZK_RPC_URL_FILE;
     } finally {
       if (was === undefined) delete process.env.ZK_RPC_URL;
       else process.env.ZK_RPC_URL = was;
