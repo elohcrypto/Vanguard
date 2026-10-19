@@ -1,46 +1,46 @@
 {
-  "why": "Per-contract branch floors read by scripts/ci/branch-floors.js (plan v2 Task 5.10, CF-7). `run` names the coverage run whose coverage.json is read: `contracts` = scripts/ci/coverage-ratchet.sh (ZK_PROOFS=0), `proofs` = scripts/ci/zk-coverage.sh (the proof suites, where PrivacyManager's proof-gated branches run). The Phase 5 floor is 80. `measured` is the figure in an isolated local coverage copy: the `contracts` run at 1317330 (Task 5.3, 2026-10-14), PrivacyManager's proof run at 8b4b158 (2026-10-13; no privacy contract changed since).",
+  "why": "Per-contract branch floors read by scripts/ci/branch-floors.js (plan v2 Task 5.10, CF-7). `run` names the coverage run whose coverage.json is read: `contracts` = scripts/ci/coverage-ratchet.sh (ZK_PROOFS=0, the shards' merge), `proofs` = scripts/ci/zk-coverage.sh (the proof suites, where PrivacyManager's proof-gated branches run). Each `min` is its `measured` figure minus 2, rounded down (Task 5.17, deep review H-1: at the Phase 5 floor of 80 a skipped guard suite passed); the Phase 5 exit row stays 80. `measured`: CI run 39211556945 at dd7943f (2026-10-19), the `contracts` figures from the merged coverage-shard artifacts, PrivacyManager's from the zk-coverage job log.",
   "floors": [
     {
       "contract": "contracts/oracle/WhitelistOracle.sol",
       "run": "contracts",
-      "min": 80,
+      "min": 96,
       "measured": "98.57 (69/70)"
     },
     {
       "contract": "contracts/oracle/BlacklistOracle.sol",
       "run": "contracts",
-      "min": 80,
+      "min": 96,
       "measured": "98.75 (79/80)"
     },
     {
       "contract": "contracts/oracle/ListOracleBase.sol",
       "run": "contracts",
-      "min": 80,
+      "min": 94,
       "measured": "96.43 (27/28)"
     },
     {
       "contract": "contracts/privacy/PrivacyManager.sol",
       "run": "proofs",
-      "min": 80,
+      "min": 93,
       "measured": "95.59 (65/68); 55.88 in the contracts run"
     },
     {
       "contract": "contracts/investor/InvestorRequestManager.sol",
       "run": "contracts",
-      "min": 80,
+      "min": 90,
       "measured": "92.55 (87/94)"
     },
     {
       "contract": "contracts/payment/EscrowWalletFactory.sol",
       "run": "contracts",
-      "min": 80,
+      "min": 94,
       "measured": "96.51 (83/86)"
     },
     {
       "contract": "contracts/payment/MultiSigEscrowWallet.sol",
       "run": "contracts",
-      "min": 80,
+      "min": 85,
       "measured": "87.96 (95/108)"
     }
   ]

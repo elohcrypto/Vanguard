@@ -3,10 +3,15 @@
 # Coverage ratchet: the instrumented suite passes and line coverage does
 # not DROP below BASELINE; a climb of 2+ points prints a notice.
 #
-# Baseline 97 (Task 5.3): 97.43% lines measured at a9f18fb and in CI
-# (run 38432941280), 97.61% at 1317330 with the 5.3 guard tests, rounded
-# down.
-# Earlier: 95 at the 4.15 tree (96.48%, 2026-10-12, Q11 b); 63.73% ->
+# Baseline 97.4 (Task 5.17, deep review H-1): 97.61% lines (2737 of
+# 2804) merged at dd7943f (CI run 39211556945). At 97 a describe.skip on
+# test/erc3643/RegistryGuards.test.ts (97.18%, 12 lines) passed. 97.4
+# leaves 6 lines of slack, not 0 (97.61): the same tree's sharded and
+# unsharded runs already differed by an arm (see Task 5.15 below), and
+# a baseline at the measured figure fails the next commit that adds an
+# untested line; 12 lost lines fail.
+# Earlier: 97 (Task 5.3: 97.43% at a9f18fb, 97.61% at 1317330, rounded
+# down); 95 at the 4.15 tree (96.48%, 2026-10-12, Q11 b); 63.73% ->
 # 65 -> 84 -> 86 -> 88 -> 90, 90.7% at c0e73fc, 95.33% at aa65de8 with
 # three failures hidden. The run itself is a gate: a failing test fails it
 # (no `|| true`; three permanent failures and, since 4.13, a corrupted
@@ -56,7 +61,7 @@
 
 set -uo pipefail
 cd "$(dirname "$0")/../.."
-BASELINE=97
+BASELINE=97.4
 LOG=coverage.log
 TIMINGS=coverage-timings.log
 SHARD=
@@ -117,11 +122,13 @@ if [ -z "$lines" ]; then
   tail -20 "$LOG"
   exit 1
 fi
-if [ "$(printf '%s\n' "$lines" "$BASELINE" | sort -g | head -1)" != "$BASELINE" ]; then
+# Decimal comparisons (bash arithmetic is integer only).
+below() { awk -v a="$1" -v b="$2" 'BEGIN { exit !(a + 0 < b + 0) }'; }
+if below "$lines" "$BASELINE"; then
   echo "::error::line coverage ${lines}% dropped below baseline ${BASELINE}%."
   exit 1
 fi
-if [ "$(printf '%s\n' "$lines" "$((BASELINE + 2))" | sort -g | head -1)" = "$((BASELINE + 2))" ]; then
+if ! below "$lines" "$(awk -v b="$BASELINE" 'BEGIN { print b + 2 }')"; then
   echo "::notice::line coverage ${lines}% is 2+ points above baseline — raise BASELINE in scripts/ci/coverage-ratchet.sh."
 fi
 exit 0
