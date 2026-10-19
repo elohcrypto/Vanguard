@@ -408,7 +408,7 @@ async function residueLines(o) {
 
 /**
  * Warnings, not failures: the deployer's leftover VSC and exemption (a
- * treasury artifact), escrows that keep the deployer as owner, and escrow
+ * treasury artifact) and VGT, escrows that keep the deployer as owner, and escrow
  * fee wallets that are not exempt on the
  * registry the Token enforces or were registered after the handover
  * (R-2F4-2: after it only an InvestorTypeConfig vote can exempt them).
@@ -424,6 +424,14 @@ async function residueWarnings(o, dAddr, govAddr, warnings) {
   if (bal > 0n || dExempt) {
     warnings.push(
       `deployer still holds ${ethers.formatEther(bal)} VSC (investorLimitExempt: ${dExempt}, verified: ${await o.identityRegistry.isVerified(dAddr)}): move it to the treasury; only a vote can remove the exemption now`,
+    );
+  }
+  // Task 5.17 (deep review L-2): leftover VGT pays deposits and fees.
+  const vgt = await o.governanceToken.balanceOf(dAddr);
+  if (vgt > 0n) {
+    const supply = await o.governanceToken.totalSupply();
+    warnings.push(
+      `deployer still holds ${ethers.formatEther(vgt)} VGT (${Number((vgt * 10000n) / supply) / 100}% of the supply): it pays proposal and voting deposits; move it to the treasury`,
     );
   }
   const fAddr =

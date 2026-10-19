@@ -302,7 +302,8 @@ echo "6. ceremony: $OPEN acceptances open at once, killed after $OWNED settled, 
 V=$(sed -n '/Handover: verify/,$p' "$OUT/ceremony.log")
 grep -q "❌" <<<"$V" && fail "a failed completion check"
 count() { grep -cE "$1" <<<"$V" || true; }
-[[ $(count '^\s+⚠️') -eq 7 ]] || fail "$(count '^\s+⚠️') warnings, not 7"
+[[ $(count '^\s+⚠️') -eq 8 ]] || fail "$(count '^\s+⚠️') warnings, not 8"
+[[ $(count '^\s+⚠️  deployer still holds [0-9.]+ VGT') -eq 1 ]] || fail "no leftover-VGT line (deep review L-2)"
 [[ $(count '^\s+⚠️  PrivacyManager issuer key .* was trusted by the deployer') -eq 3 ]] || fail "issuer-key warnings"
 [[ $(count '^\s+⚠️  OracleManager node .* was registered by the deployer') -eq 3 ]] || fail "D50 node warnings"
 [[ $(count 'escrowWalletFactory" is null') -eq 0 ]] || fail "no escrow factory deployed"
@@ -333,7 +334,8 @@ B_POST=$(($(blk) + 1))
 #    unused here) and re-approves the deployer-trusted issuer key for its
 #    three circuits; round 2, once all three are registered, removes the
 #    three deployer-era nodes; the day-2 audit then has no deployer-era
-#    node or attestor line, only the exempt fee wallet's warning.
+#    node or attestor line, only the exempt fee wallet's and the
+#    deployer's leftover VGT's warnings.
 NEW=$(MNEMONIC="$ROLES" node -e 'const { HDNodeWallet, Mnemonic } = require("ethers");
   const m = Mnemonic.fromPhrase(process.env.MNEMONIC);
   console.log([12, 13, 14].map((i, k) => HDNodeWallet.fromMnemonic(m, `m/44'"'"'/60'"'"'/0'"'"'/0/${i}`).address + ":NODE_" + (k + 1)).join(","));')
@@ -355,9 +357,10 @@ A=$(sed -n '/Handover audit/,$p' "$OUT/audit.log")
 grep -q "❌" <<<"$A" && fail "a failed audit line"
 [[ $(grep -c "registered by the deployer" <<<"$A") -eq 0 ]] || fail "a deployer-era node line remains"
 [[ $(grep -c "was trusted by the deployer" <<<"$A") -eq 0 ]] || fail "a deployer-trusted attestor line remains"
-[[ $(grep -cE '^\s+⚠️' <<<"$A") -eq 1 && $(grep -cE "^\s+⚠️  $FEE is investorLimitExempt" <<<"$A") -eq 1 ]] \
-  || fail "the audit's warnings are not just the exempt fee wallet"
-echo "8. post-ceremony votes: round 1 (3 registrations, 3 re-approvals), then round 2 (3 removals); audit: no deployer-era node or attestor line, one warning (the exempt fee wallet)"
+[[ $(grep -cE '^\s+⚠️' <<<"$A") -eq 2 && $(grep -cE "^\s+⚠️  $FEE is investorLimitExempt" <<<"$A") -eq 1 \
+  && $(grep -cE '^\s+⚠️  deployer still holds [0-9.]+ VGT' <<<"$A") -eq 1 ]] \
+  || fail "the audit's warnings are not just the exempt fee wallet and the deployer's VGT"
+echo "8. post-ceremony votes: round 1 (3 registrations, 3 re-approvals), then round 2 (3 removals); audit: no deployer-era node or attestor line, two warnings (the exempt fee wallet, the deployer's VGT)"
 
 # 9. Cost table (Q19 = A): each step's gas by sender, at COST_GWEI (20)
 #    with 50% headroom, the deploy counted twice (the throwaway deploy).

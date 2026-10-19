@@ -170,7 +170,8 @@ grep -q "✅ 6 role transaction effect(s) hold on chain" "$OUT/ceremony4.log" ||
 V=$(sed -n '/Handover: verify/,$p' "$OUT/ceremony4.log")
 grep -q "❌" <<<"$V" && fail "a failed completion check"
 count() { grep -cE "$1" <<<"$V" || true; }
-[[ $(count '^\s+⚠️') -eq 7 ]] || fail "$(count '^\s+⚠️') warnings, not 7"
+[[ $(count '^\s+⚠️') -eq 8 ]] || fail "$(count '^\s+⚠️') warnings, not 8"
+[[ $(count '^\s+⚠️  deployer still holds [0-9.]+ VGT') -eq 1 ]] || fail "no leftover-VGT line (deep review L-2)"
 [[ $(count '^\s+⚠️  PrivacyManager issuer key .* was trusted by the deployer') -eq 3 ]] || fail "issuer-key warnings"
 [[ $(count '^\s+⚠️  OracleManager node .* was registered by the deployer') -eq 3 ]] || fail "D50 node warnings"
 FEE=$(node -e 'console.log(require(process.argv[1]).feeWallets[0])' "$HANDOVER_CONFIG")
