@@ -152,17 +152,78 @@ describe("Oracle Management System", function () {
       expect(info.reason).to.equal("Test with expiry");
     });
 
+    // Task 5.17 (deep review, vacuous tests): this test asserted only that
+    // the function exists. It now drives a whitelist query to consensus
+    // and checks the signed attestation applies it, and that a signature
+    // that is not the sender's is refused.
     it("Should handle oracle attestations", async function () {
-      const queryId = ethers.keccak256(ethers.toUtf8Bytes("test-query"));
-      const signature = "0x" + "00".repeat(65); // Mock signature
-      const data = ethers.AbiCoder.defaultAbiCoder().encode(
-        ["string"],
-        ["test data"],
+      const coder = ethers.AbiCoder.defaultAbiCoder();
+      const tier = coder.encode(["uint8"], [4]);
+      const tx = await oracleManager.submitQuery(subject.address, 1, tier);
+      const block = await ethers.provider.getBlock(
+        (await tx.wait())!.blockNumber,
       );
+      const queryId = ethers.solidityPackedKeccak256(
+        ["address", "uint8", "bytes", "uint256", "address"],
+        [subject.address, 1, tier, block!.timestamp, owner.address],
+      );
+      // Two of the three agreeing resolve it at the default threshold.
+      for (const o of [oracle1, oracle2]) {
+        await oracleManager.connect(o).submitResponse(queryId, true);
+      }
+      const [resolved, verdict] =
+        await oracleManager.getQueryResolution(queryId);
+      expect([resolved, verdict]).to.deep.equal([true, true]);
+      const { chainId } = await ethers.provider.getNetwork();
+      const digest = ethers.getBytes(
+        ethers.solidityPackedKeccak256(
+          ["address", "bytes32", "bool", "uint256"],
+          [subject.address, queryId, true, chainId],
+        ),
+      );
+      const data = coder.encode(["string"], ["test data"]);
 
-      // This would require proper signature generation in a real test
-      // For now, we test the interface exists
-      expect(whitelistOracle.provideAttestation).to.exist;
+      // Signed by another oracle than the sender: not this attestation.
+      await expect(
+        whitelistOracle
+          .connect(oracle1)
+          .provideAttestation(
+            subject.address,
+            queryId,
+            true,
+            await oracle2.signMessage(digest),
+            data,
+          ),
+      ).to.be.revertedWith("WhitelistOracle: Invalid signature");
+      expect(await whitelistOracle.isWhitelisted(subject.address)).to.be.false;
+
+      const signature = await oracle1.signMessage(digest);
+      await expect(
+        whitelistOracle
+          .connect(oracle1)
+          .provideAttestation(subject.address, queryId, true, signature, data),
+      )
+        .to.emit(whitelistOracle, "AttestationProvided")
+        .withArgs(
+          oracle1.address,
+          subject.address,
+          queryId,
+          true,
+          anyValue,
+          signature,
+        );
+      expect(await whitelistOracle.isWhitelisted(subject.address)).to.be.true;
+      expect(
+        (await whitelistOracle.getWhitelistInfo(subject.address)).tier,
+      ).to.equal(4);
+      const [result, , attester, stored, isValid] =
+        await whitelistOracle.getAttestation(subject.address, queryId);
+      expect([result, attester, stored, isValid]).to.deep.equal([
+        true,
+        oracle1.address,
+        signature,
+        true,
+      ]);
     });
   });
 

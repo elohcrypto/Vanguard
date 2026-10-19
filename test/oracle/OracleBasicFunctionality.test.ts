@@ -448,14 +448,34 @@ describe("Oracle Basic Functionality Tests", function () {
       // Create a critical decision query
       const queryData = ethers.AbiCoder.defaultAbiCoder().encode(
         ["string", "address", "uint256"],
-        ["Critical compliance decision", user1.address, Date.now()],
+        ["Critical compliance decision", user1.address, 1],
       );
 
       const tx = await oracleManager.submitQuery(user1.address, 4, queryData);
-      await tx.wait();
-
+      const block = await ethers.provider.getBlock(
+        (await tx.wait())!.blockNumber,
+      );
       console.log("✅ Critical decision query created");
-      console.log("✅ Oracle consensus mechanism ready for critical decisions");
+
+      // Task 5.17 (deep review, vacuous tests): this test asserted nothing.
+      // One node (500 of 1500 weight) is under 66%; the second resolves
+      // it with their verdict, and a third answer is refused.
+      const queryId = ethers.solidityPackedKeccak256(
+        ["address", "uint8", "bytes", "uint256", "address"],
+        [user1.address, 4, queryData, block!.timestamp, owner.address],
+      );
+      await oracleManager.connect(oracle1).submitResponse(queryId, false);
+      expect((await oracleManager.getQueryResolution(queryId))[0]).to.equal(
+        false,
+      );
+      await oracleManager.connect(oracle2).submitResponse(queryId, false);
+      const [resolved, verdict] =
+        await oracleManager.getQueryResolution(queryId);
+      expect([resolved, verdict]).to.deep.equal([true, false]);
+      await expect(
+        oracleManager.connect(oracle3).submitResponse(queryId, true),
+      ).to.be.revertedWithCustomError(oracleManager, "QueryAlreadyResolved");
+      console.log("✅ Two of three nodes resolved the critical decision");
     });
   });
 });
