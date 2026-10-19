@@ -30,7 +30,11 @@
  */
 "use strict";
 
-const { RANGE_ERROR, isTransient } = require("../../demo/utils/RpcRetry");
+const {
+  ARCHIVE_ERROR,
+  RANGE_ERROR,
+  isTransient,
+} = require("../../demo/utils/RpcRetry");
 
 /**
  * `url` safe to print: scheme://host[:port]/... only. Provider URLs carry
@@ -47,32 +51,102 @@ function redactUrl(url) {
   }
 }
 
-/** `text` with every occurrence of `url` (and its parts) redacted. */
-function scrub(text, url) {
-  let t = String(text);
+/**
+ * Every secret a URL may carry, as a provider could echo it: the whole
+ * URL, the username and password, each path segment and each query value
+ * (and the fragment), the whole path and query, and the URL without its
+ * credentials (what fetch reports), each raw and percent-decoded; longest
+ * first. Tokens
+ * under 3 characters ("v3", "1") are not removed: they are not secrets and
+ * would shred ordinary text.
+ */
+function secretsOf(url) {
+  const out = new Set([String(url)]);
   try {
     const u = new URL(String(url));
-    const secrets = [
-      url,
+    const parts = [
       u.username,
       u.password,
-      u.pathname.slice(1),
-      u.search.slice(1),
-    ].filter((x) => x && x.length >= 6);
-    for (const x of secrets) t = t.split(x).join("<redacted>");
+      u.hash.slice(1),
+      u.pathname,
+      u.search,
+    ];
+    const bare = new URL(u);
+    bare.username = "";
+    bare.password = "";
+    out.add(bare.href);
+    parts.push(...u.pathname.split("/"));
+    for (const kv of u.search.slice(1).split("&"))
+      parts.push(kv.split("=").slice(1).join("="));
+    for (const x of parts) {
+      for (const y of [
+        x,
+        (() => {
+          try {
+            return decodeURIComponent(x);
+          } catch {
+            return x;
+          }
+        })(),
+      ])
+        if (y && y.length >= 3) out.add(y);
+    }
   } catch {
-    t = t.split(String(url)).join("<redacted>");
+    // unparsable: the whole string only
   }
+  return [...out].sort((a, b) => b.length - a.length);
+}
+
+/** `text` with every secret of `url` replaced by <redacted>. */
+function scrub(text, url) {
+  let t = String(text);
+  for (const x of secretsOf(url)) t = t.split(x).join("<redacted>");
   return t;
 }
+
+/** A provider error's class, printed before its (scrubbed) words. */
+function classify(text) {
+  const t = String(text);
+  if (
+    /\b429\b|too many requests|rate.?limit|-32005|exceeded .*(capacity|quota|rate)/i.test(
+      t,
+    ) &&
+    !RANGE_ERROR.test(t)
+  )
+    return "rate-limited";
+  if (RANGE_ERROR.test(t)) return "range-capped";
+  if (ARCHIVE_ERROR.test(t)) return "missing state";
+  if (
+    /unauthori[sz]ed|forbidden|\b40[13]\b|invalid (api )?key|invalid project|api key|auth/i.test(
+      t,
+    )
+  )
+    return "unauthorized";
+  return "other";
+}
+
+/** A provider error as printed: [class] scrubbed words. */
+const shown = (text, url) => {
+  const t = scrub(text, url);
+  return `[${classify(t)}] ${t}`;
+};
 
 let nextId = 1;
 /** One JSON-RPC call to `url`: { result } or { error: text, status }. */
 async function call(url, method, params = []) {
   try {
-    const r = await fetch(url, {
+    // fetch refuses a URL with credentials: send them as Basic auth.
+    const u = new URL(url);
+    const headers = { "content-type": "application/json" };
+    if (u.username || u.password) {
+      const who = `${decodeURIComponent(u.username)}:${decodeURIComponent(u.password)}`;
+      headers.authorization = `Basic ${Buffer.from(who).toString("base64")}`;
+      u.username = "";
+      u.password = "";
+    }
+    const r = await fetch(u, {
       method: "POST",
-      headers: { "content-type": "application/json" },
+      headers,
       body: JSON.stringify({ jsonrpc: "2.0", id: nextId++, method, params }),
     });
     const text = await r.text();
@@ -81,13 +155,13 @@ async function call(url, method, params = []) {
       body = JSON.parse(text);
     } catch {
       return {
-        error: `HTTP ${r.status}: ${text.slice(0, 120)}`,
+        error: shown(`HTTP ${r.status}: ${text.slice(0, 120)}`, url),
         status: r.status,
       };
     }
     if (body.error) {
       return {
-        error: scrub(
+        error: shown(
           `${body.error.code ?? ""} ${body.error.message ?? ""}`.trim(),
           url,
         ),
@@ -97,7 +171,7 @@ async function call(url, method, params = []) {
     return { result: body.result, status: r.status };
   } catch (e) {
     return {
-      error: scrub(`${e.message} (${e.cause?.code ?? "no code"})`, url),
+      error: shown(`${e.message} (${e.cause?.code ?? "no code"})`, url),
       status: 0,
     };
   }
@@ -223,4 +297,4 @@ async function main(argv) {
 if (require.main === module) {
   main(process.argv.slice(2)).then((c) => (process.exitCode = c));
 }
-module.exports = { checkUrl, call, redactUrl, scrub };
+module.exports = { checkUrl, call, redactUrl, scrub, classify, secretsOf };

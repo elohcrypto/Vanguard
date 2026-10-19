@@ -1,5 +1,6 @@
 import { expect } from "chai";
 import * as http from "http";
+import { spawn } from "child_process";
 import { AddressInfo } from "net";
 
 const rpcCheck = require("../../scripts/production/rpcCheck");
@@ -84,10 +85,10 @@ describe("rpc-check (scripts/production/rpcCheck.js)", function () {
       expect(r.ok).to.equal(false);
       expect(t).to.contain("✅ chain id 11155111 (want 11155111)");
       expect(t).to.match(
-        /❌ archive: state at block 100000 refused: -32000 missing trie node/,
+        /❌ archive: state at block 100000 refused: \[missing state\] -32000 missing trie node/,
       );
       expect(t).to.contain(
-        "getLogs 10000 blocks refused: -32005 block range is too large, max is 5000 (a range error: scanLogs halves)",
+        "getLogs 10000 blocks refused: [range-capped] -32005 block range is too large, max is 5000 (a range error: scanLogs halves)",
       );
       expect(t).to.contain(
         "✅ getLogs: up to 5000 blocks per call accepted (logChunk <= 5000)",
@@ -158,6 +159,64 @@ describe("rpc-check (scripts/production/rpcCheck.js)", function () {
       expect(t).to.contain("<redacted>");
     } finally {
       s.close();
+    }
+  });
+
+  it("redacts every key form an error may echo, in the CLI's stdout and stderr; errors are classified", async function () {
+    const { scrub, classify } = rpcCheck;
+    const KEY = "k3yAbcDEF";
+    const ENC = "k3y%2Fslash%3D";
+    const DEC = "k3y/slash=";
+    const url = `https://user:pa55word@rpc.example/v3/${KEY}/x?apikey=${ENC}&x=1`;
+    for (const echoed of [
+      `invalid project id ${KEY}`,
+      `bad apikey ${ENC}`,
+      `bad apikey ${DEC}`,
+      "auth failed for pa55word",
+      `fetch ${url} failed`,
+    ]) {
+      const t = scrub(echoed, url);
+      for (const secret of [KEY, ENC, DEC, "pa55word"])
+        expect(t, echoed).to.not.contain(secret);
+    }
+    expect(classify("429 Too Many Requests")).to.equal("rate-limited");
+    expect(classify("block range is too large")).to.equal("range-capped");
+    expect(classify("missing trie node")).to.equal("missing state");
+    expect(classify("invalid project id")).to.equal("unauthorized");
+    expect(classify("boom")).to.equal("other");
+    // The CLI against a provider echoing the path key and the decoded query.
+    const srv = http.createServer((req, res) => {
+      res.setHeader("content-type", "application/json");
+      res.end(
+        JSON.stringify({
+          jsonrpc: "2.0",
+          id: 1,
+          error: {
+            code: -32000,
+            message: `invalid project id ${KEY}, key ${DEC}`,
+          },
+        }),
+      );
+    });
+    await new Promise<void>((ok) => srv.listen(0, "127.0.0.1", ok));
+    const port = (srv.address() as AddressInfo).port;
+    const u = `http://user:pa55word@127.0.0.1:${port}/v3/${KEY}?apikey=${ENC}`;
+    try {
+      const out = await new Promise<string>((ok) => {
+        const p = spawn(process.execPath, [
+          "scripts/production/rpcCheck.js",
+          u,
+        ]);
+        let t = "";
+        p.stdout.on("data", (d) => (t += d));
+        p.stderr.on("data", (d) => (t += d));
+        p.on("exit", () => ok(t));
+      });
+      for (const secret of [KEY, ENC, DEC, "pa55word", "/v3/"])
+        expect(out, secret).to.not.contain(secret);
+      expect(out).to.contain("[unauthorized]");
+    } finally {
+      srv.close();
     }
   });
 });
