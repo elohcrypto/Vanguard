@@ -59,6 +59,7 @@ const { guardedServer } = require("./rpcGuard");
 const {
   clears,
   differs,
+  regas,
   fieldsOf,
   promptMode,
   signedStore,
@@ -259,8 +260,9 @@ async function serve() {
       const slot = `${w.address}:${full.nonce}`;
       const before = byNonce.get(slot);
       // Slice B review M-1: a recorded nonce takes the same transaction
-      // again (re-broadcast while its fee clears, else a fee bump), never
-      // another (signerState.js differs).
+      // again (re-broadcast while its fee clears, else a fee bump; signed
+      // again too when the caller's gas limit or fees moved, slice C
+      // review L-1), never another (signerState.js differs).
       let raw = null;
       let shown = d;
       let kind = "send";
@@ -268,9 +270,12 @@ async function serve() {
         const why = differs(before.raw, req, chain, w.address);
         if (why)
           throw new Error(
-            `nonce ${full.nonce} of ${w.address} was already signed for another transaction (${why}): refused`,
+            `nonce ${full.nonce} of ${w.address} was already signed for another transaction (${why}): refused; never to be mined? run: signer.js forget ${w.address} ${full.nonce}`,
           );
-        if (await clears(before.raw, provider)) {
+        const moved = regas(before.raw, req);
+        if (moved)
+          kind = `fee bump of nonce ${full.nonce}, same transaction (its ${moved} moved)`;
+        else if (await clears(before.raw, provider)) {
           const t = fieldsOf(before.raw);
           shown = describeTx(
             t,

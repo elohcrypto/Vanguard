@@ -106,6 +106,35 @@ describe("Signer: a failed broadcast's retry, fee bumps, forget (M-1)", function
     }
   });
 
+  it("a re-run whose gas estimate moved by one is the same transaction, signed again (slice C review L-1)", async function () {
+    const up = await fakeUpstream(11155111);
+    up.fault.raw = 1;
+    try {
+      const r = await runSigner(
+        "scripts/production/signer.js",
+        env(up.url),
+        async (live) => {
+          await rpc(live, "eth_sendTransaction", [{ ...tx(), gas: "0x5208" }]);
+          up.fault.baseFee = "0x47868c00"; // the recorded fee still clears
+          const again = await rpc(live, "eth_sendTransaction", [
+            { ...tx(), gas: "0x5209" },
+          ]);
+          expect(again.body.result, JSON.stringify(again.body)).to.match(
+            /^0x[0-9a-f]{64}$/,
+          );
+        },
+      );
+      expect(r.code, r.out).to.equal(0);
+      expect(r.out).to.contain(
+        "fee bump of nonce 7, same transaction (its gasLimit moved)",
+      );
+      expect(up.raws.length).to.equal(1);
+      expect(ethers.Transaction.from(up.raws[0]).gasLimit).to.equal(0x5209n);
+    } finally {
+      up.server.close();
+    }
+  });
+
   it("another transaction at a recorded nonce is refused; forget drops the entry", async function () {
     const up = await fakeUpstream(11155111);
     try {
@@ -118,7 +147,7 @@ describe("Signer: a failed broadcast's retry, fee bumps, forget (M-1)", function
           ).to.match(/^0x/);
           const diff = await rpc(live, "eth_sendTransaction", [tx(other)]);
           expect(diff.body.error.message).to.match(
-            /nonce 7 of 0x[0-9a-fA-F]{40} was already signed for another transaction \(its to differs\): refused/,
+            /nonce 7 of 0x[0-9a-fA-F]{40} was already signed for another transaction \(its to differs\): refused; never to be mined\? run: signer\.js forget 0x[0-9a-fA-F]{40} 7/,
           );
         },
       );

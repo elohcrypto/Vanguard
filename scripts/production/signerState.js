@@ -93,9 +93,11 @@ const same = (a, b) =>
   String(a ?? "").toLowerCase() === String(b ?? "").toLowerCase();
 
 /**
- * Why the request `req` (signer.js's: to, data, value, and gasLimit /
- * fees only when the caller set them) from `from` on `chain` is not the
- * transaction `raw` recorded at its nonce, or null when it is.
+ * Why the request `req` (signer.js's: to, data, value) from `from` on
+ * `chain` is not the transaction `raw` recorded at its nonce, or null
+ * when it is. Gas limit and fees are not what a transaction does (slice C
+ * review L-1: hardhat-ethers sets gas from a fresh estimateGas, which can
+ * move by one between a run and its re-run): see regas.
  */
 function differs(raw, req, chain, from) {
   const { Transaction } = require("ethers");
@@ -108,15 +110,23 @@ function differs(raw, req, chain, from) {
     ["value", big(t.value) === big(req.value)],
     ["data", same(t.data, req.data || "0x")],
   ];
-  for (const k of [
-    "gasLimit",
-    "maxFeePerGas",
-    "maxPriorityFeePerGas",
-    "gasPrice",
-  ])
-    if (req[k] !== undefined) checks.push([k, big(t[k]) === big(req[k])]);
   const bad = checks.find(([, ok]) => !ok);
   return bad ? `its ${bad[0]} differs` : null;
+}
+
+/**
+ * The gas limit or fee the caller of `req` set that differs from the
+ * recorded `raw`'s, or null: the same transaction then is signed again
+ * with them (a fee bump), not re-broadcast as recorded.
+ */
+function regas(raw, req) {
+  const { Transaction } = require("ethers");
+  const t = Transaction.from(raw);
+  return (
+    ["gasLimit", "maxFeePerGas", "maxPriorityFeePerGas", "gasPrice"].find(
+      (k) => req[k] !== undefined && BigInt(t[k] ?? 0) !== BigInt(req[k]),
+    ) ?? null
+  );
 }
 
 /** Recorded `raw` as the plain populated transaction describeTx shows. */
@@ -171,6 +181,7 @@ module.exports = {
   promptMode,
   signedStore,
   differs,
+  regas,
   clears,
   fieldsOf,
   forget,
