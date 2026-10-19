@@ -381,6 +381,7 @@ describe("Signer prompt (signerPrompt.js)", function () {
           SIGNER_KEYSTORE_DIR: path.join(dir, "keys"),
           SIGNER_PASSWORD_FILE: path.join(dir, "pass"),
           SIGNER_TOKEN_FILE: tokenFile,
+          SIGNER_PROMPT: "0", // shown, not asked (no terminal here)
         },
         async (live) => {
           sig = (await rpc(live, "vanguard_signClaim", [key.address, claim]))

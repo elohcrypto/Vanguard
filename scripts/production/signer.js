@@ -32,10 +32,13 @@
  * Every transaction and message is shown first (./signerPrompt.js: the
  * signed transaction's own fields, the call decoded only for a contract
  * whose code is a compiled artifact's, every field escaped and capped).
- * SIGNER_PROMPT=1 asks on the controlling terminal (/dev/tty) and signs
- * only on the exact token shown; it refuses to start without one. A
- * request repeating an earlier one with a pinned nonce (a retry after a
- * lost reply, demo/utils/RpcRetry.js) is shown as a RETRY of it.
+ * Off the dev chain it asks on the controlling terminal (/dev/tty) and
+ * signs only on the exact token shown; it refuses to start without one
+ * (Task 5.17: the default; SIGNER_PROMPT=0 switches it off with a loud
+ * warning, =1 asks on 31337 too). A request repeating an earlier one with
+ * a pinned nonce (a retry after a lost reply, demo/utils/RpcRetry.js) is
+ * shown as a RETRY of it. The nonces it signed are kept next to the token
+ * file (signerState.js), and the token file is removed on exit.
  */
 "use strict";
 
@@ -53,6 +56,7 @@ const {
   keccak256,
 } = require("ethers");
 const { guardedServer } = require("./rpcGuard");
+const { promptMode, signedStore } = require("./signerState");
 const { fetchTarget, scrub, scrubData, scrubKnown } = require("./redact");
 const {
   describeClaim,
@@ -165,18 +169,22 @@ async function serve() {
   const dir = process.env.SIGNER_KEYSTORE_DIR;
   if (!upstream || !dir)
     throw new Error("set SIGNER_UPSTREAM and SIGNER_KEYSTORE_DIR");
-  const prompt = process.env.SIGNER_PROMPT === "1";
-  if (prompt && !hasTty()) {
-    throw new Error(
-      "SIGNER_PROMPT=1 needs a controlling terminal (/dev/tty) to ask on",
-    );
-  }
   const provider = new JsonRpcProvider(upstream, undefined, {
     staticNetwork: true,
     batchMaxCount: 1,
     cacheTimeout: -1,
   });
   const chain = await guardChain(provider);
+  // Task 5.17 (deep review L-5): asking is the default off 31337.
+  const { prompt, warning } = promptMode(chain);
+  if (warning) console.error(warning);
+  if (prompt && !hasTty()) {
+    throw new Error(
+      process.env.SIGNER_PROMPT === "1"
+        ? "SIGNER_PROMPT=1 needs a controlling terminal (/dev/tty) to ask on"
+        : `the prompt (the default on chain ${chain}; SIGNER_PROMPT=0 switches it off) needs a controlling terminal (/dev/tty) to ask on`,
+    );
+  }
   const keys = await loadKeys(dir, await password());
   if (chain !== 31337) {
     const bad = keys.filter((k) =>
@@ -195,7 +203,9 @@ async function serve() {
     ]),
   );
   const seen = []; // requests shown, for "RETRY of #n"
-  const byNonce = new Map(); // "addr:nonce" -> { unsigned, raw } (L-5)
+  // "addr:nonce" -> { unsigned, raw } (L-5), on disk since Task 5.17
+  // (signerState.js), opened once the token file's path is known.
+  let byNonce = null;
   let queue = Promise.resolve(); // one request at a time, populate included
   let signed = 0;
 
@@ -419,15 +429,21 @@ async function serve() {
     port,
     tokenFile: process.env.SIGNER_TOKEN_FILE,
   });
+  // Synchronous after the await: no request is handled before it.
+  byNonce = signedStore(`${tokenFile}.signed.json`, chain);
+  // Task 5.17 (deep review L-6): the token goes with the process.
+  process.on("exit", () => fs.rmSync(tokenFile, { force: true }));
   console.log(
-    `signer on 127.0.0.1:${at}: ${keys.length} key(s), chain ${chain}${prompt ? ", every request asked" : ""}; token in ${tokenFile}`,
+    `signer on 127.0.0.1:${at}: ${keys.length} key(s), chain ${chain}${prompt ? ", every request asked" : ", NOT asking"}; token in ${tokenFile}; ${byNonce.size()} signed nonce(s) remembered`,
   );
   for (const [i, k] of keys.entries())
     console.log(`   ${i} ${k.name} ${k.wallet.address}`);
-  process.on("SIGTERM", () => {
-    console.log(`signer: ${signed} request(s) signed`);
-    process.exit(0);
-  });
+  for (const sig of ["SIGTERM", "SIGINT"]) {
+    process.on(sig, () => {
+      console.log(`signer: ${signed} request(s) signed`);
+      process.exit(0);
+    });
+  }
 }
 
 module.exports = { privateFile, loadKeys, guardChain, PUBLISHED, SEPOLIA };

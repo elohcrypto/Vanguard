@@ -205,6 +205,7 @@ describe("Signer request guard (rpcGuard.js)", function () {
         method: "eth_sendTransaction",
         params: [tx],
       });
+      let token = "";
       try {
         const r = await runSigner(
           script,
@@ -212,6 +213,7 @@ describe("Signer request guard (rpcGuard.js)", function () {
           async (live) => {
             expect(fs.statSync(tokenFile).mode & 0o777).to.equal(0o600);
             expect(live.token).to.match(/^[0-9a-f]{64}$/);
+            token = live.token;
             const refused = async (
               o: Parameters<typeof raw>[1],
               status: number,
@@ -289,12 +291,15 @@ describe("Signer request guard (rpcGuard.js)", function () {
         expect(r.code, "the signer stayed up and exited on SIGTERM").to.equal(
           0,
         );
-        expect(r.out).to.not.contain(
-          fs.existsSync(tokenFile)
-            ? fs.readFileSync(tokenFile, "utf8").trim()
-            : "-",
-        );
+        expect(token).to.match(/^[0-9a-f]{64}$/);
+        expect(r.out).to.not.contain(token);
         expect(r.out).to.contain(`token in ${tokenFile}`);
+        // Task 5.17 (deep review L-6): the production signer removes its
+        // token file when it exits.
+        if (script.endsWith("signer.js") && script.includes("production"))
+          expect(fs.existsSync(tokenFile), "token file left behind").to.equal(
+            false,
+          );
       } finally {
         up.server.close();
       }

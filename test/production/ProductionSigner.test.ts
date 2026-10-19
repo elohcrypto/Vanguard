@@ -68,7 +68,9 @@ describe("Production signer (scripts/production/signer.js)", function () {
           SIGNER_KEYSTORE_DIR: path.join(dir, "ok"),
           SIGNER_PASSWORD_FILE: passFile,
           SIGNER_TOKEN_FILE: path.join(dir, "token"),
-          SIGNER_PROMPT: "",
+          // Task 5.17 (L-5): asking is the default off 31337; these
+          // runs have no terminal.
+          SIGNER_PROMPT: "0",
           SIGNER_TEST: "",
           ...env,
         },
