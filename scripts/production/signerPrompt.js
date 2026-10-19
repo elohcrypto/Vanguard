@@ -239,17 +239,18 @@ function drain(fd) {
 
 /**
  * Ask on /dev/tty; true only when a line typed AFTER the prompt is exactly
- * `token`. Input typed ahead is discarded before and after the prompt.
+ * `token`. Input typed ahead is discarded before and after the request is
+ * shown; the "type <token>" line comes after the last discard, so input
+ * typed once it shows is read (Task 5.17: the line is the ready signal,
+ * test/production/SignerPrompt.test.ts waits on it, not on wall time).
  */
 function askTty(text, token) {
   const fd = fs.openSync("/dev/tty", "r+");
   try {
     drain(fd);
-    fs.writeSync(
-      fd,
-      `${text}\n   type ${token} to sign, anything else refuses: `,
-    );
+    fs.writeSync(fd, `${text}\n`);
     drain(fd);
+    fs.writeSync(fd, `   type ${token} to sign, anything else refuses: `);
     const buf = Buffer.alloc(64);
     let line = "";
     while (!line.includes("\n")) {

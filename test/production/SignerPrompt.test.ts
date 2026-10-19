@@ -301,21 +301,25 @@ describe("Signer prompt (signerPrompt.js)", function () {
       const t1 = (await waitFor(/type ([0-9a-f]{6}) to sign/, at))[1];
       p.stdin.write(`${t1}\n${t1}\n`);
       expect((await first).body.result).to.match(/^0x[0-9a-f]{64}$/);
-      // The retry has the same token; the typed-ahead line must not answer it.
+      // The retry has the same token; the typed-ahead line must not answer
+      // it. Task 5.17: asserted on the signer's state, not on 800 ms of
+      // wall time. The "type <token>" line shows only after the signer
+      // discarded typed-ahead input (askTty), so the answer typed once it
+      // shows is the one read: the operator's refusal, while the stale
+      // second copy of t1 (the same token) would have signed and sent.
       at = text.length;
       const second = rpc(live, "eth_sendTransaction", [tx]);
-      await waitFor(/RETRY of #1[\s\S]*type [0-9a-f]{6} to sign/, at);
-      await new Promise((ok) => setTimeout(ok, 500));
-      let settled = false;
-      second.then(() => (settled = true));
-      await new Promise((ok) => setTimeout(ok, 300));
-      expect(settled, "the typed-ahead line answered the retry").to.equal(
-        false,
-      );
+      const t2 = (
+        await waitFor(/RETRY of #1[\s\S]*type ([0-9a-f]{6}) to sign/, at)
+      )[1];
+      expect(t2).to.equal(t1);
       p.stdin.write("nope\n");
-      expect((await second).body.error.message).to.match(
-        /refused by the operator/,
+      const answer = (await second).body;
+      expect(answer.result, "the typed-ahead line answered the retry").to.equal(
+        undefined,
       );
+      expect(answer.error.message).to.match(/refused by the operator/);
+      expect(up.raws.length).to.equal(1);
       // Another transaction at a signed nonce is refused before any prompt.
       const other = await rpc(live, "eth_sendTransaction", [
         { ...tx, value: "0x2" },
