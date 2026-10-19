@@ -28,6 +28,7 @@
 #      option 61; nothing mints the deployer VSC) and the banner; the
 #      escrow factory moved to governance by vote; ops owns both list
 #      oracles, the unbound whitelist oracle included (Task 5.14)
+#   9. the cost table from steps 1-8's blocks (Task 5.15, Q19 = A)
 #   8. the post-ceremony votes (Task 5.15, Q15 = A, Q20 = B): round 1
 #      production nodes in and the attestor key re-approved, round 2 the
 #      deployer-era nodes out; the day-2 audit shows none
@@ -124,6 +125,9 @@ txs() { node -e 'try { console.log(require(process.argv[1]).txs.length) } catch 
 nonce() { rpc "$NODE_URL" eth_getTransactionCount "[\"$DEPLOYER\",\"latest\"]" | sed -E 's/.*"result":"([^"]+)".*/\1/'; }
 recorded() { node -e 'const r = require(process.argv[1]); console.log(r.txs.filter((t) => t.from.toLowerCase() === process.argv[2].toLowerCase()).length)' "$DEPLOY_RECORD" "$DEPLOYER"; }
 
+# Blocks around each step, for the cost table (step 9).
+blk() { echo $(($(rpc "$NODE_URL" eth_blockNumber "[]" | sed -E 's/.*"result":"([^"]+)".*/\1/'))); }
+B_DEPLOY=$(($(blk) + 1))
 # 1. Deploy, killed mid-way twice: at KILL_AT, then in the resumed run
 #    at KILL_AGAIN, inside the escrow fee wallet's onboarding (identity
 #    salt, claim signatures), so the replay crosses every flow.
@@ -183,6 +187,7 @@ deploy >"$OUT/deploy4.log" 2>&1 || fail "the re-run failed"
 grep -qE "\(([0-9]+) from the record, 0 sent now;" "$OUT/deploy4.log" || fail "the re-run sent"
 echo "4. re-run: $(grep -oE '[0-9]+ from the record, 0 sent now' "$OUT/deploy4.log")"
 
+B_VOTERS=$(($(blk) + 1))
 # 5. Voters on this deploy (H-2, Q16 = A): the production onboarding CLI
 #    through the production signer (scripts/production/signer.js, its
 #    keystores made here, 31337 by SIGNER_TEST=1). The CLI moves no clock;
@@ -220,6 +225,7 @@ rpc "$NODE_URL" evm_increaseTime "[$((WAIT + 1))]" >/dev/null
 rpc "$NODE_URL" evm_mine "[]" >/dev/null
 echo "5. voters onboarded through the production signer (no clock jump; eligible in $WAIT s); a re-run sent nothing; the drive moved the dev clock"
 signer 0
+B_CEREMONY=$(($(blk) + 1))
 # 6. The ceremony, its acceptances in parallel (Task 5.15, H-1, Q14 = A),
 #    through the faulting signer (sends slowed): the full phase is killed
 #    once its first acceptance settles; the accept phase finishes the rest,
@@ -293,6 +299,7 @@ done
   || fail "no line: the deployer owns no list oracle"
 echo "7. ceremony complete: 3 issuer keys, 3 D50 nodes, exempt fee wallet, banner; escrow factory governance's; ops owns both list oracles"
 
+B_POST=$(($(blk) + 1))
 # 8. Post-ceremony votes (Q15 = A, Q20 = B; two rounds): round 1
 #    registers three production nodes (role-phrase wallets 12-14, keys
 #    unused here) and re-approves the deployer-trusted issuer key for its
@@ -323,4 +330,21 @@ grep -q "❌" <<<"$A" && fail "a failed audit line"
 [[ $(grep -cE '^\s+⚠️' <<<"$A") -eq 1 && $(grep -cE "^\s+⚠️  $FEE is investorLimitExempt" <<<"$A") -eq 1 ]] \
   || fail "the audit's warnings are not just the exempt fee wallet"
 echo "8. post-ceremony votes: round 1 (3 registrations, 3 re-approvals), then round 2 (3 removals); audit: no deployer-era node or attestor line, one warning (the exempt fee wallet)"
+
+# 9. Cost table (Q19 = A): each step's gas by sender, at COST_GWEI (20)
+#    with 50% headroom, the deploy counted twice (the throwaway deploy).
+B_END=$(blk)
+echo "$WALLETS" >"$OUT/wallets.txt"
+cat >"$OUT/steps.json" <<STEPS
+[{"step":"deploy","from":$B_DEPLOY,"to":$((B_VOTERS - 1))},
+ {"step":"voter onboarding","from":$B_VOTERS,"to":$((B_CEREMONY - 1))},
+ {"step":"ceremony (parallel acceptance)","from":$B_CEREMONY,"to":$((B_POST - 1))},
+ {"step":"post-ceremony votes","from":$B_POST,"to":$B_END}]
+STEPS
+node scripts/production/costTable.js measure "$NODE_URL" "$OUT/steps.json" "$OUT/wallets.txt" \
+  "$HANDOVER_CONFIG" >"$OUT/gas-deploy.json" || fail "cost measure failed"
+node scripts/production/costTable.js table --gwei "${COST_GWEI:-20}" "$OUT/gas-deploy.json" \
+  | tee "$OUT/cost.txt"
+grep -qE "^    deployer +[0-9]+ gas" "$OUT/cost.txt" || fail "no deployer row in the cost table"
+echo "9. cost table: $OUT/cost.txt (gas in $OUT/gas-deploy.json)"
 echo "deploy drive PASS in $((SECONDS - START))s (logs $OUT)"

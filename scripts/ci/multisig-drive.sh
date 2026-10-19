@@ -22,6 +22,7 @@
 #   5. claim signers (Task 5.15, Q17 = A): the admin multisig's batch adds
 #      a KYC and a separate AML EOA key; their claims verify; the day-2
 #      audit passes once handover.json lists them
+#   6. the cost table from steps 1-5's blocks (Q19 = A)
 #
 # USAGE  scripts/ci/multisig-drive.sh   (nodes on MULTISIG_NODE_PORT 8547
 #        and MULTISIG_SIGNER_PORT 8549; exit 1 on failure)
@@ -113,6 +114,7 @@ node -e 'require("./scripts/zk/attest").attestorPublicKey("0x" + "11".repeat(32)
 export DEPLOY_CONFIG=$OUT/deploy.json
 echo "0. ops multisig $OPS, issuer admin multisig $ADMIN (2-of-2 TestMultisig)"
 
+B_DEPLOY=$(($(block) + 1))
 # 1. The deploy pauses at custody; a re-run before execution sends nothing.
 OPS_FILE=$OUT/31337.ops-transactions.json
 [[ $(rc deploy1.log hh scripts/production/DeployProduction.ts) -eq 3 ]] || fail "deploy: no pause (exit 3)"
@@ -140,6 +142,7 @@ CUSTODY=$(node -e 'console.log(require(process.argv[1]).contracts.investorReques
 [[ $(owner "$CUSTODY") == $(lc "$OPS") ]] || fail "custody not owned by the ops multisig"
 echo "2. executed by the owners; resumed ($(grep -oE '[0-9]+ sent now' "$OUT/deploy2.log")); re-run: $(grep -oE '[0-9]+ from the record, 0 sent now' "$OUT/deploy3.log")"
 
+B_CEREMONY=$(($(block) + 1))
 # 3. Ceremony: full phase pauses before any vote; nothing sends until executed.
 hh scripts/ci/deploy-voters.js >"$OUT/voters.log" 2>&1 || fail "voter registration failed"
 C_OPS=$HANDOVER_CONFIG.ops-transactions.json C_ADMIN=$HANDOVER_CONFIG.issuer-admin-transactions.json
@@ -185,6 +188,7 @@ for k in kycIssuer amlIssuer; do
 done
 echo "4. executed; ceremony complete: 3 issuer keys, 3 D50 nodes, exempt fee wallet, banner; governance owns 10 plan contracts, ops multisig both list oracles and custody, admin multisig both issuers"
 
+B_SIGNERS=$(($(block) + 1))
 # 5. Claim signers (Q17 = A, M-2): the admin multisig's batch adds a KYC
 #    and a separate AML EOA CLAIM_SIGNER key (wallets 14, 15); exit 3 until
 #    its owners execute it; then each key's claim verifies; the day-2
@@ -206,4 +210,20 @@ node -e 'const fs = require("fs"); const f = process.argv[1]; const c = JSON.par
 [[ $(grep -c "✅ claimSigners 0x[0-9a-fA-F]*: a CLAIM_SIGNER key the issuer admin added after the ceremony" "$OUT/audit2.log") -eq 2 ]] \
   || fail "the audit did not name both claim signers"
 echo "5. claim signers: the admin multisig's batch (2 calls) executed; both keys' claims verify; the audit failed unlisted, passed listed"
+
+# 6. Cost table (Q19 = A): the multisig deploy, the ceremony with its
+#    Safe batches (the owners' wallets 9, 10, 12, 13 pay), the claim-signer
+#    batch; at COST_GWEI (20) with 50% headroom.
+echo "$WALLETS" >"$OUT/wallets.txt"
+cat >"$OUT/steps.json" <<STEPS
+[{"step":"deploy (multisig custody batch)","from":$B_DEPLOY,"to":$((B_CEREMONY - 1))},
+ {"step":"voters + ceremony + Safe batches","from":$B_CEREMONY,"to":$((B_SIGNERS - 1))},
+ {"step":"claim-signer Safe batch","from":$B_SIGNERS,"to":$(($(block)))}]
+STEPS
+node scripts/production/costTable.js measure "$NODE_URL" "$OUT/steps.json" "$OUT/wallets.txt" \
+  "$HANDOVER_CONFIG" >"$OUT/gas-multisig.json" || fail "cost measure failed"
+node scripts/production/costTable.js table --gwei "${COST_GWEI:-20}" "$OUT/gas-multisig.json" \
+  | tee "$OUT/cost.txt"
+grep -qE "^    wallet (9|13) +[0-9]+ gas" "$OUT/cost.txt" || fail "no issuer-admin owner row in the cost table"
+echo "6. cost table: $OUT/cost.txt"
 echo "multisig drive PASS in $((SECONDS - START))s (logs $OUT)"
