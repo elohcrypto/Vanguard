@@ -12,10 +12,15 @@ dotenv.config();
 
 // R-56c-6: the published Hardhat test phrase (and its keys) is anyone's;
 // on a live network it would sign with keys the whole internet holds.
+// Task 5.17 (deep review L-7): keyed on the chain id, not the network's
+// name, so `--network localhost` or a custom name pointed at a public RPC
+// is refused too; only the dev chain (31337) may hold them.
 const TEST_PHRASE =
   "test test test test test test test test test test test junk";
-export function refuseTestKeys(network: string, accounts: any): void {
-  if (!["sepolia", "mainnet"].includes(network)) return;
+const DEV_CHAIN = 31337;
+
+/** Whether `accounts` is the published phrase or holds one of its keys. */
+function publishedKeys(accounts: any): boolean {
   const phrase = String(accounts?.mnemonic ?? "")
     .toLowerCase()
     .trim()
@@ -30,18 +35,32 @@ export function refuseTestKeys(network: string, accounts: any): void {
           .address,
     ),
   );
-  if (
+  return (
     phrase === TEST_PHRASE ||
     keys.some((k: string) => published.has(new Wallet(k).address))
-  ) {
-    throw new Error(
-      `refusing --network ${network}: MNEMONIC / PRIVATE_KEY is the published Hardhat test phrase; unset it (the local rehearsal's) and use the deployment's own keys`,
-    );
-  }
+  );
 }
-extendEnvironment((hre) =>
-  refuseTestKeys(hre.network.name, (hre.network.config as any).accounts),
-);
+
+/** Throws when `accounts` holds the published keys on a chain but 31337. */
+export function refuseTestKeys(
+  network: string,
+  accounts: any,
+  chainId: number | undefined,
+): void {
+  if (chainId === DEV_CHAIN || !publishedKeys(accounts)) return;
+  throw new Error(
+    `refusing --network ${network} (chain ${chainId ?? "not configured"}): MNEMONIC / PRIVATE_KEY is the published Hardhat test phrase; unset it (the local rehearsal's) and use the deployment's own keys`,
+  );
+}
+
+// The network's configured chain decides, before any script: Hardhat
+// itself refuses a node whose eth_chainId differs from it (HH101, on every
+// call), so a network configured 31337 is the dev chain or nothing, and
+// one with no chainId configured cannot be shown to be it.
+extendEnvironment((hre) => {
+  const cfg = hre.network.config as any;
+  refuseTestKeys(hre.network.name, cfg.accounts, cfg.chainId);
+});
 
 // Task 5.15 (L-6): TEST_SHARD=<i>/<n> runs shard i of n of the test files
 // (`hardhat test` and `hardhat coverage` both collect them here), as
