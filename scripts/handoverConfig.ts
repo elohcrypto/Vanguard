@@ -8,6 +8,7 @@
 import { ethers } from "hardhat";
 
 import { checkWallets, validatePins } from "./production/walletPins";
+import { awaitOwnSenders } from "./production/cliGuards";
 
 const { resolveRole, vetRole } = require("../demo/utils/RoleCalls");
 
@@ -197,5 +198,7 @@ export async function handoverArgs(
     // R-413-12: null is an assertion of absence and must reach the ceremony.
     if (k in cfg) args[k] = cfg[k] === null ? null : await at(name, cfg[k]);
   }
+  // Task 5.17 (deep review M-3): nothing of this run's keys in flight.
+  await awaitOwnSenders(args, `${path} (${phase})`);
   return { args, wallet };
 }

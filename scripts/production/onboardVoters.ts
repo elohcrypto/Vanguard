@@ -25,6 +25,8 @@ import { ethers, network } from "hardhat";
 
 import { checkWallets } from "./walletPins";
 
+const { awaitSettledNonces } = require("../../demo/utils/PendingNonces");
+
 const DemoState = require("../../demo/core/DemoState");
 const { scrubKnown } = require("./redact");
 const { onboard } = require("../../demo/utils/Onboard");
@@ -136,7 +138,17 @@ async function main(): Promise<void> {
     if (!f) throw new Error(`set ${k}`);
     return JSON.parse(fs.readFileSync(f, "utf8"));
   };
-  await onboardVoters(read("DEPLOY_RECORD"), read("HANDOVER_CONFIG"));
+  const rec = read("DEPLOY_RECORD");
+  const cfg = read("HANDOVER_CONFIG");
+  const signers = await ethers.getSigners();
+  // Task 5.17 (deep review M-3): nothing of the deployer's or a voter's
+  // in flight before the onboarding reads what is missing.
+  const ix = [0, cfg.proposer, ...cfg.voters].filter((i: number) => signers[i]);
+  await awaitSettledNonces(
+    ix.map((i: number) => signers[i]),
+    "voter onboarding",
+  );
+  await onboardVoters(rec, cfg);
 }
 
 if (require.main === module) {

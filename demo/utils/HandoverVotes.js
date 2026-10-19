@@ -22,6 +22,7 @@ const {
   fail,
 } = require("./HandoverChecks");
 const { withDerivedContracts } = require("./HandoverDerive");
+const { awaitSettledNonces } = require("./PendingNonces");
 
 const STATUS = [
   "Pending",
@@ -205,8 +206,19 @@ async function proposalsBy(governance, proposer) {
  * same proposer's proposal of the same type, target and calldata, still
  * voting or passed but not executed; one that ended without passing is
  * settled as Rejected, reported, never adopted.
+ *
+ * Task 5.17 (deep review M-3): first every sender's pending transactions
+ * must mine (PendingNonces.js), so a re-run never misses the killed run's
+ * in-flight proposal or vote. Two live matches (an orphan a re-run made
+ * before that fix): the one with the most votes is adopted (the lowest id
+ * on a tie) and the others are settled by settleAll once their vote ends.
  */
 async function openAll({ governance, proposer, voters, items, log }) {
+  await awaitSettledNonces(
+    [proposer, ...voters],
+    "the proposals (proposer and voters)",
+    { log },
+  );
   const mine = await proposalsBy(governance, proposer);
   const taken = new Set();
   const open = [];
@@ -219,7 +231,13 @@ async function openAll({ governance, proposer, voters, items, log }) {
         same(m.p.target, target) &&
         same(m.p.callData, it.callData),
     );
-    const live = matches.filter((m) => m.live).pop();
+    const votes = (m) => Number(m.p.votesFor + m.p.votesAgainst);
+    const lives = matches
+      .filter((m) => m.live)
+      .sort((a, b) => votes(b) - votes(a) || a.id - b.id);
+    const live = lives[0];
+    const dupes = lives.slice(1).map((m) => m.id);
+    for (const d of dupes) taken.add(d);
     // Past its vote without passing: settled (Rejected, deposits
     // refundable) so no open proposal is left on a plan contract.
     for (const m of matches.filter((x) => !x.live)) {
@@ -233,6 +251,10 @@ async function openAll({ governance, proposer, voters, items, log }) {
       id = live.id;
       taken.add(id);
       log(`   ↪️  ${it.label}: proposal #${id} already open; adopted`);
+      for (const d of dupes)
+        log(
+          `   ⚠️  ${it.label}: proposal #${d} duplicates #${id} (an earlier run's orphan): not voted on, settled once its vote ends`,
+        );
     } else {
       id = await proposeCall(
         governance,
@@ -243,7 +265,7 @@ async function openAll({ governance, proposer, voters, items, log }) {
         it.title || it.label,
       );
     }
-    open.push({ ...it, id });
+    open.push({ ...it, id, dupes });
   }
   if (!open.length) return open;
   log(
@@ -263,6 +285,7 @@ const chainNow = async () =>
 
 async function settleAll({ governance, proposer, open, log }) {
   if (!open.length) return;
+  await awaitSettledNonces([proposer], "the settlement (proposer)", { log });
   const [first] = await governance.getProposal(open[0].id);
   for (const o of open) {
     // Through module.exports, so a test can stop the run part-way.
@@ -280,9 +303,36 @@ async function settleAll({ governance, proposer, open, log }) {
     }
     if (o.verify) await o.verify();
     log(`   ✅ ${o.ok || o.label} (proposal #${o.id})`);
+    for (const d of o.dupes || [])
+      await settleDuplicate(governance, proposer, d, o, log);
   }
   log(
     `   ⏱️  ${open.length} proposal(s) settled ${(await chainNow()) - Number(first.createdAt)} s of chain time after #${open[0].id} was created`,
+  );
+}
+
+/**
+ * M-3: settle duplicate `d` of the executed `o` (proposer's fee unlocked):
+ * once its vote has ended, executeProposal (anyone's) leaves it Rejected
+ * (no votes, or its call fails now that `o` ran) or Executed (an
+ * idempotent call); while it still votes, a later run settles it.
+ */
+async function settleDuplicate(governance, proposer, d, o, log) {
+  const [p] = await governance.getProposal(d);
+  if (Number(p.status) !== ACTIVE) return;
+  if ((await chainNow()) <= p.votingEnds) {
+    log(
+      `   ⏳ duplicate proposal #${d} (${o.label}) votes until ${new Date(Number(p.votingEnds) * 1000).toISOString()}: a later run settles it`,
+    );
+    return;
+  }
+  if ((await passes(governance, p)) && (await chainNow()) < p.executionTime) {
+    await advancePast(p.executionTime, `duplicate #${d}: execution delay`);
+  }
+  await send(governance.connect(proposer).executeProposal(d));
+  const [after] = await governance.getProposal(d);
+  log(
+    `   🧹 duplicate proposal #${d} (${o.label}) settled as ${STATUS[Number(after.status)]}; deposits refundable when Rejected`,
   );
 }
 
