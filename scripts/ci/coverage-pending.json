@@ -1,0 +1,23 @@
+{
+  "why": "The tests the coverage runs (scripts/ci/coverage-ratchet.sh) leave pending on purpose, per file, checked exactly by scripts/ci/mocha-log.js pending (Task 5.17, deep review H-1; the tests job forbids pending outright, hardhat.config.ts). Two causes only: ZK_PROOFS=0 makes describeProofs (test/helpers/zkProofs.js) skip the PLONK-proving suites, which the tests job and scripts/ci/zk-coverage.sh run; and describeUnlessCoverage skips the suites whose child `hardhat run` processes would recompile the real build over the instrumented artifacts (DeployConfig's CLI refusals, HandoverCliNode). Measured 2026-10-19 at dd7943f plus slice A, both coverage shards with CI=true: 168 + 2 = 170 pending, as in CI run 39211556945. A file not listed must have 0; a change here is a change to what coverage skips, so say why in its commit.",
+  "pending": {
+    "test/circuits/BlacklistCircuit.test.js": 11,
+    "test/privacy/AccreditationAttestationSoundness.test.js": 18,
+    "test/privacy/AttestationCli.test.js": 8,
+    "test/privacy/AttestationDemoFlow.test.ts": 2,
+    "test/privacy/AttestationLifetime.test.js": 6,
+    "test/privacy/BlacklistDemoFlow.test.ts": 2,
+    "test/privacy/BlacklistSoundness.test.js": 22,
+    "test/privacy/ComplianceAttestationSoundness.test.js": 17,
+    "test/privacy/JurisdictionAttestationSoundness.test.js": 22,
+    "test/privacy/OneJurisdictionSource.test.ts": 3,
+    "test/privacy/RealZKProofs.test.js": 3,
+    "test/privacy/WhitelistCli.test.js": 14,
+    "test/privacy/WhitelistCliSubmit.test.js": 12,
+    "test/privacy/WhitelistLiveFlow.test.ts": 1,
+    "test/privacy/ZKSoundness.test.js": 13,
+    "test/production/DeployConfig.test.ts": 2,
+    "test/production/HandoverCliNode.test.ts": 2,
+    "test/proof-generation/RealProofGenerator.test.js": 12
+  }
+}

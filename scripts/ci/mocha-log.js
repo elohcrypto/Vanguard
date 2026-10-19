@@ -6,7 +6,10 @@
 // names a file): one JSON line per passing test AND per hook ("before
 // each" and the rest; the 5.2 failure was a hook), {kind, title, file,
 // ms, timeout}, where timeout is that runnable's own effective mocha
-// timeout (this.timeout() in a suite overrides the config's).
+// timeout (this.timeout() in a suite overrides the config's). When
+// MOCHA_PENDING names a file, a root after-all hook writes there
+// {file: pending tests} for every test file the run loaded (0 included;
+// deep review H-1).
 //
 // AS A CLI:
 //   failures <log> [max]   print mocha's numbered failure blocks (title,
@@ -23,8 +26,17 @@
 //                          1 on one over 75%, or on a file with no timing
 //                          (a run that recorded nothing is not a pass). A
 //                          timeout of 0 (disabled) is listed only.
+//   pending <recorded>     the pending gate of the coverage runs: every
+//                          file the run loaded has exactly the pending
+//                          count scripts/ci/coverage-pending.json lists
+//                          for it (0 if unlisted), so a describe.skip
+//                          outside the known proof and child-process
+//                          suites fails, and so does a listed suite that
+//                          no longer skips (the list must stay true).
+//                          A listed file that is not tracked fails too.
 //
-// `node scripts/ci/mocha-log.js failures <log> | durations <timings>`.
+// `node scripts/ci/mocha-log.js failures <log> | durations <timings>
+//   | pending <recorded>`.
 const fs = require("fs");
 const path = require("path");
 
@@ -78,15 +90,35 @@ let failure = null;
  * sets process.exitCode to the failure count after mocha ends, which
  * would overwrite an earlier value.
  */
-function recorderFailed(e) {
+function recorderFailed(e, to = out) {
   if (failure) return;
   failure = e;
   console.error(
-    `::error::mocha-log: recording to ${out} failed: ${e && e.message}`,
+    `::error::mocha-log: recording to ${to} failed: ${e && e.message}`,
   );
   process.on("exit", () => {
     if (!process.exitCode) process.exitCode = 1;
   });
+}
+
+/**
+ * {file: pending tests} over the whole suite tree under `suite`, every
+ * test file counted (0 included). isPending() is true for it.skip, for
+ * a test under describe.skip and for one that called this.skip().
+ */
+function pendingByFile(suite) {
+  while (suite.parent) suite = suite.parent;
+  const counts = {};
+  const walk = (s) => {
+    for (const t of s.tests) {
+      const f = path.relative(process.cwd(), t.file || "<no file>");
+      const key = f.split(path.sep).join("/");
+      counts[key] = (counts[key] || 0) + (t.isPending() ? 1 : 0);
+    }
+    s.suites.forEach(walk);
+  };
+  walk(suite);
+  return counts;
 }
 
 /** Root hooks: the first one installs the recorder. */
@@ -94,7 +126,38 @@ const mochaHooks = {
   beforeAll() {
     install();
   },
+  afterAll() {
+    const to = process.env.MOCHA_PENDING;
+    if (!to) return;
+    try {
+      const counts = pendingByFile(this.test.parent);
+      fs.writeFileSync(to, JSON.stringify(counts, null, 1) + "\n");
+    } catch (e) {
+      recorderFailed(e, to);
+    }
+  },
 };
+
+/**
+ * The pending gate (see the header): `recorded` against the committed
+ * list. Returns the findings, [] when they agree.
+ */
+function pendingFindings(recorded, listed, tracked) {
+  const out = [];
+  for (const f of Object.keys(listed)) {
+    if (!tracked.includes(f))
+      out.push(`${f} is listed in coverage-pending.json but not tracked`);
+  }
+  for (const [f, n] of Object.entries(recorded)) {
+    const want = listed[f] || 0;
+    if (n !== want)
+      out.push(
+        `${f}: ${n} pending, coverage-pending.json lists ${want}` +
+          (n > want ? " (a skipped suite?)" : " (update the list)"),
+      );
+  }
+  return out;
+}
 
 /** "[hook] title (file)" for a hook, "title (file)" for a test. */
 const label = (t) =>
@@ -102,13 +165,27 @@ const label = (t) =>
 
 function main() {
   const [mode, file, maxArg] = process.argv.slice(2);
-  if (!["failures", "durations"].includes(mode) || !file) {
-    console.error("usage: mocha-log.js failures|durations <log> [max]");
+  if (!["failures", "durations", "pending"].includes(mode) || !file) {
+    console.error("usage: mocha-log.js failures|durations|pending <log> [max]");
     process.exit(1);
   }
   if (!fs.existsSync(file)) {
     console.error(`::error::mocha-log: ${file} not found`);
     process.exit(1);
+  }
+  if (mode === "pending") {
+    const recorded = JSON.parse(fs.readFileSync(file, "utf8"));
+    const { pending: listed } = require("./coverage-pending.json");
+    const tracked = require("child_process")
+      .execFileSync("git", ["ls-files", "test"], { encoding: "utf8" })
+      .split("\n");
+    const total = Object.values(recorded).reduce((a, n) => a + n, 0);
+    const files = Object.keys(recorded).length;
+    console.log(`pending: ${total} in ${files} test files loaded`);
+    const findings = pendingFindings(recorded, listed, tracked);
+    if (!files) findings.push(`${file} records no test file (no run?)`);
+    for (const f of findings) console.error(`::error::pending gate: ${f}`);
+    process.exit(findings.length ? 1 : 0);
   }
   const ANSI = /\x1b\[[0-9;]*m/g;
   const lines = fs.readFileSync(file, "utf8").replace(ANSI, "").split("\n");
@@ -163,4 +240,4 @@ function main() {
 }
 
 if (require.main === module) main();
-else module.exports = { mochaHooks };
+else module.exports = { mochaHooks, pendingFindings };

@@ -186,6 +186,7 @@ jobs:
           path: |
             coverage.log
             coverage-timings.log
+            coverage-pending.log
           retention-days: 7
 
   # Baselines 97.4 lines and 91 branches, the instrumented set equal to

@@ -39,6 +39,13 @@
 # durations): a test over 75% of its own mocha timeout fails, over 50%
 # warns, and the slowest 10 are printed.
 #
+# Pending gate (deep review H-1): ZK_PROOFS=0 and the child-process
+# suites leave tests pending here on purpose, so this run cannot forbid
+# pending as the tests job does (hardhat.config.ts). Instead MOCHA_PENDING
+# records each loaded file's pending count and scripts/ci/mocha-log.js
+# pending checks it against scripts/ci/coverage-pending.json: any other
+# skip fails the run (a shard checks the files it loaded).
+#
 # Leaves coverage.json for scripts/ci/branch-floors.js (run "contracts").
 #
 # Task 5.15 (L-6): CI runs it in shards (scripts/ci/test-shards.js), each a
@@ -56,21 +63,24 @@
 #          check (its own figure is printed)
 #        scripts/ci/coverage-ratchet.sh --merged <n> <shard coverage.json>...
 #          merges the n shards into coverage.json, then the line check
-#        scripts/ci/coverage-ratchet.sh --from <log> <timings>
-#          checks a saved run's log and timings without running it
+#        scripts/ci/coverage-ratchet.sh --from <log> <timings> <pending>
+#          checks a saved run's log, timings and pending record without
+#          running it
 
 set -uo pipefail
 cd "$(dirname "$0")/../.."
 BASELINE=97.4
 LOG=coverage.log
 TIMINGS=coverage-timings.log
+PENDING=coverage-pending.log
 SHARD=
 MODE=${1:-}
 run=0
 case "$MODE" in
   --from)
-    LOG=${2:?--from <log> <timings>}
-    TIMINGS=${3:?--from <log> <timings>}
+    LOG=${2:?--from <log> <timings> <pending>}
+    TIMINGS=${3:?--from <log> <timings> <pending>}
+    PENDING=${4:?--from <log> <timings> <pending>}
     grep -qE '^\s+[0-9]+ failing' "$LOG" && run=1
     ;;
   --merged)
@@ -84,8 +94,9 @@ case "$MODE" in
       SHARD="${2:?--shard <i> <n>}/${3:?--shard <i> <n>}"
       export TEST_SHARD=$SHARD TEST_SHARD_RUN=coverage # hardhat.config.ts
     fi
-    rm -f "$TIMINGS"
-    ZK_PROOFS=0 MOCHA_TIMINGS="$PWD/$TIMINGS" npm run test:coverage > "$LOG" 2>&1 || run=$?
+    rm -f "$TIMINGS" "$PENDING"
+    ZK_PROOFS=0 MOCHA_TIMINGS="$PWD/$TIMINGS" MOCHA_PENDING="$PWD/$PENDING" \
+      npm run test:coverage > "$LOG" 2>&1 || run=$?
     ;;
 esac
 if [ "$MODE" != "--merged" ]; then
@@ -100,6 +111,8 @@ if [ "$MODE" != "--merged" ]; then
   fi
   slow=0
   node scripts/ci/mocha-log.js durations "$TIMINGS" || slow=1
+  skipped=0
+  node scripts/ci/mocha-log.js pending "$PENDING" || skipped=1
   if [ "$run" -ne 0 ]; then
     echo "::error::the instrumented test run failed; see $LOG"
     node scripts/ci/mocha-log.js failures "$LOG" 200
@@ -107,6 +120,7 @@ if [ "$MODE" != "--merged" ]; then
     exit 1
   fi
   [ "$slow" -eq 0 ] || { echo "::error::the near-timeout guard failed (above)"; exit 1; }
+  [ "$skipped" -eq 0 ] || { echo "::error::the pending gate failed (above)"; exit 1; }
 elif [ "$run" -ne 0 ]; then
   echo "::error::the shard merge failed (above)"
   exit 1

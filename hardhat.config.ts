@@ -199,11 +199,21 @@ const config: HardhatUserConfig = {
   },
   mocha: {
     timeout: 60000,
+    // Deep review H-1: under CI a `.only` fails the run, and so does a
+    // pending test (describe.skip, it.skip, this.skip()), so a skipped
+    // suite cannot pass as green. The coverage runs skip the proof suites
+    // on purpose (ZK_PROOFS=0) and set MOCHA_PENDING instead: a root hook
+    // records each file's pending tests there and
+    // scripts/ci/coverage-ratchet.sh checks them against the committed
+    // list (scripts/ci/coverage-pending.json).
+    ...(process.env.CI
+      ? { forbidOnly: true, forbidPending: !process.env.MOCHA_PENDING }
+      : {}),
     // CI's coverage runs set MOCHA_TIMINGS: a root hook records every
     // passing test's and hook's duration and own timeout there, for the
     // near-timeout guard (scripts/ci/mocha-log.js durations).
-    ...(process.env.MOCHA_TIMINGS
-      ? { rootHooks: require("./scripts/ci/mocha-log.js").mochaHooks }
+    ...(process.env.MOCHA_TIMINGS || process.env.MOCHA_PENDING
+      ?{ rootHooks: require("./scripts/ci/mocha-log.js").mochaHooks }
       : {}),
   },
 };
