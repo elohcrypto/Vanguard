@@ -361,12 +361,18 @@ function _settleWithRefund(uint256 proposalId, ProposalStatus terminal) internal
 }
 
 // Deposits are per identity (Task 5.2, Q6): a wallet bound to and controlling it pulls, once.
+// Task 5.17: claimRefundFor(proposalId, identity) names the identity; while no wallet is bound
+// (an agent deleted it) any wallet controlling it pulls; while one is bound, only that one.
 function claimRefund(uint256 proposalId) external nonReentrant {
+    _claimRefund(proposalId, identityRegistry.identity(msg.sender));
+}
+function _claimRefund(uint256 proposalId, address id) private {
     ProposalStatus s = _proposals[proposalId].status;
     require(s == ProposalStatus.Rejected || s == ProposalStatus.Cancelled, "Proposal not settled");
-    address id = identityRegistry.identity(msg.sender);
     uint256 amount = id == address(0) ? 0 : _voterLockedTokens[proposalId][id];
     require(amount > 0, "Nothing to claim");
+    address bound = identityRegistry.walletOf(id);
+    require(bound == address(0) || bound == msg.sender, "Identity is bound to another wallet");
     require(_controls(msg.sender, id), "Wallet does not control its identity");
     _voterLockedTokens[proposalId][id] = 0;
     require(governanceToken.transfer(msg.sender, amount), "Refund transfer failed");

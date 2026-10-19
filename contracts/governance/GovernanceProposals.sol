@@ -239,7 +239,9 @@ abstract contract GovernanceProposals is GovernanceConfig, ReentrancyGuard {
         _lockedTokens[proposalId] += votingCost;
         // Per identity (Q6): one wallet voting through two identities (a
         // consenting holder's identity moved onto it after a deletion)
-        // leaves two deposits, each claimable through its identity (L-3).
+        // leaves two deposits, each claimable through its identity (L-3),
+        // by a wallet controlling it, bound in the registry or not
+        // (claimRefundFor(proposalId, identity), Task 5.17).
         _voterLockedTokens[proposalId][id] = votingCost;
 
         // 1 Person = 1 Vote (equal voting power)

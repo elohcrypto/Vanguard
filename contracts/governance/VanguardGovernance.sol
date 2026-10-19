@@ -220,25 +220,52 @@ contract VanguardGovernance is GovernanceProposals {
 
     /**
      * @notice Pull your identity's deposit from a Rejected or Cancelled
-     *         proposal.
+     *         proposal: the identity the registry binds to the caller now.
      * @dev Deposits are keyed by identity (Task 5.2, Q6, as votes are,
-     *      D25 b): the caller's identity is the registry's for it now, and
-     *      the caller must control it now (IdentityControl: owner,
-     *      MANAGEMENT or ACTION key). A wallet recovery moves the registry
-     *      entry, so the recovered wallet claims and the lost one cannot.
-     *      Once per identity. The slot is zeroed before the transfer
+     *      D25 b), and the caller must control it now (IdentityControl:
+     *      owner, MANAGEMENT or ACTION key). A wallet recovery moves the
+     *      registry entry, so the recovered wallet claims and the lost one
+     *      cannot. Once per identity.
+     */
+    function claimRefund(uint256 proposalId) external nonReentrant {
+        _claimRefund(proposalId, identityRegistry.identity(msg.sender));
+    }
+
+    /**
+     * @notice Pull `identity`'s deposit, as a wallet that controls it.
+     * @dev A name of its own, not a claimRefund overload: typechain drops
+     *      an overloaded name from its typed contract, which would break
+     *      every typed claimRefund(proposalId) call.
+     *      Task 5.17 (deep review contracts L-1, Q23): after an agent
+     *      deletes the identity from the registry no wallet is bound to it
+     *      and the one-argument form finds nothing; control of the identity
+     *      contract (IdentityControl, not the registry) is the authority,
+     *      so a controlling wallet still pulls the deposit. While a wallet
+     *      is bound to the identity only that wallet claims (a recovery's
+     *      lost wallet may still hold a key: Q6 holds).
+     */
+    function claimRefundFor(uint256 proposalId, address identity) external nonReentrant {
+        _claimRefund(proposalId, identity);
+    }
+
+    /**
+     * @dev Both claimRefund forms. The slot is zeroed before the transfer
      *      (checks-effects-interactions); the guard is belt and braces
      *      against a token that re-enters on transfer.
      */
-    function claimRefund(uint256 proposalId) external nonReentrant {
+    function _claimRefund(uint256 proposalId, address id) private {
         ProposalStatus status = _proposals[proposalId].status;
         require(
             status == ProposalStatus.Rejected || status == ProposalStatus.Cancelled,
             "Proposal not settled"
         );
-        address id = identityRegistry.identity(msg.sender);
         uint256 amount = id == address(0) ? 0 : _voterLockedTokens[proposalId][id];
         require(amount > 0, "Nothing to claim");
+        // While the registry binds the identity to a wallet, only that wallet
+        // claims (a recovery moved it there: the lost wallet's keys may be in
+        // other hands); unbound (deleted), any wallet controlling it does.
+        address bound = identityRegistry.walletOf(id);
+        require(bound == address(0) || bound == msg.sender, "Identity is bound to another wallet");
         require(_controls(msg.sender, id), "Wallet does not control its identity");
         _voterLockedTokens[proposalId][id] = 0;
         require(governanceToken.transfer(msg.sender, amount), "Refund transfer failed");
@@ -247,7 +274,7 @@ contract VanguardGovernance is GovernanceProposals {
 
     /**
      * @notice VGT `identity` may still pull from `proposalId` (through a
-     *         wallet bound to and controlling it). Zero while the proposal
+     *         wallet controlling it: claimRefundFor(proposalId, identity)). Zero while the proposal
      *         is Active (deposit not yet claimable), after a claim, or on
      *         a proposal that passed (deposits were burned).
      */

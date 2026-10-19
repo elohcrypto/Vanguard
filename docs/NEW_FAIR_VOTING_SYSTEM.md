@@ -120,6 +120,7 @@ owed, and each one pulls it:
 
 ```solidity
 function claimRefund(uint256 proposalId) external            // once per identity, after settlement
+function claimRefundFor(uint256 proposalId, address identity) external // a deleted identity's controller
 function getClaimableRefund(uint256 proposalId, address identity) external view returns (uint256)
 ```
 
@@ -376,6 +377,7 @@ mapping(uint256 => address[]) private _proposalVoters;
 - `setVotingCost()` - Update voting cost (bounded, emits `VotingCostUpdated`)
 - `cancelProposal()` - Owner-only; settles like a rejection, deposits become claimable
 - `claimRefund()` - Pull your identity's deposit from a Rejected or Cancelled proposal (once; the wallet must be bound to and control the identity, so a recovered wallet claims and the lost one cannot)
+- `claimRefundFor(proposalId, identity)` - The same for a named identity: a wallet controlling it claims while no wallet is bound to it (an identity the agent deleted), else only the bound wallet (Task 5.17)
 - `getClaimableRefund()` - View what an identity may still claim from a proposal
 - `getLockedTokens()` - View total locked while Active; zero after a Rejected or Cancelled settlement; after execution it still reports the amount that was burned
 - `getVoterLockedTokens()` - View one identity's deposit (locked while Active, claimable after Rejected or Cancelled until claimed; on an Executed proposal it shows the burned deposit)
