@@ -251,7 +251,23 @@ for a in "${SENDERS[@]}"; do N0[$a]=$(($(rpc "$NODE_URL" eth_getTransactionCount
 signer 40 7 300
 setsid npx hardhat run scripts/handover.ts --network remote >"$OUT/ceremony1.log" 2>&1 &
 C=$!
-for _ in $(seq 1 3000); do grep -q "owned by governance (proposal #" "$OUT/ceremony1.log" && break; sleep 0.2; done
+# Task 5.17 (deep review, CI LOWs): the poll checks the ceremony is still
+# alive (kill -0), so one that dies before its first acceptance fails now
+# with its own exit code, not after the 600 s poll; so does a poll that
+# runs out (the line looked for is printed before an exit, so it is
+# re-read once the process is gone).
+settled() { grep -q "owned by governance (proposal #" "$OUT/ceremony1.log"; }
+for _ in $(seq 1 3000); do
+  settled && break
+  if ! kill -0 "$C" 2>/dev/null; then
+    rc=0
+    wait "$C" || rc=$?
+    settled || fail "the ceremony exited (code $rc) before its first acceptance settled"
+    break
+  fi
+  sleep 0.2
+done
+settled || { kill -9 -- "-$C" 2>/dev/null || true; fail "no acceptance settled in 600 s"; }
 kill -9 -- "-$C" 2>/dev/null || true
 wait "$C" 2>/dev/null || true
 grep -q "Handover complete" "$OUT/ceremony1.log" && fail "the ceremony finished before the kill"
