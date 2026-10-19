@@ -17,8 +17,9 @@
  * stopped, and a complete one re-runs sending nothing. Replay reads past
  * state: on a public chain the RPC must serve historical blocks (archive).
  */
-import { artifacts, ethers, network } from "hardhat";
+import { ethers, network } from "hardhat";
 import { DeployRecord, saveRecord, TxEntry } from "./deployRecordFile";
+import { callLabel, createLabel } from "./deployRecordLabels";
 
 const same = (a?: string | null, b?: string | null) =>
   String(a ?? "").toLowerCase() === String(b ?? "").toLowerCase();
@@ -30,40 +31,6 @@ const READS_AT = new Set([
   "eth_getStorageAt",
   "eth_getTransactionCount",
 ]);
-
-let names: { bytecode: string; name: string }[] | null = null;
-let selectors: Map<string, string> | null = null;
-
-/** The artifact whose creation code `data` starts with, else "create". */
-async function createLabel(data: string): Promise<string> {
-  if (!names) {
-    names = [];
-    for (const fq of await artifacts.getAllFullyQualifiedNames()) {
-      const a = await artifacts.readArtifact(fq);
-      if (a.bytecode.length > 2) {
-        names.push({
-          bytecode: a.bytecode.toLowerCase(),
-          name: a.contractName,
-        });
-      }
-    }
-    names.sort((x, y) => y.bytecode.length - x.bytecode.length);
-  }
-  const d = data.toLowerCase();
-  return `new ${names.find((n) => d.startsWith(n.bytecode))?.name ?? "contract"}`;
-}
-
-/** `to`.fn for a call, fn read from the compiled ABIs by selector. */
-async function callLabel(to: string, data: string): Promise<string> {
-  if (!selectors) {
-    selectors = new Map();
-    for (const fq of await artifacts.getAllFullyQualifiedNames()) {
-      const i = new ethers.Interface((await artifacts.readArtifact(fq)).abi);
-      i.forEachFunction((f) => selectors!.set(f.selector, f.name));
-    }
-  }
-  return `${ethers.getAddress(to).slice(0, 10)}….${selectors.get(data.slice(0, 10)) ?? data.slice(0, 10)}`;
-}
 
 /** Thrown when a re-run cannot follow its record: nothing more is sent. */
 export class RecordRefusal extends Error {
