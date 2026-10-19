@@ -73,7 +73,7 @@ describe("List oracle floor against the reachable votes (contracts L-2)", functi
       "minimumConsensusOracles (3) <= 2, the fewest registered nodes that reach the 66% bar",
     );
     await expect(handoverDeployerPowers(args)).to.be.rejectedWith(
-      /minimumConsensusOracles is 3 but 2 registered node\(s\) reach the 66% bar: a query resolves at 2 vote\(s\) and takes no more, so every verdict fails TooFewVoters/,
+      /minimumConsensusOracles is 3 but 2 registered node\(s\) reach the 66% bar: a query can resolve at 2 vote\(s\) and then takes no more, so a verdict can fail TooFewVoters \(every one, with equal weights\)/,
     );
     const why = await floorRefusal(f.args, nodes, facts);
     expect(why).to.match(

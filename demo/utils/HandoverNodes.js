@@ -232,7 +232,7 @@ function floorRow(label, min, fewest, threshold) {
   return {
     label: `${label} minimumConsensusOracles (${min}) <= ${fewest}, the fewest registered nodes that reach the ${threshold}% bar`,
     ok: Number(min) <= fewest,
-    fix: `${label} minimumConsensusOracles is ${min} but ${fewest} registered node(s) reach the ${threshold}% bar: a query resolves at ${fewest} vote(s) and takes no more, so every verdict fails TooFewVoters; ${
+    fix: `${label} minimumConsensusOracles is ${min} but ${fewest} registered node(s) reach the ${threshold}% bar: a query can resolve at ${fewest} vote(s) and then takes no more, so a verdict can fail TooFewVoters (every one, with equal weights); ${
       fewest >= MIN_CONSENSUS
         ? `its owner must setMinimumConsensusOracles(${fewest}) (or the node weights change) first`
         : `no floor fits (it is at least ${MIN_CONSENSUS}): the node weights must change so no single node reaches the bar`
