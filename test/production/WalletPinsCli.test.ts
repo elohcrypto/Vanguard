@@ -53,7 +53,7 @@ describeUnlessCoverage(
       new Promise<{ code: number | null; out: string }>((ok) => {
         const p = spawn(
           "npx",
-          ["hardhat", "run", script, "--network", "remote"],
+          ["hardhat", "run", "--no-compile", script, "--network", "remote"],
           {
             env: {
               ...process.env,

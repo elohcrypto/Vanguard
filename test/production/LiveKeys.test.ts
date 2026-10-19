@@ -2,6 +2,7 @@ import { expect } from "chai";
 import { execFileSync, spawn } from "child_process";
 import { fakeUpstream } from "../helpers/signerProcess";
 import { refuseTestKeys } from "../../hardhat.config";
+const { describeUnlessCoverage } = require("../helpers/zkProofs");
 
 const PHRASE = "test test test test test test test test test test test junk";
 // Hardhat's published account 0 and 19 keys.
@@ -41,75 +42,86 @@ describe("Live networks refuse the Hardhat test phrase (R-56c-6)", function () {
         refuseTestKeys(net, { mnemonic: PHRASE }, 31337),
       ).to.not.throw();
   });
-
-  it("refuses a network with no chain configured; a node configured 31337 on another chain stops at HH101", async function () {
-    this.timeout(180000);
-    expect(() =>
-      refuseTestKeys("custom", { mnemonic: PHRASE }, undefined),
-    ).to.throw(
-      "refusing --network custom (chain not configured): MNEMONIC / PRIVATE_KEY is the published Hardhat test phrase",
-    );
-    // devnode is configured 31337; pointed at a Sepolia node, Hardhat's
-    // chain check stops the run at its first call, before any send.
-    const up = await fakeUpstream(11155111);
-    try {
-      const out = await new Promise<{ code: number | null; text: string }>(
-        (ok) => {
-          const p = spawn(
-            "npx",
-            [
-              "hardhat",
-              "--network",
-              "devnode",
-              "run",
-              "scripts/print-role-wallets.js",
-            ],
-            {
-              env: { ...process.env, MNEMONIC: PHRASE, DEMO_RPC_URL: up.url },
-            },
-          );
-          let text = "";
-          p.stdout.on("data", (d) => (text += d));
-          p.stderr.on("data", (d) => (text += d));
-          p.on("exit", (code) => ok({ code, text }));
-        },
-      );
-      expect(out.code).to.equal(1);
-      expect(out.text).to.include(
-        "HH101: Hardhat was set to use chain id 31337, but connected to a chain with id 11155111",
-      );
-      expect(up.raws).to.deep.equal([]);
-    } finally {
-      up.server.close();
-    }
-  });
-
-  it("is wired: hardhat --network sepolia with the phrase stops before any script", function () {
-    this.timeout(180000);
-    let err = "";
-    try {
-      execFileSync(
-        "npx",
-        [
-          "hardhat",
-          "--network",
-          "sepolia",
-          "run",
-          "scripts/print-role-wallets.js",
-        ],
-        {
-          env: {
-            ...process.env,
-            MNEMONIC: PHRASE,
-            SEPOLIA_RPC_URL: "http://127.0.0.1:1",
-          },
-          stdio: "pipe",
-          encoding: "utf8",
-        },
-      );
-    } catch (e: any) {
-      err = String(e.stderr) + String(e.stdout);
-    }
-    expect(err).to.include("refusing --network sepolia");
-  });
 });
+
+// Not under coverage: a child `hardhat run` compiles first (and
+// --no-compile is passed too), and a recompile overwrites the
+// instrumented artifacts/ mid-run (Task 5.17, CI run 39308877486).
+describeUnlessCoverage(
+  "Live networks refuse the Hardhat test phrase: the CLI (R-56c-6)",
+  "its child `hardhat run` processes would recompile the real build over the instrumented artifacts",
+  function () {
+    it("refuses a network with no chain configured; a node configured 31337 on another chain stops at HH101", async function () {
+      this.timeout(180000);
+      expect(() =>
+        refuseTestKeys("custom", { mnemonic: PHRASE }, undefined),
+      ).to.throw(
+        "refusing --network custom (chain not configured): MNEMONIC / PRIVATE_KEY is the published Hardhat test phrase",
+      );
+      // devnode is configured 31337; pointed at a Sepolia node, Hardhat's
+      // chain check stops the run at its first call, before any send.
+      const up = await fakeUpstream(11155111);
+      try {
+        const out = await new Promise<{ code: number | null; text: string }>(
+          (ok) => {
+            const p = spawn(
+              "npx",
+              [
+                "hardhat",
+                "--network",
+                "devnode",
+                "run",
+                "--no-compile",
+                "scripts/print-role-wallets.js",
+              ],
+              {
+                env: { ...process.env, MNEMONIC: PHRASE, DEMO_RPC_URL: up.url },
+              },
+            );
+            let text = "";
+            p.stdout.on("data", (d) => (text += d));
+            p.stderr.on("data", (d) => (text += d));
+            p.on("exit", (code) => ok({ code, text }));
+          },
+        );
+        expect(out.code).to.equal(1);
+        expect(out.text).to.include(
+          "HH101: Hardhat was set to use chain id 31337, but connected to a chain with id 11155111",
+        );
+        expect(up.raws).to.deep.equal([]);
+      } finally {
+        up.server.close();
+      }
+    });
+
+    it("is wired: hardhat --network sepolia with the phrase stops before any script", function () {
+      this.timeout(180000);
+      let err = "";
+      try {
+        execFileSync(
+          "npx",
+          [
+            "hardhat",
+            "--network",
+            "sepolia",
+            "run",
+            "--no-compile",
+            "scripts/print-role-wallets.js",
+          ],
+          {
+            env: {
+              ...process.env,
+              MNEMONIC: PHRASE,
+              SEPOLIA_RPC_URL: "http://127.0.0.1:1",
+            },
+            stdio: "pipe",
+            encoding: "utf8",
+          },
+        );
+      } catch (e: any) {
+        err = String(e.stderr) + String(e.stdout);
+      }
+      expect(err).to.include("refusing --network sepolia");
+    });
+  },
+);

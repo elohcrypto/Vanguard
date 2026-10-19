@@ -38,11 +38,15 @@ describeUnlessCoverage(
     let node: ReturnType<typeof spawn> | null = null;
 
     const run = (args: string[], env: Record<string, string> = {}) =>
-      spawnSync("npx", ["hardhat", "run", ...args, "--network", "devnode"], {
-        encoding: "utf8",
-        env: { ...process.env, DEMO_RPC_URL: rpc, ...env },
-        maxBuffer: 64 * 1024 * 1024,
-      });
+      spawnSync(
+        "npx",
+        ["hardhat", "run", "--no-compile", ...args, "--network", "devnode"],
+        {
+          encoding: "utf8",
+          env: { ...process.env, DEMO_RPC_URL: rpc, ...env },
+          maxBuffer: 64 * 1024 * 1024,
+        },
+      );
 
     before(async function () {
       // Fail fast on a foreign node rather than deploying the fixture on it.
