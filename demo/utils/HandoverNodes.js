@@ -12,10 +12,14 @@
  * prints each node's provenance (who sent its OracleRegistered) as a
  * residual warning when that was the deployer (D50: rotate by vote; the
  * day-2 audit skips only a node a governance execution registered,
- * R-56c-1), and
- * warns below ConsensusOracle.MIN_NODES; it prints each node's weight
- * share and fails when one node alone reaches the bar (Task 5.1, A1F-4:
- * the engine then opens no query). Each list oracle bound to VSC
+ * R-56c-1). Completion and the audit fail a set of 1 to MIN_NODES - 1
+ * nodes (Task 5.17, deep review M-4: no query opens, so the lists freeze;
+ * 0 nodes, before production nodes are voted in, stays a warning), print
+ * each node's weight share (n/a below MIN_NODES) and fail when one node
+ * alone reaches the bar (Task 5.1, A1F-4: the engine then opens no
+ * query). No node may be the deployer, or (deep review M-5, D25 b: a
+ * node is a key of its own) ops, the guardian, the issuer admin, the
+ * proposer, a voter, or an IdentityRegistry or VGT agent. Each list oracle bound to VSC
  * or VGT must carry the compiled WhitelistOracle or BlacklistOracle
  * code, not be paused, require at least two consensus oracles and keep a
  * sane maxVerdictAge; its manager link is HandoverDerive.js.
@@ -133,6 +137,34 @@ function weightShares(f) {
   };
 }
 
+/**
+ * M-5 (D25 b): the role `a` holds besides being a node, or null: ops,
+ * the guardian, the issuer admin, the proposer or a voter (`o.voterWallets`,
+ * the proposer first), or an IdentityRegistry or VGT agent. The deployer
+ * has its own row. Shared with scripts/production/postCeremonyVotes.ts.
+ */
+async function roleOf(o, a) {
+  for (const [k, role] of [
+    ["ops", "ops"],
+    ["guardian", "the guardian"],
+    ["issuerAdmin", "the issuer admin"],
+  ]) {
+    if (o[k] && same(await addrOf(o[k]), a)) return role;
+  }
+  const vw = o.voterWallets || [];
+  for (const [i, v] of vw.entries()) {
+    if (same(await addrOf(v), a)) return i === 0 ? "the proposer" : "a voter";
+  }
+  for (const [k, role] of [
+    ["identityRegistry", "an IdentityRegistry agent"],
+    ["governanceToken", "a VGT agent"],
+  ]) {
+    const c = o[k];
+    if (c && (await c.isAgent(a).catch(() => false))) return role;
+  }
+  return null;
+}
+
 /** [{ label, ok, fix, strays }] for the nodes and designations. */
 async function nodeChecks(o, f = null) {
   f = f || (await nodeFacts(o));
@@ -147,6 +179,18 @@ async function nodeChecks(o, f = null) {
     fix: `the deployer ${dAddr} is a registered OracleManager node: it would keep voting verdicts after the handover; the manager owner must removeOracle(deployer, ...) first`,
     strays: [],
   });
+  const roles = [];
+  for (const a of live) {
+    const r = await roleOf(o, a);
+    if (r) roles.push(`${a} (${r})`);
+  }
+  out.push({
+    label:
+      "no OracleManager node is ops, the guardian, the issuer admin, the proposer, a voter or a registry/VGT agent",
+    ok: roles.length === 0,
+    fix: `OracleManager node(s) ${list(roles)} hold a role key: a node is a key of its own (D25 b), or one key both runs the system and votes its verdicts; the manager owner must removeOracle(node, ...) and register a node key of its own first`,
+    strays: [],
+  });
   out.push({
     label: `every registered OracleManager node is acknowledged in oracleNodes (${live.length} registered, ${ack.length} acknowledged)`,
     ok: stray.length === 0,
@@ -159,8 +203,11 @@ async function nodeChecks(o, f = null) {
     })),
   });
   const w = weightShares(f);
+  const few = f.nodes.length > 0 && f.nodes.length < f.minNodes;
   out.push({
-    label: `no OracleManager node alone reaches the ${f.threshold}% bar; weight shares: ${list(w.shares) || (w.alone === null ? "unreadable" : "none")}`,
+    label: `no OracleManager node alone reaches the ${f.threshold}% bar; weight shares: ${few ? "n/a (below MIN_NODES)" : list(w.shares) || (w.alone === null ? "unreadable" : "none")}`,
+    // Below MIN_NODES the share is n/a: completion and the audit fail
+    // that on their own MIN_NODES line (nodeLines).
     ok: w.alone === false,
     fix:
       w.alone === null
@@ -332,12 +379,21 @@ async function nodeLines(o, dAddr, warnings = [], residual = []) {
       residual.push(w);
     }
   }
-  if (f.nodes.length < f.minNodes) {
+  // M-4: a partial set (a removal too many) freezes every list: no query
+  // opens. None at all is the first handover's state, before production
+  // nodes are voted in (D50): a warning.
+  if (f.nodes.length === 0) {
     warnings.push(
-      `OracleManager has ${f.nodes.length} registered node(s), below ConsensusOracle.MIN_NODES (${f.minNodes}): no query can open until governance registers more by vote`,
+      `OracleManager has 0 registered nodes, below ConsensusOracle.MIN_NODES (${f.minNodes}): no query can open until governance registers nodes by vote`,
     );
   }
-  const lines = (await nodeChecks(o, f)).map((c) => [c.label, c.ok]);
+  const lines = [];
+  if (f.nodes.length > 0)
+    lines.push([
+      `OracleManager has ${f.nodes.length} registered node(s), at least ConsensusOracle.MIN_NODES (${f.minNodes})`,
+      f.nodes.length >= f.minNodes,
+    ]);
+  for (const c of await nodeChecks(o, f)) lines.push([c.label, c.ok]);
   for (const c of await listOracleChecks(o)) lines.push([c.label, c.ok]);
   for (const c of await listTargetChecks(o, false)) lines.push([c.label, c.ok]);
   return lines;
@@ -351,6 +407,7 @@ async function nodeStrays(o) {
 }
 
 module.exports = {
+  roleOf,
   nodeFacts,
   nodeChecks,
   listOracleChecks,

@@ -43,7 +43,7 @@ const { scrubKnown } = require("./redact");
 const Votes = require("../../demo/utils/HandoverVotes");
 const { withDerivedContracts } = require("../../demo/utils/HandoverDerive");
 const { addrOf, same } = require("../../demo/utils/HandoverChecks");
-const { nodeFacts } = require("../../demo/utils/HandoverNodes");
+const { nodeFacts, roleOf } = require("../../demo/utils/HandoverNodes");
 const {
   deployerTrustedAttestors,
 } = require("../../demo/utils/HandoverPrivacy");
@@ -210,6 +210,12 @@ export async function roundOneItems(
     if (taken.some((a) => same(a, n.address)))
       throw new Error(
         `${n.address} is the deployer, governance, a role, a voter or a claim signer: a node is a key of its own (D25 b)`,
+      );
+    // Deep review M-5: the node checks' own rule (an agent included).
+    const role = await roleOf({ ...o, voterWallets: voters }, n.address);
+    if (role)
+      throw new Error(
+        `${n.address} is ${role}: a node is a key of its own (D25 b)`,
       );
     const known = f.nodes.find((x: any) => same(x.addr, n.address));
     if (known && !known.byGovernance)

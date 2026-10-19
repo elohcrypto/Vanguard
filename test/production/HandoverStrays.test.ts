@@ -273,7 +273,8 @@ describe("Handover strays: roles (Task 4.13)", function () {
       );
       args.oracleNodes = [node];
       await handoverDeployerPowers(args);
-      const { warnings, residual } = await assertHandoverComplete(args);
+      const { warnings, residual, failures } =
+        await assertHandoverComplete(args);
       const w = `OracleManager node ${node} (RISK) was registered by the deployer at block`;
       expect(warnings.find((x: string) => x.startsWith(w))).to.not.equal(
         undefined,
@@ -281,8 +282,10 @@ describe("Handover strays: roles (Task 4.13)", function () {
       expect(residual.find((x: string) => x.startsWith(w))).to.not.equal(
         undefined,
       );
-      expect(warnings.join("\n")).to.include(
-        "below ConsensusOracle.MIN_NODES (2)",
+      // Task 5.17 (deep review M-4): one node is below MIN_NODES, a
+      // failure (no query opens), its weight share n/a.
+      expect(failures).to.include(
+        "OracleManager has 1 registered node(s), at least ConsensusOracle.MIN_NODES (2)",
       );
     });
 
