@@ -108,6 +108,22 @@ function secretsOf(url) {
     out.add(b.toString("hex"));
     out.add(b.toString("base64").replace(/=+$/, ""));
     out.add(b.toString("base64url"));
+    // Slice B review L-1: inside a longer base64 string the secret starts
+    // at byte offset 0, 1 or 2 of a 3-byte group. Encode it behind 0, 1
+    // or 2 filler bytes and keep only the characters the filler and the
+    // bytes after it cannot change: from the 3rd (offset 1) or 4th
+    // (offset 2) character on, up to the last full group.
+    for (const lead of [0, 1, 2]) {
+      const n = lead + b.length;
+      const enc = Buffer.concat([Buffer.alloc(lead), b])
+        .subarray(0, n - (n % 3))
+        .toString("base64");
+      const core = enc.slice([0, 2, 3][lead]);
+      if (core.length >= PATH_MIN) {
+        out.add(core);
+        out.add(core.replace(/\+/g, "-").replace(/\//g, "_"));
+      }
+    }
   }
   return [...out].sort((a, b) => b.length - a.length);
 }

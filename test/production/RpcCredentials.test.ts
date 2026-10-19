@@ -154,6 +154,25 @@ describe("RPC credentials: Basic auth, encoded forms, error data (L-1..L-3)", fu
     }
   });
 
+  // Task 5.17 (slice B review L-1): inside a longer base64 string the key
+  // starts at byte offset 0, 1 or 2 of a group; every alignment is
+  // redacted, at most the key's last two bytes' characters stay.
+  it("redacts a key embedded in a longer base64 string at any byte offset", function () {
+    const url = `https://rpc.example/v3/${KEY}`;
+    for (const pre of ["", "a", "ab", "abc"])
+      for (const post of ["", "x", "xy"]) {
+        for (const enc of ["base64", "base64url"] as const) {
+          const b = Buffer.from(pre + KEY + post).toString(enc);
+          const t = scrub(`data ${b} end`, url);
+          expect(t, `${pre}|${post} ${enc}`).to.contain("<redacted>");
+          // No 8 consecutive characters of the key's own encodings left.
+          const full = Buffer.from(KEY).toString(enc);
+          for (let i = 0; i + 8 <= full.length - 4; i++)
+            expect(t, `${pre}|${post}`).to.not.contain(full.slice(i, i + 8));
+        }
+      }
+  });
+
   it("secrets include the Basic credential, hex and base64 forms, and 6+ character path keys", function () {
     const s = secretsOf(
       `https://${USER}:${encodeURIComponent(PASS)}@rpc.example/v3/ab12cd/eth`,
