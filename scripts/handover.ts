@@ -342,14 +342,14 @@ async function main(): Promise<void> {
   // send is never repeated (demo/utils/RpcRetry.js).
   installRetry(network.provider);
   const phase = process.env.HANDOVER_PHASE || "full";
-  // R-56-5: the day-2 audit runs after the ceremony; wallet 0 sends nothing.
-  if (phase === "audit") {
-    const [deployer] = await ethers.getSigners();
-    guardDeployer(
-      deployer,
-      await ethers.getContractAt("VanguardGovernance", cfg.governance),
-    );
-  }
+  // R-56-5: once governance owns VSC, wallet 0 sends nothing, in every
+  // phase (slice C review L-3: an accept-phase re-run after VSC's
+  // acceptance was unguarded); before that the guard lets everything by.
+  const [deployer] = await ethers.getSigners();
+  guardDeployer(
+    deployer,
+    await ethers.getContractAt("VanguardGovernance", cfg.governance),
+  );
   await runHandover(cfg, phase, path);
 }
 

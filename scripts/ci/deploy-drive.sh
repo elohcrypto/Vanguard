@@ -27,7 +27,9 @@
 #      nodes (D50), one exempt holder (the escrow fee wallet, exempted by
 #      option 61; nothing mints the deployer VSC) and the banner; the
 #      escrow factory moved to governance by vote; ops owns both list
-#      oracles, the unbound whitelist oracle included (Task 5.14)
+#      oracles, the unbound whitelist oracle included (Task 5.14); the
+#      deployer sent nothing from governance's acceptance of VSC on
+#      (Task 5.17, slice C review L-3)
 #   9. the cost table from steps 1-8's blocks (Task 5.15, Q19 = A)
 #   8. the post-ceremony votes (Task 5.15, Q15 = A, Q20 = B): round 1
 #      production nodes in and the attestor key re-approved, round 2 the
@@ -335,6 +337,18 @@ done
   || fail "no line: the deployer owns no list oracle"
 echo "7. ceremony complete: 3 issuer keys, 3 D50 nodes, exempt fee wallet, banner; escrow factory governance's; ops owns both list oracles"
 D_DONE=$(($(nonce)))  # the deployer's nonce at completion
+# Slice C review L-3: the guard holds in every phase, so the deployer
+# sends nothing from governance's acceptance of VSC on: its nonce at
+# that block (one transaction per block here) is the one at completion.
+VSC=$(node -e 'console.log(require(process.argv[1]).contracts.digitalToken)' "$DEPLOY_RECORD")
+GOV_TOPIC=0x000000000000000000000000$(lc governance | cut -c3- | tr 'A-F' 'a-f')
+OWNED_TOPIC=0x8be0079c531659141344cd1fd0a4f28419497f9722a3daafe3b4186f6b6457e0
+B_VSC=$(rpc "$NODE_URL" eth_getLogs "[{\"address\":\"$VSC\",\"fromBlock\":\"$(printf 0x%x "$B_CEREMONY")\",\"topics\":[\"$OWNED_TOPIC\",null,\"$GOV_TOPIC\"]}]" \
+  | grep -oE '"blockNumber":"0x[0-9a-f]+"' | head -1 | grep -oE '0x[0-9a-f]+' || true)
+[[ -n $B_VSC ]] || fail "no OwnershipTransferred of VSC to governance"
+N_VSC=$(($(rpc "$NODE_URL" eth_getTransactionCount "[\"$DEPLOYER\",\"$B_VSC\"]" | sed -E 's/.*"result":"([^"]+)".*/\1/')))
+[[ $N_VSC -eq $D_DONE ]] || fail "the deployer sent $((D_DONE - N_VSC)) transaction(s) after governance accepted VSC (block $((B_VSC)))"
+echo "7b. the deployer sent nothing from VSC's acceptance (block $((B_VSC))) to completion (nonce $D_DONE)"
 
 B_POST=$(($(blk) + 1))
 # 8. Post-ceremony votes (Q15 = A, Q20 = B; two rounds): round 1

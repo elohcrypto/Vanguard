@@ -97,6 +97,12 @@ export function validateHandoverConfig(
   if (!Array.isArray(cfg.voters) || cfg.voters.length === 0) {
     throw new Error(`${path}: "voters" must list wallet indices`);
   }
+  // Slice C review L-3: wallet 0 is the deployer, which sends nothing once
+  // governance owns VSC (R-56-5); as proposer or voter it would.
+  if ([cfg.proposer, ...cfg.voters].includes(0))
+    throw new Error(
+      `${path}: wallet 0 is the deployer; it may not be the proposer or a voter (it sends nothing once governance owns VSC, R-56-5)`,
+    );
   validatePins(cfg, path); // deep review M-2 (checked against the signer in handoverArgs)
 }
 
@@ -140,6 +146,12 @@ export async function handoverArgs(
       throw new Error(`wallet ${i} is not configured on this network`);
     return signers[i];
   };
+  // L-3: nor any index whose key is the deployer's (pinned as wallet 0).
+  for (const i of [cfg.proposer, ...cfg.voters])
+    if (wallet(i).address.toLowerCase() === wallet(0).address.toLowerCase())
+      throw new Error(
+        `${path}: wallet ${i} is the deployer ${wallet(0).address}; it may not be the proposer or a voter (R-56-5)`,
+      );
   const at = (name: string, a: string) => ethers.getContractAt(name, a);
   const role = async (k: string) => {
     if (cfg[k] === undefined) return undefined;
