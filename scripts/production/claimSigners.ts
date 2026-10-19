@@ -26,6 +26,7 @@ import { ethers, network } from "hardhat";
 import { handoverArgs } from "../handoverConfig";
 
 const { installRetry } = require("../../demo/utils/RpcRetry");
+const { scrubKnown } = require("./redact");
 const { requireEffects } = require("../../demo/utils/RoleCalls");
 const { addrOf, same } = require("../../demo/utils/HandoverChecks");
 
@@ -202,7 +203,7 @@ if (require.main === module) {
       process.exitCode = 3;
       return;
     }
-    console.error(`❌ Claim signers failed: ${e.message}`);
+    console.error(`❌ Claim signers failed: ${scrubKnown(e.message)}`);
     process.exitCode = 1;
   });
 }

@@ -4,8 +4,10 @@
  * plus the owner's own Sepolia node, both checked before the deploy):
  * what the ceremony needs from an RPC, measured, for one or more URLs.
  *
- *   node scripts/production/rpcCheck.js [--chain 11155111]
- *     [--address 0x..] [--old-block N] <url> [<url>...]
+ *   RPC_CHECK_URLS=<url>,<url> (or RPC_CHECK_URLS_FILE=<0600 file>) \
+ *     node scripts/production/rpcCheck.js [--chain 11155111]
+ *     [--address 0x..] [--old-block N]
+ * A URL on the command line is refused (shell history, ps).
  *
  * Per URL:
  *  - chain id (refused if not --chain);
@@ -32,7 +34,15 @@
 
 const { RANGE_ERROR, isTransient } = require("../../demo/utils/RpcRetry");
 
-const { classify, redactUrl, scrub, secretsOf, shown } = require("./redact");
+const {
+  classify,
+  redactUrl,
+  scrub,
+  secretsOf,
+  shown,
+  scrubKnown,
+  urlsFrom,
+} = require("./redact");
 
 let nextId = 1;
 /** One JSON-RPC call to `url`: { result } or { error: text, status }. */
@@ -170,18 +180,18 @@ async function checkUrl(url, opts = {}) {
 }
 
 async function main(argv) {
+  const urls = urlsFrom("RPC_CHECK_URLS", argv);
   const opts = {};
-  const urls = [];
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
     if (a === "--chain") opts.chain = Number(argv[++i]);
     else if (a === "--address") opts.address = argv[++i];
     else if (a === "--old-block") opts.oldBlock = Number(argv[++i]);
-    else urls.push(a);
+    else throw new Error(`unknown argument "${redactUrl(a)}"`);
   }
   if (!urls.length) {
     console.error(
-      "usage: rpcCheck.js [--chain id] [--address 0x..] [--old-block N] <url>...",
+      "usage: RPC_CHECK_URLS=<url>,<url> (or RPC_CHECK_URLS_FILE, 0600) rpcCheck.js [--chain id] [--address 0x..] [--old-block N]",
     );
     return 1;
   }
@@ -198,6 +208,12 @@ async function main(argv) {
 }
 
 if (require.main === module) {
-  main(process.argv.slice(2)).then((c) => (process.exitCode = c));
+  main(process.argv.slice(2)).then(
+    (c) => (process.exitCode = c),
+    (e) => {
+      console.error(`rpc-check: ${scrubKnown(e.message)}`);
+      process.exitCode = 1;
+    },
+  );
 }
 module.exports = { checkUrl, call, redactUrl, scrub, classify, secretsOf };

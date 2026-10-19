@@ -3,7 +3,8 @@
  * Cost table (plan v2 Task 5.15, owner Q19 = A: a measured budget, funded
  * before the deploy). The local drives measure; this prices.
  *
- *   node scripts/production/costTable.js measure <rpc> <steps.json> \
+ *   COST_RPC_URL=<rpc> (or COST_RPC_URL_FILE, 0600) \
+ *     node scripts/production/costTable.js measure <steps.json> \
  *     <wallets.txt> <handover.json> > gas.json
  *     steps.json: [{ "step": "deploy", "from": <block>, "to": <block> }, ...]
  *     (a drive records the blocks around each step); every transaction
@@ -19,6 +20,7 @@
 "use strict";
 
 const fs = require("fs");
+const { scrubKnown, urlsFrom } = require("./redact");
 
 let id = 1;
 async function rpc(url, method, params = []) {
@@ -109,15 +111,14 @@ function table(runs, gwei) {
 
 async function main(argv) {
   const read = (f) => JSON.parse(fs.readFileSync(f, "utf8"));
-  if (argv[0] === "measure" && argv.length === 5) {
+  const [url] = urlsFrom("COST_RPC_URL", argv);
+  if (argv[0] === "measure" && argv.length === 4 && url) {
     const wallets = fs
-      .readFileSync(argv[3], "utf8")
+      .readFileSync(argv[2], "utf8")
       .split(/\s+/)
       .filter(Boolean);
     console.log(
-      JSON.stringify(
-        await measure(argv[1], read(argv[2]), wallets, read(argv[4])),
-      ),
+      JSON.stringify(await measure(url, read(argv[1]), wallets, read(argv[3]))),
     );
     return 0;
   }
@@ -129,7 +130,7 @@ async function main(argv) {
     return 0;
   }
   console.error(
-    "usage: costTable.js measure <rpc> <steps.json> <wallets.txt> <handover.json> | table --gwei <price> <gas.json>...",
+    "usage: COST_RPC_URL=<rpc> costTable.js measure <steps.json> <wallets.txt> <handover.json> | table --gwei <price> <gas.json>...",
   );
   return 1;
 }
@@ -138,7 +139,7 @@ if (require.main === module) {
   main(process.argv.slice(2)).then(
     (c) => (process.exitCode = c),
     (e) => {
-      console.error(`costTable: ${e.message}`);
+      console.error(`costTable: ${scrubKnown(e.message)}`);
       process.exitCode = 1;
     },
   );

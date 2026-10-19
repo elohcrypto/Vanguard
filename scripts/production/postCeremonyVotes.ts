@@ -38,6 +38,7 @@ import { ethers, network } from "hardhat";
 import { handoverArgs } from "../handoverConfig";
 
 const { installRetry } = require("../../demo/utils/RpcRetry");
+const { scrubKnown } = require("./redact");
 const Votes = require("../../demo/utils/HandoverVotes");
 const { withDerivedContracts } = require("../../demo/utils/HandoverDerive");
 const { addrOf, same } = require("../../demo/utils/HandoverChecks");
@@ -429,7 +430,7 @@ async function main(): Promise<void> {
 
 if (require.main === module) {
   main().catch((e) => {
-    console.error(`❌ Post-ceremony votes failed: ${e.message}`);
+    console.error(`❌ Post-ceremony votes failed: ${scrubKnown(e.message)}`);
     process.exitCode = 1;
   });
 }

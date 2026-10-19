@@ -60,6 +60,7 @@ import {
 import { configureKeyManager } from "./opsKeyManager";
 
 const DemoState = require("../../demo/core/DemoState");
+const { scrubKnown } = require("./redact");
 const { installRetry } = require("../../demo/utils/RpcRetry");
 const {
   acceptStatus,
@@ -349,7 +350,7 @@ if (require.main === module) {
       process.exitCode = 3;
       return;
     }
-    console.error(`❌ Deploy failed: ${e.message}`);
+    console.error(`❌ Deploy failed: ${scrubKnown(e.message)}`);
     process.exitCode = 1;
   });
 }

@@ -10,6 +10,7 @@
  *     npx hardhat run scripts/ci/deploy-voters.js --network remote
  */
 const fs = require("fs");
+const { scrubKnown } = require("../production/redact");
 const { ethers, network } = require("hardhat");
 const { onboardVoters } = require("../production/onboardVoters");
 const { installRetry } = require("../../demo/utils/RpcRetry");
@@ -37,6 +38,6 @@ async function main() {
 }
 
 main().catch((e) => {
-  console.error(`❌ ${e.message}`);
+  console.error(`❌ ${scrubKnown(e.message)}`);
   process.exitCode = 1;
 });

@@ -203,10 +203,9 @@ describe("rpc-check (scripts/production/rpcCheck.js)", function () {
     const u = `http://user:pa55word@127.0.0.1:${port}/v3/${KEY}?apikey=${ENC}`;
     try {
       const out = await new Promise<string>((ok) => {
-        const p = spawn(process.execPath, [
-          "scripts/production/rpcCheck.js",
-          u,
-        ]);
+        const p = spawn(process.execPath, ["scripts/production/rpcCheck.js"], {
+          env: { ...process.env, RPC_CHECK_URLS: u },
+        });
         let t = "";
         p.stdout.on("data", (d) => (t += d));
         p.stderr.on("data", (d) => (t += d));
@@ -296,5 +295,34 @@ describe("rpc-check (scripts/production/rpcCheck.js)", function () {
     expect(
       scrub("pw hunter2 at user", "https://user:hunter2@rpc.example/"),
     ).to.equal("pw <redacted> at <redacted>");
+  });
+
+  it("takes RPC URLs from the environment or a 0600 file, never argv (final review L-4)", async function () {
+    const { spawnSync } = require("child_process");
+    const run = (args: string[], env: Record<string, string> = {}) =>
+      spawnSync(process.execPath, ["scripts/production/rpcCheck.js", ...args], {
+        env: { ...process.env, RPC_CHECK_URLS: "", ...env },
+        encoding: "utf8",
+      });
+    const argv = run(["https://rpc.example/v3/ARGVKEY12345"]);
+    expect(argv.status).to.equal(1);
+    expect(argv.stderr).to.contain("an RPC URL on the command line is refused");
+    expect(argv.stderr + argv.stdout).to.not.contain("ARGVKEY12345");
+    const fs = require("fs");
+    const os = require("os");
+    const path = require("path");
+    const f = path.join(
+      fs.mkdtempSync(path.join(os.tmpdir(), "rpcf-")),
+      "urls",
+    );
+    fs.writeFileSync(f, "http://127.0.0.1:1\n", { mode: 0o644 });
+    fs.chmodSync(f, 0o644);
+    const loose = run([], { RPC_CHECK_URLS_FILE: f });
+    expect(loose.stderr).to.contain(
+      "RPC_CHECK_URLS_FILE must be this user's own file, mode 0600",
+    );
+    fs.chmodSync(f, 0o600);
+    const ok = run([], { RPC_CHECK_URLS_FILE: f });
+    expect(ok.stdout).to.contain("RPC http://127.0.0.1:1");
   });
 });

@@ -24,6 +24,7 @@ import { artifacts, ethers, network } from "hardhat";
 import { runHandover } from "../handover";
 
 const { installRetry } = require("../../demo/utils/RpcRetry");
+const { scrubKnown } = require("./redact");
 const { redactUrl, scrub } = require("./redact");
 
 type Reader = (method: string, params: any[]) => Promise<any>;
@@ -179,7 +180,7 @@ async function main(): Promise<void> {
 
 if (require.main === module) {
   main().catch((e) => {
-    console.error(`❌ scan-count failed: ${e.message}`);
+    console.error(`❌ scan-count failed: ${scrubKnown(e.message)}`);
     process.exitCode = 1;
   });
 }

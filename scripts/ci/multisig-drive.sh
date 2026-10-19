@@ -220,7 +220,7 @@ cat >"$OUT/steps.json" <<STEPS
  {"step":"voters + ceremony + Safe batches","from":$B_CEREMONY,"to":$((B_SIGNERS - 1))},
  {"step":"claim-signer Safe batch","from":$B_SIGNERS,"to":$(($(block)))}]
 STEPS
-node scripts/production/costTable.js measure "$NODE_URL" "$OUT/steps.json" "$OUT/wallets.txt" \
+COST_RPC_URL=$NODE_URL node scripts/production/costTable.js measure "$OUT/steps.json" "$OUT/wallets.txt" \
   "$HANDOVER_CONFIG" >"$OUT/gas-multisig.json" || fail "cost measure failed"
 node scripts/production/costTable.js table --gwei "${COST_GWEI:-20}" "$OUT/gas-multisig.json" \
   | tee "$OUT/cost.txt"

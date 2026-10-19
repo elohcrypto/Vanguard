@@ -341,7 +341,7 @@ cat >"$OUT/steps.json" <<STEPS
  {"step":"ceremony (parallel acceptance)","from":$B_CEREMONY,"to":$((B_POST - 1))},
  {"step":"post-ceremony votes","from":$B_POST,"to":$B_END}]
 STEPS
-node scripts/production/costTable.js measure "$NODE_URL" "$OUT/steps.json" "$OUT/wallets.txt" \
+COST_RPC_URL=$NODE_URL node scripts/production/costTable.js measure "$OUT/steps.json" "$OUT/wallets.txt" \
   "$HANDOVER_CONFIG" >"$OUT/gas-deploy.json" || fail "cost measure failed"
 node scripts/production/costTable.js table --gwei "${COST_GWEI:-20}" "$OUT/gas-deploy.json" \
   | tee "$OUT/cost.txt"

@@ -24,6 +24,7 @@ import * as fs from "fs";
 import { ethers, network } from "hardhat";
 
 const DemoState = require("../../demo/core/DemoState");
+const { scrubKnown } = require("./redact");
 const { onboard } = require("../../demo/utils/Onboard");
 const { installRetry } = require("../../demo/utils/RpcRetry");
 
@@ -131,7 +132,7 @@ async function main(): Promise<void> {
 
 if (require.main === module) {
   main().catch((e) => {
-    console.error(`❌ ${e.message}`);
+    console.error(`❌ ${scrubKnown(e.message)}`);
     process.exitCode = 1;
   });
 }

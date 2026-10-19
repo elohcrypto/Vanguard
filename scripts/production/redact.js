@@ -126,4 +126,67 @@ function shown(text, url, max = 240) {
   return `[${classify(t)}] ${t.length > max ? `${t.slice(0, max)}...` : t}`;
 }
 
-module.exports = { redactUrl, secretsOf, scrub, classify, shown };
+/** RPC URLs this process may know: hardhat's network and the tools' env. */
+function knownUrls(extra = []) {
+  const env = process.env;
+  const urls = [...extra];
+  for (const k of ["SIGNER_UPSTREAM", "SEPOLIA_RPC_URL", "MAINNET_RPC_URL"])
+    if (env[k]) urls.push(env[k]);
+  for (const k of ["SCAN_RPC_URLS", "RPC_CHECK_URLS", "COST_RPC_URL"]) {
+    try {
+      urls.push(...urlsFrom(k));
+    } catch {
+      // an unreadable file: its own error says so
+    }
+  }
+  try {
+    urls.push(require("hardhat").network.config.url);
+  } catch {
+    // not under hardhat
+  }
+  return urls.filter((u) => typeof u === "string" && /^[a-z]+:\/\//i.test(u));
+}
+
+/**
+ * `text` scrubbed of every known RPC URL (final review L-3): every CLI's
+ * top-level error print goes through this.
+ */
+function scrubKnown(text, extra = []) {
+  let t = String(text);
+  for (const u of knownUrls(extra)) t = scrub(t, u);
+  return t;
+}
+
+/**
+ * RPC URLs for a tool from `name` (comma-separated) or `${name}_FILE` (a
+ * file this user owns, mode 0600, one per line or comma-separated), never
+ * the command line (final review L-4: argv lands in shell history and
+ * ps). Throws when `argv` carries a URL.
+ */
+function urlsFrom(name, argv = []) {
+  const fs = require("fs");
+  if (argv.some((a) => /^[a-z][a-z0-9+.-]*:\/\//i.test(String(a)))) {
+    throw new Error(
+      `an RPC URL on the command line is refused (shell history, ps): set ${name} or ${name}_FILE (0600)`,
+    );
+  }
+  let text = process.env[name] || "";
+  const file = process.env[`${name}_FILE`];
+  if (file) {
+    const st = fs.lstatSync(file);
+    if (!st.isFile() || st.uid !== process.getuid() || st.mode & 0o077)
+      throw new Error(`${name}_FILE must be this user's own file, mode 0600`);
+    text = fs.readFileSync(file, "utf8");
+  }
+  return text.split(/[\s,]+/).filter(Boolean);
+}
+
+module.exports = {
+  urlsFrom,
+  redactUrl,
+  secretsOf,
+  scrub,
+  scrubKnown,
+  classify,
+  shown,
+};

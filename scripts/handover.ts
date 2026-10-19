@@ -74,6 +74,7 @@ import * as fs from "fs";
 import { handoverArgs } from "./handoverConfig";
 
 const { installRetry } = require("../demo/utils/RpcRetry");
+const { scrubKnown } = require("./production/redact");
 const { requireArchive } = require("../demo/utils/HandoverScans");
 
 const {
@@ -352,7 +353,7 @@ if (require.main === module) {
       process.exitCode = 3;
       return;
     }
-    console.error(`❌ Handover failed: ${e.message}`);
+    console.error(`❌ Handover failed: ${scrubKnown(e.message)}`);
     process.exitCode = 1;
   });
 }

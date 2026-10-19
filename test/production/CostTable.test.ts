@@ -93,4 +93,60 @@ describe("Cost table (scripts/production/costTable.js)", function () {
       s.close();
     }
   });
+
+  it("a provider echoing its key in an error never reaches the CLI's output; no URL on argv (final review L-3, L-4)", async function () {
+    const { spawn } = require("child_process");
+    const fs = require("fs");
+    const os = require("os");
+    const path = require("path");
+    const KEY = "ECHOEDKEY0987654";
+    const srv = http.createServer((req, res) => {
+      res.setHeader("content-type", "application/json");
+      res.end(
+        JSON.stringify({
+          jsonrpc: "2.0",
+          id: 1,
+          error: { code: -32000, message: `invalid key ${KEY} at ${req.url}` },
+        }),
+      );
+    });
+    await new Promise<void>((ok) => srv.listen(0, "127.0.0.1", ok));
+    const d = fs.mkdtempSync(path.join(os.tmpdir(), "cost-"));
+    fs.writeFileSync(
+      path.join(d, "steps.json"),
+      JSON.stringify([{ step: "s", from: 1, to: 1 }]),
+    );
+    fs.writeFileSync(path.join(d, "w.txt"), W.join("\n"));
+    fs.writeFileSync(path.join(d, "h.json"), JSON.stringify(h));
+    const url = `http://127.0.0.1:${(srv.address() as AddressInfo).port}/v3/${KEY}`;
+    const run = (args: string[], env: Record<string, string>) =>
+      new Promise<{ code: number; out: string }>((ok) => {
+        const p = spawn(
+          process.execPath,
+          ["scripts/production/costTable.js", ...args],
+          {
+            env: { ...process.env, ...env },
+          },
+        );
+        let out = "";
+        p.stdout.on("data", (x: Buffer) => (out += x));
+        p.stderr.on("data", (x: Buffer) => (out += x));
+        p.on("exit", (code: number) => ok({ code, out }));
+      });
+    try {
+      const files = ["steps.json", "w.txt", "h.json"].map((x) =>
+        path.join(d, x),
+      );
+      const r = await run(["measure", ...files], { COST_RPC_URL: url });
+      expect(r.code).to.equal(1);
+      expect(r.out).to.contain("invalid key <redacted>");
+      expect(r.out).to.not.contain(KEY);
+      const a = await run(["measure", url, ...files], {});
+      expect(a.code).to.equal(1);
+      expect(a.out).to.contain("an RPC URL on the command line is refused");
+      expect(a.out).to.not.contain(KEY);
+    } finally {
+      srv.close();
+    }
+  });
 });
