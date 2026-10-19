@@ -102,8 +102,16 @@ async function proposeAcceptOwnership(
   );
 }
 
-/** Every voter votes yes; one that already voted (a re-run) is skipped. */
-async function castAcceptanceVotes(governance, proposalId, voters) {
+/**
+ * Every voter votes (yes unless `support` is false); one that already
+ * voted (a re-run) is skipped.
+ */
+async function castAcceptanceVotes(
+  governance,
+  proposalId,
+  voters,
+  support = true,
+) {
   const vgt = await vgtOf(governance);
   const govAddr = await governance.getAddress();
   const cost = await governance.votingCost();
@@ -111,7 +119,13 @@ async function castAcceptanceVotes(governance, proposalId, voters) {
     if (await governance.hasVoted(proposalId, await addrOf(v))) continue;
     await send(vgt.connect(v).approve(govAddr, cost));
     await send(
-      governance.connect(v).castVote(proposalId, true, "Support handover"),
+      governance
+        .connect(v)
+        .castVote(
+          proposalId,
+          support,
+          support ? "Support handover" : "Against: unsafe now",
+        ),
     );
   }
 }
@@ -273,9 +287,11 @@ async function openAll({ governance, proposer, voters, items, log }) {
   );
   for (const o of open) {
     const [p] = await governance.getProposal(o.id);
-    if ((await chainNow()) <= p.votingEnds) {
-      await module.exports.castAcceptanceVotes(governance, o.id, voters);
-    }
+    if ((await chainNow()) > p.votingEnds) continue;
+    // Task 5.17 (deep review L-3): an item may refuse its own vote now.
+    const why = o.prevote && (await o.prevote(o.id));
+    if (why) log(`   ⚠️  ${o.label} (#${o.id}): ${why}: voting against`);
+    await module.exports.castAcceptanceVotes(governance, o.id, voters, !why);
   }
   return open;
 }

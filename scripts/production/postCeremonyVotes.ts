@@ -14,6 +14,11 @@
  *     node, proposed only when EVERY order and subset of the removals
  *     leaves MIN_NODES nodes with none alone at the consensus bar; each
  *     is checked again just before this CLI executes it.
+ * Task 5.17 (deep review L-3): at each run's start and before each vote,
+ * every open removal (anyone's) is checked with the others in every
+ * order; one that could leave an invalid set is voted AGAINST while it
+ * still votes, and cancelled by vote once passed. A cancel vote is no
+ * guard once a removal has passed: anyone may execute it first.
  * The phase is the chain's: a re-run runs round 1 while anything of it is
  * missing (adopting its open proposals), never proposes a removal while a
  * production node is missing, and adopts open removals by the same rules
@@ -37,6 +42,20 @@ import * as fs from "fs";
 import { ethers, network } from "hardhat";
 import { handoverArgs } from "../handoverConfig";
 import { guardDeployer } from "./cliGuards";
+import {
+  allOpenRemovals,
+  cancelHazards,
+  hazardousRemovals,
+  nodesNow,
+  openRemovals,
+  refusalFor,
+  removalPrecheck,
+  setRefusal,
+  voteAgainstHazards,
+  weightsOf,
+} from "./postCeremonyRemovals";
+
+export { cancelHazards };
 
 const { installRetry } = require("../../demo/utils/RpcRetry");
 const { scrubKnown } = require("./redact");
@@ -50,7 +69,6 @@ const {
 
 const ORACLE_PARAMETERS = 2;
 const PRIVACY_PARAMETERS = 11;
-const SYSTEM_PARAMETERS = 4;
 
 /** NEW_NODES "0xA:NAME,0xB:NAME" as [{ address, name }]; checksummed. */
 export function parseNodes(text = ""): { address: string; name: string }[] {
@@ -74,108 +92,6 @@ export function parseNodes(text = ""): { address: string; name: string }[] {
   );
   if (dup) throw new Error(`NEW_NODES lists ${dup.address} twice`);
   return out;
-}
-
-/** address (lower case) -> engine weight, read once. */
-async function weightsOf(o: any, nodes: string[]) {
-  const engine = await ethers.getContractAt(
-    ["function weightOf(address) view returns (uint256)"],
-    await o.oracleManager.consensusEngine(),
-  );
-  const m = new Map<string, bigint>();
-  for (const a of nodes) m.set(a.toLowerCase(), await engine.weightOf(a));
-  return m;
-}
-
-/** setRefusal on weights already read. */
-function refusalFor(after: string[], w: Map<string, bigint>, f: any) {
-  const ws = after.map((a) => w.get(a.toLowerCase()) ?? 0n);
-  const total = ws.reduce((t, x) => t + x, 0n);
-  const heavy = ws.reduce((m, x) => (x > m ? x : m), 0n);
-  if (after.length < f.minNodes)
-    return `${after.length} node(s) would remain, below MIN_NODES (${f.minNodes})`;
-  if (heavy * 100n >= total * BigInt(f.threshold))
-    return `${after.length} node(s) would remain, one alone at the ${f.threshold}% bar`;
-  return null;
-}
-
-/**
- * Review M-2: a passed removal whose execution would now leave an invalid
- * node set stays executable by anyone (executeProposal has no window,
- * removeOracle no node floor). Each such open proposal of `open` is
- * printed as a standing hazard and cancelled by a SystemParameters vote
- * (VanguardGovernance.cancelProposal, owner = governance itself); the
- * removal is proposed again by a later run once safe. Returns the ids.
- */
-export async function cancelHazards(
-  o: any,
-  proposer: any,
-  voters: any[],
-  open: any[],
-  log = console.log,
-) {
-  const gov = o.governance;
-  const ids: number[] = [];
-  for (const x of open) {
-    const [p] = await gov.getProposal(x.id);
-    if (Number(p.status) !== 1 || !x.precheck) continue;
-    if (
-      await x.precheck().then(
-        () => false,
-        () => true,
-      )
-    )
-      ids.push(x.id);
-  }
-  if (!ids.length) return ids;
-  for (const id of ids)
-    log(
-      `   ⚠️  STANDING HAZARD: proposal #${id} (a removal) would leave an invalid node set if anyone executed it now; a cancelProposal vote follows`,
-    );
-  const items = ids.map((id) => ({
-    label: `cancel hazardous removal #${id}`,
-    proposalType: SYSTEM_PARAMETERS,
-    target: gov,
-    callData: gov.interface.encodeFunctionData("cancelProposal", [id]),
-  }));
-  await Votes.checkVoters(o, proposer, voters, items.length);
-  const args = { governance: gov, proposer, voters, log };
-  await Votes.settleAll({
-    ...args,
-    open: await Votes.openAll({ ...args, items }),
-  });
-  return ids;
-}
-
-/** The node set `after` keeps MIN_NODES and no node at the bar, or why not. */
-async function setRefusal(
-  o: any,
-  after: string[],
-  f: any,
-): Promise<string | null> {
-  const engine = await ethers.getContractAt(
-    ["function weightOf(address) view returns (uint256)"],
-    await o.oracleManager.consensusEngine(),
-  );
-  const w: bigint[] = await Promise.all(after.map((a) => engine.weightOf(a)));
-  const total = w.reduce((t, x) => t + x, 0n);
-  const heavy = w.reduce((m, x) => (x > m ? x : m), 0n);
-  if (after.length < f.minNodes)
-    return `${after.length} node(s) would remain, below MIN_NODES (${f.minNodes})`;
-  if (heavy * 100n >= total * BigInt(f.threshold))
-    return `${after.length} node(s) would remain, one alone at the ${f.threshold}% bar`;
-  return null;
-}
-
-/** The registered nodes, the deployer-era ones, the facts. */
-async function nodesNow(o: any) {
-  const f = await nodeFacts(o);
-  const dAddr = await addrOf(o.deployer);
-  const old = f.nodes.filter(
-    (n: any) =>
-      !n.byGovernance && n.registeredBy && same(n.registeredBy, dAddr),
-  );
-  return { f, live: f.nodes.map((n: any) => n.addr), old };
 }
 
 /**
@@ -309,44 +225,12 @@ export async function roundTwoItems(o: any, nodes: any[]) {
     ]),
     // Read just before this CLI executes it: the nodes then registered.
     precheck: removalPrecheck(o, n.addr),
+    // L-3: and before its votes, with every open removal (anyone's).
+    prevote: async (id: number) =>
+      (await hazardousRemovals(o, await allOpenRemovals(o))).has(id)
+        ? "with the other open removals it could leave an invalid node set"
+        : null,
   }));
-}
-
-/** Throws when removing `node` now would leave an invalid node set. */
-function removalPrecheck(o: any, node: string) {
-  return async () => {
-    const now = await o.oracleManager.getRegisteredOracles();
-    const left = now.filter((a: string) => !same(a, node));
-    const no = await setRefusal(o, left, await nodeFacts(o));
-    if (no) throw new Error(`removing ${node} now: ${no}; not executed`);
-  };
-}
-
-/**
- * Review L-1 (final): this proposer's open removeOracle proposals, as
- * items cancelHazards can judge, so a re-run after a kill during a
- * cancel vote adopts and settles that vote before anything else.
- */
-async function openRemovals(o: any, proposer: any) {
-  const gov = o.governance;
-  const om = o.oracleManager;
-  const me = await addrOf(proposer);
-  const target = await addrOf(om);
-  const sel = om.interface.getFunction("removeOracle").selector;
-  const out = [];
-  for (let id = 1; id <= Number(await gov.proposalCount()); id++) {
-    const [p] = await gov.getProposal(id);
-    if (
-      Number(p.status) !== 1 ||
-      !same(p.proposer, me) ||
-      !same(p.target, target)
-    )
-      continue;
-    if (!String(p.callData).startsWith(sel)) continue;
-    const [node] = om.interface.decodeFunctionData("removeOracle", p.callData);
-    out.push({ id, precheck: removalPrecheck(o, node) });
-  }
-  return out;
 }
 
 /** The handover.json snapshot's chain is the connected one. */
@@ -372,6 +256,8 @@ export async function runPostCeremony(
   log = console.log,
 ) {
   const args = { governance: o.governance, proposer, voters, log };
+  // L-3: hazardous open removals still voting are voted against first.
+  await voteAgainstHazards(o, voters, log);
   // A hazard left by a stopped run is settled first (final review L-1).
   await cancelHazards(
     o,
