@@ -48,6 +48,7 @@ const {
 
 const ORACLE_PARAMETERS = 2;
 const PRIVACY_PARAMETERS = 11;
+const SYSTEM_PARAMETERS = 4;
 
 /** NEW_NODES "0xA:NAME,0xB:NAME" as [{ address, name }]; checksummed. */
 export function parseNodes(text = ""): { address: string; name: string }[] {
@@ -71,6 +72,77 @@ export function parseNodes(text = ""): { address: string; name: string }[] {
   );
   if (dup) throw new Error(`NEW_NODES lists ${dup.address} twice`);
   return out;
+}
+
+/** address (lower case) -> engine weight, read once. */
+async function weightsOf(o: any, nodes: string[]) {
+  const engine = await ethers.getContractAt(
+    ["function weightOf(address) view returns (uint256)"],
+    await o.oracleManager.consensusEngine(),
+  );
+  const m = new Map<string, bigint>();
+  for (const a of nodes) m.set(a.toLowerCase(), await engine.weightOf(a));
+  return m;
+}
+
+/** setRefusal on weights already read. */
+function refusalFor(after: string[], w: Map<string, bigint>, f: any) {
+  const ws = after.map((a) => w.get(a.toLowerCase()) ?? 0n);
+  const total = ws.reduce((t, x) => t + x, 0n);
+  const heavy = ws.reduce((m, x) => (x > m ? x : m), 0n);
+  if (after.length < f.minNodes)
+    return `${after.length} node(s) would remain, below MIN_NODES (${f.minNodes})`;
+  if (heavy * 100n >= total * BigInt(f.threshold))
+    return `${after.length} node(s) would remain, one alone at the ${f.threshold}% bar`;
+  return null;
+}
+
+/**
+ * Review M-2: a passed removal whose execution would now leave an invalid
+ * node set stays executable by anyone (executeProposal has no window,
+ * removeOracle no node floor). Each such open proposal of `open` is
+ * printed as a standing hazard and cancelled by a SystemParameters vote
+ * (VanguardGovernance.cancelProposal, owner = governance itself); the
+ * removal is proposed again by a later run once safe. Returns the ids.
+ */
+export async function cancelHazards(
+  o: any,
+  proposer: any,
+  voters: any[],
+  open: any[],
+  log = console.log,
+) {
+  const gov = o.governance;
+  const ids: number[] = [];
+  for (const x of open) {
+    const [p] = await gov.getProposal(x.id);
+    if (Number(p.status) !== 1 || !x.precheck) continue;
+    if (
+      await x.precheck().then(
+        () => false,
+        () => true,
+      )
+    )
+      ids.push(x.id);
+  }
+  if (!ids.length) return ids;
+  for (const id of ids)
+    log(
+      `   ⚠️  STANDING HAZARD: proposal #${id} (a removal) would leave an invalid node set if anyone executed it now; a cancelProposal vote follows`,
+    );
+  const items = ids.map((id) => ({
+    label: `cancel hazardous removal #${id}`,
+    proposalType: SYSTEM_PARAMETERS,
+    target: gov,
+    callData: gov.interface.encodeFunctionData("cancelProposal", [id]),
+  }));
+  await Votes.checkVoters(o, proposer, voters, items.length);
+  const args = { governance: gov, proposer, voters, log };
+  await Votes.settleAll({
+    ...args,
+    open: await Votes.openAll({ ...args, items }),
+  });
+  return ids;
 }
 
 /** The node set `after` keeps MIN_NODES and no node at the bar, or why not. */
@@ -199,12 +271,19 @@ export async function roundTwoItems(o: any, nodes: any[]) {
       `round 2 not proposed: production node(s) ${missing.map((n) => n.address).join(", ")} not registered on chain`,
     );
   }
+  // Review I-4: 2^k subsets, from weights read once; k bounded.
+  if (old.length > 12) {
+    throw new Error(
+      `round 2 not proposed: ${old.length} deployer-era nodes; more than 12 cannot be checked in every order (remove some by separate votes first)`,
+    );
+  }
+  const weights = await weightsOf(o, live);
   for (let mask = 1; mask < 1 << old.length; mask++) {
     const gone = old.filter((_: any, i: number) => mask & (1 << i));
     const left = live.filter(
       (a: string) => !gone.some((n: any) => same(n.addr, a)),
     );
-    const why = await setRefusal(o, left, f);
+    const why = refusalFor(left, weights, f);
     if (why)
       throw new Error(
         `round 2 not proposed: removing ${gone.map((n: any) => n.addr).join(", ")} ${why}`,
@@ -270,10 +349,14 @@ export async function runPostCeremony(
     log(
       `   🗳️  round 2: ${two.length} removal(s), every production node registered`,
     );
-    await Votes.settleAll({
-      ...args,
-      open: await Votes.openAll({ ...args, items: two }),
-    });
+    const open = await Votes.openAll({ ...args, items: two });
+    try {
+      await Votes.settleAll({ ...args, open });
+    } catch (e: any) {
+      if (/ now: .* not executed/.test(e.message))
+        await cancelHazards(o, proposer, voters, open, log);
+      throw e;
+    }
   }
   if (!one.length && !two.length)
     log(

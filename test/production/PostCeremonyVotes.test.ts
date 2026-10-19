@@ -6,6 +6,7 @@ import { byVote, captured, cliConfig } from "../helpers/handoverCli";
 import { runHandover } from "../../scripts/handover";
 import { handoverArgs } from "../../scripts/handoverConfig";
 import {
+  cancelHazards,
   parseNodes,
   requireSameChain,
   roundOneItems,
@@ -342,5 +343,79 @@ describe("Post-ceremony votes (D50 rotation, attestor re-approval)", function ()
     const left = await nodesNow();
     expect(left.length).to.equal(2);
     expect(left).to.include(c);
+  });
+
+  it("a hazardous passed removal fails the audit and is cancelled by vote (review M-2)", async function () {
+    await ceremony();
+    const { o, voters } = await derive();
+    const args = {
+      governance: o.governance,
+      proposer: f.proposer,
+      voters: f.voters,
+      log: () => {},
+    };
+    const one = await roundOneItems(o, parseNodes(await NEW()), cfg, voters);
+    await Votes.settleAll({
+      ...args,
+      open: await Votes.openAll({ ...args, items: one }),
+    });
+    const open = await Votes.openAll({
+      ...args,
+      items: await roundTwoItems(o, parseNodes(await NEW())),
+    });
+    const om = f.c.oracleManager;
+    for (const x of await addrs([13, 14]))
+      await byVote(
+        f,
+        2,
+        om,
+        om.interface.encodeFunctionData("removeOracle", [x, "test"]),
+      );
+    await Votes.settleAll({ ...args, open }).catch(() => undefined);
+    // (b) While a passed removal that would break the set is open, the
+    // day-2 audit fails naming it.
+    cfg.oracleNodes = [...(await om.getRegisteredOracles())];
+    out.length = 0;
+    await expect(
+      captured(out, () => runHandover(cfg, "audit", cfgPath)),
+    ).to.be.rejectedWith(/audit failed/);
+    expect(out.join("\n")).to.match(
+      /❌ no open governance proposal targets a plan contract/,
+    );
+    // (a) The hazard is printed and cancelled by a SystemParameters vote.
+    const lines: string[] = [];
+    const ids = await cancelHazards(
+      o,
+      f.proposer,
+      f.voters,
+      open,
+      (m: string) => lines.push(m),
+    );
+    expect(ids.length).to.be.greaterThan(0);
+    expect(lines.join("\n")).to.match(
+      /STANDING HAZARD: proposal #\d+ \(a removal\)/,
+    );
+    for (const id of ids)
+      expect(Number((await f.c.governance.getProposal(id))[0].status)).to.equal(
+        5,
+      );
+    expect((await nodesNow()).length).to.be.at.least(2);
+  });
+
+  it("refuses round 2 for more than 12 deployer-era nodes (review I-4)", async function () {
+    const om = f.c.oracleManager.connect(f.deployer);
+    for (let i = 0; i < 10; i++)
+      await om.registerOracle(
+        ethers.Wallet.createRandom().address,
+        `D${i}`,
+        "d",
+        500,
+      );
+    cfg.oracleNodes = [...(await f.c.oracleManager.getRegisteredOracles())];
+    await ceremony();
+    const { o } = await derive();
+    await expect(roundTwoItems(o, [])).to.be.rejectedWith(
+      /13 deployer-era nodes; more than 12 cannot be checked/,
+    );
   });
 });
