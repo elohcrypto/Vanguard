@@ -31,7 +31,11 @@
 #   9. the cost table from steps 1-8's blocks (Task 5.15, Q19 = A)
 #   8. the post-ceremony votes (Task 5.15, Q15 = A, Q20 = B): round 1
 #      production nodes in and the attestor key re-approved, round 2 the
-#      deployer-era nodes out; the day-2 audit shows none
+#      deployer-era nodes out; the day-2 audit shows none. First (Task
+#      5.17, deep review M-3) a run is killed with its createProposal in
+#      the mempool (automine off) and re-run before it mines: the re-run
+#      waits, adopts it, and nothing is proposed twice. After completion
+#      (step 7) the deployer sends nothing (its nonce is unchanged).
 #
 # USAGE  scripts/ci/deploy-drive.sh   (nodes on DEPLOY_NODE_PORT 8547 and
 #        DEPLOY_SIGNER_PORT 8549; exit 1 on failure)
@@ -278,7 +282,10 @@ OPEN=$(grep -oE "🗳️  [0-9]+ proposal\(s\) open at once" "$OUT/ceremony1.log
 DONE=$(grep -c "owned by governance (proposal #" "$OUT/ceremony1.log" || true)
 [[ ${OPEN:-0} -ge 10 ]] || fail "${OPEN:-no} proposals open at once, not every acceptance"
 export HANDOVER_SNAPSHOT_SHA256
-HANDOVER_SNAPSHOT_SHA256=$(cut -d' ' -f1 "$HANDOVER_CONFIG.snapshot.json.sha256")
+# The digest as the full phase printed it, never the sidecar beside the
+# snapshot (R-56c-2: the run directory must not hold the only copy).
+HANDOVER_SNAPSHOT_SHA256=$(sed -n 's/.*snapshot sha256: \([0-9a-f]\{64\}\).*/\1/p' "$OUT/ceremony1.log" | head -1)
+[[ -n $HANDOVER_SNAPSHOT_SHA256 ]] || fail "the full phase printed no snapshot digest"
 HANDOVER_PHASE=accept npx hardhat run scripts/handover.ts --network remote >"$OUT/ceremony.log" 2>&1 \
   || fail "the resumed ceremony failed"
 signer 0
@@ -327,6 +334,7 @@ done
 [[ $(count '^\s+✅ the deployer owns no list oracle serving OracleManager') -eq 1 ]] \
   || fail "no line: the deployer owns no list oracle"
 echo "7. ceremony complete: 3 issuer keys, 3 D50 nodes, exempt fee wallet, banner; escrow factory governance's; ops owns both list oracles"
+D_DONE=$(($(nonce)))  # the deployer's nonce at completion
 
 B_POST=$(($(blk) + 1))
 # 8. Post-ceremony votes (Q15 = A, Q20 = B; two rounds): round 1
@@ -339,8 +347,39 @@ B_POST=$(($(blk) + 1))
 NEW=$(MNEMONIC="$ROLES" node -e 'const { HDNodeWallet, Mnemonic } = require("ethers");
   const m = Mnemonic.fromPhrase(process.env.MNEMONIC);
   console.log([12, 13, 14].map((i, k) => HDNodeWallet.fromMnemonic(m, `m/44'"'"'/60'"'"'/0'"'"'/0/${i}`).address + ":NODE_" + (k + 1)).join(","));')
-NEW_NODES=$NEW npx hardhat run scripts/production/postCeremonyVotes.ts --network remote >"$OUT/post.log" 2>&1 \
-  || fail "the post-ceremony votes failed"
+count_of() { echo $(($(rpc "$NODE_URL" eth_getTransactionCount "[\"$1\",\"$2\"]" | sed -E 's/.*"result":"([^"]+)".*/\1/'))); }
+PROPOSER=$(addr "$(lc proposer)")
+PC() { echo $(($(rpc "$NODE_URL" eth_call "[{\"to\":\"$(lc governance)\",\"data\":\"0xda35c664\"},\"latest\"]" | sed -E 's/.*"result":"([^"]+)".*/\1/'))); }
+P0=$(count_of "$PROPOSER" latest) COUNT0=$(PC)
+rpc "$NODE_URL" evm_setAutomine "[false]" >/dev/null
+NEW_NODES=$NEW setsid npx hardhat run scripts/production/postCeremonyVotes.ts --network remote \
+  >"$OUT/post-killed.log" 2>&1 &
+K=$!
+inflight=0
+for _ in $(seq 1 1500); do
+  l=$(count_of "$PROPOSER" latest) p=$(count_of "$PROPOSER" pending)
+  if [[ $p -gt $l && $l -eq $P0 ]]; then rpc "$NODE_URL" evm_mine "[]" >/dev/null  # its approve
+  elif [[ $l -eq $((P0 + 1)) && $p -eq $((P0 + 2)) ]]; then inflight=1; break; fi
+  kill -0 "$K" 2>/dev/null || break
+  sleep 0.2
+done
+kill -9 -- "-$K" 2>/dev/null || true
+wait "$K" 2>/dev/null || true
+[[ $inflight -eq 1 ]] || { rpc "$NODE_URL" evm_setAutomine "[true]" >/dev/null; fail "the killed run's createProposal was never in the mempool"; }
+NEW_NODES=$NEW setsid npx hardhat run scripts/production/postCeremonyVotes.ts --network remote >"$OUT/post.log" 2>&1 &
+R=$!
+for _ in $(seq 1 600); do grep -q "waiting for pending transactions to mine first" "$OUT/post.log" && break; sleep 0.2; done
+grep -q "waiting for pending transactions to mine first" "$OUT/post.log" \
+  || { rpc "$NODE_URL" evm_setAutomine "[true]" >/dev/null; fail "the re-run did not wait for the in-flight proposal"; }
+[[ $(PC) -eq $COUNT0 ]] || fail "a proposal was made before the in-flight one mined"
+rpc "$NODE_URL" evm_setAutomine "[true]" >/dev/null
+rpc "$NODE_URL" evm_mine "[]" >/dev/null
+wait "$R" || fail "the post-ceremony votes failed"
+grep -q "Already voted" "$OUT/post.log" && fail "a vote was cast twice"
+grep -qE "register production node .*: proposal #$((COUNT0 + 1)) already open; adopted" "$OUT/post.log" \
+  || fail "the in-flight proposal #$((COUNT0 + 1)) was not adopted"
+[[ $(PC) -eq $((COUNT0 + 9)) ]] || fail "$(($(PC) - COUNT0)) proposals, not 9 (6 + 3): one proposed twice"
+echo "8a. killed with createProposal #$((COUNT0 + 1)) in the mempool; the re-run waited, adopted it, proposed nothing twice"
 grep -q "🗳️  round 1: 6 proposal(s), registrations and re-approvals" "$OUT/post.log" || fail "no round 1 of 6"
 grep -q "🗳️  round 2: 3 removal(s), every production node registered" "$OUT/post.log" || fail "no round 2 of 3"
 [[ $(sed -n '/round 2: /,$p' "$OUT/post.log" | grep -c "✅ register production node") -eq 0 ]] \
@@ -360,7 +399,8 @@ grep -q "❌" <<<"$A" && fail "a failed audit line"
 [[ $(grep -cE '^\s+⚠️' <<<"$A") -eq 2 && $(grep -cE "^\s+⚠️  $FEE is investorLimitExempt" <<<"$A") -eq 1 \
   && $(grep -cE '^\s+⚠️  deployer still holds [0-9.]+ VGT' <<<"$A") -eq 1 ]] \
   || fail "the audit's warnings are not just the exempt fee wallet and the deployer's VGT"
-echo "8. post-ceremony votes: round 1 (3 registrations, 3 re-approvals), then round 2 (3 removals); audit: no deployer-era node or attestor line, two warnings (the exempt fee wallet, the deployer's VGT)"
+[[ $(($(nonce))) -eq $D_DONE ]] || fail "the deployer sent $(($(nonce) - D_DONE)) transaction(s) after the ceremony completed"
+echo "8. post-ceremony votes: round 1 (3 registrations, 3 re-approvals), then round 2 (3 removals); audit: no deployer-era node or attestor line, two warnings (the exempt fee wallet, the deployer's VGT); the deployer sent nothing after completion"
 
 # 9. Cost table (Q19 = A): each step's gas by sender, at COST_GWEI (20)
 #    with 50% headroom, the deploy counted twice (the throwaway deploy).
