@@ -6,10 +6,12 @@
 # Baseline 97.4 (Task 5.17, deep review H-1): 97.61% lines (2737 of
 # 2804) merged at dd7943f (CI run 39211556945). At 97 a describe.skip on
 # test/erc3643/RegistryGuards.test.ts (97.18%, 12 lines) passed. 97.4
-# leaves 6 lines of slack, not 0 (97.61): the same tree's sharded and
-# unsharded runs already differed by an arm (see Task 5.15 below), and
-# a baseline at the measured figure fails the next commit that adds an
-# untested line; 12 lost lines fail.
+# leaves 6 lines of slack (sc-istanbul rounds to two decimals, half up:
+# 2731 of 2804 is 97.40 and passes, 2730 is 97.36 and fails; measured
+# on the CI shards with 6 and 7 hit lines zeroed), not 0 (97.61): the same
+# tree's sharded and unsharded runs already differed by an arm (see Task
+# 5.15 below), and a baseline at the measured figure fails the next
+# commit that adds an untested line; 12 lost lines fail.
 # Earlier: 97 (Task 5.3: 97.43% at a9f18fb, 97.61% at 1317330, rounded
 # down); 95 at the 4.15 tree (96.48%, 2026-10-12, Q11 b); 63.73% ->
 # 65 -> 84 -> 86 -> 88 -> 90, 90.7% at c0e73fc, 95.33% at aa65de8 with
