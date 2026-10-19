@@ -27,7 +27,12 @@
 
 const fs = require("fs");
 const { scrubKnown } = require("../production/redact");
-const { guardedWallet, refuseRpcArg, rpcFromEnv } = require("./zkChain");
+const {
+  guardedWallet,
+  keyFromEnv,
+  refuseRpcArg,
+  rpcFromEnv,
+} = require("./zkChain");
 const path = require("path");
 const { ethers } = require("ethers");
 const { toField, revertReason } = require("./build-whitelist-root");
@@ -345,7 +350,7 @@ const USAGE = `Usage: node scripts/zk/prove-attestation.js --attestation <file> 
             (--privacy-manager <addr> | --mask <m> | --minimum <m> | --policy <min,wK,wA,wJ,wAcc>)
             [--out <proof.json>] [--submit]
 RPC (with --privacy-manager): env ZK_RPC_URL or ZK_RPC_URL_FILE (never argv).
-Submit key: env WHITELIST_WALLET_KEY (the --wallet's).`;
+Submit key: env WHITELIST_WALLET_KEY_FILE (0600) or WHITELIST_WALLET_KEY (the --wallet's).`;
 
 async function main(box) {
   // Proof generation logs progress with console.log; stdout carries only
@@ -371,10 +376,10 @@ async function main(box) {
   // Everything --submit needs is checked before the proof is generated.
   let signer;
   if (args.submit) {
-    const key = process.env.WHITELIST_WALLET_KEY;
+    const key = keyFromEnv("WHITELIST_WALLET_KEY");
     if (!chain || !key) {
       throw new Error(
-        "--submit needs env ZK_RPC_URL, --privacy-manager and env WHITELIST_WALLET_KEY",
+        "--submit needs env ZK_RPC_URL, --privacy-manager and env WHITELIST_WALLET_KEY (or WHITELIST_WALLET_KEY_FILE, 0600)",
       );
     }
     signer = await guardedWallet("WHITELIST_WALLET_KEY", provider);

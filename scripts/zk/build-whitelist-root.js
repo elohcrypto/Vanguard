@@ -35,7 +35,12 @@
 
 const fs = require("fs");
 const { scrubKnown } = require("../production/redact");
-const { guardedWallet, refuseRpcArg, rpcFromEnv } = require("./zkChain");
+const {
+  guardedWallet,
+  keyFromEnv,
+  refuseRpcArg,
+  rpcFromEnv,
+} = require("./zkChain");
 const { MerkleTreeBuilder } = require("../../utils/merkle-tree-builder");
 
 /** Depth of the whitelist_membership circuit. */
@@ -373,7 +378,7 @@ function parseArgs(argv) {
 
 const USAGE = `Usage: node scripts/zk/build-whitelist-root.js --in <entries.json> [--out <root.json>]
          [--publish --privacy-manager <addr> [--from-block <n>] [--force]]
-         (RPC: env ZK_RPC_URL or ZK_RPC_URL_FILE; key: env WHITELIST_OPS_KEY;
+         (RPC: env ZK_RPC_URL or ZK_RPC_URL_FILE; key: env WHITELIST_OPS_KEY_FILE (0600) or WHITELIST_OPS_KEY;
           --force republishes a root published before)
 entries.json: [{ "identity": "<decimal|0x>", "commitment": "<decimal|0x>" }]`;
 
@@ -415,10 +420,10 @@ async function main() {
     if (
       !args.rpc ||
       !args["privacy-manager"] ||
-      !process.env.WHITELIST_OPS_KEY
+      !keyFromEnv("WHITELIST_OPS_KEY")
     ) {
       throw new Error(
-        "--publish needs env ZK_RPC_URL, --privacy-manager and env WHITELIST_OPS_KEY",
+        "--publish needs env ZK_RPC_URL, --privacy-manager and env WHITELIST_OPS_KEY (or WHITELIST_OPS_KEY_FILE, 0600)",
       );
     }
     const { ethers } = require("ethers");

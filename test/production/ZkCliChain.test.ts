@@ -8,6 +8,7 @@ import { fakeUpstream } from "../helpers/signerProcess";
 
 const {
   guardKey,
+  keyFromEnv,
   refuseRpcArg,
   rpcFromEnv,
 } = require("../../scripts/zk/zkChain");
@@ -66,6 +67,28 @@ describe("zk CLIs: RPC from env, no published key off 31337 (L-4)", function () 
     }
   });
 
+  // The lead's ruling on slice B review L-2 (R-515-10): keys too have a
+  // 0600-file form, so no key lands in shell history.
+  it("reads each key from its 0600 file, refuses a looser one, keeps the plain form", function () {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "zkkey-"));
+    const f = path.join(dir, "k");
+    fs.writeFileSync(f, `${HARDHAT0}\n`, { mode: 0o600 });
+    for (const name of [
+      "WHITELIST_OPS_KEY",
+      "WHITELIST_WALLET_KEY",
+      "ATTESTOR_KEY",
+    ]) {
+      expect(keyFromEnv(name, { [`${name}_FILE`]: f })).to.equal(HARDHAT0);
+      expect(keyFromEnv(name, { [name]: ` ${HARDHAT0} ` })).to.equal(HARDHAT0);
+      expect(keyFromEnv(name, {})).to.equal(undefined);
+    }
+    fs.chmodSync(f, 0o640);
+    expect(() => keyFromEnv("ATTESTOR_KEY", { ATTESTOR_KEY_FILE: f })).to.throw(
+      "ATTESTOR_KEY_FILE must be this user's own file, mode 0600",
+    );
+    fs.rmSync(dir, { recursive: true, force: true });
+  });
+
   it("refuses a published Hardhat key off 31337 only", function () {
     expect(() => guardKey(HARDHAT0, 11155111n, "WHITELIST_OPS_KEY")).to.throw(
       "WHITELIST_OPS_KEY is a published Hardhat test key: refused on chain 11155111 (anyone holds it)",
@@ -115,6 +138,17 @@ describe("zk CLIs: RPC from env, no published key off 31337 (L-4)", function () 
         "WHITELIST_OPS_KEY is a published Hardhat test key: refused on chain 11155111",
       );
       expect(up.raws).to.deep.equal([]);
+      // The same key from its 0600 file: read, and refused the same way.
+      const kf = path.join(dir, "ops.key");
+      fs.writeFileSync(kf, HARDHAT0, { mode: 0o600 });
+      const viaFile = await run(
+        ["--in", entries, "--publish", "--privacy-manager", pm],
+        { ZK_RPC_URL: up.url, WHITELIST_OPS_KEY_FILE: kf },
+      );
+      expect(viaFile.status, viaFile.stderr).to.equal(1);
+      expect(viaFile.stderr).to.contain(
+        "WHITELIST_OPS_KEY is a published Hardhat test key: refused on chain 11155111",
+      );
       const argv = await run(
         [
           "--in",

@@ -365,11 +365,11 @@ node scripts/zk/prove-whitelist.js --commitment --identity <onchainID> --secret-
 
 # Operator (ops, the listOperator): entries.json is
 # [{ "identity": "<onchainID>", "commitment": "<0x..>" }, ...], one per identity
-ZK_RPC_URL_FILE=<0600 file> WHITELIST_OPS_KEY=<ops key> node scripts/zk/build-whitelist-root.js \
+ZK_RPC_URL_FILE=<0600 file> WHITELIST_OPS_KEY_FILE=<0600 file> node scripts/zk/build-whitelist-root.js \
   --in entries.json --out root.json --publish --privacy-manager <addr>
 
 # Investor, with the published root.json: prove, bind the wallet, show the status
-ZK_RPC_URL_FILE=<0600 file> WHITELIST_WALLET_KEY=<wallet key> node scripts/zk/prove-whitelist.js \
+ZK_RPC_URL_FILE=<0600 file> WHITELIST_WALLET_KEY_FILE=<0600 file> node scripts/zk/prove-whitelist.js \
   --root root.json --identity <onchainID> --wallet <wallet> --secret-file secret.txt \
   --out proof.json --submit --privacy-manager <addr>  # the URL: a 0600 file, never argv
 ```
@@ -470,8 +470,8 @@ no oracle, an open whitelist, until it is configured.
 # Issuer, once: the private key is printed once; keep it offline
 node scripts/zk/attest.js --new-key
 # Issuer: the public key for the setTrustedAttestor vote, then sign
-ATTESTOR_KEY=<key> node scripts/zk/attest.js --public-key
-ZK_RPC_URL_FILE=<0600 file> ATTESTOR_KEY=<key> node scripts/zk/attest.js --sign --circuit jurisdiction \
+ATTESTOR_KEY_FILE=<0600 file> node scripts/zk/attest.js --public-key
+ZK_RPC_URL_FILE=<0600 file> ATTESTOR_KEY_FILE=<0600 file> node scripts/zk/attest.js --sign --circuit jurisdiction \
   --identity <onchainID> --country <ISO numeric> \
   --privacy-manager <addr> --valid-days 365 --out att.json
 #   or --valid-until 2027-01-01 (ISO 8601 UTC); the expiry is required
@@ -479,12 +479,12 @@ ZK_RPC_URL_FILE=<0600 file> ATTESTOR_KEY=<key> node scripts/zk/attest.js --sign 
 #   ... --circuit accreditation --amount <amount>
 #   ... --circuit compliance --scores <kyc,aml,jurisdiction,accreditation>
 # Investor: policy and issuer trust read from PrivacyManager
-ZK_RPC_URL_FILE=<0600 file> WHITELIST_WALLET_KEY=<wallet key> node scripts/zk/prove-attestation.js \
+ZK_RPC_URL_FILE=<0600 file> WHITELIST_WALLET_KEY_FILE=<0600 file> node scripts/zk/prove-attestation.js \
   --attestation att.json --wallet <wallet> \
   --privacy-manager <addr> --out proof.json --submit
 ```
 
-The issuer key comes from `ATTESTOR_KEY` only, never argv, and is printed
+The issuer key comes from `ATTESTOR_KEY_FILE` (0600) or `ATTESTOR_KEY` only, never argv, and is printed
 only by `--new-key`. The attestation file carries the salt and the
 signature: it is the investor's secret, written with mode 0600, and the
 prover never prints either. The prover refuses an untrusted issuer key, an

@@ -20,7 +20,8 @@
  *        ... --circuit accreditation --amount <amount>
  *        ... --circuit compliance --scores <kyc,aml,jurisdiction,accreditation>
  *
- * The key comes from env ATTESTOR_KEY only (32 bytes, 0x hex), never argv,
+ * The key comes from env ATTESTOR_KEY (or ATTESTOR_KEY_FILE, a 0600 file;
+ * 32 bytes, 0x hex) only, never argv,
  * and is never printed except by --new-key. The message is
  * M = Poseidon(domain, chainId, verifierContext, validUntil, identity,
  * attributes..., salt) with a per-circuit domain (jurisdiction 1, accreditation 2,
@@ -45,7 +46,7 @@
 const crypto = require("crypto");
 const fs = require("fs");
 const { scrubKnown } = require("../production/redact");
-const { guardKey, refuseRpcArg, rpcFromEnv } = require("./zkChain");
+const { guardKey, keyFromEnv, refuseRpcArg, rpcFromEnv } = require("./zkChain");
 const { ethers } = require("ethers");
 const {
   CIRCUITS,
@@ -321,11 +322,15 @@ const USAGE = `Usage: node scripts/zk/attest.js --new-key
             --identity <id> --privacy-manager <addr> (env ZK_RPC_URL | --chain-id <n>)
             (--country <iso> (needs ZK_RPC_URL) | --mask <m> | --amount <a> | --scores <k,a,j,acc>)
             (--valid-days <n> | --valid-until <YYYY-MM-DD[THH:MM[:SS]Z]>, UTC) [--out <file>]
-Key: env ATTESTOR_KEY (0x, 32 bytes). RPC: env ZK_RPC_URL or ZK_RPC_URL_FILE (never argv).`;
+Key: env ATTESTOR_KEY_FILE (0600) or ATTESTOR_KEY (0x, 32 bytes). RPC: env ZK_RPC_URL or ZK_RPC_URL_FILE (never argv).`;
 
 function readKey(env) {
-  if (!env.ATTESTOR_KEY) throw new Error("no issuer key: set env ATTESTOR_KEY");
-  return env.ATTESTOR_KEY.trim();
+  const key = keyFromEnv("ATTESTOR_KEY", env);
+  if (!key)
+    throw new Error(
+      "no issuer key: set env ATTESTOR_KEY (or ATTESTOR_KEY_FILE, 0600)",
+    );
+  return key;
 }
 
 async function main(keyBox) {

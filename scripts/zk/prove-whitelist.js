@@ -44,7 +44,12 @@ const {
   publisherOf,
 } = require("./build-whitelist-root");
 const { scrubKnown } = require("../production/redact");
-const { guardedWallet, refuseRpcArg, rpcFromEnv } = require("./zkChain");
+const {
+  guardedWallet,
+  keyFromEnv,
+  refuseRpcArg,
+  rpcFromEnv,
+} = require("./zkChain");
 
 const VKEY = path.join(
   __dirname,
@@ -156,7 +161,7 @@ async function submitWhitelistProof({ calldata, privacyManager, signer }) {
   if (current === ethers.ZeroHash) {
     throw new Error(
       `no whitelist root is published yet; ${await publisherOf(pm)} publishes ${root}:\n` +
-        `  ZK_RPC_URL=<url> WHITELIST_OPS_KEY=... node scripts/zk/build-whitelist-root.js --in <entries.json> --publish --privacy-manager ${privacyManager}`,
+        `  ZK_RPC_URL_FILE=<0600 file> WHITELIST_OPS_KEY_FILE=<0600 file> node scripts/zk/build-whitelist-root.js --in <entries.json> --publish --privacy-manager ${privacyManager}`,
     );
   }
   if (current !== root) {
@@ -259,7 +264,7 @@ const USAGE = `Usage: node scripts/zk/prove-whitelist.js --new-secret [--out <se
        node scripts/zk/prove-whitelist.js --commitment --identity <id>
        node scripts/zk/prove-whitelist.js --root <root.json> --identity <id> --wallet <addr>
             [--out <proof.json>] [--submit --privacy-manager <addr>]
-Secret: --secret-file <path> or env WHITELIST_SECRET. Submit key: env WHITELIST_WALLET_KEY.
+Secret: --secret-file <path> or env WHITELIST_SECRET. Submit key: env WHITELIST_WALLET_KEY_FILE (0600) or WHITELIST_WALLET_KEY.
 RPC: env ZK_RPC_URL or ZK_RPC_URL_FILE (never argv).`;
 
 async function main(secretBox) {
@@ -291,11 +296,11 @@ async function main(secretBox) {
   // Everything --submit needs is checked before the proof is generated.
   let signer;
   if (args.submit) {
-    const key = process.env.WHITELIST_WALLET_KEY;
+    const key = keyFromEnv("WHITELIST_WALLET_KEY");
     const rpc = rpcFromEnv(process.argv.slice(2));
     if (!rpc || !args["privacy-manager"] || !key) {
       throw new Error(
-        "--submit needs env ZK_RPC_URL, --privacy-manager and env WHITELIST_WALLET_KEY",
+        "--submit needs env ZK_RPC_URL, --privacy-manager and env WHITELIST_WALLET_KEY (or WHITELIST_WALLET_KEY_FILE, 0600)",
       );
     }
     signer = await guardedWallet(
