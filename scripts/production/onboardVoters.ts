@@ -24,6 +24,7 @@ import * as fs from "fs";
 import { ethers, network } from "hardhat";
 
 import { checkWallets } from "./walletPins";
+import { guardDeployer } from "./cliGuards";
 
 const { awaitSettledNonces } = require("../../demo/utils/PendingNonces");
 
@@ -141,6 +142,14 @@ async function main(): Promise<void> {
   const rec = read("DEPLOY_RECORD");
   const cfg = read("HANDOVER_CONFIG");
   const signers = await ethers.getSigners();
+  // R-56-5: wallet 0 sends nothing once governance owns VSC.
+  guardDeployer(
+    signers[0],
+    await ethers.getContractAt(
+      "VanguardGovernance",
+      rec.contracts.vanguardGovernance,
+    ),
+  );
   // Task 5.17 (deep review M-3): nothing of the deployer's or a voter's
   // in flight before the onboarding reads what is missing.
   const ix = [0, cfg.proposer, ...cfg.voters].filter((i: number) => signers[i]);

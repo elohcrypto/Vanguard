@@ -36,6 +36,7 @@
 import * as fs from "fs";
 import { ethers, network } from "hardhat";
 import { handoverArgs } from "../handoverConfig";
+import { guardDeployer } from "./cliGuards";
 
 const { installRetry } = require("../../demo/utils/RpcRetry");
 const { scrubKnown } = require("./redact");
@@ -412,6 +413,7 @@ async function main(): Promise<void> {
   const cfg = JSON.parse(fs.readFileSync(path, "utf8"));
   requireSameChain(path, Number((await ethers.provider.getNetwork()).chainId));
   const { args, wallet } = await handoverArgs(cfg, "audit", path);
+  guardDeployer(args.deployer, args.governance); // R-56-5
   const o = await withDerivedContracts(args);
   const nodes = parseNodes(process.env.NEW_NODES);
   await runPostCeremony(

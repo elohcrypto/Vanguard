@@ -24,6 +24,7 @@
 import * as fs from "fs";
 import { ethers, network } from "hardhat";
 import { handoverArgs } from "../handoverConfig";
+import { guardDeployer } from "./cliGuards";
 
 const { installRetry } = require("../../demo/utils/RpcRetry");
 const { scrubKnown } = require("./redact");
@@ -150,6 +151,7 @@ async function main(): Promise<void> {
   const [path, cfg] = read("HANDOVER_CONFIG");
   const [, rec] = read("DEPLOY_RECORD");
   const { args, wallet } = await handoverArgs(cfg, "audit", path);
+  guardDeployer(args.deployer, args.governance); // R-56-5
   const voters = [cfg.proposer, ...cfg.voters].map(wallet);
   const steps = await claimSignerSteps(
     args,

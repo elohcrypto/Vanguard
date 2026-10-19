@@ -74,6 +74,7 @@
 import { ethers, network } from "hardhat";
 import * as fs from "fs";
 import { handoverArgs } from "./handoverConfig";
+import { guardDeployer } from "./production/cliGuards";
 
 const { installRetry } = require("../demo/utils/RpcRetry");
 const { scrubKnown } = require("./production/redact");
@@ -340,7 +341,16 @@ async function main(): Promise<void> {
   // Task 5.15 (M-3): rate limits and dropped connections are retried; a
   // send is never repeated (demo/utils/RpcRetry.js).
   installRetry(network.provider);
-  await runHandover(cfg, process.env.HANDOVER_PHASE || "full", path);
+  const phase = process.env.HANDOVER_PHASE || "full";
+  // R-56-5: the day-2 audit runs after the ceremony; wallet 0 sends nothing.
+  if (phase === "audit") {
+    const [deployer] = await ethers.getSigners();
+    guardDeployer(
+      deployer,
+      await ethers.getContractAt("VanguardGovernance", cfg.governance),
+    );
+  }
+  await runHandover(cfg, phase, path);
 }
 
 // `hardhat run` executes this file as the main module; a test imports it.
