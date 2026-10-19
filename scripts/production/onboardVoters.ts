@@ -74,6 +74,7 @@ export async function onboardVoters(
   checkWallets(cfg, state.signers, "handover.json", chainId, {
     file: "the deploy record",
     deployer: rec.deployer,
+    chainId: rec.chainId,
   });
   for (const [k, name] of Object.entries(ARTIFACT)) {
     state.setContract(k, await ethers.getContractAt(name, rec.contracts[k]));

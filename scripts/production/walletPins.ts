@@ -75,17 +75,20 @@ export function validatePins(cfg: any, path: string): void {
  */
 export function namedRecord(
   chainId: number,
-): { file: string; deployer: string } | null {
+): { file: string; deployer: string; chainId?: number } | null {
   if (!process.env.DEPLOY_RECORD && chainId === DEV_CHAIN) return null;
   const file = recordPath(chainId);
   if (!fs.existsSync(file)) return null;
-  return { file, deployer: loadRecord(file)!.deployer };
+  const rec = loadRecord(file)!;
+  return { file, deployer: rec.deployer, chainId: rec.chainId };
 }
 
 /**
- * Refuse (throw) a signer whose wallets are not the ones `cfg` pins, and
- * a wallet 0 that is not the named record's deployer. `wallets` are the
- * signer's accounts in index order. Call before any send.
+ * Refuse (throw) a signer whose wallets are not the ones `cfg` pins, a
+ * wallet 0 that is not the named record's deployer, and (deep review L-6)
+ * a connected chain (the signer's eth_chainId) other than the record's.
+ * `wallets` are the signer's accounts in index order. Call before any
+ * send.
  */
 export function checkWallets(
   cfg: any,
@@ -95,6 +98,11 @@ export function checkWallets(
   record = namedRecord(chainId),
 ): void {
   validatePins(cfg, path);
+  if (record?.chainId !== undefined && record.chainId !== chainId) {
+    throw new Error(
+      `the signer is on chain ${chainId} but the deploy record ${record.file} is for chain ${record.chainId}: refusing before any send`,
+    );
+  }
   if (cfg.accounts === undefined) {
     if (chainId !== DEV_CHAIN || record) {
       throw new Error(

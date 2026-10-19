@@ -96,6 +96,16 @@ describe("handover.json wallet pins (M-2)", function () {
     ).to.throw(
       `wallet 0 is ${wallets[0].address} but the deploy record r.json names the deployer ${wallets[3].address}: refusing before any send`,
     );
+    // Deep review L-6: a signer on another chain than the record's.
+    expect(() =>
+      checkWallets(pinned, wallets, "h.json", 31337, {
+        file: "r.json",
+        deployer: wallets[0].address,
+        chainId: 11155111,
+      }),
+    ).to.throw(
+      "the signer is on chain 31337 but the deploy record r.json is for chain 11155111: refusing before any send",
+    );
     expect(() =>
       checkWallets({ ...cfg, accounts: [] }, wallets, "h.json", 31337, null),
     ).to.throw(/"accounts" must map wallet indices to addresses/);
