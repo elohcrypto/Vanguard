@@ -43,17 +43,19 @@ import { ethers, network } from "hardhat";
 import { handoverArgs } from "../handoverConfig";
 import { guardDeployer } from "./cliGuards";
 import {
-  assessRemovals,
-  cancelCandidates,
   cancelHazards,
-  holdForForeignHazards,
   nodesNow,
   refusalFor,
   removalPrecheck,
   setRefusal,
-  voteAgainstHazards,
   weightsOf,
 } from "./postCeremonyRemovals";
+import {
+  assessRemovals,
+  cancelCandidates,
+  holdForForeignHazards,
+  voteAgainstHazards,
+} from "./removalHazards";
 
 export { cancelHazards };
 
@@ -228,7 +230,7 @@ export async function roundTwoItems(
       "D50 rotation after the ceremony",
     ]),
     // Read just before this CLI executes it: the nodes then registered.
-    precheck: removalPrecheck(o, n.addr),
+    precheck: removalPrecheck(o, n.addr, proposer),
     // L-3: and before its votes, with every open removal (anyone's).
     prevote: async (id: number) =>
       (await assessRemovals(o, proposer)).hazards.get(id) ?? null,
@@ -279,8 +281,11 @@ export async function runPostCeremony(
       open: await Votes.openAll({ ...args, items: one }),
     });
   }
-  // Security review of L-3: never while another's hazardous removal is open.
-  await holdForForeignHazards(o, proposer);
+  // Security reviews of L-3: round 2's removals, planned, judged with
+  // every open removal; held only for a foreign hazard that can pass.
+  const planned = (await nodesNow(o)).old.map((n: any) => n.addr);
+  await voteAgainstHazards(o, proposer, voters, log, planned);
+  await holdForForeignHazards(o, proposer, planned, log);
   const two = await roundTwoItems(o, nodes, proposer);
   if (two.length) {
     await Votes.checkVoters(o, proposer, voters, two.length);
@@ -288,6 +293,9 @@ export async function runPostCeremony(
       `   🗳️  round 2: ${two.length} removal(s), every production node registered`,
     );
     const open = await Votes.openAll({ ...args, items: two });
+    // Again now the removals exist: a foreign one proposed meanwhile.
+    await voteAgainstHazards(o, proposer, voters, log);
+    await holdForForeignHazards(o, proposer, [], log);
     try {
       await Votes.settleAll({ ...args, open });
     } catch (e: any) {

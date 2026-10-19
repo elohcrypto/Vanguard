@@ -5,6 +5,10 @@ import { handoverFixture } from "../helpers/governanceFixture";
 import { captured, cliConfig } from "../helpers/handoverCli";
 import { runHandover } from "../../scripts/handover";
 import { handoverArgs } from "../../scripts/handoverConfig";
+import {
+  parseNodes,
+  runPostCeremony,
+} from "../../scripts/production/postCeremonyVotes";
 
 const Votes = require("../../demo/utils/HandoverVotes");
 const { withDerivedContracts } = require("../../demo/utils/HandoverDerive");
@@ -50,7 +54,7 @@ describe("Post-ceremony votes: hazardous open removals (L-3)", function () {
     return { o: await withDerivedContracts(args) };
   };
 
-  const R = () => require("../../scripts/production/postCeremonyRemovals");
+  const R = () => require("../../scripts/production/removalHazards");
   const rm = (by: any, a: string) =>
     Votes.proposeCall(
       f.c.governance,
@@ -64,38 +68,52 @@ describe("Post-ceremony votes: hazardous open removals (L-3)", function () {
     const [p] = await f.c.governance.getProposal(id);
     return [p.votesFor, p.votesAgainst];
   };
+  const pastVote = async (id: number) => {
+    const [p] = await f.c.governance.getProposal(id);
+    const now = (await ethers.provider.getBlock("latest"))!.timestamp;
+    await ethers.provider.send("evm_increaseTime", [
+      Number(p.votingEnds) - now + 1,
+    ]);
+    await ethers.provider.send("evm_mine", []);
+  };
+  const NEW = async () =>
+    (await addrs([16, 17, 18])).map((a, k) => `${a}:NODE_${k + 1}`).join(",");
 
-  it("a stranger's removals that break the operator's safe plan: only theirs voted against; round 2 held", async function () {
+  it("a stranger's hazardous removal that cannot pass: voted against, round 2 not held and completes", async function () {
     await ceremony();
     const { o } = await derive();
-    // The operator's own plan: three removals, three nodes left (safe).
-    const own = [];
-    for (const a of nodes.slice(0, 3)) own.push(await rm(f.proposer, a));
-    // A stranger (a voter) removes two more: with the plan, one node left.
-    const theirs = [
-      await rm(f.voters[0], nodes[3]),
-      await rm(f.voters[0], nodes[4]),
-    ];
-    const { hazards, foreign } = await R().assessRemovals(o, f.proposer);
-    expect([...foreign].sort()).to.deep.equal(theirs);
-    for (const id of own) expect(hazards.has(id), `#${id}`).to.equal(false);
-    await captured(out, () =>
-      R().voteAgainstHazards(o, f.proposer, f.voters, console.log),
-    );
-    // voters[0] proposed them and cannot vote on them; voters[1] votes against.
-    for (const id of theirs) expect(await votes(id)).to.deep.equal([0n, 1n]);
-    for (const id of own) expect(await votes(id)).to.deep.equal([0n, 0n]);
-    expect(out.join("\n")).to.contain(
-      `removal #${theirs[0]} (${nodes[3]}, proposed by ${f.voters[0].address}) with the other open removals 1 node(s) would remain, below MIN_NODES (2): voting against while it votes (a cancel vote is no guard once it has passed)`,
-    );
-    await expect(R().holdForForeignHazards(o, f.proposer)).to.be.rejectedWith(
-      new RegExp(
-        `^round 2 held: open removal proposal\\(s\\) #${theirs[0]} \\(${nodes[3]}, by ${f.voters[0].address}: .*vote them down or cancel them by vote`,
-      ),
-    );
+    const realOpen = Votes.openAll;
+    const theirs: number[] = [];
+    // Once round 2's removals exist, a stranger proposes two more.
+    Votes.openAll = async (args: any) => {
+      const open = await realOpen(args);
+      if (/remove deployer-era/.test(args.items[0]?.label ?? "")) {
+        const [n16, n17] = await addrs([16, 17]);
+        theirs.push(await rm(f.voters[0], n16), await rm(f.voters[0], n17));
+      }
+      return open;
+    };
+    const fresh = parseNodes(await NEW());
+    try {
+      await captured(out, () =>
+        runPostCeremony(o, f.proposer, f.voters, fresh, cfg),
+      );
+    } finally {
+      Votes.openAll = realOpen;
+    }
+    expect(theirs).to.have.length(2);
+    // The proposer and voters[1] vote against (voters[0] proposed them).
+    for (const id of theirs) expect(await votes(id)).to.deep.equal([0n, 2n]);
+    const text = out.join("\n");
+    expect(text).to.contain(`removal #${theirs[0]} (`);
+    expect(text).to.contain("voting against while it votes");
+    expect(text).to.contain("but it cannot pass: not holding round 2");
+    expect(
+      [...(await f.c.oracleManager.getRegisteredOracles())].sort(),
+    ).to.deep.equal([...(await addrs([16, 17, 18]))].sort());
   });
 
-  it("a stranger's PASSED hazardous removals are cancelled by vote, then round 2 may go", async function () {
+  it("a passing foreign hazard holds round 2 with its id and stops an own removal's precheck; cancelled, the hold lifts", async function () {
     await ceremony();
     const { o } = await derive();
     for (const a of nodes.slice(0, 3)) await rm(f.proposer, a);
@@ -103,29 +121,37 @@ describe("Post-ceremony votes: hazardous open removals (L-3)", function () {
       await rm(f.voters[0], nodes[3]),
       await rm(f.voters[0], nodes[4]),
     ];
-    // Passed: the proposer and voters[1] vote for them; the vote ends.
     for (const id of theirs)
       await Votes.castAcceptanceVotes(f.c.governance, id, [
         f.proposer,
         f.voters[1],
       ]);
-    const [p] = await f.c.governance.getProposal(theirs[1]);
-    const now = (await ethers.provider.getBlock("latest"))!.timestamp;
-    await ethers.provider.send("evm_increaseTime", [
-      Number(p.votingEnds) - now + 1,
-    ]);
-    await ethers.provider.send("evm_mine", []);
+    await pastVote(theirs[1]);
+    await expect(
+      R().holdForForeignHazards(o, f.proposer, [], () => {}),
+    ).to.be.rejectedWith(
+      new RegExp(
+        `^round 2 held: open removal proposal\\(s\\) #${theirs[0]} \\(${nodes[3]}, by ${f.voters[0].address}: .*can pass`,
+      ),
+    );
+    const {
+      removalPrecheck,
+    } = require("../../scripts/production/postCeremonyRemovals");
+    await expect(removalPrecheck(o, nodes[0], f.proposer)()).to.be.rejectedWith(
+      new RegExp(
+        `^removing ${nodes[0]} now: round 2 held: .*#${theirs[0]}.*not executed$`,
+      ),
+    );
     const cand = await R().cancelCandidates(o, f.proposer);
     expect(cand.map((c: any) => c.id)).to.include.members(theirs);
+    const {
+      cancelHazards,
+    } = require("../../scripts/production/postCeremonyRemovals");
     const cancelled: number[] = await captured(out, () =>
-      R().cancelHazards(o, f.proposer, f.voters, cand, console.log),
+      cancelHazards(o, f.proposer, f.voters, cand, console.log),
     );
     expect([...cancelled].sort()).to.deep.equal(theirs);
-    for (const id of theirs)
-      expect(Number((await f.c.governance.getProposal(id))[0].status)).to.equal(
-        5,
-      );
-    await R().holdForForeignHazards(o, f.proposer);
+    await R().holdForForeignHazards(o, f.proposer, [], () => {});
   });
 
   it("fails closed past 12 distinct nodes under removal; one node's duplicates count once", async function () {
