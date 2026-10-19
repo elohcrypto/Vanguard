@@ -24,112 +24,15 @@
  *  - live gas: eth_gasPrice, eth_maxPriorityFeePerGas, the base fee.
  * Exits 1 when a URL fails the chain or archive check, or no getLogs range
  * works; the rest is information for the runbook's logChunk and budget.
- * URLs are printed as scheme://host/... only (redactUrl), and an error
- * text that echoes the URL or its key is scrubbed: provider keys live in
- * the URL.
+ * URLs are printed as scheme://host/... only and every provider error is
+ * classified and scrubbed of every key form before it is cut (./redact.js):
+ * provider keys live in the URL.
  */
 "use strict";
 
-const {
-  ARCHIVE_ERROR,
-  RANGE_ERROR,
-  isTransient,
-} = require("../../demo/utils/RpcRetry");
+const { RANGE_ERROR, isTransient } = require("../../demo/utils/RpcRetry");
 
-/**
- * `url` safe to print: scheme://host[:port]/... only. Provider URLs carry
- * API keys in the userinfo, the path or the query string; none of those
- * is ever printed, logged or written. An unparsable URL is "(rpc)".
- */
-function redactUrl(url) {
-  try {
-    const u = new URL(String(url));
-    const rest = u.pathname.length > 1 || u.search || u.hash ? "/..." : "";
-    return `${u.protocol}//${u.host}${rest}`;
-  } catch {
-    return "(rpc)";
-  }
-}
-
-/**
- * Every secret a URL may carry, as a provider could echo it: the whole
- * URL, the username and password, each path segment and each query value
- * (and the fragment), the whole path and query, and the URL without its
- * credentials (what fetch reports), each raw and percent-decoded; longest
- * first. Tokens
- * under 3 characters ("v3", "1") are not removed: they are not secrets and
- * would shred ordinary text.
- */
-function secretsOf(url) {
-  const out = new Set([String(url)]);
-  try {
-    const u = new URL(String(url));
-    const parts = [
-      u.username,
-      u.password,
-      u.hash.slice(1),
-      u.pathname,
-      u.search,
-    ];
-    const bare = new URL(u);
-    bare.username = "";
-    bare.password = "";
-    out.add(bare.href);
-    parts.push(...u.pathname.split("/"));
-    for (const kv of u.search.slice(1).split("&"))
-      parts.push(kv.split("=").slice(1).join("="));
-    for (const x of parts) {
-      for (const y of [
-        x,
-        (() => {
-          try {
-            return decodeURIComponent(x);
-          } catch {
-            return x;
-          }
-        })(),
-      ])
-        if (y && y.length >= 3) out.add(y);
-    }
-  } catch {
-    // unparsable: the whole string only
-  }
-  return [...out].sort((a, b) => b.length - a.length);
-}
-
-/** `text` with every secret of `url` replaced by <redacted>. */
-function scrub(text, url) {
-  let t = String(text);
-  for (const x of secretsOf(url)) t = t.split(x).join("<redacted>");
-  return t;
-}
-
-/** A provider error's class, printed before its (scrubbed) words. */
-function classify(text) {
-  const t = String(text);
-  if (
-    /\b429\b|too many requests|rate.?limit|-32005|exceeded .*(capacity|quota|rate)/i.test(
-      t,
-    ) &&
-    !RANGE_ERROR.test(t)
-  )
-    return "rate-limited";
-  if (RANGE_ERROR.test(t)) return "range-capped";
-  if (ARCHIVE_ERROR.test(t)) return "missing state";
-  if (
-    /unauthori[sz]ed|forbidden|\b40[13]\b|invalid (api )?key|invalid project|api key|auth/i.test(
-      t,
-    )
-  )
-    return "unauthorized";
-  return "other";
-}
-
-/** A provider error as printed: [class] scrubbed words. */
-const shown = (text, url) => {
-  const t = scrub(text, url);
-  return `[${classify(t)}] ${t}`;
-};
+const { classify, redactUrl, scrub, secretsOf, shown } = require("./redact");
 
 let nextId = 1;
 /** One JSON-RPC call to `url`: { result } or { error: text, status }. */
@@ -155,7 +58,7 @@ async function call(url, method, params = []) {
       body = JSON.parse(text);
     } catch {
       return {
-        error: shown(`HTTP ${r.status}: ${text.slice(0, 120)}`, url),
+        error: shown(`HTTP ${r.status}: ${text}`, url, 160),
         status: r.status,
       };
     }

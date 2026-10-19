@@ -219,4 +219,61 @@ describe("rpc-check (scripts/production/rpcCheck.js)", function () {
       srv.close();
     }
   });
+
+  it("scrubs before it truncates, and every query encoding (redact.js)", async function () {
+    const {
+      scrub,
+      shown,
+      secretsOf,
+    } = require("../../scripts/production/redact");
+    const KEY = "QWERTYKEY0123456789";
+    const url = `https://rpc.example/v3/${KEY}`;
+    const body = `${"x".repeat(110)}${KEY} tail`;
+    for (const out of [
+      shown(`HTTP 401: ${body}`, url, 120),
+      scrub(body, url, 120),
+    ]) {
+      for (let n = 0; n + 8 <= KEY.length; n++)
+        expect(out, out).to.not.contain(KEY.slice(n, n + 8));
+    }
+    // The rpc-check path: an HTML error page with the key at char 110.
+    const srv = http.createServer((req, res) => {
+      res.statusCode = 401;
+      res.end(body);
+    });
+    await new Promise<void>((ok) => srv.listen(0, "127.0.0.1", ok));
+    try {
+      const u = `http://127.0.0.1:${(srv.address() as AddressInfo).port}/v3/${KEY}`;
+      const t = (await checkUrl(u, {})).lines.join("\n");
+      for (let n = 0; n + 8 <= KEY.length; n++)
+        expect(t).to.not.contain(KEY.slice(n, n + 8));
+    } finally {
+      srv.close();
+    }
+    const q =
+      "https://rpc.example/?apikey=a%2Bb%20c+d&token=TOK999;sess=SESS777&flag";
+    const sec = secretsOf(q);
+    for (const want of [
+      "apikey=a%2Bb%20c+d&token=TOK999;sess=SESS777&flag",
+      "apikey=a%2Bb%20c+d",
+      "a%2Bb%20c+d",
+      "a+b c+d",
+      "a+b c d",
+      "TOK999",
+      "token=TOK999",
+      "SESS777",
+      "sess=SESS777",
+      "apikey",
+      "flag",
+    ])
+      expect(sec, want).to.include(want);
+    for (const echoed of [
+      "a+b c d",
+      "a+b c+d",
+      "a%2Bb%20c+d",
+      "TOK999",
+      "SESS777",
+    ])
+      expect(scrub(`bad ${echoed}!`, q)).to.equal("bad <redacted>!");
+  });
 });

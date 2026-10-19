@@ -24,7 +24,7 @@ import { artifacts, ethers, network } from "hardhat";
 import { runHandover } from "../handover";
 
 const { installRetry } = require("../../demo/utils/RpcRetry");
-const { redactUrl, scrub } = require("./rpcCheck");
+const { redactUrl, scrub } = require("./redact");
 
 type Reader = (method: string, params: any[]) => Promise<any>;
 
