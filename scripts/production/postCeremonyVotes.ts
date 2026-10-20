@@ -27,7 +27,8 @@
  * missing (adopting its open proposals), never proposes a removal while a
  * production node is missing, and adopts open removals by the same rules
  * (demo/utils/HandoverVotes.js openAll / settleAll). Calendar: two voting
- * periods and delays (about 20 days at TIME_SCALE 1), not one.
+ * periods and delays (about 19 days at TIME_SCALE 1: about 10 for round
+ * 1, 9 for round 2), not one.
  *
  * Refused before any proposal: a handover.json snapshot from another
  * chain; an unfinished ceremony; a NEW_NODES entry that is not a
