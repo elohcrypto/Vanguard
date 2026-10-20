@@ -350,7 +350,7 @@ describe("Signer prompt (signerPrompt.js)", function () {
         key.address,
       ]);
       expect(msg.body.error.message).to.match(
-        /refused with SIGNER_PROMPT=1: sign claims through vanguard_signClaim/,
+        /refused while the prompt is on \(the default off chain 31337\): sign claims through vanguard_signClaim/,
       );
       expect(up.raws.length).to.equal(1);
     } finally {

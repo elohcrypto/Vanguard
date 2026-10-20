@@ -25,8 +25,9 @@
  * Chain guard: the upstream must be Sepolia (11155111); 31337 only with
  * SIGNER_TEST=1 (the CI drives). Listens on 127.0.0.1 only (default port
  * 1248, Frame's), behind ./rpcGuard.js: a bearer token written to a 0600
- * file at start (SIGNER_TOKEN_FILE, else /tmp/vanguard-signer-<port>.token;
- * the CLIs read the same path), the Host checked, browser requests (Origin,
+ * file at start (SIGNER_TOKEN_FILE, else <tmp>/vanguard-signer-<uid>/
+ * <port>.token in a 0700 directory, rpcGuard.js tokenFileFor; the CLIs
+ * read the same path), the Host checked, browser requests (Origin,
  * Referer, preflight, other content types) refused, methods allowlisted.
  *
  * Every transaction and message is shown first (./signerPrompt.js: the
@@ -271,7 +272,7 @@ async function serve() {
       // recomputes and shows (vanguard_signClaim); never opaque bytes.
       if (prompt) {
         throw new Error(
-          "personal_sign/eth_sign refused with SIGNER_PROMPT=1: sign claims through vanguard_signClaim",
+          "personal_sign/eth_sign refused while the prompt is on (the default off chain 31337): sign claims through vanguard_signClaim",
         );
       }
       approve(
