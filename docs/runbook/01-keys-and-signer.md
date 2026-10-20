@@ -27,7 +27,13 @@ local rehearsal box and the order of work are there).
   agent, a claim signer, the OracleManager operator, an
   InvestorTypeRegistry governor or officer, or a key on a claim issuer
   (the preflight, the completion and the audit refuse it; a node that is
-  also an escrow fee wallet only warns). Check the demo's wallets:
+  also an escrow fee wallet only warns).
+- No tool checks that the issuer-admin Safe's owners differ from the ops
+  Safe's (Q17): the deploy refuses only the deployer as a listed owner
+  and the claim-signer CLI compares the Safe addresses. Compare the two
+  owner lists by hand in the Safe app before the deploy.
+
+Check the demo's wallets:
 
 ```bash
 npx hardhat run scripts/print-role-wallets.js --network $NET
@@ -48,83 +54,96 @@ serves Sepolia (chain 11155111) only, listens on 127.0.0.1 (default port
 derives its keys from `MNEMONIC`, refuses a chain other than 31337 unless
 `SIGNER_ALLOW_CHAIN` names it, and must never run with a real key.
 
-1. Keystores: one encrypted keystore per key, mode 0600, all under one
-   password, in one directory. The signer orders them by file name and
-   that order is the wallet index the ceremony uses (index 0 is the
-   deployer; the index is the position in the order, not the number in
-   the name), so name them with a sortable prefix:
+**Keystores.** One encrypted keystore per key, mode 0600, all under one
+password, in one directory. The signer orders them by file name and that
+order is the wallet index the ceremony uses (index 0 is the deployer;
+the index is the position in the order, not the number in the name), so
+name them with a sortable prefix:
 
-   ```bash
-   node scripts/production/signer.js new <KEYSTORE_DIR> 00-deployer 10-proposer 11-voter 12-voter
-   ```
+```bash
+node scripts/production/signer.js new <KEYSTORE_DIR> 00-deployer 10-proposer 11-voter 12-voter
+```
 
-   asks `password for the new keystores: ` (12 or more characters; or
-   reads `SIGNER_PASSWORD_FILE`, a 0600 file) and prints `<name> <address>`
-   per key. A key added later must sort after the pinned ones (1b): a
-   name that sorts before an existing keystore prints
-   `warning: <name>.json sorts before <later>.json: every wallet index from it on shifts, and a handover.json pinned to the old order is refused (name new keystores so they sort after the pinned ones, or re-pin handover.json "accounts")`.
-   Claim-signer keys (4a) are such later keys (e.g. `50-claim-kyc`,
-   `51-claim-aml`). Back up the directory and the password apart.
-2. Start it on a terminal of its own (the approval prompt reads
-   `/dev/tty`), the upstream RPC from a variable or a file, never argv:
+It asks `password for the new keystores: ` (12 or more characters; or
+reads `SIGNER_PASSWORD_FILE`, a 0600 file) and prints `<name> <address>`
+per key. A key added later must sort after the pinned ones (1b): a name
+that sorts before an existing keystore prints
+`warning: <name>.json sorts before <later>.json: every wallet index from it on shifts, and a handover.json pinned to the old order is refused (name new keystores so they sort after the pinned ones, or re-pin handover.json "accounts")`.
+Claim-signer keys (4a) are such later keys (e.g. `50-claim-kyc`,
+`51-claim-aml`). The signer reads its keystores only at start: restart
+it after adding one. Back up the directory and the password apart.
 
-   ```bash
-   export SIGNER_UPSTREAM="$(cat <0600 FILE WITH THE ARCHIVE RPC URL>)"
-   SIGNER_KEYSTORE_DIR=<KEYSTORE_DIR> SIGNER_PASSWORD_FILE=<0600 FILE> node scripts/production/signer.js
-   ```
+**Start.** On a terminal of its own (the approval prompt reads
+`/dev/tty`), the upstream RPC from a variable or a file, never argv. The
+upstream serves both reads and sends and must be archive (2.1):
 
-   prints
-   `signer on 127.0.0.1:1248: N key(s), chain 11155111, every request asked; token in <file>; N signed nonce(s) remembered`
-   and one `   <index> <name> <address>` line per key. The token file is
-   `SIGNER_TOKEN_FILE`, else `<tmp>/vanguard-signer-<uid>/<port>.token`
-   (0600; the CLIs read the same path through `hardhat.config.ts`); it is
-   removed when the signer exits. On another chain it stops:
-   `signer: upstream is chain 31337: this signer serves Sepolia (11155111) only (31337 with SIGNER_TEST=1)`
-   (`SIGNER_TEST=1` is for the CI drives).
-3. The prompt is on by default off chain 31337: every transaction is
-   shown (the call decoded for a compiled contract, to, value, nonce,
-   gas, fees, chain, the data's hash and the unsigned transaction hash)
-   and signed only when you type the token it shows,
-   `   type <token> to sign, anything else refuses: `, the last six hex
-   digits of the unsigned transaction hash. Compare what is shown with the
-   step you are running before typing. `SIGNER_PROMPT=0` switches the
-   prompt off with
-   `⚠️  SIGNER_PROMPT=0 on chain 11155111: EVERY REQUEST IS SIGNED WITHOUT ASKING. …`;
-   without a terminal it refuses to start
-   (`the prompt (the default on chain 11155111; SIGNER_PROMPT=0 switches it off) needs a controlling terminal (/dev/tty) to ask on`).
-   With the prompt on, opaque `personal_sign` / `eth_sign` requests are
-   refused; claims are signed through `vanguard_signClaim`, which
-   recomputes the claim digest (issuer, identity, topic, scheme, data, uri,
-   validTo, chain and the issuer's revocation epoch) and shows each field
-   (the onboarding and claim CLIs use it).
-4. A nonce is signed for one transaction only. The signed nonces are kept
-   in `<token file>.signed.json` (0600, survives a restart). A request at
-   a recorded nonce with the same chain, from, to, value and data is the
-   same transaction (re-sent, or re-signed when only gas or fees moved); a
-   different one is refused:
-   `nonce N of 0x… was already signed for another transaction (its value differs): refused; never to be mined? run: signer.js forget 0x… N`.
-   - A transaction stuck in the mempool: the running signer sends the
-     recorded transaction again with higher fees (asked like any other):
+```bash
+export SIGNER_UPSTREAM="$(cat <0600 FILE WITH THE ARCHIVE RPC URL>)"
+SIGNER_KEYSTORE_DIR=<KEYSTORE_DIR> SIGNER_PASSWORD_FILE=<0600 FILE> node scripts/production/signer.js
+```
 
-     ```bash
-     node scripts/production/signer.js bump <ADDRESS> <NONCE>
-     ```
+It prints
+`signer on 127.0.0.1:1248: N key(s), chain 11155111, every request asked; token in <file>; N signed nonce(s) remembered`
+and one `   <index> <name> <address>` line per key. The token file is
+`SIGNER_TOKEN_FILE`, else `<tmp>/vanguard-signer-<uid>/<port>.token`
+(0600; the CLIs read the same path through `hardhat.config.ts`); it is
+removed when the signer exits normally (a `kill -9` leaves it: `rm` it).
+A refusal ends `signer: <reason>` with exit 3 (for the signer a failure,
+not the CLIs' pause): on another chain
+`signer: upstream is chain 31337: this signer serves Sepolia (11155111) only (31337 with SIGNER_TEST=1)`
+(`SIGNER_TEST=1` is for the CI drives).
 
-     prints `signer: nonce N of 0x… sent again with higher fees: 0x…`.
-   - An entry for a transaction that will never be mined (verify on an
-     explorer that the nonce is unused or used by the transaction you
-     expect):
+**The prompt.** It is on by default off chain 31337, and then the signer
+needs a terminal: without one it refuses to start
+(`the prompt (the default on chain 11155111; SIGNER_PROMPT=0 switches it off) needs a controlling terminal (/dev/tty) to ask on`).
+Every transaction is shown (the call decoded for a compiled contract,
+to, value, nonce, gas, fees, chain, the data's hash and the unsigned
+transaction hash) and signed only when you type the token it shows,
+`   type <token> to sign, anything else refuses: `, the last six hex
+digits of the unsigned transaction hash. Compare what is shown with the
+step you are running before typing. Every send waits at the signer's
+terminal, and the CLIs give up on a request after 600 s (the `remote`
+network's timeout in `hardhat.config.ts`): stay at the signer while a CLI
+runs, and be there when a voting period or execution delay ends (each
+execution comes 9 to 10 days after its vote). With the prompt on, opaque
+`personal_sign` / `eth_sign` requests are refused; claims are signed
+through `vanguard_signClaim`, which recomputes the claim digest (issuer,
+identity, topic, scheme, data, uri, validTo, chain and the issuer's
+revocation epoch) and shows each field (the onboarding and claim CLIs
+use it). `SIGNER_PROMPT=0` switches the prompt off, needs no terminal and
+says so at start:
+`⚠️  SIGNER_PROMPT=0 on chain 11155111: EVERY REQUEST IS SIGNED WITHOUT ASKING. …`.
 
-     ```bash
-     node scripts/production/signer.js forget <ADDRESS> <NONCE>
-     ```
+**One transaction per nonce.** The signed nonces are kept in
+`<token file>.signed.json` (0600, survives a restart). A request at a
+recorded nonce with the same chain, from, to, value and data is the same
+transaction (re-sent, or re-signed when only gas or fees moved); a
+different one is refused:
+`nonce N of 0x… was already signed for another transaction (its value differs): refused; never to be mined? run: signer.js forget 0x… N`.
+A transaction stuck in the mempool: the running signer sends the
+recorded transaction again with higher fees (asked like any other):
 
-     prints `signer: forgot 11155111:0x…:N in <token file>.signed.json: the next request at that nonce is signed as new`.
+```bash
+node scripts/production/signer.js bump <ADDRESS> <NONCE>
+```
 
-   Both take the signer's port as a third argument when it is not 1248
-   (and `SIGNER_TOKEN_FILE` when the signer was started with one).
-   `node scripts/production/signer.js help` prints the four forms.
-5. Point the CLIs at it: `export SIGNER_RPC_URL=http://127.0.0.1:1248`.
+prints `signer: nonce N of 0x… sent again with higher fees: 0x…`. An
+entry for a transaction that will never be mined (verify on an explorer
+that the nonce is unused or used by the transaction you expect): STOP
+the signer first (a running signer keeps the record in memory and writes
+the entry back with its next signature), then
+
+```bash
+node scripts/production/signer.js forget <ADDRESS> <NONCE>
+```
+
+prints `signer: forgot 11155111:0x…:N in <token file>.signed.json: the next request at that nonce is signed as new`;
+start the signer again. Both take the signer's port as a third argument
+when it is not 1248 (and `SIGNER_TOKEN_FILE` when the signer was started
+with one). `node scripts/production/signer.js help` prints the four
+forms.
+
+**The CLIs.** Point them at it: `export SIGNER_RPC_URL=http://127.0.0.1:1248`.
 
 Locally the box's `remote-signer.js` stands in for sections 2 to 4a;
 the production signer is exercised by the deploy drive's onboarding step
@@ -136,15 +155,16 @@ the local signer on the same port):
 (umask 077; printf '%s\n' "rehearsal-only password" > $RB/ks-password)   # local
 SIGNER_PASSWORD_FILE=$RB/ks-password node scripts/production/signer.js new $RB/ks 10-deployer 20-proposer   # local
 SIGNER_PASSWORD_FILE=$RB/ks-password node scripts/production/signer.js new $RB/ks 15-claim-kyc   # local: sorts before 20-proposer
-SIGNER_TEST=1 SIGNER_KEYSTORE_DIR=$RB/ks SIGNER_PASSWORD_FILE=$RB/ks-password SIGNER_UPSTREAM=$DEMO_RPC_URL SIGNER_TOKEN_FILE=$RB/ks.token node scripts/production/signer.js 8549 > $RB/prod-signer.log 2>&1 &   # local
-sleep 5; cat $RB/prod-signer.log; pkill -f "scripts/production/signer.js 8549"; sleep 1; ls $RB/ks.token   # local
+SIGNER_TEST=1 SIGNER_KEYSTORE_DIR=$RB/ks SIGNER_PASSWORD_FILE=$RB/ks-password SIGNER_UPSTREAM=$DEMO_RPC_URL SIGNER_TOKEN_FILE=$RB/ks.token node scripts/production/signer.js $SIGNER_PORT > $RB/prod-signer.log 2>&1 & PSIGNER_PID=$!   # local
+sleep 5; cat $RB/prod-signer.log; kill $PSIGNER_PID; sleep 1; ls $RB/ks.token   # local
 ```
 
 prints `10-deployer 0x…`, `20-proposer 0x…`, the sort warning and
 `15-claim-kyc 0x…`; then
-`signer on 127.0.0.1:8549: 3 key(s), chain 31337, NOT asking; token in /tmp/vanguard-runbook/ks.token; 0 signed nonce(s) remembered`
-and `   0 10-deployer 0x…`, `   1 15-claim-kyc 0x…`, `   2 20-proposer 0x…`
-(the proposer moved from index 1 to 2); after the stop `ls` fails
+`signer on 127.0.0.1:N: 3 key(s), chain 31337, NOT asking; token in /tmp/vanguard-runbook/ks.token; 0 signed nonce(s) remembered`
+(N is `$SIGNER_PORT`) and `   0 10-deployer 0x…`, `   1 15-claim-kyc 0x…`,
+`   2 20-proposer 0x…` (the proposer moved from index 1 to 2); after the
+stop `ls` fails
 (`ls: cannot access '/tmp/vanguard-runbook/ks.token': No such file or directory`):
 the token went with the process.
 
