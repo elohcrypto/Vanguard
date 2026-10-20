@@ -1,10 +1,16 @@
 import { expect } from "chai";
 import { network } from "hardhat";
 import * as fs from "fs";
+import * as os from "os";
+import * as path from "path";
 import { handoverFixture } from "../helpers/governanceFixture";
 import { captured, cliConfig } from "../helpers/handoverCli";
 import { runHandover } from "../../scripts/handover";
-import { countWith, diffScans } from "../../scripts/production/scanCount";
+import {
+  countWith,
+  diffScans,
+  scanUrls,
+} from "../../scripts/production/scanCount";
 
 /**
  * Task 5.15 (readiness review L-7): scripts/production/scanCount.ts counts
@@ -57,6 +63,43 @@ describe("scan-count (scripts/production/scanCount.ts)", function () {
         /❌ \d+ \| \d+ \| \d+  \w+ @ 0x/,
       );
     } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  // Task 5.16: the URLs also come from a 0600 file, never a typed line.
+  it("reads SCAN_RPC_URLS_FILE (0600) and refuses a file others can read", function () {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "scan-urls-"));
+    const keep = {
+      urls: process.env.SCAN_RPC_URLS,
+      file: process.env.SCAN_RPC_URLS_FILE,
+    };
+    try {
+      const file = path.join(dir, "urls");
+      fs.writeFileSync(file, "http://a.example/k1,\nhttp://b.example/k2\n", {
+        mode: 0o600,
+      });
+      delete process.env.SCAN_RPC_URLS;
+      process.env.SCAN_RPC_URLS_FILE = file;
+      expect(scanUrls()).to.deep.equal([
+        "http://a.example/k1",
+        "http://b.example/k2",
+      ]);
+      fs.chmodSync(file, 0o644);
+      expect(() => scanUrls()).to.throw(
+        /SCAN_RPC_URLS_FILE must be this user's own file, mode 0600/,
+      );
+      delete process.env.SCAN_RPC_URLS_FILE;
+      process.env.SCAN_RPC_URLS = "http://c.example,http://d.example";
+      expect(scanUrls()).to.deep.equal(["http://c.example", "http://d.example"]);
+    } finally {
+      for (const [k, v] of [
+        ["SCAN_RPC_URLS", keep.urls],
+        ["SCAN_RPC_URLS_FILE", keep.file],
+      ] as const) {
+        if (v === undefined) delete process.env[k];
+        else process.env[k] = v;
+      }
       fs.rmSync(dir, { recursive: true, force: true });
     }
   });

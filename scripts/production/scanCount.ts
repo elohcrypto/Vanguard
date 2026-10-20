@@ -6,7 +6,7 @@
  * on one provider than on the others; the ceremony would read such a
  * short scan as "no stray".
  *
- *   SCAN_RPC_URLS=<provider>,<own node> SCAN_CHUNKS=5000,1000 \
+ *   SCAN_RPC_URLS_FILE=<0600 file: provider,own node> SCAN_CHUNKS=5000,1000 \
  *     HANDOVER_CONFIG=<handover.json> [HANDOVER_SNAPSHOT_SHA256=..] \
  *     npx hardhat run scripts/production/scanCount.ts --network remote
  *
@@ -25,7 +25,7 @@ import { runHandover } from "../handover";
 
 const { installRetry } = require("../../demo/utils/RpcRetry");
 const { scrubKnown } = require("./redact");
-const { fetchTarget, redactUrl, scrub } = require("./redact");
+const { fetchTarget, redactUrl, scrub, urlsFrom } = require("./redact");
 
 type Reader = (method: string, params: any[]) => Promise<any>;
 
@@ -129,15 +129,27 @@ export async function diffScans(
   return { lines, diffs, scans: keys.length };
 }
 
+/**
+ * Task 5.16: the URLs from SCAN_RPC_URLS or SCAN_RPC_URLS_FILE (this
+ * user's own 0600 file, comma or newline separated), as rpcCheck and
+ * costTable read theirs (redact.js urlsFrom): a typed URL lands in the
+ * shell history with its provider key.
+ */
+export function scanUrls(): string[] {
+  return urlsFrom("SCAN_RPC_URLS");
+}
+
 async function main(): Promise<void> {
   installRetry(network.provider);
   const path = process.env.HANDOVER_CONFIG;
-  const urls = (process.env.SCAN_RPC_URLS || "").split(",").filter(Boolean);
+  const urls = scanUrls();
   const chunks = (process.env.SCAN_CHUNKS || "5000,1000")
     .split(",")
     .map(Number);
   if (!path || !urls.length)
-    throw new Error("set HANDOVER_CONFIG and SCAN_RPC_URLS");
+    throw new Error(
+      "set HANDOVER_CONFIG and SCAN_RPC_URLS (or SCAN_RPC_URLS_FILE, 0600)",
+    );
   const cfg = JSON.parse(fs.readFileSync(path, "utf8"));
   const readers = urls.map(urlReader);
   const heads = await Promise.all(

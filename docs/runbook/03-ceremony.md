@@ -150,14 +150,16 @@ makes a scan look clean. `scripts/production/scanCount.ts` runs the
 read-only phase (the audit once governance owns the plan, else the
 preflight) once per RPC and `logChunk`, counts each scan's raw hits and
 exits 1 when any count differs. Run it after the ceremony on both RPCs
-with two chunk sizes (the URLs from a 0600 file, never typed inline):
+with two chunk sizes (the URLs from `SCAN_RPC_URLS_FILE`, this user's
+0600 file, comma or newline separated; never typed inline):
 
 ```bash
-export SCAN_RPC_URLS=$DEMO_RPC_URL,http://localhost:8547   # local; publicly export SCAN_RPC_URLS="$(cat <0600 FILE: provider URL,own node URL>)"
-SCAN_CHUNKS=5000,1000 prod scripts/production/scanCount.ts > $RB/scan.log 2>&1; echo "exit $?"; tail -1 $RB/scan.log
+(umask 077; echo "$DEMO_RPC_URL,http://localhost:8547" > $RB/scan-urls)   # local; publicly the file holds the provider URL and the own node's URL
+SCAN_RPC_URLS_FILE=$RB/scan-urls SCAN_CHUNKS=5000,1000 prod scripts/production/scanCount.ts > $RB/scan.log 2>&1; echo "exit $?"; tail -1 $RB/scan.log
 ```
 
-prints `exit 0` and `✅ all N scans count the same on every RPC and chunk size`;
+A file group or others can read is refused
+(`SCAN_RPC_URLS_FILE must be this user's own file, mode 0600`). It prints `exit 0` and `✅ all N scans count the same on every RPC and chunk size`;
 the log has `🔎 scan counts at block N (heads N, N)` and one row per scan
 (`      2 | 2 | 2 | 2  RoleGranted @ 0x… (1 topic filter(s))`). A differing
 row exits 1: find which provider or chunk drops logs before trusting
