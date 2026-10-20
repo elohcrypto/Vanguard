@@ -143,7 +143,9 @@ describe("RpcRetry (bounded retry, no double send)", function () {
   it("scrubs the RPC URL's key from its retry lines", async function () {
     const c = chain();
     const url = "https://rpc.example/v3/APIKEY123456?k=QKEY99";
-    c.readFaults = [err(`Too Many Requests from ${url} (key APIKEY123456, QKEY99)`)];
+    c.readFaults = [
+      err(`Too Many Requests from ${url} (key APIKEY123456, QKEY99)`),
+    ];
     const lines: string[] = [];
     installRetry(c, {
       url,
