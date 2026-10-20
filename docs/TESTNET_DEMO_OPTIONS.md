@@ -218,7 +218,7 @@ nodes, then remove wallets 1-3) the new nodes answer; a node with no demo
 key or a paused node is listed as one that cannot answer, and 35a needs
 exactly three registered nodes, all with a demo key.
 Option 83f is the day-2 audit after such votes (section 10 of
-[OPERATOR_RUNBOOK](OPERATOR_RUNBOOK.md#10-upgrades-and-the-day-2-audit)). `demo-drive.sh --strict 1 21 31 32 33a 34a 35a 39 40`
+[OPERATOR_RUNBOOK](runbook/05-operations.md#10-upgrades-and-the-day-2-audit)). `demo-drive.sh --strict 1 21 31 32 33a 34a 35a 39 40`
 runs with no error; 33, 34, 35 and 37 ask sub-prompts, which a drive
 answers only when the argument carries them (`37:<sub-option>:...`).
 A whitelist query names a tier T (Task 4.12; 37 -> 1 asks 1-4, 5 is the
