@@ -38,7 +38,8 @@ governance to own OracleManager.
    funding (2.2).
 3. The deploy through the signer (2.3); it pauses for the ops Safe's
    batches (custody, the ops identity: 2.4, 2.5, section 7).
-4. Voters: `onboardVoters`, then the 7-day voter age (section 3).
+4. Voters: `onboardVoters`, then the 7-day voter age; meanwhile the
+   deployer burns its VGT (section 3).
 5. The ceremony's full phase (pauses for the ops and issuer-admin Safe
    batches), the digest recorded (section 6), the accept phase (all
    acceptances voted in parallel), `scanCount`, the day-2 audit (5, 5a).
@@ -113,7 +114,7 @@ other boxes reset the node. Locally, in this order:
    production-signer box.
 2. The production track: 2.1's local `rpc-check`, 2.2's measurement
    (optional, about 6 minutes, on two other free ports), 2.3's deploy,
-   section 3's `onboardVoters` box, 5a's ceremony, audit and scan
+   section 3's `onboardVoters` box and its VGT burn, 5a's ceremony, audit and scan
    boxes, section 4's post-ceremony box and audit, 4a's claim-signer box
    and final audit.
 3. 2.4's multisig box (it resets the node and restarts the local signer).

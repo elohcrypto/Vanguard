@@ -40,6 +40,27 @@ than the record's, an incomplete record, and a run after the ceremony.
 On Sepolia wait the printed time (7 days) before section 5; the
 onboarding signs each claim through `vanguard_signClaim` (section 1a).
 
+**The deployer's VGT, before the ceremony.** The deploy mints the
+deployer 1,000,000 VGT; it pays proposal and voting deposits. Take it
+out of use while the deployer can still send: after the window opens it
+sends only votes, after the ceremony nothing, and VGT has no forced
+transfer. A transfer to a treasury is refused (`Sender not verified`:
+the production deployer has no identity, and must not get one), so the
+deployer, still a VGT agent, burns it; after the ceremony ops (a VGT
+agent) mints the treasury what it needs. Production track (after the
+voters are onboarded, before section 5):
+
+```bash
+env -u MNEMONIC npx hardhat console --network remote <<'EOF'
+const fs = await import("fs"); const rec = JSON.parse(fs.readFileSync(process.env.PROD_RECORD, "utf8")); const vgt = await ethers.getContractAt("GovernanceToken", rec.contracts.governanceToken, await ethers.getSigner(rec.deployer)); await (await vgt["burn(address,uint256)"](rec.deployer, await vgt.balanceOf(rec.deployer))).wait(); console.log("deployer VGT:", ethers.formatEther(await vgt.balanceOf(rec.deployer)));
+EOF
+```
+
+prints `deployer VGT: 0.0`. The ceremony and the audit then print no
+`deployer still holds … VGT` warning; left in place, the warning names
+the only remaining path (ops: `burn(deployer, amount)` or
+`setAddressFrozen(deployer, true)`).
+
 The demo track onboards with options 23, 24 (`24:1:<name>`) or claims 6
 and 7 and funds with 75a (a mint by the deployer before the ceremony,
 ops after) or 75. The ceremony checks the voter age first. Local: L0.
@@ -138,7 +159,7 @@ HANDOVER_PHASE=audit prod scripts/handover.ts > $RB/prod-audit.log 2>&1; echo "e
 ```
 
 prints `exit 0`, `⚠️  Handover complete with warnings: see above.` (the
-eight warnings of 2.3),
+seven warnings of 2.3: the deployer's VGT was burned),
 `   🗳️  11 proposal(s) open at once: #1, #2, #3, #4, #5, #6, #7, #8, #9, #10, #11`,
 `   ⏱️  11 proposal(s) settled N s of chain time after #1 was created`
 (about 864000 s: the 10 days, jumped on the dev node), `exit 0` and

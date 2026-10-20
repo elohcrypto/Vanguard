@@ -169,6 +169,6 @@ HANDOVER_PHASE=audit prod scripts/handover.ts > $RB/audit-final.log 2>&1; echo "
 prints `claimSigners: 2`, `exit 0`,
 `✅ Audit passed: the deployer holds no power.`, two
 `   ✅ claimSigners 0x…: a CLAIM_SIGNER key the issuer admin added after the ceremony on KYC Service (0x…)`
-lines (`AML Service` for the second) and two warnings that stay:
+lines (`AML Service` for the second) and the one warning that stays,
 `   ⚠️  0x23618e81E3f5cdF7f54C3d65f7FBc0aBf5B21E8f is investorLimitExempt (set before the handover): …`
-(the escrow fee wallet) and `   ⚠️  deployer still holds 1000000.0 VGT (N% of the supply): …`.
+(the escrow fee wallet).

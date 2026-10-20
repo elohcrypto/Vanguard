@@ -34,10 +34,18 @@ describe("Handover residue: the deployer's VGT (L-2)", function () {
     const { warnings } = await assertHandoverComplete(f.args);
     expect(line(warnings)).to.match(
       new RegExp(
-        `^deployer still holds ${ethers.formatEther(held).replace(".", "\\.")} VGT \\([0-9.]+% of the supply\\): it pays proposal and voting deposits; move it to the treasury$`,
+        `^deployer still holds ${ethers.formatEther(held).replace(".", "\\.")} VGT \\([0-9.]+% of the supply\\): it pays proposal and voting deposits; the deployer should have burned it before the ceremony \\(it sends nothing after it\\); the remaining path is ops \\(a VGT agent\\): burn\\(deployer, amount\\) or setAddressFrozen\\(deployer, true\\), and ops mints the treasury what it needs$`,
       ),
     );
     const audit = await assertHandoverComplete({ ...f.args, audit: true });
     expect(line(audit.warnings)).to.not.equal(undefined);
+    // Task 5.16: the path the warning names holds: ops, a VGT agent after
+    // the ceremony, burns the deployer's VGT (no forced transfer exists).
+    await (
+      await vgt.connect(f.ops)["burn(address,uint256)"](f.deployer.address, held)
+    ).wait();
+    expect(await vgt.balanceOf(f.deployer.address)).to.equal(0n);
+    const after = await assertHandoverComplete({ ...f.args, audit: true });
+    expect(line(after.warnings)).to.equal(undefined);
   });
 });

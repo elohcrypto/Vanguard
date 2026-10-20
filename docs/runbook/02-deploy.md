@@ -144,11 +144,12 @@ prints `✅ Deployed: 74 transactions in /tmp/vanguard-runbook/deploy-record.jso
 - The ceremony (section 5) takes the escrow factory by vote, hands both
   list oracles (`"oracles"`; the unbound whitelist oracle prints
   `   ⚠️  oracle 0x… is not bound on chain; handed over anyway`) to ops
-  and closes with eight warnings: the three deployer-trusted issuer keys,
-  the three deployer-era nodes (section 4),
+  and closes with seven warnings: the three deployer-trusted issuer keys,
+  the three deployer-era nodes (section 4) and
   `   ⚠️  0x… is investorLimitExempt (set before the handover): …` (the
-  escrow fee wallet; nothing mints the deployer VSC) and
-  `   ⚠️  deployer still holds 1000000.0 VGT (N% of the supply): it pays proposal and voting deposits; move it to the treasury`.
+  escrow fee wallet; nothing mints the deployer VSC). An eighth when the
+  deployer's VGT was not burned first (section 3):
+  `   ⚠️  deployer still holds 1000000.0 VGT (N% of the supply): it pays proposal and voting deposits; the deployer should have burned it before the ceremony (it sends nothing after it); the remaining path is ops (a VGT agent): …`.
   A list oracle of the plan's OracleManager the deployer holds (found
   among its creations since `fromBlock`, the named and bound oracles, and
   a best-effort log scan) fails it; an `"oracles"` omitting one is
@@ -211,7 +212,7 @@ The ceremony pauses after its snapshot, before any vote: `exit 3`,
 `⏸️  awaiting 4 issuerAdmin transactions: /tmp/vanguard-runbook/ms-handover.json.issuer-admin-transactions.json`,
 `⏸️  awaiting 2 ops transactions: /tmp/vanguard-runbook/ms-handover.json.ops-transactions.json`;
 then `executed 2 calls on 0x…`, `executed 4 calls on 0x…`, `exit 0`, `   ✅ 6 role transaction effect(s) hold on chain`
-and `⚠️  Handover complete with warnings: see above.` (the eight warnings above).
+and `⚠️  Handover complete with warnings: see above.` (the eight warnings above: this box does not burn the deployer's VGT).
 Before execution the accept phase exits 3 naming each call and a full re-run is
 refused (`… a full re-run would send them again …`, exit 1), sending nothing.
 The ops-identity pause (`OPS_IDENTITY` set to an OnchainID the ops Safe

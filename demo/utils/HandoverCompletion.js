@@ -427,11 +427,15 @@ async function residueWarnings(o, dAddr, govAddr, warnings) {
     );
   }
   // Task 5.17 (deep review L-2): leftover VGT pays deposits and fees.
+  // Task 5.16: the deployer burns it before the ceremony while it is a
+  // VGT agent (runbook section 3; an unverified deployer cannot transfer
+  // VGT); after it the deployer sends nothing and VGT has no forced
+  // transfer, so only ops (a VGT agent) can take it out of use.
   const vgt = await o.governanceToken.balanceOf(dAddr);
   if (vgt > 0n) {
     const supply = await o.governanceToken.totalSupply();
     warnings.push(
-      `deployer still holds ${ethers.formatEther(vgt)} VGT (${Number((vgt * 10000n) / supply) / 100}% of the supply): it pays proposal and voting deposits; move it to the treasury`,
+      `deployer still holds ${ethers.formatEther(vgt)} VGT (${Number((vgt * 10000n) / supply) / 100}% of the supply): it pays proposal and voting deposits; the deployer should have burned it before the ceremony (it sends nothing after it); the remaining path is ops (a VGT agent): burn(deployer, amount) or setAddressFrozen(deployer, true), and ops mints the treasury what it needs`,
     );
   }
   const fAddr =
