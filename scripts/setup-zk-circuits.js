@@ -120,11 +120,12 @@ async function downloadPtau() {
  * Resolve a circom 2.x binary.
  *
  * The circuits declare `pragma circom 2.0.0`, which only the Rust compiler
- * understands. The `circom` npm dependency is the deprecated 0.5.x JS
- * implementation and installs a shim at node_modules/.bin/circom. Because
- * `npm run` prepends node_modules/.bin to PATH, a bare `circom` resolves to
- * that 0.5.x shim under npm and to the Rust binary from a plain shell — the
- * same command then succeeds or fails depending on how it was launched.
+ * understands. Until Task 5.11 the repo depended on the deprecated npm
+ * `circom` 0.5.x JS implementation, which installed a shim at
+ * node_modules/.bin/circom. Because `npm run` prepends node_modules/.bin to
+ * PATH, a bare `circom` resolved to that 0.5.x shim under npm and to the Rust
+ * binary from a plain shell — the same command succeeded or failed depending
+ * on how it was launched. Any 0.5.x on PATH can still shadow it.
  *
  * So: resolve a candidate, then verify its reported major version is 2.
  */
@@ -159,7 +160,7 @@ async function resolveCircomBin() {
   throw new Error(
     `No circom 2.x compiler found. Tried:\n` +
       tried.map((t) => `    ${t}`).join("\n") +
-      `\n  The circuits require Rust circom 2.x; the bundled npm circom 0.5.x cannot compile them.\n` +
+      `\n  The circuits require Rust circom 2.x; the deprecated npm circom 0.5.x cannot compile them.\n` +
       `  Install: https://docs.circom.io/getting-started/installation/\n` +
       `  Or set CIRCOM_BIN to the binary's path.`,
   );

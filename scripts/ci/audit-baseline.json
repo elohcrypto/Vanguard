@@ -1,5 +1,9 @@
 {
   "high": 21,
+  "omitDev": {
+    "high": 0,
+    "why": "npm audit --omit=dev (the production install) high count, same ratchet rule as high: fail when it rises, lower it when it drops. 0 since R-511-1 (2026-10-20)."
+  },
   "why": [
     "Ratchet on npm audit's high count (scripts/ci/audit-ratchet.js). Gating on `high` would be permanently red and quickly ignored; instead fail only when the count RISES above this baseline, so a newly introduced high is caught while the known backlog stays visible. Critical blocks outright (`npm audit --audit-level=critical`, currently 0).",
     "The count is checked against the live advisory database, so a newly published advisory in an unchanged dependency reddens every branch at once: raise `high` with the advisory recorded in `history`. When the count drops, lower `high` to it."
