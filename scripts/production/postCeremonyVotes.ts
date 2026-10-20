@@ -14,11 +14,15 @@
  *     node, proposed only when EVERY order and subset of the removals
  *     leaves MIN_NODES nodes with none alone at the consensus bar; each
  *     is checked again just before this CLI executes it.
- * Task 5.17 (deep review L-3): at each run's start and before each vote,
- * every open removal (anyone's) is checked with the others in every
- * order; one that could leave an invalid set is voted AGAINST while it
- * still votes, and cancelled by vote once passed. A cancel vote is no
- * guard once a removal has passed: anyone may execute it first.
+ * Task 5.17 (deep review L-3, R-517-3): at each run's start and before
+ * each vote, every open removal (anyone's) is checked with the others in
+ * every order. A foreign removal that would make the set invalid is voted
+ * AGAINST while it still votes only when it has a FOR vote or passes on
+ * the votes cast (removalHazards.ts); round 2 holds only for one that
+ * passes or is executable. The guard is the precheck right before each of
+ * this run's removals executes. A cancel vote clears only a passed
+ * removal nobody executes first: anyone may execute it 2 days after its
+ * vote, before a cancel (7 + 2 days) could pass.
  * The phase is the chain's: a re-run runs round 1 while anything of it is
  * missing (adopting its open proposals), never proposes a removal while a
  * production node is missing, and adopts open removals by the same rules

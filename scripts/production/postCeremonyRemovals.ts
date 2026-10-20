@@ -2,9 +2,13 @@
  * The node-set checks of scripts/production/postCeremonyVotes.ts, moved
  * here unchanged in Task 5.17 (the 500-line rule) beside the deep review
  * L-3 hazard checks: a removal is checked with every open removal in
- * every order, voted against while it votes, cancelled by vote once
- * passed (a cancel vote is no guard once a removal has passed: anyone may
- * execute it first).
+ * every order. Under R-517-3 a foreign removal that would make the set
+ * invalid is voted against only while it votes and only when it has a
+ * FOR vote or passes on the votes cast (removalHazards.ts); the guard is
+ * the precheck right before each of this run's removals executes. A
+ * passed removal that has become unsafe gets a cancel vote
+ * (cancelHazards below), which clears it only if nobody executes it
+ * first: anyone may, 2 days after its vote.
  */
 import { ethers } from "hardhat";
 
