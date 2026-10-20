@@ -19,10 +19,11 @@ circom --version    # e.g. "circom compiler 2.2.3"
 Requires a Rust toolchain (`rustup`). If circom lives elsewhere, set `CIRCOM_BIN`
 to its path.
 
-> **Note on PATH:** `npm run` prepends `node_modules/.bin` to `PATH`, where the
-> `circom` npm dependency installs a shim for the old 0.5.x compiler. `setup:zk`
-> therefore resolves the compiler explicitly and verifies it reports version 2.x,
-> so a shadowing 0.5.x shim is rejected rather than silently used.
+> **Note on PATH:** `npm run` prepends `node_modules/.bin` to `PATH`. The repo
+> no longer depends on the `circom` npm package (removed in Task 5.11), whose
+> 0.5.x shim used to sit there ahead of the real compiler. `setup:zk` still
+> resolves the compiler explicitly and verifies it reports version 2.x, so any
+> 0.5.x on `PATH` is rejected rather than silently used.
 
 ## 🚀 Quick Start
 

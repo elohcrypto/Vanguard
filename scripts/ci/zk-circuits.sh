@@ -6,9 +6,9 @@
 # every job builds the same keys and the committed verifiers match.
 #
 #   1. circom is the Rust 2.x compiler (~/.cargo/bin/circom).
-#   2. setup:zk builds build/circuits/. `npm run` puts node_modules/.bin
-#      ahead of PATH, where the npm circom 0.5.x shim lives, so
-#      CIRCOM_BIN pins the real compiler ($HOME, not runner-specific).
+#   2. setup:zk builds build/circuits/. CIRCOM_BIN pins the real
+#      compiler ($HOME, not runner-specific), so no other circom on
+#      PATH (the npm 0.5.x shim, a dependency until Task 5.11) is used.
 #      The Powers of Tau file (37.8 MB, from this repo's releases because
 #      every public mirror 403s) is verified by BLAKE2b-512 whether cached
 #      or fresh.
