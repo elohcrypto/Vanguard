@@ -1,6 +1,6 @@
 # Demo options on a live node: privacy, custody, oracles, identity keys
 
-The testnet guide is three files: [setup](TESTNET_SETUP.md) (roles, time scale, governance rules, rehearsal, Sepolia, gas), [demo options](TESTNET_DEMO_OPTIONS.md) (privacy, custody, oracles, identity keys) and [ceremony](TESTNET_CEREMONY.md) (the handover and the operators' command lines).
+The testnet guide is four files: [setup](TESTNET_SETUP.md) (roles, time scale, governance rules, rehearsal, Sepolia, gas), [demo options](TESTNET_DEMO_OPTIONS.md) (privacy, custody, oracles, identity keys), [ceremony](TESTNET_CEREMONY.md) (the handover and the operators' rules) and [ZK command lines](TESTNET_ZK_CLI.md) (whitelist roots, proofs, attestations). The ordered operator procedure is the [runbook](OPERATOR_RUNBOOK.md).
 
 ## Privacy options
 

@@ -261,8 +261,8 @@ the submitting wallet, and keeps one wallet per attestation per policy;
 records under each user's preference flags. Options 42 -> 3, 4 and 5 run
 this with the demo's issuer key; 44, 45 and 46 show the records. The
 issuer keys and the policies are owner settings, PrivacyParameters votes
-(type 11) after the handover. See `docs/TESTNET_CEREMONY.md` for the
-command-line tools and the runbook rules.
+(type 11) after the handover. See `docs/TESTNET_ZK_CLI.md` for the
+command-line tools and `docs/TESTNET_CEREMONY.md` for the runbook rules.
 
 The jurisdiction set for private proofs is ComplianceRules' rule for VSC,
 the same one transfers enforce (Task 3.8): the allowed mask is the OR of

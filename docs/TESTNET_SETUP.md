@@ -5,7 +5,7 @@ accounts and its `evm_increaseTime` RPC. A public network has neither. This
 document is the path from a local rehearsal that behaves like a testnet to
 the testnet itself.
 
-The testnet guide is three files: [setup](TESTNET_SETUP.md) (roles, time scale, governance rules, rehearsal, Sepolia, gas), [demo options](TESTNET_DEMO_OPTIONS.md) (privacy, custody, oracles, identity keys) and [ceremony](TESTNET_CEREMONY.md) (the handover and the operators' command lines).
+The testnet guide is four files: [setup](TESTNET_SETUP.md) (roles, time scale, governance rules, rehearsal, Sepolia, gas), [demo options](TESTNET_DEMO_OPTIONS.md) (privacy, custody, oracles, identity keys), [ceremony](TESTNET_CEREMONY.md) (the handover and the operators' rules) and [ZK command lines](TESTNET_ZK_CLI.md) (whitelist roots, proofs, attestations). The ordered operator procedure is the [runbook](OPERATOR_RUNBOOK.md).
 
 ## Roles are wallet indices
 
