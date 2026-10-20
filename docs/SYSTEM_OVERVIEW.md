@@ -172,18 +172,24 @@ interfaces and test mocks; docs/SYSTEM_WORKFLOW_GUIDE.md, "Contracts").
 
 ## Testing and CI
 
-Six CI jobs (`.github/workflows/ci.yml`): compile, tests, coverage
-(contract line coverage may not drop below the recorded baseline, and
-listed contracts have branch floors, `scripts/ci/branch-floors.json`),
-zk-coverage, demo (smoke, ceremony and regression drives on a node) and
-gates (guard table: every require/revert in `contracts/` classified in
+Eight CI jobs (`.github/workflows/ci.yml`; tests and coverage in two
+shards each): compile, tests, guard-runs, coverage and coverage-merge
+(merged line coverage may not drop below the recorded baseline; an
+overall branch baseline and per-contract floors,
+`scripts/ci/branch-floors.json`), zk-coverage, demo (smoke, ceremony,
+production deploy, multisig and regression drives on a node) and gates
+(guard table: every require/revert in `contracts/` classified in
 `test/guards/table/`; line count; docs; lint and audit ratchets). A gas
-ratchet runs in the tests job.
+ratchet runs in the tests job. The docs gate checks structure and
+existence (fences, the README tree, links, option numbers, cited
+commands), not the truth of prose; that comes from the verbatim runbook
+rehearsals (`docs/rehearsals/`).
 
 ## Not done yet
 
-- A third-party security audit, a Sepolia rehearsal and a production
-  deploy with external signers (Phase 5 Task 5.7; mainnet is Phase 6).
+- A third-party security audit, the Sepolia rehearsal of the production
+  deploy through an external signer (Phase 5 Task 5.8; the tooling is
+  built) and a production deploy (mainnet is Phase 6).
 - Formal verification of the circuits, load testing, monitoring.
 - Oracle-driven KYC/AML claim updates; delegation counted in votes (after
   the audit).

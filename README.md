@@ -101,7 +101,11 @@ Vanguard/
 │   ├── DEEP_DIVE_ZK.md                         # The five circuits and their checks
 │   ├── TESTNET_SETUP.md                        # Role wallets, time scale, rehearsal, gas
 │   ├── TESTNET_DEMO_OPTIONS.md                 # Privacy, custody, oracle, key options
-│   ├── TESTNET_CEREMONY.md                     # Handover ceremony, operator CLIs
+│   ├── TESTNET_CEREMONY.md                     # Handover ceremony, operator rules
+│   ├── TESTNET_ZK_CLI.md                       # Whitelist root, proof and attestation CLIs
+│   ├── OPERATOR_RUNBOOK.md                     # Operator runbook: index and local rehearsal
+│   ├── runbook/                                # Runbook parts (keys, deploy, ceremony, after, operations)
+│   ├── rehearsals/                             # Verbatim runbook rehearsal records
 │   ├── VOTING_SYSTEM_DIAGRAM.md                # Voting system visualization
 │   ├── ZK_CIRCUIT_BUILD_GUIDE.md               # Zero-knowledge circuit build guide
 │   └── ZK_CIRCUITS_READINESS.md                # Circuit soundness status
@@ -122,7 +126,8 @@ Vanguard/
 - [System Workflow Guide](/docs/SYSTEM_WORKFLOW_GUIDE.md) - Workflows with the demo option for each step
 - [Testnet Setup](/docs/TESTNET_SETUP.md) - Role wallets from one mnemonic, governance time scale, local rehearsal
 - [Testnet Demo Options](/docs/TESTNET_DEMO_OPTIONS.md) - Privacy, custody, oracle and identity-key options on a live node
-- [Handover Ceremony](/docs/TESTNET_CEREMONY.md) - The handover ceremony and the operators' command lines
+- [Handover Ceremony](/docs/TESTNET_CEREMONY.md) - The handover ceremony and the operators' rules; [ZK command lines](/docs/TESTNET_ZK_CLI.md)
+- [Operator Runbook](/docs/OPERATOR_RUNBOOK.md) - The ordered deploy, ceremony and operations procedure, Sepolia path included
 - Technical deep dive: [transfer path](/docs/DEEP_DIVE_TRANSFER.md), [identity, recovery and governance](/docs/DEEP_DIVE_IDENTITY.md), [ZK circuits](/docs/DEEP_DIVE_ZK.md)
 - [New Fair Voting System](/docs/NEW_FAIR_VOTING_SYSTEM.md) and [Voting System Diagram](/docs/VOTING_SYSTEM_DIAGRAM.md)
 - [Investor Type System](/docs/INVESTOR_TYPE_SYSTEM.md) - Caps, cooldowns, tiers, custody
@@ -248,13 +253,21 @@ npm run test:coverage                          # coverage (sets DEPLOY_GAS_LIMIT
 
 ## 📈 Testing and CI
 
-CI (`.github/workflows/ci.yml`) runs six jobs: compile; tests (with the
-transfer gas ratchet); coverage (line coverage may not drop below the
-recorded baseline; listed contracts have branch floors in
-`scripts/ci/branch-floors.json`; a near-timeout guard flags slow tests);
-zk-coverage; demo (smoke, ceremony and regression drives on a node); and
-gates (line count, docs, deleted names, scripts reachable, guard table,
-lint and audit ratchets). Step bodies live in `scripts/ci/`.
+CI (`.github/workflows/ci.yml`) runs eight jobs, tests and coverage in
+two shards each: compile; tests (with the transfer gas ratchet);
+guard-runs (every tested guard row bound to a test that passed);
+coverage and coverage-merge (merged line coverage may not drop below the
+recorded baseline; an overall branch baseline and per-contract branch
+floors in `scripts/ci/branch-floors.json`; a near-timeout guard flags
+slow tests); zk-coverage; demo (smoke, ceremony, production deploy,
+multisig and regression drives on a node); and gates (line count, docs,
+deleted names, scripts reachable, guard table, lint and audit ratchets).
+The docs gate checks structure and existence (closed fences, this
+README's tree, links and anchors, demo option numbers, cited script
+paths and commands), not whether prose or quoted output is true; that
+comes from the verbatim rehearsals of the
+[operator runbook](docs/OPERATOR_RUNBOOK.md) (`docs/rehearsals/`). Step
+bodies live in `scripts/ci/`.
 
 ## 📄 License
 
@@ -262,7 +275,7 @@ MIT License (the `license` field of package.json; the repository has no LICENSE 
 
 ## 🎯 Project Status
 
-**Current phase**: remediation plan v2, Phases 0 to 4 done; Phase 5 in progress (see the plan for the task status), then the Sepolia rehearsal and production deploy with external signers (5.7) and the audit package. Mainnet is Phase 6.
+**Current phase**: remediation plan v2, Phases 0 to 4 done; Phase 5 in progress (see the plan for the task status), then the Sepolia rehearsal of the production deploy through an external signer (5.8; the tooling is built, Tasks 5.7 and 5.15) and the audit package. Mainnet is Phase 6.
 
 - **Smart contracts**: 26 deployable contracts (21 written, 5 generated PLONK verifiers), implemented and tested locally, not audited
 - **Not done**: security audit, testnet and production deployment, gas optimisation beyond the transfer-path ratchet, monitoring
