@@ -32,12 +32,16 @@ governance to own OracleManager.
 
 ## The Sepolia order of work
 
-1. Keys: the role table and the two Safes (section 1), the production
-   signer's keystores (1a).
+1. Keys: the role table and the three Safes (ops, guardian, issuer
+   admin; section 1), the production signer's keystores (1a), the
+   attestor key made offline (2.3), and the ops identity, an OnchainID
+   the ops Safe owns, exported as `OPS_IDENTITY` (section 7).
 2. Before the deploy: `rpc-check` on both RPCs (2.1), the budget and the
-   funding (2.2).
-3. The deploy through the signer (2.3); it pauses for the ops Safe's
-   batches (custody, the ops identity: 2.4, 2.5, section 7).
+   funding (2.2; it includes Task 5.8's stray probe, which is not a
+   runbook step yet).
+3. The deploy through the signer, `OPS_IDENTITY` set for every run of it
+   (2.3); it pauses for the ops Safe's batches (custody, the ops
+   identity: 2.4, 2.5, section 7).
 4. Voters: `onboardVoters`, then the 7-day voter age; meanwhile the
    deployer burns its VGT (section 3).
 5. The ceremony's full phase (pauses for the ops and issuer-admin Safe
@@ -71,13 +75,21 @@ runs. Skip `# local` lines publicly.
 > npm ci && npm run setup:zk         # once; setup:zk before compile
 > npx hardhat clean && npx hardhat compile
 > export MNEMONIC="test test test test test test test test test test test junk"
-> export DEMO_RPC_URL=http://127.0.0.1:8547 NET=devnode
+> export NODE_PORT=8547 SIGNER_PORT=8549   # two free ports
+> export DEMO_RPC_URL=http://127.0.0.1:$NODE_PORT NET=devnode
 > export RB=/tmp/vanguard-runbook HANDOVER_CONFIG=/tmp/vanguard-runbook/handover.json
 > export PROD_RECORD=/tmp/vanguard-runbook/deploy-record.json PROD_CONFIG=/tmp/vanguard-runbook/deploy-handover.json
+> unset OPS_IDENTITY   # set only where a box sets it (2.4); publicly section 7
 > rm -rf $RB && mkdir -p $RB   # start from an empty $RB
-> npx hardhat node --port 8547 > $RB/node.log 2>&1 &   # leave it running
-> sleep 10                                              # until it listens
+> npx hardhat node --port $NODE_PORT > $RB/node.log 2>&1 &   # leave it running
+> sleep 10                                                   # until it listens
 > ```
+>
+> Run the local track alone in this checkout: `npx hardhat clean`
+> deletes `artifacts/` under anything else using the tree, and the
+> code-hash pins compare against it. Keep `MNEMONIC` out of `.env`
+> (Hardhat loads `.env` into every run, so `prod`'s `env -u MNEMONIC`
+> cannot remove it and the deploy refuses); export it in the shell only.
 >
 > Shell functions (`reset` and the fixture never run publicly; `prod`
 > runs every production CLI, locally and on Sepolia):
@@ -111,13 +123,14 @@ The production track runs on one chain with no reset in between; the
 other boxes reset the node. Locally, in this order:
 
 1. The box above; section 1's `print-role-wallets.js`; section 1a's
-   production-signer box.
+   production-signer box (it stops the signer it started by its pid).
 2. The production track: 2.1's local `rpc-check`, 2.2's measurement
    (optional, about 6 minutes, on two other free ports), 2.3's deploy,
    section 3's `onboardVoters` box and its VGT burn, 5a's ceremony, audit and scan
    boxes, section 4's post-ceremony box and audit, 4a's claim-signer box
    and final audit.
-3. 2.4's multisig box (it resets the node and restarts the local signer).
+3. 2.4's multisig box (it resets the node, restarts the local signer by
+   its recorded pid and creates an ops identity the ops multisig owns).
 4. The fixture and demo boxes: section 3's L0 check, section 4's demo
    drive, sections 5 and 6, then sections 7 to 12 in order.
 

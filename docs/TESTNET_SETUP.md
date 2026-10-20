@@ -275,20 +275,24 @@ cannot drive (Q11 = B), and every key lives in the external signer.
 Follow the [operator runbook](OPERATOR_RUNBOOK.md) verbatim:
 
 1. Keys: the production signer's encrypted keystores (deployer,
-   proposer, voters; later the claim signers), three Safes with owners
-   that are not the deployer
+   proposer, voters; later the claim signers), three Safes (ops,
+   guardian, issuer admin) with owners that are not the deployer, the
+   attestor key made offline, and the ops identity (`OPS_IDENTITY`)
    ([runbook part 1](runbook/01-keys-and-signer.md)). No `MNEMONIC` or
    `PRIVATE_KEY` for Sepolia: the production deploy refuses them off a
    dev chain, `hardhat.config.ts` refuses the published Hardhat phrase on
    any chain but 31337, and the other CLIs run on `--network remote`,
    whose accounts are the signer's.
-2. RPCs: one commercial provider and the owner's own archive node, both
-   checked with `node scripts/production/rpcCheck.js --chain 11155111`
-   (URLs from `RPC_CHECK_URLS_FILE`, never argv).
+2. RPCs: one commercial provider and the owner's own node, each an
+   archive node or one that keeps all state from a block before the
+   deploy on, both checked with
+   `node scripts/production/rpcCheck.js --chain 11155111` (URLs from
+   `RPC_CHECK_URLS_FILE`, never argv; it probes state 200,000 blocks
+   back, or at `--old-block <N>`: [runbook 2.1](runbook/02-deploy.md#21-the-rpcs-q18)).
 3. Budget: about 200 M gas, 4.0 ETH at 20 gwei; fund about 6 ETH before
    the deploy (the deployer about 5.0, the proposer about 0.54, each
    voter about 0.23, plus the Safe owners' gas for the batches), priced
-   again at the gas `rpc-check` prints
+   again at the `gasPrice` `rpc-check` prints
    ([runbook 2.2](runbook/02-deploy.md#22-the-budget-q19)).
 4. Calendar: about 5 weeks (7 days voter age, about 10 days for the
    acceptance votes, about 19 days for the two post-ceremony rounds);
