@@ -10,6 +10,7 @@ This directory contains OnchainID implementation contracts following ERC-734 and
 - `OnchainIDOwnership.sol` - Abstract base of OnchainID over OnchainIDKeys: manager authorization, two-step ownership, the pinned recovery manager and its two hooks (`evictManagementKeys`, `transferOwnershipByRecovery`), the manager list and the freeze while a recovery is approved (split in Task 4.11)
 - `ClaimIssuer.sol` - Trusted claim issuer contract: issued claims, revocation, `hasValidClaim` and `claimValidTo`; a claim's signature covers `claimDigest` (chain id, issuer, the (identity, topic) revocation epoch, identity, topic, scheme, data, uri, validTo), and `revokeClaim` bumps the epoch, voiding every earlier signature (Task 5.2)
 - `ClaimIssuerKeys.sol` - Abstract base of ClaimIssuer, not deployed: the issuer's keys, trusted-issuer list, issuer info and the signer checks (split in Task 4.8)
+- `IdentityControl.sol` - Library: the one "wallet controls identity" rule (owner, MANAGEMENT or ACTION key; D41, Task 4.14) used by IdentityRegistry, Token.recoveryAddress and governance
 - `KeyManager.sol` - Timelocked key rotation for identities that authorize it (`authorizeManager`), and agent recovery for identities that pin it as their recovery manager (`recoveryManager()`); no owner
 - `KeyManagerRecovery.sol` - Abstract base of KeyManager, not deployed: recovery agents, candidates, approvals, cancel votes, execution with eviction, `recoveryLocked` (split in Task 4.8)
 - `KeyManagerRecoverySetup.sol` - Abstract base of KeyManager over KeyManagerRecovery: seating the agents; a re-seat waits 48h and can be vetoed (Task 4.11, R-411-16)
@@ -54,7 +55,7 @@ This directory contains OnchainID implementation contracts following ERC-734 and
   itself nor the KeyManager can be seated as an agent, at seating or at
   re-seat apply. Before seating agents the owner removes every MANAGEMENT
   key it does not know: such a key can make the chosen agents MANAGEMENT
-  keys and so block the seating or the re-seat (A2F-4). The owner is and the owner is
+  keys and so block the seating or the re-seat (A2F-4). The owner is
   refused at every open or approve too (D53, R-414-10; a MANAGEMENT key is
   not refused at the vote: a rogue key could force one onto every agent
   and stall recovery, and holding one makes nobody an agent). A new owner who

@@ -37,8 +37,9 @@ The abstract bases each contract is built on are listed in
 ## Networks
 
 `hardhat.config.ts` defines `hardhat`, `localhost`, `devnode` (when
-`DEMO_RPC_URL` is set), `sepolia` and `mainnet`. Nothing is deployed on a public network yet (Sepolia
-rehearsal and production deploy: Phase 5 Task 5.7).
+`DEMO_RPC_URL` is set), `remote` (an external signer, when `SIGNER_RPC_URL`
+is set), `sepolia` and `mainnet`. Nothing is deployed on a public network yet (the deploy
+tooling is Tasks 5.7 and 5.15; the Sepolia rehearsal is Task 5.8).
 
 ## Security
 

@@ -215,8 +215,9 @@ investorRequestManager.updateLockRequirement(
 
 ## 🧪 Testing
 
-See `test/investor/Investor{WalletAndRequests,OnboardingWorkflow,Custody}.test.ts`
-for the tests, including:
+See `test/investor/` (`Investor{WalletAndRequests,OnboardingWorkflow,Custody}`,
+the `Custody*`, `LockCapCut`, `RequestManagerGuards` and `WalletOwnership2Step`
+suites) for the tests, including:
 
 - Complete onboarding workflow
 - Multi-sig operations
