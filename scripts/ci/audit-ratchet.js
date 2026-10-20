@@ -4,7 +4,8 @@
 // in audit-baseline.json (its `why` and `history` carry the reasons and
 // every change of the number). A drop prints a notice to lower it. A
 // missing or non-numeric count fails: an audit that did not run is not
-// a pass. Exits 1 on a finding; `node scripts/ci/audit-ratchet.js`.
+// a pass. Also prints the --omit=dev high count (not gated). Exits 1
+// on a finding; `node scripts/ci/audit-ratchet.js`.
 const { spawnSync } = require("child_process");
 
 const { high: BASELINE } = require("./audit-baseline.json");
@@ -27,6 +28,16 @@ try {
   count = undefined;
 }
 console.log(`high vulnerabilities: ${count} (baseline ${BASELINE})`);
+// Production tree only (`--omit=dev`): printed for the record, not gated
+// (audit-baseline.json `posture` names what is left and why).
+let prod;
+try {
+  prod = JSON.parse(audit("--omit=dev", "--json").stdout).metadata
+    .vulnerabilities.high;
+} catch (e) {
+  prod = undefined;
+}
+console.log(`high vulnerabilities, --omit=dev: ${prod} (not gated)`);
 if (!Number.isInteger(count)) {
   console.error(`::error::npm audit gave no numeric high count: '${count}'`);
   process.exit(1);
