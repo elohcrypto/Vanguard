@@ -10,9 +10,10 @@ The testnet guide is four files: [setup](TESTNET_SETUP.md) (roles, time scale, g
 ## Roles are wallet indices
 
 One BIP-39 mnemonic in `.env`; Hardhat derives twelve keys at
-`m/44'/60'/0'/0/N`. Index N is the same role on every network, so demo code
-that reads `signers[2]` means "the AML oracle node" whether the node is local or
-Sepolia. Each role signs only its own transactions; the contracts' access
+`m/44'/60'/0'/0/N`. Index N is the same role wherever the demo runs, so demo
+code that reads `signers[2]` means "the AML oracle node". (The production path
+names its roles by address and holds its keys in an external signer: the
+[runbook](OPERATOR_RUNBOOK.md).) Each role signs only its own transactions; the contracts' access
 checks (their own modifiers, OpenZeppelin ownership and roles, and inline
 caller checks) are what enforce the separation.
 
@@ -32,8 +33,9 @@ On Sepolia and beyond, wallets 9, 10 and 11 must be multisig addresses, not
 single keys, held by different parties: ops is an IdentityRegistry agent and
 must never also own or sign for a claim issuer (2F.5, D25 b). The demo's
 signer allocation reserves wallets 0-3 and 9-11 and hands out 4, 5, 6, ...
-in the order names are entered at options 23/24 (option 62's fallback fee
-wallet, wallet 3, is the one exception). Option 32 registers wallets 4 and
+in the order names are entered at options 23/24 (option 62 takes the
+investor's MultiSigWallet or bank address as the fee wallet and otherwise
+asks for one; there is no default wallet). Option 32 registers wallets 4 and
 5 as risk and fraud oracle nodes only on a manager with fewer than three
 nodes, which never happens after option 31. Option 12, the signer
 allocation and `print-role-wallets.js` print these roles in the same words.
@@ -51,12 +53,15 @@ Put the phrase in `.env` as `MNEMONIC`. It is gitignored. Never commit it.
 every voting period and execution delay. `1` is the mainnet schedule
 (7-day votes); the ceiling is `1440`, at which the shortest duration in the
 table (1 day) is still 60 s. The percentages are never scaled. The demo reads
-`GOV_TIME_SCALE` from the environment at deploy time.
+`GOV_TIME_SCALE` from the environment at deploy time
+(`demo/utils/GovernanceDeployFlow.js`); it is a dev-chain knob: the
+production deploy refuses any value but 1 off a dev chain, and Sepolia
+runs the mainnet schedule.
 
 | GOV_TIME_SCALE | InvestorTypeConfig vote | delay  | Use                           |
 | -------------- | ----------------------- | ------ | ----------------------------- |
 | 1              | 7 days                  | 2 days | mainnet, tests                |
-| 336            | 30 min                  | ~9 min | Sepolia walkthrough           |
+| 336            | 30 min                  | ~9 min | a slow demo walkthrough       |
 | 1440           | 7 min                   | 2 min  | local rehearsal (the ceiling) |
 
 ## KYC claims and verification (2F.2)
@@ -201,8 +206,9 @@ Governance option 79, ownership-by-vote 83b and escrow 73b go through
 chain, jumps if the node allows it, and otherwise polls until the deadline
 has passed. The 13-of-14-day escrow demonstration (73a) jumps itself and
 only on a dev node, and says so on a network that cannot jump. Option 11
-(claim expiry) still jumps 120 s with no such check, so it is dev-node
-only. The key options (12, 5) jump on a dev node and otherwise print when
+(claim expiry) jumps 120 s and refuses off a dev node before sending
+anything (issue a short claim with option 6 and read it after expiry with
+option 8 instead). The key options (12, 5) jump on a dev node and otherwise print when
 to come back. Option 73 runs 62 -> 63 -> 64 -> 65 -> 73b
 -> 68 -> 69 -> 71 with no prompts and a chain-read verdict per step; on a
 network that cannot jump it stops after the proof and prints when the
@@ -263,15 +269,35 @@ key.
 
 ## Sepolia
 
-1. `SEPOLIA_RPC_URL` in `.env` (Alchemy or Infura free tier).
-2. (Amounts pending 5.7; fund wallets 10 and 11 too.) Fund index 0 with ~0.3 ETH and indices 1 to 9 with ~0.02 each from a
-   faucet. `print-role-wallets.js --network sepolia` shows balances.
-3. `GOV_TIME_SCALE=336 npx hardhat run demo/index.js --network sepolia`.
-4. Same menu walk. Option 79 waits about 40 minutes of real time.
-5. The rehearsal includes one real EIP-7702 (type-4) delegation: delegate a
-   role wallet, call `addTrustedContract(VSC, wallet)` on it and expect the revert
-   "ComplianceRules: delegated wallet". Sending a type-4 transaction needs an
-   ethers version with authorization-list support.
+The Sepolia rehearsal (plan v2 Task 5.8) is the production path, not
+the demo menu: ops, the guardian and the issuer admin are Safes the demo
+cannot drive (Q11 = B), and every key lives in the external signer.
+Follow the [operator runbook](OPERATOR_RUNBOOK.md) verbatim:
+
+1. Keys: the production signer's encrypted keystores (deployer,
+   proposer, voters; later the claim signers), three Safes with owners
+   that are not the deployer
+   ([runbook part 1](runbook/01-keys-and-signer.md)). No `MNEMONIC` or
+   `PRIVATE_KEY` for Sepolia: the production deploy refuses them off a
+   dev chain, `hardhat.config.ts` refuses the published Hardhat phrase on
+   any chain but 31337, and the other CLIs run on `--network remote`,
+   whose accounts are the signer's.
+2. RPCs: one commercial provider and the owner's own archive node, both
+   checked with `node scripts/production/rpcCheck.js --chain 11155111`
+   (URLs from `RPC_CHECK_URLS_FILE`, never argv).
+3. Budget: about 200 M gas, 4.0 ETH at 20 gwei; fund about 6 ETH before
+   the deploy (the deployer about 5.0, the proposer about 0.54, each
+   voter about 0.23, plus the Safe owners' gas for the batches), priced
+   again at the gas `rpc-check` prints
+   ([runbook 2.2](runbook/02-deploy.md#22-the-budget-q19)).
+4. Calendar: about 5 weeks (7 days voter age, about 10 days for the
+   acceptance votes, about 19 days for the two post-ceremony rounds);
+   `GOV_TIME_SCALE` stays unset (1).
+5. Still to rehearse there: one real EIP-7702 (type-4) delegation:
+   delegate a role wallet, call `addTrustedContract(VSC, wallet)` on it and
+   expect the revert "ComplianceRules: delegated wallet". Sending a
+   type-4 transaction needs an ethers version with authorization-list
+   support.
 
 ## Transfer gas by required claim topics
 
@@ -360,4 +386,10 @@ immediate. The demo refreshes after onboarding claims and after a revoke in
 options 6/7, and prints "verification cached until <date>" (or, after a
 revoke, "walk fails (no live claim), cache entry cleared").
 
-Deploy cost on a public network: to be measured in the Sepolia rehearsal (Task 5.7).
+Deploy cost: the production deploy measured 74,608,826 gas locally, and
+the whole Sepolia path (deploy twice, voters, ceremony, post-ceremony
+votes) about 200 M gas, 4.0 ETH at 20 gwei, about 6 ETH to fund with
+the 50% headroom (`scripts/production/costTable.js`, run by
+`scripts/ci/deploy-drive.sh`; the table is in the
+[runbook](runbook/02-deploy.md#22-the-budget-q19)). The Sepolia rehearsal
+records the real figure.
