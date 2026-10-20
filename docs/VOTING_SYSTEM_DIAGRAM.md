@@ -26,8 +26,6 @@ published to PrivacyManager by its list operator (ops after the handover)
 or by a PrivacyParameters vote. ComplianceRules reads the oracles and,
 by the token's whitelist mode, the ZK binding.
 
-```
-
 ---
 
 ## 🔄 Voting Workflow - Detailed
@@ -407,4 +405,3 @@ Voting: 10 VGT per vote (same bound)
 
 **Try it**: option 86 creates a ListUpdate proposal (then 77, 79, 78);
 option 88 walks the same status changes with direct owner writes, no vote.
-```

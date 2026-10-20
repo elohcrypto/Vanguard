@@ -389,7 +389,7 @@ On a local node, this order works from a fresh start:
    (send another 1050 straight to the escrow address, outside the factory)
 65 → 73b → 68 → 69/1                proof, close the window, payee signs, investor releases
 71                                  Released, escrow still holds 1050
-70a                                 "Stranded tokens returned … To: <Alice> Amount: 1050.0"
+70a                                 "Stranded tokens returned … To: <Alice> Amount: 1050.0 VSC"
 71                                  escrow holds 0
 ```
 
@@ -413,7 +413,8 @@ quorum and approval (`proposalThresholds`), and executes its call after
 the voting period and the execution delay (`executeProposal`). VGT
 delegation is recorded, not counted (D12). Demo: 74 deploys, 75-75c
 fund, 76 proposes, 77 votes, 78 executes, 78a claims a deposit back
-(keyed by identity; the wallet must control it, Task 5.2), 79 waits, 80 is
+(keyed by identity; the wallet must control it, Task 5.2; `d` claims a
+deleted identity's by `claimRefundFor`, Task 5.17), 79 waits, 80 is
 the dashboard, 82 runs one ComplianceRules proposal from creation to
 execution, 83b accepts the registry by vote, 83c-83e are the ceremony
 (from governance; 83c removes strays or refuses), 83f the day-2 audit

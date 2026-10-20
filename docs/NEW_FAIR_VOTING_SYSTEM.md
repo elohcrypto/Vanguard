@@ -154,7 +154,8 @@ Set once in `_initializeThresholds()`; there is no setter, so they cannot be
 changed after deployment. Voting period and delay: 7 and 2 days for most
 types, 7 and 3 for TokenParameters, GovernanceTokenParameters, the two
 factory types, PrivacyParameters and VerifierParameters, 5 and 1 for
-ListUpdate, all divided by the deployment's `TIME_SCALE`. EmergencyAction
+ListUpdate, 3 and 1 for EmergencyAction, all divided by the deployment's
+`TIME_SCALE`. EmergencyAction
 has a row but no bound target (`boundTarget` returns zero), so
 `createProposal` refuses it (`TargetNotBoundToType`).
 
@@ -449,6 +450,7 @@ Option 78: Execute Proposal
 
 Option 78a: Claim Refund
 → Each participant pulls their own deposit from Rejected/Cancelled proposals
+→ d: a deleted identity's deposit, by claimRefundFor (Task 5.17)
 ```
 
 ---
