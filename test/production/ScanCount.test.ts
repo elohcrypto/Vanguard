@@ -91,7 +91,10 @@ describe("scan-count (scripts/production/scanCount.ts)", function () {
       );
       delete process.env.SCAN_RPC_URLS_FILE;
       process.env.SCAN_RPC_URLS = "http://c.example,http://d.example";
-      expect(scanUrls()).to.deep.equal(["http://c.example", "http://d.example"]);
+      expect(scanUrls()).to.deep.equal([
+        "http://c.example",
+        "http://d.example",
+      ]);
     } finally {
       for (const [k, v] of [
         ["SCAN_RPC_URLS", keep.urls],

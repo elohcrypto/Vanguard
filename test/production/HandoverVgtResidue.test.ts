@@ -42,7 +42,9 @@ describe("Handover residue: the deployer's VGT (L-2)", function () {
     // Task 5.16: the path the warning names holds: ops, a VGT agent after
     // the ceremony, burns the deployer's VGT (no forced transfer exists).
     await (
-      await vgt.connect(f.ops)["burn(address,uint256)"](f.deployer.address, held)
+      await vgt
+        .connect(f.ops)
+        ["burn(address,uint256)"](f.deployer.address, held)
     ).wait();
     expect(await vgt.balanceOf(f.deployer.address)).to.equal(0n);
     const after = await assertHandoverComplete({ ...f.args, audit: true });
