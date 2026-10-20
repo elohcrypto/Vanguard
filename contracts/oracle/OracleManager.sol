@@ -261,7 +261,9 @@ contract OracleManager is IOracleManager, OracleQueryPayload, Ownable2Step, Reen
 
     // Engine parameters, set through the manager (governance after the handover).
 
-    /// @notice Percent of the active weight one side needs, in (50, 100].
+    /// @notice Percent of the snapshot weight one side needs, in (50, 100]:
+    ///         the registered weight (paused nodes included) the engine
+    ///         snapshots when a query opens.
     function setConsensusThreshold(uint256 _percent) external onlyOwner {
         _boundEngine().setConsensusThreshold(_percent);
     }
@@ -294,7 +296,7 @@ contract OracleManager is IOracleManager, OracleQueryPayload, Ownable2Step, Reen
      *      1..5 (tier 5 the owner's, Task 4.12). The id hashes the data,
      *      the raiser and block time; an existing id is refused by the engine
      *      (Task 4.4, was review N-8's self-griefing reset). The engine
-     *      snapshots the active weight now.
+     *      snapshots the registered weight (paused nodes included) now.
      */
     function submitQuery(address _subject, uint8 _queryType, bytes calldata _data) external returns (bytes32 queryId) {
         if (!oracles[msg.sender].active && msg.sender != owner()) revert UnauthorizedQueryCreator();
