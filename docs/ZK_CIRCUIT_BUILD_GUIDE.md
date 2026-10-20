@@ -79,10 +79,10 @@ npm run setup:zk
 📁 Creating build directories...
 ⬇️  Powers of Tau file...
 ✅ Powers of Tau file present, hash verified   (or: downloaded, hash verified)
-🔎 Using circom: <bin> (<version>)
 
 🔄 Processing whitelist_membership...
 🔧 Compiling whitelist_membership circuit...
+🔎 Using circom: <bin> (<version>)
 ✅ whitelist_membership circuit compiled
 🔑 Generating keys for whitelist_membership...
 ✅ whitelist_membership proving key generated
@@ -158,8 +158,7 @@ build/circuits/
 ├── circuit-info.json                         # Circuit metadata
 │
 ├── whitelist_membership/
-│   ├── whitelist_membership.r1cs             # Constraint system
-│   ├── whitelist_membership.sym              # Symbols (--sym)
+│   ├── whitelist_membership.r1cs             # Constraint system (each circuit also gets a .sym, --sym)
 │   ├── whitelist_membership_js/whitelist_membership.wasm  # Witness calculator
 │   ├── whitelist_membership.zkey             # Proving key
 │   ├── whitelist_membership_vkey.json        # Verifying key
@@ -209,7 +208,7 @@ contracts/privacy/verifiers/
 
 - **File:** `powersOfTau28_hez_final_15.ptau`
 - **Purpose:** Universal setup parameters; every circuit is PLONK (`snarkjs plonk setup`), so there is no per-circuit phase 2
-- **Size:** 37.8 MB
+- **Size:** 36.1 MB (MiB, the unit of the sizes below; 37,831,832 bytes)
 - **Source:** Hermez ceremony (trusted by Ethereum community); served from
   this repo's `ptau-hez-final-15` release since the public mirrors went dark.
   BLAKE2b-512 `982372c8…69ae6e`, as published in the snarkjs README, is
@@ -423,7 +422,7 @@ Read the reported error and fix its cause; there is no fallback to work around.
 # Real WebAssembly starts with the magic bytes 0061736d
 xxd -p -l4 build/circuits/whitelist_membership/whitelist_membership_js/whitelist_membership.wasm
 
-# Proving keys are large binaries (about 29 MB to 104 MB), not small JSON
+# Proving keys are large binaries (about 29 MB to 103 MB), not small JSON
 ls -la build/circuits/*/*.zkey
 ```
 

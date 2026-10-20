@@ -142,8 +142,9 @@ preflight refuses an investor-type registry or a whitelist oracle on VGT
 
 `isLargeTransfer(investor, amount)` (`amount > largeTransferThreshold`),
 `hasEnhancedLogging(investor)` and `hasEnhancedPrivacy(investor)` return
-the type's values. No contract reads them: the token requires no
-large-transfer approval and nothing changes with the two flags. Option 57
+the type's values. They are views that nothing in the contracts calls;
+no transfer reads them: the token requires no large-transfer approval
+and nothing changes with the two flags. Option 57
 reads the threshold.
 
 ## Assigning a type

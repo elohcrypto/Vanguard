@@ -26,14 +26,14 @@ registrations.
   together, voted, settled (one voting period and delay, about 10 days).
 - Round 2, only once every production node is registered (read from the
   chain): `removeOracle` for each deployer-era node, proposed only when
-  every order and subset of the removals leaves at least 3 nodes with
+  every order and subset of the removals leaves at least MIN_NODES (2) nodes with
   none alone at the consensus bar (about 9 days).
 - `NEW_NODES` is `<address>:<NAME>,…` (checksummed). Refused before any
   proposal: an unfinished ceremony, a snapshot from another chain, an
   entry that is zero, repeated, the deployer, governance, a role, a voter,
   the proposer or a claim signer
   (`❌ Post-ceremony votes failed: 0x… is the deployer, governance, a role, a voter or a claim signer: a node is a key of its own (D25 b)`),
-  and a final set below 3 nodes or with one node at the bar. A re-run
+  and a final set below MIN_NODES (2) nodes or with one node at the bar. A re-run
   resumes from the chain (round 1 while anything of it is missing,
   adopting its open proposals) and first waits for its own senders'
   pending transactions.
