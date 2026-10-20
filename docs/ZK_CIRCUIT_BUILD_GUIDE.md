@@ -84,7 +84,6 @@ npm run setup:zk
 🔄 Processing whitelist_membership...
 🔧 Compiling whitelist_membership circuit...
 ✅ whitelist_membership circuit compiled
-✅ whitelist_membership witness calculator generated
 🔑 Generating keys for whitelist_membership...
 ✅ whitelist_membership proving key generated
 ✅ whitelist_membership verifying key exported
@@ -95,7 +94,6 @@ npm run setup:zk
 🔄 Processing blacklist_membership...
 🔧 Compiling blacklist_membership circuit...
 ✅ blacklist_membership circuit compiled
-✅ blacklist_membership witness calculator generated
 🔑 Generating keys for blacklist_membership...
 ✅ blacklist_membership proving key generated
 ✅ blacklist_membership verifying key exported
@@ -106,7 +104,6 @@ npm run setup:zk
 🔄 Processing jurisdiction_proof...
 🔧 Compiling jurisdiction_proof circuit...
 ✅ jurisdiction_proof circuit compiled
-✅ jurisdiction_proof witness calculator generated
 🔑 Generating keys for jurisdiction_proof...
 ✅ jurisdiction_proof proving key generated
 ✅ jurisdiction_proof verifying key exported
@@ -117,7 +114,6 @@ npm run setup:zk
 🔄 Processing accreditation_proof...
 🔧 Compiling accreditation_proof circuit...
 ✅ accreditation_proof circuit compiled
-✅ accreditation_proof witness calculator generated
 🔑 Generating keys for accreditation_proof...
 ✅ accreditation_proof proving key generated
 ✅ accreditation_proof verifying key exported
@@ -128,7 +124,6 @@ npm run setup:zk
 🔄 Processing compliance_aggregation...
 🔧 Compiling compliance_aggregation circuit...
 ✅ compliance_aggregation circuit compiled
-✅ compliance_aggregation witness calculator generated
 🔑 Generating keys for compliance_aggregation...
 ✅ compliance_aggregation proving key generated
 ✅ compliance_aggregation verifying key exported
@@ -142,13 +137,13 @@ npm run setup:zk
 🎉 ZK circuit setup completed!
 
 📋 Summary:
-   • 5 circuits processed
+   • 5 circuits compiled with real artifacts
    • Build directory: build/circuits
    • Verifier contracts: contracts/privacy/verifiers/
 
 (abridged; the exact lines are the console.log calls in
 scripts/setup-zk-circuits.js: per circuit "plonk proving key generated",
-"verifying key exported (nPublic N)", "Solidity verifier generated")
+"verifying key exported (nPublic N)", "Solidity verifier generated (<Name>Verifier)")
 ```
 
 ---
@@ -172,28 +167,28 @@ build/circuits/
 │
 ├── blacklist_membership/
 │   ├── blacklist_membership.r1cs
-│   ├── blacklist_membership.wasm
+│   ├── blacklist_membership_js/blacklist_membership.wasm
 │   ├── blacklist_membership.zkey
 │   ├── blacklist_membership_vkey.json
 │   └── blacklist_membership_js/
 │
 ├── jurisdiction_proof/
 │   ├── jurisdiction_proof.r1cs
-│   ├── jurisdiction_proof.wasm
+│   ├── jurisdiction_proof_js/jurisdiction_proof.wasm
 │   ├── jurisdiction_proof.zkey
 │   ├── jurisdiction_proof_vkey.json
 │   └── jurisdiction_proof_js/
 │
 ├── accreditation_proof/
 │   ├── accreditation_proof.r1cs
-│   ├── accreditation_proof.wasm
+│   ├── accreditation_proof_js/accreditation_proof.wasm
 │   ├── accreditation_proof.zkey
 │   ├── accreditation_proof_vkey.json
 │   └── accreditation_proof_js/
 │
 └── compliance_aggregation/
     ├── compliance_aggregation.r1cs
-    ├── compliance_aggregation.wasm
+    ├── compliance_aggregation_js/compliance_aggregation.wasm
     ├── compliance_aggregation.zkey
     ├── compliance_aggregation_vkey.json
     └── compliance_aggregation_js/
@@ -315,6 +310,8 @@ After building, check `build/circuits/circuit-info.json`:
 {
   "circuits": {
     "whitelist_membership": {
+      "protocol": "plonk",
+      "nPublic": 3,
       "id": "keccak256(\"WHITELIST_MEMBERSHIP\")",
       "name": "whitelist_membership",
       "description": "Proves a whitelist slot (Poseidon(identity, secret) in the root) for a public wallet, without revealing which listed identity",
@@ -323,6 +320,8 @@ After building, check `build/circuits/circuit-info.json`:
       "hasVerifier": true
     },
     "jurisdiction_proof": {
+      "protocol": "plonk",
+      "nPublic": 8,
       "id": "keccak256(\"JURISDICTION_PROOF\")",
       "name": "jurisdiction_proof",
       "description": "Proves an issuer-attested jurisdiction is in the allowed set without revealing it (D31 a)",
@@ -375,9 +374,9 @@ circom --version    # must report 2.x
 ```
 
 ⚠️ **Do NOT run `npm install -g circom` or `npx circom`.** That is the deprecated
-0.5.x JavaScript compiler, which cannot parse `pragma circom 2.0.0`. Installing it
-also places a shim on `PATH` ahead of the real compiler under `npm run`, which makes
-the build fail in a way that looks like a circuit error.
+0.5.x JavaScript compiler, which cannot parse `pragma circom 2.0.0`. Installed, it
+puts a 0.5.x `circom` on `PATH` that a manual build may pick up and fail on in a way
+that looks like a circuit error (`setup:zk` rejects it by version).
 
 ### **Issue 2: "snarkjs: command not found"**
 

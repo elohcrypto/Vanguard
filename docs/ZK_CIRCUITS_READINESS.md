@@ -44,7 +44,7 @@ Numbers from `npm run verify:zk` (nPublic, sizes), `snarkjs r1cs info`
 | Circuit                | Public signals (snarkjs order)                                                                    | nPublic | R1CS constraints | PLONK gates | PLONK domain | WASM   | zkey   |
 | ---------------------- | ------------------------------------------------------------------------------------------------- | ------- | ---------------- | ----------- | ------------ | ------ | ------ |
 | whitelist_membership   | nullifier, merkleRoot, walletBinding                                                              | 3       | 11,455           | 13,216      | 2^14         | 1.7 MB | 29 MB  |
-| blacklist_membership   | nullifier, whitelistRoot, blacklistRoot, walletBinding                                            | 4       | 24,394           | 29,564      | 2^15         | 2.2 MB | 64 MB  |
+| blacklist_membership   | nullifier, whitelistRoot, blacklistRoot, walletBinding                                            | 4       | 24,394           | 29,564      | 2^15         | 2.2 MB | 63 MB  |
 | jurisdiction_proof     | nullifier, Ax, Ay, chainId, verifierContext, validUntil, allowedMask, walletBinding               | 8       | 9,949            | 25,100      | 2^15         | 3.5 MB | 83 MB  |
 | accreditation_proof    | nullifier, Ax, Ay, chainId, verifierContext, validUntil, minimumAccreditation, walletBinding      | 8       | 9,952            | 25,044      | 2^15         | 3.5 MB | 83 MB  |
 | compliance_aggregation | nullifier, Ax, Ay, chainId, verifierContext, validUntil, minimum, wK, wA, wJ, wAcc, walletBinding | 12      | 11,091           | 27,085      | 2^15         | 4.0 MB | 103 MB |
