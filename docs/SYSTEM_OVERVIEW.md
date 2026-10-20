@@ -114,7 +114,8 @@ recovers identities.
   (Accredited), 500,000 (Institutional) VSC; holding caps 50,000 / 50,000
   / 500,000 / 5,000,000; cooldowns 60 / 60 / 30 / 15 minutes; required
   whitelist tiers 1 / 2 / 3 / 4 (defaults in InvestorTypeRegistry).
-- A large-transfer threshold is stored per type; no contract reads it.
+- A large-transfer threshold is stored per type and read only by the
+  `isLargeTransfer` view; no transfer reads it.
 - Custody: `InvestorRequestManager` deploys a 2-of-2 `MultiSigWallet`
   (bank and user) per request; the lock is a transfer into it, capped at
   the Normal cap (`LockAboveNormalCap`, Task 5.1).
@@ -151,8 +152,9 @@ recovers identities.
 
 - 117 menu entries (89 numbered options and 28 sub-options such as 1a,
   33a, 83c), from `demo/core/MenuSystem.js`. CI drives a scripted smoke
-  of it (`scripts/ci/demo-smoke.sh`) and regression drives
-  (`scripts/ci/strict-drive.sh`).
+  of it (`scripts/ci/demo-smoke.sh`), a strict ceremony drive
+  (`scripts/ci/strict-drive.sh`) and regression drives
+  (`scripts/ci/regression-drives.sh`).
 
 ## Contracts
 

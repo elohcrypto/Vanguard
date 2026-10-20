@@ -16,7 +16,7 @@ or pegs it. The system provides:
 - ✅ **One identity, one vote governance**, with VGT paying the proposal and voting fees
 - ✅ **Escrow** (one 2-of-3 wallet per payment, with dispute resolution)
 - ✅ **Investor custody** (the investor lock moves into an on-chain 2-of-2 `MultiSigWallet`; bank and user both sign to release)
-- ✅ **Interactive demo**: 89 numbered options, 116 with their sub-options (1a, 33a, 83c, ...)
+- ✅ **Interactive demo**: 89 numbered options, 117 with their sub-options (1a, 27.5, 33a, 83c, ...)
 
 **Current status**: under development. The contracts, the interactive demo, the tests and CI run end to end on a local Hardhat node; the remaining remediation phases and a third-party security audit come before any production or mainnet use.
 
@@ -64,7 +64,7 @@ Vanguard/
 │   └── index.js                 # Main demo entry point
 ├── scripts/                     # Deployment & Utility Scripts
 │   ├── ci/                      # CI step bodies and gates (.github/workflows/ci.yml)
-│   ├── production/              # DeployProduction.ts (+ deploy* modules), RunProductionTests.ts, opsKeyManager.ts
+│   ├── production/              # DeployProduction.ts (+ deploy* modules), signer, post-ceremony and check CLIs
 │   ├── zk/                      # Whitelist root, proof and attestation CLIs
 │   ├── demo-smoke*.js           # Demo smoke test (CI) and its legs
 │   ├── demo-drive.sh            # Drives the interactive demo (npm run demo:drive)
@@ -75,6 +75,7 @@ Vanguard/
 │   ├── setup-zk-circuits.js     # Circuit build (npm run setup:zk)
 │   └── verify-zk-readiness.js   # Circuit and verifier check (npm run verify:zk)
 ├── test/                        # Test suite (npm test runs all of test/)
+│   ├── ci/                      # Tests of the CI gate scripts
 │   ├── circuits/                # ZK circuit tests
 │   ├── compliance/              # ComplianceRules tests
 │   ├── erc3643/                 # Token, registry and investor-type tests
@@ -223,7 +224,7 @@ npm run test:coverage                          # coverage (sets DEPLOY_GAS_LIMIT
 
 - **1 identity = 1 vote**: equal votes for verified identities at least `minVoterAge` old; VGT delegation is recorded, not counted (D12)
 - **VGT fees**: 10 VGT to create a proposal, 10 VGT per vote (owner-adjustable above 0 and up to 1,000 VGT)
-- **Deposits**: passed proposals burn them; rejected or cancelled ones make them claimable per identity, by a wallet the registry binds to it and that controls it (Task 5.2)
+- **Deposits**: passed proposals burn them; rejected or cancelled ones make them claimable per identity, by a wallet the registry binds to it and that controls it (Task 5.2), or, for an identity no wallet is bound to (deleted), by a wallet that controls it (`claimRefundFor`, Task 5.17)
 - **Per-type thresholds**: quorum 10-30% of the identities registered at the voter-age cutoff, approval 60-75%
 - **Proposer restriction**: a proposer's identity never votes on its own proposal
 
