@@ -22,8 +22,10 @@ nominate and accept: the deployer's `transferOwnership` only nominates the
 issuer admin. `scripts/handover.ts` signs as the issuer admin (each
 issuer's `acceptOwnership` and the deployer-key revoke) and as ops (each
 list oracle's `acceptOwnership`, Task 5.1) and refuses before step 1 when
-the issuer admin is not a signer; how a multisig issuer admin or ops signs
-these on Sepolia is Task 5.7 (pending). Since Task 4.13 option 1 deploys both issuers owned by the
+the issuer admin is neither a signer nor external; a multisig (Safe)
+issuer admin or ops gets these calls as a Safe Transaction Builder batch
+and the ceremony pauses (exit 3) until their effects hold on chain (Task
+5.13; [runbook](runbook/02-deploy.md#24-multisig-ops-and-issuer-admin-task-513-q11--b)). Since Task 4.13 option 1 deploys both issuers owned by the
 deployer (wallet 0 signs every claim before the ceremony, wallet 9 after
 it): every trusted issuer must end owned by issuerAdmin with issuerAdmin's
 the only live key, so an issuer another wallet owns is refused, never
@@ -137,18 +139,20 @@ issuer (D25 b)" and "InvestorTypeRegistry: no governor but governance, no
 open proposal". It prints warnings that do not fail it: the deployer's
 remaining VSC with its exemption and verification (the demo deployer keeps
 whatever option 25 minted to it, 100M with choice 3, verified and exempt,
-as the treasury artifact: move it and remove the exemption by vote), escrow
-fee wallets that are not exempt or were registered after the handover, and
+as the treasury artifact: move it and remove the exemption by vote), the
+deployer's remaining VGT (Task 5.17), escrow fee wallets that are not exempt or were registered after the handover, and
 the residual warnings: a current whitelist root not published by ops or
 governance ("republish as ops so deployer-era bindings lapse"), an issuer
 key the deployer trusted on PrivacyManager, an OracleManager node the
-deployer registered (D50: rotate by an OracleParameters vote), an
+deployer registered (D50: rotate by an OracleParameters vote), a node
+that is also an escrow fee wallet (R-517-1), an
 `extraTrusted` acknowledgement, or a config key set to `null`. When any
 residual warning fires, `scripts/handover.ts` and 83e close with "Handover
 complete with warnings: see above" instead of "the deployer holds no
 power". In the demo this always happens (option 31's nodes and option 1's
-attestor key are deployer-era), and the smoke asserts exactly those seven
-warnings. The InvestorTypeRegistry's own proposals
+attestor key are deployer-era), and the smoke asserts exactly eight
+residual warnings: the root it published, the three attestor keys, the
+three nodes and node wallet 1 doubling as the escrow owner fee wallet. The InvestorTypeRegistry's own proposals
 now belong to the governor set they were created under (every `setGovernor`
 bumps `governorEpoch`, so the ceremony's removal of the deployer kills any
 planted proposal), expire 7 days after their execution time, and pass the
@@ -211,10 +215,11 @@ the rules' oracles, registrars and wired PrivacyManager, the registry's issuers,
 engine and nodes, the factory's KeyManager). It also holds the wallet indices `ops`, `guardian`,
 `issuerAdmin`, `proposer` and `voters`, `accounts` (those indices and 0 pinned to their addresses, required off the dev chain or with a deploy record, whose deployer wallet 0 must be; another key at a pinned index is refused before any send, Task 5.17 M-2), the optional `fromBlock` (a block before option 1's
 first deploy; refused when any scanned contract already had code) and `logChunk`, the optional
-`keyManagerIdentity` and `feeWallets`, and three acknowledgement lists, empty by default:
+`keyManagerIdentity` and `feeWallets`, and four acknowledgement lists, empty by default:
 `oracleNodes` (every registered consensus node), `attestors` (the Ax of every trusted attestor
-key) and `extraTrusted` (trusted contracts that are neither governance on VGT nor a wallet a
-live registrar created). An address key of an older config is an assertion, refused when it
+key), `extraTrusted` (trusted contracts that are neither governance on VGT nor a wallet a
+live registrar created) and `claimSigners` (the KYC and AML claim-signer keys the issuer admin
+added after the ceremony, read by the audit only; Task 5.15). An address key of an older config is an assertion, refused when it
 differs from the derivation (R-413-1); `escrowWalletFactory`, `onchainIDFactory`,
 `privacyManager` and `zkVerifier` must still be stated (an address, or `null`) while governance
 cannot derive them, before step 3 binds them (R-413-2); any other key is refused.
@@ -222,9 +227,9 @@ cannot derive them, before step 3 binds them (R-413-2); any other key is refused
 the full phase printed, recorded outside the run directory: the directory holding the snapshot and
 its sidecar must not hold the only copy, R-56c-2) and refuses a snapshot whose sha256 differs from it or the sidecar (B-6). `HANDOVER_PHASE=audit` is the day-2
 re-check: every completion line against the state governance derives now, no snapshot or window
-([OPERATOR_RUNBOOK](OPERATOR_RUNBOOK.md) section 10). `HANDOVER_PHASE=preflight` (Task 5.7) runs the full phase's
+([runbook](runbook/05-operations.md#10-upgrades-and-the-day-2-audit) section 10). `HANDOVER_PHASE=preflight` (Task 5.7) runs the full phase's
 checks up to its first transaction and sends nothing; the production deploy runs it on the handover.json it writes
-([OPERATOR_RUNBOOK](OPERATOR_RUNBOOK.md) section 2). The preflight (and 83e, as failing lines) also
+([runbook](runbook/02-deploy.md#2-deploy) section 2). The preflight (and 83e, as failing lines) also
 refuses, from the event scans: any agent but the deployer, ops, governance (VGT) and the tokens
 (registry), a missing governance or token agent; any InvestorTypeRegistry officer wallet but
 ops, a token other than VSC authorized, a registry or whitelist oracle on VGT (D56), a Token
@@ -232,7 +237,10 @@ enforcing a registry governance is not bound to; a key on any issuer held by ops
 governance, a registry agent or an oracle node; a trusted contract outside governance on VGT, a
 live registrar's wallets and `extraTrusted`; a registrar or officer contract whose code is not
 the compiled InvestorRequestManager or EscrowWalletFactory, or whose immutable bank is not ops;
-an unacknowledged node, the deployer as a node, an emergency designation on an unacknowledged
+an unacknowledged node, the deployer as a node, a node that holds a role key (ops, the
+guardian, the issuer admin, the proposer, a voter, a claim signer, the OracleManager operator,
+an InvestorTypeRegistry governor or officer, a registry/VGT/VSC agent or a ClaimIssuer key;
+Task 5.17), an emergency designation on an unacknowledged
 node (step 5 clears the rest), a paused or inactive list oracle, one below two consensus
 oracles, one whose code is not the compiled WhitelistOracle or BlacklistOracle or whose
 `maxVerdictAge` is outside 1 hour to 30 days, a node whose weight alone reaches the consensus
@@ -283,7 +291,12 @@ plain `83c` otherwise).
   hours. Node operators' runbook: clearing a governance sanction is visible
   on chain and accountable; ops, the OracleManager operator, can pause a
   node at once, and governance removes it (`removeOracle`) by an
-  OracleParameters vote (option 76, type 2).
+  OracleParameters vote (option 76, type 2). A passed `removeOracle` is
+  executable by anyone 2 days after its vote and checks no node minimum:
+  the guards are votes against a harmful removal while it votes and a
+  check right before executing one's own; a cancel vote (7 + 2 days)
+  clears only a passed removal nobody executes first
+  ([runbook](runbook/04-after-ceremony.md#4-oracle-nodes-d50-q4-q15-q20) section 4).
 - Before step 1, cancel every open InvestorTypeRegistry proposal and remove
   every registry governor but the deployer; the ceremony refuses otherwise.
 - Never give one key both an IdentityRegistry agent role and an issuer
@@ -336,7 +349,8 @@ plain `83c` otherwise).
 - The day-2 audit (`HANDOVER_PHASE=audit`, Task 5.6b) runs every
   completion line against the state governance derives now and
   `handover.json`'s acknowledgements (`oracleNodes`, `attestors`,
-  `extraTrusted`), with no snapshot or voting window, and sends nothing.
+  `extraTrusted`, `claimSigners`), with no snapshot or voting window, and
+  sends nothing.
   A change by vote that leaves the deployer no power passes; a deployer
   power, an unacknowledged holder (agent, role, owner, node, attestor,
   trusted contract), a pending owner other than governance or ops, or an
