@@ -456,7 +456,7 @@ ls -la build/circuits/*/*.zkey
   build `pragma circom 2.0.0` circuits. Verified working: 2.2.3
 - ✅ **snarkjs** (v0.7.5+) - Proof generation/verification
 - ✅ **circomlib** (v2.0.5+) - Circuit library
-- ✅ **Node.js** 20, 22 or 24 (CI uses 22) - Runtime environment
+- ✅ **Node.js** 20, 22 or 24 (the `engines` range in package.json; npm warns on any other version; CI uses 22) - Runtime environment
 
 ---
 

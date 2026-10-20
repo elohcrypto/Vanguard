@@ -138,7 +138,7 @@ Vanguard/
 
 ### Prerequisites
 
-- Node.js (CI uses 22) and npm; Hardhat and snarkjs come with `npm install`
+- Node.js 20, 22 or 24 (the `engines` range in package.json; CI uses 22) and npm; Hardhat and snarkjs come with `npm install`
 - Rust circom 2.x on `PATH` (or `CIRCOM_BIN`) for `npm run setup:zk`
 
 ### Installation
