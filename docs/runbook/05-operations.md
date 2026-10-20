@@ -10,7 +10,26 @@ KeyManager has no owner: the ops identity's owner sends
 (`pinRecoveryManager`, final; [identity](../DEEP_DIVE_IDENTITY.md)). The
 deploy (its steps in `scripts/production/opsKeyManager.ts`) handles the
 ops OnchainID named by `OPS_IDENTITY`, which only ops may own (or the
-deployer before it transfers it; another owner is refused by name):
+deployer before it transfers it; another owner is refused by name).
+The deploy creates no identity, and `OPS_IDENTITY` is part of the deploy
+config's digest: create it and export it before the first deploy run,
+and keep it set for every re-run (a resume with another value is
+refused). On Sepolia, deploy an `OnchainID` whose owner is the ops Safe
+through the signer, from `<CREATOR_ADDRESS>`, a funded key the signer holds, not the
+deployer (its creator gets no lasting power: only in the creating block
+may it pin a recovery manager or add a creation key):
+
+```bash
+env -u MNEMONIC OPS_SAFE=<OPS_SAFE> CREATOR=<CREATOR_ADDRESS> npx hardhat console --network remote > ops-identity.log 2>&1 <<'EOF'
+const id = await (await ethers.getContractFactory("OnchainID", await ethers.getSigner(process.env.CREATOR))).deploy(process.env.OPS_SAFE); await id.waitForDeployment(); console.log("OPS_IDENTITY", await id.getAddress(), "owner", await id.owner());
+EOF
+export OPS_IDENTITY=$(awk '/^OPS_IDENTITY/ {print $2}' ops-identity.log); grep "^OPS_IDENTITY" ops-identity.log
+```
+
+It prints `OPS_IDENTITY 0x… owner <OPS_SAFE>` (2.4's box runs it
+locally). Check the address has code and `owner()` is the ops Safe
+before the deploy. The deploy then handles it by its owner:
+
 
 - owned by an external ops (the ops Safe, the Sepolia case): both calls
   are a Safe batch (`deployments/11155111.ops-identity.ops-transactions.json`,
@@ -95,65 +114,75 @@ one subject per clearing otherwise.
   (section 9), and audit.
 - Never unbind an oracle as a remedy (it switches its gate off): rebind a
   working one, or pause the token (section 12).
-- The day-2 audit, after an upgrade, a rotation or any vote that moves a
-  power, sends nothing: what it checks, passes and fails is in
-  [TESTNET_CEREMONY](../TESTNET_CEREMONY.md#runbook-rules-for-the-ceremony-and-after-plan-2f).
-  Audit between votes (an open proposal on a plan contract fails it).
-  Publicly: `HANDOVER_PHASE=audit prod scripts/handover.ts` (sections 4,
-  4a). Local: section 9's L0 chain. Demo option 83f runs the same audit
-  from the demo's in-memory state (section 4).
 
-  ```bash
-  HANDOVER_PHASE=audit npx hardhat run scripts/handover.ts --network $NET > $RB/audit.log 2>&1; tail -1 $RB/audit.log
-  grep "Handover audit" $RB/audit.log
-  ```
+**The day-2 audit**, after an upgrade, a rotation or any vote that
+moves a power, sends nothing: what it checks, passes and fails is in
+[TESTNET_CEREMONY](../TESTNET_CEREMONY.md#runbook-rules-for-the-ceremony-and-after-plan-2f).
+Audit between votes (an open proposal on a plan contract fails it).
+Publicly: `HANDOVER_PHASE=audit prod scripts/handover.ts` (sections 4,
+4a). Local: section 9's L0 chain. Demo option 83f runs the same audit
+from the demo's in-memory state (section 4).
 
-  ends `✅ Audit passed: the deployer holds no power.` (`⚠️  Audit passed with warnings: see above.`;
-  failing: `❌ Handover failed: audit failed (see ❌ above)`) and has
-  `🔍 Handover audit: every completion line against the state governance derives now (no snapshot, no voting window)`.
-  Before the ceremony: `❌ Handover failed: HANDOVER_PHASE=audit: the ceremony has not completed: governance does not own Token, …; run the full phase (or HANDOVER_PHASE=accept) first`.
-  A list oracle the deployer owns fails it (`   ❌ the deployer still owns (or has pending by its own nomination) list oracle(s) 0x… serving OracleManager 0x…`);
-  a stranger's nomination of the deployer only warns. Repeat the scan
-  cross-check (section 5a) when you change RPC providers.
+```bash
+HANDOVER_PHASE=audit npx hardhat run scripts/handover.ts --network $NET > $RB/audit.log 2>&1; tail -1 $RB/audit.log
+grep "Handover audit" $RB/audit.log
+```
+
+It ends `✅ Audit passed: the deployer holds no power.` and has
+`🔍 Handover audit: every completion line against the state governance derives now (no snapshot, no voting window)`.
+Its `⚠️` lines are of two kinds. Residual warnings, deployer-era facts
+(an attestor key the deployer trusted, a node it registered, a
+whitelist root it published, a node that is also an escrow fee wallet,
+an `extraTrusted` acknowledgement, a config key set to `null`), change
+the last line to `⚠️  Audit passed with warnings: see above.`. Other
+warnings (an exempt escrow fee wallet or deployer, the deployer's
+leftover VSC or VGT, a circuit with no trusted attestor) are printed
+and leave `✅ Audit passed: …` (section 4a's final audit shows one).
+The ceremony's completion line follows the same rule. Failing:
+`❌ Handover failed: audit failed (see ❌ above)`. Before the ceremony:
+`❌ Handover failed: HANDOVER_PHASE=audit: the ceremony has not completed: governance does not own Token, …; run the full phase (or HANDOVER_PHASE=accept) first`.
+A list oracle the deployer owns fails it (`   ❌ the deployer still owns (or has pending by its own nomination) list oracle(s) 0x… serving OracleManager 0x…`);
+a stranger's nomination of the deployer only warns. Repeat the scan
+cross-check (section 5a, between votes) when you change RPC providers.
 
 ## 11. Recovery drills
 
-- KeyManager recovery on a drill identity, quarterly: demo option 12
-  rotates a key, then recovers with two agents, evicting a planted key
-  and moving the owner after 7 days. Local: reset.
+KeyManager recovery on a drill identity, quarterly: demo option 12
+rotates a key, then recovers with two agents, evicting a planted key and
+moving the owner after 7 days. Local: reset.
 
-  ```bash
-  reset   # local
-  npm run demo:drive -- --strict --timeout 1800 --log $RB/d12.log 1 21 51 12 0
-  ```
+```bash
+reset   # local
+npm run demo:drive -- --strict --timeout 1800 --log $RB/d12.log 1 21 51 12 0
+```
 
-  The log shows `   ✅ executeKeyRecovery (receipt): 2 MANAGEMENT keys evicted`,
-  `   ✅ owner() = wallet 6 (investor Alice) 0x976EA74026E726554dB657fA54763abd0C3a0aa9`
-  and `✅ Key rotated; recovery evicted the rogue key and moved the owner`;
-  the drive ends `✓ demo ran to completion`. Publicly the option prints
-  when each timelock (24 h rotation, 48 h recovery, 7 days owner
-  transfer) is due; run it again then, in the same demo session.
+The log shows `   ✅ executeKeyRecovery (receipt): 2 MANAGEMENT keys evicted`,
+`   ✅ owner() = wallet 6 (investor Alice) 0x976EA74026E726554dB657fA54763abd0C3a0aa9`
+and `✅ Key rotated; recovery evicted the rogue key and moved the owner`;
+the drive ends `✓ demo ran to completion`. Publicly the option prints
+when each timelock (24 h rotation, 48 h recovery, 7 days owner transfer)
+is due; run it again then, in the same demo session.
 
-- A holder with no seated agents and a lost owner key: ops burns the
-  balance (`Token.burn(lostWallet, amount)`) and re-issues it to the new,
-  onboarded wallet (`Token.mint(newWallet, amount)`); no script yet.
+A holder with no seated agents and a lost owner key: ops burns the
+balance (`Token.burn(lostWallet, amount)`) and re-issues it to the new,
+onboarded wallet (`Token.mint(newWallet, amount)`); no script yet.
 
 ## 12. Incident: pause and the voted unpause (D24, D56)
 
-- The guardian pauses VSC (`Token.pause()`); only governance unpauses it,
-  by a TokenParameters vote (option 76 builds none). A pause never
-  expires and the guardian can pause again (D56). Local: L0.
+The guardian pauses VSC (`Token.pause()`); only governance unpauses it,
+by a TokenParameters vote (option 76 builds none). A pause never expires
+and the guardian can pause again (D56). Local: L0.
 
-  ```bash
-  l0   # local
-  npx hardhat console --network $NET <<'EOF'
-  const fs = await import("fs"); const cfg = JSON.parse(fs.readFileSync(process.env.HANDOVER_CONFIG, "utf8")); const s = await ethers.getSigners(); const { proposeCall, castAcceptanceVotes, settleProposal } = await import("./demo/utils/HandoverVotes.js"); const g = await ethers.getContractAt("VanguardGovernance", cfg.governance, s[cfg.proposer]); const vsc = await ethers.getContractAt("Token", await g.boundTarget(3)); await (await vsc.connect(s[cfg.guardian]).pause()).wait(); console.log("VSC paused:", await vsc.paused()); const id = await proposeCall(g, s[cfg.proposer], 3, vsc, vsc.interface.encodeFunctionData("unpause"), "Unpause VSC", "runbook 12"); await castAcceptanceVotes(g, id, cfg.voters.map((v) => s[v])); await settleProposal(g, id, "unpause VSC"); console.log("VSC paused:", await vsc.paused());
-  EOF
-  ```
+```bash
+l0   # local
+npx hardhat console --network $NET <<'EOF'
+const fs = await import("fs"); const cfg = JSON.parse(fs.readFileSync(process.env.HANDOVER_CONFIG, "utf8")); const s = await ethers.getSigners(); const { proposeCall, castAcceptanceVotes, settleProposal } = await import("./demo/utils/HandoverVotes.js"); const g = await ethers.getContractAt("VanguardGovernance", cfg.governance, s[cfg.proposer]); const vsc = await ethers.getContractAt("Token", await g.boundTarget(3)); await (await vsc.connect(s[cfg.guardian]).pause()).wait(); console.log("VSC paused:", await vsc.paused()); const id = await proposeCall(g, s[cfg.proposer], 3, vsc, vsc.interface.encodeFunctionData("unpause"), "Unpause VSC", "runbook 12"); await castAcceptanceVotes(g, id, cfg.voters.map((v) => s[v])); await settleProposal(g, id, "unpause VSC"); console.log("VSC paused:", await vsc.paused());
+EOF
+```
 
-  prints `VSC paused: true`, `   ⏩ unpause VSC: voting period + execution delay: jumped 656s (dev node)`
-  and `VSC paused: false`; publicly `settleProposal` waits and the
-  guardian's pause is a transaction of the guardian Safe.
+It prints `VSC paused: true`, `   ⏩ unpause VSC: voting period + execution delay: jumped 656s (dev node)`
+and `VSC paused: false`; publicly `settleProposal` waits and the
+guardian's pause is a transaction of the guardian Safe.
 
 - VGT: a pause by vote is released by ops (VGT agent) with `unpause()`,
   no vote (D24 a); to hold against ops, remove ops as a VGT agent in the

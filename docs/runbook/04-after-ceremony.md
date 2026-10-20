@@ -74,7 +74,8 @@ HANDOVER_PHASE=audit prod scripts/handover.ts > $RB/audit-d50.log 2>&1; echo "ex
 ```
 
 prints `oracleNodes: 3`, `exit 0`, the two deployer lines
-(`   ✅ the deployer is not an OracleManager node`) and
+`   ✅ the deployer is not an OracleManager node` and
+`   ✅ the deployer 0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266 is not an OracleManager node`, then
 `   ✅ no OracleManager node is ops, the guardian, the issuer admin, the proposer, a voter, a claim signer, the manager operator, an InvestorTypeRegistry governor or officer, a registry/VGT/VSC agent or a ClaimIssuer key`,
 `   ✅ every registered OracleManager node is acknowledged in oracleNodes (3 registered, 3 acknowledged)`,
 `   ✅ no OracleManager node alone reaches the 66% bar; weight shares: 0x… 100 (33.3%), …`;
@@ -142,9 +143,12 @@ exports them as the issuer admin's Safe batch
 signed by each key the signer holds. Refused: an issuer the ceremony has
 not handed over, one key for both, a key that is the deployer's,
 governance's, a role's, a node's or a voter's, and a key the issuer
-revoked before (a revoked key is never re-added: choose another). Keep
-the claim-signer keystores in the signer, named to sort after the pinned
-ones (1a); claims are then signed through `vanguard_signClaim`.
+revoked before (a revoked key is never re-added: choose another). Run
+it after round 2 of section 4 has completed (a claim-signer key listed
+in `handover.json` is then never a node). Keep the claim-signer
+keystores in the signer, named to sort after the pinned ones, and
+restart the signer after adding them: it reads its keystores only at
+start (1a). Claims are then signed through `vanguard_signClaim`.
 
 Production track (after section 4; locally the issuer admin is a signer
 wallet, so the calls are sent; the keys are the test phrase's wallets 15
