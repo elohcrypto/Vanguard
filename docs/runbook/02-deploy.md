@@ -10,16 +10,23 @@ there). Keys and the signer: [part 1](01-keys-and-signer.md).
 and option 61's escrow factory through the signer (section 1a; no
 unsigned-transaction files), records every transaction in the deploy
 record before the next, writes the ceremony's `handover.json` and runs
-its preflight. Publicly send through a private RPC where you can (e.g.
-Flashbots Protect).
+its preflight. The signer has one upstream that serves both its reads and
+its sends and must be archive (2.1): a send-only private RPC (e.g.
+Flashbots Protect) cannot be that upstream.
 
 ### 2.1 The RPCs (Q18)
 
-One commercial provider and the owner's own Sepolia node, the second
-archive (or keeping state since before the deploy) and synced before the
-deploy: every ceremony phase reads historical state from `fromBlock` on,
-and refuses an RPC that cannot serve it. Check both, URLs from a 0600
-file (comma or newline separated), never argv:
+One commercial provider and the owner's own Sepolia node, synced before
+the deploy: every ceremony phase reads historical state from `fromBlock`
+on (about 5 weeks of blocks by the end) and refuses an RPC that cannot
+serve it. Each must be an archive node, or a node that keeps all state
+from a block before the deploy on. `rpc-check` probes state at head
+minus 200,000 blocks unless `--old-block <N>` is given, so the
+commercial RPC is probed archive-deep. Check both, URLs from a 0600 file
+(comma or newline separated), never argv; for a node that keeps state
+only from some block on, check it with `--old-block <its first kept block>`
+before the deploy and with `--old-block <fromBlock in handover.json>`
+after it:
 
 ```bash
 RPC_CHECK_URLS=$DEMO_RPC_URL node scripts/production/rpcCheck.js --chain 31337   # local; publicly RPC_CHECK_URLS_FILE=<0600 FILE> … --chain 11155111
@@ -63,12 +70,20 @@ Cost table at 20 gwei (fund = +50%, Q19):
 ```
 
 About 200 M gas, 4.0 ETH at 20 gwei: fund about 6 ETH. The deployer row
-counts the deploy twice (5.8's stray probe runs on a second, throwaway
-deploy). With Safes the issuer-admin and ops rows are paid by the Safe
+counts the deploy twice: Task 5.8's stray probe (plant a deployer agent
+on a second, throwaway deploy and see its preflight refuse) is budgeted
+here but is not a runbook step yet. It must run before the real
+ceremony and never with the deployer key after it, with `OPS_IDENTITY`
+unset (a throwaway deploy would pin its own KeyManager on the ops
+identity, and a pin is final) and with a separate record and
+`handover.json`; with Safe roles the throwaway also pauses for its own
+custody batch. Without it the deployer needs about 2.24 ETH less (1.49
+ETH plus headroom at 20 gwei). With Safes the issuer-admin and ops rows are paid by the Safe
 owners who execute the batches; `scripts/ci/multisig-drive.sh` prints
 their table. Re-measure on the reviewed commit (about 6 minutes; the
 drive starts its own node and signer on two free ports, not the box's)
-and price at the gas `rpc-check` printed:
+and price at the live `gasPrice` `rpc-check` printed (decimals are
+accepted, e.g. `--gwei 1.875`):
 
 ```bash
 DEPLOY_NODE_PORT=<FREE_PORT> DEPLOY_SIGNER_PORT=<FREE_PORT> COST_GWEI=20 scripts/ci/deploy-drive.sh > $RB/cost-drive.log 2>&1; sed -n '/^Cost table/,/total/p' $RB/cost-drive.log
@@ -100,29 +115,53 @@ names every role by address:
   them by wallet index). The three nodes are the deployer's choice and
   are rotated out by vote after the ceremony (section 4): three distinct
   keys of their own. The escrow fee wallet is its own key (D54), not a
-  role or a node. `<AX>`, `<AY>`: the issuer's EdDSA public key,
-  `ATTESTOR_KEY_FILE=<0600 FILE> node scripts/zk/attest.js --public-key`
-  ([ZK command lines](../TESTNET_ZK_CLI.md)).
+  role or a node.
+- `<AX>`, `<AY>`: the attestor's EdDSA public key (Q20: the owner holds
+  the private key offline, apart from the claim signers). On an offline
+  machine, `attest.js --new-key` prints the key once as JSON
+  (`{ "privateKey": "0x…", "Ax": "…", "Ay": "…" }`); the key file holds
+  only the `0x…` key:
+
+```bash
+(umask 077; node scripts/zk/attest.js --new-key > <OFFLINE_DIR>/attestor.json && node -e 'console.log(JSON.parse(require("fs").readFileSync(process.argv[1], "utf8")).privateKey)' <OFFLINE_DIR>/attestor.json > <OFFLINE_DIR>/attestor.key)
+ATTESTOR_KEY_FILE=<OFFLINE_DIR>/attestor.key node scripts/zk/attest.js --public-key
+```
+
+The first line also prints, on stderr,
+`The private key is printed once: store it offline; it is never shown again.`;
+the second prints `{ "Ax": "…", "Ay": "…" }` for the config
+([ZK command lines](../TESTNET_ZK_CLI.md)).
+
+- `OPS_IDENTITY`: the ops OnchainID (section 7), created and exported
+  before the first deploy run and kept set for every re-run: it is part
+  of the config digest the record keeps, and a resume with another value
+  is refused (`… was made with another config (digest …); refusing to resume with this one`).
 - Optional: `"oracleOperator"` (must be ops, D47), `"lockAmounts"` (D45;
   Sepolia defaults to cap/4, cap/2, cap; mainnet requires it),
   `"logChunk"`, `"confirmations"`, `"externalRoles"`. On Sepolia and
   31337 an absent role defaults to the signer's account at its
   [TESTNET_SETUP](../TESTNET_SETUP.md) index; name them all on Sepolia.
 - Refused before any transaction: `PRIVATE_KEY` or `MNEMONIC` set off a
-  dev chain, a network with local accounts, `GOV_TIME_SCALE` other than
-  1 off a dev chain, a role that is neither a signer account nor external,
-  two roles on one key.
+  dev chain (also from `.env`), a network with local accounts,
+  `GOV_TIME_SCALE` other than 1 off a dev chain, a role that is neither
+  a signer account nor external, a deployer, ops, guardian and issuer
+  admin that are not four different keys, a fee wallet that is the
+  deployer, a role or a node, and a node that is the deployer. A
+  proposer, voter or node that clashes with another role is refused
+  later, by the onboarding (section 3) and the ceremony's checks.
 
-Local (production track; publicly `signer.js` on 1248, section 1a):
+Local (production track; publicly `signer.js` on 1248, section 1a;
+locally `OPS_IDENTITY` stays unset here, 2.4's box sets one):
 
 ```bash
-SIGNER_COUNT=17 SIGNER_UPSTREAM=$DEMO_RPC_URL node scripts/ci/remote-signer.js 8549 > $RB/signer.log 2>&1 &   # local; publicly signer.js
-export SIGNER_RPC_URL=http://127.0.0.1:8549   # publicly http://127.0.0.1:1248
+SIGNER_COUNT=17 SIGNER_UPSTREAM=$DEMO_RPC_URL node scripts/ci/remote-signer.js $SIGNER_PORT > $RB/signer.log 2>&1 & SIGNER_PID=$!   # local; publicly signer.js
+export SIGNER_RPC_URL=http://127.0.0.1:$SIGNER_PORT   # publicly http://127.0.0.1:1248
 node -e 'require("./scripts/zk/attest").attestorPublicKey("0x" + "11".repeat(32)).then((k) => console.log(JSON.stringify({ attestor: { Ax: String(k.Ax), Ay: String(k.Ay) } })))' > $RB/deploy.json   # local; publicly the config above
 DEPLOY_CONFIG=$RB/deploy.json prod scripts/production/DeployProduction.ts > $RB/deploy.log 2>&1; grep -E "^✅ (Deployed|Preflight)" $RB/deploy.log
 ```
 
-prints `✅ Deployed: 74 transactions in /tmp/vanguard-runbook/deploy-record.json (0 from the record, 74 sent now; 74,608,826 gas)` and
+prints `✅ Deployed: 74 transactions in /tmp/vanguard-runbook/deploy-record.json (0 from the record, 74 sent now; N gas)`
+(N about 74.6 M; it moves by a few dozen gas between runs) and
 `✅ Preflight passed: every check before the ceremony's first transaction holds (voters are checked by the full phase)`.
 
 - Publicly `PROD_RECORD` and `PROD_CONFIG` are
@@ -144,8 +183,9 @@ prints `✅ Deployed: 74 transactions in /tmp/vanguard-runbook/deploy-record.jso
 - The ceremony (section 5) takes the escrow factory by vote, hands both
   list oracles (`"oracles"`; the unbound whitelist oracle prints
   `   ⚠️  oracle 0x… is not bound on chain; handed over anyway`) to ops
-  and closes with seven warnings: the three deployer-trusted issuer keys,
-  the three deployer-era nodes (section 4) and
+  and closes with seven warnings: the attestor key the deployer trusted,
+  one line per circuit (jurisdiction, accreditation, compliance), the
+  three deployer-era nodes (section 4) and
   `   ⚠️  0x… is investorLimitExempt (set before the handover): …` (the
   escrow fee wallet; nothing mints the deployer VSC). An eighth when the
   deployer's VGT was not burned first (section 3):
@@ -189,25 +229,34 @@ restarts the local signer); section 3's voter registration runs inside
 it:
 
 ```bash
-reset; pkill -f remote-signer.js; SIGNER_COUNT=14 SIGNER_UPSTREAM=$DEMO_RPC_URL node scripts/ci/remote-signer.js 8549 > $RB/signer.log 2>&1 &   # local
+reset; kill $SIGNER_PID; sleep 1; SIGNER_COUNT=14 SIGNER_UPSTREAM=$DEMO_RPC_URL node scripts/ci/remote-signer.js $SIGNER_PORT > $RB/signer.log 2>&1 & SIGNER_PID=$!   # local
 for a in 0xFABB0ac9d68B0B445fB7357272Ff202C5651694a 0x1CBd3b2770909D4e10f157cABC84C7264073C9Ec; do curl -s -X POST -H 'Content-Type: application/json' --data "{\"jsonrpc\":\"2.0\",\"method\":\"hardhat_setBalance\",\"params\":[\"$a\",\"0x56BC75E2D63100000\"],\"id\":1}" $DEMO_RPC_URL > /dev/null; done   # local: owners 12, 13
 ms() { MULTISIG_OWNERS=$1 npx hardhat run scripts/ci/multisig-exec.js --network remote | sed -n 's/^multisig //p'; }   # local
 exe() { BATCH=$1 MULTISIG_OWNERS=$2 npx hardhat run scripts/ci/multisig-exec.js --network remote; }   # local; publicly the Safe app
 msrun() { env -u MNEMONIC DEPLOY_CONFIG=$RB/ms.json DEPLOY_RECORD=$RB/ms-record.json HANDOVER_CONFIG=$RB/ms-handover.json npx hardhat run "$@" --network remote; }   # local
 export OPS=$(ms 10,12) ADMIN=$(ms 9,13)   # local; publicly the two Safes
+env -u MNEMONIC OPS_SAFE=$OPS CREATOR=0xFABB0ac9d68B0B445fB7357272Ff202C5651694a npx hardhat console --network remote > $RB/ops-identity.log 2>&1 <<'EOF'   # section 7; locally owner 12 creates it
+const id = await (await ethers.getContractFactory("OnchainID", await ethers.getSigner(process.env.CREATOR))).deploy(process.env.OPS_SAFE); await id.waitForDeployment(); console.log("OPS_IDENTITY", await id.getAddress(), "owner", await id.owner());
+EOF
+export OPS_IDENTITY=$(awk '/^OPS_IDENTITY/ {print $2}' $RB/ops-identity.log); grep "^OPS_IDENTITY" $RB/ops-identity.log
 node -e 'require("./scripts/zk/attest").attestorPublicKey("0x" + "11".repeat(32)).then((k) => console.log(JSON.stringify({ attestor: { Ax: String(k.Ax), Ay: String(k.Ay) }, ops: process.env.OPS, issuerAdmin: process.env.ADMIN })))' > $RB/ms.json   # local
 dep() { msrun scripts/production/DeployProduction.ts > $RB/ms-deploy.log 2>&1; echo "exit $?"; grep -E "^⏸️|not executed|effect|^✅ Preflight" $RB/ms-deploy.log; }
-dep; dep; exe $RB/ms-record.ops-transactions.json 10,12; dep
+dep; dep; exe $RB/ms-record.ops-transactions.json 10,12; dep; exe $RB/ms-record.ops-identity.ops-transactions.json 10,12; dep
 msrun scripts/ci/deploy-voters.js > $RB/ms-voters.log 2>&1   # local: section 3
 msrun scripts/handover.ts > $RB/ms-full.log 2>&1; echo "exit $?"; grep "^⏸️" $RB/ms-full.log
 export MS_SHA256=$(awk '/snapshot sha256:/ {print $3}' $RB/ms-full.log)   # section 6
 exe $RB/ms-handover.json.ops-transactions.json 10,12; exe $RB/ms-handover.json.issuer-admin-transactions.json 9,13
 HANDOVER_SNAPSHOT_SHA256=$MS_SHA256 HANDOVER_PHASE=accept msrun scripts/handover.ts > $RB/ms-accept.log 2>&1; echo "exit $?"; grep "effect(s) hold" $RB/ms-accept.log; tail -1 $RB/ms-accept.log
+unset OPS_IDENTITY   # local
 ```
 
+The console prints `OPS_IDENTITY 0x… owner 0x…` (the ops multisig).
 The deploy prints `exit 3` and `⏸️  awaiting 1 ops transaction: /tmp/vanguard-runbook/ms-record.ops-transactions.json`
 twice (the re-run sends nothing and adds `   ❌ not executed: [deploy.custody.accept] InvestorRequestManager 0x….acceptOwnership(): …`),
-`executed 1 calls on 0x…`, `exit 0`, `   ✅ 1 role transaction effect(s) hold on chain` and the preflight line.
+`executed 1 calls on 0x…`; then `exit 3`, `   ✅ 1 role transaction effect(s) hold on chain` and
+`⏸️  awaiting 2 ops transactions: /tmp/vanguard-runbook/ms-record.ops-identity.ops-transactions.json`
+(the ops identity's `pinRecoveryManager` and `authorizeManager`, section 7); `executed 2 calls on 0x…`, `exit 0`,
+`   ✅ 1 role transaction effect(s) hold on chain`, `   ✅ 2 role transaction effect(s) hold on chain` and the preflight line.
 The ceremony pauses after its snapshot, before any vote: `exit 3`,
 `⏸️  awaiting 4 issuerAdmin transactions: /tmp/vanguard-runbook/ms-handover.json.issuer-admin-transactions.json`,
 `⏸️  awaiting 2 ops transactions: /tmp/vanguard-runbook/ms-handover.json.ops-transactions.json`;
@@ -215,9 +264,8 @@ then `executed 2 calls on 0x…`, `executed 4 calls on 0x…`, `exit 0`, `   ✅
 and `⚠️  Handover complete with warnings: see above.` (the eight warnings above: this box does not burn the deployer's VGT).
 Before execution the accept phase exits 3 naming each call and a full re-run is
 refused (`… a full re-run would send them again …`, exit 1), sending nothing.
-The ops-identity pause (`OPS_IDENTITY` set to an OnchainID the ops Safe
-owns) and the claim-signer batch are driven by `scripts/ci/multisig-drive.sh`
-(steps 2 and 5), not by this box.
+The claim-signer batch with a multisig issuer admin is driven by
+`scripts/ci/multisig-drive.sh` (step 5), not by this box.
 
 ### 2.5 Executing a Safe batch
 
