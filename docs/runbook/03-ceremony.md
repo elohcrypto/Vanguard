@@ -12,7 +12,9 @@ identity at least `minVoterAge` (7 days / `GOV_TIME_SCALE`; 7 days on
 Sepolia) old at the first proposal. Each is a key of its own in the
 signer (never the deployer, a role or a node). Delete every identity
 whose claims expired (`deleteIdentity`): it still counts toward quorum
-(D7).
+(D7). A deleted identity's deposit still locked in a proposal is
+claimed with `claimRefundFor(proposalId, identity)` from a verified
+wallet that controls that identity (R-517-8).
 
 `scripts/production/onboardVoters.ts` onboards the deploy's proposer and
 voters through the signer (the OnchainID, the KYC and AML claims the
@@ -104,8 +106,14 @@ governance nomination on an InvestorRequestManager or list oracle;
 factory-made identities only; re-sign claims after a revocation
 (`Signer does not have claim signer key`); exempt the treasury and fee
 wallets first) and their reasons: [TESTNET_CEREMONY](../TESTNET_CEREMONY.md#runbook-rules-for-the-ceremony-and-after-plan-2f).
-Once governance owns VSC every production CLI refuses a transaction from
-the deployer's key. Check and clear a nomination on the
+Once governance owns VSC, `scripts/handover.ts`, `onboardVoters.ts`,
+`claimSigners.ts` and `postCeremonyVotes.ts` refuse a transaction from
+the deployer's key (`DeployProduction.ts` installs no such guard). The
+signer itself still signs for wallet 0 for any local client holding its
+token, a console snippet included: never run a console snippet as wallet
+0 after the ceremony. The guarantee is the audit's
+`✅ Audit passed: the deployer holds no power.` (section 10). Check and
+clear a nomination on the
 InvestorRequestManager from ops; `IRM` is the address the completion
 names in `   ✅ registrar / officer contract 0x… code matches the compiled InvestorRequestManager`.
 The `# local` lines plant one to clear:
@@ -145,9 +153,12 @@ The same CLI on the deploy's `handover.json`, through the signer:
   (`   ⏳ <config> (accept): waiting for pending transactions to mine first: 0x… (nonce N..N) (up to 900 s)`),
   then adopts its open proposals (`   ↪️  IdentityRegistry: proposal #3 already open; adopted`)
   and skips the settled ones (`   ✅ Token: already owned by governance`).
-  RPC errors are retried without resending (`   ↻ …`, `adopted (not resent)`).
-- After completion the deployer sends nothing (the CLIs refuse its key).
-  Run the day-2 audit, and the scan cross-check below.
+  On an RPC error the same request is repeated at the same pinned nonce,
+  never as a second transaction (`   ↻ …`; a send whose reply was lost
+  is `adopted (not resent)`).
+- After completion the deployer sends nothing (the four ceremony and
+  post-ceremony CLIs refuse its key; section 5). Run the day-2 audit,
+  and the scan cross-check below.
 
 Production track (after section 3; locally the roles are signer wallets,
 so nothing pauses):
@@ -170,12 +181,13 @@ power from event scans; a provider that silently caps or drops logs
 makes a scan look clean. `scripts/production/scanCount.ts` runs the
 read-only phase (the audit once governance owns the plan, else the
 preflight) once per RPC and `logChunk`, counts each scan's raw hits and
-exits 1 when any count differs. Run it after the ceremony on both RPCs
-with two chunk sizes (the URLs from `SCAN_RPC_URLS_FILE`, this user's
+exits 1 when any count differs or a phase fails. The audit fails while a
+proposal on a plan contract is open, so run it between votes: right
+after the ceremony completes, on both RPCs with two chunk sizes (the URLs from `SCAN_RPC_URLS_FILE`, this user's
 0600 file, comma or newline separated; never typed inline):
 
 ```bash
-(umask 077; echo "$DEMO_RPC_URL,http://localhost:8547" > $RB/scan-urls)   # local; publicly the file holds the provider URL and the own node's URL
+(umask 077; echo "$DEMO_RPC_URL,http://localhost:$NODE_PORT" > $RB/scan-urls)   # local; publicly the file holds the provider URL and the own node's URL
 SCAN_RPC_URLS_FILE=$RB/scan-urls SCAN_CHUNKS=5000,1000 prod scripts/production/scanCount.ts > $RB/scan.log 2>&1; echo "exit $?"; tail -1 $RB/scan.log
 ```
 
@@ -183,8 +195,8 @@ A file group or others can read is refused
 (`SCAN_RPC_URLS_FILE must be this user's own file, mode 0600`). It prints `exit 0` and `✅ all N scans count the same on every RPC and chunk size`;
 the log has `🔎 scan counts at block N (heads N, N)` and one row per scan
 (`      2 | 2 | 2 | 2  RoleGranted @ 0x… (1 topic filter(s))`). A differing
-row exits 1: find which provider or chunk drops logs before trusting
-any phase on it.
+row (marked `❌`) or a phase that failed on one RPC exits 1: find which
+provider or chunk drops logs before trusting any phase on it.
 
 ## 6. The snapshot (B-6)
 
@@ -192,27 +204,29 @@ The full phase writes `$HANDOVER_CONFIG.snapshot.json`, its sha256 beside
 it (`….snapshot.json.sha256`) and prints the digest. `HANDOVER_PHASE=accept`
 requires that digest in `HANDOVER_SNAPSHOT_SHA256` and refuses a file whose
 hash differs from it or the sidecar. Whoever can rewrite `$RB` can rewrite
-all three, so `$RB` must not hold the only copy. Local: L0.
+all three, so `$RB` must not hold the only copy. Local: section 5's L0
+chain as it is (its full phase, then the IRM plant-and-clear; no new
+`l0`).
 
 1. Right after the full phase, record the digest it printed
    (`   snapshot sha256: <64 hex> (in …snapshot.json.sha256; record this line outside the run directory)`)
    outside `$RB` (the ceremony ticket, a signed message, a second person);
    locally `export TICKET_SHA256=$(awk '/snapshot sha256:/ {print $3}' $RB/handover.log)`.
+2. Before every accept run, take the digest from that record, not `$RB`
+   (the box below). Publicly:
+   `HANDOVER_SNAPSHOT_SHA256=<DIGEST> HANDOVER_PHASE=accept prod scripts/handover.ts`.
 
-2. Before every accept run, take the digest from that record, not `$RB`:
+```bash
+sha256sum -c $HANDOVER_CONFIG.snapshot.json.sha256
+HANDOVER_SNAPSHOT_SHA256=$TICKET_SHA256 HANDOVER_PHASE=accept npx hardhat run scripts/handover.ts --network $NET > $RB/accept.log 2>&1; tail -1 $RB/accept.log
+```
 
-   ```bash
-   sha256sum -c $HANDOVER_CONFIG.snapshot.json.sha256
-   HANDOVER_SNAPSHOT_SHA256=$TICKET_SHA256 HANDOVER_PHASE=accept npx hardhat run scripts/handover.ts --network $NET > $RB/accept.log 2>&1; tail -1 $RB/accept.log
-   ```
-
-   prints `/tmp/vanguard-runbook/handover.json.snapshot.json: OK`; the log
-   has `⏭️  HANDOVER_PHASE=accept: deployer steps skipped`,
-   `   snapshot sha256: <64 hex> (matches the full phase's)` and
-   `   snapshot: /tmp/vanguard-runbook/handover.json.snapshot.json (block N)`
-   and ends as in section 5. Without the variable it refuses:
-   `❌ Handover failed: snapshot digest missing: set HANDOVER_SNAPSHOT_SHA256 to the digest the full phase printed for …snapshot.json ("snapshot sha256: <hex>", recorded outside the run directory); …`.
-   Publicly: `HANDOVER_SNAPSHOT_SHA256=<DIGEST> HANDOVER_PHASE=accept prod scripts/handover.ts`.
+It prints `/tmp/vanguard-runbook/handover.json.snapshot.json: OK`; the
+log has `⏭️  HANDOVER_PHASE=accept: deployer steps skipped`,
+`   snapshot sha256: <64 hex> (matches the full phase's)` and
+`   snapshot: /tmp/vanguard-runbook/handover.json.snapshot.json (block N)`
+and ends as in section 5. Without the variable it refuses:
+`❌ Handover failed: snapshot digest missing: set HANDOVER_SNAPSHOT_SHA256 to the digest the full phase printed for …snapshot.json ("snapshot sha256: <hex>", recorded outside the run directory); …`.
 
 3. An edited snapshot stops it before anything is read (a re-run, not a
    pass: record it so and run the full phase again):
