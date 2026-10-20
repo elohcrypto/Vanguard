@@ -68,8 +68,9 @@ the deployer sets it before the handover, an InvestorTypeConfig vote
 (option 76, type 0) after it; a compliance officer cannot. The demo
 exempts the treasury (signer 0) and the two escrow fee wallets. The
 production deploy (`scripts/production/DeployProduction.ts`, Task 5.7)
-deploys the registry with option 51's flow and exempts no one: it names
-no treasury, and no cap is raised to fit a fixture.
+deploys the registry with option 51's flow and exempts only its escrow
+fee wallet (option 61's flow, D22; the ceremony and the audit warn on
+it): it names no treasury, and no cap is raised to fit a fixture.
 
 ## Cooldown and tier: enforced (D37 = a, Task 4.10)
 

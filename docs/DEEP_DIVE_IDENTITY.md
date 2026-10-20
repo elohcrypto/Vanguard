@@ -1,6 +1,7 @@
 # Technical Deep Dive: identity, recovery and governance
 
-Checked against the code in Task 5.5; listings are condensed from the
+Checked against the code in Task 5.5 and again at 8c77e24 (2026-10-20,
+after Task 5.17); listings are condensed from the
 Solidity named next to each. The technical deep dive is three files: [transfer path](DEEP_DIVE_TRANSFER.md) (token, compliance, oracles), [identity, recovery and governance](DEEP_DIVE_IDENTITY.md) and [zero-knowledge circuits](DEEP_DIVE_ZK.md).
 
 ---

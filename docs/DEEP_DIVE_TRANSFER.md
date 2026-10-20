@@ -2,8 +2,8 @@
 
 How a VSC transfer is checked: the token, ComplianceRules, the oracle
 consensus that writes the lists, and the security notes for that path.
-Checked against the code in Task 5.5; listings are condensed from the
-Solidity named next to each.
+Checked against the code in Task 5.5 and again at 8c77e24 (2026-10-20);
+listings are condensed from the Solidity named next to each.
 
 The technical deep dive is three files: [transfer path](DEEP_DIVE_TRANSFER.md) (token, compliance, oracles), [identity, recovery and governance](DEEP_DIVE_IDENTITY.md) and [zero-knowledge circuits](DEEP_DIVE_ZK.md).
 
@@ -308,10 +308,10 @@ codeHash)`, owner only, event `TrustedRegistrarSet`).
 
 The repo measures the transfer path only: `scripts/gas-analysis.ts`
 (`npm run gas:claims`) records a baseline and CI fails a rise over 1,500
-gas. At aa65de8 plus Task 4.17: 96,902 with the permissive mock registry
-(A), 144,868 with one claim topic (B), 178,682 with KYC and AML (C),
-105,896 with both identities in the verification cache (D), 135,232 with
-an authorized InvestorTypeRegistry too (E); `refreshVerified` 104,403. No
+gas. Re-recorded at dd7943f (Task 5.17): 96,916 with the permissive mock
+registry (A), 144,222 with one claim topic (B), 177,332 with KYC and AML
+(C), 105,954 with both identities in the verification cache (D), 135,290
+with an authorized InvestorTypeRegistry too (E); `refreshVerified` 103,060. No
 figure for identity creation, claims, attestations, ZK verification or
 votes is measured in the repo.
 
@@ -361,4 +361,5 @@ votes is measured in the repo.
 ### Not done
 
 Formal verification of the circuits (not started); an external security
-audit; a testnet deployment (Task 5.7).
+audit; a testnet deployment (the Sepolia rehearsal, Task 5.8; the
+deploy tooling is built, Tasks 5.7 and 5.15).
