@@ -317,9 +317,9 @@ investor-type registry (E, Task 4.10). Re-run with `npm run gas:claims`
 compares each figure with the baseline recorded in the script and fails on
 a rise over 1,500 gas (CI runs it in the tests job).
 
-**Current baseline** (`scripts/gas-analysis.ts`, recorded at aa65de8 plus
-Task 4.17): A 96,902, B 144,868, C 178,682, D 105,896 (+8,994 over A), E
-135,232 (+38,330), `refreshVerified` 104,403. The two tables below are
+**Current baseline** (`scripts/gas-analysis.ts`, re-recorded at dd7943f,
+Task 5.17): A 96,916, B 144,222, C 177,332, D 105,954 (+9,038 over A), E
+135,290 (+38,374), `refreshVerified` 103,060. The two tables below are
 history, measured on 2026-10-07.
 
 **Task 4.9 (measured 2026-10-07).** Before: 88d9454, no cache. After: the

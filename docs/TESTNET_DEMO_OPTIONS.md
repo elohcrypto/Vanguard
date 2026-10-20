@@ -477,4 +477,7 @@ exact call the identity owner must send:
 KeyManager as the ops identity's recovery manager (or prints
 `OnchainID(<ops identity>).pinRecoveryManager(<keyManager>)` for its
 owner), refuses an identity already pinned to another manager (a pin is
-final), and sets the factory's `recoveryManager` to KeyManager.
+final), and sets the factory's `recoveryManager` to KeyManager. When the
+identity's owner is the ops multisig (Task 5.13), both calls go out as a
+Safe batch and the deploy pauses (exit 3) until a re-run finds their
+effects on chain (Task 5.17).

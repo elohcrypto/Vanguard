@@ -353,8 +353,10 @@ plain `83c` otherwise).
   sends nothing.
   A change by vote that leaves the deployer no power passes; a deployer
   power, an unacknowledged holder (agent, role, owner, node, attestor,
-  trusted contract), a pending owner other than governance or ops, or an
-  open proposal on a plan contract fails. A node a governance execution
+  trusted contract), a pending owner other than governance or ops, an
+  open proposal on a plan contract, or 1 to MIN_NODES - 1 registered
+  nodes (no query opens; 0, before nodes are voted in, warns; Task 5.17)
+  fails. A node a governance execution
   registered passes whoever sent it; one the deployer registered itself
   ends it with D50's warning (R-56c-1). It refuses before the ceremony
   completed (governance does not own every plan contract).
