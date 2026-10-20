@@ -65,7 +65,8 @@ the `handover.json` the deploy writes; on Sepolia
 `deployments/11155111.json` and `deployments/11155111.handover.json`).
 `<ANGLE>` is a value the operator fills in. Output is quoted as printed;
 `0x…` and `N` stand for an address and a number that differ between
-runs. Skip `# local` lines publicly.
+runs. Skip `# local` lines publicly and `# public` lines (with their
+here-document) locally.
 
 > **Local rehearsal box.** A fresh local node with Hardhat's public test
 > accounts (a published phrase): never use them on a public network.

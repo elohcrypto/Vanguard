@@ -240,7 +240,7 @@ const id = await (await ethers.getContractFactory("OnchainID", await ethers.getS
 EOF
 export OPS_IDENTITY=$(awk '/^OPS_IDENTITY/ {print $2}' $RB/ops-identity.log); grep "^OPS_IDENTITY" $RB/ops-identity.log
 node -e 'require("./scripts/zk/attest").attestorPublicKey("0x" + "11".repeat(32)).then((k) => console.log(JSON.stringify({ attestor: { Ax: String(k.Ax), Ay: String(k.Ay) }, ops: process.env.OPS, issuerAdmin: process.env.ADMIN })))' > $RB/ms.json   # local
-dep() { msrun scripts/production/DeployProduction.ts > $RB/ms-deploy.log 2>&1; echo "exit $?"; grep -E "^⏸️|not executed|effect|^✅ Preflight" $RB/ms-deploy.log; }
+dep() { msrun scripts/production/DeployProduction.ts > $RB/ms-deploy.log 2>&1; echo "exit $?"; grep -E "^⏸️|not executed|effect\(s\) hold|^✅ Preflight" $RB/ms-deploy.log; }
 dep; dep; exe $RB/ms-record.ops-transactions.json 10,12; dep; exe $RB/ms-record.ops-identity.ops-transactions.json 10,12; dep
 msrun scripts/ci/deploy-voters.js > $RB/ms-voters.log 2>&1   # local: section 3
 msrun scripts/handover.ts > $RB/ms-full.log 2>&1; echo "exit $?"; grep "^⏸️" $RB/ms-full.log

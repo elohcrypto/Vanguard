@@ -20,10 +20,10 @@ deployer (its creator gets no lasting power: only in the creating block
 may it pin a recovery manager or add a creation key):
 
 ```bash
-env -u MNEMONIC OPS_SAFE=<OPS_SAFE> CREATOR=<CREATOR_ADDRESS> npx hardhat console --network remote > ops-identity.log 2>&1 <<'EOF'
+env -u MNEMONIC OPS_SAFE=<OPS_SAFE> CREATOR=<CREATOR_ADDRESS> npx hardhat console --network remote > $RB/ops-identity.log 2>&1 <<'EOF'   # public
 const id = await (await ethers.getContractFactory("OnchainID", await ethers.getSigner(process.env.CREATOR))).deploy(process.env.OPS_SAFE); await id.waitForDeployment(); console.log("OPS_IDENTITY", await id.getAddress(), "owner", await id.owner());
 EOF
-export OPS_IDENTITY=$(awk '/^OPS_IDENTITY/ {print $2}' ops-identity.log); grep "^OPS_IDENTITY" ops-identity.log
+export OPS_IDENTITY=$(awk '/^OPS_IDENTITY/ {print $2}' $RB/ops-identity.log); grep "^OPS_IDENTITY" $RB/ops-identity.log   # public
 ```
 
 It prints `OPS_IDENTITY 0x… owner <OPS_SAFE>` (2.4's box runs it
