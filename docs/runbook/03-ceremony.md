@@ -211,12 +211,13 @@ chain as it is (its full phase, then the IRM plant-and-clear; no new
 1. Right after the full phase, record the digest it printed
    (`   snapshot sha256: <64 hex> (in …snapshot.json.sha256; record this line outside the run directory)`)
    outside `$RB` (the ceremony ticket, a signed message, a second person);
-   locally `export TICKET_SHA256=$(awk '/snapshot sha256:/ {print $3}' $RB/handover.log)`.
+   locally the box below's first line takes it from section 5's log.
 2. Before every accept run, take the digest from that record, not `$RB`
    (the box below). Publicly:
    `HANDOVER_SNAPSHOT_SHA256=<DIGEST> HANDOVER_PHASE=accept prod scripts/handover.ts`.
 
 ```bash
+export TICKET_SHA256=$(awk '/snapshot sha256:/ {print $3}' $RB/handover.log)   # local; publicly the digest from the record outside $RB
 sha256sum -c $HANDOVER_CONFIG.snapshot.json.sha256
 HANDOVER_SNAPSHOT_SHA256=$TICKET_SHA256 HANDOVER_PHASE=accept npx hardhat run scripts/handover.ts --network $NET > $RB/accept.log 2>&1; tail -1 $RB/accept.log
 ```

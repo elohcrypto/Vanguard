@@ -130,14 +130,25 @@ grep "Handover audit" $RB/audit.log
 
 It ends `✅ Audit passed: the deployer holds no power.` and has
 `🔍 Handover audit: every completion line against the state governance derives now (no snapshot, no voting window)`.
-Its `⚠️` lines are of two kinds. Residual warnings, deployer-era facts
-(an attestor key the deployer trusted, a node it registered, a
-whitelist root it published, a node that is also an escrow fee wallet,
-an `extraTrusted` acknowledgement, a config key set to `null`), change
-the last line to `⚠️  Audit passed with warnings: see above.`. Other
-warnings (an exempt escrow fee wallet or deployer, the deployer's
-leftover VSC or VGT, a circuit with no trusted attestor) are printed
-and leave `✅ Audit passed: …` (section 4a's final audit shows one).
+Its `⚠️` lines are of two kinds. Residual warnings, deployer-era facts,
+change the last line to `⚠️  Audit passed with warnings: see above.`:
+an attestor key the deployer trusted (one line per circuit), a node the
+deployer registered, a current whitelist root published by anyone but
+ops or governance, a node that is also an escrow fee wallet, an
+`extraTrusted` acknowledgement, a config key set to `null`. Every other
+warning is printed and leaves `✅ Audit passed: …` (section 4a's final
+audit shows one): an address exempt from investor limits since before
+the handover (`0x… is investorLimitExempt (set before the handover): …`),
+the deployer's leftover VSC or exemption, the deployer's leftover VGT,
+an escrow made before the handover that keeps the deployer as owner, an
+escrow fee wallet that is not exempt (`escrow fee wallet 0x… (…) is not investorLimitExempt on the registry the Token enforces: …`)
+or was registered after the handover,
+`OracleManager has 0 registered nodes, below ConsensusOracle.MIN_NODES (2): …`,
+a circuit with no trusted attestor (`PrivacyManager trusts no attestor for <circuit>: …`),
+a list oracle a stranger nominated the deployer on, a list oracle not
+created, named or bound that makes the deployer its listManager, a
+capped list-oracle scan, and VSC holders not listed on the whitelist
+oracle in Either mode.
 The ceremony's completion line follows the same rule. Failing:
 `❌ Handover failed: audit failed (see ❌ above)`. Before the ceremony:
 `❌ Handover failed: HANDOVER_PHASE=audit: the ceremony has not completed: governance does not own Token, …; run the full phase (or HANDOVER_PHASE=accept) first`.

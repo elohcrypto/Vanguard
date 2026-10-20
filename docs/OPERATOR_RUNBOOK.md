@@ -81,7 +81,7 @@ runs. Skip `# local` lines publicly.
 > export PROD_RECORD=/tmp/vanguard-runbook/deploy-record.json PROD_CONFIG=/tmp/vanguard-runbook/deploy-handover.json
 > unset OPS_IDENTITY   # set only where a box sets it (2.4); publicly section 7
 > rm -rf $RB && mkdir -p $RB   # start from an empty $RB
-> npx hardhat node --port $NODE_PORT > $RB/node.log 2>&1 &   # leave it running
+> node_modules/.bin/hardhat node --port $NODE_PORT > $RB/node.log 2>&1 & NODE_PID=$!   # leave it running (not via npx: $! is then the node itself)
 > sleep 10                                                   # until it listens
 > ```
 >
@@ -104,7 +104,13 @@ runs. Skip `# local` lines publicly.
 > `reset` prints `{"jsonrpc":"2.0","id":1,"result":true}`; `l0deploy` adds
 > `handover fixture deployed; config written to /tmp/vanguard-runbook/handover.json`;
 > `l0` adds `✅ Handover complete: the deployer holds no power.` At the end
-> `unset MNEMONIC PRIVATE_KEY` (public networks refuse it).
+> stop the local signer (the one 2.4 restarted) and the node, and drop the
+> keys (public networks refuse them):
+>
+> ```bash
+> kill $SIGNER_PID; kill $NODE_PID   # local
+> unset MNEMONIC PRIVATE_KEY
+> ```
 >
 > **Three tracks.** The production track (`prod`: sections 2, 3, 5a, 4,
 > 4a) runs the Sepolia commands against the local node through
