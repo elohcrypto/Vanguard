@@ -18,7 +18,7 @@ A template for the checks before a production deploy. Nothing here is checked by
   npx hardhat test test/integration/*.test.ts test/integration/*.test.js
   ```
 
-- [ ] **Production Simulation**: the three production suites pass
+- [ ] **Production Simulation**: the four Production*.test.ts suites pass (simulation, the deploy's ops step, the signer)
 
   ```bash
   npx hardhat test test/production/Production*.test.ts
@@ -78,12 +78,15 @@ A template for the checks before a production deploy. Nothing here is checked by
   ```
   - [ ] KeyManager authorized on the ops identity: the deploy sends
         `authorizeManager(KeyManager)` itself only when the deploying
-        wallet owns the ops identity; otherwise (or with `OPS_IDENTITY`
-        unset) it prints `OnchainID(<ops identity>).authorizeManager(<keyManager>)`,
-        which the ops identity's owner must send
+        wallet owns the ops identity; for an external ops (a Safe) it
+        exports the call as the ops Safe's batch and checks its effect on
+        the next run; otherwise (or with `OPS_IDENTITY` unset) it prints
+        `OnchainID(<ops identity>).authorizeManager(<keyManager>)`, which
+        the ops identity's owner must send
   - [ ] KeyManager pinned as the ops identity's recovery manager: the
         deploy pins it when the deploying wallet owns the identity,
-        prints the `pinRecoveryManager` call for another owner, and
+        puts it in the same batch for a Safe, prints the
+        `pinRecoveryManager` call for another owner, and
         refuses an identity already pinned to another manager
 
 - [ ] **Contract Verification**: Source code verification ready
@@ -143,7 +146,7 @@ A template for the checks before a production deploy. Nothing here is checked by
 
 - No identity fee; gas price and limits from the signer; 1 confirmation
   per transaction on a dev chain, 3 elsewhere (`confirmations` in the
-  config); about 64.3 M gas in all.
+  config); about 74.6 M gas for the deploy (docs/runbook/02-deploy.md, 2.2).
 - Timelocks are on chain, not configuration: `RECOVERY_TIMELOCK` is a
   48-hour constant; the rotation timelock defaults to 24 hours and an
   identity may set 1 hour to 7 days (`setCustomTimelock`).
@@ -164,7 +167,8 @@ ETHERSCAN_API_KEY=...
 
 ```bash
 # Run the production test set on the in-process network: test/integration
-# (listed with fs) and the three Production*.test.ts suites. The runner
+# (listed with fs), ProductionOnboarding, ProductionResilience and
+# ProductionDeployOps. The runner
 # refuses any network but hardhat/localhost and deploys nothing; a
 # live-network rehearsal is the deploy script below plus the handover
 # ceremony (docs/TESTNET_CEREMONY.md)
@@ -195,7 +199,7 @@ echo "⛽ Current gas price should be < 50 gwei for deployment"
 
 ```bash
 # Deploy to mainnet (FINAL STEP)
-SIGNER_RPC_URL=<signer endpoint> DEPLOY_CONFIG=<deploy.json> npx hardhat run scripts/production/DeployProduction.ts --network remote
+OPS_IDENTITY=<ops OnchainID> SIGNER_RPC_URL=<signer endpoint> DEPLOY_CONFIG=<deploy.json> npx hardhat run scripts/production/DeployProduction.ts --network remote
 
 # Verify deployment
 npx hardhat verify --network mainnet FACTORY_ADDRESS "CONSTRUCTOR_ARGS"

@@ -14,12 +14,25 @@ test/production/
 ├── ProductionOnboarding.test.ts  # Corporate, individual and institutional onboarding
 ├── ProductionResilience.test.ts  # Recovery, congestion, performance, security probes
 ├── ProductionDeployOps.test.ts   # DeployProduction's ops-identity step
+├── ProductionSigner.test.ts      # scripts/production/signer.js end to end
+├── Signer*.test.ts               # The signer: prompt, nonce record, bump, retry, token guard
 ├── DeployConfig.test.ts          # Deploy inputs, key refusals, CLI refusals
-├── DeployRecord.test.ts          # The deploy record: resume, replay, tamper
+├── DeployRecord*.test.ts         # The deploy record: resume, replay, tamper, stale pending
+├── DeployFrontRun.test.ts        # A front-run deploy transaction
+├── DeployRolePause.test.ts       # Multisig roles: the deploy's pause and effect checks
+├── DevChainGuards.test.ts        # Dev-chain-only refusals; LiveKeys.test.ts, CliGuards.test.ts
+├── WalletPins*.test.ts           # The handover.json "accounts" pins
+├── Rpc*.test.ts                  # rpc-check, RPC credentials, RPC retry
+├── ScanCount.test.ts             # The scan cross-check; CostTable.test.ts, the budget table
+├── PostCeremony*.test.ts         # Post-ceremony votes, removal hazards, pending senders
+├── OracleRotation.test.ts        # Node rotation by vote after the ceremony
+├── ClaimSigners.test.ts          # The claim-signer CLI
 ├── OpsKeyManager.test.ts         # scripts/production/opsKeyManager.ts
 ├── Onboard.test.ts               # The shared onboarding helper
 ├── CustodyFlow.test.ts           # Custody (InvestorRequestManager, MultiSigWallet)
 ├── GovernedCalls.test.ts         # Calls governance makes after the handover
+├── *ProposalFlow.test.ts         # The demo's vote and execute flows; ProposeAfterCeremony,
+│                                 #   RoleCallsValues, ZkCliChain .test.ts
 ├── deployHandoverFixture.ts      # The ceremony fixture
 ├── Handover*.test.ts             # The ceremony: preflight, steps, window, completion, CLI
 ├── PRODUCTION_CHECKLIST.md       # Pre-deployment checklist (a template)
@@ -29,13 +42,14 @@ test/production/
 ## Running
 
 ```bash
-# The three production-simulation suites
+# The four Production*.test.ts suites (simulation, ops step, signer)
 npx hardhat test test/production/Production*.test.ts
 
 # Everything in this directory runs with the rest of the suite
 npm test
 
-# test/integration plus the three Production*.test.ts suites, with a JSON
+# test/integration plus ProductionOnboarding, ProductionResilience and
+# ProductionDeployOps, with a JSON
 # summary in test-reports/production/. Local only: it refuses any network
 # but hardhat/localhost, deploys nothing itself and runs the suites on the
 # in-process network (plan v2 Task 4.13, D48).
@@ -81,7 +95,9 @@ environment variable or config file changes either.
 `MAINNET_RPC_URL`, `ETHERSCAN_API_KEY`, `SIGNER_RPC_URL` (the `remote`
 network; hardhat.config.ts), `DEPLOY_GAS_LIMIT` (ProductionEnvironment),
 `DEPLOY_CONFIG`, `DEPLOY_RECORD`, `HANDOVER_CONFIG` and `OPS_IDENTITY`
-(DeployProduction.ts, which refuses `MNEMONIC` / `PRIVATE_KEY`).
+(DeployProduction.ts, which refuses `MNEMONIC` / `PRIVATE_KEY`). The
+signer and the other production CLIs read their own (`SIGNER_*`,
+`RPC_CHECK_URLS*`, `NEW_NODES`, `CLAIM_SIGNERS`, `SCAN_*`): the runbook.
 
 ## Related
 
