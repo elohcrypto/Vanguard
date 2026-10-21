@@ -122,10 +122,13 @@ async function handoverDeployerPowers(o) {
   await preflightPins(o);
   const { governanceOwned } = await preflight(o);
   // Review D-1: every role read as a multisig; the deployer owns none.
-  for (const [label, pass] of await roleSafeLines(o)) {
+  // Round 3: its warnings print here too, on every path (83c vets none).
+  const roleWarns = [];
+  for (const [label, pass] of await roleSafeLines(o, roleWarns)) {
     check(pass, label);
     log(`   ✅ ${label}`);
   }
+  for (const w of roleWarns) log(`   ⚠️  ${w}`);
   // Task 4.16 (D47): a whitelist oracle bound to VSC must list every holder.
   await preflightHolders(o, (w) => log(`   ⚠️  ${w}`));
   await preflightLinks(o); // Task 4.13: A1 H2/H3, M1, D56
