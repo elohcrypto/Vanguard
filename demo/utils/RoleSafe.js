@@ -19,6 +19,7 @@ const DEPTH = 2; // nested multisigs read below the role
 const SENTINEL = "0x0000000000000000000000000000000000000001";
 const MAX_MODULES = 100; // past it the module list is unread
 const PAST = "past";
+const NEUTRAL = { from: ethers.ZeroAddress };
 const is7702 = (code) => code.toLowerCase().startsWith("0xef0100");
 
 /**
@@ -46,14 +47,16 @@ function noSuchFunction(e) {
  * a rate limit) propagates and fails the run like every other read.
  */
 async function readSafe(addr) {
-  const safe = await ethers.getContractAt(SAFE_ABI, addr);
+  // Round 3: an eth_call from the zero address, not the deployer, so a
+  // lookalike keyed on msg.sender cannot answer the deployer differently.
+  const safe = new ethers.Contract(addr, SAFE_ABI, ethers.provider);
   const none = (e) => {
     if (noSuchFunction(e)) return null;
     throw e;
   };
-  const owners = await safe.getOwners().catch(none);
+  const owners = await safe.getOwners(NEUTRAL).catch(none);
   if (owners === null) return null;
-  const threshold = await safe.getThreshold().catch(none);
+  const threshold = await safe.getThreshold(NEUTRAL).catch(none);
   const modules = await readModules(safe, none);
   return { owners: [...owners], threshold, modules };
 }
@@ -69,7 +72,7 @@ async function readModules(safe, none) {
   const mods = [];
   let start = SENTINEL;
   for (;;) {
-    const page = await safe.getModulesPaginated(start, 10).catch(none);
+    const page = await safe.getModulesPaginated(start, 10, NEUTRAL).catch(none);
     if (page === null) return null;
     const [list, next] = [[...page[0]], page[1]];
     const end = !list.length || sameAddr(next, SENTINEL);
