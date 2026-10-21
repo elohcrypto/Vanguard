@@ -412,10 +412,10 @@ async function residueLines(o) {
 
 /**
  * Warnings, not failures: the deployer's leftover VSC and exemption (a
- * treasury artifact) and VGT, escrows that keep the deployer as owner, and escrow
- * fee wallets that are not exempt on the
- * registry the Token enforces or were registered after the handover
- * (R-2F4-2: after it only an InvestorTypeConfig vote can exempt them).
+ * treasury artifact) and VGT, escrows that keep the deployer as owner or
+ * fee wallet, and escrow fee wallets that are not exempt on the registry
+ * the Token enforces or were registered after the handover (R-2F4-2:
+ * after it only an InvestorTypeConfig vote can exempt them).
  */
 async function residueWarnings(o, dAddr, govAddr, warnings) {
   const itr = await o.token.investorTypeRegistry();
@@ -447,13 +447,8 @@ async function residueWarnings(o, dAddr, govAddr, warnings) {
     o.derived.factories.escrowWalletFactory ||
     o.derived.escrowFactories[0]?.factory;
   const f = fAddr && (await ethers.getContractAt("EscrowWalletFactory", fAddr));
-  // Review L-2: an escrow's owner is immutable.
-  const mine = f ? await deployerEscrows(f, dAddr, o) : [];
-  if (mine.length) {
-    warnings.push(
-      `escrow(s) ${mine.join(", ")} were created before the handover and keep the deployer as owner (immutable): it can still setPayer on an unfunded one and sweepExcess; settle or sweep them`,
-    );
-  }
+  // Review L-2, D2-5: an escrow's owner and fee wallet are fixed.
+  if (f) warnings.push(...(await deployerEscrows(f, dAddr, o)));
   if (!reg) return;
   const fee = [];
   if (f) {

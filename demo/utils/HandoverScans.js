@@ -13,7 +13,10 @@ const { RANGE_ERROR, ARCHIVE_ERROR, textOf } = require("./RpcRetry");
 
 const ZERO = ethers.ZeroAddress;
 const FACTORY_OF = ["function factory() view returns (address)"];
-const OWNER_OF = ["function owner() view returns (address)"];
+const ESCROW_OF = [
+  "function owner() view returns (address)",
+  "function ownerWallet() view returns (address)",
+];
 
 /** Checksummed, de-duplicated, zero dropped. */
 function uniq(list) {
@@ -314,9 +317,10 @@ async function issuerLines(o) {
 }
 
 /**
- * Review L-2: escrows `factory` created whose immutable owner is the
- * deployer (created before the handover). It can still setPayer on an
- * unfunded one and sweepExcess.
+ * Review L-2, D2-5: warnings for the escrows `factory` created that still
+ * serve the deployer: an immutable owner (it can still setPayer on an
+ * unfunded one and sweepExcess) or an ownerWallet fixed at creation (the
+ * platform fee and the swept excess of every release go to it).
  */
 async function deployerEscrows(factory, dAddr, o) {
   const created = await scanLogs(
@@ -324,11 +328,21 @@ async function deployerEscrows(factory, dAddr, o) {
     factory.filters.EscrowWalletCreated(),
     o,
   );
-  const out = [];
+  const [owned, paid] = [[], []];
   for (const a of uniq(created.map((ev) => ev.args[1]))) {
-    const w = await ethers.getContractAt(OWNER_OF, a);
-    if (same(await w.owner(), dAddr)) out.push(a);
+    const w = await ethers.getContractAt(ESCROW_OF, a);
+    if (same(await w.owner(), dAddr)) owned.push(a);
+    if (same(await w.ownerWallet(), dAddr)) paid.push(a);
   }
+  const out = [];
+  if (owned.length)
+    out.push(
+      `escrow(s) ${owned.join(", ")} were created before the handover and keep the deployer as owner (immutable): it can still setPayer on an unfunded one and sweepExcess; settle or sweep them`,
+    );
+  if (paid.length)
+    out.push(
+      `escrow(s) ${paid.join(", ")} keep the deployer as ownerWallet (fixed at creation): the platform fee and the swept excess of every release go to the deployer; settle or sweep them`,
+    );
   return out;
 }
 
