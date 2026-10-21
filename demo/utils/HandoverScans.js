@@ -273,22 +273,23 @@ async function liveTrustedContracts(o) {
 
 /**
  * Review D2-1: every issuer the IdentityRegistry trusts for any topic,
- * required or not: [{ issuer, topics }] from TrustedIssuerAdded, each
- * topic re-read with isTrustedIssuer. R-413-6: every issuer of a required
- * topic was trusted by event, so the scan must have seen it.
+ * required or not: [{ issuer, topics, block }] from TrustedIssuerAdded,
+ * each topic re-read with isTrustedIssuer, `block` its last such event.
+ * R-413-6: every issuer of a required topic was trusted by event, so the
+ * scan must have seen it.
  */
 async function trustedIssuers(o) {
   const reg = o.identityRegistry;
   const events = await scanLogs(reg, reg.filters.TrustedIssuerAdded(), o);
   const out = [];
   for (const issuer of uniq(events.map((ev) => ev.args[0]))) {
-    const asked = new Set();
-    for (const ev of events)
-      if (same(ev.args[0], issuer)) for (const t of ev.args[1]) asked.add(t);
+    const mine = events.filter((ev) => same(ev.args[0], issuer));
+    const asked = new Set(mine.flatMap((ev) => [...ev.args[1]]));
     const topics = [];
     for (const t of asked)
       if (await reg.isTrustedIssuer(issuer, t)) topics.push(t);
-    if (topics.length) out.push({ issuer, topics });
+    const block = mine[mine.length - 1].blockNumber;
+    if (topics.length) out.push({ issuer, topics, block });
   }
   const missed = [];
   for (const topic of await reg.getClaimTopics()) {
@@ -306,10 +307,10 @@ async function trustedIssuers(o) {
 /** D2-1: one line per trusted issuer the scan found, with its topics. */
 async function issuerLines(o) {
   const out = [];
-  for (const { issuer, topics } of o.derived.trustedIssuers) {
+  for (const { issuer, topics, block } of o.derived.trustedIssuers) {
     const c = await ethers.getContractAt("ClaimIssuer", issuer);
     out.push([
-      `IdentityRegistry trusts ${await issuerLabel(c)} for topic(s) [${topics.join(", ")}] (TrustedIssuerAdded scan)`,
+      `IdentityRegistry trusts ${await issuerLabel(c)} for topic(s) [${topics.join(", ")}] (TrustedIssuerAdded at block ${block})`,
       true,
     ]);
   }
