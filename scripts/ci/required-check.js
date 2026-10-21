@@ -1,42 +1,53 @@
 #!/usr/bin/env node
 "use strict";
-// Review E-3 (Q22): branch protection requires one check, the `required`
-// job in .github/workflows/ci.yml. Its needs must equal every other job
-// id, so a new job cannot be left out, and its `if` must hold always(),
-// so a failed or skipped need fails it instead of skipping it (protection
-// reads a skipped check as passed). Exits 1 on any gap;
-// `node scripts/ci/required-check.js [workflow.yml]`.
-// js-yaml is not a direct dependency: npm ci hoists 4.x from mocha and
-// solhint. Losing it fails the require loudly; a regex would miss quietly.
+// Review E-3 (Q22): `required` is the one check branch protection needs.
+// Its needs must equal the other job ids, and its shape is pinned so it
+// runs and fails when a need failed or was skipped (a skipped check reads
+// as passed). js-yaml is hoisted (mocha, solhint): a loss fails loudly.
 const fs = require("fs");
 const yaml = require("js-yaml");
 
-// The parsed workflow -> one string per gap, [] when clean.
+const IF = "${{ always() && !github.event.deleted }}";
+const RUN = `jq -e 'all(.[]; .result == "success")' <<< "$RESULTS"`;
+const ENV = "${{ toJSON(needs) }}";
+const show = JSON.stringify;
+const list = (ids) => ids.join(", ") || "none";
+const without = (ids, set) => list(ids.filter((id) => !set.includes(id)));
 function check(doc) {
   const jobs = doc.jobs || {};
-  const required = jobs.required;
-  if (!required) return ["no `required` job"];
+  const job = jobs.required;
+  if (!job) return ["no `required` job"];
+  const step = (job.steps || [])[0] || {};
   const errors = [];
-  if (!String(required.if).includes("always()")) {
-    errors.push(`required.if is ${JSON.stringify(required.if)}, without always()`);
-  }
-  const others = Object.keys(jobs)
-    .filter((id) => id !== "required")
-    .sort();
-  const needs = [].concat(required.needs || []).sort();
-  const missing = others.filter((id) => !needs.includes(id));
-  const extra = needs.filter((id) => !others.includes(id));
-  if (missing.length || extra.length) {
-    errors.push(
-      `required.needs [${needs.join(", ")}] differs from the other jobs ` +
-        `[${others.join(", ")}]; missing: ${missing.join(", ") || "none"}; ` +
-        `not a job: ${extra.join(", ") || "none"}`,
+  const only = (at, obj, keys) =>
+    Object.keys(obj).forEach(
+      (k) => keys.includes(k) || errors.push(`${at} sets ${k}`),
     );
+  const pin = (at, got, want) =>
+    got === want || errors.push(`${at} is ${show(got)}, not ${show(want)}`);
+  // Any other key can skip, soften or rename the check.
+  only("required", job, ["if", "needs", "runs-on", "timeout-minutes", "steps"]);
+  only("required.steps[0]", step, ["name", "env", "run"]);
+  only("required.steps[0].env", step.env || {}, ["RESULTS"]);
+  pin("required step count", (job.steps || []).length, 1);
+  pin("required.if", job.if, IF);
+  pin("required.steps[0].run", step.run, RUN);
+  pin("required.steps[0].env.RESULTS", (step.env || {}).RESULTS, ENV);
+  if (!Array.isArray(job.needs)) {
+    return [...errors, `required.needs is ${show(job.needs)}, not a list`];
   }
-  return errors;
+  const others = Object.keys(jobs).filter((id) => id !== "required");
+  const needs = [...job.needs].sort();
+  if (show(needs) === show([...others].sort())) return errors;
+  const dup = list(needs.filter((id, i) => needs.indexOf(id) !== i));
+  return [
+    ...errors,
+    `required.needs missing: ${without(others, needs)}; not a job: ` +
+      `${without(needs, others)}; duplicate: ${dup}`,
+  ];
 }
 
-function main() {
+if (require.main === module) {
   const file = process.argv[2] || ".github/workflows/ci.yml";
   const doc = yaml.load(fs.readFileSync(file, "utf8"));
   const errors = check(doc);
@@ -45,6 +56,4 @@ function main() {
   const n = Object.keys(doc.jobs).length - 1;
   console.log(`required needs all ${n} other jobs in ${file}`);
 }
-
-if (require.main === module) main();
 module.exports = { check };
