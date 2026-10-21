@@ -49,7 +49,11 @@ const { preflightHolders } = require("./HandoverHolders");
 const { preflightRoles } = require("./HandoverRoles");
 const { preflightTrust } = require("./HandoverTrust");
 const { preflightNodes, nodeSteps } = require("./HandoverNodes");
-const { preflightParams, paramSteps } = require("./HandoverParams");
+const {
+  preflightPins,
+  preflightParams,
+  paramSteps,
+} = require("./HandoverParams");
 const { snapshotFacts, preflightSnapshots } = require("./HandoverSnapshot");
 const { preflightEscrow } = require("./HandoverEscrow");
 const { recordingSigner } = require("./HandoverWindow");
@@ -115,6 +119,7 @@ async function handoverDeployerPowers(o) {
   };
 
   // Read-only; throws before any transaction when a precondition fails.
+  await preflightPins(o);
   const { governanceOwned } = await preflight(o);
   // Review D-1: every role read as a multisig; the deployer owns none.
   for (const [label, pass] of await roleSafeLines(o)) {

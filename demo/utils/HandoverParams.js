@@ -300,6 +300,14 @@ async function paramChecks(o, pre) {
 /** Read-only, before the first transaction. */
 async function preflightParams(o) {
   for (const c of await paramChecks(o, true)) if (!c.ok) fail(c.fix);
+}
+
+/**
+ * The plan's code pins, before the preflight reads through the plan
+ * (review D2-1 round 2): a trusted issuer that is no ClaimIssuer is
+ * refused by name, not by the revert of its first call.
+ */
+async function preflightPins(o) {
   for (const c of await planPins(o)) if (!c.ok) fail(codeHashRefusal(c));
 }
 
@@ -336,6 +344,7 @@ module.exports = {
   privacyChecks,
   identityChecks,
   planPins,
+  preflightPins,
   preflightParams,
   paramSteps,
   paramLines,
