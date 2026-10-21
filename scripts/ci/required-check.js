@@ -11,28 +11,40 @@
 const fs = require("fs");
 const yaml = require("js-yaml");
 
-const file = process.argv[2] || ".github/workflows/ci.yml";
-const fail = (msg) => {
-  console.error(`::error::${file}: ${msg}`);
-  process.exit(1);
-};
-const { jobs } = yaml.load(fs.readFileSync(file, "utf8"));
-const required = jobs.required;
-if (!required) fail("no `required` job");
-if (!String(required.if).includes("always()")) {
-  fail(`required.if is ${JSON.stringify(required.if)}, without always()`);
+// The parsed workflow -> one string per gap, [] when clean.
+function check(doc) {
+  const jobs = doc.jobs || {};
+  const required = jobs.required;
+  if (!required) return ["no `required` job"];
+  const errors = [];
+  if (!String(required.if).includes("always()")) {
+    errors.push(`required.if is ${JSON.stringify(required.if)}, without always()`);
+  }
+  const others = Object.keys(jobs)
+    .filter((id) => id !== "required")
+    .sort();
+  const needs = [].concat(required.needs || []).sort();
+  const missing = others.filter((id) => !needs.includes(id));
+  const extra = needs.filter((id) => !others.includes(id));
+  if (missing.length || extra.length) {
+    errors.push(
+      `required.needs [${needs.join(", ")}] differs from the other jobs ` +
+        `[${others.join(", ")}]; missing: ${missing.join(", ") || "none"}; ` +
+        `not a job: ${extra.join(", ") || "none"}`,
+    );
+  }
+  return errors;
 }
-const others = Object.keys(jobs)
-  .filter((id) => id !== "required")
-  .sort();
-const needs = [].concat(required.needs || []).sort();
-const missing = others.filter((id) => !needs.includes(id));
-const extra = needs.filter((id) => !others.includes(id));
-if (missing.length || extra.length) {
-  fail(
-    `required.needs [${needs.join(", ")}] differs from the other jobs ` +
-      `[${others.join(", ")}]; missing: ${missing.join(", ") || "none"}; ` +
-      `not a job: ${extra.join(", ") || "none"}`,
-  );
+
+function main() {
+  const file = process.argv[2] || ".github/workflows/ci.yml";
+  const doc = yaml.load(fs.readFileSync(file, "utf8"));
+  const errors = check(doc);
+  errors.forEach((e) => console.error(`::error::${file}: ${e}`));
+  if (errors.length) process.exit(1);
+  const n = Object.keys(doc.jobs).length - 1;
+  console.log(`required needs all ${n} other jobs in ${file}`);
 }
-console.log(`required needs all ${others.length} other jobs in ${file}`);
+
+if (require.main === module) main();
+module.exports = { check };
