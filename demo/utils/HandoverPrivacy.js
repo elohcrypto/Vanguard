@@ -113,11 +113,15 @@ async function preflightPrivacy(o, log = () => {}) {
   for (const c of await codeHashChecks(pm, [zk])) {
     if (!c.ok) fail(codeHashRefusal(c));
   }
-  // Review D2-2: what completion and the audit refuse, shown up front.
+  // Review D2-2: the lines completion and the audit print, refused here
+  // too (round 2): before the ceremony the deployer republishes or
+  // re-trusts in one transaction; after it each is a governance vote.
   if (!pm) return;
   const [ops, gov] = await Promise.all([o.ops, o.governance].map(addrOf));
   const swaps = await swapLines(o, pm, [await pm.zkVerifier()], ops, gov);
-  for (const [label, ok] of swaps) log(`   ${ok ? "ℹ️ " : "⚠️ "} ${label}`);
+  for (const [label, ok] of swaps) log(`   ${ok ? "✅" : "❌"} ${label}`);
+  const open = swaps.filter(([, ok]) => !ok).map(([label]) => label);
+  check(!open.length, open.join("; "));
 }
 
 /**
