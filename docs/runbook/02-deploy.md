@@ -213,16 +213,31 @@ words: a 7702 account; the deployer as a listed owner
 an owner below the role they cannot read (past two levels, in a cycle,
 or with no readable `getOwners()`:
 `❌ guardian 0x…: owner 0x… (through 0x…, 0x…) is unread (code past 2 levels): the deployer's ownership of it cannot be vetted`);
-the deployer as an enabled module of the role or of an owner Safe
-(`❌ guardian 0x… has the deployer 0x… as an enabled module: a module executes without the owners`).
-Warned in every phase, never a ✅, and the run then ends with
-warnings: any other module
+the deployer as an enabled module of the role or of an owner Safe, on
+any page of its module list
+(`❌ guardian 0x… has the deployer 0x… as an enabled module: a module executes without the owners`);
+a module list they cannot read whole, past 100 entries
+(`❌ guardian 0x… has its module list unread past 100: a module executes without the owners`)
+or not readable beside a working `getOwners()`
+(`❌ guardian 0x… reads as a Safe but its module list cannot be read: a module executes without the owners`);
+a contract that reads as a Safe (`getOwners()` works, so its owners
+are vetted as above) but whose threshold they cannot read
+(`❌ guardian 0x… reads as a Safe but its threshold cannot be read: it cannot be vetted as a multisig`);
+and a degenerate multisig, with no owner or a threshold of 0 or above
+its owner count
+(`❌ guardian 0x… is a degenerate multisig (0-of-0): it needs an owner and a threshold from 1 to its owner count`).
+Warned in every phase (the preflight included), never a ✅, and the
+run then ends with warnings: any other module
 (`⚠️  ops 0x… has module(s) enabled (…): a module executes without the owners`)
-and a role contract that reads as no Safe
+and a role contract whose `getOwners()` cannot be read, so it reads as
+no Safe
 (`⚠️  ops 0x… has code but no readable getOwners()/getThreshold(): the deployer's ownership of it is unchecked (runbook section 2)`).
-A timeout or a rate limit on these reads fails the run; it is never
-read as "no Safe". The vet reads what each contract reports, so compare
-each role address with your own Safe before the deploy, and ensure the
+Only a call that has no such function (a revert with no data, or no
+data back) reads as missing; a timeout, a rate limit, a revert with
+data or any other error on these reads fails the run. The vet reads
+what each contract reports, each call from the zero address so a
+contract cannot answer the deployer differently; still compare each
+role address with your own Safe before the deploy, and ensure the
 deployer neither owns nor executes it any other way. Its calls go to a
 Safe Transaction Builder batch (2.5) with
 `⏸️  awaiting N <role> transaction(s): <file>`, exit 3: paused, not done.

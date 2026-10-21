@@ -135,7 +135,9 @@ change the last line to `⚠️  Audit passed with warnings: see above.`:
 an attestor key the deployer trusted (one line per circuit), a node the
 deployer registered, a current whitelist root published by anyone but
 ops or governance, a node that is also an escrow fee wallet, an
-`extraTrusted` acknowledgement, a config key set to `null`. Every other
+`extraTrusted` acknowledgement, a config key set to `null`, and a role
+Safe's module other than the deployer or a role contract that reads as
+no Safe ([2.4](02-deploy.md#24-multisig-ops-issuer-admin-and-guardian-task-513-q11--b)). Every other
 warning is printed and leaves `✅ Audit passed: …` (section 4a's final
 audit shows one): an address exempt from investor limits since before
 the handover (`0x… is investorLimitExempt (set before the handover): …`),
@@ -152,6 +154,16 @@ oracle in Either mode.
 The ceremony's completion line follows the same rule. Failing:
 `❌ Handover failed: audit failed (see ❌ above)`. Before the ceremony:
 `❌ Handover failed: HANDOVER_PHASE=audit: the ceremony has not completed: governance does not own Token, …; run the full phase (or HANDOVER_PHASE=accept) first`.
+Each role is read as a Safe again, and the role lines of 2.4 fail it
+(`   ❌ guardian 0x… lists the deployer 0x… as an owner: the deployer holds its power`,
+a module list or a threshold unread, a degenerate multisig); so does a
+verifier swap since the ceremony until its remedy
+(`   ❌ whitelist bindings made up to block N (the last whitelist verifier swap) still count: …`,
+`   ❌ <circuit> records made up to block N (the last <circuit> verifier swap) still count: …`;
+ops republishing the root is the whitelist's remedy, the attestation
+remedies are in [section 4](04-after-ceremony.md)). A trusted issuer
+that is no ClaimIssuer is refused by its code pin before the lines
+(`Handover: ClaimIssuer 0x… runtime code hash 0x… is not the compiled ClaimIssuer (0x…): …`).
 A list oracle the deployer owns fails it (`   ❌ the deployer still owns (or has pending by its own nomination) list oracle(s) 0x… serving OracleManager 0x…`);
 a stranger's nomination of the deployer only warns. Repeat the scan
 cross-check (section 5a, between votes) when you change RPC providers.

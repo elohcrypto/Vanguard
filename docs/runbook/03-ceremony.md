@@ -102,7 +102,8 @@ Before step 1 it prints one line per issuer the registry trusts, read
 from the TrustedIssuerAdded scan whatever the topic
 (`   ℹ️  IdentityRegistry trusts KYC Issuer (0x…) for topic(s) [6] (TrustedIssuerAdded at block N)`;
 the name is the issuer's own: `KYC Issuer` on this fixture, `KYC Service`
-in the demo; a `"issuers"` list that omits one is refused, and a trusted
+in the demo and on the production track, whose deploy runs the demo's
+deployer; a `"issuers"` list that omits one is refused, and a trusted
 issuer that is no ClaimIssuer is refused by its code pin,
 `ClaimIssuer 0x… runtime code hash 0x… is not the compiled ClaimIssuer (0x…): …`),
 one line per role read as a key or a Safe
