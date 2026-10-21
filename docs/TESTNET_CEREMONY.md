@@ -31,8 +31,8 @@ it): every trusted issuer must end owned by issuerAdmin with issuerAdmin's
 the only live key, so an issuer another wallet owns is refused, never
 skipped (R-413-7).
 The deployer's powers are read from chain, not from the config (2F.5): the
-oracles ComplianceRules binds to VSC and VGT, the registry's trusted issuers
-of each required topic, each oracle's `listManager`, the DynamicListManager
+oracles ComplianceRules binds to VSC and VGT, every issuer the registry
+trusts for any topic (TrustedIssuerAdded scan), each oracle's `listManager`, the DynamicListManager
 governance is bound to, and the contracts bound to types 9 to 12 (the two
 factories, PrivacyManager, ZKVerifierIntegrated). Step 3 nominates each
 and binds its type (`setEscrowWalletFactory`, `setOnchainIDFactory`,

@@ -69,11 +69,14 @@ ops after) or 75. The ceremony checks the voter age first. Local: L0.
 
 ```bash
 l0   # local
-grep "minVoterAge" $RB/handover.log
+grep -E "minVoterAge|TIME_SCALE [0-9]+ on" $RB/handover.log
 ```
 
 A young identity stops it with `❌ Handover failed: Handover: voter 0x… has an identity younger than minVoterAge (Ns); governance refuses it ("Identity too new to vote"): …`;
-L0 prints `   ✅ governance minVoterAge 420s is at least 7 days / TIME_SCALE (420s)`.
+L0 prints `   ✅ governance TIME_SCALE 1440 on chain 31337 (above 1 only on the dev chain 31337)`
+and `   ✅ governance minVoterAge 420s is at least 7 days / TIME_SCALE (420s)`.
+Off chain 31337 a TIME_SCALE other than 1 stops the preflight
+(`❌ Handover failed: Handover: governance TIME_SCALE is 1440 on chain 11155111: …`).
 
 ## 5. The ceremony
 
@@ -95,6 +98,22 @@ and its digest (section 6), `🏛️  Handover: governance accepts by vote`
 `⚠️  Handover complete with warnings: see above.`). A failure ends
 `❌ Handover failed: <reason>`, exit 1 (the preflight refuses before the
 first transaction); a multisig role pauses it, exit 3 (section 2.4).
+Before step 1 it prints one line per issuer the registry trusts, read
+from the TrustedIssuerAdded scan whatever the topic
+(`   ℹ️  IdentityRegistry trusts KYC Service (0x…) for topic(s) [6] (TrustedIssuerAdded scan)`;
+a `"issuers"` list that omits one is refused), one line per role read as
+a key or a Safe (`   ✅ guardian 0x… is a key (no code), not the deployer`
+or `   ✅ guardian 0x… is a <T>-of-<N> multisig; the deployer is no listed owner`;
+the deployer as a listed owner at any depth is refused) and the verifier
+swaps (`   ℹ️  verifier swaps since fromBlock N: 0`, then
+`   ℹ️  ZKVerifierIntegrated 0x… validProofs whitelist 0, …; PrivacyManager bindings whitelist 0, …`:
+account for any validProofs count above its bindings). The verify step
+and the audit print the same lines. A swap prints
+`   ❌ verifier swap at block N: ZKVerifierIntegrated 0x… whitelist verifier set to 0x… (K PrivacyManager binding(s) made under it)`
+and fails the verify step and the audit while records made under it can
+still count: ops republishes the whitelist root after it; for an
+attestation verifier a PrivacyParameters vote untrusts then re-trusts
+each trusted key of that circuit, or changes its policy (section 4).
 `HANDOVER_PHASE` selects the phase: unset or `full`, `preflight` (the
 checks up to the first transaction, nothing sent; the deploy runs it),
 `accept` (resume, section 6) and `audit` (section 10). Demo options 83c,

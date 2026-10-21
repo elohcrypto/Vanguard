@@ -146,8 +146,10 @@ the second prints `{ "Ax": "…", "Ay": "…" }` for the config
   `GOV_TIME_SCALE` other than 1 off a dev chain, a role that is neither
   a signer account nor external, a deployer, ops, guardian and issuer
   admin that are not four different keys, a fee wallet that is the
-  deployer, a role or a node, and a node that is the deployer. A
-  proposer, voter or node that clashes with another role is refused
+  deployer, a role or a node, and a node that is the deployer, ops, the
+  guardian, the issuer admin, the proposer or a voter
+  (`deploy config: oracleNodes[2] 0x… is voters[0]: a node is a key of its own (D25 b); …`).
+  A proposer or voter that clashes with another role is refused
   later, by the onboarding (section 3) and the ceremony's checks.
 
 Local (production track; publicly `signer.js` on 1248, section 1a;
@@ -203,8 +205,9 @@ prints `✅ Deployed: 74 transactions in /tmp/vanguard-runbook/deploy-record.jso
 A role at an address with code (a Safe) or in the config's
 `"externalRoles"` is external: nothing is sent for it (a wallet index with
 code, e.g. an EIP-7702 account, is refused: write it as an address).
-Refused: a 7702 account, the deployer as a listed owner (or two nested
-levels down); warned: an unreadable multisig, a deeper contract owner, a
+Refused, for every external role (the guardian Safe too: its owners
+could pause VSC): a 7702 account, the deployer as a listed owner (or two
+nested levels down); warned: an unreadable multisig, a deeper contract owner, a
 module (`⚠️  ops 0x… has module(s) enabled (…): …`). It sees listed
 owners only: you ensure the deployer neither owns nor executes it,
 directly or through other contracts or modules. Its calls go to a Safe
