@@ -6,10 +6,18 @@
 
 const { ethers } = require("hardhat");
 const { addrOf, same } = require("./HandoverChecks");
+const { readRoleSafe } = require("./RoleCalls");
+
+const ROLES = [
+  ["ops", "ops"],
+  ["guardian", "the guardian"],
+  ["issuerAdmin", "the issuer admin"],
+];
 
 /**
  * M-5 (D25 b): the role `a` holds besides being a node, or null: ops,
- * the guardian, the issuer admin, the proposer or a voter (`o.voterWallets`,
+ * the guardian, the issuer admin or an owner key of one that is a
+ * multisig (review D-8), the proposer or a voter (`o.voterWallets`,
  * the proposer first), a claim signer (`o.claimSigners`), the
  * OracleManager operator, an InvestorTypeRegistry governor or compliance
  * officer (slice D review LOW-4), an IdentityRegistry,
@@ -18,12 +26,16 @@ const { addrOf, same } = require("./HandoverChecks");
  * with scripts/production/postCeremonyVotes.ts.
  */
 async function roleOf(o, a) {
-  for (const [k, role] of [
-    ["ops", "ops"],
-    ["guardian", "the guardian"],
-    ["issuerAdmin", "the issuer admin"],
-  ]) {
+  for (const [k, role] of ROLES) {
     if (o[k] && same(await addrOf(o[k]), a)) return role;
+  }
+  // Review D-8: nor an owner key of a role multisig, at any depth read.
+  for (const [k, role] of ROLES) {
+    if (!o[k]) continue;
+    const r = await addrOf(o[k]);
+    const { keys } = await readRoleSafe(r, ethers.ZeroAddress, role);
+    if (keys.some((x) => same(x, a)))
+      return `an owner key of ${role} (multisig ${r})`;
   }
   const vw = o.voterWallets || [];
   for (const [i, v] of vw.entries()) {
