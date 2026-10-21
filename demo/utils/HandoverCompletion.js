@@ -47,6 +47,7 @@ const { paramLines } = require("./HandoverParams");
 const { snapshotLines, preflightSnapshots } = require("./HandoverSnapshot");
 const { escrowLines } = require("./HandoverEscrow");
 const { windowLines } = require("./HandoverWindow");
+const { roleSafeLines } = require("./RoleCalls");
 
 const ZERO = ethers.ZeroAddress;
 const EXEMPT_ABI = [
@@ -245,6 +246,7 @@ async function assertHandoverComplete(o) {
     "Token guardian is not the deployer",
     !same(await o.token.guardian(), dAddr),
   );
+  await lines("role multisigs", roleSafeLines(o)); // review D-1
   if (o.dynamicListManager) {
     add(
       "DynamicListManager governanceContract is governance",

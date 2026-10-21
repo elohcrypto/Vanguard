@@ -54,6 +54,7 @@ const { snapshotFacts, preflightSnapshots } = require("./HandoverSnapshot");
 const { preflightEscrow } = require("./HandoverEscrow");
 const { recordingSigner } = require("./HandoverWindow");
 const { oracleAccept, queueRoleCall } = require("./HandoverRoleCalls");
+const { roleSafeLines } = require("./RoleCalls");
 const { roleStrays } = require("./HandoverRoles");
 const { trustStrays } = require("./HandoverTrust");
 const { nodeStrays } = require("./HandoverNodes");
@@ -115,6 +116,11 @@ async function handoverDeployerPowers(o) {
 
   // Read-only; throws before any transaction when a precondition fails.
   const { governanceOwned } = await preflight(o);
+  // Review D-1: every role read as a multisig; the deployer owns none.
+  for (const [label, pass] of await roleSafeLines(o)) {
+    check(pass, label);
+    log(`   ✅ ${label}`);
+  }
   // Task 4.16 (D47): a whitelist oracle bound to VSC must list every holder.
   await preflightHolders(o, (w) => log(`   ⚠️  ${w}`));
   await preflightLinks(o); // Task 4.13: A1 H2/H3, M1, D56
