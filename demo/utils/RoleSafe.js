@@ -81,7 +81,8 @@ async function readModules(safe, none) {
  * the same words: a 7702 account, the deployer as a listed owner, and
  * (review D-1 round 2) an owner below the role whose owners cannot be
  * read (code past DEPTH, a cycle, or a contract that reads as no Safe)
- * and the deployer as an enabled module (it executes without owners).
+ * and the deployer as an enabled module (it executes without owners);
+ * round 3: a module list unread (past MAX_MODULES, or not readable).
  */
 async function readRoleSafe(addr, deployer, head) {
   const code = await ethers.provider.getCode(addr);
@@ -119,6 +120,11 @@ async function readRoleSafe(addr, deployer, head) {
     if (safe.modules === PAST)
       out.fails.push(
         `${where} has its module list unread past ${MAX_MODULES}: a module executes without the owners`,
+      );
+    // Round 3: a Safe-shaped contract whose modules cannot be read.
+    if (safe.modules === null)
+      out.fails.push(
+        `${where} reads as a Safe but its module list cannot be read: a module executes without the owners`,
       );
     const mods = Array.isArray(safe.modules) ? safe.modules : [];
     if (mods.some((m) => sameAddr(m, deployer)))
