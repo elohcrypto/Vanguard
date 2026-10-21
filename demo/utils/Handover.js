@@ -415,6 +415,9 @@ async function auditHandover(args, log = console.log) {
   log(
     "🔍 Handover audit: every completion line against the state governance derives now (no snapshot, no voting window)",
   );
+  // Review D2-1 round 3: as the preflight, a trusted issuer that is no
+  // ClaimIssuer is refused by name, not by the revert of its first call.
+  await preflightPins(await withDerivedPowers(o, () => {}, { strict: false }));
   const { ok, checks, warnings, residual } = await assertHandoverComplete({
     ...args,
     audit: true,
