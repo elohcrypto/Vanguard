@@ -39,20 +39,33 @@ async function readSafe(addr) {
 }
 
 /**
- * The role at `addr` (`head` names it in notes) read as a Safe: { code,
- * top, keys, deployerVia, notes }. `top` is readSafe(addr), null when the
+ * The role at `addr` (`head` names it in its lines) read as a Safe: {
+ * code, top, keys, notes, fails }. `top` is readSafe(addr), null when the
  * address has no code, is an EIP-7702 delegated account or reads as no
  * Safe. Breadth-first over nested multisig owners to DEPTH: `keys` the
- * owners that are keys, `deployerVia` the multisigs between the role and
- * `deployer` as an owner ("" at the role itself, null when it is none),
- * `notes` the ⚠️ lines for enabled modules and owners not read.
+ * owners that are keys, `notes` the ⚠️ lines for enabled modules, `fails`
+ * the refusals the vet throws and the ceremony's role lines print with
+ * the same words: a 7702 account, the deployer as a listed owner, and
+ * (review D-1 round 2) an owner below the role whose owners cannot be
+ * read (code past DEPTH, a cycle, or a contract that reads as no Safe).
  */
 async function readRoleSafe(addr, deployer, head) {
   const code = await ethers.provider.getCode(addr);
-  const out = { code, top: null, keys: [], deployerVia: null, notes: [] };
-  if (code === "0x" || is7702(code)) return out;
+  const out = { code, top: null, keys: [], notes: [], fails: [] };
+  if (code === "0x") return out;
+  if (is7702(code)) {
+    out.fails.push(
+      `${head} is an EIP-7702 delegated account: its own key acts alone, so it is no multisig; use a multisig contract`,
+    );
+    return out;
+  }
   out.top = await readSafe(addr);
   if (!out.top) return out;
+  const unread = (o, via, why) =>
+    out.fails.push(
+      `${head}: owner ${o}${via} is unread (${why}): the deployer's ownership of it cannot be vetted`,
+    );
+  let listed = false;
   const queue = [{ safe: out.top, at: addr, path: [] }];
   while (queue.length) {
     const { safe, at, path } = queue.shift();
@@ -62,24 +75,24 @@ async function readRoleSafe(addr, deployer, head) {
         `⚠️  ${head}${at === addr ? "" : `: owner ${at}${via}`} has module(s) enabled (${safe.modules.join(", ")}): a module executes without the owners`,
       );
     for (const o of safe.owners) {
-      if (sameAddr(o, deployer)) out.deployerVia ??= via;
+      if (sameAddr(o, deployer) && !listed) {
+        listed = true;
+        out.fails.push(
+          `${head} lists the deployer ${deployer} as an owner${via}: the deployer holds its power`,
+        );
+      }
       const c = await ethers.provider.getCode(o);
       if (c === "0x" || is7702(c)) {
         out.keys.push(o);
         continue;
       }
       if (path.length >= DEPTH) {
-        out.notes.push(
-          `⚠️  ${head}: owner ${o} (through ${path.join(", ")}) has code past ${DEPTH} levels: not read`,
-        );
+        unread(o, via, `code past ${DEPTH} levels`);
         continue;
       }
       const inner = await readSafe(o);
       if (inner) queue.push({ safe: inner, at: o, path: [...path, o] });
-      else
-        out.notes.push(
-          `⚠️  ${head}: owner ${o}${via} has code but no readable getOwners(): not checked`,
-        );
+      else unread(o, via, "code but no readable getOwners()");
     }
   }
   return out;
@@ -87,33 +100,25 @@ async function readRoleSafe(addr, deployer, head) {
 
 /**
  * Review LOW-5 (D-1: every external role, the guardian too): an external
- * role with code is read as a Safe. Refused: an EIP-7702 delegated
- * account (its own key acts alone), or the deployer listed as an owner at
- * the role or at any of DEPTH nested multisig levels. Warned by name: an
- * unreadable multisig, an enabled module (it executes without the
- * owners), a contract owner past DEPTH. The check sees listed owners
- * only: the operator makes sure the deployer neither owns nor executes it
- * any other way (runbook section 2).
+ * role with code is read as a Safe and refused on any of readRoleSafe's
+ * fails. Warned by name: a role that reads as no Safe (unchecked, Task
+ * 5.13's honest scope) and an enabled module (it executes without the
+ * owners). The check sees listed owners only: the operator makes sure
+ * the deployer neither owns nor executes it any other way (runbook
+ * section 2).
  */
 async function vetRole(r, deployer, log = console.log) {
   if (!r?.external) return;
   const head = `${r.label} ${r.address}`;
   const tail = "its calls are exported for its owners, never sent here";
   const s = await readRoleSafe(r.address, deployer, head);
+  if (s.fails.length) throw new Error(s.fails[0]);
   if (s.code === "0x") return log(`ℹ️  ${head} is external: ${tail}`);
-  if (is7702(s.code))
-    throw new Error(
-      `${head} is an EIP-7702 delegated account: its own key acts alone, so it is no multisig; use a multisig contract`,
-    );
   if (!s.top)
     return log(
       `⚠️  ${head} has code but no readable getOwners()/getThreshold(): the deployer's ownership of it is unchecked; ${tail}`,
     );
   for (const n of s.notes) log(n);
-  if (s.deployerVia !== null)
-    throw new Error(
-      `${head} lists the deployer ${deployer} as an owner${s.deployerVia}: the deployer neither owns nor executes a role multisig (Task 5.13)`,
-    );
   log(
     `ℹ️  ${head} is a ${s.top.threshold}-of-${s.top.owners.length} multisig; the deployer is no listed owner: ${tail}`,
   );
@@ -122,8 +127,9 @@ async function vetRole(r, deployer, log = console.log) {
 /**
  * Review D-1: [label, pass] per role (ops, guardian, issuerAdmin) as
  * vetRole reads it, for the ceremony's preflight, completion and audit: a
- * key that is not the deployer, or a multisig the deployer owns at no
- * depth. One that reads as no Safe passes, named unchecked, as in vetRole.
+ * key that is not the deployer, or a multisig with none of readRoleSafe's
+ * fails, each failing with the vet's words. One that reads as no Safe
+ * passes, named unchecked, as in vetRole.
  */
 async function roleSafeLines(o) {
   const d = await addrOf(o.deployer);
@@ -132,30 +138,21 @@ async function roleSafeLines(o) {
     if (!o[k]) continue;
     const a = await addrOf(o[k]);
     const s = await readRoleSafe(a, d, `${k} ${a}`);
+    out.push(...s.fails.map((f) => [f, false]));
     if (s.code === "0x") {
       out.push([
         `${k} ${a} is a key (no code), not the deployer`,
         !sameAddr(a, d),
       ]);
-    } else if (is7702(s.code)) {
-      out.push([
-        `${k} ${a} is an EIP-7702 delegated account: its own key acts alone`,
-        false,
-      ]);
-    } else if (!s.top) {
+    } else if (!s.top && !s.fails.length) {
       out.push([
         `${k} ${a} has code but no readable getOwners()/getThreshold(): the deployer's ownership of it is unchecked (runbook section 2)`,
         true,
       ]);
-    } else if (s.deployerVia === null) {
+    } else if (!s.fails.length) {
       out.push([
         `${k} ${a} is a ${s.top.threshold}-of-${s.top.owners.length} multisig; the deployer is no listed owner`,
         true,
-      ]);
-    } else {
-      out.push([
-        `${k} ${a} lists the deployer ${d} as an owner${s.deployerVia}: the deployer holds its power`,
-        false,
       ]);
     }
   }
