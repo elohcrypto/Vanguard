@@ -2,7 +2,7 @@
 // deployer as an enabled module of the role Safe or of an owner Safe
 // fails the role line; any other module, and a role contract that reads
 // as no Safe (the Task 5.13 honest scope), is a ⚠️ line that completion
-// and the audit print too, never a ✅.
+// and the audit print too, never a ✅ (round 3: the preflight too).
 import { expect } from "chai";
 import * as fs from "fs";
 import { ethers } from "hardhat";
@@ -73,6 +73,10 @@ describe("D-1b role Safe modules and role contracts that read as no Safe", funct
     ).to.equal("accepted");
     expect(logged).to.include(warn);
     const { cfg, cfgPath, dir } = await cliConfig(f);
+    // Round 3 (A8): the preflight prints it too, with no config vet (83c).
+    const pre = await h.preflightAs(cfg, cfgPath, rAddr);
+    expect(pre.verdict).to.equal("ok");
+    expect(pre.out).to.include(`   ${warn}`);
     const full = await h.phase({ ...cfg, guardian: rAddr }, "full", cfgPath);
     console.log(`      full phase: ${full.verdict}`);
     expect(full.verdict).to.equal("ok");
@@ -100,6 +104,9 @@ describe("D-1b role Safe modules and role contracts that read as no Safe", funct
     const xAddr = await x.getAddress();
     const warn = `   ⚠️  guardian ${xAddr} has code but no readable getOwners()/getThreshold(): the deployer's ownership of it is unchecked (runbook section 2)`;
     const { cfg, cfgPath, dir } = await cliConfig(f);
+    const pre = await h.preflightAs(cfg, cfgPath, xAddr);
+    expect(pre.verdict).to.equal("ok");
+    expect(pre.out).to.include(warn);
     const full = await h.phase({ ...cfg, guardian: xAddr }, "full", cfgPath);
     console.log(
       `      full phase, guardian a deployer-owned forwarder: ${full.verdict}`,

@@ -6,7 +6,7 @@
 import { expect } from "chai";
 import { ethers, network } from "hardhat";
 import { handoverFixture } from "../helpers/governanceFixture";
-import { cliConfig } from "../helpers/handoverCli";
+import { byVote, cliConfig } from "../helpers/handoverCli";
 import { runHandover } from "../../scripts/handover";
 import { handoverArgs } from "../../scripts/handoverConfig";
 import { AML_TOPIC, attest, deployIdentity } from "../helpers/kyc";
@@ -216,4 +216,66 @@ describe("D2-1 trusted issuer on a non-required topic", function () {
       fs.rmSync(dir, { recursive: true, force: true });
     });
   }
+
+  it("an issuer added, removed and re-added shows its last TrustedIssuerAdded block", async function () {
+    const f = await handoverFixture();
+    const d = f.deployer;
+    const reg = f.c.identityRegistry.connect(d);
+    const x = await (
+      await ethers.getContractFactory("ClaimIssuer")
+    )
+      .connect(d)
+      .deploy(d.address, "Readded", "AML");
+    const xAddr = await x.getAddress();
+    const blk = async (tx: Promise<any>) =>
+      (await (await tx).wait()).blockNumber;
+    const first = await blk(reg.addTrustedIssuer(xAddr, [1, AML_TOPIC]));
+    await blk(reg.removeTrustedIssuer(xAddr));
+    const last = await blk(reg.addTrustedIssuer(xAddr, [AML_TOPIC]));
+    const { cfg, cfgPath, dir } = await cliConfig(f);
+    delete cfg.issuers;
+    const r = await ceremony(cfg, cfgPath);
+    const line = r.fullOut.find((l) => l.includes(xAddr) && /trusts/.test(l));
+    console.log(`      added at ${first}, re-added at ${last}: ${line}`);
+    expect(r.full).to.equal("ok");
+    expect(line).to.contain(
+      `for topic(s) [${AML_TOPIC}] (TrustedIssuerAdded at block ${last})`,
+    );
+    fs.rmSync(dir, { recursive: true, force: true });
+  });
+
+  it("a trusted issuer that is no ClaimIssuer, added by vote after the ceremony, is refused by name in the audit", async function () {
+    const f = await handoverFixture();
+    const reg = f.c.identityRegistry;
+    const { cfg, cfgPath, dir } = await cliConfig(f);
+    expect((await ceremony(cfg, cfgPath)).audit).to.equal("ok");
+    const x = await (await ethers.getContractFactory("MockTarget")).deploy();
+    const xAddr = await x.getAddress();
+    const add = reg.interface.encodeFunctionData("addTrustedIssuer", [
+      xAddr,
+      [AML_TOPIC],
+    ]);
+    await byVote(f, 7, reg, add); // IdentityRegistryParameters
+    for (const listed of [true, false]) {
+      const run = { ...cfg };
+      if (listed) run.issuers = [...cfg.issuers, xAddr];
+      else delete run.issuers;
+      const quiet = console.log;
+      const out: string[] = [];
+      console.log = (...m: any[]) => out.push(m.join(" "));
+      const audit = await runHandover(run, "audit", cfgPath)
+        .then(
+          () => "ok",
+          (e: any) => e.message,
+        )
+        .finally(() => (console.log = quiet));
+      const text = `${audit}\n${out.join("\n")}`;
+      console.log(`      ${listed ? "listed" : "left out"}: ${audit}`);
+      expect(audit).to.not.equal("ok");
+      expect(text).to.contain(`ClaimIssuer ${xAddr} runtime code hash 0x`);
+      expect(text).to.contain("is not the compiled ClaimIssuer");
+      expect(text).to.not.contain("function selector was not recognized");
+    }
+    fs.rmSync(dir, { recursive: true, force: true });
+  });
 });
