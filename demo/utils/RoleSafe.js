@@ -24,8 +24,9 @@ const is7702 = (code) => code.toLowerCase().startsWith("0xef0100");
 /**
  * `addr` read as a Safe: { owners, threshold, modules } (modules null when
  * the contract has no getModulesPaginated, PAST beyond MAX_MODULES), or
- * null when it has no getOwners()/getThreshold(). Review D-1 round 2:
- * only a revert or
+ * null when it has no getOwners(). Round 3: a working getOwners() makes
+ * it Safe-shaped, threshold null when getThreshold() cannot be read.
+ * Review D-1 round 2: only a revert or
  * undecodable data means "no such function"; any other error (a timeout,
  * a rate limit) propagates and fails the run like every other read.
  */
@@ -43,7 +44,6 @@ async function readSafe(addr) {
   const owners = await safe.getOwners().catch(none);
   if (owners === null) return null;
   const threshold = await safe.getThreshold().catch(none);
-  if (threshold === null) return null;
   const modules = await readModules(safe, none);
   return { owners: [...owners], threshold, modules };
 }
@@ -82,7 +82,7 @@ async function readModules(safe, none) {
  * (review D-1 round 2) an owner below the role whose owners cannot be
  * read (code past DEPTH, a cycle, or a contract that reads as no Safe)
  * and the deployer as an enabled module (it executes without owners);
- * round 3: a module list unread (past MAX_MODULES, or not readable).
+ * round 3: a module list or a threshold unread.
  */
 async function readRoleSafe(addr, deployer, head) {
   const code = await ethers.provider.getCode(addr);
@@ -117,6 +117,16 @@ async function readRoleSafe(addr, deployer, head) {
       at === addr
         ? head
         : `${head}: owner ${at}${above.length ? ` (through ${above.join(", ")})` : ""}`;
+    if (!listed && safe.owners.some((o) => sameAddr(o, deployer))) {
+      listed = true;
+      out.fails.push(
+        `${head} lists the deployer ${deployer} as an owner${via}: the deployer holds its power`,
+      );
+    }
+    if (safe.threshold === null)
+      out.fails.push(
+        `${where} reads as a Safe but its threshold cannot be read: it cannot be vetted as a multisig`,
+      );
     if (safe.modules === PAST)
       out.fails.push(
         `${where} has its module list unread past ${MAX_MODULES}: a module executes without the owners`,
@@ -137,12 +147,6 @@ async function readRoleSafe(addr, deployer, head) {
         `${where} has module(s) enabled (${others.join(", ")}): a module executes without the owners`,
       );
     for (const o of safe.owners) {
-      if (sameAddr(o, deployer) && !listed) {
-        listed = true;
-        out.fails.push(
-          `${head} lists the deployer ${deployer} as an owner${via}: the deployer holds its power`,
-        );
-      }
       const c = await ethers.provider.getCode(o);
       if (c === "0x" || is7702(c)) {
         out.keys.push(o);
