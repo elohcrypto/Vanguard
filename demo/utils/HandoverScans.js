@@ -8,7 +8,7 @@
  */
 
 const { ethers } = require("hardhat");
-const { addrOf, same, fail } = require("./HandoverChecks");
+const { addrOf, same, fail, issuerLabel } = require("./HandoverChecks");
 const { RANGE_ERROR, ARCHIVE_ERROR, textOf } = require("./RpcRetry");
 
 const ZERO = ethers.ZeroAddress;
@@ -268,6 +268,51 @@ async function liveTrustedContracts(o) {
 }
 
 /**
+ * Review D2-1: every issuer the IdentityRegistry trusts for any topic,
+ * required or not: [{ issuer, topics }] from TrustedIssuerAdded, each
+ * topic re-read with isTrustedIssuer. R-413-6: every issuer of a required
+ * topic was trusted by event, so the scan must have seen it.
+ */
+async function trustedIssuers(o) {
+  const reg = o.identityRegistry;
+  const events = await scanLogs(reg, reg.filters.TrustedIssuerAdded(), o);
+  const out = [];
+  for (const issuer of uniq(events.map((ev) => ev.args[0]))) {
+    const asked = new Set();
+    for (const ev of events)
+      if (same(ev.args[0], issuer)) for (const t of ev.args[1]) asked.add(t);
+    const topics = [];
+    for (const t of asked)
+      if (await reg.isTrustedIssuer(issuer, t)) topics.push(t);
+    if (topics.length) out.push({ issuer, topics });
+  }
+  const missed = [];
+  for (const topic of await reg.getClaimTopics()) {
+    for (const a of await reg.getTrustedIssuersForClaimTopic(topic))
+      if (!out.some((x) => same(x.issuer, a))) missed.push(a);
+  }
+  if (missed.length) {
+    fail(
+      `IdentityRegistry TrustedIssuerAdded event scan found none of the holders it must see (${uniq(missed).join(", ")}): fromBlock, logChunk or the RPC is wrong; nothing can be concluded from it`,
+    );
+  }
+  return out;
+}
+
+/** D2-1: one line per trusted issuer the scan found, with its topics. */
+async function issuerLines(o) {
+  const out = [];
+  for (const { issuer, topics } of o.derived.trustedIssuers) {
+    const c = await ethers.getContractAt("ClaimIssuer", issuer);
+    out.push([
+      `IdentityRegistry trusts ${await issuerLabel(c)} for topic(s) [${topics.join(", ")}] (TrustedIssuerAdded scan)`,
+      true,
+    ]);
+  }
+  return out;
+}
+
+/**
  * Review L-2: escrows `factory` created whose immutable owner is the
  * deployer (created before the handover). It can still setPayer on an
  * unfunded one and sweepExcess.
@@ -336,6 +381,8 @@ async function liveRuleAdministrators(o, extra = [], mustSee = []) {
 
 module.exports = {
   uniq,
+  trustedIssuers,
+  issuerLines,
   liveRuleAdministrators,
   liveTrustedContracts,
   scanLogs,

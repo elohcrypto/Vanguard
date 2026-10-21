@@ -32,6 +32,7 @@ const {
   deployerEscrows,
   liveRuleAdministrators,
   liveTrustedContracts,
+  issuerLines,
 } = require("./HandoverScans");
 const { privacyLines } = require("./HandoverPrivacy");
 const { keyManagerLines } = require("./HandoverKeys");
@@ -113,6 +114,7 @@ async function assertHandoverComplete(o) {
   await lines("links", linkLines(o));
   // Task 4.13: exact role sets from the event scans (A1 H1).
   await lines("roles", roleLines(o, warnings));
+  await lines("issuers", issuerLines(o));
   if (o.skippedRegistry) {
     add(
       "InvestorTypeRegistry is not live on Token or is owned by governance",
