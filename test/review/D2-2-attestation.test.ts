@@ -1,24 +1,21 @@
 // D2-2, attestation variant: the deployer swaps the jurisdiction,
 // accreditation and compliance verifiers to an always-true one, forges
 // attestation records for a wallet no issuer attested, and restores them.
-// Completion and the day-2 audit name each swap and fail while records
-// made under it can still count: the Q20 re-approval vote (trusted ->
-// trusted) leaves them valid, an untrust then re-trust vote or a policy
-// change lapses them, and the audit passes once all three have lapsed.
+// The preflight, completion and the day-2 audit name each swap and fail
+// while records made under it can still count. Round 2: the preflight
+// refuses, because before the ceremony the deployer lapses them in one
+// transaction each (a trusted -> trusted re-approval leaves them valid;
+// untrust then re-trust, or a policy change, lapses them); after it each
+// is a PrivacyParameters vote. Then the ceremony and the audit pass.
 import { expect } from "chai";
 import { ethers } from "hardhat";
 import * as fs from "fs";
-import { time } from "@nomicfoundation/hardhat-network-helpers";
 import { handoverFixture } from "../helpers/governanceFixture";
-import { byVote, captured, cliConfig } from "../helpers/handoverCli";
+import { captured, cliConfig } from "../helpers/handoverCli";
 import { runHandover } from "../../scripts/handover";
 import { handoverArgs } from "../../scripts/handoverConfig";
-import {
-  parseNodes,
-  runPostCeremony,
-} from "../../scripts/production/postCeremonyVotes";
 
-const { withDerivedContracts } = require("../../demo/utils/HandoverDerive");
+const { assertHandoverComplete } = require("../../demo/utils/Handover");
 const {
   attestorPublicKey,
   newAttestorKey,
@@ -35,7 +32,7 @@ const abi = ethers.AbiCoder.defaultAbiCoder();
 
 describe("D2-2 verifier swap residue, attestation circuits", function () {
   this.timeout(900000);
-  it("completion and the audit fail on the swaps until every forged record has lapsed", async function () {
+  it("the preflight refuses the swaps until the deployer lapses every forged record; then the ceremony and the audit pass", async function () {
     const f = await handoverFixture();
     const { cfg, cfgPath, dir } = await cliConfig(f);
     const d = f.deployer;
@@ -70,7 +67,6 @@ describe("D2-2 verifier swap residue, attestation circuits", function () {
     );
 
     const w = f.stranger; // holds no issuer-signed attestation at all
-    const control = await signer(18); // never touched
     const garbage = Array.from({ length: 24 }, (_, i) => BigInt(i + 1));
     const BIG = 2n ** 64n - 1n; // forged validUntil, the largest the contract accepts
     const signalsFor = (id: string, nullifier: bigint, policy: bigint[]) => [
@@ -227,222 +223,98 @@ describe("D2-2 verifier swap residue, attestation circuits", function () {
       `      traces: ZKVerifierIntegrated VerifierUpdated events ${(await zk.queryFilter(zk.filters.VerifierUpdated())).length}, validProofs(jurisdiction/accreditation/compliance) = ${await zk.validProofs("jurisdiction")}/${await zk.validProofs("accreditation")}/${await zk.validProofs("compliance")}, PrivacyManager AttestationProofBound events ${(await pm.queryFilter(pm.filters.AttestationProofBound())).length}`,
     );
 
-    // ---- the ceremony (full phase), then the day-2 audit -----------------------------------
+    // ---- before the ceremony: the preflight refuses; completion and the audit fail the same lines
     const out: string[] = [];
-    const ceremony = () =>
-      captured(out, () => runHandover(cfg, "full", cfgPath));
-    let full = "ok";
-    await ceremony().catch((e: any) => (full = e.message));
-    const fullText = out.join("\n");
     const pick = (re: RegExp, text: string) =>
       text.split("\n").filter((l) => re.test(l));
+    const stuck = (v: string) =>
+      CIRCUITS.map(([n]) => n).filter((n) =>
+        new RegExp(
+          `${n} records made up to block \\d+ \\(the last ${n} verifier swap\\) still count`,
+        ).test(v),
+      );
+    const preflight = async () => {
+      out.length = 0;
+      return captured(out, () => runHandover(cfg, "preflight", cfgPath)).then(
+        () => "ok",
+        (e: any) => e.message,
+      );
+    };
+    const n0 = await ethers.provider.getTransactionCount(d.address);
+    const pre = await preflight();
+    console.log(`      preflight refuses: ${stuck(pre).join(", ")}`);
+    expect(stuck(pre)).to.deep.equal([
+      "jurisdiction",
+      "accreditation",
+      "compliance",
+    ]);
+    let full = "ok";
+    await captured(out, () => runHandover(cfg, "full", cfgPath)).catch(
+      (e: any) => (full = e.message),
+    );
+    expect(full).to.equal(pre);
+    expect(await ethers.provider.getTransactionCount(d.address)).to.equal(n0);
+    expect(await pm.owner()).to.equal(d.address);
+    const { args } = await handoverArgs(cfg, "audit", cfgPath);
+    const { checks } = await assertHandoverComplete({ ...args, audit: true });
+    for (const [name] of CIRCUITS)
+      expect(
+        checks.filter(
+          (c: any) =>
+            !c.ok && c.label.startsWith(`${name} records made up to block`),
+        ),
+      ).to.have.lengthOf(1);
+
+    // ---- a re-approval (trusted -> trusted) leaves the epochs, so every forged record still counts
+    const epochs = async () =>
+      Promise.all(CIRCUITS.map(([, id]) => pm.attestorEpoch(id, attestor)));
+    const e0 = await epochs();
+    for (const [, id] of CIRCUITS)
+      await (await pm.connect(d).setTrustedAttestor(id, Ax, Ay, true)).wait();
+    expect(await epochs()).to.deep.equal(e0);
+    expect(stuck(await preflight())).to.have.lengthOf(3);
+
+    // ---- the deployer's remedies before the run: untrust then re-trust, or a policy change
+    for (const id of [JUR, COMP]) {
+      await (await pm.connect(d).setTrustedAttestor(id, Ax, Ay, false)).wait();
+      await (await pm.connect(d).setTrustedAttestor(id, Ax, Ay, true)).wait();
+    }
+    const left = await preflight();
+    console.log(
+      `      after untrust/re-trust of jurisdiction and compliance: ${stuck(left).join(", ")}`,
+    );
+    expect(stuck(left)).to.deep.equal(["accreditation"]);
+    await (await pm.connect(d).setMinimumAccreditation(101)).wait();
+    expect(await preflight()).to.equal("ok");
+    expect(out.join("\n")).to.contain("✅ Preflight passed");
+    for (const [name, id] of CIRCUITS) {
+      const valid = (await pm.getUserProofInfo(w.address, id)).isValid;
+      console.log(`      forged ${name} after the remedies: isValid ${valid}`);
+      expect(valid).to.equal(false);
+    }
+
+    // ---- the ceremony completes and the day-2 audit passes, both naming the six swaps
+    out.length = 0;
+    full = "ok";
+    await captured(out, () => runHandover(cfg, "full", cfgPath)).catch(
+      (e: any) => (full = e.message),
+    );
     console.log(`      full phase: ${full}`);
-    console.log(
-      `      full phase verdict line: ${pick(/Handover complete/, fullText).join(" | ")}`,
-    );
-    console.log(
-      `      full phase lines naming the deployer-trusted issuer key: ${pick(/issuer key/, fullText).length}`,
-    );
-    console.log(
-      `      full phase lines naming a verifier swap / forged record: ${pick(/verifier swap|records made up to block|updateVerifier|VerifierUpdated|forged|AttestationProofBound|attestationRecords/i, fullText).length}`,
-    );
-    expect(full).to.contain("handover incomplete");
-    for (const [name] of CIRCUITS)
-      expect(
-        pick(new RegExp(`❌ ${name} records made up to block \\d+`), fullText),
-      ).to.have.lengthOf(1);
+    expect(full).to.equal("ok");
+    expect(
+      pick(/✅ verifier swaps since fromBlock \d+: 6/, out.join("\n")),
+    ).to.have.lengthOf(2);
     expect(await pm.owner()).to.equal(f.govAddr);
-
     out.length = 0;
-    let before = "ok";
+    let audit = "ok";
     await captured(out, () => runHandover(cfg, "audit", cfgPath)).catch(
-      (e: any) => (before = e.message),
+      (e: any) => (audit = e.message),
     );
-    console.log(`      audit before the votes: ${before}`);
-    expect(before).to.contain("audit failed");
-    expect(out.join("\n")).to.contain("was trusted by the deployer"); // the documented residue, Q20
-
-    // ---- the Q20 re-approval votes + D50 rotation, with the real CLI function --------------
-    const derive = async () => {
-      const { args, wallet } = await handoverArgs(cfg, "audit", cfgPath);
-      return { o: await withDerivedContracts(args), wallet };
-    };
-    const epochBefore = {
-      j: await pm.attestorEpoch(JUR, attestor),
-      a: await pm.attestorEpoch(ACC, attestor),
-      c: await pm.attestorEpoch(COMP, attestor),
-    };
-    const pEpochBefore = {
-      j: await pm.policyEpoch(JUR),
-      a: await pm.policyEpoch(ACC),
-      c: await pm.policyEpoch(COMP),
-    };
-    const t0 = (await ethers.provider.getBlock("latest"))!.timestamp;
-    const nodes = (await addrs([13, 14, 15]))
-      .map((a, k) => `${a}:NODE_${k + 1}`)
-      .join(",");
-    out.length = 0;
-    const { o } = await derive();
-    await captured(out, () =>
-      runPostCeremony(o, f.proposer, f.voters, parseNodes(nodes), cfg),
-    );
-    const t1 = (await ethers.provider.getBlock("latest"))!.timestamp;
-    console.log(
-      `      post-ceremony votes: ${pick(/round [12]:/, out.join("\n"))
-        .map((s) => s.trim())
-        .join(" | ")}`,
-    );
-    console.log(
-      `      chain time spent in the votes: ${((t1 - t0) / DAY).toFixed(1)} days`,
-    );
-    const epochAfter = {
-      j: await pm.attestorEpoch(JUR, attestor),
-      a: await pm.attestorEpoch(ACC, attestor),
-      c: await pm.attestorEpoch(COMP, attestor),
-    };
-    console.log(
-      `      attestorEpoch before/after the re-approval vote: ${JSON.stringify([epochBefore, epochAfter], (_, v) => (typeof v === "bigint" ? v.toString() : v))}`,
-    );
-    expect(epochAfter).to.deep.equal(epochBefore); // setTrustedAttestor(true) on a trusted key changes nothing
-    expect(await pm.policyEpoch(JUR)).to.equal(pEpochBefore.j);
-    const trusts = await pm.queryFilter(pm.filters.TrustedAttestorSet(JUR));
-    console.log(
-      `      last TrustedAttestorSet(JURISDICTION).by == governance: ${trusts[trusts.length - 1].args.by === f.govAddr}`,
-    );
-
-    cfg.oracleNodes = await addrs([13, 14, 15]);
-    out.length = 0;
-    let verdict = "ok";
-    await captured(out, () => runHandover(cfg, "audit", cfgPath)).catch(
-      (e: any) => (verdict = e.message),
-    );
-    const audit = out.join("\n");
-    console.log(`      audit after the votes: ${verdict}`);
-    console.log(
-      `      audit lines naming the deployer-trusted key: ${pick(/was trusted by the deployer/, audit).length}; any line naming a swap or a forged record: ${pick(/verifier swap|records made up to block|updateVerifier|VerifierUpdated|forged|attestationRecords/i, audit).length}`,
-    );
-    expect(verdict).to.contain("audit failed");
-    for (const [name] of CIRCUITS)
-      expect(
-        pick(new RegExp(`❌ ${name} records made up to block \\d+`), audit),
-      ).to.have.lengthOf(1);
-
-    // ---- afterwards: the forged records still count ----------------------------------------
-    const now = (await ethers.provider.getBlock("latest"))!.timestamp;
-    for (const [name, id] of CIRCUITS) {
-      const info = await pm.getUserProofInfo(w.address, id);
-      const left = Number(rec[id].expiresAt) - now;
-      console.log(
-        `      after ceremony + votes + clean audit: stranger's forged ${name} isValid=${info.isValid}, ${(left / DAY).toFixed(1)} days left (chain now ${new Date(now * 1000).toISOString()})`,
-      );
-    }
-    // The fixture runs governance at TIME_SCALE 1440; at TIME_SCALE 1 the same steps take 1440x the chain time.
-    const scale = await f.c.governance.TIME_SCALE();
-    for (const [name, id] of CIRCUITS) {
-      const full = ((now - marks[id].at) * Number(scale)) / DAY;
-      const validity = Number(rec[id].expiresAt - BigInt(marks[id].at)) / DAY;
-      console.log(
-        `      ${name}: forged ${now - marks[id].at}s of chain time before this audit = ${full.toFixed(1)} days at TIME_SCALE 1; record validity ${validity} days => still valid at TIME_SCALE 1: ${full < validity}`,
-      );
-    }
-    const j = await pm.validatePrivateJurisdiction.staticCall(w.address);
-    const a = await pm.validatePrivateAccreditation.staticCall(w.address);
-    const c = await pm.validatePrivateCompliance.staticCall(w.address);
-    const all = await pm.validateAllPrivateCompliance(w.address);
-    console.log(
-      `      validatePrivateJurisdiction/Accreditation/Compliance(stranger) = ${j}/${a}/${c}; validateAllPrivateCompliance = [${all.join(", ")}]`,
-    );
-    const ctrl = await pm.validateAllPrivateCompliance(control.address);
-    console.log(
-      `      control wallet validateAllPrivateCompliance = [${ctrl.join(", ")}]`,
-    );
-    expect(ctrl.every((x: boolean) => x === false)).to.equal(true);
-    // jurisdiction + compliance were forged at the 30-day default: report whether they outlived the votes; accreditation (365 days) must have
-    expect((await pm.getUserProofInfo(w.address, ACC)).isValid).to.equal(true);
-    expect(await pm.owner()).to.equal(f.govAddr);
-    expect(await zk.owner()).to.equal(f.govAddr);
-
-    // ---- how long it stays valid: expiry, or a policy epoch / attestor epoch change --------
-    const stillJ = (await pm.getUserProofInfo(w.address, JUR)).isValid;
-    const stillC = (await pm.getUserProofInfo(w.address, COMP)).isValid;
-    console.log(
-      `      30-day-default records after the votes: jurisdiction ${stillJ}, compliance ${stillC}`,
-    );
-    const { takeSnapshot } =
-      await import("@nomicfoundation/hardhat-network-helpers");
-    const snap = await takeSnapshot();
-    for (const [name, id] of [
-      ["jurisdiction", JUR],
-      ["compliance", COMP],
-      ["accreditation", ACC],
-    ] as [string, string][]) {
-      const snap2 = await takeSnapshot();
-      await time.increaseTo(Number(rec[id].expiresAt) - 5);
-      const before = (await pm.getUserProofInfo(w.address, id)).isValid;
-      await time.increaseTo(Number(rec[id].expiresAt) + 1);
-      const after = (await pm.getUserProofInfo(w.address, id)).isValid;
-      console.log(
-        `      ${name}: 5s before its expiresAt ${before}, 1s after ${after}`,
-      );
-      expect([before, after]).to.deep.equal([true, false]);
-      await snap2.restore();
-    }
-    // What ends it early: a governance vote that changes the attestor's trust or the circuit's policy.
-    const calls = (fn: string, ...a: any[]) =>
-      pm.interface.encodeFunctionData(fn, a);
-    const eBefore = await pm.attestorEpoch(JUR, attestor);
-    await byVote(f, 11, pm, calls("setTrustedAttestor", JUR, Ax, Ay, true)); // re-approval again
-    console.log(
-      `      another re-approval vote (trusted -> trusted): jurisdiction isValid ${(await pm.getUserProofInfo(w.address, JUR)).isValid}, attestorEpoch ${eBefore} -> ${await pm.attestorEpoch(JUR, attestor)}`,
-    );
-    expect((await pm.getUserProofInfo(w.address, JUR)).isValid).to.equal(true);
-    await byVote(f, 11, pm, calls("setTrustedAttestor", JUR, Ax, Ay, false));
-    await byVote(f, 11, pm, calls("setTrustedAttestor", JUR, Ax, Ay, true));
-    console.log(
-      `      untrust vote then re-trust vote: jurisdiction isValid ${(await pm.getUserProofInfo(w.address, JUR)).isValid}, attestorEpoch -> ${await pm.attestorEpoch(JUR, attestor)} (the epoch only grows)`,
-    );
-    expect((await pm.getUserProofInfo(w.address, JUR)).isValid).to.equal(false);
-    await byVote(f, 11, pm, calls("setMinimumAccreditation", 101));
-    console.log(
-      `      setMinimumAccreditation vote: accreditation isValid ${(await pm.getUserProofInfo(w.address, ACC)).isValid}, policyEpoch -> ${await pm.policyEpoch(ACC)}`,
-    );
-    expect((await pm.getUserProofInfo(w.address, ACC)).isValid).to.equal(false);
-    expect((await pm.getUserProofInfo(w.address, COMP)).isValid).to.equal(true); // compliance untouched by both
-    out.length = 0;
-    let partial = "ok";
-    await captured(out, () => runHandover(cfg, "audit", cfgPath)).catch(
-      (e: any) => (partial = e.message),
-    );
-    const left = pick(/records made up to block/, out.join("\n"));
-    console.log(
-      `      audit with compliance records still valid: ${partial}; ${left.map((l) => l.trim()).join(" | ")}`,
-    );
-    expect(partial).to.contain("audit failed");
-    expect(left).to.have.lengthOf(1);
-    expect(left[0]).to.contain("❌ compliance records made up to block");
-    await byVote(f, 11, pm, calls("setTrustedAttestor", COMP, Ax, Ay, false));
-    await byVote(f, 11, pm, calls("setTrustedAttestor", COMP, Ax, Ay, true));
-    expect((await pm.getUserProofInfo(w.address, COMP)).isValid).to.equal(
-      false,
-    );
-    out.length = 0;
-    let lapsed = "ok";
-    await captured(out, () => runHandover(cfg, "audit", cfgPath)).catch(
-      (e: any) => (lapsed = e.message),
-    );
-    console.log(
-      `      audit once every forged record lapsed: ${lapsed}; ${pick(
-        /Audit passed/,
-        out.join("\n"),
-      )
-        .join(" | ")
-        .trim()}`,
-    );
-    expect(lapsed).to.equal("ok");
+    console.log(`      audit: ${audit}`);
+    expect(audit).to.equal("ok");
     expect(
       pick(/✅ verifier swaps since fromBlock \d+: 6/, out.join("\n")),
     ).to.have.lengthOf(1);
-    await snap.restore();
 
     fs.rmSync(dir, { recursive: true, force: true });
   });

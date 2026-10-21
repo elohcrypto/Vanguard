@@ -6,11 +6,15 @@
 import { expect } from "chai";
 import { ethers, network } from "hardhat";
 import { handoverFixture } from "../helpers/governanceFixture";
+import { cliConfig } from "../helpers/handoverCli";
 import { runHandover } from "../../scripts/handover";
+import { handoverArgs } from "../../scripts/handoverConfig";
 import { AML_TOPIC, attest, deployIdentity } from "../helpers/kyc";
 import * as fs from "fs";
 import * as os from "os";
 import * as path from "path";
+
+const { assertHandoverComplete } = require("../../demo/utils/Handover");
 
 async function planted() {
   const f = await handoverFixture();
@@ -24,7 +28,9 @@ async function planted() {
     .connect(d)
     .deploy(d.address, "Planted", "AML");
   const pAddr = await p.getAddress();
-  await (await reg.connect(d).addTrustedIssuer(pAddr, [AML_TOPIC])).wait();
+  const added = await (
+    await reg.connect(d).addTrustedIssuer(pAddr, [AML_TOPIC])
+  ).wait();
   console.log(
     `      required topics: [${(await reg.getClaimTopics()).join(", ")}]; planted issuer trusted for ${AML_TOPIC}: ${await reg.isTrustedIssuer(pAddr, AML_TOPIC)}`,
   );
@@ -55,7 +61,7 @@ async function planted() {
     proposer: 4,
     voters: [5, 6],
   };
-  return { f, d, reg, p, pAddr, cfg, cfgPath };
+  return { f, d, reg, p, pAddr, cfg, cfgPath, at: added!.blockNumber };
 }
 
 async function ceremony(cfg: any, cfgPath: string) {
@@ -82,9 +88,9 @@ async function ceremony(cfg: any, cfgPath: string) {
 describe("D2-1 trusted issuer on a non-required topic", function () {
   this.timeout(600000);
   it("a config that omits it is refused before any transaction", async function () {
-    const { d, reg, p, pAddr, cfg, cfgPath } = await planted();
+    const { d, reg, p, pAddr, cfg, cfgPath, at } = await planted();
     const r = await ceremony(cfg, cfgPath);
-    const scanned = r.fullOut.filter((l) => /TrustedIssuerAdded scan/.test(l));
+    const scanned = r.fullOut.filter((l) => /\(TrustedIssuerAdded at/.test(l));
     console.log(
       `      full phase: ${r.full}\n      ${scanned.join("\n      ")}\n      audit: ${r.audit}`,
     );
@@ -92,33 +98,43 @@ describe("D2-1 trusted issuer on a non-required topic", function () {
       `config "issuers" omits ${pAddr} (a trusted issuer of the IdentityRegistry)`,
     );
     expect(scanned).to.include(
-      `   ℹ️  IdentityRegistry trusts Planted (${pAddr}) for topic(s) [${AML_TOPIC}] (TrustedIssuerAdded scan)`,
+      `   ℹ️  IdentityRegistry trusts Planted (${pAddr}) for topic(s) [${AML_TOPIC}] (TrustedIssuerAdded at block ${at})`,
     );
-    expect(r.audit).to.contain("the ceremony has not completed");
+    // The builder completion and the audit call refuses it too.
+    const { args } = await handoverArgs(cfg, "audit", cfgPath);
+    const { checks } = await assertHandoverComplete({ ...args, audit: true });
+    const named = checks.filter((c: any) => !c.ok && c.label.includes(pAddr));
+    console.log(
+      `      completion lines failing on it: ${named.map((c: any) => c.label).join(" | ")}`,
+    );
+    expect(named).to.not.be.empty;
     expect(await reg.owner()).to.equal(d.address);
     expect(await p.owner()).to.equal(d.address);
   });
 
   it("left out of the config, it is handed to issuerAdmin, listed by topic, and the deployer cannot attest", async function () {
-    const { f, d, reg, p, pAddr, cfg, cfgPath } = await planted();
+    const { f, d, reg, p, pAddr, cfg, cfgPath, at } = await planted();
     delete cfg.issuers;
     const r = await ceremony(cfg, cfgPath);
     const kyc = await f.args.issuers[0].getAddress();
+    const kycAt = (await reg.queryFilter(reg.filters.TrustedIssuerAdded(kyc)))
+      .map((e: any) => e.blockNumber)
+      .pop();
     const lines = (out: string[]) =>
-      out.filter((l) => /TrustedIssuerAdded scan/.test(l));
+      out.filter((l) => /\(TrustedIssuerAdded at/.test(l));
     console.log(
       `      full phase: ${r.full}; audit: ${r.audit}\n      ${lines(r.auditOut).join("\n      ")}`,
     );
     expect(r.full).to.equal("ok");
     expect(r.audit).to.equal("ok");
     expect(lines(r.fullOut)).to.include(
-      `   ℹ️  IdentityRegistry trusts Planted (${pAddr}) for topic(s) [${AML_TOPIC}] (TrustedIssuerAdded scan)`,
+      `   ℹ️  IdentityRegistry trusts Planted (${pAddr}) for topic(s) [${AML_TOPIC}] (TrustedIssuerAdded at block ${at})`,
     );
     expect(lines(r.auditOut)).to.include(
-      `   ✅ IdentityRegistry trusts Planted (${pAddr}) for topic(s) [${AML_TOPIC}] (TrustedIssuerAdded scan)`,
+      `   ✅ IdentityRegistry trusts Planted (${pAddr}) for topic(s) [${AML_TOPIC}] (TrustedIssuerAdded at block ${at})`,
     );
     expect(lines(r.auditOut)).to.include(
-      `   ✅ IdentityRegistry trusts KYC Issuer (${kyc}) for topic(s) [6] (TrustedIssuerAdded scan)`,
+      `   ✅ IdentityRegistry trusts KYC Issuer (${kyc}) for topic(s) [6] (TrustedIssuerAdded at block ${kycAt})`,
     );
     expect(await reg.owner()).to.equal(f.govAddr);
     expect(await p.owner()).to.equal(f.issuerAdmin.address);
@@ -166,4 +182,38 @@ describe("D2-1 trusted issuer on a non-required topic", function () {
     expect(before).to.equal(false);
     expect(after).to.equal(false);
   });
+
+  for (const kind of ["MockTarget", "AttackForwarder"]) {
+    it(`a trusted issuer that is no ClaimIssuer (${kind}) is refused by name before any send`, async function () {
+      const f = await handoverFixture();
+      const d = f.deployer;
+      const x = await (
+        await ethers.getContractFactory(kind)
+      )
+        .connect(d)
+        .deploy();
+      const xAddr = await x.getAddress();
+      await (
+        await f.c.identityRegistry
+          .connect(d)
+          .addTrustedIssuer(xAddr, [AML_TOPIC])
+      ).wait();
+      const { cfg, cfgPath, dir } = await cliConfig(f);
+      const n = await ethers.provider.getTransactionCount(d.address);
+      for (const listed of [true, false]) {
+        const run = { ...cfg };
+        if (listed) run.issuers = [...cfg.issuers, xAddr];
+        else delete run.issuers;
+        const r = await ceremony(run, cfgPath);
+        console.log(
+          `      ${kind}, ${listed ? "listed" : "left out"}: ${r.full}`,
+        );
+        expect(r.full).to.contain(`ClaimIssuer ${xAddr} runtime code hash 0x`);
+        expect(r.full).to.contain("is not the compiled ClaimIssuer");
+      }
+      expect(await ethers.provider.getTransactionCount(d.address)).to.equal(n);
+      expect(await f.c.token.owner()).to.equal(d.address);
+      fs.rmSync(dir, { recursive: true, force: true });
+    });
+  }
 });

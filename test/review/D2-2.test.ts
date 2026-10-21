@@ -1,18 +1,23 @@
 // D2-2: a verifier swapped and swapped back before the ceremony leaves
-// forged PrivacyManager bindings; completion and the day-2 audit scan
-// VerifierUpdated, name the swap block and fail until ops republishes the
-// root, which lapses every binding made under the swapped verifier.
+// forged PrivacyManager bindings; the preflight, completion and the day-2
+// audit scan VerifierUpdated, name the swap block and fail until ops
+// republishes the root, which lapses every binding made under the swapped
+// verifier. Round 2: the preflight refuses, while the remedy (ops, which
+// the deployer can name list operator early, republishes) is cheap.
 import { expect } from "chai";
 import { ethers } from "hardhat";
 import { handoverFixture } from "../helpers/governanceFixture";
 import { runHandover } from "../../scripts/handover";
+import { handoverArgs } from "../../scripts/handoverConfig";
 import * as fs from "fs";
 import * as os from "os";
 import * as path from "path";
 
+const { assertHandoverComplete } = require("../../demo/utils/Handover");
+
 describe("D2-2 verifier swap residue", function () {
   this.timeout(600000);
-  it("completion and the audit fail on the swap until ops republishes the root", async function () {
+  it("the preflight refuses the swap until ops republishes the root; then the ceremony and the audit pass", async function () {
     const f = await handoverFixture();
     const d = f.deployer;
     const pm = f.c.privacyManager;
@@ -75,59 +80,62 @@ describe("D2-2 verifier swap residue", function () {
     const quiet = console.log;
     const out: string[] = [];
     console.log = (...m: any[]) => out.push(m.join(" "));
+    const run = async (phase: string) => {
+      out.length = 0;
+      return runHandover(cfg, phase, cfgPath).then(
+        () => "ok",
+        (e: any) => e.message,
+      );
+    };
+    const n0 = await ethers.provider.getTransactionCount(d.address);
+    let pre = "ok";
     let full = "ok";
-    let audit = "ok";
-    let after = "ok";
     let fullOut: string[] = [];
-    let auditOut: string[] = [];
+    let after = "ok";
+    let afterOut: string[] = [];
+    let audit = "ok";
+    let checks: any[] = [];
+    let sent = -1;
     try {
-      await runHandover(cfg, "full", cfgPath).catch(
-        (e: any) => (full = e.message),
-      );
-      fullOut = out.splice(0);
-      await runHandover(cfg, "audit", cfgPath).catch(
-        (e: any) => (audit = e.message),
-      );
-      auditOut = out.splice(0);
-      // The remedy: ops republishes the root after the swap.
+      pre = await run("preflight");
+      full = await run("full");
+      fullOut = [...out];
+      sent = (await ethers.provider.getTransactionCount(d.address)) - n0;
+      const { args } = await handoverArgs(cfg, "audit", cfgPath);
+      checks = (await assertHandoverComplete({ ...args, audit: true })).checks;
+      // The remedy, before the ceremony: ops republishes the root.
       await (
         await pm
           .connect(f.ops)
           .publishWhitelistRoot(ethers.toBeHex(root + 1n, 32))
       ).wait();
-      await runHandover(cfg, "audit", cfgPath).catch(
-        (e: any) => (after = e.message),
-      );
+      after = await run("full");
+      afterOut = [...out];
+      audit = await run("audit");
     } finally {
       console.log = quiet;
     }
     const pick = (re: RegExp, ls: string[]) => ls.filter((l) => re.test(l));
-    const swapLines = pick(/verifier swap/, auditOut);
+    const open = `whitelist bindings made up to block ${restore!.blockNumber} (the last whitelist verifier swap) still count: ops must republish the whitelist root (publishWhitelistRoot) after it`;
     console.log(
-      `      full phase: ${full}; audit: ${audit}\n      ${swapLines.join("\n      ")}\n      audit after ops republished: ${after}`,
+      `      preflight: ${pre}\n      full phase after ops republished: ${after}; audit: ${audit}`,
     );
-    expect(full).to.contain("handover incomplete");
-    expect(
-      pick(/⚠️  whitelist bindings made up to block/, fullOut),
-    ).to.have.lengthOf(1);
-    expect(
-      pick(/❌ whitelist bindings made up to block/, fullOut),
-    ).to.have.lengthOf(1);
-    expect(audit).to.contain("audit failed");
+    expect(pre).to.contain(open);
+    expect(full).to.equal(pre);
+    expect(sent).to.equal(0);
     const zkAddr = await zk.getAddress();
-    expect(swapLines).to.include(
+    expect(pick(/verifier swap/, fullOut)).to.include.members([
       `   ❌ verifier swaps since fromBlock ${f.args.fromBlock}: 2`,
-    );
-    expect(swapLines).to.include(
       `   ❌ verifier swap at block ${swap!.blockNumber}: ZKVerifierIntegrated ${zkAddr} whitelist verifier set to ${rogueAddr} (1 PrivacyManager binding(s) made under it)`,
-    );
-    expect(swapLines).to.include(
       `   ❌ verifier swap at block ${restore!.blockNumber}: ZKVerifierIntegrated ${zkAddr} whitelist verifier set to ${original} (0 PrivacyManager binding(s) made under it)`,
-    );
-    expect(
-      pick(/whitelist bindings made up to block/, auditOut),
-    ).to.have.lengthOf(1);
+    ]);
+    // The builder completion and the audit call fails the same line.
+    expect(checks).to.deep.include({ label: open, ok: false });
     expect(after).to.equal("ok");
+    expect(
+      pick(/✅ verifier swaps since fromBlock \d+: 2/, afterOut),
+    ).to.have.lengthOf(2);
+    expect(audit).to.equal("ok");
     expect(
       pick(/✅ verifier swaps since fromBlock \d+: 2/, out),
     ).to.have.lengthOf(1);

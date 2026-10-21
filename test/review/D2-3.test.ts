@@ -1,7 +1,8 @@
 // D2-3: a governance deployed with a demo TIME_SCALE (1440) is refused by
-// the handover's preflight, full phase and day-2 audit on a chain that is
-// NOT 31337 (here the in-process node answers as Sepolia, 11155111), not
-// only by the deploy (scripts/production/deployConfig.ts refuseTimeScale).
+// the handover's preflight and full phase, and fails the table completion
+// and the day-2 audit build, on a chain that is NOT 31337 (here the
+// in-process node answers as Sepolia, 11155111), not only by the deploy
+// (scripts/production/deployConfig.ts refuseTimeScale).
 // This file runs twice: under the project config it starts itself again
 // as a child `hardhat test` under D2-3.hardhat.config.ts, whose
 // in-process node is chain 11155111, and that run checks the refusals.
@@ -10,11 +11,13 @@ import { ethers, network } from "hardhat";
 import { spawnSync } from "child_process";
 import { handoverFixture } from "../helpers/governanceFixture";
 import { runHandover } from "../../scripts/handover";
+import { handoverArgs } from "../../scripts/handoverConfig";
 import { refuseTimeScale } from "../../scripts/production/deployConfig";
 import { pinsFor } from "../../scripts/production/walletPins";
 import * as fs from "fs";
 import * as os from "os";
 import * as path from "path";
+const { assertHandoverComplete } = require("../../demo/utils/Handover");
 const {
   maskedCodeHash,
   expectedHash,
@@ -129,7 +132,7 @@ describeUnlessCoverage(
       console.log = (...m: any[]) => out.push(m.join(" "));
       let pre = "ok";
       let full = "ok";
-      let audit = "ok";
+      let table: any[] = [];
       try {
         await runHandover(cfg, "preflight", cfgPath).catch(
           (e: any) => (pre = e.message),
@@ -137,19 +140,22 @@ describeUnlessCoverage(
         await runHandover(cfg, "full", cfgPath).catch(
           (e: any) => (full = e.message),
         );
-        await runHandover(cfg, "audit", cfgPath).catch(
-          (e: any) => (audit = e.message),
-        );
+        // TIME_SCALE is immutable, so no completed ceremony gets past the
+        // preflight: the table completion and the audit build is read here.
+        const { args } = await handoverArgs(cfg, "audit", cfgPath);
+        table = (await assertHandoverComplete({ ...args, audit: true })).checks;
       } finally {
         console.log = quiet;
       }
+      const line = `governance TIME_SCALE 1440 on chain ${SEPOLIA} (above 1 only on the dev chain 31337)`;
+      const entry = table.filter((c) => c.label === line);
       console.log(
-        `      preflight: ${pre}\n      full phase: ${full}\n      audit: ${audit}`,
+        `      preflight: ${pre}\n      full phase: ${full}\n      completion/audit table: ${JSON.stringify(entry)}`,
       );
       const refusal = `governance TIME_SCALE is 1440 on chain ${SEPOLIA}`;
       expect(pre).to.contain(refusal);
       expect(full).to.contain(refusal);
-      expect(audit).to.contain("the ceremony has not completed");
+      expect(entry).to.deep.equal([{ label: line, ok: false }]);
       expect(await f.c.identityRegistry.owner()).to.equal(f.deployer.address);
       expect(await f.c.governance.TIME_SCALE()).to.equal(1440n);
 

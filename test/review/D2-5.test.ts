@@ -5,7 +5,9 @@
 // second naming the fee:
 //  A) owner == ownerWallet == deployer (the usual history): both warnings;
 //  B) owner != deployer, ownerWallet == deployer (the factory was owned by
-//     someone else when the escrow was made): the fee-wallet warning.
+//     someone else when the escrow was made): the fee-wallet warning;
+//  C) the control: ownerWallet == ops (made after the factory's fee wallet
+//     moved): the owner warning only.
 import { expect } from "chai";
 import { ethers } from "hardhat";
 import { time } from "@nomicfoundation/hardhat-network-helpers";
@@ -48,6 +50,12 @@ describe("D2-5 escrows whose fee wallet is the deployer", function () {
       .createEscrowWallet(alice.address, bob.address, E("100"));
     await e.connect(stranger).transferOwnership(deployer.address);
     await e.acceptOwnership();
+    // Escrow 3 (the control): made once the factory's fee wallet is ops.
+    await e.setOwnerWallet(f.ops.address);
+    await e
+      .connect(carol)
+      .createEscrowWallet(alice.address, bob.address, E("100"));
+    const w3 = await e.getWalletAddress(3);
 
     const MS = await ethers.getContractFactory("MultiSigEscrowWallet");
     const wallets: any[] = [];
@@ -107,6 +115,9 @@ describe("D2-5 escrows whose fee wallet is the deployer", function () {
     expect(fee[0]).to.include(w1);
     expect(fee[0]).to.include(w2);
     expect(fee[0]).to.match(/platform fee/);
+    // The control: the owner warning sees escrow 3; the fee warning does not.
+    expect(mine.join("\n")).to.include(w3);
+    expect(fee[0]).to.not.include(w3);
 
     // After the ceremony both escrows release; the platform fee (2 VSC each)
     // lands on the deployer, not ops.
