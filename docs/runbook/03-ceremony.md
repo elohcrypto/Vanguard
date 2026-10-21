@@ -100,20 +100,29 @@ and its digest (section 6), `🏛️  Handover: governance accepts by vote`
 first transaction); a multisig role pauses it, exit 3 (section 2.4).
 Before step 1 it prints one line per issuer the registry trusts, read
 from the TrustedIssuerAdded scan whatever the topic
-(`   ℹ️  IdentityRegistry trusts KYC Service (0x…) for topic(s) [6] (TrustedIssuerAdded scan)`;
-a `"issuers"` list that omits one is refused), one line per role read as
-a key or a Safe (`   ✅ guardian 0x… is a key (no code), not the deployer`
+(`   ℹ️  IdentityRegistry trusts KYC Issuer (0x…) for topic(s) [6] (TrustedIssuerAdded at block N)`;
+the name is the issuer's own: `KYC Issuer` on this fixture, `KYC Service`
+in the demo; a `"issuers"` list that omits one is refused, and a trusted
+issuer that is no ClaimIssuer is refused by its code pin,
+`ClaimIssuer 0x… runtime code hash 0x… is not the compiled ClaimIssuer (0x…): …`),
+one line per role read as a key or a Safe
+(`   ✅ guardian 0x… is a key (no code), not the deployer`
 or `   ✅ guardian 0x… is a <T>-of-<N> multisig; the deployer is no listed owner`;
-the deployer as a listed owner at any depth is refused) and the verifier
-swaps (`   ℹ️  verifier swaps since fromBlock N: 0`, then
-`   ℹ️  ZKVerifierIntegrated 0x… validProofs whitelist 0, …; PrivacyManager bindings whitelist 0, …`:
+section 2.4 lists the refusals and warnings) and the verifier swaps
+(`   ✅ verifier swaps since fromBlock N: 0`, then
+`   ✅ ZKVerifierIntegrated 0x… validProofs whitelist 0, …; PrivacyManager bindings whitelist 0, …`:
 account for any validProofs count above its bindings). The verify step
-and the audit print the same lines. A swap prints
+and the audit print the same lines, each marked ✅ (an issuer line is
+ℹ️ only before step 1). A swap prints
 `   ❌ verifier swap at block N: ZKVerifierIntegrated 0x… whitelist verifier set to 0x… (K PrivacyManager binding(s) made under it)`
-and fails the verify step and the audit while records made under it can
-still count: ops republishes the whitelist root after it; for an
-attestation verifier a PrivacyParameters vote untrusts then re-trusts
-each trusted key of that circuit, or changes its policy (section 4).
+and fails the preflight, the verify step and the audit while records
+made under it can still count. Before the ceremony each remedy is one
+transaction: ops (named list operator early with `setListOperator`,
+the grant step 5 makes) republishes the whitelist root after it; for an
+attestation verifier the deployer untrusts then re-trusts each trusted
+key of that circuit, or changes its policy. After the ceremony ops
+still republishes, and the attestation remedy is a PrivacyParameters
+vote per key (section 4).
 `HANDOVER_PHASE` selects the phase: unset or `full`, `preflight` (the
 checks up to the first transaction, nothing sent; the deploy runs it),
 `accept` (resume, section 6) and `audit` (section 10). Demo options 83c,

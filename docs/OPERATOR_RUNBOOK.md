@@ -21,7 +21,7 @@ local node by a non-author before 5.8 (records in
 | Part                                                    | Sections                                                                                               |
 | ------------------------------------------------------- | ------------------------------------------------------------------------------------------------------ |
 | [Keys and the signer](runbook/01-keys-and-signer.md)    | 1 roles and keys; 1a the production signer; 1b the `accounts` pins                                     |
-| [Deploy](runbook/02-deploy.md)                          | 2 deploy: 2.1 the RPCs, 2.2 the budget, 2.3 the deploy, 2.4 multisig ops and issuer admin, 2.5 a Safe batch |
+| [Deploy](runbook/02-deploy.md)                          | 2 deploy: 2.1 the RPCs, 2.2 the budget, 2.3 the deploy, 2.4 multisig ops, issuer admin and guardian, 2.5 a Safe batch |
 | [Voters and the ceremony](runbook/03-ceremony.md)       | 3 voter registration; 5 the ceremony; 5a on a public chain; 6 the snapshot                             |
 | [After the ceremony](runbook/04-after-ceremony.md)      | 4 oracle nodes (the post-ceremony votes); 4a claim signers                                             |
 | [Operations](runbook/05-operations.md)                  | 7 the KeyManager ops identity; 8 rule administrators; 9 list oracles; 10 the day-2 audit; 11 drills; 12 incidents |

@@ -25,7 +25,7 @@ list oracle's `acceptOwnership`, Task 5.1) and refuses before step 1 when
 the issuer admin is neither a signer nor external; a multisig (Safe)
 issuer admin or ops gets these calls as a Safe Transaction Builder batch
 and the ceremony pauses (exit 3) until their effects hold on chain (Task
-5.13; [runbook](runbook/02-deploy.md#24-multisig-ops-and-issuer-admin-task-513-q11--b)). Since Task 4.13 option 1 deploys both issuers owned by the
+5.13; [runbook](runbook/02-deploy.md#24-multisig-ops-issuer-admin-and-guardian-task-513-q11--b)). Since Task 4.13 option 1 deploys both issuers owned by the
 deployer (wallet 0 signs every claim before the ceremony, wallet 9 after
 it): every trusted issuer must end owned by issuerAdmin with issuerAdmin's
 the only live key, so an issuer another wallet owns is refused, never

@@ -200,18 +200,31 @@ prints `✅ Deployed: 74 transactions in /tmp/vanguard-runbook/deploy-record.jso
   (`   ⚠️  list oracle 0x… names the deployer as pending owner, nominated by 0x…, not the deployer: …`),
   as does a capped scan (`   ⚠️  scan for other list oracles naming the deployer was capped at block N…: not checked`).
 
-### 2.4 Multisig ops and issuer admin (Task 5.13, Q11 = B)
+### 2.4 Multisig ops, issuer admin and guardian (Task 5.13, Q11 = B)
 
 A role at an address with code (a Safe) or in the config's
 `"externalRoles"` is external: nothing is sent for it (a wallet index with
 code, e.g. an EIP-7702 account, is refused: write it as an address).
-Refused, for every external role (the guardian Safe too: its owners
-could pause VSC): a 7702 account, the deployer as a listed owner (or two
-nested levels down); warned: an unreadable multisig, a deeper contract owner, a
-module (`⚠️  ops 0x… has module(s) enabled (…): …`). It sees listed
-owners only: you ensure the deployer neither owns nor executes it,
-directly or through other contracts or modules. Its calls go to a Safe
-Transaction Builder batch (2.5) with
+The deploy, the ceremony's preflight, completion and the audit read
+every external role as a Safe (the guardian Safe too: its owners could
+pause VSC), down two levels of owner Safes, and refuse with the same
+words: a 7702 account; the deployer as a listed owner
+(`❌ guardian 0x… lists the deployer 0x… as an owner (through 0x…): the deployer holds its power`);
+an owner below the role they cannot read (past two levels, in a cycle,
+or with no readable `getOwners()`:
+`❌ guardian 0x…: owner 0x… (through 0x…, 0x…) is unread (code past 2 levels): the deployer's ownership of it cannot be vetted`);
+the deployer as an enabled module of the role or of an owner Safe
+(`❌ guardian 0x… has the deployer 0x… as an enabled module: a module executes without the owners`).
+Warned in every phase, never a ✅, and the run then ends with
+warnings: any other module
+(`⚠️  ops 0x… has module(s) enabled (…): a module executes without the owners`)
+and a role contract that reads as no Safe
+(`⚠️  ops 0x… has code but no readable getOwners()/getThreshold(): the deployer's ownership of it is unchecked (runbook section 2)`).
+A timeout or a rate limit on these reads fails the run; it is never
+read as "no Safe". The vet reads what each contract reports, so compare
+each role address with your own Safe before the deploy, and ensure the
+deployer neither owns nor executes it any other way. Its calls go to a
+Safe Transaction Builder batch (2.5) with
 `⏸️  awaiting N <role> transaction(s): <file>`, exit 3: paused, not done.
 The next run checks each effect on chain and goes on, pauses again
 (`   ❌ not executed: [<step>] …`, only those re-written) or refuses another
