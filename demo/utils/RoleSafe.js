@@ -43,15 +43,16 @@ async function readSafe(addr) {
  * code, top, keys, notes, fails }. `top` is readSafe(addr), null when the
  * address has no code, is an EIP-7702 delegated account or reads as no
  * Safe. Breadth-first over nested multisig owners to DEPTH: `keys` the
- * owners that are keys, `notes` the ⚠️ lines for enabled modules, `fails`
+ * owners that are keys, `warns` the warnings for enabled modules, `fails`
  * the refusals the vet throws and the ceremony's role lines print with
  * the same words: a 7702 account, the deployer as a listed owner, and
  * (review D-1 round 2) an owner below the role whose owners cannot be
- * read (code past DEPTH, a cycle, or a contract that reads as no Safe).
+ * read (code past DEPTH, a cycle, or a contract that reads as no Safe)
+ * and the deployer as an enabled module (it executes without owners).
  */
 async function readRoleSafe(addr, deployer, head) {
   const code = await ethers.provider.getCode(addr);
-  const out = { code, top: null, keys: [], notes: [], fails: [] };
+  const out = { code, top: null, keys: [], warns: [], fails: [] };
   if (code === "0x") return out;
   if (is7702(code)) {
     out.fails.push(
@@ -70,9 +71,20 @@ async function readRoleSafe(addr, deployer, head) {
   while (queue.length) {
     const { safe, at, path } = queue.shift();
     const via = path.length ? ` (through ${path.join(", ")})` : "";
-    if (safe.modules?.length)
-      out.notes.push(
-        `⚠️  ${head}${at === addr ? "" : `: owner ${at}${via}`} has module(s) enabled (${safe.modules.join(", ")}): a module executes without the owners`,
+    const above = path.slice(0, -1);
+    const where =
+      at === addr
+        ? head
+        : `${head}: owner ${at}${above.length ? ` (through ${above.join(", ")})` : ""}`;
+    const mods = safe.modules || [];
+    if (mods.some((m) => sameAddr(m, deployer)))
+      out.fails.push(
+        `${where} has the deployer ${deployer} as an enabled module: a module executes without the owners`,
+      );
+    const others = mods.filter((m) => !sameAddr(m, deployer));
+    if (others.length)
+      out.warns.push(
+        `${where} has module(s) enabled (${others.join(", ")}): a module executes without the owners`,
       );
     for (const o of safe.owners) {
       if (sameAddr(o, deployer) && !listed) {
@@ -112,13 +124,13 @@ async function vetRole(r, deployer, log = console.log) {
   const head = `${r.label} ${r.address}`;
   const tail = "its calls are exported for its owners, never sent here";
   const s = await readRoleSafe(r.address, deployer, head);
+  for (const w of s.warns) log(`⚠️  ${w}`);
   if (s.fails.length) throw new Error(s.fails[0]);
   if (s.code === "0x") return log(`ℹ️  ${head} is external: ${tail}`);
   if (!s.top)
     return log(
       `⚠️  ${head} has code but no readable getOwners()/getThreshold(): the deployer's ownership of it is unchecked; ${tail}`,
     );
-  for (const n of s.notes) log(n);
   log(
     `ℹ️  ${head} is a ${s.top.threshold}-of-${s.top.owners.length} multisig; the deployer is no listed owner: ${tail}`,
   );
@@ -129,15 +141,19 @@ async function vetRole(r, deployer, log = console.log) {
  * vetRole reads it, for the ceremony's preflight, completion and audit: a
  * key that is not the deployer, or a multisig with none of readRoleSafe's
  * fails, each failing with the vet's words. One that reads as no Safe
- * passes, named unchecked, as in vetRole.
+ * passes, named unchecked, as in vetRole. Its warnings (round 2: enabled
+ * modules) go to `warnings` and `residual`: a power the vet cannot
+ * attribute, so "the deployer holds no power" is not claimed.
  */
-async function roleSafeLines(o) {
+async function roleSafeLines(o, warnings = [], residual = []) {
   const d = await addrOf(o.deployer);
   const out = [];
   for (const k of ["ops", "guardian", "issuerAdmin"]) {
     if (!o[k]) continue;
     const a = await addrOf(o[k]);
     const s = await readRoleSafe(a, d, `${k} ${a}`);
+    warnings.push(...s.warns);
+    residual.push(...s.warns);
     out.push(...s.fails.map((f) => [f, false]));
     if (s.code === "0x") {
       out.push([

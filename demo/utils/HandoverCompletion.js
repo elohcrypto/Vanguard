@@ -246,7 +246,7 @@ async function assertHandoverComplete(o) {
     "Token guardian is not the deployer",
     !same(await o.token.guardian(), dAddr),
   );
-  await lines("role multisigs", roleSafeLines(o)); // review D-1
+  await lines("role multisigs", roleSafeLines(o, warnings, residual)); // D-1
   if (o.dynamicListManager) {
     add(
       "DynamicListManager governanceContract is governance",
