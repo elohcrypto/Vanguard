@@ -143,7 +143,7 @@ verdict token
 drive 1a 1a "${CEREMONY_VOTERS[@]}" 22 32 83c:y 83d 83e 83f 0
 need "$(count 'DEPLOYING ORACLE MANAGEMENT SYSTEM')" 1 "1a oracle deploy"
 need "$(count 'oracles registered')" 1 "oracles registered line"
-ISSUER='^\s+(ℹ️|✅)\s+IdentityRegistry trusts (KYC|AML) Service \(0x[0-9a-fA-F]{40}\) for topic\(s\) \[[67]\] \(TrustedIssuerAdded scan\)'
+ISSUER='^\s+(ℹ️|✅)\s+IdentityRegistry trusts (KYC|AML) Service \(0x[0-9a-fA-F]{40}\) for topic\(s\) \[[67]\] \(TrustedIssuerAdded at block [0-9]+\)'
 need "$(bcount "$STEP1" 1 "$ISSUER")" 2 "83c: both ClaimIssuers by topic"
 need "$(bcount "$AUDIT" 1 "$ISSUER")" 2 "83f: both ClaimIssuers by topic"
 GUARDIAN='^\s+✅ guardian 0x[0-9a-fA-F]{40} is a key \(no code\), not the deployer'
@@ -172,7 +172,7 @@ verdict glyph
 
 drive zkswap 1 21 51 31 74 "${CEREMONY_VOTERS[@]}" 22 32 42:1:1 83c:y 83d 83e \
   83f 0
-need "$(bcount "$STEP1" 1 '^\s+ℹ️\s+verifier swaps since fromBlock [0-9]+: 0$')" 1 \
+need "$(bcount "$STEP1" 1 '^\s+✅ verifier swaps since fromBlock [0-9]+: 0$')" 1 \
   "83c: no verifier swap"
 need "$(bcount "$STEP1" 1 'validProofs whitelist 1, .*; PrivacyManager bindings whitelist 1, ')" 1 \
   "83c: the bound proof counted"
