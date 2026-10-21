@@ -92,7 +92,7 @@ async function readModules(safe, none) {
  * (review D-1 round 2) an owner below the role whose owners cannot be
  * read (code past DEPTH, a cycle, or a contract that reads as no Safe)
  * and the deployer as an enabled module (it executes without owners);
- * round 3: a module list or a threshold unread.
+ * round 3: a module list or a threshold unread, a degenerate multisig.
  */
 async function readRoleSafe(addr, deployer, head) {
   const code = await ethers.provider.getCode(addr);
@@ -133,9 +133,14 @@ async function readRoleSafe(addr, deployer, head) {
         `${head} lists the deployer ${deployer} as an owner${via}: the deployer holds its power`,
       );
     }
-    if (safe.threshold === null)
+    const [t, n] = [safe.threshold, BigInt(safe.owners.length)];
+    if (t === null)
       out.fails.push(
         `${where} reads as a Safe but its threshold cannot be read: it cannot be vetted as a multisig`,
+      );
+    else if (t < 1n || t > n)
+      out.fails.push(
+        `${where} is a degenerate multisig (${t}-of-${n}): it needs an owner and a threshold from 1 to its owner count`,
       );
     if (safe.modules === PAST)
       out.fails.push(
