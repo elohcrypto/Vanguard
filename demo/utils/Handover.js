@@ -120,7 +120,7 @@ async function handoverDeployerPowers(o) {
   await preflightLinks(o); // Task 4.13: A1 H2/H3, M1, D56
   await preflightPowers(o, { governanceOwned });
   await preflightRoles(o); // Task 4.13: exact role sets (A1 H1)
-  await preflightPrivacy(o);
+  await preflightPrivacy(o, log);
   await preflightKeyManager(o);
   await preflightRegistrars(o); // Task 4.3
   await preflightTrust(o); // Task 4.13: trusted contracts by provenance

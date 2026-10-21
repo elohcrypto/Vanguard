@@ -244,7 +244,7 @@ describe("D2-2 verifier swap residue, attestation circuits", function () {
       `      full phase lines naming the deployer-trusted issuer key: ${pick(/issuer key/, fullText).length}`,
     );
     console.log(
-      `      full phase lines naming a verifier swap / forged record: ${pick(/updateVerifier|VerifierUpdated|swapp|forged|AttestationProofBound|attestationRecords/i, fullText).length}`,
+      `      full phase lines naming a verifier swap / forged record: ${pick(/verifier swap|records made up to block|updateVerifier|VerifierUpdated|forged|AttestationProofBound|attestationRecords/i, fullText).length}`,
     );
     expect(full).to.contain("handover incomplete");
     for (const [name] of CIRCUITS)
@@ -317,13 +317,9 @@ describe("D2-2 verifier swap residue, attestation circuits", function () {
       (e: any) => (verdict = e.message),
     );
     const audit = out.join("\n");
+    console.log(`      audit after the votes: ${verdict}`);
     console.log(
-      `      audit after the votes: ${pick(/Audit passed/, audit)
-        .join(" | ")
-        .trim()}`,
-    );
-    console.log(
-      `      audit lines naming the deployer-trusted key: ${pick(/was trusted by the deployer/, audit).length}; any line naming a swap or a forged record: ${pick(/updateVerifier|VerifierUpdated|swapp|forged|attestationRecords/i, audit).length}`,
+      `      audit lines naming the deployer-trusted key: ${pick(/was trusted by the deployer/, audit).length}; any line naming a swap or a forged record: ${pick(/verifier swap|records made up to block|updateVerifier|VerifierUpdated|forged|attestationRecords/i, audit).length}`,
     );
     expect(verdict).to.contain("audit failed");
     for (const [name] of CIRCUITS)

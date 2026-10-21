@@ -15,7 +15,7 @@
 
 const { ethers } = require("hardhat");
 const { addrOf, same, fail, MODE } = require("./HandoverChecks");
-const { scanLogs } = require("./HandoverScans");
+const { scanLogs, uniq } = require("./HandoverScans");
 const {
   codeHashChecks,
   codeHashLabel,
@@ -31,6 +31,15 @@ const ATTESTATION_CIRCUITS = [
   ["accreditation", ethers.id("ACCREDITATION_PROOF")],
   ["compliance", ethers.id("COMPLIANCE_AGGREGATION")],
 ];
+const ALL_KINDS = ["whitelist", ...ATTESTATION_CIRCUITS.map(([n]) => n)];
+// updateVerifier's tag -> the PrivacyManager records that verifier decides.
+const KINDS = {
+  whitelist: ["whitelist"],
+  blacklist: [],
+  jurisdiction: ["jurisdiction"],
+  accreditation: ["accreditation"],
+  compliance: ["compliance"],
+};
 
 /**
  * Task 3.4 (R-3R-15): the PrivacyManager ComplianceRules wires for VSC and
@@ -83,7 +92,7 @@ async function wiredPrivacy(o, bound) {
  * name it (else the deployer keeps updateVerifier), and no named verifier
  * may be a testingMode one (it accepts any proof with non-zero signals).
  */
-async function preflightPrivacy(o) {
+async function preflightPrivacy(o, log = () => {}) {
   const pm = o.privacyManager;
   const zk = o.zkVerifier;
   if (pm) {
@@ -104,6 +113,11 @@ async function preflightPrivacy(o) {
   for (const c of await codeHashChecks(pm, [zk])) {
     if (!c.ok) fail(codeHashRefusal(c));
   }
+  // Review D2-2: what completion and the audit refuse, shown up front.
+  if (!pm) return;
+  const [ops, gov] = await Promise.all([o.ops, o.governance].map(addrOf));
+  const swaps = await swapLines(o, pm, [await pm.zkVerifier()], ops, gov);
+  for (const [label, ok] of swaps) log(`   ${ok ? "ℹ️ " : "⚠️ "} ${label}`);
 }
 
 /**
@@ -188,6 +202,139 @@ async function deployerTrustedAttestors(o, dAddr, c = o.privacyManager) {
     }
   }
   return out;
+}
+
+/**
+ * Review D2-2: every verifier swap since fromBlock, oldest first: a
+ * ZKVerifierIntegrated VerifierUpdated on each wrapper in `zks` (its
+ * constructor emits none) and a PrivacyManager ZKVerifierUpdated after the
+ * constructor's. [{ block, what, kinds, bindings }]: `kinds` the records
+ * the swapped verifier decides (a blacklist proof binds nothing),
+ * `bindings` the PrivacyManager bindings made from it to the next swap.
+ * Also `bound`: the binding events, whitelist then attestation.
+ */
+async function verifierSwaps(o, pm, zks) {
+  const swaps = [];
+  for (const a of zks) {
+    const zk = await ethers.getContractAt("ZKVerifierIntegrated", a);
+    for (const ev of await scanLogs(zk, zk.filters.VerifierUpdated(), o)) {
+      const tag = Object.keys(KINDS).find(
+        (t) => ethers.id(t) === ev.args[0].hash,
+      );
+      swaps.push({
+        block: ev.blockNumber,
+        what: `ZKVerifierIntegrated ${a} ${tag || "unknown"} verifier set to ${ev.args[1]}`,
+        kinds: tag ? KINDS[tag] : ALL_KINDS,
+      });
+    }
+  }
+  for (const ev of await scanLogs(pm, pm.filters.ZKVerifierUpdated(), o)) {
+    if (same(ev.args[0], ZERO)) continue;
+    swaps.push({
+      block: ev.blockNumber,
+      what: `PrivacyManager verifier ${ev.args[0]} replaced by ${ev.args[1]}`,
+      kinds: ALL_KINDS,
+    });
+  }
+  swaps.sort((x, y) => x.block - y.block);
+  const bound = {
+    whitelist: await scanLogs(pm, pm.filters.WhitelistProofBound(), o),
+    attestation: await scanLogs(pm, pm.filters.AttestationProofBound(), o),
+  };
+  const at = [...bound.whitelist, ...bound.attestation].map(
+    (e) => e.blockNumber,
+  );
+  swaps.forEach((s, i) => {
+    const end = i + 1 < swaps.length ? swaps[i + 1].block : Infinity;
+    s.bindings = at.filter((b) => b >= s.block && b < end).length;
+  });
+  return { swaps, bound };
+}
+
+/**
+ * D2-2: true when every attestation record of circuit `id` made up to block
+ * `b` has lapsed: the policy epoch, or the epoch of every attestor the
+ * circuit trusts now, moved after `b`.
+ */
+async function lapsedSince(pm, id, b, o) {
+  const then = { blockTag: b };
+  if ((await pm.policyEpoch(id)) > (await pm.policyEpoch(id, then)))
+    return true;
+  const sets = await scanLogs(pm, pm.filters.TrustedAttestorSet(id), o);
+  for (const k of new Set(sets.map((e) => e.args.attestor))) {
+    if (!(await pm.trustedAttestor(id, k))) continue;
+    const now = await pm.attestorEpoch(id, k);
+    if (now <= (await pm.attestorEpoch(id, k, then))) return false;
+  }
+  return true;
+}
+
+/**
+ * Review D2-2, completion and the audit: [label, pass] for the swaps, one
+ * line each, and a failing line per record kind a swap left able to count:
+ * whitelist bindings until ops (or governance) republishes the root after
+ * the last whitelist verifier swap; a circuit's attestation records until
+ * its policy epoch, or the epoch of every attestor it trusts, moved after
+ * the last swap of its verifier. Then the wrapper's validProofs beside the
+ * bindings, for the operator to account for.
+ */
+async function swapLines(o, pm, zks, ops, govAddr) {
+  const { swaps, bound } = await verifierSwaps(o, pm, zks);
+  const last = (k) =>
+    Math.max(
+      -1,
+      ...swaps.filter((s) => s.kinds.includes(k)).map((s) => s.block),
+    );
+  const open = [];
+  const lw = last("whitelist");
+  if (lw >= 0) {
+    const v = await pm.whitelistVersion();
+    const pubs = await scanLogs(pm, pm.filters.WhitelistRootPublished(), o);
+    const cur = pubs.find((e) => e.args.version === v);
+    const fresh =
+      v === 0n ||
+      (cur &&
+        cur.blockNumber > lw &&
+        [ops, govAddr].some((a) => same(a, cur.args.publisher)));
+    if (!fresh)
+      open.push([
+        "whitelist",
+        `whitelist bindings made up to block ${lw} (the last whitelist verifier swap) still count: ops must republish the whitelist root (publishWhitelistRoot) after it`,
+      ]);
+  }
+  for (const [name, id] of ATTESTATION_CIRCUITS) {
+    const b = last(name);
+    if (b < 0) continue;
+    if (!(await lapsedSince(pm, id, b, o)))
+      open.push([
+        name,
+        `${name} records made up to block ${b} (the last ${name} verifier swap) still count: a PrivacyParameters vote must untrust then re-trust each trusted ${name} attestor key, or change the ${name} policy, after it`,
+      ]);
+  }
+  const stuck = new Set(open.map(([k]) => k));
+  const zk = await ethers.getContractAt("ZKVerifierIntegrated", zks[0]);
+  const proofs = [];
+  const binds = [`whitelist ${bound.whitelist.length}`];
+  for (const k of ALL_KINDS) proofs.push(`${k} ${await zk.validProofs(k)}`);
+  for (const [name, id] of ATTESTATION_CIRCUITS)
+    binds.push(
+      `${name} ${bound.attestation.filter((e) => e.args.circuitId === id).length}`,
+    );
+  return [
+    [
+      `verifier swaps since fromBlock ${Number(o.fromBlock || 0)}: ${swaps.length}`,
+      open.length === 0,
+    ],
+    ...swaps.map((s) => [
+      `verifier swap at block ${s.block}: ${s.what} (${s.bindings} PrivacyManager binding(s) made under it)`,
+      !s.kinds.some((k) => stuck.has(k)),
+    ]),
+    ...open.map(([, label]) => [label, false]),
+    [
+      `ZKVerifierIntegrated ${zks[0]} validProofs ${proofs.join(", ")}; PrivacyManager bindings ${binds.join(", ")}`,
+      true,
+    ],
+  ];
 }
 
 /**
@@ -292,6 +439,11 @@ async function privacyLines(
     lines.push([codeHashLabel(c), c.ok]);
   }
   if (pins.length) lines.push([buildIdentityLabel(buildIdentity()), true]);
+  // Review D2-2: read through pinned code only.
+  if (pmAddr && pins.every((c) => c.ok)) {
+    const pm = await ethers.getContractAt("PrivacyManager", pmAddr);
+    lines.push(...(await swapLines(o, pm, uniq([used, zkAddr]), ops, govAddr)));
+  }
   if (zkAddr) {
     const v = await ethers.getContractAt("ZKVerifierIntegrated", zkAddr);
     lines.push([

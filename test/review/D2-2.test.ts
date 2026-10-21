@@ -78,11 +78,13 @@ describe("D2-2 verifier swap residue", function () {
     let full = "ok";
     let audit = "ok";
     let after = "ok";
+    let fullOut: string[] = [];
     let auditOut: string[] = [];
     try {
       await runHandover(cfg, "full", cfgPath).catch(
         (e: any) => (full = e.message),
       );
+      fullOut = out.splice(0);
       await runHandover(cfg, "audit", cfgPath).catch(
         (e: any) => (audit = e.message),
       );
@@ -105,6 +107,12 @@ describe("D2-2 verifier swap residue", function () {
       `      full phase: ${full}; audit: ${audit}\n      ${swapLines.join("\n      ")}\n      audit after ops republished: ${after}`,
     );
     expect(full).to.contain("handover incomplete");
+    expect(
+      pick(/⚠️  whitelist bindings made up to block/, fullOut),
+    ).to.have.lengthOf(1);
+    expect(
+      pick(/❌ whitelist bindings made up to block/, fullOut),
+    ).to.have.lengthOf(1);
     expect(audit).to.contain("audit failed");
     const zkAddr = await zk.getAddress();
     expect(swapLines).to.include(
