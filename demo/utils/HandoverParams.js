@@ -48,7 +48,14 @@ async function governanceChecks(o) {
   const floor = (7n * 86400n) / scale;
   const age = await g.minVoterAge();
   const [pc, vc] = [await g.proposalCreationCost(), await g.votingCost()];
+  // Review D2-3: the code pin masks TIME_SCALE (an immutable).
+  const chainId = (await ethers.provider.getNetwork()).chainId;
   const out = [
+    {
+      label: `governance TIME_SCALE ${scale} on chain ${chainId} (above 1 only on the dev chain 31337)`,
+      ok: scale === 1n || chainId === 31337n,
+      fix: `governance TIME_SCALE is ${scale} on chain ${chainId}: every governance window is ${scale} times shorter than the mainnet schedule; off the dev chain 31337 only TIME_SCALE 1 is accepted: redeploy governance with TIME_SCALE 1`,
+    },
     {
       label: `governance minVoterAge ${age}s is at least 7 days / TIME_SCALE (${floor}s)`,
       ok: age >= floor,
