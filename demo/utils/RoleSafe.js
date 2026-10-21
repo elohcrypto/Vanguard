@@ -22,23 +22,33 @@ const PAST = "past";
 const is7702 = (code) => code.toLowerCase().startsWith("0xef0100");
 
 /**
+ * True when `e` means "no such function" (review D-1 round 3): a revert
+ * with no data or a call answering none, as each provider reports it
+ * (measured): ethers' CALL_EXCEPTION or BAD_DATA, Hardhat in process (no
+ * code) or an EIP-1474 node (code 3) with data "0x", a Hardhat node over
+ * HTTP (-32603) with data.data "0x". Anything else is false: a timeout,
+ * a rate limit, out of gas (-32000), a fault whose text says "reverted".
+ */
+function noSuchFunction(e) {
+  if (e.code === "CALL_EXCEPTION") return e.data == null || e.data === "0x";
+  if (e.code === "BAD_DATA") return e.value === "0x";
+  if (e.code === undefined || e.code === 3) return e.data === "0x";
+  if (e.code === -32603) return e.data?.data === "0x";
+  return false;
+}
+
+/**
  * `addr` read as a Safe: { owners, threshold, modules } (modules null when
  * the contract has no getModulesPaginated, PAST beyond MAX_MODULES), or
  * null when it has no getOwners(). Round 3: a working getOwners() makes
  * it Safe-shaped, threshold null when getThreshold() cannot be read.
- * Review D-1 round 2: only a revert or
- * undecodable data means "no such function"; any other error (a timeout,
+ * Only noSuchFunction errors read as absent; any other error (a timeout,
  * a rate limit) propagates and fails the run like every other read.
  */
 async function readSafe(addr) {
   const safe = await ethers.getContractAt(SAFE_ABI, addr);
   const none = (e) => {
-    if (
-      e.code === "CALL_EXCEPTION" ||
-      e.code === "BAD_DATA" ||
-      /revert/i.test(e.message)
-    )
-      return null;
+    if (noSuchFunction(e)) return null;
     throw e;
   };
   const owners = await safe.getOwners().catch(none);
@@ -221,4 +231,4 @@ async function roleSafeLines(o, warnings = [], residual = []) {
   return out;
 }
 
-module.exports = { readRoleSafe, vetRole, roleSafeLines };
+module.exports = { readRoleSafe, vetRole, roleSafeLines, noSuchFunction };
