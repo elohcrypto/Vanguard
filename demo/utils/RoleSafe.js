@@ -20,22 +20,30 @@ const is7702 = (code) => code.toLowerCase().startsWith("0xef0100");
 
 /**
  * `addr` read as a Safe: { owners, threshold, modules } (modules null when
- * the contract has no getModulesPaginated), or null when unreadable.
+ * the contract has no getModulesPaginated), or null when it has no
+ * getOwners()/getThreshold(). Review D-1 round 2: only a revert or
+ * undecodable data means "no such function"; any other error (a timeout,
+ * a rate limit) propagates and fails the run like every other read.
  */
 async function readSafe(addr) {
   const safe = await ethers.getContractAt(SAFE_ABI, addr);
-  try {
-    const [owners, threshold] = await Promise.all([
-      safe.getOwners(),
-      safe.getThreshold(),
-    ]);
-    const page = await safe
-      .getModulesPaginated("0x0000000000000000000000000000000000000001", 10)
-      .catch(() => null);
-    return { owners: [...owners], threshold, modules: page && [...page[0]] };
-  } catch {
-    return null;
-  }
+  const none = (e) => {
+    if (
+      e.code === "CALL_EXCEPTION" ||
+      e.code === "BAD_DATA" ||
+      /revert/i.test(e.message)
+    )
+      return null;
+    throw e;
+  };
+  const owners = await safe.getOwners().catch(none);
+  if (owners === null) return null;
+  const threshold = await safe.getThreshold().catch(none);
+  if (threshold === null) return null;
+  const page = await safe
+    .getModulesPaginated("0x0000000000000000000000000000000000000001", 10)
+    .catch(none);
+  return { owners: [...owners], threshold, modules: page && [...page[0]] };
 }
 
 /**
