@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 #
 # Regression drives of the interactive demo (Task 4.17; the sixth since
-# Task 5.10, the seventh since 5.12): strict drives through
+# Task 5.10, the seventh since 5.12, the eighth since U1): strict drives through
 # scripts/demo-drive.sh, each with
 # the needles that pin what it exists to show. One PASS/FAIL line per
 # drive; exits 1 when any drive fails.
@@ -10,13 +10,18 @@
 #              "claim revoked (not valid on chain)"
 #   token      4.8 token options (23-30): a cooldown that "jumped"
 #   1a         4.16 option 1a (oracles deployed with everything), then
-#              the ceremony
+#              the ceremony and (U1) the day-2 audit: 83c and 83f list
+#              both ClaimIssuers by topic from the TrustedIssuerAdded
+#              scan and read the guardian as a key, not the deployer
 #   q9         4.16 Q9 fill-then-bind: the ceremony, the VSC whitelist
 #              oracle read, an approval refused below the tier
 #              (TierBelowNewType, printed as "Approval refused (chain
 #              rule, Q7 c)") and approved after option 33 raises it
 #   glyph      4.16 glyph list: no error glyph but the menu's own Exit
 #              line, and the VSC whitelist oracle read
+#   zkswap     U1 (D2-2): option 42 binds a real whitelist proof before
+#              the ceremony; 83c counts no verifier swap and the one
+#              binding, 83f prints no swap line
 #   escrowdlm  5.10: the ceremony with an EscrowWalletFactory (61) and a
 #              DynamicListManager (84) deployed, so the handover moves
 #              both to governance by vote and the verifier reads each
@@ -118,6 +123,8 @@ verdict() {
 
 CEREMONY_VOTERS=(24:1:Alice 24:1:Bob 24:1:Carol 24:1:Dave
   75a:4:1000:y 75a:5:1000:y 75a:6:1000:y 75a:7:1000:y)
+STEP1='HANDOVER STEP 1: DEPLOYER GRANTS'
+AUDIT='HANDOVER STEP 4: DAY-2 AUDIT'
 
 drive onchainid 1 21 51 3:1:5 3:1:6 4:0 6:0:1:840 6:1:1:840 8 6:0:4 \
   7:0:4 7:0:1 9:0:1 10:0 11:0 6:0:5 6:0:4 6:0:3:1 6:1:2 7:0:2 7:0:3:3 \
@@ -133,9 +140,15 @@ drive token 1 21 51 22 25:1:3 25:5 25:4 24:1:Alice 24:1:Bob 24:1:Carol \
 need "$(count 'jumped')" 1 "jumped line"
 verdict token
 
-drive 1a 1a "${CEREMONY_VOTERS[@]}" 22 32 83c:y 83d 83e 0
+drive 1a 1a "${CEREMONY_VOTERS[@]}" 22 32 83c:y 83d 83e 83f 0
 need "$(count 'DEPLOYING ORACLE MANAGEMENT SYSTEM')" 1 "1a oracle deploy"
 need "$(count 'oracles registered')" 1 "oracles registered line"
+ISSUER='^\s+(ℹ️|✅)\s+IdentityRegistry trusts (KYC|AML) Service \(0x[0-9a-fA-F]{40}\) for topic\(s\) \[[67]\] \(TrustedIssuerAdded scan\)'
+need "$(bcount "$STEP1" 1 "$ISSUER")" 2 "83c: both ClaimIssuers by topic"
+need "$(bcount "$AUDIT" 1 "$ISSUER")" 2 "83f: both ClaimIssuers by topic"
+GUARDIAN='^\s+✅ guardian 0x[0-9a-fA-F]{40} is a key \(no code\), not the deployer'
+need "$(bcount "$STEP1" 1 "$GUARDIAN")" 1 "83c: guardian vetted"
+need "$(bcount "$AUDIT" 1 "$GUARDIAN")" 1 "83f: guardian vetted"
 ceremony
 verdict 1a
 
@@ -156,6 +169,19 @@ menu=$(count '0\.  ❌ Exit')
 [[ "${glyphs:-0}" -eq "${menu:-0}" ]] \
   || REASONS+=("$((glyphs - menu)) error glyph(s) besides the menu's Exit")
 verdict glyph
+
+drive zkswap 1 21 51 31 74 "${CEREMONY_VOTERS[@]}" 22 32 42:1:1 83c:y 83d 83e \
+  83f 0
+need "$(bcount "$STEP1" 1 '^\s+ℹ️\s+verifier swaps since fromBlock [0-9]+: 0$')" 1 \
+  "83c: no verifier swap"
+need "$(bcount "$STEP1" 1 'validProofs whitelist 1, .*; PrivacyManager bindings whitelist 1, ')" 1 \
+  "83c: the bound proof counted"
+need "$(bcount "$AUDIT" 1 '^\s+✅ verifier swaps since fromBlock [0-9]+: 0$')" 1 \
+  "83f: no verifier swap"
+swap=$(bcount "$AUDIT" 1 'verifier swap at block')
+[[ "${swap:-0}" -eq 0 ]] || REASONS+=("83f: $swap verifier swap line(s)")
+ceremony
+verdict zkswap
 
 drive escrowdlm 1 21 51 31 74 61 84 "${CEREMONY_VOTERS[@]}" 22 32 83c:y \
   83d 83e 0
@@ -185,7 +211,6 @@ drive rotate 1 21 51 31 74 "${CEREMONY_VOTERS[@]}" 22 32 83c:y 83d 83e 83f \
   "76:2:3:2:D50 rotation" "${RM_VOTES[@]}" 79:y 78:14:y 78:15:y 78:16:y \
   33a 83f 39 0
 ceremony
-AUDIT='HANDOVER STEP 4: DAY-2 AUDIT'
 DEPLOYER_NODE='^\s+⚠️  OracleManager node 0x[0-9a-fA-F]{40} \(\w+\) was registered by the deployer'
 PASSED='^⚠️  Audit passed with warnings: see above\.$'
 need "$(bcount "$AUDIT" 1 "$DEPLOYER_NODE")" 3 "audit before: deployer-era node lines"
