@@ -7,6 +7,14 @@
 const { ethers } = require("hardhat");
 const { addrOf, same } = require("./HandoverChecks");
 const { readRoleSafe } = require("./RoleCalls");
+const { noSuchFunction } = require("./RoleSafe");
+
+// A read with no such function is `v` (review D-1 round 3); any other
+// error, a timeout too, is rethrown.
+const or = (v) => (e) => {
+  if (noSuchFunction(e)) return v;
+  throw e;
+};
 
 const ROLES = [
   ["ops", "ops"],
@@ -45,7 +53,7 @@ async function roleOf(o, a) {
     for (const x of o[k] || []) if (same(await addrOf(x), a)) return role;
   }
   const om = o.oracleManager;
-  if (om && same(await om.operator().catch(() => null), a))
+  if (om && same(await om.operator().catch(or(null)), a))
     return "the OracleManager operator";
   for (const [k, role] of [
     ["identityRegistry", "an IdentityRegistry agent"],
@@ -53,7 +61,7 @@ async function roleOf(o, a) {
     ["token", "a VSC agent"],
   ]) {
     const c = o[k];
-    if (c && (await c.isAgent(a).catch(() => false))) return role;
+    if (c && (await c.isAgent(a).catch(or(false)))) return role;
   }
   // Slice D review LOW-4: InvestorTypeRegistry's governors and
   // compliance officers.
@@ -66,9 +74,9 @@ async function roleOf(o, a) {
       ],
       await addrOf(itr),
     );
-    if (await r.isGovernor(a).catch(() => false))
+    if (await r.isGovernor(a).catch(or(false)))
       return "an InvestorTypeRegistry governor";
-    if (await r.isComplianceOfficer(a).catch(() => false))
+    if (await r.isComplianceOfficer(a).catch(or(false)))
       return "an InvestorTypeRegistry compliance officer";
   }
   const key = ethers.keccak256(ethers.solidityPacked(["address"], [a]));
@@ -81,13 +89,13 @@ async function roleOf(o, a) {
       ],
       at,
     );
-    if (same(await c.owner().catch(() => null), a))
+    if (same(await c.owner().catch(or(null)), a))
       return `the owner of ClaimIssuer ${at}`;
     for (const [purpose, what] of [
       [1, "management"],
       [3, "claim"],
     ]) {
-      const keys = await c.getKeysByPurpose(purpose).catch(() => []);
+      const keys = await c.getKeysByPurpose(purpose).catch(or([]));
       if (keys.some((k) => same(k, key)))
         return `a ${what} key of ClaimIssuer ${at}`;
     }
