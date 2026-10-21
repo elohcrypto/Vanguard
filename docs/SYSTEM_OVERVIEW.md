@@ -174,14 +174,15 @@ interfaces and test mocks; docs/SYSTEM_WORKFLOW_GUIDE.md, "Contracts").
 
 ## Testing and CI
 
-Eight CI jobs (`.github/workflows/ci.yml`; tests and coverage in two
+Nine CI jobs (`.github/workflows/ci.yml`; tests and coverage in two
 shards each): compile, tests, guard-runs, coverage and coverage-merge
 (merged line coverage may not drop below the recorded baseline; an
 overall branch baseline and per-contract floors,
 `scripts/ci/branch-floors.json`), zk-coverage, demo (smoke, ceremony,
-production deploy, multisig and regression drives on a node) and gates
+production deploy, multisig and regression drives on a node), gates
 (guard table: every require/revert in `contracts/` classified in
-`test/guards/table/`; line count; docs; lint and audit ratchets). A gas
+`test/guards/table/`; line count; docs; lint and audit ratchets) and
+required (passes only when every other job succeeded). A gas
 ratchet runs in the tests job. The docs gate checks structure and
 existence (fences, the README tree, links, option numbers, cited
 commands), not the truth of prose; that comes from the verbatim runbook
