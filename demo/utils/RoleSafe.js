@@ -16,12 +16,16 @@ const SAFE_ABI = [
   "function getModulesPaginated(address,uint256) view returns (address[],address)",
 ];
 const DEPTH = 2; // nested multisigs read below the role
+const SENTINEL = "0x0000000000000000000000000000000000000001";
+const MAX_MODULES = 100; // past it the module list is unread
+const PAST = "past";
 const is7702 = (code) => code.toLowerCase().startsWith("0xef0100");
 
 /**
  * `addr` read as a Safe: { owners, threshold, modules } (modules null when
- * the contract has no getModulesPaginated), or null when it has no
- * getOwners()/getThreshold(). Review D-1 round 2: only a revert or
+ * the contract has no getModulesPaginated, PAST beyond MAX_MODULES), or
+ * null when it has no getOwners()/getThreshold(). Review D-1 round 2:
+ * only a revert or
  * undecodable data means "no such function"; any other error (a timeout,
  * a rate limit) propagates and fails the run like every other read.
  */
@@ -40,10 +44,31 @@ async function readSafe(addr) {
   if (owners === null) return null;
   const threshold = await safe.getThreshold().catch(none);
   if (threshold === null) return null;
-  const page = await safe
-    .getModulesPaginated("0x0000000000000000000000000000000000000001", 10)
-    .catch(none);
-  return { owners: [...owners], threshold, modules: page && [...page[0]] };
+  const modules = await readModules(safe, none);
+  return { owners: [...owners], threshold, modules };
+}
+
+/**
+ * Every module `safe` pages (review D-1 round 3: the deployer enabled
+ * first sat 11th, past a single page): PAST beyond MAX_MODULES, null
+ * when the contract has no getModulesPaginated. A v1.4.1 Safe returns
+ * the page's last entry as `next`; v1.3.0 the first entry after the
+ * page, which the next page skips, so it is kept here.
+ */
+async function readModules(safe, none) {
+  const mods = [];
+  let start = SENTINEL;
+  for (;;) {
+    const page = await safe.getModulesPaginated(start, 10).catch(none);
+    if (page === null) return null;
+    const [list, next] = [[...page[0]], page[1]];
+    const end = !list.length || sameAddr(next, SENTINEL);
+    if (!end && !list.some((m) => sameAddr(m, next))) list.push(next);
+    mods.push(...list);
+    if (mods.length > MAX_MODULES) return PAST;
+    if (end) return mods;
+    start = next;
+  }
 }
 
 /**
@@ -91,7 +116,11 @@ async function readRoleSafe(addr, deployer, head) {
       at === addr
         ? head
         : `${head}: owner ${at}${above.length ? ` (through ${above.join(", ")})` : ""}`;
-    const mods = safe.modules || [];
+    if (safe.modules === PAST)
+      out.fails.push(
+        `${where} has its module list unread past ${MAX_MODULES}: a module executes without the owners`,
+      );
+    const mods = Array.isArray(safe.modules) ? safe.modules : [];
     if (mods.some((m) => sameAddr(m, deployer)))
       out.fails.push(
         `${where} has the deployer ${deployer} as an enabled module: a module executes without the owners`,
