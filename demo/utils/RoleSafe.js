@@ -61,7 +61,14 @@ async function readRoleSafe(addr, deployer, head) {
     return out;
   }
   out.top = await readSafe(addr);
-  if (!out.top) return out;
+  if (!out.top) {
+    // Task 5.13's honest scope (MultiSigWallet has no getOwners): passed,
+    // but a warning in every phase, never a ✅ (review D-1 round 2).
+    out.warns.push(
+      `${head} has code but no readable getOwners()/getThreshold(): the deployer's ownership of it is unchecked (runbook section 2)`,
+    );
+    return out;
+  }
   const unread = (o, via, why) =>
     out.fails.push(
       `${head}: owner ${o}${via} is unread (${why}): the deployer's ownership of it cannot be vetted`,
@@ -113,8 +120,8 @@ async function readRoleSafe(addr, deployer, head) {
 /**
  * Review LOW-5 (D-1: every external role, the guardian too): an external
  * role with code is read as a Safe and refused on any of readRoleSafe's
- * fails. Warned by name: a role that reads as no Safe (unchecked, Task
- * 5.13's honest scope) and an enabled module (it executes without the
+ * fails. Warned by name, as readRoleSafe's warns: a role that reads as
+ * no Safe (unchecked) and an enabled module (it executes without the
  * owners). The check sees listed owners only: the operator makes sure
  * the deployer neither owns nor executes it any other way (runbook
  * section 2).
@@ -127,10 +134,7 @@ async function vetRole(r, deployer, log = console.log) {
   for (const w of s.warns) log(`⚠️  ${w}`);
   if (s.fails.length) throw new Error(s.fails[0]);
   if (s.code === "0x") return log(`ℹ️  ${head} is external: ${tail}`);
-  if (!s.top)
-    return log(
-      `⚠️  ${head} has code but no readable getOwners()/getThreshold(): the deployer's ownership of it is unchecked; ${tail}`,
-    );
+  if (!s.top) return;
   log(
     `ℹ️  ${head} is a ${s.top.threshold}-of-${s.top.owners.length} multisig; the deployer is no listed owner: ${tail}`,
   );
@@ -140,10 +144,10 @@ async function vetRole(r, deployer, log = console.log) {
  * Review D-1: [label, pass] per role (ops, guardian, issuerAdmin) as
  * vetRole reads it, for the ceremony's preflight, completion and audit: a
  * key that is not the deployer, or a multisig with none of readRoleSafe's
- * fails, each failing with the vet's words. One that reads as no Safe
- * passes, named unchecked, as in vetRole. Its warnings (round 2: enabled
- * modules) go to `warnings` and `residual`: a power the vet cannot
- * attribute, so "the deployer holds no power" is not claimed.
+ * fails, each failing with the vet's words. Its warnings (round 2: an
+ * enabled module, a role that reads as no Safe) go to `warnings` and
+ * `residual`: a power the vet cannot attribute, so "the deployer holds
+ * no power" is not claimed.
  */
 async function roleSafeLines(o, warnings = [], residual = []) {
   const d = await addrOf(o.deployer);
@@ -160,12 +164,7 @@ async function roleSafeLines(o, warnings = [], residual = []) {
         `${k} ${a} is a key (no code), not the deployer`,
         !sameAddr(a, d),
       ]);
-    } else if (!s.top && !s.fails.length) {
-      out.push([
-        `${k} ${a} has code but no readable getOwners()/getThreshold(): the deployer's ownership of it is unchecked (runbook section 2)`,
-        true,
-      ]);
-    } else if (!s.fails.length) {
+    } else if (s.top && !s.fails.length) {
       out.push([
         `${k} ${a} is a ${s.top.threshold}-of-${s.top.owners.length} multisig; the deployer is no listed owner`,
         true,
