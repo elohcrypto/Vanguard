@@ -211,7 +211,7 @@ async function main(): Promise<void> {
 }
 
 /** The deploy on the locked record `file`, then handover.json. */
-async function deployOn(
+export async function deployOn(
   file: string,
   inputs: DeployInputs,
   accounts: string[],

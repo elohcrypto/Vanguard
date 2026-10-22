@@ -162,6 +162,13 @@ describe("D-4 one signer per keystore directory", function () {
       );
       expect(fs.readFileSync(victim, "utf8")).to.equal("precious\n");
       expect(up.raws, "nothing signed is sent").to.have.length(0);
+      // the refused signature never counted: nonce 7 is still free
+      fs.rmSync(path.join(keys, `signed-nonces.tmp-${s.p.pid}`));
+      const b = await rpc(s.live, "eth_sendTransaction", [tx("0x2")]);
+      expect(b.body.result, JSON.stringify(b.body)).to.match(
+        /^0x[0-9a-f]{64}$/,
+      );
+      expect(up.raws).to.have.length(1);
     } finally {
       await s.stop();
       up.server.close();

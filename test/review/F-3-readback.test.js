@@ -17,21 +17,9 @@ const {
   ask,
   baseStack,
   swap,
+  swapDeployed,
   oneClick,
 } = require("../helpers/deployFlows");
-
-/** ethers.getContractFactory(name)'s next deploys answer `fn` with `impl`. */
-function swapDeployed(name, fn, impl) {
-  const orig = ethers.getContractFactory;
-  ethers.getContractFactory = async (n, ...a) => {
-    const f = await orig.call(ethers, n, ...a);
-    if (n !== name) return f;
-    return swap(f, "deploy", async (...x) =>
-      swap(await f.deploy(...x), fn, impl),
-    );
-  };
-  return () => (ethers.getContractFactory = orig);
-}
 
 /** ComplianceRules owned by a wallet that is neither the deployer nor governance. */
 async function rulesElsewhere(state) {

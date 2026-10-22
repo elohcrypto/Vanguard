@@ -50,6 +50,19 @@ function swap(real, fn, impl) {
   });
 }
 
+/** ethers.getContractFactory(name)'s next deploys answer `fn` with `impl`. */
+function swapDeployed(name, fn, impl) {
+  const orig = ethers.getContractFactory;
+  ethers.getContractFactory = async (n, ...a) => {
+    const f = await orig.call(ethers, n, ...a);
+    if (n !== name) return f;
+    return swap(f, "deploy", async (...x) =>
+      swap(await f.deploy(...x), fn, impl),
+    );
+  };
+  return () => (ethers.getContractFactory = orig);
+}
+
 /** Option 1a's last two steps (51, 74) over the base stack and the oracles. */
 async function oneClick(state, deployer) {
   await capture(() => deployer.deployOracleSystem());
@@ -72,4 +85,4 @@ async function oneClick(state, deployer) {
   return { ok, text: out.join("\n"), gov };
 }
 
-module.exports = { capture, ask, baseStack, swap, oneClick };
+module.exports = { capture, ask, baseStack, swap, swapDeployed, oneClick };
