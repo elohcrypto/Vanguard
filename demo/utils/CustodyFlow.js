@@ -120,7 +120,8 @@ async function deployCustody(
       `   ⏳ Wallets cannot be created until proposal #${reg.proposalId} passes (options 77, 78)`,
     );
   } else {
-    log(`   ⚠️  Manager is not a registrar: ${reg.refused}`);
+    // Review F-3: a manager no wallet can be trusted by is no deploy.
+    throw new Error(`Manager is not a registrar: ${reg.refused}`);
   }
   state.setContract("investorRequestManager", m);
   return m;

@@ -99,7 +99,8 @@ async function deployEscrowSystem(mod) {
         `   ⏳ Escrows cannot be created until proposal #${reg.proposalId} names the factory a registrar: vote with option 77, execute with option 78`,
       );
     } else {
-      displayWarning(`Factory is not a registrar: ${reg.refused}`);
+      // Review F-3: a factory no escrow can be trusted by is no deploy.
+      throw new Error(`Factory is not a registrar: ${reg.refused}`);
     }
     // Review F-3: in demo state only once the registrar step has run.
     mod.state.setContract("escrowFactory", escrowFactory);

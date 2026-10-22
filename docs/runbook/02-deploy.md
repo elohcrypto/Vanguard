@@ -171,9 +171,12 @@ prints `✅ Deployed: 74 transactions in /tmp/vanguard-runbook/deploy-record.jso
 `✅ Preflight passed: every check before the ceremony's first transaction holds (voters are checked by the full phase)`.
 
 - Before that line the deploy reads its wiring back from chain
-  (`🔗 Wiring read back from chain (12 links):`, then one
-  `   ✅ <link>` each: agents, rule administrators, VGT's registry and
-  trust, the registrars, the custody officer, the registry's nomination).
+  (`🔗 Wiring read back from chain (16 links):`, 17 with `"lockAmounts"`,
+  then one `   ✅ <link>` each: agents, rule administrators (the
+  deployer's on VGT until the handover too), VGT's registry and trust,
+  VSC's authorization on the investor type registry, the registrars,
+  the custody officer and lock amounts, the registry's nomination, the
+  escrow fee wallet verified and exempt from investor limits).
   A link that does not read true stops it
   (`❌ Deploy failed: the deploy stopped; missing wiring: <links>`), and a
   step that fails stops it with that step's error, the links it left

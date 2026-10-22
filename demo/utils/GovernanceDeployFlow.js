@@ -18,7 +18,7 @@ const {
 const { advancePast } = require("./ChainTime");
 const { ethers } = require("hardhat");
 const { PROPOSAL_TYPE_NAMES } = require("./GovernanceProposalFlow");
-const { reportStop } = require("./DeployWiring");
+const { missingWiring, reportStop } = require("./DeployWiring");
 
 /** Option 74: Deploy Governance System */
 async function deployGovernanceSystem(mod) {
@@ -206,8 +206,18 @@ async function deployGovernanceSystem(mod) {
       );
     }
 
-    // Review F-3: in demo state only once its wiring is on chain, so a
-    // stop above leaves 74 to run again (and 1a's read-back sees it).
+    // Review F-3: 74's own links read back from chain (a re-run after a
+    // stop past step 6 finds ComplianceRules recording the earlier VGT),
+    // and in demo state only once on chain, so a stop leaves 74 to run
+    // again (and 1a's read-back sees it).
+    const missing = await missingWiring(
+      mod.state,
+      { governanceToken: govToken, vanguardGovernance },
+      "74",
+    );
+    if (missing.length) {
+      throw new Error(`missing wiring: ${missing.join(", ")}`);
+    }
     mod.state.setContract("governanceToken", govToken);
     mod.state.setContract("vanguardGovernance", vanguardGovernance);
 
