@@ -94,6 +94,7 @@ describe("F-3 the deploy flows report success only after their wiring", function
       "the deploy stopped; missing wiring: VanguardGovernance rule administrator for VSC, VanguardGovernance rule administrator for VGT",
     );
     expect(text).to.contain("STOPPED AT STEP 5 OF 5");
+    expect(text).to.match(/Governance system +stopped here/);
     expect(text).to.not.contain("FULL STACK DEPLOYED");
     expect(state.getContract("governanceToken")).to.equal(undefined);
     expect(state.getContract("vanguardGovernance")).to.equal(undefined);

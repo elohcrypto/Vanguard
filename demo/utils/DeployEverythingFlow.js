@@ -190,8 +190,10 @@ function _reportDeploySummary(mod, done, steps, reached) {
       }
     }
   }
+  // The stopped step may have deployed contracts it did not wire (F-3).
   for (let i = done.length; i < steps.length; i++) {
-    console.log(`   ⏭️  ${steps[i].name.padEnd(26)} not deployed`);
+    const what = i === reached ? "stopped here" : "not deployed";
+    console.log(`   ⏭️  ${steps[i].name.padEnd(26)} ${what}`);
   }
 
   if (reached === steps.length) {
