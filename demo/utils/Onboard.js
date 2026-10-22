@@ -88,6 +88,16 @@ async function onboard(state, address, opts = {}) {
   let created = false;
   if (same(identity, ZERO)) {
     identity = await factory.getIdentityByOwner(address);
+    // Review D2-6: ownerToIdentity is set at creation only, so it may name
+    // an identity the wallet no longer owns; adopted only if its own.
+    if (
+      !same(identity, ZERO) &&
+      !(await ownIdentity(factory, address, identity))
+    ) {
+      throw new Error(
+        `factory identity ${identity} of ${address} is not its own (the factory's, owned by it, its one MANAGEMENT key, the pinned recovery manager): not adopted`,
+      );
+    }
     if (same(identity, ZERO)) {
       const rc = await deployIdentity(
         factory,
@@ -179,32 +189,38 @@ async function onboard(state, address, opts = {}) {
 }
 
 /**
+ * Whether `id` is `address`'s own factory identity: the factory's, owned
+ * by `address`, whose one MANAGEMENT key is `address`'s, pinned to the
+ * factory's recovery manager (I-2).
+ */
+async function ownIdentity(factory, address, id) {
+  if (same(id, ZERO) || !(await factory.isOnchainID(id))) return false;
+  const oid = await ethers.getContractAt("OnchainID", id);
+  const key = ethers.solidityPackedKeccak256(["address"], [address]);
+  const keys = await oid.getKeysByPurpose(1);
+  const pinned = await factory.recoveryManager();
+  return (
+    same(await oid.owner(), address) &&
+    keys.length === 1 &&
+    keys[0] === key &&
+    !same(pinned, ZERO) &&
+    same(await oid.recoveryManager(), pinned)
+  );
+}
+
+/**
  * The factory's deployOnchainID for `address` with `salt`: its receipt, or
  * null when another sender's copy of the call mined first (Task 5.7, M-1:
  * the factory is permissionless and the salt is visible while pending).
- * That identity is accepted only if it is the factory's own, owned by
- * `address`, whose one MANAGEMENT key is `address`'s, pinned to the
- * factory's recovery manager (I-2); anything else rethrows the failure.
+ * That identity is accepted only if it is `address`'s own (ownIdentity);
+ * anything else rethrows the failure.
  */
 async function deployIdentity(factory, address, salt) {
   try {
     return await (await factory.deployOnchainID(address, salt)).wait();
   } catch (e) {
     const id = await factory.getIdentityByOwner(address);
-    if (same(id, ZERO) || !(await factory.isOnchainID(id))) throw e;
-    const oid = await ethers.getContractAt("OnchainID", id);
-    const key = ethers.solidityPackedKeccak256(["address"], [address]);
-    const keys = await oid.getKeysByPurpose(1);
-    const pinned = await factory.recoveryManager();
-    if (
-      !same(await oid.owner(), address) ||
-      keys.length !== 1 ||
-      keys[0] !== key ||
-      same(pinned, ZERO) ||
-      !same(await oid.recoveryManager(), pinned)
-    ) {
-      throw e;
-    }
+    if (!(await ownIdentity(factory, address, id))) throw e;
     return null;
   }
 }
