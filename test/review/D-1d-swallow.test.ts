@@ -46,6 +46,23 @@ const missing: [string, (tx: any) => any][] = [
 ];
 
 const sel = (sig: string) => ethers.id(sig).slice(0, 10);
+
+/** The error a call that reverts with a reason throws (MockTarget's). */
+async function revertWithReason() {
+  const s19 = (await ethers.getSigners())[19];
+  const x: any = await (
+    await ethers.getContractFactory("MockTarget", s19)
+  ).deploy();
+  const data = x.interface.encodeFunctionData("revertFunction");
+  const to = await x.getAddress();
+  const e = await ethers.provider.call({ to, data }).then(
+    () => null,
+    (e: any) => e,
+  );
+  expect(e, "revertFunction() reverts").to.not.equal(null);
+  return e;
+}
+
 const addr = (c: any) => c.getAddress();
 
 /**
@@ -60,6 +77,7 @@ const sites: {
   read: (f: any) => Promise<any>;
   absent: (r: { v: any; err: string }) => void;
   audit: boolean;
+  reason?: boolean;
 }[] = [
   {
     name: "an oracle's listManager()",
@@ -84,6 +102,7 @@ const sites: {
     read: (f) => preflightEscrow(f.args),
     absent: (r) => expect(r.err).to.equal(""),
     audit: true,
+    reason: true,
   },
   {
     name: "a trusted contract's factory()",
@@ -92,6 +111,7 @@ const sites: {
     read: (f) => escrowFactoriesFromChain(f.args),
     absent: (r) => expect(r).to.deep.equal({ v: [], err: "" }),
     audit: true,
+    reason: true,
   },
   {
     name: "ComplianceRules.privacyManager(token)",
@@ -137,6 +157,7 @@ describe("D-1d errors at the six reads outside the Safe reader", function () {
       const to = await s.at(f);
       const { cfg, cfgPath, dir } = await cliConfig(f);
       const run = (p: string) => h.phase(cfg, p, cfgPath);
+      const reverted = s.reason ? await revertWithReason() : undefined;
       const n = await ethers.provider.getTransactionCount(d);
       for (const [kn, text, mk] of faults) {
         const r = await faulted(to, sel(s.sig), mk, () => run("preflight"));
@@ -146,6 +167,19 @@ describe("D-1d errors at the six reads outside the Safe reader", function () {
         );
         expect(r.hits, kn).to.be.greaterThan(0);
         expect(v, kn).to.contain(text);
+      }
+      if (s.reason) {
+        // Round 4 (F4 LOW-1), fail-closed by design: a trusted contract
+        // whose read reverts with a reason blocks the ceremony with it.
+        const r = await faulted(
+          to,
+          sel(s.sig),
+          () => reverted,
+          () => run("preflight"),
+        );
+        console.log(`      preflight [a revert with a reason]: ${r.v.verdict}`);
+        expect(r.hits).to.be.greaterThan(0);
+        expect(r.v.verdict).to.contain("MockTarget: Intentional revert");
       }
       expect(await ethers.provider.getTransactionCount(d)).to.equal(n);
       expect((await run("full")).verdict).to.equal("ok");
