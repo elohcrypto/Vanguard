@@ -195,12 +195,17 @@ prints `✅ Deployed: 74 transactions in /tmp/vanguard-runbook/deploy-record.jso
   replaced or evicted transaction is adopted if mined unchanged at its
   nonce, else re-sent while the nonce is unused; past 5000 blocks or a
   taken nonce is refused: find that nonce's transaction on an explorer and
-  fix the record by hand. A hash the node does not know is read again two
-  blocks later
-  (`   ⏳ <label>: entry #N unknown to this node; re-checking two blocks on`)
-  before it counts as never mined, and an entry a node once returned the
-  receipt of is never dropped: a node that still does not know it is
-  refused (`… a lagging or inconsistent RPC; kept in the record, re-run against a synced RPC`).
+  fix the record by hand. A hash the node does not know counts as never
+  mined only when its nonce is unused at a block two past the send (or
+  past the last time a node knew the hash), read pinned to that block,
+  and the hash is still unknown
+  (`   ⏳ <label>: entry #N unknown to this node; re-checking at block B (two past the send)`);
+  a node that stays short of that block for 120 s lags and is refused,
+  the entry kept (`… cannot be read at block B or later (two past the send); its head is block H: a lagging RPC; kept in the record, resume against a synced RPC`).
+  An entry a node once returned the receipt of is never dropped: a node
+  that still does not know it is refused
+  (`… a lagging or inconsistent RPC; kept in the record, re-run against a synced RPC`),
+  and so is a receipt of another transaction for its hash.
   Every resume counts the deployer's nonce from `startNonce`, an empty
   record included
   (`the deployer's nonce is N but the record accounts for M: a transaction outside the record; refusing to resume`). A transaction stuck in the mempool: `signer.js

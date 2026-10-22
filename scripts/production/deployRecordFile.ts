@@ -16,6 +16,8 @@ export interface TxEntry {
   /** The latest block when the intent was written: replay reads here. */
   block: number;
   hash?: string;
+  /** The head once the send returned (D-2): "unknown" counts two past it. */
+  sentAtBlock?: number;
   status: "sending" | "sent" | "confirmed" | "reverted";
   contract?: string;
   codeHash?: string;

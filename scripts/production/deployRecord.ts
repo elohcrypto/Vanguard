@@ -263,6 +263,10 @@ export class Recorder {
     ]);
     e.hash = hash;
     e.status = "sent";
+    // Review D-2: the head the send was made at. A failed read falls back
+    // to the intent's block (a lower bound) and never costs the hash.
+    const head = await this.raw("eth_blockNumber").then(Number, () => block);
+    e.sentAtBlock = Math.max(block, head);
     this.save();
     this.last = e;
     this.cursor = this.live().length;
@@ -386,6 +390,7 @@ export class Recorder {
         );
       }
       if (e.status === "sent") {
+        e.sentAtBlock ??= e.block; // a record made before review D-2 round 2
         const r = await this.chain.receipt(e);
         if (r) await this.confirm(e, r);
         else this.unsend(e);
