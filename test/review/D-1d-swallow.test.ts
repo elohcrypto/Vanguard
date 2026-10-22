@@ -13,7 +13,7 @@ import { ethers } from "hardhat";
 import { handoverFixture } from "../helpers/governanceFixture";
 import { cliConfig } from "../helpers/handoverCli";
 import * as h from "./D-1b-common";
-import { faults, faulted } from "./D-1c-common";
+import { faults, faulted, rpcError } from "./D-1c-common";
 
 const {
   listManagerOf,
@@ -26,19 +26,12 @@ const {
   preflightPrivacy,
 } = require("../../demo/utils/HandoverPrivacy");
 
-/** "No such function" as ethers (public RPC) and a Hardhat node report it. */
-const missing: [string, () => any][] = [
+/** "No such function" as ethers' JsonRpcProvider and a Hardhat node report it. */
+const missing: [string, (tx: any) => any][] = [
   [
-    "CALL_EXCEPTION without data",
-    () =>
-      ethers.makeError("missing revert data", "CALL_EXCEPTION", {
-        action: "call",
-        data: null,
-        reason: null,
-        transaction: {} as any,
-        invocation: null,
-        revert: null,
-      } as any),
+    "an empty revert through ethers' JsonRpcProvider (data 0x)",
+    (tx) =>
+      rpcError({ code: 3, message: "execution reverted", data: "0x" }, tx),
   ],
   [
     "a Hardhat node's -32603 with data 0x",

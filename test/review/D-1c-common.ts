@@ -58,8 +58,35 @@ export async function vetAndPreflight(f: any, a: string) {
   return { words, logs, pre };
 }
 
-/** [name, text the verdict must carry, the error]. */
-export const faults: [string, string, () => any][] = [
+const NET = new ethers.Network("scripted", 31337);
+
+/** An ethers JsonRpcProvider answering every request with `answer`. */
+export class Scripted extends ethers.JsonRpcProvider {
+  answer: any;
+  constructor(answer: { error?: any; result?: any }) {
+    super("http://127.0.0.1:1", NET, { staticNetwork: NET, batchMaxCount: 1 });
+    this.answer = answer;
+  }
+  async _send(p: any): Promise<any> {
+    return [{ id: p.id, jsonrpc: "2.0", ...this.answer }];
+  }
+}
+
+/** What ethers' JsonRpcProvider throws when `tx` is answered with `error`. */
+export async function rpcError(error: any, tx: any) {
+  const p = new Scripted({ error });
+  try {
+    await p.call(tx);
+  } catch (e) {
+    return e;
+  } finally {
+    p.destroy();
+  }
+  throw new Error("the scripted eth_call did not fail");
+}
+
+/** [name, text the verdict must carry, the error for the faulted call]. */
+export const faults: [string, string, (tx: any) => any][] = [
   [
     "missing trie node (UNKNOWN_ERROR)",
     "execution reverted: missing trie node",
@@ -86,13 +113,30 @@ export const faults: [string, string, () => any][] = [
         response: { statusCode: 429 } as any,
       }),
   ],
+  // Round 5: ethers' JsonRpcProvider turns an eth_call error without
+  // revert data into CALL_EXCEPTION with data null.
+  [
+    "-32000 missing trie node (ethers JsonRpcProvider)",
+    "missing revert data",
+    (tx) => rpcError({ code: -32000, message: "missing trie node" }, tx),
+  ],
+  [
+    "-32005 rate limit (ethers JsonRpcProvider)",
+    "missing revert data",
+    (tx) => rpcError({ code: -32005, message: "rate limit exceeded" }, tx),
+  ],
+  [
+    "-32603 internal error (ethers JsonRpcProvider)",
+    "missing revert data",
+    (tx) => rpcError({ code: -32603, message: "internal error" }, tx),
+  ],
 ];
 
-/** `fn` with every eth_call of selector `sel` to `to` throwing `mk()`. */
+/** `fn` with every eth_call of selector `sel` to `to` throwing `mk(tx)`. */
 export async function faulted(
   to: string,
   sel: string,
-  mk: () => any,
+  mk: (tx: any) => any,
   fn: () => any,
 ) {
   const prov: any = ethers.provider;
@@ -102,7 +146,7 @@ export async function faulted(
     const at = String(tx.to).toLowerCase() === to.toLowerCase();
     if (at && String(tx.data).startsWith(sel)) {
       hits++;
-      throw mk();
+      throw await mk(tx);
     }
     return call(tx);
   };

@@ -4,7 +4,7 @@
 // with that error, and fails the preflight, the full phase and the
 // audit with it before the deployer sends anything. noSuchFunction's
 // CALL_EXCEPTION branch, which hardhat-ethers never emits, is pinned on
-// synthetic errors.
+// synthetic errors: round 5, only data "0x" is no such function.
 import { expect } from "chai";
 import * as fs from "fs";
 import { ethers } from "hardhat";
@@ -117,13 +117,13 @@ describe("D-1c noSuchFunction on ethers' CALL_EXCEPTION", function () {
       invocation: null,
       revert: null,
     } as any);
-  it("no data or 0x is no such function; revert data is not", function () {
+  it("only data 0x is no such function; no data or revert data is not", function () {
     const reason = ethers.concat([
       "0x08c379a0",
       ethers.AbiCoder.defaultAbiCoder().encode(["string"], ["nope"]),
     ]);
-    expect(noSuchFunction(callException(null))).to.equal(true);
-    expect(noSuchFunction(callException(undefined))).to.equal(true);
+    expect(noSuchFunction(callException(null))).to.equal(false);
+    expect(noSuchFunction(callException(undefined))).to.equal(false);
     expect(noSuchFunction(callException("0x"))).to.equal(true);
     expect(noSuchFunction(callException(reason))).to.equal(false);
   });
