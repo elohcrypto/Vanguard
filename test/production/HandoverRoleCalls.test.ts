@@ -347,17 +347,16 @@ describe("Handover with a multisig ops and issuer admin (Task 5.13)", function (
     await expect(vetRole(await role(outer), d, log)).to.be.rejectedWith(
       `lists the deployer ${d} as an owner (through ${await inner.getAddress()})`,
     );
-    // Past two levels: a contract owner not read is named.
+    // Past two levels: a contract owner not read is refused by name
+    // (review D-1 round 2: the deployer's ownership of it cannot be vetted).
     const leaf = await MS.deploy(
       [await ms.admin.getAddress(), s[14].address],
       2,
     );
     const mid = await MS.deploy([await leaf.getAddress(), s[15].address], 2);
     const head = await MS.deploy([await mid.getAddress(), s[16].address], 2);
-    lines.length = 0;
-    await vetRole(await role(head), d, log);
-    expect(lines.join("\n")).to.include(
-      `⚠️  ops ${await head.getAddress()}: owner ${await ms.admin.getAddress()} (through ${await mid.getAddress()}, ${await leaf.getAddress()}) has code past 2 levels: not read`,
+    await expect(vetRole(await role(head), d, log)).to.be.rejectedWith(
+      `ops ${await head.getAddress()}: owner ${await ms.admin.getAddress()} (through ${await mid.getAddress()}, ${await leaf.getAddress()}) is unread`,
     );
     // An enabled module executes without the owners: warned by name.
     await (await ms.admin.setModule(s[17].address)).wait();

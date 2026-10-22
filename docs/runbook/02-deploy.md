@@ -146,8 +146,10 @@ the second prints `{ "Ax": "…", "Ay": "…" }` for the config
   `GOV_TIME_SCALE` other than 1 off a dev chain, a role that is neither
   a signer account nor external, a deployer, ops, guardian and issuer
   admin that are not four different keys, a fee wallet that is the
-  deployer, a role or a node, and a node that is the deployer. A
-  proposer, voter or node that clashes with another role is refused
+  deployer, a role or a node, and a node that is the deployer, ops, the
+  guardian, the issuer admin, the proposer or a voter
+  (`deploy config: oracleNodes[2] 0x… is voters[0]: a node is a key of its own (D25 b); …`).
+  A proposer or voter that clashes with another role is refused
   later, by the onboarding (section 3) and the ceremony's checks.
 
 Local (production track; publicly `signer.js` on 1248, section 1a;
@@ -198,17 +200,46 @@ prints `✅ Deployed: 74 transactions in /tmp/vanguard-runbook/deploy-record.jso
   (`   ⚠️  list oracle 0x… names the deployer as pending owner, nominated by 0x…, not the deployer: …`),
   as does a capped scan (`   ⚠️  scan for other list oracles naming the deployer was capped at block N…: not checked`).
 
-### 2.4 Multisig ops and issuer admin (Task 5.13, Q11 = B)
+### 2.4 Multisig ops, issuer admin and guardian (Task 5.13, Q11 = B)
 
 A role at an address with code (a Safe) or in the config's
 `"externalRoles"` is external: nothing is sent for it (a wallet index with
 code, e.g. an EIP-7702 account, is refused: write it as an address).
-Refused: a 7702 account, the deployer as a listed owner (or two nested
-levels down); warned: an unreadable multisig, a deeper contract owner, a
-module (`⚠️  ops 0x… has module(s) enabled (…): …`). It sees listed
-owners only: you ensure the deployer neither owns nor executes it,
-directly or through other contracts or modules. Its calls go to a Safe
-Transaction Builder batch (2.5) with
+The deploy, the ceremony's preflight, completion and the audit read
+every external role as a Safe (the guardian Safe too: its owners could
+pause VSC), down two levels of owner Safes, and refuse with the same
+words: a 7702 account; the deployer as a listed owner
+(`❌ guardian 0x… lists the deployer 0x… as an owner (through 0x…): the deployer holds its power`);
+an owner below the role they cannot read (past two levels, in a cycle,
+or with no readable `getOwners()`:
+`❌ guardian 0x…: owner 0x… (through 0x…, 0x…) is unread (code past 2 levels): the deployer's ownership of it cannot be vetted`);
+the deployer as an enabled module of the role or of an owner Safe, on
+any page of its module list
+(`❌ guardian 0x… has the deployer 0x… as an enabled module: a module executes without the owners`);
+a module list they cannot read whole, past 100 entries
+(`❌ guardian 0x… has its module list unread past 100: a module executes without the owners`)
+or not readable beside a working `getOwners()`
+(`❌ guardian 0x… reads as a Safe but its module list cannot be read: a module executes without the owners`);
+a contract that reads as a Safe (`getOwners()` works, so its owners
+are vetted as above) but whose threshold they cannot read
+(`❌ guardian 0x… reads as a Safe but its threshold cannot be read: it cannot be vetted as a multisig`);
+and a degenerate multisig, with no owner or a threshold of 0 or above
+its owner count
+(`❌ guardian 0x… is a degenerate multisig (0-of-0): it needs an owner and a threshold from 1 to its owner count`).
+Warned in every phase (the preflight included), never a ✅, and the
+run then ends with warnings: any other module
+(`⚠️  ops 0x… has module(s) enabled (…): a module executes without the owners`)
+and a role contract whose `getOwners()` cannot be read, so it reads as
+no Safe
+(`⚠️  ops 0x… has code but no readable getOwners()/getThreshold(): the deployer's ownership of it is unchecked (runbook section 2)`).
+Only a call that has no such function (a revert with no data, or no
+data back) reads as missing; a timeout, a rate limit, a revert with
+data or any other error on these reads fails the run. The vet reads
+what each contract reports, each call from the zero address so a
+contract cannot answer the deployer differently; still compare each
+role address with your own Safe before the deploy, and ensure the
+deployer neither owns nor executes it any other way. Its calls go to a
+Safe Transaction Builder batch (2.5) with
 `⏸️  awaiting N <role> transaction(s): <file>`, exit 3: paused, not done.
 The next run checks each effect on chain and goes on, pauses again
 (`   ❌ not executed: [<step>] …`, only those re-written) or refuses another

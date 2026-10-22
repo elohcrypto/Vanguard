@@ -272,6 +272,22 @@ export function resolveInputs(
   if (oracleNodes.includes(deployer)) {
     throw bad("a node key may not be the deployer (D50)");
   }
+  // Review D-3: the static part of HandoverNodeKeys.roleOf, before any send.
+  const roleKeys: [string, string][] = [
+    ["ops", ops],
+    ["guardian", guardian],
+    ["issuerAdmin", issuerAdmin],
+    ["proposer", proposer],
+    ...voters.map((v, i): [string, string] => [`voters[${i}]`, v]),
+  ];
+  oracleNodes.forEach((n, i) => {
+    const hit = roleKeys.find(([, v]) => v === n);
+    if (hit) {
+      throw bad(
+        `oracleNodes[${i}] ${n} is ${hit[0]}: a node is a key of its own (D25 b); name three node keys that hold no role`,
+      );
+    }
+  });
   const marked = raw.externalRoles ?? [];
   if (
     !Array.isArray(marked) ||

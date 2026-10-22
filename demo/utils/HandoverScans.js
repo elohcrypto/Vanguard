@@ -8,12 +8,21 @@
  */
 
 const { ethers } = require("hardhat");
-const { addrOf, same, fail } = require("./HandoverChecks");
+const {
+  addrOf,
+  same,
+  fail,
+  issuerLabel,
+  noSuchFunction,
+} = require("./HandoverChecks");
 const { RANGE_ERROR, ARCHIVE_ERROR, textOf } = require("./RpcRetry");
 
 const ZERO = ethers.ZeroAddress;
 const FACTORY_OF = ["function factory() view returns (address)"];
-const OWNER_OF = ["function owner() view returns (address)"];
+const ESCROW_OF = [
+  "function owner() view returns (address)",
+  "function ownerWallet() view returns (address)",
+];
 
 /** Checksummed, de-duplicated, zero dropped. */
 function uniq(list) {
@@ -73,6 +82,7 @@ async function checkFromBlock(o, log = () => {}, extra = []) {
     ["oracleManager", "OracleManager"],
     ["escrowWalletFactory", "EscrowWalletFactory"],
     ["privacyManager", "PrivacyManager"],
+    ["zkVerifier", "ZKVerifierIntegrated"],
   ]
     .filter(([k]) => o[k])
     .map(([k, label]) => [o[k], label]);
@@ -216,12 +226,7 @@ async function escrowFactoriesFromChain(o) {
     try {
       f = await (await ethers.getContractAt(FACTORY_OF, a)).factory();
     } catch (e) {
-      // No factory(): a revert (or undecodable data), not an RPC failure.
-      const noFactory =
-        e.code === "CALL_EXCEPTION" ||
-        e.code === "BAD_DATA" ||
-        /revert/i.test(e.message);
-      if (noFactory) continue;
+      if (noSuchFunction(e)) continue; // no factory(): not an escrow
       throw e;
     }
     if (same(f, ZERO) || out.some((x) => same(x.factory, f))) continue;
@@ -268,9 +273,56 @@ async function liveTrustedContracts(o) {
 }
 
 /**
- * Review L-2: escrows `factory` created whose immutable owner is the
- * deployer (created before the handover). It can still setPayer on an
- * unfunded one and sweepExcess.
+ * Review D2-1: every issuer the IdentityRegistry trusts for any topic,
+ * required or not: [{ issuer, topics, block }] from TrustedIssuerAdded,
+ * each topic re-read with isTrustedIssuer, `block` its last such event.
+ * R-413-6: every issuer of a required topic was trusted by event, so the
+ * scan must have seen it.
+ */
+async function trustedIssuers(o) {
+  const reg = o.identityRegistry;
+  const events = await scanLogs(reg, reg.filters.TrustedIssuerAdded(), o);
+  const out = [];
+  for (const issuer of uniq(events.map((ev) => ev.args[0]))) {
+    const mine = events.filter((ev) => same(ev.args[0], issuer));
+    const asked = new Set(mine.flatMap((ev) => [...ev.args[1]]));
+    const topics = [];
+    for (const t of asked)
+      if (await reg.isTrustedIssuer(issuer, t)) topics.push(t);
+    const block = mine[mine.length - 1].blockNumber;
+    if (topics.length) out.push({ issuer, topics, block });
+  }
+  const missed = [];
+  for (const topic of await reg.getClaimTopics()) {
+    for (const a of await reg.getTrustedIssuersForClaimTopic(topic))
+      if (!out.some((x) => same(x.issuer, a))) missed.push(a);
+  }
+  if (missed.length) {
+    fail(
+      `IdentityRegistry TrustedIssuerAdded event scan found none of the holders it must see (${uniq(missed).join(", ")}): fromBlock, logChunk or the RPC is wrong; nothing can be concluded from it`,
+    );
+  }
+  return out;
+}
+
+/** D2-1: one line per trusted issuer the scan found, with its topics. */
+async function issuerLines(o) {
+  const out = [];
+  for (const { issuer, topics, block } of o.derived.trustedIssuers) {
+    const c = await ethers.getContractAt("ClaimIssuer", issuer);
+    out.push([
+      `IdentityRegistry trusts ${await issuerLabel(c)} for topic(s) [${topics.join(", ")}] (TrustedIssuerAdded at block ${block})`,
+      true,
+    ]);
+  }
+  return out;
+}
+
+/**
+ * Review L-2, D2-5: warnings for the escrows `factory` created that still
+ * serve the deployer: an immutable owner (it can still setPayer on an
+ * unfunded one and sweepExcess) or an ownerWallet fixed at creation (the
+ * platform fee and the swept excess of every release go to it).
  */
 async function deployerEscrows(factory, dAddr, o) {
   const created = await scanLogs(
@@ -278,11 +330,21 @@ async function deployerEscrows(factory, dAddr, o) {
     factory.filters.EscrowWalletCreated(),
     o,
   );
-  const out = [];
+  const [owned, paid] = [[], []];
   for (const a of uniq(created.map((ev) => ev.args[1]))) {
-    const w = await ethers.getContractAt(OWNER_OF, a);
-    if (same(await w.owner(), dAddr)) out.push(a);
+    const w = await ethers.getContractAt(ESCROW_OF, a);
+    if (same(await w.owner(), dAddr)) owned.push(a);
+    if (same(await w.ownerWallet(), dAddr)) paid.push(a);
   }
+  const out = [];
+  if (owned.length)
+    out.push(
+      `escrow(s) ${owned.join(", ")} were created before the handover and keep the deployer as owner (immutable): it can still setPayer on an unfunded one and sweepExcess; settle or sweep them`,
+    );
+  if (paid.length)
+    out.push(
+      `escrow(s) ${paid.join(", ")} keep the deployer as ownerWallet (fixed at creation): the platform fee and the swept excess of every release go to the deployer; settle or sweep them`,
+    );
   return out;
 }
 
@@ -336,6 +398,8 @@ async function liveRuleAdministrators(o, extra = [], mustSee = []) {
 
 module.exports = {
   uniq,
+  trustedIssuers,
+  issuerLines,
   liveRuleAdministrators,
   liveTrustedContracts,
   scanLogs,

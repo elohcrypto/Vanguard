@@ -24,6 +24,8 @@ const {
   checkFromBlock,
   preflightFactoryRoles,
   escrowFactoriesFromChain,
+  trustedIssuers,
+  issuerLines,
 } = require("./HandoverScans");
 const { escrowSteps } = require("./HandoverEscrow");
 const { wiredPrivacy } = require("./HandoverPrivacy");
@@ -58,14 +60,14 @@ const send = async (p) => (await p).wait();
 
 /**
  * The contracts that hold power over holders, read from chain: oracles
- * bound in ComplianceRules for VSC and VGT, the registry's trusted issuers
- * per required topic, each oracle's listManager, the DynamicListManager
- * governance is bound to, the contracts bound to types 9-12 (factories,
- * PrivacyManager, ZKVerifierIntegrated; `bound`), the PrivacyManager
- * ComplianceRules wires (`privacy`, which `factories` takes when type 11 is
- * unbound), the escrow factories that created trusted escrows (M-2),
- * and (Task 5.14) the list oracles the deployer holds, bound or not
- * (`heldOracles`; the rest in `listOracles`, HandoverOracles.js).
+ * bound in ComplianceRules for VSC and VGT, every issuer the registry
+ * trusts for any topic (D2-1), each oracle's listManager, the
+ * DynamicListManager governance is bound to, the contracts bound to types
+ * 9-12 (factories, PrivacyManager, ZKVerifierIntegrated; `bound`), the
+ * PrivacyManager ComplianceRules wires (`privacy`, which `factories` takes
+ * when type 11 is unbound), the escrow factories that created trusted
+ * escrows (M-2), and (Task 5.14) the list oracles the deployer holds, bound
+ * or not (`heldOracles`; the rest in `listOracles`, HandoverOracles.js).
  */
 async function derivePowers(o) {
   const rules = o.complianceRules;
@@ -79,11 +81,7 @@ async function derivePowers(o) {
   // R-413-6: the bound and the named oracles must be in the scan.
   const named = await Promise.all((o.oracles || []).map(addrOf));
   const lists = await deployerListOracles(o, [...oracles, ...named]);
-  const reg = o.identityRegistry;
-  const issuers = [];
-  for (const topic of await reg.getClaimTopics()) {
-    issuers.push(...(await reg.getTrustedIssuersForClaimTopic(topic)));
-  }
+  const trusted = await trustedIssuers(o);
   const listManagers = [];
   for (const a of uniq(oracles)) {
     const lm = await listManagerOf(await ethers.getContractAt(ORACLE_ABI, a));
@@ -101,7 +99,8 @@ async function derivePowers(o) {
   const factories = { ...bound, privacyManager: privacy.privacyManager };
   return {
     oracles: uniq(oracles),
-    issuers: uniq(issuers),
+    issuers: trusted.map((x) => x.issuer),
+    trustedIssuers: trusted,
     listManagers,
     dynamicListManager: same(dlm, ZERO) ? null : dlm,
     factories,
@@ -126,8 +125,11 @@ async function derivePowers(o) {
 async function withDerivedPowers(o, log = () => {}, { strict = true } = {}) {
   const d = await derivePowers(o);
   const out = { ...o, derived: d };
-  // Task 5.14 review I-3, L-2: before the "omits" refusal below.
-  if (strict) await preflightListOracles(d, o.oracles || [], log);
+  if (strict) {
+    for (const [label] of await issuerLines(out)) log(`   ℹ️  ${label}`);
+    // Task 5.14 review I-3, L-2: before the "omits" refusal below.
+    await preflightListOracles(d, o.oracles || [], log);
+  }
   // Task 5.14: a list oracle the deployer holds is required too.
   const bound = (a) => d.oracles.some((b) => same(a, b));
   const kinds = [

@@ -49,11 +49,16 @@ const { preflightHolders } = require("./HandoverHolders");
 const { preflightRoles } = require("./HandoverRoles");
 const { preflightTrust } = require("./HandoverTrust");
 const { preflightNodes, nodeSteps } = require("./HandoverNodes");
-const { preflightParams, paramSteps } = require("./HandoverParams");
+const {
+  preflightPins,
+  preflightParams,
+  paramSteps,
+} = require("./HandoverParams");
 const { snapshotFacts, preflightSnapshots } = require("./HandoverSnapshot");
 const { preflightEscrow } = require("./HandoverEscrow");
 const { recordingSigner } = require("./HandoverWindow");
 const { oracleAccept, queueRoleCall } = require("./HandoverRoleCalls");
+const { roleSafeLines } = require("./RoleCalls");
 const { roleStrays } = require("./HandoverRoles");
 const { trustStrays } = require("./HandoverTrust");
 const { nodeStrays } = require("./HandoverNodes");
@@ -114,13 +119,22 @@ async function handoverDeployerPowers(o) {
   };
 
   // Read-only; throws before any transaction when a precondition fails.
+  await preflightPins(o);
   const { governanceOwned } = await preflight(o);
+  // Review D-1: every role read as a multisig; the deployer owns none.
+  // Round 3: its warnings print here too, on every path (83c vets none).
+  const roleWarns = [];
+  for (const [label, pass] of await roleSafeLines(o, roleWarns)) {
+    check(pass, label);
+    log(`   ✅ ${label}`);
+  }
+  for (const w of roleWarns) log(`   ⚠️  ${w}`);
   // Task 4.16 (D47): a whitelist oracle bound to VSC must list every holder.
   await preflightHolders(o, (w) => log(`   ⚠️  ${w}`));
   await preflightLinks(o); // Task 4.13: A1 H2/H3, M1, D56
   await preflightPowers(o, { governanceOwned });
   await preflightRoles(o); // Task 4.13: exact role sets (A1 H1)
-  await preflightPrivacy(o);
+  await preflightPrivacy(o, log);
   await preflightKeyManager(o);
   await preflightRegistrars(o); // Task 4.3
   await preflightTrust(o); // Task 4.13: trusted contracts by provenance
@@ -401,6 +415,9 @@ async function auditHandover(args, log = console.log) {
   log(
     "🔍 Handover audit: every completion line against the state governance derives now (no snapshot, no voting window)",
   );
+  // Review D2-1 round 3: as the preflight, a trusted issuer that is no
+  // ClaimIssuer is refused by name, not by the revert of its first call.
+  await preflightPins(await withDerivedPowers(o, () => {}, { strict: false }));
   const { ok, checks, warnings, residual } = await assertHandoverComplete({
     ...args,
     audit: true,

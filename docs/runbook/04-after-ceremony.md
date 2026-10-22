@@ -15,6 +15,10 @@ and the audit name each:
 They stay through the ceremony (R-56-2) and are rotated just after it,
 together with the re-approval of the attestor key the deployer trusted
 (`   ⚠️  PrivacyManager issuer key (Ax …) for jurisdiction was trusted by the deployer: re-approve it by a PrivacyParameters vote or untrust it`, three circuits).
+After a verifier swap (`   ❌ jurisdiction records made up to block N (the last jurisdiction verifier swap) still count: …`;
+the preflight refuses one made before the ceremony) a re-approval
+leaves the records made under it valid: untrust then re-trust that key
+(two votes), or change that circuit's policy.
 
 `scripts/production/postCeremonyVotes.ts` does both in TWO rounds,
 because `executeProposal` is anyone's and `removeOracle` checks no node

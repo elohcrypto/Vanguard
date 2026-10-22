@@ -285,8 +285,9 @@ async function deployOn(
 }
 
 /**
- * Task 5.13 (review LOW-5): one line per external role; refused when the
- * deployer owns the ops or issuer-admin multisig (RoleCalls.vetRole).
+ * Task 5.13 (review LOW-5, D-1): one line per external role (ops, the
+ * issuer admin, the guardian); refused when the deployer owns or drives
+ * its multisig, or an owner below it cannot be read (RoleSafe.vetRole).
  */
 export async function vetExternalRoles(
   inputs: DeployInputs,

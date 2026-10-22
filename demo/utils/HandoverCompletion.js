@@ -32,6 +32,7 @@ const {
   deployerEscrows,
   liveRuleAdministrators,
   liveTrustedContracts,
+  issuerLines,
 } = require("./HandoverScans");
 const { privacyLines } = require("./HandoverPrivacy");
 const { keyManagerLines } = require("./HandoverKeys");
@@ -46,6 +47,7 @@ const { paramLines } = require("./HandoverParams");
 const { snapshotLines, preflightSnapshots } = require("./HandoverSnapshot");
 const { escrowLines } = require("./HandoverEscrow");
 const { windowLines } = require("./HandoverWindow");
+const { roleSafeLines } = require("./RoleCalls");
 
 const ZERO = ethers.ZeroAddress;
 const EXEMPT_ABI = [
@@ -113,6 +115,7 @@ async function assertHandoverComplete(o) {
   await lines("links", linkLines(o));
   // Task 4.13: exact role sets from the event scans (A1 H1).
   await lines("roles", roleLines(o, warnings));
+  await lines("issuers", issuerLines(o));
   if (o.skippedRegistry) {
     add(
       "InvestorTypeRegistry is not live on Token or is owned by governance",
@@ -243,6 +246,7 @@ async function assertHandoverComplete(o) {
     "Token guardian is not the deployer",
     !same(await o.token.guardian(), dAddr),
   );
+  await lines("role multisigs", roleSafeLines(o, warnings, residual)); // D-1
   if (o.dynamicListManager) {
     add(
       "DynamicListManager governanceContract is governance",
@@ -408,10 +412,10 @@ async function residueLines(o) {
 
 /**
  * Warnings, not failures: the deployer's leftover VSC and exemption (a
- * treasury artifact) and VGT, escrows that keep the deployer as owner, and escrow
- * fee wallets that are not exempt on the
- * registry the Token enforces or were registered after the handover
- * (R-2F4-2: after it only an InvestorTypeConfig vote can exempt them).
+ * treasury artifact) and VGT, escrows that keep the deployer as owner or
+ * fee wallet, and escrow fee wallets that are not exempt on the registry
+ * the Token enforces or were registered after the handover (R-2F4-2:
+ * after it only an InvestorTypeConfig vote can exempt them).
  */
 async function residueWarnings(o, dAddr, govAddr, warnings) {
   const itr = await o.token.investorTypeRegistry();
@@ -443,13 +447,8 @@ async function residueWarnings(o, dAddr, govAddr, warnings) {
     o.derived.factories.escrowWalletFactory ||
     o.derived.escrowFactories[0]?.factory;
   const f = fAddr && (await ethers.getContractAt("EscrowWalletFactory", fAddr));
-  // Review L-2: an escrow's owner is immutable.
-  const mine = f ? await deployerEscrows(f, dAddr, o) : [];
-  if (mine.length) {
-    warnings.push(
-      `escrow(s) ${mine.join(", ")} were created before the handover and keep the deployer as owner (immutable): it can still setPayer on an unfunded one and sweepExcess; settle or sweep them`,
-    );
-  }
+  // Review L-2, D2-5: an escrow's owner and fee wallet are fixed.
+  if (f) warnings.push(...(await deployerEscrows(f, dAddr, o)));
   if (!reg) return;
   const fee = [];
   if (f) {

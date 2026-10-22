@@ -48,7 +48,14 @@ async function governanceChecks(o) {
   const floor = (7n * 86400n) / scale;
   const age = await g.minVoterAge();
   const [pc, vc] = [await g.proposalCreationCost(), await g.votingCost()];
+  // Review D2-3: the code pin masks TIME_SCALE (an immutable).
+  const chainId = (await ethers.provider.getNetwork()).chainId;
   const out = [
+    {
+      label: `governance TIME_SCALE ${scale} on chain ${chainId} (above 1 only on the dev chain 31337)`,
+      ok: scale === 1n || chainId === 31337n,
+      fix: `governance TIME_SCALE is ${scale} on chain ${chainId}: every governance window is ${scale} times shorter than the mainnet schedule; off the dev chain 31337 only TIME_SCALE 1 is accepted: redeploy governance with TIME_SCALE 1`,
+    },
     {
       label: `governance minVoterAge ${age}s is at least 7 days / TIME_SCALE (${floor}s)`,
       ok: age >= floor,
@@ -293,6 +300,14 @@ async function paramChecks(o, pre) {
 /** Read-only, before the first transaction. */
 async function preflightParams(o) {
   for (const c of await paramChecks(o, true)) if (!c.ok) fail(c.fix);
+}
+
+/**
+ * The plan's code pins, before the preflight reads through the plan
+ * (review D2-1 round 2): a trusted issuer that is no ClaimIssuer is
+ * refused by name, not by the revert of its first call.
+ */
+async function preflightPins(o) {
   for (const c of await planPins(o)) if (!c.ok) fail(codeHashRefusal(c));
 }
 
@@ -329,6 +344,7 @@ module.exports = {
   privacyChecks,
   identityChecks,
   planPins,
+  preflightPins,
   preflightParams,
   paramSteps,
   paramLines,
