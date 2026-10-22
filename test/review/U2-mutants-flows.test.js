@@ -1,5 +1,6 @@
-// Review U2 round 2 (the swarm's surviving mutants M17, M19, M30, and the
-// round-2 read-back links): each case fails when its guard is removed.
+// Review U2 rounds 2 and 3 (the swarm's surviving mutants M17, M18, M19,
+// M30, and the read-back links): each case fails when its guard is
+// removed.
 const { expect } = require("chai");
 const { ethers, network } = require("hardhat");
 const GovernanceModule = require("../../demo/modules/GovernanceModule");
@@ -13,6 +14,7 @@ const {
   attestorPublicKey,
   newAttestorKey,
 } = require("../../scripts/zk/attest");
+const everything = require("../../demo/utils/DeployEverythingFlow");
 const {
   capture,
   ask,
@@ -167,5 +169,40 @@ describe("U2 the deploy flows' read-back (mutants M17, M19, M30)", function () {
     );
     state.setContract("escrowFactory", escrow);
     expect(await missingWiring(state)).to.include("escrow fee wallet verified");
+  });
+
+  it("M18: a later step undoing an earlier option's link stops 1a at that step", async function () {
+    const { state, deployer } = await baseStack();
+    await capture(() => deployer.deployOracleSystem());
+    const rules = state.getContract("complianceRules");
+    const vsc = await state.getContract("digitalToken").getAddress();
+    const investorType = new InvestorTypeModule(
+      state,
+      new EnhancedLogger(),
+      ask,
+    );
+    const real = investorType.deployInvestorTypeSystem.bind(investorType);
+    // 51 reads only its own links back; 1a reads every link after a step
+    investorType.deployInvestorTypeSystem = async () => {
+      await real();
+      await (await rules.setBlacklistOracle(vsc, ethers.ZeroAddress)).wait();
+    };
+    const mod = {
+      state,
+      deployAllContracts: async () => {},
+      deployDigitalTokenSystem: async () => {},
+      deployOracleSystem: async () => {},
+    };
+    mod._reportDeploySummary = (done, steps, reached) =>
+      everything._reportDeploySummary(mod, done, steps, reached);
+    const governance = new GovernanceModule(state, new EnhancedLogger(), ask);
+    const [ok, out] = await capture(() =>
+      everything.deployEverything(mod, { investorType, governance }),
+    );
+    expect(ok).to.equal(false);
+    expect(out.join("\n")).to.match(
+      /Step 4 \(Investor Type Registry\): the deploy stopped; missing wiring: [^\n]*VSC blacklist oracle in ComplianceRules/,
+    );
+    expect(state.getContract("vanguardGovernance")).to.equal(undefined);
   });
 });
