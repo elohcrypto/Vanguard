@@ -10,6 +10,8 @@ import { handoverFixture } from "../helpers/governanceFixture";
 import { cliConfig } from "../helpers/handoverCli";
 import * as h from "./D-1b-common";
 
+const { roleOf } = require("../../demo/utils/HandoverNodeKeys");
+
 /** `fn` with every eth_call of `data` to `to` timing out; returns the hits too. */
 async function timingOut(to: string, data: string, fn: () => Promise<any>) {
   const prov: any = ethers.provider;
@@ -77,4 +79,26 @@ describe("D-1c roleOf read errors", function () {
       fs.rmSync(dir, { recursive: true, force: true });
     });
   }
+});
+
+// Round 4 (G3 LOW): a missing operator() or owner() read as null, which
+// roleOf compared as an address and threw on; it is "not that role".
+describe("D-1c roleOf on a contract without the role function", function () {
+  this.timeout(600000);
+  it("an OracleManager or ClaimIssuer without operator()/owner() is no role, and the walk goes on", async function () {
+    const f = await handoverFixture();
+    const MT = await ethers.getContractFactory("MockTarget");
+    const at = await (await MT.deploy()).getAddress();
+    const om = await ethers.getContractAt("OracleManager", at);
+    const a = ethers.Wallet.createRandom().address;
+    expect(await roleOf({ oracleManager: om }, a)).to.equal(null);
+    expect(await roleOf({ issuers: [at] }, a)).to.equal(null);
+    const iss = f.kycIssuer;
+    expect(
+      await roleOf(
+        { oracleManager: om, issuers: [at, iss] },
+        await iss.owner(),
+      ),
+    ).to.equal(`the owner of ClaimIssuer ${await iss.getAddress()}`);
+  });
 });
