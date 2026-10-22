@@ -113,14 +113,18 @@ function fail(msg) {
 /**
  * True when `e` means "no such function" (review D-1 round 3): a revert
  * with no data or a call answering none, as each provider reports it
- * (measured): ethers' CALL_EXCEPTION or BAD_DATA, Hardhat in process (no
- * code) or an EIP-1474 node (code 3) with data "0x", a Hardhat node over
- * HTTP (-32603) with data.data "0x". Anything else is false: a timeout,
- * a rate limit, out of gas (-32000), a fault whose text says "reverted".
+ * (measured): ethers' JsonRpcProvider CALL_EXCEPTION with data "0x" (an
+ * empty revert), BAD_DATA with value "0x" (a call answering none),
+ * Hardhat in process (no code) or an EIP-1474 node (code 3) with data
+ * "0x", a Hardhat node over HTTP (-32603) with data.data "0x". Anything
+ * else is false: a timeout, a rate limit, out of gas (-32000), a fault
+ * whose text says "reverted", and (round 5) a JsonRpcProvider
+ * CALL_EXCEPTION with data null, its shape for every eth_call error
+ * without revert data (-32000, -32005, -32016, -32603).
  * Every read that takes a missing function for "none" asks it (round 4).
  */
 function noSuchFunction(e) {
-  if (e.code === "CALL_EXCEPTION") return e.data == null || e.data === "0x";
+  if (e.code === "CALL_EXCEPTION") return e.data === "0x";
   if (e.code === "BAD_DATA") return e.value === "0x";
   if (e.code === undefined || e.code === 3) return e.data === "0x";
   if (e.code === -32603) return e.data?.data === "0x";
