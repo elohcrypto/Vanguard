@@ -91,3 +91,38 @@ describe("D-1e noSuchFunction through ethers' JsonRpcProvider", function () {
     });
   }
 });
+
+// G4 ISSUES 2/3: each branch refuses what is not its missing-selector
+// shape, so a branch read as "always true" fails here.
+const pe = (m: string, code: any, data?: any) =>
+  Object.assign(new Error(m), { code, data });
+const refused: [string, any][] = [
+  [
+    "CALL_EXCEPTION with revert data",
+    ethers.makeError("x", "CALL_EXCEPTION", {
+      action: "call",
+      data: "0x08c379a0",
+      reason: null,
+      transaction: {},
+      invocation: null,
+      revert: null,
+    } as any),
+  ],
+  [
+    "BAD_DATA with a value other than 0x",
+    ethers.makeError("x", "BAD_DATA", { value: "0x00", info: {} } as any),
+  ],
+  ["-32603 without data", pe("internal error", -32603)],
+  ["-32603 with data 0x but no data.data", pe("internal error", -32603, "0x")],
+  ["-32000 out of gas with data 0x", pe("out of gas", -32000, "0x")],
+  ["-32000 missing trie node", pe("missing trie node", -32000)],
+  ["3 without data", pe("execution reverted", 3)],
+];
+
+describe("D-1e noSuchFunction refuses near misses", function () {
+  for (const [name, e] of refused) {
+    it(`refuses ${name}`, function () {
+      expect(noSuchFunction(e)).to.equal(false);
+    });
+  }
+});
