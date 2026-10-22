@@ -143,7 +143,12 @@ describe("U2 round 3: an entry stays, a re-send is one checked send", function (
     let saved = "";
     let atNextRead: string | null = null;
     let sent = false;
-    const send = unknown(() => ((sent = true), H2));
+    const send = unknown(() => {
+      // a second send would loop on a mock node that never yields
+      if (sent) throw new Error("sent a second time");
+      sent = true;
+      return H2;
+    });
     const raw = async (m: string, p: any[] = []) => {
       if (sent && atNextRead === null) atNextRead = saved;
       return send(m, p);
