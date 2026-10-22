@@ -173,6 +173,13 @@ export async function roundOneItems(
       "production node (D50)",
       500,
     ]),
+    // Review D-9: read back as round 2 reads the node set.
+    verify: async () => {
+      if (!(await om.isRegisteredOracle(n.address)))
+        throw new Error(
+          `${n.address} (${n.name}) is not a registered node after the vote`,
+        );
+    },
   }));
   for (const k of await deployerTrustedAttestors(o, dAddr)) {
     items.push({
@@ -186,6 +193,13 @@ export async function roundOneItems(
         k.ay,
         true,
       ]),
+      verify: async () => {
+        const left = await deployerTrustedAttestors(o, dAddr);
+        if (left.some((x: any) => x.circuitId === k.circuitId && x.ax === k.ax))
+          throw new Error(
+            `the ${k.name} issuer key Ax ${k.ax} is still the deployer's after the vote`,
+          );
+      },
     });
   }
   return items;
