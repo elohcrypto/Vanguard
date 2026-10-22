@@ -19,6 +19,7 @@ const {
 const { registerRegistrar } = require("./GovernedCalls");
 const { retirePlaceholder } = require("./CustodyFlow");
 const { onboard } = require("./Onboard");
+const { reportStop } = require("./DeployWiring");
 const { ethers } = require("hardhat");
 
 /** Option 61: Deploy Enhanced Escrow System */
@@ -27,6 +28,7 @@ async function deployEscrowSystem(mod) {
   console.log("One-time-use multi-signature escrow wallets");
   console.log("");
 
+  let escrowFactory;
   try {
     const digitalToken = mod.state.getContract("digitalToken");
     if (!digitalToken) {
@@ -69,16 +71,13 @@ async function deployEscrowSystem(mod) {
     const EscrowWalletFactory = await ethers.getContractFactory(
       "EscrowWalletFactory",
     );
-    const escrowFactory = await EscrowWalletFactory.deploy(
+    escrowFactory = await EscrowWalletFactory.deploy(
       await digitalToken.getAddress(),
       ownerWallet.address,
       await identityRegistry.getAddress(),
       await mod.state.getContract("complianceRules").getAddress(),
     );
     await escrowFactory.waitForDeployment();
-
-    mod.state.setContract("escrowFactory", escrowFactory);
-    mod.state.escrowFactory = escrowFactory; // Alias
     console.log(`✅ EscrowWalletFactory: ${await escrowFactory.getAddress()}`);
 
     // Task 4.3: the factory is a ComplianceRules registrar on VSC for the
@@ -100,8 +99,12 @@ async function deployEscrowSystem(mod) {
         `   ⏳ Escrows cannot be created until proposal #${reg.proposalId} names the factory a registrar: vote with option 77, execute with option 78`,
       );
     } else {
-      displayWarning(`Factory is not a registrar: ${reg.refused}`);
+      // Review F-3: a factory no escrow can be trusted by is no deploy.
+      throw new Error(`Factory is not a registrar: ${reg.refused}`);
     }
+    // Review F-3: in demo state only once the registrar step has run.
+    mod.state.setContract("escrowFactory", escrowFactory);
+    mod.state.escrowFactory = escrowFactory; // Alias
 
     console.log("");
     displaySuccess("ENHANCED ESCROW SYSTEM DEPLOYED SUCCESSFULLY!");
@@ -145,6 +148,8 @@ async function deployEscrowSystem(mod) {
     console.log("   3. Fund and use the system");
   } catch (error) {
     displayError(`Deployment failed: ${error.message}`);
+    await reportStop(mod.state, { escrowFactory });
+    throw error; // review F-3: a half-wired factory is not a success
   }
 }
 

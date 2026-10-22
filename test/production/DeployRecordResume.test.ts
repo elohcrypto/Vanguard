@@ -13,7 +13,8 @@ import * as h from "../helpers/deployRecordFlow";
 /**
  * Plan v2 Task 5.7 (review fix round): the deploy record across a stop.
  * A sent transaction the node no longer knows is adopted from the chain,
- * dropped back to unsent, or refused with the reason (M-2); every check
+ * sent again at its recorded nonce (review D-2 round 3: never dropped),
+ * or refused with the reason (M-2); every check
  * that settles a record or replays it refuses what it exists to refuse
  * (M-3); one process at a time holds the record (L-2), written durably
  * (L-3).
@@ -49,6 +50,7 @@ describe("Production deploy record: resume and refusals (Task 5.7)", function ()
       to: rec.txs[0].contract!,
       value: "0",
       dataHash: ethers.keccak256(data),
+      data,
       nonce: await h.nonce(),
       block: await ethers.provider.getBlockNumber(),
       status: "sent",
@@ -83,14 +85,17 @@ describe("Production deploy record: resume and refusals (Task 5.7)", function ()
       expect([b.r.sent, b.r.reused]).to.deep.equal([0, 4]);
     });
 
-    it("is dropped back to unsent when its nonce is unused and nothing is pending", async function () {
+    it("is sent again at its nonce when the nonce is unused and nothing is pending", async function () {
       const rec = await three();
-      await fourth(rec, {});
+      const { e } = await fourth(rec, {});
       const before = await h.nonce();
       await h.settle(box.file, load());
-      expect(load().txs).to.have.length(3);
+      expect(load().txs.map((t) => [t.nonce, t.status])[3]).to.deep.equal([
+        e.nonce,
+        "confirmed",
+      ]);
       const b = await run(load());
-      expect([b.r.sent, b.r.reused]).to.deep.equal([1, 3]);
+      expect([b.r.sent, b.r.reused]).to.deep.equal([0, 4]);
       expect(await h.nonce()).to.equal(before + 1);
     });
 

@@ -11,6 +11,8 @@ export interface TxEntry {
   to: string | null;
   value: string;
   dataHash: string;
+  /** The calldata until the entry is mined: a resume sends it again (D-2). */
+  data?: string;
   gas?: string;
   nonce: number;
   /** The latest block when the intent was written: replay reads here. */
@@ -28,6 +30,8 @@ export interface DeployRecord {
   chainId: number;
   configDigest: string;
   deployer: string;
+  /** The deployer's mined nonce when the record was made (D-2). */
+  startNonce: number;
   /** The block before the first deploy transaction: the scans' start. */
   fromBlock: number;
   /** Random, made with the record: identity salts derive from it. */

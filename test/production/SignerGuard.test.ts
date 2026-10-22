@@ -24,7 +24,7 @@ describe("Signer request guard (rpcGuard.js)", function () {
 
   before(async function () {
     dir = fs.mkdtempSync(path.join(os.tmpdir(), "guard-"));
-    fs.mkdirSync(path.join(dir, "keys"));
+    fs.mkdirSync(path.join(dir, "keys"), { mode: 0o700 });
     const json = await ethers.encryptKeystoreJson(
       { address: key.address, privateKey: key.privateKey },
       PASS,

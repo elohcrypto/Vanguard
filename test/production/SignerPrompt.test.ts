@@ -40,7 +40,7 @@ describe("Signer prompt (signerPrompt.js)", function () {
 
   before(async function () {
     dir = fs.mkdtempSync(path.join(os.tmpdir(), "prompt-"));
-    fs.mkdirSync(path.join(dir, "keys"));
+    fs.mkdirSync(path.join(dir, "keys"), { mode: 0o700 });
     const json = await ethers.encryptKeystoreJson(
       { address: key.address, privateKey: key.privateKey },
       PASS,
@@ -50,6 +50,11 @@ describe("Signer prompt (signerPrompt.js)", function () {
     fs.writeFileSync(path.join(dir, "pass"), PASS, { mode: 0o600 });
   });
   after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  // Each case signs nonce 7 at its own prompt: none inherits another's
+  // signed-nonce record, which lives beside the keystores (review D-4).
+  beforeEach(() =>
+    fs.rmSync(path.join(dir, "keys", "signed-nonces"), { force: true }),
+  );
 
   it("escapes controls, ANSI, bidi and zero-width characters, and caps each field", function () {
     const shown = clean(`${ESC}${BIDI}\u200b`);

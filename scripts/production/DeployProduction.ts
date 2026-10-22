@@ -69,6 +69,7 @@ const {
   vetRole,
 } = require("../../demo/utils/RoleCalls");
 const ContractDeployer = require("../../demo/core/ContractDeployer");
+const { wiring } = require("../../demo/utils/DeployWiring");
 const InvestorTypeModule = require("../../demo/modules/InvestorTypeModule");
 const GovernanceModule = require("../../demo/modules/GovernanceModule");
 const EscrowModule = require("../../demo/modules/EscrowModule");
@@ -97,7 +98,7 @@ const EXPECTED = [
 ];
 
 /** Demo option 1a for `inputs`, roles at their TESTNET_SETUP wallets. */
-async function deployStack(
+export async function deployStack(
   inputs: DeployInputs,
   salt: string,
   roles: unknown,
@@ -138,6 +139,16 @@ async function deployStack(
       `the deploy stopped${missing.length ? `; missing: ${missing.join(", ")}` : ""} (see above)`,
     );
   }
+  // Review F-3: the wiring read back from chain, not inferred from state.
+  const links = await wiring(state);
+  const unwired = links.filter((w: any) => !w.ok).map((w: any) => w.name);
+  if (unwired.length) {
+    throw new Error(
+      `the deploy stopped; missing wiring: ${unwired.join(", ")}`,
+    );
+  }
+  console.log(`\n🔗 Wiring read back from chain (${links.length} links):`);
+  for (const w of links) console.log(`   ✅ ${w.name}`);
   return state;
 }
 
@@ -200,7 +211,7 @@ async function main(): Promise<void> {
 }
 
 /** The deploy on the locked record `file`, then handover.json. */
-async function deployOn(
+export async function deployOn(
   file: string,
   inputs: DeployInputs,
   accounts: string[],
@@ -218,11 +229,23 @@ async function deployOn(
     );
   }
   if (!rec) {
+    // Review D-2: every resume counts the deployer's nonce from here.
+    const [startNonce, pending] = await Promise.all(
+      ["latest", "pending"].map((t) =>
+        ethers.provider.getTransactionCount(inputs.deployer, t),
+      ),
+    );
+    if (pending !== startNonce) {
+      throw new Error(
+        `the deployer ${inputs.deployer} has ${pending - startNonce} pending transaction(s): wait for them to mine, then run the deploy (its record starts at the mined nonce)`,
+      );
+    }
     const created: DeployRecord = {
       version: 1,
       chainId,
       configDigest: inputs.digest,
       deployer: inputs.deployer,
+      startNonce,
       fromBlock: await ethers.provider.getBlockNumber(),
       salt: ethers.hexlify(ethers.randomBytes(32)),
       txs: [],

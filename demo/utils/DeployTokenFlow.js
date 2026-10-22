@@ -22,6 +22,7 @@ const {
   DEFAULT_ALLOWED_COUNTRIES,
   DEFAULT_BLOCKED_COUNTRIES,
 } = require("./DeployDefaults");
+const { missingWiring, reportStop } = require("./DeployWiring");
 
 /**
  * Deploy ERC-3643 Digital Token System with full configuration
@@ -288,6 +289,12 @@ async function deployDigitalTokenSystem(mod) {
       );
     }
 
+    // Review F-3: success only once option 21's links read back from chain.
+    const missing = await missingWiring(mod.state, {}, "21");
+    if (missing.length) {
+      throw new Error(`missing wiring: ${missing.join(", ")}`);
+    }
+
     mod.state.maxTransferAmount = 8000; // 8,000 VSC limit for Normal/Retail
 
     displaySuccess("ERC-3643 DIGITAL TOKEN SYSTEM DEPLOYED!");
@@ -318,6 +325,7 @@ async function deployDigitalTokenSystem(mod) {
   } catch (error) {
     displayError(`ERC-3643 Digital Token deployment failed: ${error.message}`);
     console.error("💡 Stack trace:", error.stack);
+    await reportStop(mod.state);
     throw error;
   }
 }

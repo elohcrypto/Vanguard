@@ -58,7 +58,7 @@ describe("Signer bump: a stuck low-fee transaction replaced (L-5)", function () 
 
   it("names the stuck nonce and the command; the bump mines it", async function () {
     const key = ethers.Wallet.createRandom();
-    fs.mkdirSync(path.join(dir, "keys"));
+    fs.mkdirSync(path.join(dir, "keys"), { mode: 0o700 });
     fs.writeFileSync(
       path.join(dir, "keys", "a.json"),
       await ethers.encryptKeystoreJson(

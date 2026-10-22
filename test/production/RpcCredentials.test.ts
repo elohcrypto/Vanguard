@@ -108,7 +108,7 @@ describe("RPC credentials: Basic auth, encoded forms, error data (L-1..L-3)", fu
   it("the production signer forwards reads to a basic-auth upstream; error data comes back scrubbed", async function () {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), "creds-"));
     try {
-      fs.mkdirSync(path.join(dir, "keys"));
+      fs.mkdirSync(path.join(dir, "keys"), { mode: 0o700 });
       const w = ethers.Wallet.createRandom();
       fs.writeFileSync(
         path.join(dir, "keys", "a.json"),

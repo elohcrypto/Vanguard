@@ -70,7 +70,12 @@ prints `exit 0`,
 The log has a `   ✅ register production node 0x… (NODE_1) (proposal #12)`,
 `   ✅ re-approve issuer key Ax … for jurisdiction (Q20) (proposal #N)` and
 `   ✅ remove deployer-era node 0x70997970C51812dc3A010C7d01b50e0d17dc79C8 (KYC_ORACLE) (proposal #N)`
-line per proposal. Acknowledge the nodes it printed and audit:
+line per proposal, each printed only once its effect reads back from
+chain, in round 1 as in round 2 (a proposal settled without it, e.g.
+executed by someone else and undone since, stops the run:
+`❌ Post-ceremony votes failed: 0x… (NODE_1) is not a registered node after the vote`
+or `… issuer key Ax … is still the deployer's after the vote`; a re-run
+resumes). Acknowledge the nodes it printed and audit:
 
 ```bash
 node -e 'const fs = require("fs"); const p = process.env.PROD_CONFIG; const c = JSON.parse(fs.readFileSync(p, "utf8")); c.oracleNodes = JSON.parse(process.argv[1]); fs.writeFileSync(p, JSON.stringify(c, null, 2)); console.log("oracleNodes:", c.oracleNodes.length)' "$(grep -oE 'set handover.json "oracleNodes" to \[.*\]' $RB/post.log | sed -E 's/.* to //')"

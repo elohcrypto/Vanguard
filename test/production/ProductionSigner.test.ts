@@ -39,7 +39,7 @@ describe("Production signer (scripts/production/signer.js)", function () {
   before(async function () {
     dir = fs.mkdtempSync(path.join(os.tmpdir(), "signer-"));
     for (const d of ["ok", "open", "published"])
-      fs.mkdirSync(path.join(dir, d));
+      fs.mkdirSync(path.join(dir, d), { mode: 0o700 });
     // File-name order is wallet-index order: "b" sorts after "a".
     await keystore(path.join(dir, "ok", "b-second.json"), keys[1]);
     await keystore(path.join(dir, "ok", "a-first.json"), keys[0]);

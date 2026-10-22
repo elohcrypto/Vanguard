@@ -37,15 +37,19 @@ in the order names are entered at options 23/24 (option 62 takes the
 investor's MultiSigWallet or bank address as the fee wallet and otherwise
 asks for one; there is no default wallet). Option 32 registers wallets 4 and
 5 as risk and fraud oracle nodes only on a manager with fewer than three
-nodes, which never happens after option 31. Option 12, the signer
-allocation and `print-role-wallets.js` print these roles in the same words.
+nodes, which never happens after option 31. Option 12 and the signer
+allocation print these roles in the same words. `print-role-wallets.js`
+prints the roles the production deploy gives the same wallets by default
+(`scripts/production/deployConfig.ts`): 1 to 3 the oracle nodes, 4 the
+proposer, 5 and 6 the voters, 8 the escrow fee wallet, 9 to 11 as above.
 
 ```bash
 cp .env.example .env
-npx hardhat run scripts/print-role-wallets.js --network hardhat   # generates a phrase if MNEMONIC is empty
+npx hardhat run scripts/print-role-wallets.js --network hardhat   # MNEMONIC empty: a new phrase in .env.mnemonic.local (0600), not on the terminal
 ```
 
-Put the phrase in `.env` as `MNEMONIC`. It is gitignored. Never commit it.
+Put the phrase in `.env` as `MNEMONIC`. Both files are gitignored. Never
+commit them.
 
 ## Governance time scale
 

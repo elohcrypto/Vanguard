@@ -25,6 +25,7 @@ const {
   DEFAULT_ALLOWED_COUNTRIES,
   DEFAULT_BLOCKED_COUNTRIES,
 } = require("./DeployDefaults");
+const { missingWiring, reportStop } = require("./DeployWiring");
 
 /**
  * Deploy OnchainID contracts (Factory, KYC Issuer, AML Issuer)
@@ -48,7 +49,6 @@ async function deployOnchainIDContracts(mod) {
     kmHash,
   );
   await factory.waitForDeployment();
-  mod.state.setContract("onchainIDFactory", factory);
 
   await mod.logger.logContractDeployment("OnchainIDFactory", factory, [
     mod.state.signers[0].address,
@@ -102,6 +102,15 @@ async function deployOnchainIDContracts(mod) {
   // KeyManager as its one recovery manager.
   const kmAddr = await keyManager.getAddress();
   await (await factory.setRecoveryManager(kmAddr)).wait();
+  // Review F-3: in demo state only once the pin reads back from chain; an
+  // identity created without it never pins a recovery manager.
+  const local = { onchainIDFactory: factory };
+  const missing = await missingWiring(mod.state, local, "1");
+  if (missing.length) {
+    await reportStop(mod.state, local);
+    throw new Error(`missing wiring: ${missing.join(", ")}`);
+  }
+  mod.state.setContract("onchainIDFactory", factory);
   console.log(`   🔗 OnchainIDFactory.recoveryManager = KeyManager ${kmAddr}`);
 }
 

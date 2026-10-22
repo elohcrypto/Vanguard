@@ -32,7 +32,7 @@ describe("Signer: a failed broadcast's retry, fee bumps, forget (M-1)", function
 
   beforeEach(async function () {
     dir = fs.mkdtempSync(path.join(os.tmpdir(), "signer-retry-"));
-    fs.mkdirSync(path.join(dir, "keys"));
+    fs.mkdirSync(path.join(dir, "keys"), { mode: 0o700 });
     fs.writeFileSync(
       path.join(dir, "keys", "a.json"),
       await ethers.encryptKeystoreJson(
@@ -189,7 +189,7 @@ describe("Signer: a failed broadcast's retry, fee bumps, forget (M-1)", function
       expect(f.status, f.stderr).to.equal(0);
       expect(f.stdout).to.match(
         new RegExp(
-          `signer: forgot 11155111:${key.address.toLowerCase()}:7 in .*token\\.signed\\.json`,
+          `signer: forgot 11155111:${key.address.toLowerCase()}:7 in .*keys/signed-nonces`,
         ),
       );
       await runSigner(

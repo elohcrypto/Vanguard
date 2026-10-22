@@ -74,7 +74,7 @@ describeUnlessCoverage(
 
     before(async function () {
       dir = fs.mkdtempSync(path.join(os.tmpdir(), "pins-cli-"));
-      fs.mkdirSync(path.join(dir, "keys"));
+      fs.mkdirSync(path.join(dir, "keys"), { mode: 0o700 });
       for (const [i, n] of NAMES.entries()) await keystore(n, keys[i]);
       fs.writeFileSync(path.join(dir, "pass"), PASS, { mode: 0o600 });
       // Written from the directory as it was: index i is NAMES[i]'s key.

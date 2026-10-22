@@ -30,3 +30,11 @@ runs:
     - name: Build and verify ZK circuits
       run: scripts/ci/zk-circuits.sh
       shell: bash
+    # Review D-4 round 3: the signer lock's PID-namespace tests start a
+    # signer under `unshare -Upf --map-root-user`, which Ubuntu 24.04's
+    # AppArmor confines for unprivileged users.
+    - name: Allow unprivileged user namespaces
+      run: |
+        f=/proc/sys/kernel/apparmor_restrict_unprivileged_userns
+        if [[ -e $f ]]; then sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0; fi
+      shell: bash
