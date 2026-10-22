@@ -10,7 +10,8 @@ const { readRoleSafe } = require("./RoleCalls");
 const { noSuchFunction } = require("./RoleSafe");
 
 // A read with no such function is `v` (review D-1 round 3); any other
-// error, a timeout too, is rethrown.
+// error, a timeout too, is rethrown. An address read reads as the zero
+// address, "not that role" (round 4: null threw in same()).
 const or = (v) => (e) => {
   if (noSuchFunction(e)) return v;
   throw e;
@@ -53,7 +54,7 @@ async function roleOf(o, a) {
     for (const x of o[k] || []) if (same(await addrOf(x), a)) return role;
   }
   const om = o.oracleManager;
-  if (om && same(await om.operator().catch(or(null)), a))
+  if (om && same(await om.operator().catch(or(ethers.ZeroAddress)), a))
     return "the OracleManager operator";
   for (const [k, role] of [
     ["identityRegistry", "an IdentityRegistry agent"],
@@ -89,7 +90,7 @@ async function roleOf(o, a) {
       ],
       at,
     );
-    if (same(await c.owner().catch(or(null)), a))
+    if (same(await c.owner().catch(or(ethers.ZeroAddress)), a))
       return `the owner of ClaimIssuer ${at}`;
     for (const [purpose, what] of [
       [1, "management"],
