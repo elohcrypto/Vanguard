@@ -3,77 +3,16 @@
 // wiring is on chain and never swallow a failure, and option 1a reads the
 // wiring back from chain before it reports FULL STACK DEPLOYED.
 const { expect } = require("chai");
-const { ethers } = require("hardhat");
-const DemoState = require("../../demo/core/DemoState");
-const ContractDeployer = require("../../demo/core/ContractDeployer");
-const everything = require("../../demo/utils/DeployEverythingFlow");
-const GovernanceModule = require("../../demo/modules/GovernanceModule");
 const InvestorTypeModule = require("../../demo/modules/InvestorTypeModule");
 const EscrowModule = require("../../demo/modules/EscrowModule");
 const { EnhancedLogger } = require("../../demo/logging");
-
-/** Run fn with console.log/error captured; returns [result, lines]. */
-async function capture(fn) {
-  const lines = [];
-  const [l, e] = [console.log, console.error];
-  console.log = (...a) => lines.push(a.join(" "));
-  console.error = (...a) => lines.push(a.join(" "));
-  try {
-    return [await fn(), lines];
-  } finally {
-    [console.log, console.error] = [l, e];
-  }
-}
-
-const ask = async (q) => {
-  throw new Error(`asked: ${q}`);
-};
-
-/** Options 1, 13 and 21 deployed, as the smoke does. */
-async function baseStack() {
-  const state = new DemoState();
-  state.signers = await ethers.getSigners();
-  const deployer = new ContractDeployer(state, new EnhancedLogger());
-  await capture(async () => {
-    await deployer.deployAllContracts();
-    await deployer.deployComplianceRules();
-    await deployer.deployDigitalTokenSystem();
-  });
-  return { state, deployer };
-}
-
-/** `real` with `fn` answered by `impl` (the rest bound to the contract). */
-function swap(real, fn, impl) {
-  return new Proxy(real, {
-    get(t, p) {
-      if (p === fn) return impl;
-      const v = Reflect.get(t, p);
-      return typeof v === "function" ? v.bind(t) : v;
-    },
-  });
-}
-
-/** Option 1a's last two steps (51, 74) over the base stack and the oracles. */
-async function oneClick(state, deployer) {
-  await capture(() => deployer.deployOracleSystem());
-  const gov = new GovernanceModule(state, new EnhancedLogger(), ask);
-  const mod = {
-    state,
-    deployAllContracts: async () => {},
-    deployDigitalTokenSystem: async () => {},
-    deployOracleSystem: async () => {},
-  };
-  mod._reportDeploySummary = (done, steps, reached) =>
-    everything._reportDeploySummary(mod, done, steps, reached);
-  const modules = {
-    investorType: new InvestorTypeModule(state, new EnhancedLogger(), ask),
-    governance: gov,
-  };
-  const [ok, out] = await capture(() =>
-    everything.deployEverything(mod, modules),
-  );
-  return { ok, text: out.join("\n"), gov };
-}
+const {
+  capture,
+  ask,
+  baseStack,
+  swap,
+  oneClick,
+} = require("../helpers/deployFlows");
 
 describe("F-3 the deploy flows report success only after their wiring", function () {
   this.timeout(300000);
