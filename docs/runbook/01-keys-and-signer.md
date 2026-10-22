@@ -56,7 +56,9 @@ derives its keys from `MNEMONIC`, refuses a chain other than 31337 unless
 `SIGNER_ALLOW_CHAIN` names it, and must never run with a real key.
 
 **Keystores.** One encrypted keystore per key, mode 0600, all under one
-password, in one directory. The signer orders them by file name and that
+password, in one directory, yours and mode 0700 (`signer.js new` creates
+it so; else `chmod 700 <KEYSTORE_DIR>`): the signer refuses any other at
+start (`signer: <KEYSTORE_DIR> must be this user's own directory, mode 0700 (it is 755): chmod 700 <KEYSTORE_DIR>`). The signer orders them by file name and that
 order is the wallet index the ceremony uses (index 0 is the deployer;
 the index is the position in the order, not the number in the name), so
 name them with a sortable prefix:
@@ -89,6 +91,11 @@ and one `   <index> <name> <address>` line per key. The token file is
 `SIGNER_TOKEN_FILE`, else `<tmp>/vanguard-signer-<uid>/<port>.token`
 (0600; the CLIs read the same path through `hardhat.config.ts`); it is
 removed when the signer exits normally (a `kill -9` leaves it: `rm` it).
+One signer runs per keystore directory: it holds
+`<KEYSTORE_DIR>/signer.lock` (its pid) while it runs, and a second one is
+refused
+(`signer: <KEYSTORE_DIR>/signer.lock is held by pid N (a signer running on these keystores): refusing to start a second one; if none runs, rm <KEYSTORE_DIR>/signer.lock`);
+a lock a killed signer left (`kill -9`) is taken over at the next start.
 A refusal ends `signer: <reason>` with exit 3 (for the signer a failure,
 not the CLIs' pause): on another chain
 `signer: upstream is chain 31337: this signer serves Sepolia (11155111) only (31337 with SIGNER_TEST=1)`

@@ -38,8 +38,9 @@
  * (Task 5.17: the default; SIGNER_PROMPT=0 switches it off with a loud
  * warning, =1 asks on 31337 too). A request repeating an earlier one with
  * a pinned nonce (a retry after a lost reply, demo/utils/RpcRetry.js) is
- * shown as a RETRY of it. The nonces it signed are kept next to the token
- * file (signerState.js), and the token file is removed on exit.
+ * shown as a RETRY of it. The nonces it signed are kept beside the
+ * keystores, whose directory (this user's, 0700) one signer holds at a
+ * time (signerState.js), and the token file is removed on exit.
  */
 "use strict";
 
@@ -63,6 +64,7 @@ const {
   promptMode,
   signedStore,
   recordFile,
+  holdKeystores,
 } = require("./signerState");
 const { HELP, create, forgetCmd, bumpCmd } = require("./signerCommands");
 const {
@@ -88,6 +90,7 @@ async function serve() {
   const dir = process.env.SIGNER_KEYSTORE_DIR;
   if (!upstream || !dir)
     throw new Error("set SIGNER_UPSTREAM and SIGNER_KEYSTORE_DIR");
+  holdKeystores(dir); // review D-4: one signer per keystore directory
   const provider = new JsonRpcProvider(upstream, undefined, {
     staticNetwork: true,
     batchMaxCount: 1,

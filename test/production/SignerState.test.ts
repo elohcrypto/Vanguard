@@ -23,7 +23,7 @@ describe("Signer state: prompt default, signed nonces, token file (L-5, L-6)", f
 
   before(async function () {
     dir = fs.mkdtempSync(path.join(os.tmpdir(), "signer-state-"));
-    fs.mkdirSync(path.join(dir, "keys"));
+    fs.mkdirSync(path.join(dir, "keys"), { mode: 0o700 });
     fs.writeFileSync(
       path.join(dir, "keys", "a.json"),
       await ethers.encryptKeystoreJson(

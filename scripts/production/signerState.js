@@ -27,6 +27,13 @@
  *    later request and restart was refused.
  *  - forget (`signer.js forget <address> <nonce>`): drops a stuck entry
  *    from the record, logged; the operator's way out.
+ *  - holdKeystores (review D-4 round 2): the keystore directory is this
+ *    user's own, mode 0700, and one signer's: <dir>/signer.lock, created
+ *    exclusively, holds the pid. Two signers on one directory would each
+ *    keep the record in memory and both sign the same nonce, so a second
+ *    is refused while that pid lives; a killed holder's lock is taken
+ *    over. The record's temporary file is created exclusively too, so a
+ *    path planted there is refused, never written through.
  */
 "use strict";
 
@@ -66,6 +73,65 @@ function own(file) {
   }
 }
 
+/** Whether process `pid` runs (EPERM: it does, as another user). */
+function alive(pid) {
+  if (!Number.isInteger(pid) || pid <= 0) return false;
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (e) {
+    return e.code === "EPERM";
+  }
+}
+
+/** Hold keystore directory `dir` for this process; released on exit. */
+function holdKeystores(dir) {
+  const st = fs.statSync(dir);
+  const mode = st.mode & 0o777;
+  if (!st.isDirectory() || st.uid !== process.getuid() || mode !== 0o700) {
+    throw new Error(
+      `${dir} must be this user's own directory, mode 0700 (it is ${mode.toString(8)}): chmod 700 ${dir}`,
+    );
+  }
+  const lock = path.join(dir, "signer.lock");
+  for (let tries = 0; ; tries++) {
+    try {
+      fs.writeFileSync(lock, `${process.pid}\n`, { flag: "wx", mode: 0o600 });
+      break;
+    } catch (e) {
+      if (e.code !== "EEXIST" || tries > 0) throw e;
+      const pid = Number(fs.readFileSync(lock, "utf8").trim());
+      if (alive(pid)) {
+        throw new Error(
+          `${lock} is held by pid ${pid} (a signer running on these keystores): refusing to start a second one; if none runs, rm ${lock}`,
+        );
+      }
+      fs.rmSync(lock, { force: true }); // its holder was killed: taken over
+    }
+  }
+  process.on("exit", () => {
+    const held = fs.existsSync(lock) && fs.readFileSync(lock, "utf8").trim();
+    if (held === String(process.pid)) fs.rmSync(lock, { force: true });
+  });
+}
+
+/** `all` to the record at `file`: an exclusive temporary file, renamed. */
+function writeRecord(file, all) {
+  const tmp = `${file}.tmp-${process.pid}`;
+  try {
+    fs.writeFileSync(tmp, JSON.stringify(all, null, 1) + "\n", {
+      mode: 0o600,
+      flag: "wx",
+    });
+  } catch (e) {
+    if (e.code !== "EEXIST") throw e;
+    throw new Error(
+      `${tmp} exists: refusing to write the signed-nonce record through it (remove it if no signer runs)`,
+    );
+  }
+  fs.renameSync(tmp, file);
+}
+
 /**
  * The signed-nonce record at `file` for `chain`: get(slot) and
  * set(slot, { unsigned, raw }), slot "<address>:<nonce>"; every set is
@@ -84,12 +150,9 @@ function signedStore(file, chain) {
   return {
     get: (slot) => all[key(slot)],
     set(slot, entry) {
-      all[key(slot)] = entry;
-      const tmp = `${file}.tmp-${process.pid}`;
-      fs.writeFileSync(tmp, JSON.stringify(all, null, 1) + "\n", {
-        mode: 0o600,
-      });
-      fs.renameSync(tmp, file);
+      const next = { ...all, [key(slot)]: entry };
+      writeRecord(file, next); // on disk before it counts
+      all = next;
     },
     size: () =>
       Object.keys(all).filter((k) => k.startsWith(`${chain}:`)).length,
@@ -211,14 +274,13 @@ function forget(file, address, nonce) {
   const tail = `:${String(address).toLowerCase()}:${Number(nonce)}`;
   const gone = Object.keys(all).filter((k) => k.endsWith(tail));
   for (const k of gone) delete all[k];
-  const tmp = `${file}.tmp-${process.pid}`;
-  fs.writeFileSync(tmp, JSON.stringify(all, null, 1) + "\n", { mode: 0o600 });
-  fs.renameSync(tmp, file);
+  writeRecord(file, all);
   return gone;
 }
 
 module.exports = {
   recordFile,
+  holdKeystores,
   promptMode,
   signedStore,
   differs,
