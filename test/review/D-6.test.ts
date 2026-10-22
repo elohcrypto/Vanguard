@@ -21,8 +21,11 @@ describe("D-6 dev-node calls off the dev chain", function () {
   const box = h.files();
 
   it("a caught evm_ refusal off the dev chain does not stop the deploy", async function () {
-    delete require.cache[require.resolve("../../demo/utils/ChainTime")];
-    const ChainTime = require("../../demo/utils/ChainTime");
+    // A fresh ChainTime (it caches its first answer), dropped again after
+    // so no later file gets this one's "cannot jump".
+    const path = require.resolve("../../demo/utils/ChainTime");
+    delete require.cache[path];
+    const ChainTime = require(path);
     const rec = await h.fresh(box.file);
     const r = new Recorder(box.file, rec, 1, quiet);
     await r.install();
@@ -43,6 +46,7 @@ describe("D-6 dev-node calls off the dev chain", function () {
       expect(rc!.status).to.equal(1);
     } finally {
       r.remove();
+      delete require.cache[path];
     }
   });
 
