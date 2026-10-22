@@ -8,7 +8,13 @@
  */
 
 const { ethers } = require("hardhat");
-const { addrOf, same, fail, issuerLabel } = require("./HandoverChecks");
+const {
+  addrOf,
+  same,
+  fail,
+  issuerLabel,
+  noSuchFunction,
+} = require("./HandoverChecks");
 const { RANGE_ERROR, ARCHIVE_ERROR, textOf } = require("./RpcRetry");
 
 const ZERO = ethers.ZeroAddress;
@@ -220,12 +226,7 @@ async function escrowFactoriesFromChain(o) {
     try {
       f = await (await ethers.getContractAt(FACTORY_OF, a)).factory();
     } catch (e) {
-      // No factory(): a revert (or undecodable data), not an RPC failure.
-      const noFactory =
-        e.code === "CALL_EXCEPTION" ||
-        e.code === "BAD_DATA" ||
-        /revert/i.test(e.message);
-      if (noFactory) continue;
+      if (noSuchFunction(e)) continue; // no factory(): not an escrow
       throw e;
     }
     if (same(f, ZERO) || out.some((x) => same(x.factory, f))) continue;

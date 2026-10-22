@@ -6,7 +6,7 @@
  */
 
 const { ethers } = require("hardhat");
-const { addrOf } = require("./HandoverChecks");
+const { addrOf, noSuchFunction } = require("./HandoverChecks");
 
 const sameAddr = (a, b) => String(a).toLowerCase() === String(b).toLowerCase();
 
@@ -21,22 +21,6 @@ const MAX_MODULES = 100; // past it the module list is unread
 const PAST = "past";
 const NEUTRAL = { from: ethers.ZeroAddress };
 const is7702 = (code) => code.toLowerCase().startsWith("0xef0100");
-
-/**
- * True when `e` means "no such function" (review D-1 round 3): a revert
- * with no data or a call answering none, as each provider reports it
- * (measured): ethers' CALL_EXCEPTION or BAD_DATA, Hardhat in process (no
- * code) or an EIP-1474 node (code 3) with data "0x", a Hardhat node over
- * HTTP (-32603) with data.data "0x". Anything else is false: a timeout,
- * a rate limit, out of gas (-32000), a fault whose text says "reverted".
- */
-function noSuchFunction(e) {
-  if (e.code === "CALL_EXCEPTION") return e.data == null || e.data === "0x";
-  if (e.code === "BAD_DATA") return e.value === "0x";
-  if (e.code === undefined || e.code === 3) return e.data === "0x";
-  if (e.code === -32603) return e.data?.data === "0x";
-  return false;
-}
 
 /**
  * `addr` read as a Safe: { owners, threshold, modules } (modules null when

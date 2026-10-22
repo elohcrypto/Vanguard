@@ -18,7 +18,7 @@
  */
 
 const { ethers } = require("hardhat");
-const { addrOf, same, fail } = require("./HandoverChecks");
+const { addrOf, same, fail, noSuchFunction } = require("./HandoverChecks");
 const {
   roleHolders,
   scanLogs,
@@ -71,12 +71,7 @@ async function deployerArbitrates(o, dAddr) {
     try {
       investor = await w.investor();
     } catch (e) {
-      // No investor(): not an escrow (a revert or undecodable data).
-      const none =
-        e.code === "CALL_EXCEPTION" ||
-        e.code === "BAD_DATA" ||
-        /revert/i.test(e.message);
-      if (none) continue;
+      if (noSuchFunction(e)) continue; // no investor(): not an escrow
       throw e;
     }
     if (same(investor, dAddr)) out.push(account);

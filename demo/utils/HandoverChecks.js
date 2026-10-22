@@ -111,16 +111,31 @@ function fail(msg) {
 }
 
 /**
+ * True when `e` means "no such function" (review D-1 round 3): a revert
+ * with no data or a call answering none, as each provider reports it
+ * (measured): ethers' CALL_EXCEPTION or BAD_DATA, Hardhat in process (no
+ * code) or an EIP-1474 node (code 3) with data "0x", a Hardhat node over
+ * HTTP (-32603) with data.data "0x". Anything else is false: a timeout,
+ * a rate limit, out of gas (-32000), a fault whose text says "reverted".
+ * Every read that takes a missing function for "none" asks it (round 4).
+ */
+function noSuchFunction(e) {
+  if (e.code === "CALL_EXCEPTION") return e.data == null || e.data === "0x";
+  if (e.code === "BAD_DATA") return e.value === "0x";
+  if (e.code === undefined || e.code === 3) return e.data === "0x";
+  if (e.code === -32603) return e.data?.data === "0x";
+  return false;
+}
+
+/**
  * An oracle's list-manager writer, or null when it has none: no listManager
- * in its ABI, or the call reverts (an oracle without the role).
+ * in its ABI, or no such function on chain (noSuchFunction).
  * Anything else (an RPC failure) is rethrown, never read as "no role".
  */
 async function listManagerOf(oracle) {
   if (typeof oracle.listManager !== "function") return null;
   return oracle.listManager().catch((e) => {
-    // ethers v6 on a public RPC reports CALL_EXCEPTION; a Hardhat node
-    // reports "Transaction reverted: function selector was not recognized".
-    if (e.code === "CALL_EXCEPTION" || /revert/i.test(e.message)) return null;
+    if (noSuchFunction(e)) return null;
     throw e;
   });
 }
@@ -154,15 +169,15 @@ const MODE = ["OracleOnly", "ZkOnly", "Either"];
 
 /**
  * VGT's whitelist mode name in the config's ComplianceRules, or null when
- * that ComplianceRules predates Task 3.4 (no getter). Only a revert means
- * "no getter"; anything else (an RPC failure) is rethrown.
+ * that ComplianceRules predates Task 3.4 (no getter). Only noSuchFunction
+ * means "no getter"; anything else (an RPC failure) is rethrown.
  */
 async function vgtWhitelistMode(o) {
   const vgt = await addrOf(o.governanceToken);
   try {
     return MODE[Number(await o.complianceRules.whitelistMode(vgt))];
   } catch (e) {
-    if (e.code !== "CALL_EXCEPTION" && !/revert/i.test(e.message)) throw e;
+    if (!noSuchFunction(e)) throw e;
     return null;
   }
 }
@@ -406,6 +421,7 @@ module.exports = {
   hasLiveKey,
   issuerLabel,
   listManagerOf,
+  noSuchFunction,
   withBoundRegistry,
   preflight,
   liveOnToken,
