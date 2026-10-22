@@ -19,6 +19,7 @@ const {
   DEFAULT_ALLOWED_COUNTRIES,
   DEFAULT_BLOCKED_COUNTRIES,
 } = require("./DeployDefaults");
+const { missingWiring } = require("./DeployWiring");
 
 /**
  * Option 1a: One-click deployment of the full stack, in dependency order.
@@ -133,9 +134,9 @@ async function deployEverything(mod, modules) {
       return false;
     }
 
-    // Verify by reading state back, not by assuming the call worked: the
-    // demo's modules catch their own errors and return normally, so a step
-    // can "succeed" while registering nothing.
+    // Verify by reading back, not by assuming the call worked: a step
+    // that returns without registering its contract, or registers it with
+    // a link missing on chain (review F-3), stops the deploy.
     const contract = mod.state.getContract(step.expect);
     if (!contract) {
       displayError(
@@ -143,6 +144,14 @@ async function deployEverything(mod, modules) {
       );
       console.log(
         "   Later steps depend on it; continuing would fail confusingly.",
+      );
+      mod._reportDeploySummary(done, steps, i);
+      return false;
+    }
+    const missing = await missingWiring(mod.state);
+    if (missing.length) {
+      displayError(
+        `Step ${i + 1} (${step.name}): the deploy stopped; missing wiring: ${missing.join(", ")}`,
       );
       mod._reportDeploySummary(done, steps, i);
       return false;

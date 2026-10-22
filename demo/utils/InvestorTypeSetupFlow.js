@@ -31,7 +31,6 @@ async function deployInvestorTypeSystem(mod) {
     const investorTypeRegistry = await InvestorTypeRegistryFactory.deploy();
     await investorTypeRegistry.waitForDeployment();
     const registryAddress = await investorTypeRegistry.getAddress();
-    mod.state.setContract("investorTypeRegistry", investorTypeRegistry);
     console.log(`✅ InvestorTypeRegistry deployed: ${registryAddress}`);
 
     // Set up compliance officer. Not in a production deploy (Task 5.7):
@@ -39,17 +38,15 @@ async function deployInvestorTypeSystem(mod) {
     const demoOfficer = !mod.state.production;
     if (demoOfficer) console.log("👮 Setting up compliance officers...");
     if (demoOfficer) {
-      try {
+      await (
         await investorTypeRegistry.setComplianceOfficer(
           mod.state.signers[1].address,
           true,
-        );
-        console.log(
-          `✅ Compliance officer configured: ${mod.state.signers[1].address}`,
-        );
-      } catch (error) {
-        console.log("⚠️ Compliance officer setup failed:", error.message);
-      }
+        )
+      ).wait();
+      console.log(
+        `✅ Compliance officer configured: ${mod.state.signers[1].address}`,
+      );
     }
 
     // Check if VanguardGovernance is already deployed
@@ -76,6 +73,58 @@ async function deployInvestorTypeSystem(mod) {
       );
       console.log("   💡 Or continue with owner-based control for testing");
     }
+
+    // Task 2A.2: wire the registry into the Token whenever one already
+    // exists, regardless of deploy order (option 21 then 51, or 51 then
+    // 21 — option 21 does the symmetric call when the registry exists
+    // first). Without this, ContractDeployer.js used to point operators at
+    // option 52, a read-only dashboard that never calls
+    // token.setInvestorTypeRegistry.
+    const token =
+      mod.state.getContract("token") || mod.state.getContract("digitalToken");
+    if (token) {
+      console.log("\n🔗 Connecting InvestorTypeRegistry to VSC token...");
+      await wireInvestorRegistry(token, investorTypeRegistry); // 4.10
+      const wired = await token.investorTypeRegistry();
+      console.log(`   ✅ Token.investorTypeRegistry(): ${wired}`);
+      // D22 (a): mint now enforces holding caps; a treasury is exempt.
+      // Owner only (D22): the deployer owns a freshly deployed registry.
+      const canExempt =
+        (await investorTypeRegistry.owner()) ===
+        (await investorTypeRegistry.runner.getAddress());
+      for (const bank of mod.state.bankingInstitutions?.values() || []) {
+        if (bank.type !== "CENTRAL_BANK") continue;
+        if (!canExempt) {
+          console.log(
+            "   central bank not exempt: after the handover only governance can exempt a treasury (InvestorTypeConfig vote)",
+          );
+          continue;
+        }
+        await (
+          await investorTypeRegistry.setInvestorLimitExempt(bank.address, true)
+        ).wait();
+        console.log(
+          "   ✅ central bank exempt from investor limits (treasury, D22)",
+        );
+      }
+      if (wired.toLowerCase() !== registryAddress.toLowerCase()) {
+        console.log(
+          `   ⚠️  Readback (${wired}) does not match deployed registry (${registryAddress})`,
+        );
+      }
+      // Task 4.3: investor custody (option 23) needs this registry.
+      console.log(
+        "\n🔐 Deploying investor custody (InvestorRequestManager)...",
+      );
+      await deployCustody(mod.state, console.log, investorTypeRegistry);
+    } else {
+      console.log(
+        "\n💡 No VSC token deployed yet — connect automatically once option 21 deploys it",
+      );
+    }
+
+    // Review F-3: in demo state, and reported, only once wired on chain.
+    mod.state.setContract("investorTypeRegistry", investorTypeRegistry);
 
     // Display basic system info
     console.log("\n📊 Basic System Information:");
@@ -104,68 +153,10 @@ async function deployInvestorTypeSystem(mod) {
       console.log(`   🗳️ Governance: Not integrated (owner-based control)`);
       console.log(`   💡 Deploy Option 74 for democratic governance`);
     }
-
-    // Task 2A.2: wire the registry into the Token whenever one already
-    // exists, regardless of deploy order (option 21 then 51, or 51 then
-    // 21 — option 21 does the symmetric call when the registry exists
-    // first). Without this, ContractDeployer.js used to point operators at
-    // option 52, a read-only dashboard that never calls
-    // token.setInvestorTypeRegistry.
-    const token =
-      mod.state.getContract("token") || mod.state.getContract("digitalToken");
-    if (token) {
-      console.log("\n🔗 Connecting InvestorTypeRegistry to VSC token...");
-      try {
-        await wireInvestorRegistry(token, investorTypeRegistry); // 4.10
-        const wired = await token.investorTypeRegistry();
-        console.log(`   ✅ Token.investorTypeRegistry(): ${wired}`);
-        // D22 (a): mint now enforces holding caps; a treasury is exempt.
-        // Owner only (D22): the deployer owns a freshly deployed registry.
-        const canExempt =
-          (await investorTypeRegistry.owner()) ===
-          (await investorTypeRegistry.runner.getAddress());
-        for (const bank of mod.state.bankingInstitutions?.values() || []) {
-          if (bank.type !== "CENTRAL_BANK") continue;
-          if (!canExempt) {
-            console.log(
-              "   central bank not exempt: after the handover only governance can exempt a treasury (InvestorTypeConfig vote)",
-            );
-            continue;
-          }
-          await (
-            await investorTypeRegistry.setInvestorLimitExempt(
-              bank.address,
-              true,
-            )
-          ).wait();
-          console.log(
-            "   ✅ central bank exempt from investor limits (treasury, D22)",
-          );
-        }
-        if (wired.toLowerCase() !== registryAddress.toLowerCase()) {
-          console.log(
-            `   ⚠️  Readback (${wired}) does not match deployed registry (${registryAddress})`,
-          );
-        }
-        // Task 4.3: investor custody (option 23) needs this registry.
-        console.log(
-          "\n🔐 Deploying investor custody (InvestorRequestManager)...",
-        );
-        await deployCustody(mod.state);
-      } catch (error) {
-        if (error.name === "RoleCallsPending") throw error; // Task 5.13
-        console.log(
-          `⚠️ Failed to connect InvestorTypeRegistry to token: ${error.message}`,
-        );
-      }
-    } else {
-      console.log(
-        "\n💡 No VSC token deployed yet — connect automatically once option 21 deploys it",
-      );
-    }
   } catch (error) {
-    if (error.name === "RoleCallsPending") throw error; // Task 5.13: paused
-    displayError(`Investor Type System deployment failed: ${error.message}`);
+    if (error.name !== "RoleCallsPending")
+      displayError(`Investor Type System deployment failed: ${error.message}`);
+    throw error; // Task 5.13 pauses; review F-3: a failure is not a success
   }
 }
 

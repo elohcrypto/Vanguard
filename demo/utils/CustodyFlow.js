@@ -44,9 +44,13 @@ function bankSigner(state) {
  * the type) and a ComplianceRules registrar; ownership goes to ops.
  * Returns the manager, or null with the reason printed.
  */
-async function deployCustody(state, log = console.log) {
+async function deployCustody(
+  state,
+  log = console.log,
+  // Option 51 passes its registry before it is in state (review F-3).
+  types = state.getContract("investorTypeRegistry"),
+) {
   const token = state.getContract("digitalToken");
-  const types = state.getContract("investorTypeRegistry");
   const idReg = state.getContract("identityRegistry");
   if (!token || !types || !idReg) {
     log("   ℹ️  Custody needs VSC and the investor type registry (21, 51)");

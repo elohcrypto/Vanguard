@@ -76,9 +76,6 @@ async function deployEscrowSystem(mod) {
       await mod.state.getContract("complianceRules").getAddress(),
     );
     await escrowFactory.waitForDeployment();
-
-    mod.state.setContract("escrowFactory", escrowFactory);
-    mod.state.escrowFactory = escrowFactory; // Alias
     console.log(`✅ EscrowWalletFactory: ${await escrowFactory.getAddress()}`);
 
     // Task 4.3: the factory is a ComplianceRules registrar on VSC for the
@@ -102,6 +99,9 @@ async function deployEscrowSystem(mod) {
     } else {
       displayWarning(`Factory is not a registrar: ${reg.refused}`);
     }
+    // Review F-3: in demo state only once the registrar step has run.
+    mod.state.setContract("escrowFactory", escrowFactory);
+    mod.state.escrowFactory = escrowFactory; // Alias
 
     console.log("");
     displaySuccess("ENHANCED ESCROW SYSTEM DEPLOYED SUCCESSFULLY!");
@@ -145,6 +145,7 @@ async function deployEscrowSystem(mod) {
     console.log("   3. Fund and use the system");
   } catch (error) {
     displayError(`Deployment failed: ${error.message}`);
+    throw error; // review F-3: a half-wired factory is not a success
   }
 }
 

@@ -69,6 +69,7 @@ const {
   vetRole,
 } = require("../../demo/utils/RoleCalls");
 const ContractDeployer = require("../../demo/core/ContractDeployer");
+const { wiring } = require("../../demo/utils/DeployWiring");
 const InvestorTypeModule = require("../../demo/modules/InvestorTypeModule");
 const GovernanceModule = require("../../demo/modules/GovernanceModule");
 const EscrowModule = require("../../demo/modules/EscrowModule");
@@ -97,7 +98,7 @@ const EXPECTED = [
 ];
 
 /** Demo option 1a for `inputs`, roles at their TESTNET_SETUP wallets. */
-async function deployStack(
+export async function deployStack(
   inputs: DeployInputs,
   salt: string,
   roles: unknown,
@@ -138,6 +139,16 @@ async function deployStack(
       `the deploy stopped${missing.length ? `; missing: ${missing.join(", ")}` : ""} (see above)`,
     );
   }
+  // Review F-3: the wiring read back from chain, not inferred from state.
+  const links = await wiring(state);
+  const unwired = links.filter((w: any) => !w.ok).map((w: any) => w.name);
+  if (unwired.length) {
+    throw new Error(
+      `the deploy stopped; missing wiring: ${unwired.join(", ")}`,
+    );
+  }
+  console.log(`\n🔗 Wiring read back from chain (${links.length} links):`);
+  for (const w of links) console.log(`   ✅ ${w.name}`);
   return state;
 }
 

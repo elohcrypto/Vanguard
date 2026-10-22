@@ -54,7 +54,6 @@ async function deployGovernanceSystem(mod) {
     );
     await govToken.waitForDeployment();
     const govTokenAddr = await govToken.getAddress();
-    mod.state.setContract("governanceToken", govToken);
     console.log(`   ✅ GovernanceToken deployed: ${govTokenAddr}`);
 
     // Deploy VanguardGovernance
@@ -107,7 +106,6 @@ async function deployGovernanceSystem(mod) {
     );
     await vanguardGovernance.waitForDeployment();
     const govAddr = await vanguardGovernance.getAddress();
-    mod.state.setContract("vanguardGovernance", vanguardGovernance);
     console.log(`   ✅ VanguardGovernance deployed: ${govAddr}`);
 
     // Set VanguardGovernance as agent for GovernanceToken
@@ -192,7 +190,7 @@ async function deployGovernanceSystem(mod) {
       console.log(
         "\n📝 Step 7: Nominating VanguardGovernance as InvestorTypeRegistry owner...",
       );
-      await investorTypeRegistry.transferOwnership(govAddr);
+      await (await investorTypeRegistry.transferOwnership(govAddr)).wait();
 
       const currentOwner = await investorTypeRegistry.owner();
       const pending = await investorTypeRegistry.pendingOwner();
@@ -205,6 +203,11 @@ async function deployGovernanceSystem(mod) {
         "   💡 Use option 83b to run the vote that completes the handover",
       );
     }
+
+    // Review F-3: in demo state only once its wiring is on chain, so a
+    // stop above leaves 74 to run again (and 1a's read-back sees it).
+    mod.state.setContract("governanceToken", govToken);
+    mod.state.setContract("vanguardGovernance", vanguardGovernance);
 
     // Get governance costs
     const proposalCost = await vanguardGovernance.proposalCreationCost();
@@ -245,6 +248,7 @@ async function deployGovernanceSystem(mod) {
     );
   } catch (error) {
     displayError(`Deployment failed: ${error.message}`);
+    throw error; // review F-3: a half-wired governance is not a success
   }
 }
 

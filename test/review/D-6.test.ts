@@ -5,7 +5,10 @@
 import { expect } from "chai";
 import { ethers, network } from "hardhat";
 import { Recorder } from "../../scripts/production/deployRecord";
-import { rolePause } from "../../scripts/production/DeployProduction";
+import {
+  deployStack,
+  rolePause,
+} from "../../scripts/production/DeployProduction";
 import { resolveInputs } from "../../scripts/production/deployConfig";
 import { configureKeyManager } from "../../scripts/production/opsKeyManager";
 import * as h from "../helpers/deployRecordFlow";
@@ -83,43 +86,7 @@ describe("D-6 dev-node calls off the dev chain", function () {
       const log = console.log;
       console.log = () => {};
       try {
-        // deployStack, verbatim apart from the import paths (DeployProduction.ts:100-141)
-        const DemoState = require("../../demo/core/DemoState");
-        const ContractDeployer = require("../../demo/core/ContractDeployer");
-        const InvestorTypeModule = require("../../demo/modules/InvestorTypeModule");
-        const GovernanceModule = require("../../demo/modules/GovernanceModule");
-        const EscrowModule = require("../../demo/modules/EscrowModule");
-        const { EnhancedLogger } = require("../../demo/logging");
-        const state = new DemoState();
-        state.production = {
-          roles,
-          attestor: inputs.attestor,
-          lockRequirements: inputs.lockAmounts,
-          escrowFeeWallet: await ethers.getSigner(inputs.escrowFeeWallet),
-          identitySalt: (w: string) =>
-            ethers.solidityPackedKeccak256(
-              ["bytes32", "address"],
-              [rec.salt, w],
-            ),
-        };
-        const at = (a: string) => ethers.getSigner(a);
-        state.signers = new Array(12);
-        state.signers[0] = await at(inputs.deployer);
-        for (const [i, a] of inputs.oracleNodes.entries())
-          state.signers[i + 1] = await at(a);
-        state.signers[9] = await at(inputs.issuerAdmin);
-        state.signers[10] = await at(inputs.ops);
-        state.signers[11] = await at(inputs.guardian);
-        const logger = new EnhancedLogger();
-        const ask = async (q: string) => {
-          throw new Error(`asked: ${q}`);
-        };
-        const ok = await new ContractDeployer(state, logger).deployEverything({
-          investorType: new InvestorTypeModule(state, logger, ask),
-          governance: new GovernanceModule(state, logger, ask),
-        });
-        expect(ok).to.equal(true);
-        await new EscrowModule(state, logger, ask).deployEscrowSystem();
+        const state = await deployStack(inputs, rec.salt, roles);
         await configureKeyManager(
           state.getContract("keyManager"),
           { address: inputs.deployer },

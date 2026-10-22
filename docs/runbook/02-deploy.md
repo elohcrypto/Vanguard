@@ -170,6 +170,16 @@ prints `✅ Deployed: 74 transactions in /tmp/vanguard-runbook/deploy-record.jso
 (N about 74.6 M; it moves by a few dozen gas between runs) and
 `✅ Preflight passed: every check before the ceremony's first transaction holds (voters are checked by the full phase)`.
 
+- Before that line the deploy reads its wiring back from chain
+  (`🔗 Wiring read back from chain (12 links):`, then one
+  `   ✅ <link>` each: agents, rule administrators, VGT's registry and
+  trust, the registrars, the custody officer, the registry's nomination).
+  A link that does not read true stops it
+  (`❌ Deploy failed: the deploy stopped; missing wiring: <links>`), and a
+  step that fails stops it with that step's error and
+  `the deploy stopped; missing: <contracts> (see above)`: a stack is
+  never reported deployed half-wired. Re-run the line once the cause is
+  fixed: the record replays the sent part and the wiring resumes.
 - Publicly `PROD_RECORD` and `PROD_CONFIG` are
   `deployments/11155111.json` (keep it) and
   `deployments/11155111.handover.json`, the deploy's defaults.
