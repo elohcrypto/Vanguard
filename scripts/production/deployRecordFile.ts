@@ -11,19 +11,17 @@ export interface TxEntry {
   to: string | null;
   value: string;
   dataHash: string;
+  /** The calldata until the entry is mined: a resume sends it again (D-2). */
+  data?: string;
   gas?: string;
   nonce: number;
   /** The latest block when the intent was written: replay reads here. */
   block: number;
   hash?: string;
-  /** The head once the send returned (D-2): "unknown" counts two past it. */
-  sentAtBlock?: number;
   status: "sending" | "sent" | "confirmed" | "reverted";
   contract?: string;
   codeHash?: string;
   gasUsed?: string;
-  /** The block of a receipt a node returned (D-2): never dropped since. */
-  minedAt?: number;
   label: string;
 }
 

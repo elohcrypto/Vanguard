@@ -1,9 +1,9 @@
-// Review D-2, round 2 (ported from the swarm's attack-u2-lag and
-// attack-u2-chain, inverted): a sent entry leaves the deploy record only
-// on evidence read from a node whose head is past the send. A backend K
-// blocks behind (K > 2), head reads from mixed backends, a receipt of
-// another transaction, or a hash seen pending between two unknown reads
-// never drop a mined deploy transaction or send it twice.
+// Review D-2, rounds 2 and 3 (ported from the swarm's attack-u2-lag and
+// attack-u2-chain, inverted): a sent entry never leaves the deploy
+// record. A backend K blocks behind (K = 1..10), head reads from mixed
+// backends, a receipt of another transaction, or an unknown hash never
+// drop a mined deploy transaction or send it twice: an entry the node
+// does not know is sent again at its recorded nonce (round 3).
 import { expect } from "chai";
 import { ethers, network } from "hardhat";
 import { Recorder } from "../../scripts/production/deployRecord";
@@ -78,7 +78,7 @@ describe("D-2 a lag longer than two blocks keeps a mined deploy transaction", fu
     return ir.getAddress();
   };
 
-  for (const K of [1, 2, 3, 5, 10]) {
+  for (const K of [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]) {
     it(`K=${K}: the mined deploy stays in the record and is never sent again`, async function () {
       for (let i = 0; i < 12; i++)
         await network.provider.request({ method: "evm_mine" });
@@ -90,7 +90,6 @@ describe("D-2 a lag longer than two blocks keeps a mined deploy transaction", fu
         await r1.install();
         await (await ethers.getContractFactory("IdentityRegistry")).deploy();
         r1.remove();
-        expect(loadRecord(box.file)!.txs[0].minedAt).to.equal(undefined);
 
         // run 2 resumes against the lagging backend
         node.st.on = true;
@@ -128,7 +127,7 @@ describe("D-2 a lag longer than two blocks keeps a mined deploy transaction", fu
   }
 });
 
-describe("D-2 EntryChain: unsent only on evidence from past the send", function () {
+describe("D-2 EntryChain: an unknown entry is kept and sent again at its nonce", function () {
   this.timeout(60000);
   const hash = "0x" + "ab".repeat(32);
   const entry = (): any => ({
@@ -160,7 +159,7 @@ describe("D-2 EntryChain: unsent only on evidence from past the send", function 
       () => saves.n++,
     );
 
-  it("U2: head reads from a fresh and a lagging backend unsend nothing", async function () {
+  it("U2: head reads from a fresh and a lagging backend drop nothing", async function () {
     const e = entry();
     let reads = 0;
     const raw = async (m: string, p: any[] = []) => {
@@ -182,27 +181,6 @@ describe("D-2 EntryChain: unsent only on evidence from past the send", function 
     expect(out).to.be.instanceOf(RecordRefusal);
     expect(out.message).to.match(
       /record entry #0 \(x\): .* kept in the record, resume against a synced RPC/,
-    );
-  });
-
-  it("a head that never reaches two past the send refuses, the entry kept", async function () {
-    const e = { ...entry(), sentAtBlock: 100 };
-    let reads = 0;
-    const raw = async (m: string) => {
-      if (m === "eth_blockNumber")
-        return hex(Math.min(90 + Math.floor(reads++ / 2), 101));
-      if (m === "eth_getTransactionCount") return "0x5";
-      return null;
-    };
-    const out = await chain(raw, e)
-      .receipt(e)
-      .then(
-        (r) => r,
-        (x) => x,
-      );
-    expect(out).to.be.instanceOf(RecordRefusal);
-    expect(out.message).to.match(
-      /cannot be read at block 102 or later \(two past the send\); its head is block 101: a lagging RPC; kept in the record, resume against a synced RPC/,
     );
   });
 
@@ -230,41 +208,35 @@ describe("D-2 EntryChain: unsent only on evidence from past the send", function 
       );
     expect(out).to.be.instanceOf(RecordRefusal);
     expect(out.message).to.match(/receipt of 0x(cd){32}/);
-    expect(e.minedAt).to.equal(undefined);
     expect(saves.n).to.equal(0);
   });
 
-  it("U5: unknown, pending, unknown: dropped only on a count two past the pending sighting", async function () {
-    const e = entry();
-    let blocks = 0;
+  it("U5: an unknown hash is sent again at its nonce with its recorded payload, never dropped", async function () {
+    const e = { ...entry(), data: "0x60016002", gas: "0x5208" };
+    const H2 = "0x" + "ef".repeat(32);
+    const sends: any[] = [];
     let byHash = 0;
-    let pendingAt = -1;
-    const tags: string[] = [];
-    const head = () => 100 + Math.floor(blocks / 2);
     const raw = async (m: string, p: any[] = []) => {
-      if (m === "eth_getTransactionByHash") {
-        byHash++;
-        if (byHash === 2) {
-          pendingAt = head();
-          return { hash, blockNumber: null };
-        }
-        return null;
+      if (m === "eth_getTransactionByHash")
+        return byHash++ === 1 ? { hash } : null;
+      if (m === "eth_getTransactionCount") return "0x5"; // nonce 5 unused
+      if (m === "eth_sendTransaction") {
+        sends.push(p[0]);
+        return H2;
       }
-      if (m === "eth_getTransactionCount") {
-        tags.push(p[1]);
-        return "0x5"; // nonce 5 unused
-      }
-      if (m === "eth_blockNumber") {
-        blocks++;
-        return hex(head());
-      }
+      if (m === "eth_getTransactionReceipt" && p[0] === H2)
+        return { transactionHash: H2, blockNumber: "0x70", status: "0x1" };
+      if (m === "eth_blockNumber") return "0x70";
       return null;
     };
     const r = await chain(raw, e).receipt(e);
-    expect(r).to.equal(null); // evicted for real: unsent (M-2)
-    expect(pendingAt).to.be.greaterThan(0);
-    const pinned = tags.filter((t) => /^0x/.test(t)).map(Number);
-    expect(pinned, "a count pinned to a block").to.not.be.empty;
-    expect(Math.max(...pinned)).to.be.at.least(pendingAt + 2);
+    expect(sends).to.deep.equal([
+      { from: e.from, value: "0x0", data: e.data, gas: e.gas, nonce: "0x5" },
+    ]);
+    expect([r.transactionHash, e.hash, e.status]).to.deep.equal([
+      H2,
+      H2,
+      "sent",
+    ]);
   });
 });

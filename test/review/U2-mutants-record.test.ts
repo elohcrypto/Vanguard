@@ -1,5 +1,7 @@
-// Review U2 round 2 (the swarm's surviving mutants M01, M02, M06 and the
-// round-2 record rules): each case fails when its guard is removed.
+// Review U2 rounds 2 and 3 (the swarm's surviving mutants M01, M02, M06
+// and the record rules): each case fails when its guard is removed. Round
+// 3: an entry is never dropped, so a lost receipt or a lagging node leads
+// to a re-send at the recorded nonce or a refusal with the entry kept.
 import { expect } from "chai";
 import { ethers, network } from "hardhat";
 import * as fs from "fs";
@@ -62,22 +64,23 @@ describe("U2 deploy record guards (mutants M01, M02, M06)", function () {
     );
   });
 
-  it("M06: a receipt read while confirmations accrue is kept: a later lagging node refuses", async function () {
+  it("M06: a receipt seen while confirmations accrue, then lost: kept, sent again at its nonce", async function () {
     let reads = 0;
     let pass = 0;
+    const sends: any[] = [];
     const e: any = {
       from: "0x00000000000000000000000000000000000000aa",
       to: null,
       value: "0",
-      dataHash: "0x" + "00".repeat(32),
+      dataHash: ethers.keccak256("0x6001"),
+      data: "0x6001",
       nonce: 5,
       block: 98,
-      sentAtBlock: 98,
       status: "sent",
       hash: "0x" + "ab".repeat(32),
       label: "x",
     };
-    const node = async (m: string) => {
+    const node = async (m: string, p: any[] = []) => {
       if (m === "eth_getTransactionReceipt")
         return pass++ === 0
           ? {
@@ -90,9 +93,12 @@ describe("U2 deploy record guards (mutants M01, M02, M06)", function () {
           : null;
       if (m === "eth_blockNumber") return ethers.toQuantity(100 + reads++);
       if (m === "eth_getTransactionCount") return "0x5";
+      if (m === "eth_sendTransaction") {
+        sends.push(p[0]);
+        throw new Error("nonce too low");
+      }
       return null;
     };
-    let saves = 0;
     const real = global.setTimeout;
     (global as any).setTimeout = (f: any) => real(f, 0);
     try {
@@ -101,18 +107,20 @@ describe("U2 deploy record guards (mutants M01, M02, M06)", function () {
         { chainId: 11155111, txs: [e] } as any,
         3,
         () => {},
-        () => saves++,
+        () => {},
       );
       await expect(c.receipt(e)).to.be.rejectedWith(
-        /a node returned its receipt at block 100: a lagging or inconsistent RPC; kept in the record/,
+        /is unused after it was sent again at that nonce; the node answered: nonce too low: a lagging or inconsistent RPC; kept in the record, resume against a synced RPC/,
       );
     } finally {
       (global as any).setTimeout = real;
     }
-    expect([e.minedAt, saves]).to.deep.equal([100, 1]);
+    expect(sends.map((t) => [t.nonce, t.data])).to.deep.equal([
+      ["0x5", "0x6001"],
+    ]);
   });
 
-  it("a nonce used at the bar by a replacement in every field is adopted, not unsent", async function () {
+  it("a replacement in every field mined at its nonce is adopted, never sent again", async function () {
     const [H, H2] = ["0x" + "ab".repeat(32), "0x" + "ef".repeat(32)];
     const from = "0x00000000000000000000000000000000000000aa";
     const e: any = {
@@ -120,9 +128,9 @@ describe("U2 deploy record guards (mutants M01, M02, M06)", function () {
       to: null,
       value: "0",
       dataHash: ethers.keccak256("0x"),
+      data: "0x",
       nonce: 5,
       block: 100,
-      sentAtBlock: 100,
       status: "sent",
       hash: H,
       label: "x",
@@ -139,9 +147,8 @@ describe("U2 deploy record guards (mutants M01, M02, M06)", function () {
             }
           : null;
       if (m === "eth_blockNumber") return "0x67";
-      // a lagging backend answers latest and pending; block 103 knows it used
-      if (m === "eth_getTransactionCount")
-        return /^0x/.test(p[1]) ? "0x6" : "0x5";
+      if (m === "eth_getTransactionCount") return "0x6";
+      if (m === "eth_sendTransaction") throw new Error("sent again");
       if (m === "eth_getBlockByNumber")
         return {
           transactions:
@@ -168,56 +175,14 @@ describe("U2 deploy record guards (mutants M01, M02, M06)", function () {
       () => {},
     );
     const r = await c.receipt(e);
-    expect([r?.transactionHash, e.hash]).to.deep.equal([H2, H2]);
-  });
-
-  it("an entry made before round 2 takes its intent's block as sentAtBlock on resume", async function () {
-    const r1 = new Recorder(box.file, await h.fresh(box.file), 1, () => {});
-    await r1.install();
-    await (await ethers.getContractFactory("IdentityRegistry")).deploy();
-    r1.remove();
-    const rec = loadRecord(box.file)!;
-    const e = rec.txs[0];
-    expect(e.sentAtBlock, "saved with the hash").to.equal(
-      await ethers.provider.getBlockNumber(),
-    );
-    delete e.sentAtBlock;
-    saveRecord(box.file, rec);
-    await h.settle(box.file, loadRecord(box.file)!);
-    expect(loadRecord(box.file)!.txs[0].sentAtBlock).to.equal(e.block);
-  });
-
-  it("a receipt of another hash read by the flow stamps nothing", async function () {
-    const p: any = network.provider;
-    const request = p.request.bind(p);
-    const other = "0x" + "cd".repeat(32);
-    p.request = async (a: any) => {
-      const out = await request(a);
-      return a.method === "eth_getTransactionReceipt" && out
-        ? { ...out, transactionHash: other }
-        : out;
-    };
-    try {
-      const r = new Recorder(box.file, await h.fresh(box.file), 1, () => {});
-      await r.install();
-      try {
-        const ir = await (
-          await ethers.getContractFactory("IdentityRegistry")
-        ).deploy();
-        await ir.waitForDeployment();
-      } finally {
-        r.remove(); // killed before the next send confirms it
-      }
-    } finally {
-      p.request = request;
-    }
-    expect(loadRecord(box.file)!.txs[0].minedAt).to.equal(undefined);
+    expect([r?.transactionHash, e.hash, c.resent]).to.deep.equal([H2, H2, 0]);
   });
 });
 
 describe("U2 a lagging node and an intent sent before the stop", function () {
   const box = h.files();
-  it("K=3: an intent mined before the stop is adopted, not dropped and sent again", async function () {
+  it("K=3: an intent mined before the stop is never dropped or sent twice", async function () {
+    for (let i = 0; i < 5; i++) await network.provider.send("evm_mine", []);
     const rec = await h.fresh(box.file);
     const [d] = await ethers.getSigners();
     const nonce = await h.nonce();
@@ -228,6 +193,7 @@ describe("U2 a lagging node and an intent sent before the stop", function () {
       to: null,
       value: "0",
       dataHash: ethers.keccak256(data),
+      data,
       nonce,
       block: await ethers.provider.getBlockNumber(),
       status: "sending",
@@ -248,14 +214,25 @@ describe("U2 a lagging node and an intent sent before the stop", function () {
         });
       return request(a);
     };
+    let lagged = "";
     try {
-      await h.settle(box.file, loadRecord(box.file)!);
+      lagged = await h.settle(box.file, loadRecord(box.file)!).then(
+        () => "",
+        (e: Error) => e.message,
+      );
     } finally {
       p.request = request;
     }
+    if (lagged)
+      expect(lagged).to.match(
+        /kept in the record, resume against a synced RPC/,
+      );
+    expect(loadRecord(box.file)!.txs).to.have.length(1);
+    await h.settle(box.file, loadRecord(box.file)!);
     expect(loadRecord(box.file)!.txs.map((t) => t.status)).to.deep.equal([
       "confirmed",
     ]);
+    expect(await h.nonce(), "sent once").to.equal(nonce + 1);
   });
 });
 

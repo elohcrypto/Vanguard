@@ -71,7 +71,8 @@ describe("Production deploy record (Task 5.7)", function () {
     expect(await nonce()).to.equal(rec.txs[0].nonce + 4);
   });
 
-  it("an intent sent but not recorded is adopted; one never sent is dropped", async function () {
+  /** A killed run's first step settled, and the next step's intent after it. */
+  async function intentAfterFirst() {
     const [d] = await ethers.getSigners();
     await expect(run(await fresh(), () => flow(1))).to.be.rejectedWith(
       "killed",
@@ -91,19 +92,35 @@ describe("Production deploy record (Task 5.7)", function () {
       to: rec.txs[0].contract!,
       value: "0",
       dataHash: ethers.keccak256(data),
+      data,
       nonce: await nonce(),
       block: await ethers.provider.getBlockNumber(),
       status: "sending" as const,
       label: "addAgent",
     };
-    // Never sent: dropped, and the resumed flow sends it itself.
     saveRecord(file, { ...rec, txs: [...rec.txs, intent] });
+    return { d, rec, intent, data };
+  }
+
+  it("an intent never sent is sent again at its nonce, never dropped", async function () {
+    const { rec, intent } = await intentAfterFirst();
     const a = new Recorder(file, loadRecord(file)!, 1, quiet);
     await a.install();
     a.remove();
-    expect(loadRecord(file)!.txs).to.have.length(1);
+    expect(loadRecord(file)!.txs.map((t) => [t.nonce, t.status])).to.deep.equal(
+      [
+        [rec.txs[0].nonce, "confirmed"],
+        [intent.nonce, "confirmed"],
+      ],
+    );
+    const b = await run(loadRecord(file)!, () => flow());
+    expect([b.r.sent, b.r.reused]).to.deep.equal([2, 2]);
+    expect(await nonce()).to.equal(rec.txs[0].nonce + 4);
+  });
+
+  it("an intent sent but not recorded is adopted", async function () {
+    const { d, rec, intent, data } = await intentAfterFirst();
     // Sent before the stop (outside the recorder): adopted from the chain.
-    saveRecord(file, { ...rec, txs: [...rec.txs, intent] });
     const tx = await d.sendTransaction({ to: intent.to, data });
     const b = await run(loadRecord(file)!, () => flow());
     expect(loadRecord(file)!.txs[1].hash).to.equal(tx.hash);

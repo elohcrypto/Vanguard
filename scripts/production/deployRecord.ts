@@ -5,9 +5,11 @@
  *
  * Every transaction the deploy sends is recorded in order, atomically
  * (temporary file, fsync, rename): an intent (sender, pinned nonce, the
- * block it was read at) before it is sent, its hash once sent, and its
- * receipt (status, contract address, runtime code hash, artifact label)
- * before the next transaction. A re-run replays: the deploy flows run
+ * block it was read at, the payload until it is mined) before it is sent,
+ * its hash once sent, and its receipt (status, contract address, runtime
+ * code hash, artifact label) before the next transaction. An entry is
+ * never dropped: one the node does not know is sent again at its nonce
+ * (deployRecordChain.ts). A re-run replays: the deploy flows run
  * again and every transaction the record holds is answered from it, never
  * sent, in the record's order (sender, target, value, calldata and chain
  * must match the next entry; anything else is a refusal), with each read
@@ -37,7 +39,7 @@ const READS_AT = new Set([
 ]);
 
 export class Recorder {
-  sent = 0;
+  private sends = 0;
   reused = 0;
   private cursor = 0;
   private last: TxEntry | null = null;
@@ -54,6 +56,11 @@ export class Recorder {
 
   private save() {
     saveRecord(this.file, this.rec);
+  }
+
+  /** Transactions sent this run, those sent again at their nonce included. */
+  get sent(): number {
+    return this.sends + (this.chain?.resent ?? 0);
   }
 
   /**
@@ -186,16 +193,7 @@ export class Recorder {
         return this.raw(method, q);
       }
     }
-    const out = await this.raw(method, params);
-    // Review D-2: the flows saw the entry in flight mined; never dropped.
-    if (
-      method === "eth_getTransactionReceipt" &&
-      out &&
-      this.last &&
-      same(params[0], this.last.hash)
-    )
-      this.chain.mined(this.last, out);
-    return out;
+    return this.raw(method, params);
   }
 
   private matches(e: TxEntry, tx: any): boolean {
@@ -261,6 +259,7 @@ export class Recorder {
       to: tx.to ? ethers.getAddress(tx.to) : null,
       value: BigInt(tx.value ?? 0).toString(),
       dataHash: ethers.keccak256(data),
+      data,
       gas: tx.gas,
       nonce,
       block,
@@ -274,14 +273,10 @@ export class Recorder {
     ]);
     e.hash = hash;
     e.status = "sent";
-    // Review D-2: the head the send was made at. A failed read falls back
-    // to the intent's block (a lower bound) and never costs the hash.
-    const head = await this.raw("eth_blockNumber").then(Number, () => block);
-    e.sentAtBlock = Math.max(block, head);
-    this.save();
+    this.save(); // the hash, before anything else is read (F2 LOW-2)
     this.last = e;
     this.cursor = this.live().length;
-    this.sent++;
+    this.sends++;
     this.log(`   📤 #${this.rec.txs.length - 1} ${label}: sent ${hash}`);
     return hash;
   }
@@ -295,15 +290,6 @@ export class Recorder {
     }
   }
 
-  /** `e` was never mined (evicted): out of the record, sent again later. */
-  private unsend(e: TxEntry): void {
-    this.rec.txs.splice(this.rec.txs.indexOf(e), 1);
-    this.save();
-    this.log(
-      `   ↩️  ${e.label}: never mined (nonce ${e.nonce} unused); unsent`,
-    );
-  }
-
   private async confirm(e: TxEntry, r: any): Promise<void> {
     e.status = Number(r.status) === 1 ? "confirmed" : "reverted";
     e.gasUsed = BigInt(r.gasUsed).toString();
@@ -313,6 +299,7 @@ export class Recorder {
         await this.raw("eth_getCode", [e.contract, "latest"]),
       );
     }
+    delete e.data; // mined: never sent again
     this.save();
   }
 
@@ -321,14 +308,7 @@ export class Recorder {
     if (!this.last) return;
     const e = this.last;
     this.last = null;
-    const r = await this.chain.receipt(e);
-    if (!r) {
-      this.unsend(e);
-      throw new RecordRefusal(
-        `${e.label} (${e.hash}) was evicted before it mined: re-run to send it again`,
-      );
-    }
-    await this.confirm(e, r);
+    await this.confirm(e, await this.chain.receipt(e));
   }
 
   /**
@@ -371,41 +351,35 @@ export class Recorder {
         );
         continue;
       }
+      const n = this.rec.txs.indexOf(e);
+      // An intent the stop left: mined before it (adopted), pending, or
+      // not seen (receipt() sends it again at its nonce).
       if (e.status === "sending") {
-        const used = await this.chain.used(e);
-        const t = used ? await this.chain.findMined(e) : null;
-        if (used && (!t || !this.chain.sameTx(e, t))) {
-          throw new RecordRefusal(
-            `${e.from} used nonce ${e.nonce} for a transaction that is not record entry #${this.rec.txs.indexOf(e)} (${e.label}): refusing`,
-          );
-        }
-        if (!t) {
-          const pending = Number(
-            await this.raw("eth_getTransactionCount", [e.from, "pending"]),
-          );
-          if (pending > e.nonce) {
+        if ((await this.chain.count(e.from, "latest")) > e.nonce) {
+          const t = await this.chain.findMined(e);
+          if (!t) {
             throw new RecordRefusal(
-              `${e.from}'s nonce ${e.nonce} is pending (${e.label}): wait for it to mine, then re-run`,
+              `${e.from}'s nonce ${e.nonce} is used, but this node shows no transaction at it since block ${e.block} (record entry #${n}, ${e.label}): a lagging RPC; kept in the record, resume against a synced RPC`,
             );
           }
-          this.rec.txs.splice(this.rec.txs.indexOf(e), 1); // never sent
+          if (!this.chain.sameTx(e, t)) {
+            throw new RecordRefusal(
+              `${e.from} used nonce ${e.nonce} for a transaction that is not record entry #${n} (${e.label}): refusing`,
+            );
+          }
+          e.hash = t.hash;
+          e.status = "sent";
           this.log(
-            `   ↩️  ${e.label}: was never sent; dropped from the record`,
+            `   ↪️  ${e.label}: sent before the stop (${t.hash}); adopted`,
           );
-          continue;
+        } else if ((await this.chain.count(e.from, "pending")) > e.nonce) {
+          throw new RecordRefusal(
+            `${e.from}'s nonce ${e.nonce} is pending (${e.label}): wait for it to mine, then re-run`,
+          );
         }
-        e.hash = t.hash;
-        e.status = "sent";
-        this.log(
-          `   ↪️  ${e.label}: sent before the stop (${t.hash}); adopted`,
-        );
       }
-      if (e.status === "sent") {
-        e.sentAtBlock ??= e.block; // a record made before review D-2 round 2
-        const r = await this.chain.receipt(e);
-        if (r) await this.confirm(e, r);
-        else this.unsend(e);
-      }
+      if (e.status === "sending" || e.status === "sent")
+        await this.confirm(e, await this.chain.receipt(e));
     }
     this.save();
     const own = this.rec.txs.filter((e) => same(e.from, this.rec.deployer));
