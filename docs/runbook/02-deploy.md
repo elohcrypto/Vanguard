@@ -176,9 +176,10 @@ prints `✅ Deployed: 74 transactions in /tmp/vanguard-runbook/deploy-record.jso
   trust, the registrars, the custody officer, the registry's nomination).
   A link that does not read true stops it
   (`❌ Deploy failed: the deploy stopped; missing wiring: <links>`), and a
-  step that fails stops it with that step's error and
-  `the deploy stopped; missing: <contracts> (see above)`: a stack is
-  never reported deployed half-wired. Re-run the line once the cause is
+  step that fails stops it with that step's error, the links it left
+  missing (`   the deploy stopped; missing wiring: <links>`) and
+  `❌ Deploy failed: the deploy stopped; missing: <contracts> (see above)`:
+  a stack is never reported deployed half-wired. Re-run the line once the cause is
   fixed: the record replays the sent part and the wiring resumes.
 - Publicly `PROD_RECORD` and `PROD_CONFIG` are
   `deployments/11155111.json` (keep it) and

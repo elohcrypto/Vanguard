@@ -90,6 +90,9 @@ describe("F-3 the deploy flows report success only after their wiring", function
     const { ok, text, gov } = await oneClick(state, deployer);
     expect(ok).to.equal(false);
     expect(text).to.contain("nonce too low");
+    expect(text).to.contain(
+      "the deploy stopped; missing wiring: VanguardGovernance rule administrator for VSC, VanguardGovernance rule administrator for VGT",
+    );
     expect(text).to.contain("STOPPED AT STEP 5 OF 5");
     expect(text).to.not.contain("FULL STACK DEPLOYED");
     expect(state.getContract("governanceToken")).to.equal(undefined);
@@ -134,10 +137,13 @@ describe("F-3 the deploy flows report success only after their wiring", function
     );
     const m = new InvestorTypeModule(state, new EnhancedLogger(), ask);
     let err = "";
-    await capture(() =>
+    const [, out] = await capture(() =>
       m.deployInvestorTypeSystem().catch((e) => (err = e.message)),
     );
     expect(err).to.contain("rejected at the signer");
+    expect(out.join("\n")).to.contain(
+      "the deploy stopped; missing wiring: VSC investor type registry",
+    );
     expect(state.getContract("investorTypeRegistry")).to.equal(undefined);
   });
 
@@ -154,8 +160,13 @@ describe("F-3 the deploy flows report success only after their wiring", function
     );
     const m = new EscrowModule(state, new EnhancedLogger(), ask);
     let err = "";
-    await capture(() => m.deployEscrowSystem().catch((e) => (err = e.message)));
+    const [, out] = await capture(() =>
+      m.deployEscrowSystem().catch((e) => (err = e.message)),
+    );
     expect(err).to.contain("registrar call rejected");
+    expect(out.join("\n")).to.contain(
+      "the deploy stopped; missing wiring: escrow factory registrar on VSC",
+    );
     expect(state.getContract("escrowFactory")).to.equal(undefined);
   });
 });

@@ -19,6 +19,7 @@ const {
 const { registerRegistrar } = require("./GovernedCalls");
 const { retirePlaceholder } = require("./CustodyFlow");
 const { onboard } = require("./Onboard");
+const { reportStop } = require("./DeployWiring");
 const { ethers } = require("hardhat");
 
 /** Option 61: Deploy Enhanced Escrow System */
@@ -27,6 +28,7 @@ async function deployEscrowSystem(mod) {
   console.log("One-time-use multi-signature escrow wallets");
   console.log("");
 
+  let escrowFactory;
   try {
     const digitalToken = mod.state.getContract("digitalToken");
     if (!digitalToken) {
@@ -69,7 +71,7 @@ async function deployEscrowSystem(mod) {
     const EscrowWalletFactory = await ethers.getContractFactory(
       "EscrowWalletFactory",
     );
-    const escrowFactory = await EscrowWalletFactory.deploy(
+    escrowFactory = await EscrowWalletFactory.deploy(
       await digitalToken.getAddress(),
       ownerWallet.address,
       await identityRegistry.getAddress(),
@@ -145,6 +147,7 @@ async function deployEscrowSystem(mod) {
     console.log("   3. Fund and use the system");
   } catch (error) {
     displayError(`Deployment failed: ${error.message}`);
+    await reportStop(mod.state, { escrowFactory });
     throw error; // review F-3: a half-wired factory is not a success
   }
 }

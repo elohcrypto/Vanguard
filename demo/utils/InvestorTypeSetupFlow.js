@@ -17,18 +17,20 @@ const {
 const { ethers } = require("hardhat");
 const { deployCustody } = require("./CustodyFlow");
 const { wireInvestorRegistry } = require("./InvestorTypeRules");
+const { reportStop } = require("./DeployWiring");
 
 /** Option 51: Deploy Investor Type System */
 async function deployInvestorTypeSystem(mod) {
   displaySection("DEPLOY INVESTOR TYPE SYSTEM", "🏗️");
 
+  let investorTypeRegistry;
   try {
     // Deploy InvestorTypeRegistry
     console.log("📦 Deploying InvestorTypeRegistry...");
     const InvestorTypeRegistryFactory = await ethers.getContractFactory(
       "InvestorTypeRegistry",
     );
-    const investorTypeRegistry = await InvestorTypeRegistryFactory.deploy();
+    investorTypeRegistry = await InvestorTypeRegistryFactory.deploy();
     await investorTypeRegistry.waitForDeployment();
     const registryAddress = await investorTypeRegistry.getAddress();
     console.log(`✅ InvestorTypeRegistry deployed: ${registryAddress}`);
@@ -154,8 +156,10 @@ async function deployInvestorTypeSystem(mod) {
       console.log(`   💡 Deploy Option 74 for democratic governance`);
     }
   } catch (error) {
-    if (error.name !== "RoleCallsPending")
+    if (error.name !== "RoleCallsPending") {
       displayError(`Investor Type System deployment failed: ${error.message}`);
+      await reportStop(mod.state, { investorTypeRegistry });
+    }
     throw error; // Task 5.13 pauses; review F-3: a failure is not a success
   }
 }

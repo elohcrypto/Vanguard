@@ -97,4 +97,20 @@ async function missingWiring(state) {
   return (await wiring(state)).filter((w) => !w.ok).map((w) => w.name);
 }
 
-module.exports = { wiring, missingWiring };
+/**
+ * After a deploy flow stopped: its links still missing on chain, with
+ * `local` (its contracts, not yet in state) counted in, as one line. A
+ * report only: the flow rethrows its own error whatever this reads.
+ */
+async function reportStop(state, local) {
+  const view = {
+    production: state.production,
+    signers: state.signers,
+    getContract: (k) => local[k] || state.getContract(k),
+  };
+  const missing = await missingWiring(view).catch(() => null);
+  if (missing?.length)
+    console.log(`   the deploy stopped; missing wiring: ${missing.join(", ")}`);
+}
+
+module.exports = { wiring, missingWiring, reportStop };

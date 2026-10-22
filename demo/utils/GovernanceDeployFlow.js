@@ -18,6 +18,7 @@ const {
 const { advancePast } = require("./ChainTime");
 const { ethers } = require("hardhat");
 const { PROPOSAL_TYPE_NAMES } = require("./GovernanceProposalFlow");
+const { reportStop } = require("./DeployWiring");
 
 /** Option 74: Deploy Governance System */
 async function deployGovernanceSystem(mod) {
@@ -37,6 +38,7 @@ async function deployGovernanceSystem(mod) {
     return;
   }
 
+  let govToken, vanguardGovernance;
   try {
     console.log("\n🔗 DEPLOYING GOVERNANCE TOKEN ON-CHAIN...");
 
@@ -46,7 +48,7 @@ async function deployGovernanceSystem(mod) {
     // Deploy GovernanceToken
     console.log("\n📝 Step 1: Deploying GovernanceToken contract...");
     const GovernanceToken = await ethers.getContractFactory("GovernanceToken");
-    const govToken = await GovernanceToken.deploy(
+    govToken = await GovernanceToken.deploy(
       "Vanguard Governance Token",
       "VGT",
       identityRegistryAddr,
@@ -92,7 +94,7 @@ async function deployGovernanceSystem(mod) {
 
     const VanguardGovernance =
       await ethers.getContractFactory("VanguardGovernance");
-    const vanguardGovernance = await VanguardGovernance.deploy(
+    vanguardGovernance = await VanguardGovernance.deploy(
       govTokenAddr,
       identityRegistryAddr,
       investorTypeRegistryAddr,
@@ -248,6 +250,10 @@ async function deployGovernanceSystem(mod) {
     );
   } catch (error) {
     displayError(`Deployment failed: ${error.message}`);
+    await reportStop(mod.state, {
+      governanceToken: govToken,
+      vanguardGovernance,
+    });
     throw error; // review F-3: a half-wired governance is not a success
   }
 }
