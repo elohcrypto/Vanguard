@@ -16,6 +16,7 @@ const {
   displayError,
   displayProgress,
 } = require("./DisplayHelpers");
+const { missingWiring, reportStop } = require("./DeployWiring");
 
 /**
  * Deploy Oracle Management System
@@ -28,13 +29,13 @@ const {
 async function deployOracleSystem(mod) {
   displaySection("DEPLOYING ORACLE MANAGEMENT SYSTEM", "🔮");
 
+  const local = {}; // review F-3: in demo state once read back from chain
   try {
     displayProgress("Deploying OracleManager...");
     const OracleManager = await ethers.getContractFactory("OracleManager");
     const oracleManager = await OracleManager.deploy();
     await oracleManager.waitForDeployment();
-    mod.state.oracleManager = oracleManager;
-    mod.state.setContract("oracleManager", oracleManager);
+    local.oracleManager = oracleManager;
 
     displayProgress("Deploying WhitelistOracle...");
     const WhitelistOracle = await ethers.getContractFactory("WhitelistOracle");
@@ -44,8 +45,7 @@ async function deployOracleSystem(mod) {
       "Oracle for KYC/AML whitelist management",
     );
     await whitelistOracle.waitForDeployment();
-    mod.state.whitelistOracle = whitelistOracle;
-    mod.state.setContract("whitelistOracle", whitelistOracle);
+    local.whitelistOracle = whitelistOracle;
 
     displayProgress("Deploying BlacklistOracle...");
     const BlacklistOracle = await ethers.getContractFactory("BlacklistOracle");
@@ -55,8 +55,7 @@ async function deployOracleSystem(mod) {
       "Oracle for AML blacklist screening",
     );
     await blacklistOracle.waitForDeployment();
-    mod.state.blacklistOracle = blacklistOracle;
-    mod.state.setContract("blacklistOracle", blacklistOracle);
+    local.blacklistOracle = blacklistOracle;
 
     // Task 4.4 (D11 = a): ConsensusOracle is the manager's weighted
     // engine, bound to it at construction; the manager binds it back.
@@ -69,8 +68,7 @@ async function deployOracleSystem(mod) {
     await (
       await oracleManager.setConsensusEngine(await consensusOracle.getAddress())
     ).wait();
-    mod.state.consensusOracle = consensusOracle;
-    mod.state.setContract("consensusOracle", consensusOracle);
+    local.consensusOracle = consensusOracle;
 
     // Register oracles in the manager. Menu options 32+ (registration,
     // whitelist/blacklist, consensus voting) read these signer roles and
@@ -155,9 +153,19 @@ async function deployOracleSystem(mod) {
       );
     }
 
+    const missing = await missingWiring(mod.state, local, "31");
+    if (missing.length) {
+      throw new Error(`missing wiring: ${missing.join(", ")}`);
+    }
+    for (const [k, contract] of Object.entries(local)) {
+      mod.state[k] = contract; // the legacy alias
+      mod.state.setContract(k, contract);
+    }
+
     displaySuccess("Oracle Management System deployed successfully!");
   } catch (error) {
     displayError(`Oracle System deployment failed: ${error.message}`);
+    await reportStop(mod.state, local);
     throw error;
   }
 }

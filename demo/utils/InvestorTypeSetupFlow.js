@@ -17,7 +17,7 @@ const {
 const { ethers } = require("hardhat");
 const { deployCustody } = require("./CustodyFlow");
 const { wireInvestorRegistry } = require("./InvestorTypeRules");
-const { reportStop } = require("./DeployWiring");
+const { missingWiring, reportStop } = require("./DeployWiring");
 
 /** Option 51: Deploy Investor Type System */
 async function deployInvestorTypeSystem(mod) {
@@ -126,6 +126,14 @@ async function deployInvestorTypeSystem(mod) {
     }
 
     // Review F-3: in demo state, and reported, only once wired on chain.
+    const missing = await missingWiring(
+      mod.state,
+      { investorTypeRegistry },
+      "51",
+    );
+    if (missing.length) {
+      throw new Error(`missing wiring: ${missing.join(", ")}`);
+    }
     mod.state.setContract("investorTypeRegistry", investorTypeRegistry);
 
     // Display basic system info

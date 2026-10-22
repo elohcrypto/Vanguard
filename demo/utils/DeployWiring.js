@@ -1,15 +1,16 @@
 /**
  * @fileoverview The deploy flows' wiring, read back from chain (review F-3)
  * @module DeployWiring
- * @description Options 74, 51 and 61 wire each contract they deploy
- * (agents, rule administrators, trust, the registry links and the token's
- * authorization, the registrars, the compliance officers, the custody
- * lock amounts, the escrow fee wallet's identity and exemption). Option
- * 1a, option 74 (its own links) and the production deploy report success
- * only when every link below reads true on chain: a contract in demo
- * state proves it was deployed, not that it was wired. A check runs only
- * once its contracts are in state, so it holds before and after the
- * handover.
+ * @description Options 1, 21, 31, 51, 74 and 61 wire each contract they
+ * deploy (the KeyManager pin, agents, rule administrators, trust, the
+ * registry, jurisdiction, privacy and oracle links, the consensus engine
+ * and nodes, the token's authorization, the registrars, the compliance
+ * officers, the custody lock amounts, the treasury and escrow fee wallet
+ * exemptions). Option 1a, each of those options but 61 (its own links)
+ * and the production deploy report success only when every link below
+ * reads true on chain: a contract in demo state proves it was deployed,
+ * not that it was wired. A check runs only once its contracts are in
+ * state, so it holds before and after the handover.
  */
 
 "use strict";
@@ -21,10 +22,19 @@ const same = (a, b) => String(a).toLowerCase() === String(b).toLowerCase();
 
 /**
  * Each check for `state`'s contracts: [{ name, ok }], in deploy order;
- * with `flow` ("51", "74" or "61"), only the links that option makes.
+ * with `flow` ("1", "21", "31", "51", "74" or "61"), only the links that
+ * option makes.
  */
 async function wiring(state, flow) {
   const c = (k) => state.getContract(k);
+  const [factory, km, pm, om, engine, blacklist] = [
+    c("onchainIDFactory"),
+    c("keyManager"),
+    c("privacyManager"),
+    c("oracleManager"),
+    c("consensusOracle"),
+    c("blacklistOracle"),
+  ];
   const [rules, vsc, ir] = [
     c("complianceRules"),
     c("digitalToken"),
@@ -40,6 +50,62 @@ async function wiring(state, flow) {
   const deployer = state.signers[0].address;
   const checks = [];
   const add = (by, name, read) => checks.push([by, name, read]);
+  const is = (read, want) => async () =>
+    same(await read(), await want.getAddress());
+  if (factory && km) {
+    add(
+      "1",
+      "KeyManager recovery manager on OnchainIDFactory",
+      is(() => factory.recoveryManager(), km),
+    );
+  }
+  if (ir && rules && vsc) {
+    add("21", "VSC agent on IdentityRegistry (recovery)", () =>
+      ir.isAgent(vsc),
+    );
+    // Its jurisdiction token has no getter: the rules are read back.
+    add(
+      "21",
+      "ComplianceRules jurisdiction check on IdentityRegistry",
+      is(() => ir.getComplianceRules(), rules),
+    );
+    if (pm) {
+      add(
+        "21",
+        "VSC PrivacyManager in ComplianceRules",
+        is(() => rules.privacyManager(vsc), pm),
+      );
+    }
+  }
+  if (om) {
+    if (engine) {
+      add(
+        "31",
+        "ConsensusOracle engine on OracleManager",
+        is(() => om.consensusEngine(), engine),
+      );
+    }
+    // After the handover governance's votes replace the deploy's nodes.
+    add(
+      "31",
+      "oracle nodes registered on OracleManager (until the handover)",
+      async () => {
+        if (!same(await om.owner(), deployer)) return true;
+        for (const i of [1, 2, 3]) {
+          if (!(await om.isRegisteredOracle(state.signers[i].address)))
+            return false;
+        }
+        return true;
+      },
+    );
+    if (rules && vsc && blacklist) {
+      add(
+        "31",
+        "VSC blacklist oracle in ComplianceRules",
+        is(() => rules.blacklistOracle(vsc), blacklist),
+      );
+    }
+  }
   if (types && vsc) {
     add("51", "VSC investor type registry", async () =>
       same(await vsc.investorTypeRegistry(), await types.getAddress()),
@@ -56,6 +122,23 @@ async function wiring(state, flow) {
     add("51", "InvestorRequestManager compliance officer", async () =>
       irm ? types.isComplianceOfficer(irm) : false,
     );
+    const banks = [...(state.bankingInstitutions?.values() || [])].filter(
+      (b) => b.type === "CENTRAL_BANK",
+    );
+    if (banks.length) {
+      // After the handover only governance exempts a treasury (D22).
+      add(
+        "51",
+        "central bank exempt from investor limits (until the handover)",
+        async () => {
+          if (!same(await types.owner(), deployer)) return true;
+          for (const b of banks) {
+            if (!(await types.investorLimitExempt(b.address))) return false;
+          }
+          return true;
+        },
+      );
+    }
     const locks = state.production?.lockRequirements;
     if (locks) {
       add("51", "custody lock requirements as configured", async () => {
@@ -152,6 +235,7 @@ async function missingWiring(state, local = {}, flow) {
   const view = {
     production: state.production,
     signers: state.signers,
+    bankingInstitutions: state.bankingInstitutions,
     getContract: (k) => local[k] || state.getContract(k),
   };
   return (await wiring(view, flow)).filter((w) => !w.ok).map((w) => w.name);

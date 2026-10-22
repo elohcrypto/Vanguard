@@ -134,17 +134,22 @@ describe("U2 the deploy flows' read-back (mutants M17, M19, M30)", function () {
       const restore = swapped
         ? swapDeployed("InvestorRequestManager", "updateLockRequirement", noop)
         : () => {};
+      let err = "";
       try {
         const m = new InvestorTypeModule(state, new EnhancedLogger(), ask);
-        await capture(() => m.deployInvestorTypeSystem());
+        await capture(() =>
+          m.deployInvestorTypeSystem().catch((e) => (err = e.message)),
+        );
       } finally {
         restore();
       }
-      return missingWiring(state);
+      return [err, await missingWiring(state)];
     };
-    expect(await missing(false)).to.deep.equal([]);
+    expect(await missing(false)).to.deep.equal(["", []]);
+    // Round 3: option 51 reads its own links back and stops on the miss.
     expect(await missing(true)).to.deep.equal([
-      "custody lock requirements as configured",
+      "missing wiring: custody lock requirements as configured",
+      [],
     ]);
   });
 
