@@ -155,15 +155,19 @@ export class Recorder {
         `the deploy sends only through its record and the external signer (${method} refused)`,
       );
     }
+    // Review D-6: plain errors, not sticky refusals: a probe that catches
+    // one (ChainTime.canJumpTime, hardhat_metadata) does not stop the
+    // deploy. A method object could serialize to anything (round 3).
+    if (typeof method !== "string") {
+      throw new Error(`a JSON-RPC method that is not a string refused`);
+    }
     if (
-      /^(evm_|hardhat_|anvil_)/.test(method) &&
-      method !== "hardhat_metadata" &&
-      !LOCAL.has(this.rec.chainId)
+      !LOCAL.has(this.rec.chainId) &&
+      (!/^(eth|net|web3)_\w+$/.test(method) ||
+        method === "eth_sendUnsignedTransaction")
     ) {
-      // Review D-6: a plain error, not a sticky refusal: a probe that
-      // catches it (ChainTime.canJumpTime) does not stop the deploy.
       throw new Error(
-        `${method} refused on chain ${this.rec.chainId}: no dev-node call off a dev chain`,
+        `${method} refused on chain ${this.rec.chainId}: no dev-node call off a dev chain (only eth_, net_ and web3_ methods reach the node)`,
       );
     }
     const next = this.live()[this.cursor];
