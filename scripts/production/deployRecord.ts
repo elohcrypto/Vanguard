@@ -142,7 +142,9 @@ export class Recorder {
       method !== "hardhat_metadata" &&
       !LOCAL.has(this.rec.chainId)
     ) {
-      throw new RecordRefusal(
+      // Review D-6: a plain error, not a sticky refusal: a probe that
+      // catches it (ChainTime.canJumpTime) does not stop the deploy.
+      throw new Error(
         `${method} refused on chain ${this.rec.chainId}: no dev-node call off a dev chain`,
       );
     }
