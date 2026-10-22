@@ -7,11 +7,14 @@
  *    asks; "0" never does, and off 31337 says so loudly at start (an
  *    operator who switches the prompt off on Sepolia should see it).
  *  - signedStore: the per-nonce "already signed" record (signer.js L-5:
- *    one nonce signed for one transaction only) kept on disk next to the
- *    token file (<token file>.signed.json, this user's own, 0600, written
- *    atomically), so a restarted signer still refuses another transaction
- *    at a nonce it signed before. It holds raw signed transactions only
- *    (public once sent), keyed by chain, signer address and nonce.
+ *    one nonce signed for one transaction only) kept on disk beside the
+ *    keystores (recordFile: <SIGNER_KEYSTORE_DIR>/signed-nonces, this
+ *    user's own, 0600, written atomically; review D-4: not under the temp
+ *    directory nor keyed by port, so a reboot, a tmp cleanup or another
+ *    port keeps it), so a restarted signer still refuses another
+ *    transaction at a nonce it signed before. It holds raw signed
+ *    transactions only (public once sent), keyed by chain, signer address
+ *    and nonce. No .json suffix: loadKeys reads every *.json as a key.
  *  - differs / clears (slice B review M-1): a request at a recorded nonce
  *    is the SAME transaction when every field the caller controls (chain,
  *    from, to, value, data, and the gas limit and fees it set itself)
@@ -28,8 +31,12 @@
 "use strict";
 
 const fs = require("fs");
+const path = require("path");
 
 const DEV_CHAIN = 31337;
+
+/** The signed-nonce record of the keystores in `dir`. */
+const recordFile = (dir) => path.join(dir, "signed-nonces");
 
 /** { prompt, warning } for `chain` and SIGNER_PROMPT (`value`). */
 function promptMode(chain, value = process.env.SIGNER_PROMPT) {
@@ -211,6 +218,7 @@ function forget(file, address, nonce) {
 }
 
 module.exports = {
+  recordFile,
   promptMode,
   signedStore,
   differs,

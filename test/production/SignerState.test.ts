@@ -11,7 +11,7 @@ const { promptMode } = require("../../scripts/production/signerState");
  * Task 5.17 slice B (deep review L-5, L-6): scripts/production/signer.js
  *  - asks by default off the dev chain (SIGNER_PROMPT unset), refuses to
  *    start there without a terminal, and warns loudly on SIGNER_PROMPT=0;
- *  - remembers the nonces it signed across a restart (<token>.signed.json),
+ *  - remembers the nonces it signed across a restart (beside the keystores),
  *    so a restarted signer refuses another transaction at a signed nonce;
  *  - removes its token file when it exits.
  */
@@ -97,7 +97,7 @@ describe("Signer state: prompt default, signed nonces, token file (L-5, L-6)", f
       expect(fs.existsSync(tokenFile), "token file left behind").to.equal(
         false,
       );
-      const record = `${tokenFile}.signed.json`;
+      const record = path.join(dir, "keys", "signed-nonces");
       expect(fs.statSync(record).mode & 0o777).to.equal(0o600);
       const second = await runSigner(
         "scripts/production/signer.js",

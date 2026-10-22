@@ -6,8 +6,9 @@
  *    pins each wallet index to an address (walletPins.ts), so a name that
  *    sorts before an existing keystore shifts every index after it: warned
  *    (slice B review L-4).
- *  - `forget <address> <nonce> [port]`: drops a stuck signed-nonce entry
- *    (signerState.js forget), logged (slice B review M-1).
+ *  - `forget <address> <nonce>`: drops a stuck signed-nonce entry from
+ *    the record beside SIGNER_KEYSTORE_DIR's keystores (signerState.js
+ *    forget), logged (slice B review M-1, review D-4).
  *  - `bump <address> <nonce> [port]`: asks the running signer to send the
  *    transaction it recorded at that nonce again with higher fees
  *    (vanguard_bump), for one stuck in the mempool (slice C review L-5).
@@ -17,11 +18,11 @@
 const fs = require("fs");
 const path = require("path");
 const { Wallet, getAddress } = require("ethers");
-const { forget } = require("./signerState");
+const { forget, recordFile } = require("./signerState");
 
 const HELP = `usage: node scripts/production/signer.js [port]   serve (SIGNER_UPSTREAM, SIGNER_KEYSTORE_DIR, SIGNER_PASSWORD_FILE)
        node scripts/production/signer.js new <dir> <name>...   new encrypted keystores (name them to sort after the existing ones)
-       node scripts/production/signer.js forget <address> <nonce> [port]   drop a stuck signed-nonce entry (<token file>.signed.json)
+       node scripts/production/signer.js forget <address> <nonce>   drop a stuck signed-nonce entry (SIGNER_KEYSTORE_DIR/signed-nonces)
        node scripts/production/signer.js bump <address> <nonce> [port]   the running signer re-sends its transaction at that nonce with higher fees`;
 
 /** `new <dir> <name>...`; `password(question)` asks for the password. */
@@ -48,11 +49,13 @@ async function create(dir, names, password) {
   }
 }
 
-/** `forget <address> <nonce> [port]`, logged. */
-async function forgetCmd(address, nonce, port = "1248") {
+/** `forget <address> <nonce>`, logged. */
+async function forgetCmd(address, nonce) {
   if (!address || !/^\d+$/.test(String(nonce ?? ""))) throw new Error(HELP);
-  const { tokenFileFor } = require("./rpcGuard");
-  const file = `${tokenFileFor(port)}.signed.json`;
+  const dir = process.env.SIGNER_KEYSTORE_DIR;
+  if (!dir)
+    throw new Error("set SIGNER_KEYSTORE_DIR to the keystores' directory");
+  const file = recordFile(dir);
   const gone = forget(file, getAddress(address), nonce);
   console.log(
     gone.length

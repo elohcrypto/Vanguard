@@ -114,8 +114,9 @@ use it). `SIGNER_PROMPT=0` switches the prompt off, needs no terminal and
 says so at start:
 `⚠️  SIGNER_PROMPT=0 on chain 11155111: EVERY REQUEST IS SIGNED WITHOUT ASKING. …`.
 
-**One transaction per nonce.** The signed nonces are kept in
-`<token file>.signed.json` (0600, survives a restart). A request at a
+**One transaction per nonce.** The signed nonces are kept beside the
+keystores in `<KEYSTORE_DIR>/signed-nonces` (0600; a restart on any
+port, a reboot or a cleaned temp directory keeps it). A request at a
 recorded nonce with the same chain, from, to, value and data is the same
 transaction (re-sent, or re-signed when only gas or fees moved); a
 different one is refused:
@@ -134,13 +135,13 @@ the signer first (a running signer keeps the record in memory and writes
 the entry back with its next signature), then
 
 ```bash
-node scripts/production/signer.js forget <ADDRESS> <NONCE>
+SIGNER_KEYSTORE_DIR=<KEYSTORE_DIR> node scripts/production/signer.js forget <ADDRESS> <NONCE>
 ```
 
-prints `signer: forgot 11155111:0x…:N in <token file>.signed.json: the next request at that nonce is signed as new`;
-start the signer again. Both take the signer's port as a third argument
-when it is not 1248 (and `SIGNER_TOKEN_FILE` when the signer was started
-with one). `node scripts/production/signer.js help` prints the four
+prints `signer: forgot 11155111:0x…:N in <KEYSTORE_DIR>/signed-nonces: the next request at that nonce is signed as new`;
+start the signer again. `bump` takes the signer's port as a third
+argument when it is not 1248 (and `SIGNER_TOKEN_FILE` when the signer was
+started with one). `node scripts/production/signer.js help` prints the four
 forms.
 
 **The CLIs.** Point them at it: `export SIGNER_RPC_URL=http://127.0.0.1:1248`.

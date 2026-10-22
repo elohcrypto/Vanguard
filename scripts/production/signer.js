@@ -62,6 +62,7 @@ const {
   fieldsOf,
   promptMode,
   signedStore,
+  recordFile,
 } = require("./signerState");
 const { HELP, create, forgetCmd, bumpCmd } = require("./signerCommands");
 const {
@@ -406,7 +407,7 @@ async function serve() {
     tokenFile: process.env.SIGNER_TOKEN_FILE,
   });
   // Synchronous after the await: no request is handled before it.
-  byNonce = signedStore(`${tokenFile}.signed.json`, chain);
+  byNonce = signedStore(recordFile(dir), chain);
   // Task 5.17 (deep review L-6): the token goes with the process.
   process.on("exit", () => fs.rmSync(tokenFile, { force: true }));
   console.log(
@@ -430,7 +431,7 @@ if (require.main === module) {
     cmd === "new"
       ? create(a, process.argv.slice(4), password)
       : cmd === "forget"
-        ? forgetCmd(a, b, c)
+        ? forgetCmd(a, b)
         : cmd === "bump"
           ? bumpCmd(a, b, c)
           : cmd === "help" || cmd === "--help"
