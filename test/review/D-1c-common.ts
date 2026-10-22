@@ -57,3 +57,64 @@ export async function vetAndPreflight(f: any, a: string) {
   const pre = await h.preflightAs(cfg, cfgPath, a);
   return { words, logs, pre };
 }
+
+/** [name, text the verdict must carry, the error]. */
+export const faults: [string, string, () => any][] = [
+  [
+    "missing trie node (UNKNOWN_ERROR)",
+    "execution reverted: missing trie node",
+    () =>
+      ethers.makeError("could not coalesce error", "UNKNOWN_ERROR", {
+        error: {
+          code: -32000,
+          message: "execution reverted: missing trie node",
+        },
+      } as any),
+  ],
+  [
+    "upstream reverted to cache (Error)",
+    "upstream reverted to cache",
+    () => new Error("503 from reverse proxy: upstream reverted to cache"),
+  ],
+  ["timeout", "ETIMEDOUT", () => new Error("request timeout (ETIMEDOUT)")],
+  [
+    "429",
+    "Too Many Requests",
+    () =>
+      ethers.makeError("Too Many Requests", "SERVER_ERROR", {
+        request: {} as any,
+        response: { statusCode: 429 } as any,
+      }),
+  ],
+];
+
+/** `fn` with every eth_call of selector `sel` to `to` throwing `mk()`. */
+export async function faulted(
+  to: string,
+  sel: string,
+  mk: () => any,
+  fn: () => any,
+) {
+  const prov: any = ethers.provider;
+  const call = prov.call.bind(prov);
+  let hits = 0;
+  prov.call = async (tx: any) => {
+    const at = String(tx.to).toLowerCase() === to.toLowerCase();
+    if (at && String(tx.data).startsWith(sel)) {
+      hits++;
+      throw mk();
+    }
+    return call(tx);
+  };
+  try {
+    const r = await Promise.resolve()
+      .then(fn)
+      .then(
+        (v) => ({ v, err: "" }),
+        (e: any) => ({ v: undefined, err: String(e.message) }),
+      );
+    return { ...r, hits };
+  } finally {
+    prov.call = call;
+  }
+}

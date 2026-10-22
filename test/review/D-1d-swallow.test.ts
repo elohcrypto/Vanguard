@@ -13,6 +13,7 @@ import { ethers } from "hardhat";
 import { handoverFixture } from "../helpers/governanceFixture";
 import { cliConfig } from "../helpers/handoverCli";
 import * as h from "./D-1b-common";
+import { faults, faulted } from "./D-1c-common";
 
 const {
   listManagerOf,
@@ -24,36 +25,6 @@ const {
   wiredPrivacy,
   preflightPrivacy,
 } = require("../../demo/utils/HandoverPrivacy");
-
-/** [name, text the verdict must carry, the error]. */
-const faults: [string, string, () => any][] = [
-  [
-    "missing trie node (UNKNOWN_ERROR)",
-    "execution reverted: missing trie node",
-    () =>
-      ethers.makeError("could not coalesce error", "UNKNOWN_ERROR", {
-        error: {
-          code: -32000,
-          message: "execution reverted: missing trie node",
-        },
-      } as any),
-  ],
-  [
-    "upstream reverted to cache (Error)",
-    "upstream reverted to cache",
-    () => new Error("503 from reverse proxy: upstream reverted to cache"),
-  ],
-  ["timeout", "ETIMEDOUT", () => new Error("request timeout (ETIMEDOUT)")],
-  [
-    "429",
-    "Too Many Requests",
-    () =>
-      ethers.makeError("Too Many Requests", "SERVER_ERROR", {
-        request: {} as any,
-        response: { statusCode: 429 } as any,
-      }),
-  ],
-];
 
 /** "No such function" as ethers (public RPC) and a Hardhat node report it. */
 const missing: [string, () => any][] = [
@@ -80,32 +51,6 @@ const missing: [string, () => any][] = [
       ),
   ],
 ];
-
-/** `fn` with every eth_call of selector `sel` to `to` throwing `mk()`. */
-async function faulted(to: string, sel: string, mk: () => any, fn: () => any) {
-  const prov: any = ethers.provider;
-  const call = prov.call.bind(prov);
-  let hits = 0;
-  prov.call = async (tx: any) => {
-    const at = String(tx.to).toLowerCase() === to.toLowerCase();
-    if (at && String(tx.data).startsWith(sel)) {
-      hits++;
-      throw mk();
-    }
-    return call(tx);
-  };
-  try {
-    const r = await Promise.resolve()
-      .then(fn)
-      .then(
-        (v) => ({ v, err: "" }),
-        (e: any) => ({ v: undefined, err: String(e.message) }),
-      );
-    return { ...r, hits };
-  } finally {
-    prov.call = call;
-  }
-}
 
 const sel = (sig: string) => ethers.id(sig).slice(0, 10);
 const addr = (c: any) => c.getAddress();
