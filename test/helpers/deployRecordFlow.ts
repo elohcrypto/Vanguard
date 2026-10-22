@@ -38,6 +38,7 @@ export async function fresh(file: string): Promise<DeployRecord> {
     chainId: 31337,
     configDigest: "test",
     deployer: d.address,
+    startNonce: await ethers.provider.getTransactionCount(d.address),
     fromBlock: await ethers.provider.getBlockNumber(),
     salt: ethers.ZeroHash,
     txs: [],

@@ -20,6 +20,8 @@ export interface TxEntry {
   contract?: string;
   codeHash?: string;
   gasUsed?: string;
+  /** The block of a receipt a node returned (D-2): never dropped since. */
+  minedAt?: number;
   label: string;
 }
 
@@ -28,6 +30,8 @@ export interface DeployRecord {
   chainId: number;
   configDigest: string;
   deployer: string;
+  /** The deployer's mined nonce when the record was made (D-2). */
+  startNonce: number;
   /** The block before the first deploy transaction: the scans' start. */
   fromBlock: number;
   /** Random, made with the record: identity salts derive from it. */

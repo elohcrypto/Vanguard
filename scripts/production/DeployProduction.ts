@@ -218,11 +218,23 @@ async function deployOn(
     );
   }
   if (!rec) {
+    // Review D-2: every resume counts the deployer's nonce from here.
+    const [startNonce, pending] = await Promise.all(
+      ["latest", "pending"].map((t) =>
+        ethers.provider.getTransactionCount(inputs.deployer, t),
+      ),
+    );
+    if (pending !== startNonce) {
+      throw new Error(
+        `the deployer ${inputs.deployer} has ${pending - startNonce} pending transaction(s): wait for them to mine, then run the deploy (its record starts at the mined nonce)`,
+      );
+    }
     const created: DeployRecord = {
       version: 1,
       chainId,
       configDigest: inputs.digest,
       deployer: inputs.deployer,
+      startNonce,
       fromBlock: await ethers.provider.getBlockNumber(),
       salt: ethers.hexlify(ethers.randomBytes(32)),
       txs: [],

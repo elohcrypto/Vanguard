@@ -10,7 +10,11 @@ there). Keys and the signer: [part 1](01-keys-and-signer.md).
 and option 61's escrow factory through the signer (section 1a; no
 unsigned-transaction files), records every transaction in the deploy
 record before the next, writes the ceremony's `handover.json` and runs
-its preflight. The signer has one upstream that serves both its reads and
+its preflight. The record (`deployments/<chainId>.json`) holds the
+deployer and its mined nonce when the record was made (`startNonce`; a
+deployer with a pending transaction is refused until it mines), the
+config digest, `fromBlock`, the salt, and one entry per transaction
+(intent, hash, receipt; `minedAt` once a node has returned its receipt). The signer has one upstream that serves both its reads and
 its sends and must be archive (2.1): a send-only private RPC (e.g.
 Flashbots Protect) cannot be that upstream.
 
@@ -180,7 +184,15 @@ prints `✅ Deployed: 74 transactions in /tmp/vanguard-runbook/deploy-record.jso
   replaced or evicted transaction is adopted if mined unchanged at its
   nonce, else re-sent while the nonce is unused; past 5000 blocks or a
   taken nonce is refused: find that nonce's transaction on an explorer and
-  fix the record by hand. A transaction stuck in the mempool: `signer.js
+  fix the record by hand. A hash the node does not know is read again two
+  blocks later
+  (`   ⏳ <label>: entry #N unknown to this node; re-checking two blocks on`)
+  before it counts as never mined, and an entry a node once returned the
+  receipt of is never dropped: a node that still does not know it is
+  refused (`… a lagging or inconsistent RPC; kept in the record, re-run against a synced RPC`).
+  Every resume counts the deployer's nonce from `startNonce`, an empty
+  record included
+  (`the deployer's nonce is N but the record accounts for M: a transaction outside the record; refusing to resume`). A transaction stuck in the mempool: `signer.js
   bump` (section 1a).
 - The ceremony (section 5) takes the escrow factory by vote, hands both
   list oracles (`"oracles"`; the unbound whitelist oracle prints
