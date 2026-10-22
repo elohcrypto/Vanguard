@@ -12,7 +12,7 @@
 
 const { displaySection, displayError } = require("./DisplayHelpers");
 const { issuerOwnerSigner, signClaim } = require("./Kyc");
-const { onboard } = require("./Onboard");
+const { adoptOwn, onboard } = require("./Onboard");
 const { ethers } = require("hardhat");
 
 /** Option 24: Create Normal Users */
@@ -232,9 +232,12 @@ async function createNonCompliantNormalUser(mod) {
     console.log(`   🧱 Block Number: ${receipt1.blockNumber}`);
     console.log(`   ⛽ Gas Used: ${receipt1.gasUsed.toLocaleString()}`);
 
-    // Get the created identity address
-    const identityAddress = await onchainIDFactory.getIdentityByOwner(
+    // Get the created identity address: the wallet's own (review D2-6)
+    const identityAddress = await adoptOwn(
+      onchainIDFactory,
       signer.address,
+      await onchainIDFactory.getIdentityByOwner(signer.address),
+      "factory",
     );
     console.log(`   🆔 OnchainID Created: ${identityAddress}`);
 

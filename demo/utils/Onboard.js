@@ -85,31 +85,22 @@ async function onboard(state, address, opts = {}) {
 
   // 1. The identity the registry reads, else the factory's record, else new.
   let identity = registry ? await registry.identity(address) : ZERO;
+  const source = same(identity, ZERO) ? "factory" : "registry";
+  if (same(identity, ZERO))
+    identity = await factory.getIdentityByOwner(address);
+  await adoptOwn(factory, address, identity, source);
   let created = false;
   if (same(identity, ZERO)) {
+    const rc = await deployIdentity(
+      factory,
+      address,
+      // A production deploy replays its record (Task 5.7): its salt is
+      // stable per wallet (DemoState.production), else random.
+      state.production?.identitySalt?.(address) ?? ethers.randomBytes(32),
+    );
+    if (rc) take("deploy", rc);
     identity = await factory.getIdentityByOwner(address);
-    // Review D2-6: ownerToIdentity is set at creation only, so it may name
-    // an identity the wallet no longer owns; adopted only if its own.
-    if (
-      !same(identity, ZERO) &&
-      !(await ownIdentity(factory, address, identity))
-    ) {
-      throw new Error(
-        `factory identity ${identity} of ${address} is not its own (the factory's, owned by it, its one MANAGEMENT key, the pinned recovery manager): not adopted`,
-      );
-    }
-    if (same(identity, ZERO)) {
-      const rc = await deployIdentity(
-        factory,
-        address,
-        // A production deploy replays its record (Task 5.7): its salt is
-        // stable per wallet (DemoState.production), else random.
-        state.production?.identitySalt?.(address) ?? ethers.randomBytes(32),
-      );
-      if (rc) take("deploy", rc);
-      identity = await factory.getIdentityByOwner(address);
-      created = true;
-    }
+    created = true;
   }
 
   // 2. The registry entry, by a registry agent, with the country.
@@ -189,6 +180,21 @@ async function onboard(state, address, opts = {}) {
 }
 
 /**
+ * `id`, the identity `source` (the registry, the factory) names for
+ * `address`, when it is the wallet's own (ownIdentity); else refused by
+ * name (review D2-6: ownerToIdentity is set at creation only, and the
+ * registry keeps its entry when the identity's ownership moves).
+ */
+async function adoptOwn(factory, address, id, source) {
+  if (!same(id, ZERO) && !(await ownIdentity(factory, address, id))) {
+    throw new Error(
+      `${source} identity ${id} of ${address} is not its own (the factory's, owned by it, its one MANAGEMENT key, the pinned recovery manager): not adopted`,
+    );
+  }
+  return id;
+}
+
+/**
  * Whether `id` is `address`'s own factory identity: the factory's, owned
  * by `address`, whose one MANAGEMENT key is `address`'s, pinned to the
  * factory's recovery manager (I-2).
@@ -240,6 +246,7 @@ async function claimLive(issuer, identity, topic, now, renewWithin = 0) {
 
 module.exports = {
   onboard,
+  adoptOwn,
   deployIdentity,
   defaultCountry,
   registryAgent,
