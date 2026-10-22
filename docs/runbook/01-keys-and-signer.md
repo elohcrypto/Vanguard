@@ -33,13 +33,14 @@ local rehearsal box and the order of work are there).
   and the claim-signer CLI compares the Safe addresses. Compare the two
   owner lists by hand in the Safe app before the deploy.
 
-Check the demo's wallets:
+Check the wallets, each labelled with the role the deploy gives it by
+default:
 
 ```bash
 npx hardhat run scripts/print-role-wallets.js --network $NET
 ```
 
-prints one row per role, locally
+prints one row per wallet, locally
 ` 10  ops                                0xBcd4042DE499D14e55001CcbB24a551F3b954096  10000.0 ETH`.
 On Sepolia the roles are not the demo's wallet indices: the deploy config
 names them by address (section 2.3).
