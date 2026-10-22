@@ -92,10 +92,20 @@ and one `   <index> <name> <address>` line per key. The token file is
 (0600; the CLIs read the same path through `hardhat.config.ts`); it is
 removed when the signer exits normally (a `kill -9` leaves it: `rm` it).
 One signer runs per keystore directory: it holds
-`<KEYSTORE_DIR>/signer.lock` (its pid) while it runs, and a second one is
-refused
+`<KEYSTORE_DIR>/signer.lock` while it runs (one line naming its pid,
+host, boot, PID namespace and start time, created whole by `link()`), and
+a second one is refused
 (`signer: <KEYSTORE_DIR>/signer.lock is held by pid N (a signer running on these keystores): refusing to start a second one; if none runs, rm <KEYSTORE_DIR>/signer.lock`);
-a lock a killed signer left (`kill -9`) is taken over at the next start.
+a lock a killed signer left (`kill -9`) on this host, boot and PID
+namespace is taken over at the next start, one starter at a time
+(`<KEYSTORE_DIR>/signer.lock.takeover`). A lock this signer cannot check
+is refused with its `rm`, never taken over: one from another host, boot
+(after a reboot: `rm` it once) or PID namespace
+(`signer: … is held by pid N on host "H" (boot "B", "pid:[I]"), another host, boot or PID namespace than this signer's, where it cannot be checked: refusing to start; if no signer runs there, rm …`),
+an empty or unparsable one, a lock from before this format
+(`signer: … is not a signer lock (empty or unparsable): refusing to start; if no signer runs on these keystores, rm …`),
+and a takeover file a killed start left
+(`signer: ….takeover exists: another signer is taking over …, or was killed doing so: refusing to start; if none is starting, rm ….takeover`).
 A refusal ends `signer: <reason>` with exit 3 (for the signer a failure,
 not the CLIs' pause): on another chain
 `signer: upstream is chain 31337: this signer serves Sepolia (11155111) only (31337 with SIGNER_TEST=1)`
