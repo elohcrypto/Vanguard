@@ -65,14 +65,17 @@ export class Recorder {
   }
 
   /**
-   * Hook the provider (request and send, as PostCeremony.guardDeployerKey
-   * does), then settle the record against the chain before any read the
-   * flows make. Returns once the record is consistent; throws otherwise.
+   * Hook the provider (request, send and sendAsync; review D-6: every
+   * entry point), then settle the record against the chain before any
+   * read the flows make. Returns once the record is consistent; throws
+   * otherwise.
    */
   async install(): Promise<void> {
     const p: any = network.provider;
     const request = p.request.bind(p);
     const send = typeof p.send === "function" ? p.send.bind(p) : null;
+    const sendAsync =
+      typeof p.sendAsync === "function" ? p.sendAsync.bind(p) : null;
     this.raw = (method, params = []) => request({ method, params });
     this.chain = new EntryChain(
       this.raw,
@@ -83,9 +86,17 @@ export class Recorder {
     );
     p.request = (a: any) => this.handle(a.method, a.params ?? []);
     if (send) p.send = (m: string, a?: unknown[]) => this.handle(m, a ?? []);
+    if (sendAsync) {
+      p.sendAsync = (q: any, done: (e: any, r?: any) => void) =>
+        this.handle(q.method, q.params ?? []).then(
+          (result) => done(null, { id: q.id, jsonrpc: "2.0", result }),
+          done,
+        );
+    }
     this.uninstall = () => {
       p.request = request;
       if (send) p.send = send;
+      if (sendAsync) p.sendAsync = sendAsync;
     };
     try {
       await this.settle();
@@ -138,7 +149,7 @@ export class Recorder {
       );
     }
     if (
-      /^(evm_|hardhat_)/.test(method) &&
+      /^(evm_|hardhat_|anvil_)/.test(method) &&
       method !== "hardhat_metadata" &&
       !LOCAL.has(this.rec.chainId)
     ) {
