@@ -43,7 +43,10 @@
  *    removed only while holding it, after re-reading that the lock is
  *    still the one judged dead, so a lock another starter made since is
  *    never removed; a takeover file left by a killed start is refused with
- *    its rm. Without /proc (macOS) boot, ns and start are null and the pid
+ *    its rm. That file may be removed only while no signer is starting: a
+ *    start paused between its re-read and its unlink would remove the lock
+ *    another start took meanwhile (POSIX has no compare-and-unlink; G3 T3).
+ *    Without /proc (macOS) boot, ns and start are null and the pid
  *    alone is checked: a reused pid reads as a live holder (refused, rm by
  *    hand). On exit a holder removes the lock only while it is its own,
  *    byte for byte. The record's temporary file is created exclusively

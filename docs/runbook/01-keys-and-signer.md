@@ -106,6 +106,9 @@ an empty or unparsable one, a lock from before this format
 (`signer: … is not a signer lock (empty or unparsable): refusing to start; if no signer runs on these keystores, rm …`),
 and a takeover file a killed start left
 (`signer: ….takeover exists: another signer is taking over …, or was killed doing so: refusing to start; if none is starting, rm ….takeover`).
+Remove the takeover file only while no signer is starting on these
+keystores: a start still inside its takeover would remove the lock of a
+signer started meanwhile, and a third start would then run beside it.
 A refusal ends `signer: <reason>` with exit 3 (for the signer a failure,
 not the CLIs' pause): on another chain
 `signer: upstream is chain 31337: this signer serves Sepolia (11155111) only (31337 with SIGNER_TEST=1)`

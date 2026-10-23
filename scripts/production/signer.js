@@ -413,17 +413,18 @@ async function serve() {
   byNonce = signedStore(recordFile(dir), chain);
   // Task 5.17 (deep review L-6): the token goes with the process.
   process.on("exit", () => fs.rmSync(tokenFile, { force: true }));
-  console.log(
-    `signer on 127.0.0.1:${at}: ${keys.length} key(s), chain ${chain}${prompt ? ", every request asked" : ", NOT asking"}; token in ${tokenFile}; ${byNonce.size()} signed nonce(s) remembered`,
-  );
-  for (const [i, k] of keys.entries())
-    console.log(`   ${i} ${k.name} ${k.wallet.address}`);
+  // before the line: a signal sent on it still runs the exit hooks
   for (const sig of ["SIGTERM", "SIGINT"]) {
     process.on(sig, () => {
       console.log(`signer: ${signed} request(s) signed`);
       process.exit(0);
     });
   }
+  console.log(
+    `signer on 127.0.0.1:${at}: ${keys.length} key(s), chain ${chain}${prompt ? ", every request asked" : ", NOT asking"}; token in ${tokenFile}; ${byNonce.size()} signed nonce(s) remembered`,
+  );
+  for (const [i, k] of keys.entries())
+    console.log(`   ${i} ${k.name} ${k.wallet.address}`);
 }
 
 module.exports = { privateFile, loadKeys, guardChain, PUBLISHED, SEPOLIA };
