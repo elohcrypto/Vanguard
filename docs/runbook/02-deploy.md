@@ -215,9 +215,14 @@ prints `✅ Deployed: 74 transactions in /tmp/vanguard-runbook/deploy-record.jso
   is refused with the entry kept
   (`… a lagging or inconsistent RPC; kept in the record, resume against a synced RPC`):
   resume against a synced RPC. So is a receipt of another transaction
-  for its hash. Off a dev chain only `eth_`, `net_` and `web3_` calls
-  reach the RPC
-  (`<method> refused on chain N: no dev-node call off a dev chain (only eth_, net_ and web3_ methods reach the node)`).
+  for its hash. Off a dev chain only the calls the deploy makes reach
+  the RPC, by exact name: `eth_accounts`, `eth_blockNumber`, `eth_call`,
+  `eth_chainId`, `eth_estimateGas`, `eth_getBlockByNumber`, `eth_getCode`,
+  `eth_getTransactionByHash`, `eth_getTransactionReceipt`,
+  `eth_sendTransaction`, `net_version`, `web3_clientVersion` and the
+  issuers' claim signatures (`vanguard_signClaim`, `personal_sign`); any
+  other method or letter case is refused
+  (`<method> refused on chain N: no dev-node call off a dev chain (only the calls the deploy makes reach the node)`).
   Every resume counts the deployer's nonce from `startNonce`, an empty
   record included
   (`the deployer's nonce is N but the record accounts for M: a transaction outside the record; refusing to resume`). A transaction stuck in the mempool: `signer.js

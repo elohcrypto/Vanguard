@@ -1,14 +1,14 @@
 // Review D-6, round 3 (ported from the swarm's attack-u2r2-dev, inverted):
-// off a dev chain the deploy record's hook lets only eth_, net_ and web3_
-// methods reach the node (eth_sendUnsignedTransaction refused too), and a
-// method that is not a string is refused on any chain, through request,
-// send, sendAsync and the ethers provider.
+// off a dev chain no dev-node call reaches the node (round 4: only the
+// calls the deploy makes, D-6-allowlist-4), and a method that is not a
+// string is refused on any chain, through request, send, sendAsync and
+// the ethers provider.
 import { expect } from "chai";
 import { ethers, network } from "hardhat";
 import { Recorder } from "../../scripts/production/deployRecord";
 import * as h from "../helpers/deployRecordFlow";
 
-describe("D-6 off a dev chain only eth_, net_ and web3_ calls reach the node", function () {
+describe("D-6 off a dev chain no dev-node call reaches the node", function () {
   const box = h.files();
 
   it("every other method or shape is refused before the node; reads still answer", async function () {

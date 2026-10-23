@@ -173,7 +173,7 @@ describe("U2 round 3: an entry stays, a re-send is one checked send", function (
     expect(sends).to.have.length(1);
   });
 
-  it("R24: off a dev chain a method is allowed only as a whole eth_, net_ or web3_ name", async function () {
+  it("R24: off a dev chain a method is allowed only by its whole name", async function () {
     const p: any = network.provider;
     const request = p.request.bind(p);
     const seen: string[] = [];

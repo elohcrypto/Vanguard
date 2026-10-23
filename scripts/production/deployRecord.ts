@@ -30,6 +30,28 @@ export { RecordRefusal };
 const same = (a?: string | null, b?: string | null) =>
   String(a ?? "").toLowerCase() === String(b ?? "").toLowerCase();
 const LOCAL = new Set([31337]);
+/**
+ * Review D-6 round 4: off a dev chain only the calls the deploy flows and
+ * ethers make reach the node, by exact name (logged from a deploy drive
+ * and the test suite). vanguard_signClaim and its personal_sign fallback
+ * are the issuers' claim signatures (Kyc.js), the signer's to show.
+ */
+const OFF_DEV = new Set([
+  "eth_accounts",
+  "eth_blockNumber",
+  "eth_call",
+  "eth_chainId",
+  "eth_estimateGas",
+  "eth_getBlockByNumber",
+  "eth_getCode",
+  "eth_getTransactionByHash",
+  "eth_getTransactionReceipt",
+  "eth_sendTransaction",
+  "net_version",
+  "personal_sign",
+  "vanguard_signClaim",
+  "web3_clientVersion",
+]);
 const READS_AT = new Set([
   "eth_call",
   "eth_getCode",
@@ -161,13 +183,9 @@ export class Recorder {
     if (typeof method !== "string") {
       throw new Error(`a JSON-RPC method that is not a string refused`);
     }
-    if (
-      !LOCAL.has(this.rec.chainId) &&
-      (!/^(eth|net|web3)_\w+$/.test(method) ||
-        method === "eth_sendUnsignedTransaction")
-    ) {
+    if (!LOCAL.has(this.rec.chainId) && !OFF_DEV.has(method)) {
       throw new Error(
-        `${method} refused on chain ${this.rec.chainId}: no dev-node call off a dev chain (only eth_, net_ and web3_ methods reach the node)`,
+        `${method} refused on chain ${this.rec.chainId}: no dev-node call off a dev chain (only the calls the deploy makes reach the node)`,
       );
     }
     const next = this.live()[this.cursor];
