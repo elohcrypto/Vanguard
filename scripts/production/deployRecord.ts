@@ -235,6 +235,12 @@ export class Recorder {
       if (!this.matches(next, tx)) throw this.diverged(next, tx, label);
       if (next.contract) await this.checkCode(next, n);
       this.cursor++;
+      if (!next.hash) {
+        // F3 LOW-4: its send threw this run and the flow sends it again:
+        // settled as a resume settles an intent, at its recorded nonce.
+        await this.confirm(next, await this.chain.receipt(next));
+        return next.hash!;
+      }
       this.reused++;
       this.log(
         `   ⏭️  #${n} ${next.label}: skipped (recorded${next.contract ? ", code hash ok" : ""})`,
