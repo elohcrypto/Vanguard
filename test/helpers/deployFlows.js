@@ -1,7 +1,9 @@
 // Review F-3: the demo deploy flows (options 1, 13, 21, 31, 51, 74, 61)
 // over the in-process chain, their output captured, and a contract with
-// one function answered by a stand-in (a call that fails or does nothing).
-const { ethers } = require("hardhat");
+// one function answered by a stand-in (a call that fails or does nothing),
+// or one sent call replaced at the provider (found by target, function
+// and arguments).
+const { ethers, network, artifacts } = require("hardhat");
 const DemoState = require("../../demo/core/DemoState");
 const ContractDeployer = require("../../demo/core/ContractDeployer");
 const everything = require("../../demo/utils/DeployEverythingFlow");
@@ -21,6 +23,8 @@ async function capture(fn) {
     [console.log, console.error] = [l, e];
   }
 }
+
+const same = (a, b) => String(a).toLowerCase() === String(b).toLowerCase();
 
 const ask = async (q) => {
   throw new Error(`asked: ${q}`);
@@ -85,4 +89,53 @@ async function oneClick(state, deployer) {
   return { ok, text: out.join("\n"), gov };
 }
 
-module.exports = { capture, ask, baseStack, swap, swapDeployed, oneClick };
+/**
+ * Run `fn` with each eth_sendTransaction to `spec.target()` calling
+ * `spec.fn` of contract `spec.name` with arguments `spec.match` accepts
+ * sent as `spec.edit(tx, args, iface)` instead; returns [result, hits].
+ */
+async function editing(spec, fn) {
+  const i = new ethers.Interface((await artifacts.readArtifact(spec.name)).abi);
+  const sel = i.getFunction(spec.fn).selector;
+  const p = network.provider;
+  const [request, send] = [p.request.bind(p), p.send.bind(p)];
+  let hits = 0;
+  const shim = async (a) => {
+    const tx = a.method === "eth_sendTransaction" ? a.params[0] : null;
+    const data = tx && (tx.data || tx.input);
+    if (tx?.to && same(tx.to, await spec.target()) && data?.startsWith(sel)) {
+      const args = i.decodeFunctionData(spec.fn, data);
+      if (await spec.match(args)) {
+        hits++;
+        return request({ method: a.method, params: [spec.edit(tx, args, i)] });
+      }
+    }
+    return request(a);
+  };
+  p.request = shim;
+  p.send = (m, x) => shim({ method: m, params: x ?? [] });
+  try {
+    return [await fn(), hits];
+  } finally {
+    [p.request, p.send] = [request, send];
+  }
+}
+
+/** Mined, status 1, no effect: a self-transfer of nothing. */
+const skip = (tx) => {
+  const out = { ...tx, to: tx.from, value: "0x0" };
+  delete out.data;
+  delete out.input;
+  return out;
+};
+
+module.exports = {
+  capture,
+  ask,
+  baseStack,
+  swap,
+  swapDeployed,
+  oneClick,
+  editing,
+  skip,
+};

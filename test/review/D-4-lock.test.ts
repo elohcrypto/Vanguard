@@ -8,6 +8,7 @@
 import { expect } from "chai";
 import { ethers } from "ethers";
 import { spawn, ChildProcess } from "child_process";
+import { once } from "events";
 import * as fs from "fs";
 import * as os from "os";
 import * as path from "path";
@@ -42,21 +43,23 @@ describe("D-4 one signer per keystore directory", function () {
     return keys;
   }
 
-  type Up = { p: ChildProcess; live: Live; stop: () => Promise<void> };
-  /** signer.js on `keys`: up (its live endpoint) or the output it exited with. */
-  function start(keys: string, upstream: string): Promise<Up | string> {
-    const tokenFile = path.join(dir, `token-${++n}`);
-    const env = {
+  /** The environment of a signer on `keys` with its token at `tokenFile`. */
+  const envOf = (keys: string, upstream: string, tokenFile: string) =>
+    ({
       ...process.env,
       SIGNER_UPSTREAM: upstream,
       SIGNER_KEYSTORE_DIR: keys,
       SIGNER_PASSWORD_FILE: path.join(dir, "pass"),
       SIGNER_PROMPT: "0",
       SIGNER_TOKEN_FILE: tokenFile,
-    } as Record<string, string>;
+    }) as Record<string, string>;
+  type Up = { p: ChildProcess; live: Live; stop: () => Promise<void> };
+  /** signer.js on `keys`: up (its live endpoint) or the output it exited with. */
+  function start(keys: string, upstream: string): Promise<Up | string> {
+    const tokenFile = path.join(dir, `token-${++n}`);
     return new Promise((ok) => {
       const p = spawn(process.execPath, ["scripts/production/signer.js", "0"], {
-        env,
+        env: envOf(keys, upstream, tokenFile),
         stdio: ["ignore", "pipe", "pipe"],
       });
       let text = "";
@@ -128,6 +131,47 @@ describe("D-4 one signer per keystore directory", function () {
       up.server.close();
     }
     expect(fs.existsSync(path.join(keys, "signer.lock"))).to.equal(false);
+  });
+
+  it("a signal sent on the listening line still releases the lock and the token", async function () {
+    // the earliest such signal: SIGTERM to itself right after the line's write
+    const onLine = path.join(dir, "sigterm-on-line.js");
+    fs.writeFileSync(
+      onLine,
+      `const w = process.stdout.write;
+process.stdout.write = function (chunk, ...rest) {
+  const r = w.call(this, chunk, ...rest);
+  if (/signer on 127\\.0\\.0\\.1:/.test(String(chunk))) process.kill(process.pid, "SIGTERM");
+  return r;
+};
+`,
+    );
+    const up = await fakeUpstream(11155111);
+    const keys = await keystores();
+    const tokenFile = path.join(dir, `token-${++n}`);
+    const p = spawn(
+      process.execPath,
+      ["-r", onLine, "scripts/production/signer.js", "0"],
+      {
+        env: envOf(keys, up.url, tokenFile),
+        stdio: ["ignore", "pipe", "pipe"],
+      },
+    );
+    let text = "";
+    p.stdout.on("data", (d) => (text += d));
+    p.stderr.on("data", (d) => (text += d));
+    const stuck = setTimeout(() => p.kill("SIGKILL"), 60_000);
+    const [code, signal] = await once(p, "close");
+    clearTimeout(stuck);
+    up.server.close();
+    expect(text, "it got to the listening line").to.match(
+      /signer on 127\.0\.0\.1:\d+/,
+    );
+    expect({ code, signal }, text).to.deep.equal({ code: 0, signal: null });
+    expect(fs.existsSync(path.join(keys, "signer.lock")), "lock").to.equal(
+      false,
+    );
+    expect(fs.existsSync(tokenFile), "token file").to.equal(false);
   });
 
   it("S4: a keystore directory others can enter is refused at start", async function () {

@@ -296,6 +296,10 @@ describe("D-4 round 3: the keystore lock without races", function () {
     ["an empty lock", ""],
     ["an unparsable lock", "not a lock\n"],
     ["a lock of the old format (a bare dead pid)", `${DEAD}\n`],
+    [
+      "a lock naming a pid that is not an integer (G3 O22)",
+      JSON.stringify({ pid: 1.5, ...HERE, start: "1" }) + "\n",
+    ],
   ]) {
     it(`${what} is refused with its rm, not taken over`, function () {
       const [d] = dirs(1);
@@ -362,6 +366,28 @@ describe("D-4 round 3: the keystore lock without races", function () {
     );
     expect(fs.readFileSync(lockOf(d), "utf8")).to.equal(dead);
     expect(fs.readFileSync(`${lockOf(d)}.takeover`, "utf8")).to.equal(left);
+  });
+
+  it("G3 O23: a path planted at the lock's temporary file is refused, not written through", function () {
+    const [d] = dirs(1);
+    const victim = path.join(root, `victim-${++n}`);
+    fs.writeFileSync(victim, "precious\n");
+    const crypto = require("crypto");
+    const random = crypto.randomBytes;
+    const planted = `${lockOf(d)}.${process.pid}.${"ab".repeat(6)}`;
+    fs.symlinkSync(victim, planted);
+    let out: string;
+    crypto.randomBytes = () => Buffer.alloc(6, 0xab); // take()'s temp name
+    try {
+      out = hold(d);
+    } finally {
+      crypto.randomBytes = random;
+    }
+    expect(out, "refused, naming the planted path").to.include(planted);
+    expect(out).to.not.equal("HELD");
+    expect(fs.readFileSync(victim, "utf8")).to.equal("precious\n");
+    expect(fs.readlinkSync(planted)).to.equal(victim);
+    expect(fs.existsSync(lockOf(d)), "no lock taken").to.equal(false);
   });
 
   it("a dangling link at the lock is refused with its rm (the start ends)", function () {
