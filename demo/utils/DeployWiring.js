@@ -183,11 +183,19 @@ async function wiring(state, flow) {
     add("51", "VSC authorized on InvestorTypeRegistry", () =>
       types.isTokenAuthorized(vsc),
     );
-    add("51", "InvestorRequestManager (custody) registrar on VSC", async () =>
+    // After the handover naming it is a ComplianceRules vote: option 51
+    // prints the pending proposal, and stops on a refused one.
+    add(
+      "51",
+      "InvestorRequestManager (custody) registrar on VSC (until the handover)",
       irm
-        ? (await rules.trustedRegistrars(vsc, irm)) ===
-          (await walletCodeHash("MultiSigWallet"))
-        : false,
+        ? untilHandover(
+            rules,
+            async () =>
+              (await rules.trustedRegistrars(vsc, irm)) ===
+              (await walletCodeHash("MultiSigWallet")),
+          )
+        : async () => false,
     );
     add("51", "InvestorRequestManager compliance officer", async () =>
       irm ? types.isComplianceOfficer(irm) : false,
