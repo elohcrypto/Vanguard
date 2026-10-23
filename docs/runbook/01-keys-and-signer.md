@@ -109,6 +109,13 @@ and a takeover file a killed start left
 Remove the takeover file only while no signer is starting on these
 keystores: a start still inside its takeover would remove the lock of a
 signer started meanwhile, and a third start would then run beside it.
+The lock's PID-namespace tests (`test/review/D-4-lock-3.test.ts`, L3)
+run a holder under `unshare -Upf --mount-proc --map-root-user`, which
+needs unprivileged user namespaces: CI's prepare step sets
+`kernel.apparmor_restrict_unprivileged_userns=0`, and a stock Ubuntu
+24.04 host needs the same
+(`sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0`)
+before the suite, else those two cases fail.
 A refusal ends `signer: <reason>` with exit 3 (for the signer a failure,
 not the CLIs' pause): on another chain
 `signer: upstream is chain 31337: this signer serves Sepolia (11155111) only (31337 with SIGNER_TEST=1)`

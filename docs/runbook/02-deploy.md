@@ -210,7 +210,18 @@ prints `✅ Deployed: 74 transactions in /tmp/vanguard-runbook/deploy-record.jso
   sends again what it signed at that nonce, or a fee bump of it. A nonce
   mines once, so the entry deploys once. Past 5000 blocks or a taken
   nonce is refused: find that nonce's transaction on an explorer and fix
-  the record by hand. A node that shows a used nonce but not its
+  the record by hand. Another transaction still pending at the entry's
+  nonce is refused too
+  (`… is pending …: wait for it to mine, then re-run`): wait, then
+  re-run. An entry becomes the transaction under its hash only when that
+  transaction is the entry in every field; one a signer sent at another
+  nonce is refused, kept, nothing more sent
+  (`… mined at nonce N from 0x…, not as the entry recorded (nonce M from 0x…, its target, value and calldata): the signer did not send it as recorded; kept in the record, nothing more is sent`),
+  and so is an entry whose recorded payload does not hash to its
+  `dataHash` or whose nonce, value, sender or target is not one, before
+  anything is read or sent
+  (`… its recorded data (its keccak256 is not its dataHash): an edited record; kept, nothing sent`).
+  A node that shows a used nonce but not its
   transaction, or still does not know the entry once it was sent again,
   is refused with the entry kept
   (`… a lagging or inconsistent RPC; kept in the record, resume against a synced RPC`):

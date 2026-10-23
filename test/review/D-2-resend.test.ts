@@ -203,7 +203,6 @@ describe("D-2 a recorded entry stays at its nonce whatever the node says", funct
     try {
       await sendOne();
       const rec: any = load();
-      delete rec.txs[0].sentAtBlock; // made before round 2
       delete rec.txs[0].data; // made before round 3
       rec.txs[0].block -= 30;
       saveRecord(box.file, rec);
