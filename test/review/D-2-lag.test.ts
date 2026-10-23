@@ -212,11 +212,14 @@ describe("D-2 EntryChain: an unknown entry is kept and sent again at its nonce",
   });
 
   it("U5: an unknown hash is sent again at its nonce with its recorded payload, never dropped", async function () {
-    const e = { ...entry(), data: "0x60016002", gas: "0x5208" };
+    const data = "0x60016002";
+    const e = { ...entry(), data, dataHash: ethers.keccak256(data), gas: "0x5208" };
     const H2 = "0x" + "ef".repeat(32);
     const sends: any[] = [];
     let byHash = 0;
     const raw = async (m: string, p: any[] = []) => {
+      if (m === "eth_getTransactionByHash" && p[0] === H2)
+        return { hash: H2, from: e.from, nonce: "0x5", to: null, value: "0x0", input: data }; // mined, as the entry (round 4)
       if (m === "eth_getTransactionByHash")
         return byHash++ === 1 ? { hash } : null;
       if (m === "eth_getTransactionCount") return "0x5"; // nonce 5 unused

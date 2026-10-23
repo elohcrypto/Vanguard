@@ -348,6 +348,7 @@ export class Recorder {
       );
     }
     for (const e of [...this.rec.txs]) {
+      if (e.data !== undefined) this.chain.unedited(e); // before any read
       if (e.status === "sending" && (await this.staleIntent(e))) {
         this.rec.txs.splice(this.rec.txs.indexOf(e), 1); // never sent
         this.log(

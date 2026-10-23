@@ -136,6 +136,17 @@ describe("U2 deploy record guards (mutants M01, M02, M06)", function () {
       label: "x",
     };
     const node = async (m: string, p: any[] = []) => {
+      // a real node shows the mined replacement by its hash (round 4)
+      if (m === "eth_getTransactionByHash" && p[0] === H2)
+        return {
+          hash: H2,
+          from,
+          nonce: "0x5",
+          to: null,
+          value: "0x0",
+          input: "0x",
+          blockNumber: "0x65",
+        };
       if (m === "eth_getTransactionReceipt")
         return p[0] === H2
           ? {

@@ -27,6 +27,20 @@ export type Raw = (method: string, params?: unknown[]) => Promise<any>;
 const same = (a?: string | null, b?: string | null) =>
   String(a ?? "").toLowerCase() === String(b ?? "").toLowerCase();
 
+/** What in `e` the deploy never records that way (an edited record), or "". */
+function edited(e: TxEntry): string {
+  const data = String(e.data);
+  if (!ethers.isHexString(data) || ethers.keccak256(data) !== e.dataHash)
+    return "data (its keccak256 is not its dataHash)";
+  if (!Number.isSafeInteger(e.nonce) || e.nonce < 0)
+    return "nonce (not a nonce)";
+  if (!/^\d+$/.test(String(e.value))) return "value (not a decimal amount)";
+  if (!ethers.isAddress(e.from)) return "sender (not an address)";
+  if (e.to !== null && !ethers.isAddress(e.to))
+    return "target (not an address)";
+  return "";
+}
+
 export class EntryChain {
   constructor(
     private raw: Raw,
@@ -48,6 +62,19 @@ export class EntryChain {
       BigInt(t.value) === BigInt(e.value) &&
       ethers.keccak256(t.input) === e.dataHash
     );
+  }
+
+  /**
+   * Round 4 (A4): `e`'s payload is the one the deploy recorded, so a
+   * resume that sends it again sends that transaction or nothing.
+   */
+  unedited(e: TxEntry): void {
+    const bad = edited(e);
+    if (bad) {
+      throw new RecordRefusal(
+        `record entry #${this.rec.txs.indexOf(e)} (${e.label}): its recorded ${bad}: an edited record; kept, nothing sent`,
+      );
+    }
   }
 
   /** Transactions sent again at their recorded nonce. */
@@ -130,7 +157,10 @@ export class EntryChain {
           );
         }
         const head = Number(await this.raw("eth_blockNumber"));
-        if (head - Number(r.blockNumber) + 1 >= this.confirmations) return r;
+        if (head - Number(r.blockNumber) + 1 >= this.confirmations) {
+          await this.isTheEntry(e, n);
+          return r;
+        }
       } else if (
         !e.hash ||
         !(await this.raw("eth_getTransactionByHash", [e.hash]))
@@ -157,6 +187,26 @@ export class EntryChain {
         continue;
       }
       await new Promise((ok) => setTimeout(ok, 1000));
+    }
+  }
+
+  /**
+   * Round 4 (A1): the transaction mined under `e.hash` is `e` in every
+   * field (sender, nonce, target, value, calldata), whatever the signer
+   * did with the nonce field: one that drops it can mine a re-send at the
+   * next nonce, and that transaction never becomes the entry.
+   */
+  private async isTheEntry(e: TxEntry, n: number): Promise<void> {
+    const t = await this.raw("eth_getTransactionByHash", [e.hash]);
+    if (!t) {
+      throw new RecordRefusal(
+        `record entry #${n} (${e.label}): ${e.hash} has a receipt but the node does not show the transaction: an inconsistent RPC; kept in the record, re-run against a synced RPC`,
+      );
+    }
+    if (!this.sameTx(e, t)) {
+      throw new RecordRefusal(
+        `record entry #${n} (${e.label}): ${e.hash} mined at nonce ${Number(t.nonce)} from ${t.from}, not as the entry recorded (nonce ${e.nonce} from ${e.from}, its target, value and calldata): the signer did not send it as recorded; kept in the record, nothing more is sent`,
+      );
     }
   }
 
