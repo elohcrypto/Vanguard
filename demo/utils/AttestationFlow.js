@@ -51,6 +51,16 @@ function demoAttestorKey(state) {
   return state.attestorKey;
 }
 
+/** The issuer key a deploy trusts: the production config's, else the demo's. */
+async function issuerKey(state) {
+  // Task 5.7: a production deploy trusts the issuer's key from its config;
+  // it makes no private key (state.production, DemoState).
+  const given = state.production?.attestor;
+  return given
+    ? { Ax: BigInt(given.Ax), Ay: BigInt(given.Ay) }
+    : attestorPublicKey(demoAttestorKey(state));
+}
+
 const same = (a, b) => String(a).toLowerCase() === String(b).toLowerCase();
 
 /**
@@ -87,12 +97,8 @@ async function setupDemoAttestations({
   privacyManager: pm,
   log = console.log,
 }) {
-  // Task 5.7: a production deploy trusts the issuer's key from its config;
-  // it makes no private key (state.production, DemoState).
   const given = state.production?.attestor;
-  const { Ax, Ay } = given
-    ? { Ax: BigInt(given.Ax), Ay: BigInt(given.Ay) }
-    : await attestorPublicKey(demoAttestorKey(state));
+  const { Ax, Ay } = await issuerKey(state);
   const id = attestorId(Ax, Ay);
   log(
     given
@@ -324,6 +330,7 @@ module.exports = {
   DEFAULT_COMPLIANCE,
   DEMO_VALIDITY,
   demoAttestorKey,
+  issuerKey,
   setupDemoAttestations,
   wireJurisdictionSource,
   runAttestationFlow,

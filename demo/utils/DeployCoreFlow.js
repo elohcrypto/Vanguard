@@ -189,7 +189,6 @@ async function deployPrivacyPair(mod) {
     await ethers.getContractFactory("PrivacyManager")
   ).deploy(zkAddr);
   await privacyManager.waitForDeployment();
-  mod.state.setContract("privacyManager", privacyManager);
   await mod.logger.logContractDeployment("PrivacyManager", privacyManager, [
     zkAddr,
   ]);
@@ -203,6 +202,15 @@ async function deployPrivacyPair(mod) {
   // Task 3.7b: the demo issuer key trusted for the three attestation
   // circuits, and the default policies.
   await setupDemoAttestations({ state: mod.state, privacyManager });
+  // Review F-3: in demo state only once its issuer key and policies read
+  // back from chain (options 1 and 41).
+  const local = { privacyManager };
+  const missing = await missingWiring(mod.state, local, "1");
+  if (missing.length) {
+    await reportStop(mod.state, local);
+    throw new Error(`missing wiring: ${missing.join(", ")}`);
+  }
+  mod.state.setContract("privacyManager", privacyManager);
   return { zkVerifier, privacyManager };
 }
 

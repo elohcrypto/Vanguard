@@ -31,6 +31,10 @@ const STATUS = [
 const same = (a, b) => a.toLowerCase() === b.toLowerCase();
 const fmt = (v) => Number(ethers.formatEther(v)).toLocaleString();
 
+/** D45: a production deploy's lock amounts (Task 5.7), else cap/4, cap/2, cap. */
+const lockAmounts = (state, cap) =>
+  state.production?.lockRequirements ?? [cap / 4n, cap / 2n, cap];
+
 /** The custody bank: ops (wallet 10), never the deployer (handover). */
 function bankSigner(state) {
   return state.signers[10];
@@ -75,13 +79,10 @@ async function deployCustody(
   log(`   ✅ InvestorRequestManager: ${mAddr} (bank = ops ${bank.address})`);
 
   const cap = (await types.getInvestorTypeConfig(0)).maxTransferAmount;
-  // D45: a production deploy's amounts (Task 5.7), else cap/4, cap/2, cap.
-  const set = state.production?.lockRequirements;
-  const locks = [
-    [TYPES.RETAIL, set ? set[0] : cap / 4n],
-    [TYPES.ACCREDITED, set ? set[1] : cap / 2n],
-    [TYPES.INSTITUTIONAL, set ? set[2] : cap],
-  ];
+  const amounts = lockAmounts(state, cap);
+  const locks = [TYPES.RETAIL, TYPES.ACCREDITED, TYPES.INSTITUTIONAL].map(
+    (t, i) => [t, amounts[i]],
+  );
   for (const [t, amount] of locks) {
     await (await m.updateLockRequirement(t, amount)).wait();
   }
@@ -393,6 +394,7 @@ async function retirePlaceholder(
 
 module.exports = {
   TYPES,
+  lockAmounts,
   bankSigner,
   deployCustody,
   requestOf,

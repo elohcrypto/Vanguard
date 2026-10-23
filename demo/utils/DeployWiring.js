@@ -2,7 +2,8 @@
  * @fileoverview The deploy flows' wiring, read back from chain (review F-3)
  * @module DeployWiring
  * @description Options 1, 21, 31, 51, 74 and 61 wire each contract they
- * deploy (the KeyManager pin, agents, rule administrators, trust, the
+ * deploy (the KeyManager pin, PrivacyManager's issuer key, policies,
+ * policy token and code bits, agents, rule administrators, trust, the
  * registry, jurisdiction, privacy and oracle links, the consensus engine
  * and nodes, the token's authorization, the registrars, the compliance
  * officers, the custody lock amounts, the treasury and escrow fee wallet
@@ -10,13 +11,21 @@
  * and the production deploy report success only when every link below
  * reads true on chain: a contract in demo state proves it was deployed,
  * not that it was wired. A check runs only once its contracts are in
- * state, so it holds before and after the handover.
+ * state; a link only a vote sets after the handover reads true once the
+ * deployer no longer owns its contract.
  */
 
 "use strict";
 
 const { ethers } = require("hardhat");
 const { walletCodeHash } = require("./GovernedCalls");
+const { CIRCUITS, attestorId } = require("../../scripts/zk/attest");
+const {
+  DEFAULT_MINIMUM_ACCREDITATION,
+  DEFAULT_COMPLIANCE,
+  issuerKey,
+} = require("./AttestationFlow");
+const { lockAmounts } = require("./CustodyFlow");
 
 const same = (a, b) => String(a).toLowerCase() === String(b).toLowerCase();
 
@@ -52,6 +61,9 @@ async function wiring(state, flow) {
   const add = (by, name, read) => checks.push([by, name, read]);
   const is = (read, want) => async () =>
     same(await read(), await want.getAddress());
+  // `read` while the deployer owns `c`: after the handover a vote's.
+  const untilHandover = (c, read) => async () =>
+    !same(await c.owner(), deployer) || read();
   if (factory && km) {
     add(
       "1",
@@ -59,9 +71,46 @@ async function wiring(state, flow) {
       is(() => factory.recoveryManager(), km),
     );
   }
+  if (pm) {
+    // The deploy's issuer key and default policies (setupDemoAttestations).
+    add(
+      "1",
+      "issuer key trusted on PrivacyManager for each attestation circuit (until the handover)",
+      untilHandover(pm, async () => {
+        const { Ax, Ay } = await issuerKey(state);
+        for (const { id } of Object.values(CIRCUITS)) {
+          if (!(await pm.trustedAttestor(id, attestorId(Ax, Ay)))) return false;
+        }
+        return true;
+      }),
+    );
+    add(
+      "1",
+      "PrivacyManager minimum accreditation policy (until the handover)",
+      untilHandover(
+        pm,
+        async () =>
+          (await pm.minimumAccreditation()) === DEFAULT_MINIMUM_ACCREDITATION,
+      ),
+    );
+    add(
+      "1",
+      "PrivacyManager compliance aggregation policy (until the handover)",
+      untilHandover(pm, async () => {
+        const policy = await pm.compliancePolicy();
+        return DEFAULT_COMPLIANCE.every((v, i) => policy[i] === v);
+      }),
+    );
+  }
   if (ir && rules && vsc) {
     add("21", "VSC agent on IdentityRegistry (recovery)", () =>
       ir.isAgent(vsc),
+    );
+    // The ceremony takes ComplianceRules and this role from the deployer.
+    add(
+      "21",
+      "deployer rule administrator for VSC (until the handover)",
+      untilHandover(rules, () => rules.ruleAdministrators(vsc, deployer)),
     );
     // Its jurisdiction token has no getter: the rules are read back.
     add(
@@ -74,6 +123,27 @@ async function wiring(state, flow) {
         "21",
         "VSC PrivacyManager in ComplianceRules",
         is(() => rules.privacyManager(vsc), pm),
+      );
+      // Private jurisdiction proofs take VSC's rule (wireJurisdictionSource).
+      add(
+        "21",
+        "VSC jurisdiction policy token on PrivacyManager (until the handover)",
+        untilHandover(
+          pm,
+          is(() => pm.policyToken(), vsc),
+        ),
+      );
+      add(
+        "21",
+        "jurisdiction bit for each allowed VSC code on PrivacyManager (until the handover)",
+        untilHandover(pm, async () => {
+          const [, allowed] = await rules.getJurisdictionRule(vsc);
+          for (const code of allowed) {
+            if (!(await rules.validateJurisdiction(vsc, code))[0]) continue;
+            if ((await pm.jurisdictionBit(code)) === 0n) return false;
+          }
+          return true;
+        }),
       );
     }
   }
@@ -139,17 +209,18 @@ async function wiring(state, flow) {
         },
       );
     }
-    const locks = state.production?.lockRequirements;
-    if (locks) {
-      add("51", "custody lock requirements as configured", async () => {
-        if (!irm) return false;
-        for (const [i, t] of [1, 2, 3].entries()) {
-          if ((await irm.lockRequirements(t)) !== BigInt(locks[i]))
-            return false;
-        }
-        return true;
-      });
-    }
+    add("51", "custody lock requirements as configured", async () => {
+      if (!irm) return false;
+      // The demo's amounts follow the Normal cap, a vote's after the handover.
+      const set = state.production?.lockRequirements;
+      if (!set && !same(await types.owner(), deployer)) return true;
+      const cap = (await types.getInvestorTypeConfig(0)).maxTransferAmount;
+      const locks = lockAmounts(state, cap);
+      for (const [i, t] of [1, 2, 3].entries()) {
+        if ((await irm.lockRequirements(t)) !== BigInt(locks[i])) return false;
+      }
+      return true;
+    });
   }
   if (types && !state.production) {
     add("51", "compliance officer wallet 1", () =>
@@ -234,6 +305,7 @@ async function wiring(state, flow) {
 async function missingWiring(state, local = {}, flow) {
   const view = {
     production: state.production,
+    attestorKey: state.attestorKey,
     signers: state.signers,
     bankingInstitutions: state.bankingInstitutions,
     getContract: (k) => local[k] || state.getContract(k),
