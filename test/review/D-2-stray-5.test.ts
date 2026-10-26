@@ -115,6 +115,30 @@ describe("D-2 round 5: a re-send mined at another nonce is a stray, never the en
     expect(await h.nonce()).to.equal(start + 2);
   });
 
+  it("F2 (lane C case 1): a nonce-dropping signer's re-send at the entry's own nonce is the entry, no stray", async function () {
+    const start = await h.nonce();
+    await sendOne(true);
+    let sends = 0;
+    const restore = node(async (a, request) => {
+      if (a.method !== "eth_sendTransaction") return undefined;
+      sends++;
+      const { nonce, ...rest } = a.params[0]; // this signer ignores it
+      return request({ method: a.method, params: [rest] });
+    });
+    let err = "";
+    try {
+      err = await accepted();
+    } finally {
+      restore();
+    }
+    const rec: any = load();
+    expect([err, sends, rec.strays]).to.deep.equal(["accepted", 1, undefined]);
+    expect(rec.txs.map((t: any) => [t.nonce, t.status])).to.deep.equal([
+      [start, "confirmed"],
+    ]);
+    expect(await created(start)).to.have.length(1);
+  });
+
   it("F2: with a stray recorded, a deployer transaction the record does not hold still refuses", async function () {
     const [d] = await ethers.getSigners();
     await strayed();
