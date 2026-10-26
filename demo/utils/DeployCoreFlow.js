@@ -177,9 +177,6 @@ async function deployPrivacyPair(mod) {
     await ethers.getContractFactory("ZKVerifierIntegrated")
   ).deploy(false);
   await deployed(zkVerifier, "ZKVerifierIntegrated");
-  mod.state.setContract("zkVerifierIntegrated", zkVerifier);
-  mod.state.setContract("zkVerifier", zkVerifier); // alias, options 42-50
-  mod.state.zkVerifier = zkVerifier;
   await mod.logger.logContractDeployment("ZKVerifierIntegrated", zkVerifier, [
     false,
   ]);
@@ -211,6 +208,10 @@ async function deployPrivacyPair(mod) {
     await reportStop(mod.state, local);
     throw new Error(`missing wiring: ${missing.join(", ")}`);
   }
+  // Round 8 (D7-2): the verifier too, so a refused pair leaves neither.
+  mod.state.setContract("zkVerifierIntegrated", zkVerifier);
+  mod.state.setContract("zkVerifier", zkVerifier); // alias, options 42-50
+  mod.state.zkVerifier = zkVerifier;
   mod.state.setContract("privacyManager", privacyManager);
   return { zkVerifier, privacyManager };
 }

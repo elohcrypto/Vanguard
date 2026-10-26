@@ -24,6 +24,7 @@ async function deployInvestorTypeSystem(mod) {
   displaySection("DEPLOY INVESTOR TYPE SYSTEM", "🏗️");
 
   let investorTypeRegistry;
+  let investorRequestManager; // round 8 (D7-1): in state once read back
   try {
     // Deploy InvestorTypeRegistry
     console.log("📦 Deploying InvestorTypeRegistry...");
@@ -118,7 +119,11 @@ async function deployInvestorTypeSystem(mod) {
       console.log(
         "\n🔐 Deploying investor custody (InvestorRequestManager)...",
       );
-      await deployCustody(mod.state, console.log, investorTypeRegistry);
+      investorRequestManager = await deployCustody(
+        mod.state,
+        console.log,
+        investorTypeRegistry,
+      );
     } else {
       console.log(
         "\n💡 No VSC token deployed yet — connect automatically once option 21 deploys it",
@@ -126,15 +131,15 @@ async function deployInvestorTypeSystem(mod) {
     }
 
     // Review F-3: in demo state, and reported, only once wired on chain.
-    const missing = await missingWiring(
-      mod.state,
-      { investorTypeRegistry },
-      "51",
-    );
+    const local = { investorTypeRegistry, investorRequestManager };
+    const missing = await missingWiring(mod.state, local, "51");
     if (missing.length) {
       throw new Error(`missing wiring: ${missing.join(", ")}`);
     }
     mod.state.setContract("investorTypeRegistry", investorTypeRegistry);
+    if (investorRequestManager) {
+      mod.state.setContract("investorRequestManager", investorRequestManager);
+    }
 
     // Display basic system info
     console.log("\n📊 Basic System Information:");
@@ -166,7 +171,10 @@ async function deployInvestorTypeSystem(mod) {
   } catch (error) {
     if (error.name !== "RoleCallsPending") {
       displayError(`Investor Type System deployment failed: ${error.message}`);
-      await reportStop(mod.state, { investorTypeRegistry });
+      await reportStop(mod.state, {
+        investorTypeRegistry,
+        investorRequestManager,
+      });
     }
     throw error; // Task 5.13 pauses; review F-3: a failure is not a success
   }

@@ -127,7 +127,11 @@ async function deployCustody(
     // Review F-3: a manager no wallet can be trusted by is no deploy.
     throw new Error(`Manager is not a registrar: ${reg.refused}`);
   }
-  state.setContract("investorRequestManager", m);
+  // Round 8 (D7-1): option 51's registry is not in state yet; option 51
+  // sets both once its read-back passes, so a stop leaves no manager.
+  if (types === state.getContract("investorTypeRegistry")) {
+    state.setContract("investorRequestManager", m);
+  }
   return m;
 }
 
