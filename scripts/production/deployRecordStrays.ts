@@ -113,6 +113,12 @@ export class StrayChain {
         );
       }
       const by = t ? null : await this.replacement(s);
+      if (typeof by === "string") {
+        this.strayLines.push(
+          `   ⚠️  ${of}: dropped, its nonce taken by stray ${by}`,
+        );
+        continue;
+      }
       const x = t ?? by;
       const r = x
         ? await this.raw("eth_getTransactionReceipt", [x.hash])
@@ -149,7 +155,8 @@ export class StrayChain {
    * entry of its sender waits above it: a gap only a fill closes. With the
    * nonce used, the sender's transaction there (`replacedBy`, once found)
    * replaced it, unless it is a record entry (null): counted as a mined
-   * stray, never adopted.
+   * stray, never adopted. Round 8 (GG1): or another recorded stray's (its
+   * hash returned): the nonce is counted once, as that stray's.
    */
   private async replacement(s: Stray): Promise<any> {
     const id = `stray ${s.hash} (nonce ${s.nonce}, the re-send of entry #${s.entry})`;
@@ -178,6 +185,16 @@ export class StrayChain {
     );
     const o = own && (await this.raw("eth_getTransactionByHash", [own.hash]));
     if (!s.replacedBy && o?.blockNumber && this.sameTx(own!, o)) return null;
+    // Round 8 (GG1): another stray of the sender mined there (its hash or
+    // its replacement's): read by its hash, no scan.
+    for (const x of s.replacedBy ? [] : (this.rec.strays ?? [])) {
+      if (x === s || !same(x.from, s.from) || x.nonce !== s.nonce) continue;
+      const w = await this.raw("eth_getTransactionByHash", [
+        x.replacedBy ?? x.hash,
+      ]);
+      if (w?.blockNumber && same(w.from, s.from) && Number(w.nonce) === s.nonce)
+        return x.hash;
+    }
     const t = s.replacedBy
       ? await this.raw("eth_getTransactionByHash", [s.replacedBy])
       : await this.findMined({
@@ -194,6 +211,16 @@ export class StrayChain {
       );
     }
     if (!fits || this.rec.txs.some((e) => this.sameTx(e, t))) return null;
+    // Round 8 (GG1): another stray's transaction is never a replacement,
+    // nor an earlier stray's replacement (a round-7 record's own pair).
+    const all = this.rec.strays ?? [];
+    const twin = all.find(
+      (x) =>
+        x !== s &&
+        (same(x.hash, t.hash) ||
+          (same(x.replacedBy, t.hash) && all.indexOf(x) < all.indexOf(s))),
+    );
+    if (twin) return twin.hash;
     if (!s.replacedBy) {
       s.replacedBy = t.hash;
       this.save();
