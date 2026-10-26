@@ -400,6 +400,8 @@ export class Recorder {
         `${this.file} has no startNonce (a record made before review D-2): a resume cannot account for the deployer's nonce; start a new record`,
       );
     }
+    // Round 7 (GH): the strays first: nothing is sent while one is pending.
+    const strays = await this.chain.outside(this.rec.deployer);
     for (const e of [...this.rec.txs]) {
       const held = e.status === "sending" && (await this.staleIntent(e));
       if (held) {
@@ -446,10 +448,7 @@ export class Recorder {
     );
     // Review D-2: from the record's start, so an empty record and a
     // dropped first entry are counted too; round 5: and its strays.
-    const accounted =
-      this.rec.startNonce +
-      own.length +
-      (await this.chain.outside(this.rec.deployer));
+    const accounted = this.rec.startNonce + own.length + strays;
     if (nonce !== accounted) {
       throw new RecordRefusal(
         `the deployer's nonce is ${nonce} but the record accounts for ${accounted}: a transaction outside the record; refusing to resume`,
