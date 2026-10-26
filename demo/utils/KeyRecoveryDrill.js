@@ -61,7 +61,7 @@ async function drillIdentity(state, owner, opts, run) {
   if (!run.identity) {
     const F = await ethers.getContractFactory("OnchainID", owner);
     const id = await F.deploy(owner.address);
-    await id.waitForDeployment();
+    await require("./DeployWiring").deployed(id, "OnchainID");
     run.identity = await id.getAddress();
     console.log(
       `   🆔 Drill identity ${run.identity}, owner ${who(state, owner.address)} (deployed for the drill, not in the registry)`,

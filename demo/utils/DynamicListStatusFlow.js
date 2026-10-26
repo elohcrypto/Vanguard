@@ -15,6 +15,7 @@ const {
   displayError,
 } = require("./DisplayHelpers");
 const { ethers } = require("hardhat");
+const { deployed } = require("./DeployWiring");
 
 /** Option 84: Deploy Dynamic List Manager */
 async function deployDynamicListSystem(mod) {
@@ -34,7 +35,7 @@ async function deployDynamicListSystem(mod) {
     const dynamicListManager = await DynamicListManager.deploy(
       mod.state.signers[0].address,
     );
-    await dynamicListManager.waitForDeployment();
+    await deployed(dynamicListManager, "DynamicListManager");
 
     mod.state.setContract("dynamicListManager", dynamicListManager);
     const address = await dynamicListManager.getAddress();
