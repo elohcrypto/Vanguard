@@ -20,6 +20,11 @@ export interface TxEntry {
   hash?: string;
   /** D-2 round 5: `hash` came back from the record's own re-send. */
   resent?: boolean;
+  /**
+   * D-2 round 8: the hash of the entry's own send that a re-send's hash
+   * replaced: the entry is read by it before any block scan.
+   */
+  sentHash?: string;
   status: "sending" | "sent" | "confirmed" | "reverted";
   contract?: string;
   codeHash?: string;
@@ -40,6 +45,8 @@ export interface Stray {
    * the stray (a speed-up or a cancel), never a record entry.
    */
   replacedBy?: string;
+  /** D-2 round 8: the head block before its re-send: scans start here. */
+  block?: number;
 }
 
 export interface DeployRecord {

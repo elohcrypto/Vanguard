@@ -88,6 +88,8 @@ describe("D-2 round 5: a re-send mined at another nonce is a stray, never the en
       ),
     );
     const rec: any = load();
+    // Round 8 (B): the row carries its block, the stray's own when mined.
+    const block = (await ethers.provider.getTransaction(stray))!.blockNumber;
     expect(rec.strays).to.deep.equal([
       {
         hash: stray,
@@ -95,6 +97,7 @@ describe("D-2 round 5: a re-send mined at another nonce is a stray, never the en
         nonce: start + 1,
         entry: 0,
         label: "new IdentityRegistry",
+        block,
       },
     ]);
     expect([

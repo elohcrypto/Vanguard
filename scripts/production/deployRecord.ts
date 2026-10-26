@@ -416,7 +416,7 @@ export class Recorder {
       // not seen (receipt() sends it again at its nonce).
       if (e.status === "sending") {
         if ((await this.chain.count(e.from, "latest")) > e.nonce) {
-          const t = await this.chain.findMined(e);
+          const t = await this.chain.minedAt(e);
           if (!t) {
             throw new RecordRefusal(
               `${e.from}'s nonce ${e.nonce} is used, but this node shows no transaction at it since block ${e.block} (record entry #${n}, ${e.label}): a lagging RPC; kept in the record, resume against a synced RPC`,

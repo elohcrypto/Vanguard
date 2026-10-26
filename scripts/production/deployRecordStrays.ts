@@ -15,6 +15,9 @@ export class RecordRefusal extends Error {
 
 export type Raw = (method: string, params?: unknown[]) => Promise<any>;
 
+/** Round 8 (GG2): the operator's DEPLOY_FILL_HASH and the stray it fills. */
+type Fill = { s: Stray; t: any };
+
 export const same = (a?: string | null, b?: string | null) =>
   String(a ?? "").toLowerCase() === String(b ?? "").toLowerCase();
 
@@ -87,6 +90,7 @@ export class StrayChain {
   async outside(deployer: string): Promise<number> {
     let mined = 0;
     this.strayLines = [];
+    const fill = await this.fill();
     for (const s of this.rec.strays ?? []) {
       const of = `nonce ${s.nonce}: ${s.hash}, the signer's re-send of entry #${s.entry} (${s.label}) at another nonce`;
       const id = `stray ${s.hash} (nonce ${s.nonce}, the re-send of entry #${s.entry})`;
@@ -112,7 +116,7 @@ export class StrayChain {
           `${id} is pending on this node: wait for it to mine or drop, then re-run`,
         );
       }
-      const by = t ? null : await this.replacement(s);
+      const by = t ? null : await this.replacement(s, fill);
       if (typeof by === "string") {
         this.strayLines.push(
           `   ⚠️  ${of}: dropped, its nonce taken by stray ${by}`,
@@ -158,7 +162,7 @@ export class StrayChain {
    * stray, never adopted. Round 8 (GG1): or another recorded stray's (its
    * hash returned): the nonce is counted once, as that stray's.
    */
-  private async replacement(s: Stray): Promise<any> {
+  private async replacement(s: Stray, fill: Fill | null): Promise<any> {
     const id = `stray ${s.hash} (nonce ${s.nonce}, the re-send of entry #${s.entry})`;
     const who = same(s.from, this.rec.deployer) ? "the deployer" : s.from;
     const mined = await this.count(s.from, "latest");
@@ -195,14 +199,21 @@ export class StrayChain {
       if (w?.blockNumber && same(w.from, s.from) && Number(w.nonce) === s.nonce)
         return x.hash;
     }
+    // Round 8 (GG2): the operator's fill by its hash, else a scan from
+    // the stray's block (an older row: the record's fromBlock).
     const t = s.replacedBy
       ? await this.raw("eth_getTransactionByHash", [s.replacedBy])
-      : await this.findMined({
-          from: s.from,
-          nonce: s.nonce,
-          block: this.rec.fromBlock,
-          label: id,
-        } as TxEntry);
+      : fill?.s === s
+        ? fill.t
+        : await this.findMined(
+            {
+              from: s.from,
+              nonce: s.nonce,
+              block: s.block ?? this.rec.fromBlock,
+              label: id,
+            } as TxEntry,
+            "pass the hash of the transaction that filled it as DEPLOY_FILL_HASH=<hash>, then resume",
+          );
     const fits =
       t?.blockNumber && same(t.from, s.from) && Number(t.nonce) === s.nonce;
     if (s.replacedBy && !fits) {
@@ -228,12 +239,56 @@ export class StrayChain {
     return t;
   }
 
+  /**
+   * Round 8 (GG2): `e`'s transaction at its nonce, read by the hash of its
+   * own earlier send when the record kept one, else found by a scan.
+   */
+  async minedAt(e: TxEntry): Promise<any> {
+    const t =
+      e.sentHash && (await this.raw("eth_getTransactionByHash", [e.sentHash]));
+    return t?.blockNumber && this.sameTx(e, t) ? t : this.findMined(e);
+  }
+
+  /**
+   * Round 8 (GG2): DEPLOY_FILL_HASH, the operator's fill of a stray's
+   * nonce, verified by its hash: shown, no record entry, no stray itself,
+   * at a recorded stray's sender and nonce, mined. Null when unset.
+   */
+  private async fill(): Promise<Fill | null> {
+    const hash = process.env.DEPLOY_FILL_HASH;
+    if (!hash) return null;
+    const no = (why: string) =>
+      new RecordRefusal(`DEPLOY_FILL_HASH ${hash} ${why}: refusing`);
+    if (!/^0x[0-9a-fA-F]{64}$/.test(hash))
+      throw no("is not a transaction hash");
+    const t = await this.raw("eth_getTransactionByHash", [hash]);
+    if (!t) throw no("is not shown by this node");
+    const k = this.rec.txs.findIndex((e) => this.sameTx(e, t));
+    if (k >= 0) throw no(`is record entry #${k}'s transaction, not a fill`);
+    const all = this.rec.strays ?? [];
+    const x = all.find((y) => same(y.hash, hash));
+    if (x) throw no(`is stray ${x.hash} itself, not a fill`);
+    const s = all.find(
+      (y) => same(y.from, t.from) && y.nonce === Number(t.nonce),
+    );
+    if (!s) {
+      throw no(
+        `is ${ethers.getAddress(t.from)}'s transaction at nonce ${Number(t.nonce)}, not at a recorded stray's sender and nonce`,
+      );
+    }
+    if (!t.blockNumber) throw no("is not mined on this node");
+    return { s, t };
+  }
+
   /** The mined transaction from `e.from` at `e.nonce` since `e.block`. */
-  async findMined(e: TxEntry): Promise<any> {
+  async findMined(
+    e: TxEntry,
+    how = "find that transaction and record it by hand",
+  ): Promise<any> {
     const head = Number(await this.raw("eth_blockNumber"));
     if (head - e.block > 5000) {
       throw new RecordRefusal(
-        `${e.label}: ${e.from} used nonce ${e.nonce} more than 5000 blocks after the intent (block ${e.block}); find that transaction and record it by hand`,
+        `${e.label}: ${e.from} used nonce ${e.nonce} more than 5000 blocks after the intent (block ${e.block}); ${how}`,
       );
     }
     for (let b = e.block; b <= head; b++) {

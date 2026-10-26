@@ -58,7 +58,7 @@ export class EntryChain extends StrayChain {
 
   /** The transaction mined at `e`'s nonce, adopted when it is `e`. */
   private async adopt(e: TxEntry, why: string): Promise<void> {
-    const t = await this.findMined(e);
+    const t = await this.minedAt(e);
     if (!t) {
       throw new RecordRefusal(
         `${why} is used, but this node shows no transaction at it since block ${e.block}: a lagging RPC; kept in the record, resume against a synced RPC`,
@@ -86,6 +86,8 @@ export class EntryChain extends StrayChain {
       );
     }
     const n = this.rec.txs.indexOf(e);
+    // Round 8 (GG2): a stray of this send is looked for from here.
+    const head = Number(await this.raw("eth_blockNumber"));
     try {
       const hash = await this.raw("eth_sendTransaction", [
         {
@@ -99,6 +101,7 @@ export class EntryChain extends StrayChain {
       ]);
       if (!/^0x[0-9a-fA-F]{64}$/.test(String(hash)))
         throw new Error(`no transaction hash (${hash})`);
+      if (e.hash && !e.resent) e.sentHash = e.hash;
       e.resent = true;
       e.hash = hash;
       e.status = "sent";
@@ -112,7 +115,7 @@ export class EntryChain extends StrayChain {
     }
     // Round 5 (lane C F1): the next read is what the signer sent.
     const t = await this.raw("eth_getTransactionByHash", [e.hash]);
-    if (t) this.stray(e, t, n);
+    if (t) this.stray(e, t, n, head);
     return "";
   }
 
@@ -122,7 +125,7 @@ export class EntryChain extends StrayChain {
    * outside the record. It is recorded as a stray, never as `e`: the hash
    * is cleared, so `e`'s own transaction is adopted at its nonce.
    */
-  private stray(e: TxEntry, t: any, n: number): void {
+  private stray(e: TxEntry, t: any, n: number, head: number): void {
     const at = Number(t.nonce);
     // Round 7 (lane C c1): another sender's transaction is neither the
     // entry's nor a stray of its sender's: its hash goes, nothing stays.
@@ -154,7 +157,15 @@ export class EntryChain extends StrayChain {
     const strays = (this.rec.strays ??= []);
     if (!strays.some((s) => same(s.hash, t.hash))) {
       const from = ethers.getAddress(t.from);
-      strays.push({ hash: t.hash, from, nonce: at, entry: n, label: e.label });
+      const block = t.blockNumber ? Number(t.blockNumber) : head;
+      strays.push({
+        hash: t.hash,
+        from,
+        nonce: at,
+        entry: n,
+        label: e.label,
+        block,
+      });
     }
     delete e.hash;
     delete e.resent;
@@ -188,7 +199,7 @@ export class EntryChain extends StrayChain {
         }
         const head = Number(await this.raw("eth_blockNumber"));
         if (head - Number(r.blockNumber) + 1 >= this.confirmations) {
-          await this.isTheEntry(e, n);
+          await this.isTheEntry(e, n, head);
           return r;
         }
       } else if (
@@ -226,7 +237,7 @@ export class EntryChain extends StrayChain {
    * did with the nonce field: one that drops it can mine a re-send at the
    * next nonce, and that transaction never becomes the entry.
    */
-  private async isTheEntry(e: TxEntry, n: number): Promise<void> {
+  private async isTheEntry(e: TxEntry, n: number, head: number): Promise<void> {
     const t = await this.raw("eth_getTransactionByHash", [e.hash]);
     if (!t) {
       throw new RecordRefusal(
@@ -234,7 +245,7 @@ export class EntryChain extends StrayChain {
       );
     }
     if (!this.sameTx(e, t)) {
-      this.stray(e, t, n);
+      this.stray(e, t, n, head);
       throw new RecordRefusal(
         `record entry #${n} (${e.label}): ${e.hash} mined at nonce ${Number(t.nonce)} from ${t.from}, not as the entry recorded (nonce ${e.nonce} from ${e.from}, its target, value and calldata): the signer did not send it as recorded; kept in the record, nothing more is sent`,
       );
