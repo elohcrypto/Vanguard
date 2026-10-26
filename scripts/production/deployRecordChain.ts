@@ -148,7 +148,18 @@ export class EntryChain {
    */
   private stray(e: TxEntry, t: any, n: number): void {
     const at = Number(t.nonce);
-    if (!e.resent || !same(t.from, e.from) || at === e.nonce) return;
+    // Round 7 (lane C c1): another sender's transaction is neither the
+    // entry's nor a stray of its sender's: its hash goes, nothing stays.
+    if (!same(t.from, e.from)) {
+      delete e.hash;
+      delete e.resent;
+      e.status = "sending";
+      this.save();
+      throw new RecordRefusal(
+        `record entry #${n} (${e.label}): ${t.hash} ${t.blockNumber ? "mined" : "sent"} at nonce ${at} from ${ethers.getAddress(t.from)}, another sender's transaction, not the entry's and not the deployer's stray: nothing recorded; the entry's own transaction is looked up at its nonce on the next run: fix the signer, then resume against a synced RPC; kept in the record, nothing more is sent`,
+      );
+    }
+    if (!e.resent || at === e.nonce) return;
     // Round 6 (G1): not a transaction outside the record, so no stray.
     const k = this.accounted(t.hash, t.from, at, e);
     if (k !== null) {

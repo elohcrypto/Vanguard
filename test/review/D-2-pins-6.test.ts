@@ -57,7 +57,7 @@ describe("D-2 round 6: the stray guards and the chain id, pinned", function () {
     }
   }
 
-  it("G (H02): a re-send answered with another sender's transaction is no stray: refused as not the entry, the entry kept", async function () {
+  it("G (H02): a re-send answered with another sender's transaction is no stray: refused by name, its hash cleared; the next healthy resume adopts the entry", async function () {
     const start = await h.nonce();
     await h.sendOne(box.file);
     const [, other] = await ethers.getSigners();
@@ -65,13 +65,23 @@ describe("D-2 round 6: the stray guards and the chain id, pinned", function () {
       await other.sendTransaction({ to: h.AGENT })
     ).wait())!;
     const err = await lagging(start, async () => theirs.hash);
+    // Round 7 (lane C c1, lead ruling R7-C2): never the entry's hash.
     expect(err).to.contain(
       `record entry #0 (new IdentityRegistry): ${theirs.hash} mined at nonce`,
     );
     expect(err).to.contain(
-      "the signer did not send it as recorded; kept in the record",
+      `from ${other.address}, another sender's transaction, not the entry's and not the deployer's stray: nothing recorded`,
     );
+    const e0 = load().txs[0];
+    expect([e0.hash, e0.status]).to.deep.equal([undefined, "sending"]);
     expect((load() as any).strays, "no stray").to.equal(undefined);
+    expect(await h.nonce(), "nothing more sent").to.equal(start + 1);
+    expect(await accepted(), "the healthy resume").to.equal("accepted");
+    expect(load().txs[0].hash, "never the foreign hash").to.not.equal(
+      theirs.hash,
+    );
+    expect(await h.created(start), "one deploy").to.have.length(1);
+    expect(await h.nonce()).to.equal(start + 1);
   });
 
   it("G (H03): a stray the signer answers twice is listed once; the healthy resume completes", async function () {
