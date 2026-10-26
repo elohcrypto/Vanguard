@@ -69,7 +69,10 @@ export class StrayChain {
     const s = (this.rec.strays ?? []).find(
       (x) => same(x.from, e.from) && x.nonce === e.nonce,
     );
-    const t = s && (await this.raw("eth_getTransactionByHash", [s.hash]));
+    // Round 8 (GG8): a replaced stray's transaction is its replacement's.
+    const t =
+      s &&
+      (await this.raw("eth_getTransactionByHash", [s.replacedBy ?? s.hash]));
     return t?.blockNumber &&
       same(t.from, s!.from) &&
       Number(t.nonce) === s!.nonce
