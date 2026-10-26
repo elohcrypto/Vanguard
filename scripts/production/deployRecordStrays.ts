@@ -170,9 +170,19 @@ export class StrayChain {
     const who = same(s.from, this.rec.deployer) ? "the deployer" : s.from;
     const mined = await this.count(s.from, "latest");
     const pending = await this.count(s.from, "pending");
-    if (pending > mined) {
+    // Round 8 (GG4): the record's own sent entries in that pending range
+    // that the node shows pending are not hidden; they are awaited.
+    let hidden = pending - mined;
+    for (const e of this.rec.txs) {
+      if (hidden <= 0) break;
+      if (e.status !== "sent" || !same(e.from, s.from)) continue;
+      if (e.nonce < mined || e.nonce >= pending) continue;
+      const o = await this.raw("eth_getTransactionByHash", [e.hash]);
+      if (o && !o.blockNumber) hidden--;
+    }
+    if (hidden > 0) {
       throw new RecordRefusal(
-        `${id} is not shown by this node but ${who} has ${pending - mined} pending transactions it does not show: a lagging or inconsistent RPC; wait or re-run against a synced RPC`,
+        `${id} is not shown by this node but ${who} has ${hidden} pending transactions it does not show: a lagging or inconsistent RPC; wait or re-run against a synced RPC`,
       );
     }
     if (mined <= s.nonce) {
