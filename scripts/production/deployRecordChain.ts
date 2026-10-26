@@ -190,6 +190,27 @@ export class EntryChain {
     return older ? -1 : null;
   }
 
+  /**
+   * Round 6 (G3): "stray <hash>" when `e` is an intent (status sending, no
+   * hash) whose nonce a recorded stray of `e`'s sender holds mined, so `e`
+   * can never mine; else "". Both must hold: the chain shows the stray
+   * mined from that sender at that nonce, and its hash is in rec.strays
+   * (the record's own re-send). Any other transaction at the nonce keeps
+   * the refusal by name, and a sent entry there is never dropped.
+   */
+  async heldByStray(e: TxEntry): Promise<string> {
+    if (e.status !== "sending" || e.hash) return "";
+    const s = (this.rec.strays ?? []).find(
+      (x) => same(x.from, e.from) && x.nonce === e.nonce,
+    );
+    const t = s && (await this.raw("eth_getTransactionByHash", [s.hash]));
+    return t?.blockNumber &&
+      same(t.from, s!.from) &&
+      Number(t.nonce) === s!.nonce
+      ? `stray ${s!.hash}`
+      : "";
+  }
+
   /** Round 5: what each stray cost, printed by every resume and at the end. */
   strayLines: string[] = [];
 

@@ -197,6 +197,45 @@ describe("D-2 round 6: a stray is a transaction the record does not otherwise ac
   });
 
   describe("E (G3): an unsent intent at a mined stray's nonce is stale", function () {
+    it("a sent entry at a mined stray's nonce is never dropped: refused by name as today (lead condition a)", async function () {
+      const [d] = await ethers.getSigners();
+      const start = await h.nonce();
+      await h.sendOne(box.file);
+      const block = await ethers.provider.getBlockNumber();
+      expect((await lagging(0, start, dropNonce)).err).to.contain(
+        "outside the record",
+      );
+      expect(await accepted(), "the healthy resume").to.equal("accepted");
+      const rec = load();
+      const stray = rec.strays![0].hash;
+      const data = (
+        await (
+          await ethers.getContractFactory("KeyManager")
+        ).getDeployTransaction()
+      ).data;
+      const hash = ethers.keccak256("0x5e47"); // a send no node knows
+      rec.txs.push({
+        from: d.address,
+        to: null,
+        value: "0",
+        dataHash: ethers.keccak256(data),
+        data,
+        nonce: start + 1,
+        block,
+        hash,
+        status: "sent",
+        label: "new KeyManager",
+      });
+      saveRecord(box.file, rec);
+      const want = `record entry #1 (new KeyManager): ${hash} is unknown to the node and ${d.address}'s nonce ${start + 1} went to ${stray}, another transaction: refusing`;
+      expect(await accepted()).to.equal(want);
+      expect(await accepted(), "every resume").to.equal(want);
+      expect(load().txs.map((t) => [t.nonce, t.status])).to.deep.equal([
+        [start, "confirmed"],
+        [start + 1, "sent"],
+      ]);
+    });
+
     it("T4: a lagging count plants the next intent at the stray's nonce; the healthy resume drops it and the deploy completes, the stray listed once with its cost", async function () {
       const [d] = await ethers.getSigners();
       const start = await h.nonce();

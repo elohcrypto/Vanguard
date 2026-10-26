@@ -223,7 +223,7 @@ describe("D-2 round 5: a re-send mined at another nonce is a stray, never the en
     );
   });
 
-  it("F2: a later intent at the stray's nonce is refused by name, never planned again", async function () {
+  it("F2 (round 6 E): a later unsent intent at the stray's nonce is stale: dropped, never sent", async function () {
     const [d] = await ethers.getSigners();
     const start = await h.nonce();
     await sendOne();
@@ -264,12 +264,12 @@ describe("D-2 round 5: a re-send mined at another nonce is a stray, never the en
     } finally {
       restore();
     }
-    expect(await accepted()).to.equal(
-      `${d.address} used nonce ${start + 1} for a transaction that is not record entry #1 (new KeyManager): refusing`,
-    );
+    expect(await accepted()).to.equal("accepted");
     expect(load().txs.map((t) => [t.nonce, t.status])).to.deep.equal([
       [start, "confirmed"],
-      [start + 1, "sending"],
     ]);
+    expect(await h.nonce(), "nothing sent for the dropped intent").to.equal(
+      start + 2,
+    );
   });
 });

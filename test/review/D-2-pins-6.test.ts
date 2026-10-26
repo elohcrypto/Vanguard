@@ -132,6 +132,45 @@ describe("D-2 round 6: the stray guards and the chain id, pinned", function () {
     expect(lines.join("\n")).to.contain(`it cost ${d.address} ${cost} ETH`);
   });
 
+  it("E: another sender's intent at the nonce of a deployer stray is not stale: adopted as mined, never dropped", async function () {
+    const [d, role] = await ethers.getSigners();
+    const rec = await h.fresh(box.file);
+    const out = (await (await d.sendTransaction({ to: h.AGENT })).wait())!;
+    rec.strays = [
+      {
+        hash: out.hash,
+        from: d.address,
+        nonce: rec.startNonce,
+        entry: 0,
+        label: "x",
+      },
+    ];
+    // the role key's transaction at the same nonce number, its reply lost
+    await network.provider.request({
+      method: "hardhat_setNonce",
+      params: [role.address, ethers.toQuantity(rec.startNonce)],
+    });
+    const block = await ethers.provider.getBlockNumber();
+    const data = "0x1234";
+    await (await role.sendTransaction({ to: h.AGENT, data })).wait();
+    rec.txs.push({
+      from: role.address,
+      to: ethers.getAddress(h.AGENT),
+      value: "0",
+      dataHash: ethers.keccak256(data),
+      data,
+      nonce: rec.startNonce,
+      block,
+      status: "sending",
+      label: "a role call",
+    });
+    saveRecord(box.file, rec);
+    expect(await accepted()).to.equal("accepted");
+    expect(load().txs.map((t) => [t.from, t.status])).to.deep.equal([
+      [role.address, "confirmed"],
+    ]);
+  });
+
   for (const id of [1, 31338]) {
     it(`I (F-1): a record edited to chain ${id} is refused by name after one eth_chainId read; nothing sent, the deployer's nonce unchanged`, async function () {
       const start = await h.nonce();

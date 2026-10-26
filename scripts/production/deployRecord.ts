@@ -361,17 +361,17 @@ export class Recorder {
 
   /**
    * Deep review M-1: `e` (an intent) took its nonce from a stale pending
-   * count, so the nonce is an EARLIER record entry's, whose transaction is
-   * mined as recorded. RpcRetry's stale check refused that send, so `e`
-   * never left the process (a record written before the sendTx check).
+   * count, so the nonce is an EARLIER record entry's, mined as recorded,
+   * or (round 6, G3) a mined recorded stray's: `e` can never mine.
    */
-  private async staleIntent(e: TxEntry): Promise<boolean> {
+  private async staleIntent(e: TxEntry): Promise<string> {
     const earlier = this.rec.txs
       .slice(0, this.rec.txs.indexOf(e))
       .find((x) => x.hash && same(x.from, e.from) && x.nonce === e.nonce);
-    if (!earlier) return false;
+    if (!earlier) return this.chain.heldByStray(e);
     const t = await this.raw("eth_getTransactionByHash", [earlier.hash]);
-    return !!t?.blockNumber && this.chain.sameTx(earlier, t);
+    const ok = t?.blockNumber && this.chain.sameTx(earlier, t);
+    return ok ? `record entry #${this.rec.txs.indexOf(earlier)}` : "";
   }
 
   /**
@@ -395,10 +395,11 @@ export class Recorder {
       );
     }
     for (const e of [...this.rec.txs]) {
-      if (e.status === "sending" && (await this.staleIntent(e))) {
+      const held = e.status === "sending" && (await this.staleIntent(e));
+      if (held) {
         this.rec.txs.splice(this.rec.txs.indexOf(e), 1); // never sent
         this.log(
-          `   ↩️  ${e.label}: its nonce ${e.nonce} is record entry #${this.rec.txs.findIndex((x) => same(x.from, e.from) && x.nonce === e.nonce)}'s (an intent read from a lagging RPC, never sent); dropped from the record`,
+          `   ↩️  ${e.label}: its nonce ${e.nonce} is ${held}'s (an intent read from a lagging RPC, never sent); dropped from the record`,
         );
         continue;
       }
