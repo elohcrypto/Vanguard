@@ -35,6 +35,11 @@ export interface Stray {
   /** The record entry whose re-send it was. */
   entry: number;
   label: string;
+  /**
+   * D-2 round 7: the sender's transaction mined at this nonce in place of
+   * the stray (a speed-up or a cancel), never a record entry.
+   */
+  replacedBy?: string;
 }
 
 export interface DeployRecord {

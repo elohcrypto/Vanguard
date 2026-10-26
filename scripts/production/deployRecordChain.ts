@@ -15,7 +15,7 @@
  * kept.
  */
 import { ethers } from "hardhat";
-import { DeployRecord, TxEntry } from "./deployRecordFile";
+import { DeployRecord, Stray, TxEntry } from "./deployRecordFile";
 
 /** Thrown when a re-run cannot follow its record: nothing more is sent. */
 export class RecordRefusal extends Error {
@@ -217,7 +217,8 @@ export class EntryChain {
   /**
    * Round 5: each stray as the chain shows it (refused unless from its
    * sender at its nonce), printed; returns the deployer's mined ones,
-   * which hold nonces outside the record's entries.
+   * which hold nonces outside the record's entries. Round 7 (GB): one
+   * the node does not show may have been replaced at its nonce.
    */
   async outside(deployer: string): Promise<number> {
     let mined = 0;
@@ -247,10 +248,12 @@ export class EntryChain {
           `${id} is pending on this node: wait for it to mine or drop, then re-run`,
         );
       }
-      const r = t
-        ? await this.raw("eth_getTransactionReceipt", [s.hash])
+      const by = t ? null : await this.replacement(s);
+      const x = t ?? by;
+      const r = x
+        ? await this.raw("eth_getTransactionReceipt", [x.hash])
         : null;
-      if (!t) {
+      if (!x) {
         this.strayLines.push(`   ⚠️  ${of}: dropped, not counted`);
       } else if (!r) {
         this.strayLines.push(
@@ -258,18 +261,59 @@ export class EntryChain {
         );
       } else {
         const fee =
-          BigInt(r.gasUsed) * BigInt(r.effectiveGasPrice ?? t.gasPrice);
+          BigInt(r.gasUsed) * BigInt(r.effectiveGasPrice ?? x.gasPrice);
         const made = r.contractAddress
           ? ` and created ${ethers.getAddress(r.contractAddress)}, which the record does not own`
           : "";
+        const was = by
+          ? `nonce ${s.nonce}: stray ${s.hash} replaced by ${by.hash},`
+          : `${of}:`;
         this.strayLines.push(
-          `   ⚠️  ${of}: outside the record, never adopted; it cost ${s.from} ${ethers.formatEther(fee + BigInt(t.value))} ETH${made}`,
+          `   ⚠️  ${was} outside the record, never adopted; it cost ${s.from} ${ethers.formatEther(fee + BigInt(x.value))} ETH${made}`,
         );
         if (same(s.from, deployer)) mined++;
       }
     }
     for (const l of this.strayLines) this.log(l);
     return mined;
+  }
+
+  /**
+   * Round 7 (GB): stray `s`, which this node does not show. With its
+   * nonce free it is dropped (null); with the nonce used, the sender's
+   * transaction there (`replacedBy`, once found) replaced it, unless it
+   * is a record entry (null): counted as a mined stray, never adopted.
+   */
+  private async replacement(s: Stray): Promise<any> {
+    const id = `stray ${s.hash} (nonce ${s.nonce}, the re-send of entry #${s.entry})`;
+    if ((await this.count(s.from, "latest")) <= s.nonce) return null;
+    // An entry of the record took the nonce: read by its hash, no scan.
+    const own = this.rec.txs.find(
+      (e) => e.hash && same(e.from, s.from) && e.nonce === s.nonce,
+    );
+    const o = own && (await this.raw("eth_getTransactionByHash", [own.hash]));
+    if (!s.replacedBy && o?.blockNumber && this.sameTx(own!, o)) return null;
+    const t = s.replacedBy
+      ? await this.raw("eth_getTransactionByHash", [s.replacedBy])
+      : await this.findMined({
+          from: s.from,
+          nonce: s.nonce,
+          block: this.rec.fromBlock,
+          label: id,
+        } as TxEntry);
+    const fits =
+      t?.blockNumber && same(t.from, s.from) && Number(t.nonce) === s.nonce;
+    if (s.replacedBy && !fits) {
+      throw new RecordRefusal(
+        `${id}: its replacement ${s.replacedBy} is not shown mined from ${s.from} at nonce ${s.nonce}: refusing`,
+      );
+    }
+    if (!fits || this.rec.txs.some((e) => this.sameTx(e, t))) return null;
+    if (!s.replacedBy) {
+      s.replacedBy = t.hash;
+      this.save();
+    }
+    return t;
   }
 
   /**
