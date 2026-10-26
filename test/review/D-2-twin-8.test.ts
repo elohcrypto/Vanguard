@@ -21,7 +21,10 @@ describe("D-2 round 8: two strays at one nonce count that nonce once", function 
     const { start, stray, hide } = await s.pendingStray();
     await s.drop(stray);
     await s.automine(true);
-    const restore = s.liar(start, hide, "0x4c4b40");
+    // Another transaction than the first re-send (S2 != S1), with gas
+    // enough under coverage too: the recorded gas less one.
+    const gas = BigInt(s.load().txs[0].gas!) - 1n;
+    const restore = s.liar(start, hide, ethers.toQuantity(gas));
     try {
       expect(await h.accepted(s.box.file)).to.contain("outside the record");
     } finally {
