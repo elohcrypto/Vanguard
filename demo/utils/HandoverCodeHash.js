@@ -67,14 +67,26 @@ async function immutableRanges(name) {
  * exact: ZKVerifierIntegrated's only immutable is testingMode, whose
  * honest value is the artifact's zero (HandoverCodeHash.test.ts).
  */
-async function maskedCodeHash(addr, name) {
-  const code = ethers.getBytes(await ethers.provider.getCode(addr));
+async function maskedCodeHash(addr, name, read) {
+  const code = ethers.getBytes(read ?? (await ethers.provider.getCode(addr)));
   for (const r of await immutableRanges(name)) {
     if (r.start + r.length <= code.length) {
       code.fill(0, r.start, r.start + r.length);
     }
   }
   return ethers.keccak256(code);
+}
+
+/**
+ * Review U2 round 6 (G4): `code` (read at a new address) is `name`'s
+ * runtime code, its immutables aside. The exact match needs no build info,
+ * so only a contract with immutables pays for reading it.
+ */
+async function isCodeOf(code, name) {
+  const { deployedBytecode } = await artifacts.readArtifact(name);
+  if (code.toLowerCase() === deployedBytecode.toLowerCase()) return true;
+  const masked = await maskedCodeHash(null, name, code);
+  return masked === ethers.keccak256(deployedBytecode);
 }
 
 /**
@@ -185,6 +197,7 @@ module.exports = {
   expectedHash,
   immutableRanges,
   maskedCodeHash,
+  isCodeOf,
   pinChecks,
   codeHashChecks,
   codeHashLabel,

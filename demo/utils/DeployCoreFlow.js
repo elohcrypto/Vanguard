@@ -64,7 +64,7 @@ async function deployOnchainIDContracts(mod) {
     "KYC Service",
     "KYC verification service",
   );
-  await deployed(kycIssuer, "KYC ClaimIssuer");
+  await deployed(kycIssuer, "KYC ClaimIssuer", "ClaimIssuer");
   mod.state.setContract("kycIssuer", kycIssuer);
 
   await mod.logger.logContractDeployment("KYC_ClaimIssuer", kycIssuer, [
@@ -80,7 +80,7 @@ async function deployOnchainIDContracts(mod) {
     "AML Service",
     "AML screening service",
   );
-  await deployed(amlIssuer, "AML ClaimIssuer");
+  await deployed(amlIssuer, "AML ClaimIssuer", "ClaimIssuer");
   mod.state.setContract("amlIssuer", amlIssuer);
 
   await mod.logger.logContractDeployment("AML_ClaimIssuer", amlIssuer, [

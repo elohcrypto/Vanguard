@@ -92,7 +92,7 @@ async function deployDigitalTokenSystem(mod) {
       await mod.state.getContract("identityRegistry").getAddress(),
       await mod.state.getContract("complianceRules").getAddress(),
     );
-    await deployed(token, "Token (VSC)");
+    await deployed(token, "Token (VSC)", "Token");
     mod.state.digitalToken = token;
     mod.state.setContract("digitalToken", token);
 

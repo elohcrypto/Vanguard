@@ -19,6 +19,7 @@
 
 const { ethers } = require("hardhat");
 const { walletCodeHash } = require("./GovernedCalls");
+const { isCodeOf } = require("./HandoverCodeHash");
 const { CIRCUITS, attestorId } = require("../../scripts/zk/attest");
 const {
   DEFAULT_MINIMUM_ACCREDITATION,
@@ -340,13 +341,22 @@ async function reportStop(state, local) {
  * Round 5 (lane D-3): `c` deployed with code at its address, else a stop
  * naming it (its deploy mined without creating the contract), before
  * anything holds `c`: demo state never gets an address without code.
+ * Round 6 (G4): and that code is `artifact`'s, its immutables aside, with
+ * the masked comparison the handover's code-hash pins use (the record's
+ * own checkCode compares a recorded hash, not an artifact).
  */
-async function deployed(c, name) {
+async function deployed(c, name, artifact = name) {
   await c.waitForDeployment();
   const at = await c.getAddress();
-  if ((await ethers.provider.getCode(at)) === "0x") {
+  const code = await ethers.provider.getCode(at);
+  if (code === "0x") {
     throw new Error(
       `${name} at ${at} has no code: its deploy transaction mined without creating it`,
+    );
+  }
+  if (!(await isCodeOf(code, artifact))) {
+    throw new Error(
+      `${name} at ${at} has code that is not ${artifact}'s: its deploy transaction created another contract`,
     );
   }
   return c;
