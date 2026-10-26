@@ -80,6 +80,11 @@ export class Recorder {
     saveRecord(this.file, this.rec);
   }
 
+  /** Round 5: each stray's line, as the last resume printed it. */
+  get strays(): string[] {
+    return this.chain?.strayLines ?? [];
+  }
+
   /** Transactions sent this run, those sent again at their nonce included. */
   get sent(): number {
     return this.sends + (this.chain?.resent ?? 0);
@@ -343,6 +348,7 @@ export class Recorder {
       );
     }
     delete e.data; // mined: never sent again
+    delete e.resent;
     this.save();
   }
 
@@ -433,8 +439,11 @@ export class Recorder {
       await this.raw("eth_getTransactionCount", [this.rec.deployer, "latest"]),
     );
     // Review D-2: from the record's start, so an empty record and a
-    // dropped first entry are counted too.
-    const accounted = this.rec.startNonce + own.length;
+    // dropped first entry are counted too; round 5: and its strays.
+    const accounted =
+      this.rec.startNonce +
+      own.length +
+      (await this.chain.outside(this.rec.deployer));
     if (nonce !== accounted) {
       throw new RecordRefusal(
         `the deployer's nonce is ${nonce} but the record accounts for ${accounted}: a transaction outside the record; refusing to resume`,

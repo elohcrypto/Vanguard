@@ -109,6 +109,7 @@ export class EntryChain {
         `${why} is unused, and the entry has no recorded payload to send again (recorded before review D-2 round 3): kept in the record, resume against a synced RPC`,
       );
     }
+    const n = this.rec.txs.indexOf(e);
     try {
       const hash = await this.raw("eth_sendTransaction", [
         {
@@ -122,17 +123,86 @@ export class EntryChain {
       ]);
       if (!/^0x[0-9a-fA-F]{64}$/.test(String(hash)))
         throw new Error(`no transaction hash (${hash})`);
+      e.resent = true;
       e.hash = hash;
       e.status = "sent";
       this.save();
       this.resent++;
       this.log(
-        `   📤 #${this.rec.txs.indexOf(e)} ${e.label}: sent again at its nonce ${e.nonce}: ${hash}`,
+        `   📤 #${n} ${e.label}: sent again at its nonce ${e.nonce}: ${hash}`,
       );
-      return "";
     } catch (x: any) {
       return `; the node answered: ${String(x?.message ?? x).split("\n")[0]}`;
     }
+    // Round 5 (lane C F1): the next read is what the signer sent.
+    const t = await this.raw("eth_getTransactionByHash", [e.hash]);
+    if (t) this.stray(e, t, n);
+    return "";
+  }
+
+  /**
+   * Round 5 (lane C F1): `t`, under the hash the record's re-send of `e`
+   * got back, is from `e`'s sender at another nonce: the signer sent it
+   * outside the record. It is recorded as a stray, never as `e`: the hash
+   * is cleared, so `e`'s own transaction is adopted at its nonce.
+   */
+  private stray(e: TxEntry, t: any, n: number): void {
+    const at = Number(t.nonce);
+    if (!e.resent || !same(t.from, e.from) || at === e.nonce) return;
+    const strays = (this.rec.strays ??= []);
+    if (!strays.some((s) => same(s.hash, t.hash))) {
+      const from = ethers.getAddress(t.from);
+      strays.push({ hash: t.hash, from, nonce: at, entry: n, label: e.label });
+    }
+    delete e.hash;
+    delete e.resent;
+    e.status = "sending";
+    this.save();
+    throw new RecordRefusal(
+      `record entry #${n} (${e.label}): ${t.hash} ${t.blockNumber ? "mined" : "sent"} at nonce ${at} from ${t.from}, not as the entry recorded (nonce ${e.nonce} from ${e.from}): a transaction the signer sent at nonce ${at} outside the record, recorded as a stray, never the entry; the entry's own transaction is looked up at its nonce on the next run: fix the signer, then resume against a synced RPC; kept in the record, nothing more is sent`,
+    );
+  }
+
+  /** Round 5: what each stray cost, printed by every resume and at the end. */
+  strayLines: string[] = [];
+
+  /**
+   * Round 5: each stray as the chain shows it (refused unless from its
+   * sender at its nonce), printed; returns the deployer's mined ones,
+   * which hold nonces outside the record's entries.
+   */
+  async outside(deployer: string): Promise<number> {
+    let mined = 0;
+    this.strayLines = [];
+    for (const s of this.rec.strays ?? []) {
+      const t = await this.raw("eth_getTransactionByHash", [s.hash]);
+      if (t && (!same(t.from, s.from) || Number(t.nonce) !== s.nonce)) {
+        throw new RecordRefusal(
+          `stray ${s.hash} (nonce ${s.nonce}, the re-send of entry #${s.entry}): the chain shows it from ${ethers.getAddress(t.from)} at nonce ${Number(t.nonce)}, not as recorded: refusing`,
+        );
+      }
+      const of = `nonce ${s.nonce}: ${s.hash}, the signer's re-send of entry #${s.entry} (${s.label}) at another nonce`;
+      const r = t?.blockNumber
+        ? await this.raw("eth_getTransactionReceipt", [s.hash])
+        : null;
+      if (!r) {
+        this.strayLines.push(
+          `   ⚠️  ${of}: not mined on this node, not counted`,
+        );
+      } else {
+        const fee =
+          BigInt(r.gasUsed) * BigInt(r.effectiveGasPrice ?? t.gasPrice);
+        const made = r.contractAddress
+          ? ` and created ${ethers.getAddress(r.contractAddress)}, which the record does not own`
+          : "";
+        this.strayLines.push(
+          `   ⚠️  ${of}: outside the record, never adopted; it cost ${s.from} ${ethers.formatEther(fee + BigInt(t.value))} ETH${made}`,
+        );
+        if (same(s.from, deployer)) mined++;
+      }
+    }
+    for (const l of this.strayLines) this.log(l);
+    return mined;
   }
 
   /**
@@ -204,6 +274,7 @@ export class EntryChain {
       );
     }
     if (!this.sameTx(e, t)) {
+      this.stray(e, t, n);
       throw new RecordRefusal(
         `record entry #${n} (${e.label}): ${e.hash} mined at nonce ${Number(t.nonce)} from ${t.from}, not as the entry recorded (nonce ${e.nonce} from ${e.from}, its target, value and calldata): the signer did not send it as recorded; kept in the record, nothing more is sent`,
       );

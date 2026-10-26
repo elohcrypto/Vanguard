@@ -149,24 +149,36 @@ describe("D-2 round 4: the entry's nonce and payload, whatever the signer and th
         "kept in the record",
       );
       st.lie = false;
-      for (let i = 0; i < 2; i++) {
-        await expect(h.settle(box.file, load())).to.be.rejectedWith(
-          new RegExp(
-            `mined at nonce ${start + 1} from 0x[0-9a-fA-F]{40}, not as the entry recorded \\(nonce ${start} from .*kept in the record`,
-          ),
-        );
-      }
+      await expect(h.settle(box.file, load())).to.be.rejectedWith(
+        new RegExp(
+          `mined at nonce ${start + 1} from 0x[0-9a-fA-F]{40}, not as the entry recorded \\(nonce ${start} from .*kept in the record`,
+        ),
+      );
+      // Round 5 (lead countersign): a stray, so the next resume adopts
+      // the entry's own transaction at its nonce.
+      await h.settle(box.file, load());
     } finally {
       restore();
     }
     expect(st.sends, "the one re-send, nothing after").to.equal(1);
-    const e = load().txs[0];
+    const [d] = await ethers.getSigners();
+    const rec: any = load();
+    const e = rec.txs[0];
     expect([e.nonce, e.status, !!e.data, e.contract]).to.deep.equal([
       start,
-      "sent",
-      true,
-      undefined,
+      "confirmed",
+      false,
+      ethers.getCreateAddress({ from: d.address, nonce: start }),
     ]);
+    expect(rec.strays.map((x: any) => [x.nonce, x.entry])).to.deep.equal([
+      [start + 1, 0],
+    ]);
+    expect(rec.strays[0].hash, "the stray is never the entry").to.not.equal(
+      e.hash,
+    );
+    expect(await h.nonce(), "the account counts exactly that stray").to.equal(
+      rec.startNonce + rec.txs.length + 1,
+    );
   });
 
   it("A1 (Q03): a receipt whose transaction the node does not show is refused, the entry kept", async function () {

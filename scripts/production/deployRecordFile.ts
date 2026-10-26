@@ -18,10 +18,22 @@ export interface TxEntry {
   /** The latest block when the intent was written: replay reads here. */
   block: number;
   hash?: string;
+  /** D-2 round 5: `hash` came back from the record's own re-send. */
+  resent?: boolean;
   status: "sending" | "sent" | "confirmed" | "reverted";
   contract?: string;
   codeHash?: string;
   gasUsed?: string;
+  label: string;
+}
+
+/** D-2 round 5: what the signer sent for an entry's re-send, at another nonce. */
+export interface Stray {
+  hash: string;
+  from: string;
+  nonce: number;
+  /** The record entry whose re-send it was. */
+  entry: number;
   label: string;
 }
 
@@ -37,6 +49,12 @@ export interface DeployRecord {
   /** Random, made with the record: identity salts derive from it. */
   salt: string;
   txs: TxEntry[];
+  /**
+   * D-2 round 5: transactions outside the record, never an entry, each
+   * counted in its sender's nonce once the chain shows it mined. Older
+   * records have none.
+   */
+  strays?: Stray[];
   contracts: Record<string, string>;
   complete: boolean;
 }

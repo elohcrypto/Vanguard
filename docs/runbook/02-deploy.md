@@ -216,10 +216,25 @@ prints `✅ Deployed: 74 transactions in /tmp/vanguard-runbook/deploy-record.jso
   re-run. An entry becomes the transaction under its hash only when that
   transaction is the entry in every field; one a signer sent at another
   nonce is refused, kept, nothing more sent
-  (`… mined at nonce N from 0x…, not as the entry recorded (nonce M from 0x…, its target, value and calldata): the signer did not send it as recorded; kept in the record, nothing more is sent`),
-  and so is an entry whose recorded payload does not hash to its
-  `dataHash` or whose nonce, value, sender or target is not one, before
-  anything is read or sent
+  (`… mined at nonce N from 0x…, not as the entry recorded (nonce M from 0x…, its target, value and calldata): the signer did not send it as recorded; kept in the record, nothing more is sent`).
+  A re-send the signer sent at another nonce than the entry's (a signer
+  that drops the nonce field, behind an RPC that hid the mined entry) is
+  a stray: the record keeps it under `strays`, never as the entry,
+  clears the entry's hash and refuses once
+  (`… a transaction the signer sent at nonce N outside the record, recorded as a stray, never the entry; …`).
+  Fix or replace the signer, then re-run against a synced RPC: the
+  resume adopts the entry's own transaction at its nonce, counts the
+  stray in the deployer's nonce, and prints it on every resume and after
+  the deploy
+  (`   ⚠️  nonce N: 0x…, the signer's re-send of entry #M (<label>) at another nonce: outside the record, never adopted; it cost 0x… X ETH and created 0x…, which the record does not own`).
+  Its contract is a duplicate nothing points at; its cost is the
+  deployer's. A stray the chain shows from another sender or nonce is
+  refused by name, and a later entry recorded at the stray's nonce is
+  refused as a taken nonce
+  (`0x… used nonce N for a transaction that is not record entry #M (<label>): refusing`),
+  never planned again. An entry whose recorded payload does not hash to
+  its `dataHash`, or whose nonce, value, sender or target is not one, is
+  refused before anything is read or sent
   (`… its recorded data (its keccak256 is not its dataHash): an edited record; kept, nothing sent`).
   A node that shows a used nonce but not its
   transaction, or still does not know the entry once it was sent again,
