@@ -252,13 +252,15 @@ export class Recorder {
     if (next) {
       if (!this.matches(next, tx)) throw this.diverged(next, tx, label);
       if (next.contract) await this.checkCode(next, n);
-      this.cursor++;
-      if (!next.hash) {
-        // F3 LOW-4: its send threw this run and the flow sends it again:
-        // settled as a resume settles an intent, at its recorded nonce.
+      if (next.status === "sending" || next.status === "sent") {
+        // F3 LOW-4: its send (round 5: or its settle) threw this run and
+        // the flow sends it again: settled as a resume settles it, at its
+        // recorded nonce, and behind the cursor only once settled.
         await this.confirm(next, await this.chain.receipt(next));
+        this.cursor++;
         return next.hash!;
       }
+      this.cursor++;
       this.reused++;
       this.log(
         `   ⏭️  #${n} ${next.label}: skipped (recorded${next.contract ? ", code hash ok" : ""})`,
@@ -334,9 +336,9 @@ export class Recorder {
   /** The last sent transaction's receipt into the record. */
   async confirmLast(): Promise<void> {
     if (!this.last) return;
-    const e = this.last;
+    // Round 5: still the last send until its receipt is in the record.
+    await this.confirm(this.last, await this.chain.receipt(this.last));
     this.last = null;
-    await this.confirm(e, await this.chain.receipt(e));
   }
 
   /**
