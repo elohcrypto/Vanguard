@@ -341,6 +341,13 @@ export class Recorder {
   private async confirm(e: TxEntry, r: any): Promise<void> {
     const ok = Number(r.status) === 1;
     const at = ok && r.contractAddress && ethers.getAddress(r.contractAddress);
+    // Round 8 (GA1): a creation's contract is CREATE(sender, nonce).
+    const want = at && ethers.getCreateAddress(e);
+    if (at !== want) {
+      throw new RecordRefusal(
+        `record entry #${this.rec.txs.indexOf(e)} (${e.label}): the receipt names ${at} as the contract created, not ${want}, the CREATE address of ${e.from} at nonce ${e.nonce}: an inconsistent RPC; kept, re-run against a synced RPC`,
+      );
+    }
     // Round 6 (G6): read first, so an error leaves `e` as it was.
     const code = at && (await this.raw("eth_getCode", [at, "latest"]));
     // Round 7 (GA): a receipt without code is the node's lag, not a hash.
