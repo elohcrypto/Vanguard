@@ -41,9 +41,12 @@ describe("D-2 round 5: a re-send mined at another nonce is a stray, never the en
    * until the first send, and a signer that drops the nonce field, so the
    * re-send mines at `start + 1`: a stray deploy.
    */
-  async function strayed() {
+  async function strayed(held = false) {
     const start = await h.nonce();
     await sendOne();
+    const automine = (on: boolean) =>
+      network.provider.request({ method: "evm_setAutomine", params: [on] });
+    if (held) await automine(false); // the node holds the stray pending
     const own = load().txs[0].hash!;
     const st = { lie: true, sends: 0 };
     const restore = node(async (a, request) => {
@@ -66,6 +69,10 @@ describe("D-2 round 5: a re-send mined at another nonce is a stray, never the en
       err = await accepted();
     } finally {
       restore();
+      if (held) {
+        await automine(true);
+        await network.provider.request({ method: "evm_mine" });
+      }
     }
     return { start, own, err, sends: st.sends };
   }
@@ -179,6 +186,19 @@ describe("D-2 round 5: a re-send mined at another nonce is a stray, never the en
       "sent",
       true,
     ]);
+  });
+
+  it("F2: a stray the node still holds pending is refused at once by name, and counted once mined", async function () {
+    const { start, err } = await strayed(true);
+    const rec: any = load();
+    expect(err).to.contain(
+      `${rec.strays?.[0]?.hash} sent at nonce ${start + 1} from`,
+    );
+    expect(err).to.contain(
+      `a transaction the signer sent at nonce ${start + 1} outside the record`,
+    );
+    expect(await accepted(), "once it mined").to.equal("accepted");
+    expect(await h.nonce()).to.equal(start + 2);
   });
 
   it("F2: with a stray recorded, a deployer transaction the record does not hold still refuses", async function () {
