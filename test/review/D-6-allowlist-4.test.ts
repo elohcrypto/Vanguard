@@ -115,6 +115,32 @@ describe("D-6 round 4: off a dev chain only the methods the deploy calls reach t
     );
   });
 
+  it("on the dev chain a method object serializing to evm_mine is refused before the node", async function () {
+    const rec = await h.fresh(box.file);
+    const p: any = network.provider;
+    const request = p.request.bind(p);
+    const height = () => request({ method: "eth_blockNumber" });
+    const before = await height();
+    // an HTTP transport sends what JSON.stringify makes of the method
+    p.request = (a: any) => request(JSON.parse(JSON.stringify(a)));
+    const r = new Recorder(box.file, rec, 1, () => {});
+    let err = "";
+    try {
+      await r.install();
+      err = await p
+        .request({ method: { toJSON: () => "evm_mine" }, params: [] })
+        .then(
+          () => "",
+          (e: Error) => e.message,
+        );
+    } finally {
+      r.remove();
+      p.request = request;
+    }
+    expect(err).to.equal("a JSON-RPC method that is not a string refused");
+    expect(await height(), "nothing mined").to.equal(before);
+  });
+
   it("an issuer's claim is signed under the record off 31337", async function () {
     const [d, issuer] = await ethers.getSigners();
     const ci = await (

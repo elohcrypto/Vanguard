@@ -182,6 +182,22 @@ describe("F-3 round 4: option 1a's PrivacyManager, rule administrator and custod
     });
   }
 
+  it("a step-1 stop keeps the half-wired PrivacyManager out of demo state", async function () {
+    const spec = {
+      name: "PrivacyManager",
+      fn: "setMinimumAccreditation",
+      target: () => at.privacyManager,
+      match: () => true,
+      edit: skip,
+    };
+    const [{ ok, text, state }, hits] = await fresh(() => editing(spec, run1a));
+    expect(hits, "the call was made and skipped once").to.equal(1);
+    expect(ok).to.equal(false);
+    expect(text).to.contain("STOPPED AT STEP 1 OF 5");
+    // deployPrivacyPair reuses a PrivacyManager it finds in state
+    expect(state.getContract("privacyManager")).to.equal(undefined);
+  });
+
   // A skipped demo updateLockRequirement leaves the chain as it was: the
   // manager's constructor sets the same D45 amounts (cap/4, cap/2, cap).
   // A lock set to another amount is what the read-back can see.

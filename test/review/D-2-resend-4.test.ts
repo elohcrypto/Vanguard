@@ -169,6 +169,61 @@ describe("D-2 round 4: the entry's nonce and payload, whatever the signer and th
     ]);
   });
 
+  it("A1 (Q03): a receipt whose transaction the node does not show is refused, the entry kept", async function () {
+    const start = await h.nonce();
+    await sendOne();
+    const { hash } = load().txs[0];
+    const restore = node(async (a) =>
+      a.method === "eth_getTransactionByHash" && a.params[0] === hash
+        ? null
+        : undefined,
+    );
+    try {
+      await expect(h.settle(box.file, load())).to.be.rejectedWith(
+        `record entry #0 (new IdentityRegistry): ${hash} has a receipt but the node does not show the transaction: an inconsistent RPC; kept in the record`,
+      );
+    } finally {
+      restore();
+    }
+    const e = load().txs[0];
+    expect([e.hash, e.status, !!e.data, e.contract]).to.deep.equal([
+      hash,
+      "sent",
+      true,
+      undefined,
+    ]);
+    expect(await created(start), "the one deploy").to.have.length(1);
+  });
+
+  it("A1 (Q38): the entry's transaction shown with another target is refused, the entry kept", async function () {
+    const [d] = await ethers.getSigners();
+    const start = await h.nonce();
+    await sendOne();
+    const { hash } = load().txs[0];
+    const restore = node(async (a, request) =>
+      a.method === "eth_getTransactionByHash" && a.params[0] === hash
+        ? { ...(await request(a)), to: d.address }
+        : undefined,
+    );
+    try {
+      await expect(h.settle(box.file, load())).to.be.rejectedWith(
+        new RegExp(
+          `record entry #0 \\(new IdentityRegistry\\): ${hash} mined at nonce ${start} from 0x[0-9a-fA-F]{40}, not as the entry recorded \\(nonce ${start} from .*kept in the record, nothing more is sent`,
+        ),
+      );
+    } finally {
+      restore();
+    }
+    const e = load().txs[0];
+    expect([e.hash, e.status, !!e.data, e.contract]).to.deep.equal([
+      hash,
+      "sent",
+      true,
+      undefined,
+    ]);
+    expect(await created(start), "no second contract").to.have.length(1);
+  });
+
   it("A4: a payload that does not match its recorded hash is refused, nothing sent", async function () {
     const start = await h.nonce();
     await sendOne(true);
