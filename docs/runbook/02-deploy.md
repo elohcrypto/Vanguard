@@ -171,7 +171,7 @@ prints `✅ Deployed: 74 transactions in /tmp/vanguard-runbook/deploy-record.jso
 `✅ Preflight passed: every check before the ceremony's first transaction holds (voters are checked by the full phase)`.
 
 - Before that line the deploy reads its wiring back from chain
-  (`🔗 Wiring read back from chain (35 links):`,
+  (`🔗 Wiring read back from chain (47 links):`,
   then one `   ✅ <link>` each: the KeyManager pin on the identity
   factory, agents, rule administrators (the deployer's on VGT until the
   handover too), the identity registry's ComplianceRules, VSC's
@@ -183,7 +183,14 @@ prints `✅ Deployed: 74 transactions in /tmp/vanguard-runbook/deploy-record.jso
   constructor arguments a getter shows are links too: the issuers' and
   ComplianceRules' owner (until the handover), the custody manager's
   bank (ops) and VSC, governance's bound registry, ComplianceRules,
-  OracleManager and VSC, and the escrow factory's fee wallet.
+  OracleManager and VSC, and the escrow factory's fee wallet. So is
+  every address argument that names another contract
+  (`<Contract> <field> as deployed`): the list oracles' OracleManager,
+  the custody manager's identity registry (read right after its deploy,
+  wherever it is deployed), the escrow factory's VSC, identity registry
+  and ComplianceRules, governance's VGT and identity registry, and
+  VSC's and VGT's identity registry and compliance (the last six until
+  the handover: their owners may move them).
   Each new contract is read before anything holds it: no code at its
   address, or code that is not its compiled artifact's (immutables
   aside), stops that deploy naming it
@@ -228,7 +235,9 @@ prints `✅ Deployed: 74 transactions in /tmp/vanguard-runbook/deploy-record.jso
   sends again what it signed at that nonce, or a fee bump of it. A nonce
   mines once, so the entry deploys once. Past 5000 blocks or a taken
   nonce is refused: find that nonce's transaction on an explorer and fix
-  the record by hand. Another transaction still pending at the entry's
+  the record by hand. An entry sent again keeps the hash of its own
+  earlier send (`sentHash`) and is read by that hash before any block
+  scan, so a stray at the re-send (below) does not need one. Another transaction still pending at the entry's
   nonce is refused too
   (`… is pending …: wait for it to mine, then re-run`): wait, then
   re-run. An entry becomes the transaction under its hash only when that
@@ -243,16 +252,20 @@ prints `✅ Deployed: 74 transactions in /tmp/vanguard-runbook/deploy-record.jso
   at its own nonce. A creation whose receipt the node shows but whose
   code it does not yet (a lagging node) pins nothing
   (`record entry #N (<label>): 0x… has a receipt but no code on this node: a lagging RPC; kept, re-run against a synced RPC`):
-  re-run against a synced RPC; the code is read again.
+  re-run against a synced RPC; the code is read again. A receipt that
+  names another contract than the CREATE address of the entry's sender
+  and nonce (a lying node) pins nothing either
+  (`record entry #N (<label>): the receipt names 0x… as the contract created, not 0x…, the CREATE address of 0x… at nonce N: an inconsistent RPC; kept, re-run against a synced RPC`):
+  re-run against a synced RPC.
   A re-send the signer sent at another nonce than the entry's (a signer
   that drops the nonce field, behind an RPC that hid the mined entry) is
-  a stray: the record keeps it under `strays`, never as the entry,
-  clears the entry's hash and refuses once
+  a stray: the record keeps it under `strays` (with `block`, the head
+  before that re-send), never as the entry, clears the entry's hash and
+  refuses once
   (`… a transaction the signer sent at nonce N outside the record, recorded as a stray, never the entry; …`).
   Fix or replace the signer, then re-run against a synced RPC: the
   resume adopts the entry's own transaction at its nonce, counts the
-  stray in the deployer's nonce, and prints it on every resume and after
-  the deploy
+  stray in the deployer's nonce, and prints it once on every resume
   (`   ⚠️  nonce N: 0x…, the signer's re-send of entry #M (<label>) at another nonce: outside the record, never adopted; it cost 0x… X ETH and created 0x…, which the record does not own`).
   Its contract is a duplicate nothing points at; its cost is the
   deployer's. A stray the chain shows from another sender or nonce is
@@ -272,15 +285,28 @@ prints `✅ Deployed: 74 transactions in /tmp/vanguard-runbook/deploy-record.jso
   (`stray 0x… (nonce N, the re-send of entry #M) is pending on this node: wait for it to mine or drop, then re-run`):
   wait for it to mine, or for the node to drop it, then re-run. A stray
   that stays pending: replace it at its nonce from the deployer (a
-  cancel to self), then resume. The replacement is recorded under the
+  cancel to self), keep that cancel's hash, then resume. The replacement
+  is found by a block scan from the stray's `block` (an older row: the
+  record's `fromBlock`), recorded under the
   stray (`replacedBy`), counted as a mined stray and printed on every
   resume, never an entry
   (`   ⚠️  nonce N: stray 0x… replaced by 0x…, outside the record, never adopted; it cost 0x… X ETH`).
+  More than 5000 blocks after the stray the scan is refused and asks for
+  the hash
+  (`… more than 5000 blocks after the intent (block N); pass the hash of the transaction that filled it as DEPLOY_FILL_HASH=<hash>, then resume`):
+  re-run with `DEPLOY_FILL_HASH=0x…` (the cancel's hash) set. It is read
+  by that hash and must be mined, from the stray's sender at its nonce,
+  and no record entry or stray, else it is refused by name
+  (`DEPLOY_FILL_HASH 0x… is <what it is>: refusing`).
   One the node no longer shows is trusted as gone only while its sender
   has nothing pending the node hides
   (`… is not shown by this node but the deployer has N pending transactions it does not show: a lagging or inconsistent RPC; wait or re-run against a synced RPC`);
-  then it prints `…: dropped, not counted`, and the next entry takes its
-  nonce. A dropped stray below an entry's nonce leaves a gap no re-send
+  the record's own sent entries the node shows pending in that range
+  are no hidden transactions: the resume waits for them as for any sent
+  entry. Then it prints `…: dropped, not counted`, and the next entry
+  takes its nonce. Two strays at one nonce (the same re-send answered
+  twice) count that nonce once: the one the node does not show prints
+  `…: dropped, its nonce taken by stray 0x…`. A dropped stray below an entry's nonce leaves a gap no re-send
   fills
   (`… is dropped and its nonce is unfilled below record entry #K's nonce M: fill nonce N from the deployer (a cancel to self), then resume; …`):
   fill it the same way (a cancel to self at nonce N); the fill is
@@ -309,9 +335,16 @@ prints `✅ Deployed: 74 transactions in /tmp/vanguard-runbook/deploy-record.jso
   other method or letter case is refused
   (`<method> refused on chain N: no dev-node call off a dev chain (only the calls the deploy makes reach the node)`).
   Every resume counts the deployer's nonce from `startNonce`, an empty
-  record included
-  (`the deployer's nonce is N but the record accounts for M: a transaction outside the record; refusing to resume`). A transaction stuck in the mempool: `signer.js
-  bump` (section 1a).
+  record included, and names each nonce no entry and no stray holds
+  (`the deployer's nonce is N but the record accounts for M: a transaction outside the record; refusing to resume (nonce K is no entry's and no stray's: find that transaction and record it by hand)`).
+  A re-send writes its intent (the entry and the head block) before it
+  goes out, so a re-send the signer answered at another nonce while the
+  run was killed is found at such a nonce and recorded as the entry's
+  stray
+  (`   ⚠️  nonce K: 0x…, the signer's re-send of entry #M (<label>) at another nonce, found on chain from its recorded intent (the run that sent it stopped before recording it): recorded as a stray`).
+  Any other transaction there keeps the refusal: find it on an explorer
+  (the deployer at nonce K) and record it by hand. A transaction stuck
+  in the mempool: `signer.js bump` (section 1a).
 - The ceremony (section 5) takes the escrow factory by vote, hands both
   list oracles (`"oracles"`; the unbound whitelist oracle prints
   `   ⚠️  oracle 0x… is not bound on chain; handed over anyway`) to ops
