@@ -4,7 +4,7 @@
 // sender is checked, N17 a stray the node shows without a receipt is not
 // counted, N31 more than one stray is counted, N28 the lag refusal leaves
 // the in-memory entry unchanged. Each passes on 3c1fcdf and fails under
-// its mutant.
+// its mutant. N30, N16 and V16 (round 8's lever) are pinned the same way.
 import { expect } from "chai";
 import { ethers, network } from "hardhat";
 import { Recorder } from "../../scripts/production/deployRecord";
@@ -161,5 +161,86 @@ describe("D-2 round 8: pins for the round-7 stray survivors", function () {
       undefined,
     ]);
     expect(e.hash, "its hash kept").to.match(/^0x[0-9a-f]{64}$/);
+  });
+
+  it("N30: a reverted creation is recorded reverted with no code read, even when its receipt names the CREATE address (as geth's receipts do)", async function () {
+    const [d] = await ethers.getSigners();
+    const n = await h.nonce();
+    const at = ethers.getCreateAddress({ from: d.address, nonce: n });
+    const restore = h.node(async (a, request) => {
+      if (a.method !== "eth_getTransactionReceipt") return undefined;
+      const r = await request(a);
+      return r && r.status === "0x0" && !r.contractAddress
+        ? { ...r, contractAddress: at }
+        : r;
+    });
+    const r = new Recorder(s.box.file, await h.fresh(s.box.file), 1, () => {});
+    let err = "";
+    try {
+      await r.install();
+      await s.automine(false); // under automine hardhat refuses the send
+      const F = await ethers.getContractFactory("VanguardGovernance");
+      const zero = ethers.ZeroAddress;
+      await F.deploy(zero, zero, zero, zero, zero, zero, 1, {
+        gasLimit: 3_000_000,
+      });
+      await network.provider.request({ method: "evm_mine" });
+      await r.finish().catch((e: Error) => (err = e.message));
+    } finally {
+      r.remove();
+      restore();
+    }
+    expect(err, "no lag refusal").to.equal("");
+    expect(r.rec.txs.map((e) => [e.status, e.contract])).to.deep.equal([
+      ["reverted", undefined],
+    ]);
+    expect(await s.resume()).to.equal("accepted");
+  });
+
+  it("N16: a stray's cost line takes the receipt's effective gas price, not the transaction's gasPrice field", async function () {
+    const { d, start, rec } = await base();
+    const t = await (
+      await d.sendTransaction({ to: d.address, nonce: start + 1, value: 7 })
+    ).wait();
+    rec.strays = [row(d, t!.hash, start + 1)];
+    saveRecord(s.box.file, rec);
+    const restore = h.node(async (a, request) => {
+      if (a.method !== "eth_getTransactionByHash" || a.params[0] !== t!.hash)
+        return undefined;
+      const x = await request(a);
+      return { ...x, gasPrice: ethers.toQuantity(BigInt(x.gasPrice) * 2n) };
+    });
+    const lines: string[] = [];
+    try {
+      expect(await s.resume(lines)).to.equal("accepted");
+    } finally {
+      restore();
+    }
+    const fee = t!.gasUsed * t!.gasPrice + 7n;
+    expect(lines.join("\n")).to.contain(
+      `it cost ${d.address} ${ethers.formatEther(fee)} ETH`,
+    );
+  });
+
+  it("V16: an entry whose kept hash (sentHash) is another mined transaction of the deployer's is adopted by the scan at its nonce, never as that transaction", async function () {
+    const [d] = await ethers.getSigners();
+    // An older transaction of the deployer's, before the record's start.
+    const older = (await (await d.sendTransaction({ to: d.address })).wait())!
+      .hash;
+    const start = await h.nonce();
+    await h.sendOne(s.box.file);
+    const rec = s.load();
+    const own = rec.txs[0].hash!;
+    rec.txs[0].hash = older; // the signer answered the send with it
+    saveRecord(s.box.file, rec);
+    const restore = s.liar(start, older);
+    try {
+      expect(await h.accepted(s.box.file)).to.contain("outside the record");
+    } finally {
+      restore();
+    }
+    expect(s.load().txs[0].sentHash, "kept").to.equal(older);
+    expect(await s.resume()).to.equal("accepted");
+    expect(s.load().txs[0].hash, "its own transaction").to.equal(own);
   });
 });
