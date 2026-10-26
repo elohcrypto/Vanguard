@@ -10,6 +10,7 @@
 import { expect } from "chai";
 import { ethers, network } from "hardhat";
 import { Recorder } from "../../scripts/production/deployRecord";
+import { loadRecord } from "../../scripts/production/deployRecordFile";
 import * as h from "../helpers/deployRecordFlow";
 
 const { signClaim } = require("../../demo/utils/Kyc");
@@ -46,6 +47,7 @@ const REFUSED = [
   "eth_subscribe",
   "eth_unsubscribe",
   "eth_requestAccounts",
+  "eth_getBalance",
   "eth_importRawKey",
   "eth_mine",
   "eth_setCoinbase",
@@ -113,6 +115,39 @@ describe("D-6 round 4: off a dev chain only the methods the deploy calls reach t
     expect(reached.filter((m) => m !== "eth_chainId")).to.deep.equal(
       CALLED.filter((m) => m !== "eth_chainId"),
     );
+  });
+
+  it("off a dev chain a recorded send reaches the node at its recorded nonce", async function () {
+    const [d] = await ethers.getSigners();
+    const rec = await h.fresh(box.file);
+    rec.chainId = 11155111;
+    const p: any = network.provider;
+    const request = p.request.bind(p);
+    const sent: any[] = [];
+    p.request = (a: any) => {
+      if (a.method === "eth_chainId") return Promise.resolve("0xaa36a7");
+      if (a.method === "eth_sendTransaction") sent.push(a.params[0]);
+      return request(a);
+    };
+    const r = new Recorder(box.file, rec, 1, () => {});
+    let hash = "";
+    try {
+      await r.install();
+      hash = await p.request({
+        method: "eth_sendTransaction",
+        params: [{ from: d.address, to: h.AGENT, value: "0x0" }],
+      });
+      await r.finish();
+    } finally {
+      r.remove();
+      p.request = request;
+    }
+    expect(sent.map((t) => t.nonce)).to.deep.equal([
+      ethers.toQuantity(rec.startNonce),
+    ]);
+    expect(
+      loadRecord(box.file)!.txs.map((t) => [t.hash, t.status]),
+    ).to.deep.equal([[hash, "confirmed"]]);
   });
 
   it("on the dev chain a method object serializing to evm_mine is refused before the node", async function () {

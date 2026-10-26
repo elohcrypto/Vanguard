@@ -1,10 +1,11 @@
-import { ethers } from "hardhat";
+import { ethers, network } from "hardhat";
 import * as fs from "fs";
 import * as os from "os";
 import * as path from "path";
 import { Recorder } from "../../scripts/production/deployRecord";
 import {
   DeployRecord,
+  loadRecord,
   saveRecord,
 } from "../../scripts/production/deployRecordFile";
 
@@ -98,3 +99,63 @@ export async function settle(file: string, rec: DeployRecord): Promise<void> {
 
 export const nonce = async (i = 0) =>
   ethers.provider.getTransactionCount((await ethers.getSigners())[i]);
+
+export type Hook = (a: any, request: any) => Promise<any> | undefined;
+
+/** The provider with `hook` in front (undefined: the node answers). */
+export function node(hook: Hook): () => void {
+  const p: any = network.provider;
+  const request = p.request.bind(p);
+  const send = p.send?.bind(p);
+  const shim = async (a: any) => {
+    const r = await hook(a, request);
+    return r !== undefined ? r : request(a);
+  };
+  p.request = shim;
+  if (send)
+    p.send = (m: string, x?: unknown[]) => shim({ method: m, params: x ?? [] });
+  return () => {
+    p.request = request;
+    if (send) p.send = send;
+  };
+}
+
+/** The first signer's contracts created from nonce `start` on. */
+export async function created(start: number): Promise<string[]> {
+  const [d] = await ethers.getSigners();
+  const out: string[] = [];
+  for (let n = start; n < (await nonce()); n++) {
+    const a = ethers.getCreateAddress({ from: d.address, nonce: n });
+    if ((await ethers.provider.getCode(a)) !== "0x") out.push(a);
+  }
+  return out;
+}
+
+/** Run 1 on `file`: one IdentityRegistry deploy; `refuse`: the signer refuses it. */
+export async function sendOne(file: string, refuse = false): Promise<void> {
+  let once = refuse;
+  const restore = node(async (a) => {
+    if (a.method !== "eth_sendTransaction" || !once) return undefined;
+    once = false;
+    throw new Error("refused by the operator (#1)");
+  });
+  const r1 = new Recorder(file, await fresh(file), 1, quiet);
+  try {
+    await r1.install();
+    await (
+      await ethers.getContractFactory("IdentityRegistry")
+    )
+      .deploy()
+      .catch(() => {});
+  } finally {
+    r1.remove();
+    restore();
+  }
+}
+
+/** The record at `file` settled: "accepted", else the refusal. */
+export const accepted = (file: string): Promise<string> =>
+  settle(file, loadRecord(file)!).then(
+    () => "accepted",
+    (e: Error) => e.message,
+  );
