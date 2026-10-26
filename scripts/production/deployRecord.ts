@@ -157,7 +157,6 @@ export class Recorder {
   }
 
   private async handle(method: string, params: any[]): Promise<any> {
-    if (this.refused && method === "eth_sendTransaction") throw this.refused;
     try {
       return await this.dispatch(method, params);
     } catch (e) {
@@ -233,7 +232,21 @@ export class Recorder {
     );
   }
 
-  private async sendTx(tx: any): Promise<string> {
+  private queue: Promise<unknown> = Promise.resolve();
+
+  /**
+   * Round 5 (G4 R4): one send at a time. A send starts once the one
+   * before it is saved and sent or refused, so two in flight never read
+   * one pending nonce; each caller gets its own answer.
+   */
+  private sendTx(tx: any): Promise<string> {
+    const run = this.queue.then(() => this.sendOne(tx));
+    this.queue = run.catch(() => {});
+    return run;
+  }
+
+  private async sendOne(tx: any): Promise<string> {
+    if (this.refused) throw this.refused;
     for (const [role, a] of Object.entries(this.external)) {
       if (same(a, tx.from)) {
         throw new RecordRefusal(
