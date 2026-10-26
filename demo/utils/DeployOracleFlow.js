@@ -17,6 +17,7 @@ const {
   displayProgress,
 } = require("./DisplayHelpers");
 const { missingWiring, reportStop, deployed } = require("./DeployWiring");
+const { ORACLE_NODES, ORACLE_REPUTATION } = require("./DeployDefaults");
 
 /**
  * Deploy Oracle Management System
@@ -75,33 +76,19 @@ async function deployOracleSystem(mod) {
     // this.state.oracleConfig; both used to exist only in the menu-only
     // OracleModule.deployOracleSystem, which never bound the blacklist
     // oracle into ComplianceRules. Folded here so there is one deploy path.
-    // Reputation 500: above MIN_REPUTATION, so ops may unpause (4.4).
     displayProgress("Registering oracles in manager...");
-    for (const [key, i, role, about] of [
-      [
-        "kyc",
-        1,
-        "KYC_ORACLE",
-        "KYC verification oracle for identity validation",
-      ],
-      [
-        "aml",
-        2,
-        "AML_ORACLE",
-        "AML screening oracle for anti-money laundering checks",
-      ],
-      [
-        "compliance",
-        3,
-        "COMPLIANCE_ORACLE",
-        "Compliance validation oracle for regulatory checks",
-      ],
-    ]) {
+    for (const [key, i, role, about] of ORACLE_NODES) {
       const address = mod.state.signers[i].address;
       await (
-        await oracleManager.registerOracle(address, role, about, 500)
+        await oracleManager.registerOracle(
+          address,
+          role,
+          about,
+          ORACLE_REPUTATION,
+        )
       ).wait();
-      mod.state.oracleConfig.set(key, { address, role, reputation: 500 });
+      const reputation = Number(ORACLE_REPUTATION);
+      mod.state.oracleConfig.set(key, { address, role, reputation });
     }
     console.log("   ✅ KYC/AML/Compliance oracles registered (3)");
 

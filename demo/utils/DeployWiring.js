@@ -26,6 +26,7 @@ const {
   issuerKey,
 } = require("./AttestationFlow");
 const { lockAmounts } = require("./CustodyFlow");
+const { ORACLE_NODES, ORACLE_REPUTATION } = require("./DeployDefaults");
 
 const same = (a, b) => String(a).toLowerCase() === String(b).toLowerCase();
 
@@ -161,9 +162,12 @@ async function wiring(state, flow) {
       "oracle nodes registered on OracleManager (until the handover)",
       async () => {
         if (!same(await om.owner(), deployer)) return true;
-        for (const i of [1, 2, 3]) {
-          if (!(await om.isRegisteredOracle(state.signers[i].address)))
+        // Round 5 (G4 F4): with the deploy's name, description, reputation.
+        for (const [, i, role, about] of ORACLE_NODES) {
+          const o = await om.oracles(state.signers[i].address);
+          if (!o.registered || o.name !== role || o.description !== about)
             return false;
+          if (o.reputation !== ORACLE_REPUTATION) return false;
         }
         return true;
       },

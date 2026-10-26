@@ -46,4 +46,31 @@ const DEFAULT_BLOCKED_COUNTRIES = [
   760, // Syria
 ];
 
-module.exports = { DEFAULT_ALLOWED_COUNTRIES, DEFAULT_BLOCKED_COUNTRIES };
+/**
+ * The deploy's three oracle nodes (option 31): key, wallet index, role and
+ * description, each registered at ORACLE_REPUTATION, above MIN_REPUTATION
+ * so ops may unpause it (Task 4.4). DeployWiring reads them back.
+ */
+const ORACLE_NODES = [
+  ["kyc", 1, "KYC_ORACLE", "KYC verification oracle for identity validation"],
+  [
+    "aml",
+    2,
+    "AML_ORACLE",
+    "AML screening oracle for anti-money laundering checks",
+  ],
+  [
+    "compliance",
+    3,
+    "COMPLIANCE_ORACLE",
+    "Compliance validation oracle for regulatory checks",
+  ],
+];
+const ORACLE_REPUTATION = 500n;
+
+module.exports = {
+  DEFAULT_ALLOWED_COUNTRIES,
+  DEFAULT_BLOCKED_COUNTRIES,
+  ORACLE_NODES,
+  ORACLE_REPUTATION,
+};
