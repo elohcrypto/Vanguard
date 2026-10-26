@@ -212,4 +212,44 @@ describe("D-2 round 7: a stray replaced at its nonce is counted, never adopted",
     );
     expect(load().strays![0].replacedBy, "no replacement").to.equal(undefined);
   });
+  it("U05: an entry's own transaction mined at a dropped stray's nonce, recorded hashless, is adopted as the entry, never a replacement; counted once", async function () {
+    const [d] = await ethers.getSigners();
+    const { start, stray } = await pendingStray();
+    await network.provider.request({
+      method: "hardhat_dropTransaction",
+      params: [stray],
+    });
+    await automine(true);
+    // Its intent was saved, then the run died before the hash was: the
+    // entry is hashless while its transaction mined at the stray's nonce.
+    const { data } = await (
+      await ethers.getContractFactory("KeyManager")
+    ).getDeployTransaction();
+    const block = await ethers.provider.getBlockNumber();
+    const mined = await (
+      await d.sendTransaction({ data, nonce: start + 1 })
+    ).wait();
+    const rec = load();
+    rec.txs.push({
+      from: d.address,
+      to: null,
+      value: "0",
+      dataHash: ethers.keccak256(data),
+      data,
+      nonce: start + 1,
+      block,
+      status: "sending",
+      label: "new KeyManager",
+    });
+    saveRecord(box.file, rec);
+    const lines: string[] = [];
+    expect(await resume(lines)).to.equal("accepted");
+    expect(load().txs[1].hash, "adopted as the entry").to.equal(mined!.hash);
+    expect(load().strays![0].replacedBy, "no replacement").to.equal(undefined);
+    expect(lines.join("\n")).to.contain(
+      `${stray}, the signer's re-send of entry #0 (new IdentityRegistry) at another nonce: dropped, not counted`,
+    );
+    expect(await h.nonce(), "startNonce + own entries").to.equal(start + 2);
+    expect(await resume(), "a re-run").to.equal("accepted");
+  });
 });
