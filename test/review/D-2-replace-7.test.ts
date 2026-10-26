@@ -252,4 +252,61 @@ describe("D-2 round 7: a stray replaced at its nonce is counted, never adopted",
     expect(await h.nonce(), "startNonce + own entries").to.equal(start + 2);
     expect(await resume(), "a re-run").to.equal("accepted");
   });
+  /** An intent for a KeyManager deploy at `nonce`, as the record saves it. */
+  async function intent(nonce: number, extra: object = {}) {
+    const [d] = await ethers.getSigners();
+    const { data } = await (
+      await ethers.getContractFactory("KeyManager")
+    ).getDeployTransaction();
+    const rec = load();
+    rec.txs.push({
+      from: d.address,
+      to: null,
+      value: "0",
+      dataHash: ethers.keccak256(data),
+      data,
+      nonce,
+      block: await ethers.provider.getBlockNumber(),
+      status: "sending",
+      label: "new KeyManager",
+      ...extra,
+    });
+    saveRecord(box.file, rec);
+  }
+
+  it("U13: an unsent intent AT a dropped stray's free nonce is no gap: the stray is dropped, the intent sent at its nonce", async function () {
+    const { start, stray } = await pendingStray();
+    await network.provider.request({
+      method: "hardhat_dropTransaction",
+      params: [stray],
+    });
+    await automine(true);
+    await intent(start + 1);
+    const lines: string[] = [];
+    expect(await resume(lines)).to.equal("accepted");
+    expect(lines.join("\n")).to.contain(
+      `${stray}, the signer's re-send of entry #0 (new IdentityRegistry) at another nonce: dropped, not counted`,
+    );
+    expect(load().txs.map((t) => [t.nonce, t.status])).to.deep.equal([
+      [start, "confirmed"],
+      [start + 1, "confirmed"],
+    ]);
+    expect(await h.nonce()).to.equal(start + 2);
+  });
+
+  it("U10: an entry at the stray's nonce whose hash is not that entry is no shortcut: the fill there is recorded as the replacement, the entry refused by name", async function () {
+    const [d] = await ethers.getSigners();
+    const { start, stray } = await pendingStray();
+    const fill = await replace(stray, { to: d.address, nonce: start + 1 });
+    const other = await (await d.sendTransaction({ to: h.AGENT })).wait();
+    await intent(start + 1, { hash: other!.hash, status: "sent" });
+    const err = await resume();
+    expect(err).to.contain(
+      `record entry #1 (new KeyManager): ${other!.hash} mined at nonce ${start + 2}`,
+    );
+    expect(err).to.contain("not as the entry recorded");
+    expect(load().strays![0].replacedBy, "the fill, by the scan").to.equal(
+      fill,
+    );
+  });
 });
