@@ -149,6 +149,21 @@ export class EntryChain {
   private stray(e: TxEntry, t: any, n: number): void {
     const at = Number(t.nonce);
     if (!e.resent || !same(t.from, e.from) || at === e.nonce) return;
+    // Round 6 (G1): not a transaction outside the record, so no stray.
+    const k = this.accounted(t.hash, t.from, at, e);
+    if (k !== null) {
+      const known =
+        k >= 0
+          ? `record entry #${k}'s transaction`
+          : `an older transaction (nonce ${at}, before the record's startNonce ${this.rec.startNonce})`;
+      delete e.hash;
+      delete e.resent;
+      e.status = "sending";
+      this.save();
+      throw new RecordRefusal(
+        `record entry #${n} (${e.label}): the signer answered its re-send with ${t.hash}, ${known}, not a new one: nothing recorded as a stray; the entry's own transaction is looked up at its nonce on the next run: fix the signer, then resume against a synced RPC; kept in the record, nothing more is sent`,
+      );
+    }
     const strays = (this.rec.strays ??= []);
     if (!strays.some((s) => same(s.hash, t.hash))) {
       const from = ethers.getAddress(t.from);
@@ -163,6 +178,18 @@ export class EntryChain {
     );
   }
 
+  /**
+   * Round 6 (G1): the entry whose transaction `hash` is (its index), or
+   * -1 when it is the deployer's from before the record's start (`at`
+   * below startNonce), or null: only then is it outside the record.
+   */
+  private accounted(hash: string, from: string, at: number, not?: TxEntry) {
+    const k = this.rec.txs.findIndex((x) => x !== not && same(x.hash, hash));
+    if (k >= 0) return k;
+    const older = same(from, this.rec.deployer) && at < this.rec.startNonce;
+    return older ? -1 : null;
+  }
+
   /** Round 5: what each stray cost, printed by every resume and at the end. */
   strayLines: string[] = [];
 
@@ -175,13 +202,24 @@ export class EntryChain {
     let mined = 0;
     this.strayLines = [];
     for (const s of this.rec.strays ?? []) {
+      const of = `nonce ${s.nonce}: ${s.hash}, the signer's re-send of entry #${s.entry} (${s.label}) at another nonce`;
+      const id = `stray ${s.hash} (nonce ${s.nonce}, the re-send of entry #${s.entry})`;
+      const k = this.accounted(s.hash, s.from, s.nonce);
+      if (k !== null) {
+        const known =
+          k >= 0
+            ? `record entry #${k}'s transaction`
+            : `below the record's startNonce ${this.rec.startNonce}`;
+        throw new RecordRefusal(
+          `${id} is ${known}: the record's strays list is inconsistent (a stray is a transaction the record does not otherwise account for); remove it from strays, then re-run`,
+        );
+      }
       const t = await this.raw("eth_getTransactionByHash", [s.hash]);
       if (t && (!same(t.from, s.from) || Number(t.nonce) !== s.nonce)) {
         throw new RecordRefusal(
           `stray ${s.hash} (nonce ${s.nonce}, the re-send of entry #${s.entry}): the chain shows it from ${ethers.getAddress(t.from)} at nonce ${Number(t.nonce)}, not as recorded: refusing`,
         );
       }
-      const of = `nonce ${s.nonce}: ${s.hash}, the signer's re-send of entry #${s.entry} (${s.label}) at another nonce`;
       const r = t?.blockNumber
         ? await this.raw("eth_getTransactionReceipt", [s.hash])
         : null;
