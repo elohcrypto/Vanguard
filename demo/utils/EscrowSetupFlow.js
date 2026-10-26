@@ -222,7 +222,7 @@ async function _ensureFeeExempt(mod, address, label) {
   if ((await ethers.provider.getCode(address)) !== "0x") return;
   if ((await registry.owner()) !== (await registry.runner.getAddress())) {
     displayWarning(
-      `${label} ${address} is not exempt from investor limits: after the handover only an InvestorTypeConfig vote can exempt it (option 76, type 0, choice 2)`,
+      `${label} ${address} is not exempt from investor limits: after the handover only an InvestorTypeConfig vote can exempt it (D22; option 76, type 0, choice 2)`,
     );
     return;
   }

@@ -229,7 +229,11 @@ describe("F-3 round 7: the deploy flows read their constructor arguments back", 
         step("61", m).catch((e) => console.log(`THROWN: ${e.message}`)),
       ),
     );
-    return { text: lines.join("\n"), state: m.state };
+    const f = m.state.getContract("escrowFactory");
+    const types = m.state.getContract("investorTypeRegistry");
+    const exempt =
+      f && (await types.investorLimitExempt(await f.ownerWallet()));
+    return { text: lines.join("\n"), state: m.state, exempt };
   }
 
   it("option 61 before the handover: a fee wallet left unexempt stops it by name", async function () {
@@ -267,10 +271,11 @@ describe("F-3 round 7: the deploy flows read their constructor arguments back", 
       ),
     );
     expect(r.text).to.contain(
-      "is not exempt from investor limits: after the handover only an InvestorTypeConfig vote can exempt it (option 76, type 0, choice 2)",
+      "is not exempt from investor limits: after the handover only an InvestorTypeConfig vote can exempt it (D22; option 76, type 0, choice 2)",
     );
     expect(r.text).to.not.contain("missing wiring");
     expect(r.text).to.contain(BANNER[61]);
+    expect(r.exempt, "the exemption stays a vote's").to.equal(false);
     expect(r.state.getContract("escrowFactory")).to.not.equal(undefined);
   });
 
