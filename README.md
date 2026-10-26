@@ -254,14 +254,15 @@ npm run test:coverage                          # coverage (sets DEPLOY_GAS_LIMIT
 
 ## 📈 Testing and CI
 
-CI (`.github/workflows/ci.yml`) runs nine jobs, tests and coverage in
-two shards each: compile; tests (with the transfer gas ratchet);
+CI (`.github/workflows/ci.yml`) runs ten jobs, tests in two shards and
+coverage in three: compile; tests (with the transfer gas ratchet);
 guard-runs (every tested guard row bound to a test that passed);
 coverage and coverage-merge (merged line coverage may not drop below the
 recorded baseline; an overall branch baseline and per-contract branch
 floors in `scripts/ci/branch-floors.json`; a near-timeout guard flags
-slow tests); zk-coverage; demo (smoke, ceremony, production deploy,
-multisig and regression drives on a node); gates (line count, docs,
+slow tests); zk-coverage; demo (smoke, ceremony and regression drives
+on a node); deploy-drives (the production deploy and multisig drives on
+their own nodes); gates (line count, docs,
 deleted names, scripts reachable, guard table, lint and audit ratchets);
 and required (passes only when every other job succeeded).
 The docs gate checks structure and existence (closed fences, this
