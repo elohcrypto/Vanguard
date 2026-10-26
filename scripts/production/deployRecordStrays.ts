@@ -81,7 +81,7 @@ export class StrayChain {
       : "";
   }
 
-  /** Round 5: what each stray cost, printed by every resume and at the end. */
+  /** Round 5: what each stray cost, printed once by every resume (round 8). */
   strayLines: string[] = [];
 
   /** Round 8 (J): the nonces of the deployer's strays outside() counted. */

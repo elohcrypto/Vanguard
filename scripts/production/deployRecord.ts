@@ -80,11 +80,6 @@ export class Recorder {
     saveRecord(this.file, this.rec);
   }
 
-  /** Round 5: each stray's line, as the last resume printed it. */
-  get strays(): string[] {
-    return this.chain?.strayLines ?? [];
-  }
-
   /** Transactions sent this run, those sent again at their nonce included. */
   get sent(): number {
     return this.sends + (this.chain?.resent ?? 0);

@@ -294,7 +294,6 @@ export async function deployOn(
   console.log(
     `\n✅ Deployed: ${rec.txs.length} transactions in ${file} (${recorder.reused} from the record, ${recorder.sent} sent now; ${gas.toLocaleString("en-US")} gas)`,
   );
-  for (const l of recorder.strays) console.log(l);
 
   const out =
     process.env.HANDOVER_CONFIG || file.replace(/\.json$/, ".handover.json");
