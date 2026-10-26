@@ -129,6 +129,14 @@ jobs:
       # test/guards/table/ (tested or unreachable); no bare revert.
       - name: Guard table (every require/revert classified)
         run: node scripts/ci/guards-table.js
+      # U2 round 7: demo and deploy-drives split the drives; each drive
+      # script runs exactly once across the two jobs.
+      - name: Every drive exactly once
+        run: |
+          for d in demo-smoke whitelist-cli strict-drive deploy-drive multisig-drive regression-drives; do
+            n=$(grep -oE "(run: |&& )scripts/ci/$d\.sh" .github/workflows/ci.yml | wc -l)
+            [ "$n" = 1 ] || { echo "::error::scripts/ci/$d.sh runs $n times, not once"; exit 1; }
+          done
       - name: Lint ratchet (no solhint errors, no NEW warnings)
         run: scripts/ci/lint-ratchet.sh
       - name: Audit dependencies (critical blocks)
