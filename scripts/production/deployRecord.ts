@@ -343,6 +343,12 @@ export class Recorder {
     const at = ok && r.contractAddress && ethers.getAddress(r.contractAddress);
     // Round 6 (G6): read first, so an error leaves `e` as it was.
     const code = at && (await this.raw("eth_getCode", [at, "latest"]));
+    // Round 7 (GA): a receipt without code is the node's lag, not a hash.
+    if (at && code === "0x") {
+      throw new RecordRefusal(
+        `record entry #${this.rec.txs.indexOf(e)} (${e.label}): ${at} has a receipt but no code on this node: a lagging RPC; kept, re-run against a synced RPC`,
+      );
+    }
     e.status = ok ? "confirmed" : "reverted";
     e.gasUsed = BigInt(r.gasUsed).toString();
     if (at) [e.contract, e.codeHash] = [at, ethers.keccak256(code)];
