@@ -81,9 +81,10 @@ async function registerRegistrar(
   registrar,
   walletName,
   log = console.log,
+  token = state.getContract("digitalToken"), // option 21's, round 8 C2
 ) {
   const rules = state.getContract("complianceRules");
-  const vsc = await state.getContract("digitalToken").getAddress();
+  const vsc = await token.getAddress();
   const hash = await walletCodeHash(walletName);
   if ((await rules.trustedRegistrars(vsc, registrar)) === hash) {
     return { direct: true };

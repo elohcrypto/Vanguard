@@ -94,7 +94,6 @@ async function deployOnchainIDContracts(mod) {
     await ethers.getContractFactory("KeyManager")
   ).deploy();
   await deployed(keyManager, "KeyManager");
-  mod.state.setContract("keyManager", keyManager);
   await mod.logger.logContractDeployment("KeyManager", keyManager, []);
   // Task 4.11 (R-411-14): every identity the factory creates pins this
   // KeyManager as its one recovery manager.
@@ -103,12 +102,14 @@ async function deployOnchainIDContracts(mod) {
   // Review F-3: in demo state only once the pin reads back from chain; an
   // identity created without it never pins a recovery manager. Round 7
   // (lane D D6 args): the issuers too, once their owner reads back.
-  const local = { onchainIDFactory: factory, kycIssuer, amlIssuer };
+  // Round 8 (C2): and the KeyManager the pin names.
+  const local = { onchainIDFactory: factory, kycIssuer, amlIssuer, keyManager };
   const missing = await missingWiring(mod.state, local, "1");
   if (missing.length) {
     await reportStop(mod.state, local);
     throw new Error(`missing wiring: ${missing.join(", ")}`);
   }
+  mod.state.setContract("keyManager", keyManager);
   mod.state.setContract("kycIssuer", kycIssuer);
   mod.state.setContract("amlIssuer", amlIssuer);
   mod.state.setContract("onchainIDFactory", factory);
@@ -223,9 +224,11 @@ async function deployPrivacyPair(mod) {
  * wiring (R-3R-15); option 42 -> 1 switches VSC to Either.
  * @returns {Promise<boolean>} true when VSC reads this PrivacyManager
  */
-async function wirePrivacyManager(mod) {
+async function wirePrivacyManager(
+  mod,
+  token = mod.state.getContract("digitalToken"), // option 21's, round 8 C2
+) {
   const rules = mod.state.getContract("complianceRules");
-  const token = mod.state.getContract("digitalToken");
   const pm = mod.state.getContract("privacyManager");
   if (!rules || !token || !pm) {
     console.log(

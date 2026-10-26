@@ -70,8 +70,8 @@ class ContractDeployer {
   }
 
   /** Point ComplianceRules at the PrivacyManager for VSC, leaving the */
-  async wirePrivacyManager() {
-    return core.wirePrivacyManager(this);
+  async wirePrivacyManager(token) {
+    return core.wirePrivacyManager(this, token);
   }
 
   /** Deploy ComplianceRules contract with user-provided configuration */
@@ -94,8 +94,8 @@ class ContractDeployer {
   }
 
   /** Plan v2 Task 4.3: deploy InvestorRequestManager for VSC (bank = ops, */
-  async deployInvestorCustody() {
-    return tokenSystem.deployInvestorCustody(this);
+  async deployInvestorCustody(token) {
+    return tokenSystem.deployInvestorCustody(this, token);
   }
 
   /** Deploy Oracle Management System */

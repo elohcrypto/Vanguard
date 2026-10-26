@@ -12,7 +12,8 @@
  * (the issuers' and ComplianceRules' owner, the custody bank and token,
  * the escrow fee wallet, governance's bound targets) are links too.
  * Round 8 (GA-ARGS): so are the address arguments a getter reads (the list
- * oracles' manager, the custody and escrow registries, token and rules).
+ * oracles' manager, the custody and escrow registries, token and rules;
+ * C2: both tokens' registry and compliance), a vote's once settable.
  * Option 1a, each of those options and the production deploy report
  * success only when every link below reads true on chain: a contract in
  * demo state proves it was deployed, not that it was wired. A check runs
@@ -39,9 +40,9 @@ const same = (a, b) => String(a).toLowerCase() === String(b).toLowerCase();
 /**
  * Each check for `state`'s contracts: [{ name, ok }], in deploy order;
  * with `flow` ("1", "13", "21", "31", "51", "74", "61" or "84"), only the
- * links that option makes.
+ * links that option makes; with `only`, the names it accepts.
  */
-async function wiring(state, flow) {
+async function wiring(state, flow, only = () => true) {
   const c = (k) => state.getContract(k);
   const [factory, km, pm, om, engine, whitelist, blacklist] = [
     c("onchainIDFactory"),
@@ -77,15 +78,13 @@ async function wiring(state, flow) {
   // `read` while the deployer owns `c`: after the handover a vote's.
   const untilHandover = (c, read) => async () =>
     !same(await c.owner(), deployer) || read();
-  // Round 8 (GA-ARGS): `x`'s address argument `field` reads `want`.
-  const asDeployed = (by, label, x, field, want) => {
-    if (x && want) {
-      add(
-        by,
-        `${label} ${field} as deployed`,
-        is(() => x[field](), want),
-      );
-    }
+  // Round 8 (GA-ARGS): `x`'s address argument `field` reads `want`;
+  // `settable` (an owner setter moves it): until the handover.
+  const asDeployed = (by, label, x, field, want, settable) => {
+    if (!x || !want) return;
+    const read = is(() => x[field](), want);
+    const name = `${label} ${field} as deployed`;
+    add(by, name, settable ? untilHandover(x, read) : read);
   };
   if (kyc && aml) {
     // Round 7 (lane D D6 args): the ceremony hands the issuers to the
@@ -152,6 +151,8 @@ async function wiring(state, flow) {
     );
   }
   if (ir && rules && vsc) {
+    asDeployed("21", "Token", vsc, "identityRegistry", ir, true);
+    asDeployed("21", "Token", vsc, "compliance", rules, true);
     add("21", "VSC agent on IdentityRegistry (recovery)", () =>
       ir.isAgent(vsc),
     );
@@ -316,6 +317,8 @@ async function wiring(state, flow) {
   }
   asDeployed("74", "VanguardGovernance", gov, "governanceToken", vgt);
   asDeployed("74", "VanguardGovernance", gov, "identityRegistry", ir);
+  asDeployed("74", "GovernanceToken", vgt, "identityRegistry", ir, true);
+  asDeployed("74", "GovernanceToken", vgt, "compliance", rules, true);
   if (gov && vgt) {
     add("74", "VanguardGovernance agent on VGT", () => vgt.isAgent(gov));
     add("74", "VGT agent on IdentityRegistry (recovery)", () =>
@@ -365,9 +368,10 @@ async function wiring(state, flow) {
         (await rules.trustedRegistrars(vsc, escrow)) ===
         (await walletCodeHash("MultiSigEscrowWallet")),
     );
-    asDeployed("61", "EscrowWalletFactory", escrow, "vscToken", vsc);
-    asDeployed("61", "EscrowWalletFactory", escrow, "identityRegistry", ir);
-    asDeployed("61", "EscrowWalletFactory", escrow, "complianceRules", rules);
+    const f = "EscrowWalletFactory";
+    asDeployed("61", f, escrow, "vscToken", vsc);
+    asDeployed("61", f, escrow, "identityRegistry", ir, true);
+    asDeployed("61", f, escrow, "complianceRules", rules, true);
     // Round 7 (lane D D6 args): the constructor's fee wallet; the owner's
     // setOwnerWallet after the handover.
     add(
@@ -409,7 +413,9 @@ async function wiring(state, flow) {
   }
   const out = [];
   for (const [by, name, read] of checks) {
-    if (!flow || by === flow) out.push({ name, ok: await read() });
+    if ((!flow || by === flow) && only(name)) {
+      out.push({ name, ok: await read() });
+    }
   }
   return out;
 }
@@ -417,9 +423,9 @@ async function wiring(state, flow) {
 /**
  * The names of `state`'s wiring that does not read true on chain, with
  * `local` (a flow's contracts, not yet in state) counted in; with `flow`,
- * that option's links only.
+ * that option's links only (and with `only`, the names it accepts).
  */
-async function missingWiring(state, local = {}, flow) {
+async function missingWiring(state, local = {}, flow, only) {
   const view = {
     production: state.production,
     attestorKey: state.attestorKey,
@@ -427,7 +433,9 @@ async function missingWiring(state, local = {}, flow) {
     bankingInstitutions: state.bankingInstitutions,
     getContract: (k) => local[k] || state.getContract(k),
   };
-  return (await wiring(view, flow)).filter((w) => !w.ok).map((w) => w.name);
+  return (await wiring(view, flow, only))
+    .filter((w) => !w.ok)
+    .map((w) => w.name);
 }
 
 /**
