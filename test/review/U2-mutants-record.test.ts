@@ -103,7 +103,7 @@ describe("U2 deploy record guards (mutants M01, M02, M06)", function () {
     (global as any).setTimeout = (f: any) => real(f, 0);
     try {
       const c = new EntryChain(
-        node,
+        h.fused(node),
         { chainId: 11155111, txs: [e] } as any,
         3,
         () => {},
@@ -179,7 +179,7 @@ describe("U2 deploy record guards (mutants M01, M02, M06)", function () {
       return null;
     };
     const c = new EntryChain(
-      node,
+      h.fused(node),
       { chainId: 11155111, txs: [e] } as any,
       1,
       () => {},
@@ -215,7 +215,7 @@ describe("U2 a lagging node and an intent sent before the stop", function () {
     const p: any = network.provider;
     const request = p.request.bind(p);
     const K = 3;
-    p.request = async (a: any) => {
+    p.request = h.fused(async (a: any) => {
       const seen = Number(await request({ method: "eth_blockNumber" })) - K;
       if (a.method === "eth_blockNumber") return ethers.toQuantity(seen);
       if (a.method === "eth_getTransactionCount")
@@ -224,7 +224,7 @@ describe("U2 a lagging node and an intent sent before the stop", function () {
           params: [a.params[0], ethers.toQuantity(seen)],
         });
       return request(a);
-    };
+    });
     let lagged = "";
     try {
       lagged = await h.settle(box.file, loadRecord(box.file)!).then(

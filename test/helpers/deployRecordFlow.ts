@@ -102,15 +102,28 @@ export const nonce = async (i = 0) =>
 
 export type Hook = (a: any, request: any) => Promise<any> | undefined;
 
+/**
+ * Review U2 round 5 (item E): `f`, a test's node shim or mock node, with a
+ * request budget. Past `n` requests every one is refused, so a resume that
+ * loops (a mutant without its bound) fails its own test, never the run.
+ */
+export function fused<T extends (...a: any[]) => any>(f: T, n = 5000): T {
+  let calls = 0;
+  return ((...a: any[]) =>
+    ++calls > n
+      ? Promise.reject(new Error(`fuse: over ${n} requests, the resume loops`))
+      : f(...a)) as T;
+}
+
 /** The provider with `hook` in front (undefined: the node answers). */
 export function node(hook: Hook): () => void {
   const p: any = network.provider;
   const request = p.request.bind(p);
   const send = p.send?.bind(p);
-  const shim = async (a: any) => {
+  const shim = fused(async (a: any) => {
     const r = await hook(a, request);
     return r !== undefined ? r : request(a);
-  };
+  });
   p.request = shim;
   if (send)
     p.send = (m: string, x?: unknown[]) => shim({ method: m, params: x ?? [] });

@@ -37,7 +37,7 @@ describe("U2 round 3: an entry stays, a re-send is one checked send", function (
   });
   const chain = (raw: any, e: any, save = () => {}) =>
     new EntryChain(
-      raw,
+      h.fused(raw),
       { chainId: 11155111, txs: [e] } as any,
       1,
       () => {},

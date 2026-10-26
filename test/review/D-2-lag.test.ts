@@ -23,7 +23,7 @@ describe("D-2 a lag longer than two blocks keeps a mined deploy transaction", fu
     const request = p.request.bind(p);
     const send = p.send?.bind(p);
     const st = { on: false };
-    const shim = async (a: any) => {
+    const shim = h.fused(async (a: any) => {
       if (!st.on) return request(a);
       const seen = Number(await request({ method: "eth_blockNumber" })) - K;
       const m = a.method;
@@ -45,7 +45,7 @@ describe("D-2 a lag longer than two blocks keeps a mined deploy transaction", fu
           params: [a.params[0], ethers.toQuantity(seen)],
         });
       return request(a);
-    };
+    });
     p.request = shim;
     if (send)
       p.send = (m: string, x?: unknown[]) =>
@@ -152,7 +152,7 @@ describe("D-2 EntryChain: an unknown entry is kept and sent again at its nonce",
   });
   const chain = (raw: any, e: any, log: string[] = [], saves = { n: 0 }) =>
     new EntryChain(
-      raw,
+      h.fused(raw),
       { chainId: 11155111, txs: [e] } as any,
       1,
       (m) => log.push(m),

@@ -40,10 +40,10 @@ describe("D-2 round 4: the entry's nonce and payload, whatever the signer and th
     const p: any = network.provider;
     const request = p.request.bind(p);
     const send = p.send?.bind(p);
-    const shim = async (a: any) => {
+    const shim = h.fused(async (a: any) => {
       const r = await hook(a, request);
       return r !== undefined ? r : request(a);
-    };
+    });
     p.request = shim;
     if (send)
       p.send = (m: string, x?: unknown[]) =>
@@ -436,7 +436,7 @@ describe("D-2 round 4: a re-send's fields and sameTx, pinned", function () {
   });
   const chain = (raw: any, e: any) =>
     new EntryChain(
-      raw,
+      h.fused(raw),
       { chainId: 11155111, txs: [e] } as any,
       1,
       () => {},

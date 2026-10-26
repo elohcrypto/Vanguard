@@ -43,9 +43,19 @@ describe("D-6 dev-node calls off the dev chain", function () {
       );
       expect(err.name).to.not.equal("RecordRefusal");
       const [d] = await ethers.getSigners();
-      const rc = await (
-        await d.sendTransaction({ to: d.address, value: 1n })
-      ).wait();
+      // Bounded: a send whose transaction the node is never asked for
+      // (ethers polls it) fails here, not by the run's timeout.
+      let t: any;
+      const shown = new Promise<never>((_, ko) => {
+        t = setTimeout(
+          () => ko(new Error("the send was not shown in 20 s")),
+          2e4,
+        );
+      });
+      const rc = await Promise.race([
+        d.sendTransaction({ to: d.address, value: 1n }).then((x) => x.wait()),
+        shown,
+      ]).finally(() => clearTimeout(t));
       expect(rc!.status).to.equal(1);
     } finally {
       r.remove();

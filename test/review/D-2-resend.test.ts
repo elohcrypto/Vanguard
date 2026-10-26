@@ -37,7 +37,7 @@ describe("D-2 a recorded entry stays at its nonce whatever the node says", funct
     const request = p.request.bind(p);
     const send = p.send?.bind(p);
     const st = { on: false, headOnly: false };
-    const shim = async (a: any) => {
+    const shim = h.fused(async (a: any) => {
       if (hook) {
         const r = await hook(a, request);
         if (r !== undefined) return r;
@@ -66,7 +66,7 @@ describe("D-2 a recorded entry stays at its nonce whatever the node says", funct
           params: [a.params[0], ethers.toQuantity(Math.min(seen, real))],
         });
       return request(a);
-    };
+    });
     p.request = shim;
     if (send)
       p.send = (m: string, x?: unknown[]) =>
