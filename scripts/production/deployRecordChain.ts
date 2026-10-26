@@ -220,10 +220,18 @@ export class EntryChain {
           `stray ${s.hash} (nonce ${s.nonce}, the re-send of entry #${s.entry}): the chain shows it from ${ethers.getAddress(t.from)} at nonce ${Number(t.nonce)}, not as recorded: refusing`,
         );
       }
-      const r = t?.blockNumber
+      // Round 6 (G2): no entry is planned behind a pending stray.
+      if (t && !t.blockNumber) {
+        throw new RecordRefusal(
+          `${id} is pending on this node: wait for it to mine or drop, then re-run`,
+        );
+      }
+      const r = t
         ? await this.raw("eth_getTransactionReceipt", [s.hash])
         : null;
-      if (!r) {
+      if (!t) {
+        this.strayLines.push(`   ⚠️  ${of}: dropped, not counted`);
+      } else if (!r) {
         this.strayLines.push(
           `   ⚠️  ${of}: not mined on this node, not counted`,
         );
