@@ -280,17 +280,24 @@ export class EntryChain {
   }
 
   /**
-   * Round 7 (GB): stray `s`, which this node does not show. With its
-   * nonce free it is dropped (null), unless (GH) a record entry of its
-   * sender waits above it: a gap only a fill closes. With the nonce used,
-   * the sender's transaction there (`replacedBy`, once found) replaced
-   * it, unless it is a record entry (null): counted as a mined stray,
-   * never adopted.
+   * Round 7 (GB): stray `s`, which this node does not show, trusted as
+   * gone only when its sender has nothing pending the node hides (lane C
+   * cp). With its nonce free it is dropped (null), unless (GH) a record
+   * entry of its sender waits above it: a gap only a fill closes. With the
+   * nonce used, the sender's transaction there (`replacedBy`, once found)
+   * replaced it, unless it is a record entry (null): counted as a mined
+   * stray, never adopted.
    */
   private async replacement(s: Stray): Promise<any> {
     const id = `stray ${s.hash} (nonce ${s.nonce}, the re-send of entry #${s.entry})`;
     const who = same(s.from, this.rec.deployer) ? "the deployer" : s.from;
     const mined = await this.count(s.from, "latest");
+    const pending = await this.count(s.from, "pending");
+    if (pending > mined) {
+      throw new RecordRefusal(
+        `${id} is not shown by this node but ${who} has ${pending - mined} pending transactions it does not show: a lagging or inconsistent RPC; wait or re-run against a synced RPC`,
+      );
+    }
     if (mined <= s.nonce) {
       const k = this.rec.txs.findIndex(
         (e) => same(e.from, s.from) && e.nonce > s.nonce,
