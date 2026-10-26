@@ -375,6 +375,9 @@ export class Recorder {
    * transaction and contract against the chain.
    */
   private async settle(): Promise<void> {
+    // Round 4 (A4): every entry's payload, before anything is read or sent.
+    for (const e of this.rec.txs)
+      if (e.data !== undefined) this.chain.unedited(e);
     const chain = Number(await this.raw("eth_chainId"));
     if (chain !== this.rec.chainId) {
       throw new RecordRefusal(
@@ -387,7 +390,6 @@ export class Recorder {
       );
     }
     for (const e of [...this.rec.txs]) {
-      if (e.data !== undefined) this.chain.unedited(e); // before any read
       if (e.status === "sending" && (await this.staleIntent(e))) {
         this.rec.txs.splice(this.rec.txs.indexOf(e), 1); // never sent
         this.log(
