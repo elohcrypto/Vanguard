@@ -339,14 +339,13 @@ export class Recorder {
   }
 
   private async confirm(e: TxEntry, r: any): Promise<void> {
-    e.status = Number(r.status) === 1 ? "confirmed" : "reverted";
+    const ok = Number(r.status) === 1;
+    const at = ok && r.contractAddress && ethers.getAddress(r.contractAddress);
+    // Round 6 (G6): read first, so an error leaves `e` as it was.
+    const code = at && (await this.raw("eth_getCode", [at, "latest"]));
+    e.status = ok ? "confirmed" : "reverted";
     e.gasUsed = BigInt(r.gasUsed).toString();
-    if (r.contractAddress && e.status === "confirmed") {
-      e.contract = ethers.getAddress(r.contractAddress);
-      e.codeHash = ethers.keccak256(
-        await this.raw("eth_getCode", [e.contract, "latest"]),
-      );
-    }
+    if (at) [e.contract, e.codeHash] = [at, ethers.keccak256(code)];
     delete e.data; // mined: never sent again
     delete e.resent;
     this.save();
