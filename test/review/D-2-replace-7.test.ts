@@ -180,7 +180,7 @@ describe("D-2 round 7: a stray replaced at its nonce is counted, never adopted",
     expect(await resume()).to.equal("accepted");
     await (await d.sendTransaction({ to: d.address })).wait();
     expect(await resume()).to.equal(
-      `the deployer's nonce is ${start + 3} but the record accounts for ${start + 2}: a transaction outside the record; refusing to resume`,
+      `the deployer's nonce is ${start + 3} but the record accounts for ${start + 2}: a transaction outside the record; refusing to resume (nonce ${start + 2} is no entry's and no stray's: find that transaction and record it by hand)`,
     );
   });
 

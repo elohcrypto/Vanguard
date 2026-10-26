@@ -25,6 +25,12 @@ export interface TxEntry {
    * replaced: the entry is read by it before any block scan.
    */
   sentHash?: string;
+  /**
+   * D-2 round 8: the head block read before the record last sent this
+   * entry again, saved before that send (the re-send's intent): a re-send
+   * the run did not live to record is looked for from here.
+   */
+  resendFrom?: number;
   status: "sending" | "sent" | "confirmed" | "reverted";
   contract?: string;
   codeHash?: string;

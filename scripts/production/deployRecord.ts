@@ -449,18 +449,7 @@ export class Recorder {
         await this.confirm(e, await this.chain.receipt(e));
     }
     this.save();
-    const own = this.rec.txs.filter((e) => same(e.from, this.rec.deployer));
-    const nonce = Number(
-      await this.raw("eth_getTransactionCount", [this.rec.deployer, "latest"]),
-    );
-    // Review D-2: from the record's start, so an empty record and a
-    // dropped first entry are counted too; round 5: and its strays.
-    const accounted = this.rec.startNonce + own.length + strays;
-    if (nonce !== accounted) {
-      throw new RecordRefusal(
-        `the deployer's nonce is ${nonce} but the record accounts for ${accounted}: a transaction outside the record; refusing to resume`,
-      );
-    }
+    await this.chain.account(strays);
     let contracts = 0;
     for (const [n, e] of this.rec.txs.entries()) {
       const t = await this.raw("eth_getTransactionByHash", [e.hash]);

@@ -86,8 +86,11 @@ export class EntryChain extends StrayChain {
       );
     }
     const n = this.rec.txs.indexOf(e);
-    // Round 8 (GG2): a stray of this send is looked for from here.
+    // Round 8 (GG2): a stray of this send is looked for from here; (J)
+    // saved as the re-send's intent before the send leaves.
     const head = Number(await this.raw("eth_blockNumber"));
+    e.resendFrom = head;
+    this.save();
     try {
       const hash = await this.raw("eth_sendTransaction", [
         {

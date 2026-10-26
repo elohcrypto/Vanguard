@@ -2,8 +2,9 @@
  * The strays of a deploy record, for the Recorder (deployRecord.ts) through
  * EntryChain (deployRecordChain.ts), which extends this class: each stray
  * as the chain shows it (mined, pending, replaced or dropped), the nonce
- * account's share of them, and the chain reads both files share. Moved
- * out of deployRecordChain.ts unchanged (U2 round 8, the 500-line rule).
+ * account (round 8, J: moved from deployRecord.ts), and the chain reads
+ * both files share. Moved out of deployRecordChain.ts unchanged (U2
+ * round 8, the 500-line rule); each later change is marked by its item.
  */
 import { ethers } from "hardhat";
 import { DeployRecord, Stray, TxEntry } from "./deployRecordFile";
@@ -83,6 +84,9 @@ export class StrayChain {
   /** Round 5: what each stray cost, printed by every resume and at the end. */
   strayLines: string[] = [];
 
+  /** Round 8 (J): the nonces of the deployer's strays outside() counted. */
+  private counted: number[] = [];
+
   /**
    * Round 5: each stray as the chain shows it (refused unless from its
    * sender at its nonce), printed; returns the deployer's mined ones,
@@ -93,6 +97,7 @@ export class StrayChain {
   async outside(deployer: string): Promise<number> {
     let mined = 0;
     this.strayLines = [];
+    this.counted = [];
     const fill = await this.fill();
     for (const s of this.rec.strays ?? []) {
       const of = `nonce ${s.nonce}: ${s.hash}, the signer's re-send of entry #${s.entry} (${s.label}) at another nonce`;
@@ -149,10 +154,90 @@ export class StrayChain {
           `   ⚠️  ${was} outside the record, never adopted; it cost ${s.from} ${ethers.formatEther(fee + BigInt(x.value))} ETH${made}`,
         );
         if (same(s.from, deployer)) mined++;
+        if (same(s.from, deployer)) this.counted.push(s.nonce);
       }
     }
     for (const l of this.strayLines) this.log(l);
     return mined;
+  }
+
+  /**
+   * The deployer's mined nonce against the record (moved from
+   * deployRecord.ts): its start, its own entries and its mined strays.
+   * Review D-2: from the record's start, so an empty record and a dropped
+   * first entry are counted too; round 5: and its strays. Round 8 (J): a
+   * nonce none of them holds may be a re-send the run did not live to
+   * record (unrecorded()); the refusal names every nonce still unheld.
+   */
+  async account(strays: number): Promise<void> {
+    const own = this.rec.txs.filter((e) => same(e.from, this.rec.deployer));
+    const nonce = Number(
+      await this.raw("eth_getTransactionCount", [this.rec.deployer, "latest"]),
+    );
+    const accounted = this.rec.startNonce + own.length + strays;
+    const held = new Set([...own.map((e) => e.nonce), ...this.counted]);
+    const free: number[] = [];
+    for (let n = this.rec.startNonce; n < nonce; n++)
+      if (!held.has(n)) free.push(n);
+    const found = nonce > accounted ? await this.unrecorded(free) : 0;
+    if (nonce !== accounted + found) {
+      const why = !free.length
+        ? ""
+        : free.length === 1
+          ? ` (nonce ${free[0]} is no entry's and no stray's: find that transaction and record it by hand)`
+          : ` (nonces ${free.join(", ")} are no entry's and no stray's: find those transactions and record them by hand)`;
+      throw new RecordRefusal(
+        `the deployer's nonce is ${nonce} but the record accounts for ${accounted + found}: a transaction outside the record; refusing to resume${why}`,
+      );
+    }
+  }
+
+  /**
+   * Round 8 (lane C cX): at each of the deployer's `free` nonces, its
+   * mined transaction with the payload of an entry whose re-send intent
+   * the record saved (resendFrom, mined after it) is that re-send, sent
+   * before a kill could record it: recorded now as the entry's stray and
+   * taken from `free`. Returns how many; anything else stays free.
+   */
+  private async unrecorded(free: number[]): Promise<number> {
+    const d = this.rec.deployer;
+    const sent = this.rec.txs.filter(
+      (e) => same(e.from, d) && e.resendFrom !== undefined,
+    );
+    if (!sent.length) return 0;
+    const block = Math.min(...sent.map((e) => e.resendFrom!));
+    let found = 0;
+    for (const n of [...free]) {
+      const t = await this.findMined({
+        from: d,
+        nonce: n,
+        block,
+        label: `nonce ${n}`,
+      } as TxEntry);
+      const e = sent.find(
+        (x) =>
+          t &&
+          Number(t.blockNumber) >= x.resendFrom! &&
+          this.sameTx(x, { ...t, nonce: x.nonce }),
+      );
+      if (!e) continue;
+      const k = this.rec.txs.indexOf(e);
+      (this.rec.strays ??= []).push({
+        hash: t.hash,
+        from: ethers.getAddress(t.from),
+        nonce: n,
+        entry: k,
+        label: e.label,
+        block: e.resendFrom,
+      });
+      this.save();
+      free.splice(free.indexOf(n), 1);
+      this.log(
+        `   ⚠️  nonce ${n}: ${t.hash}, the signer's re-send of entry #${k} (${e.label}) at another nonce, found on chain from its recorded intent (the run that sent it stopped before recording it): recorded as a stray`,
+      );
+      found++;
+    }
+    return found;
   }
 
   /**
