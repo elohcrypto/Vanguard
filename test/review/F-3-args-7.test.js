@@ -183,12 +183,9 @@ describe("F-3 round 7: the deploy flows read their constructor arguments back", 
       expect(mine).to.contain("missing wiring: ");
       expect(mine).to.contain(CHECK[opt]);
       expect(mine).to.not.contain(BANNER[opt]);
-      if (opt === "51") {
-        // deployCustody keeps the manager; the option's registry stays out.
-        expect(r.keys).to.not.include("investorTypeRegistry");
-      } else {
-        expect(holding(r.state, r.at)).to.deep.equal([]);
-      }
+      // Round 8 (lane D D7-1): option 51's manager and registry stay out.
+      if (opt === "51") expect(r.keys).to.not.include("investorTypeRegistry");
+      expect(holding(r.state, r.at)).to.deep.equal([]);
     });
   }
 

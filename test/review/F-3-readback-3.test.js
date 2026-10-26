@@ -146,9 +146,13 @@ describe("F-3 round 3: each deploy option reads its own links back", function ()
     "ERC-3643 DIGITAL TOKEN SYSTEM DEPLOYED",
     "Oracle Management System deployed successfully",
   ];
-  // Options 1 and 31 register their contracts only once read back; 21's
-  // later steps read its token from state, so the token stays there.
-  const unset = ["onchainIDFactory", null, "oracleManager"];
+  // Options 1, 21 and 31 register their contracts only once read back
+  // (round 8, C2: option 21's token and option 1's KeyManager too).
+  const unset = [
+    ["onchainIDFactory", "keyManager"],
+    ["digitalToken"],
+    ["oracleManager"],
+  ];
   for (const [id, name, fn, when, step, link] of cases) {
     it(`${id}: ${name}.${fn} without effect stops option ${option[step - 1]} and 1a at step ${step}`, async function () {
       const { ok, text, state } = await run1a(name, fn, when);
@@ -164,8 +168,8 @@ describe("F-3 round 3: each deploy option reads its own links back", function ()
       expect(text).to.contain(`STOPPED AT STEP ${step} OF 5`);
       expect(text).to.not.contain(success[step - 1]);
       expect(text).to.not.contain("FULL STACK DEPLOYED");
-      if (unset[step - 1]) {
-        expect(state.getContract(unset[step - 1])).to.equal(undefined);
+      for (const k of unset[step - 1]) {
+        expect(state.getContract(k), k).to.equal(undefined);
       }
     });
   }
@@ -199,10 +203,19 @@ describe("F-3 round 3: each deploy option reads its own links back", function ()
     );
     expect(out.join("\n")).to.not.contain("DEPLOYED SUCCESSFULLY");
     expect(state.getContract("investorTypeRegistry")).to.equal(undefined);
+    // Round 8 (D7-1): nor its custody manager, counted in by its address.
+    expect(state.getContract("investorRequestManager")).to.equal(undefined);
     const [types] = deployed;
     expect(await types.investorLimitExempt(bank.address)).to.equal(false);
+    const [, at] = out
+      .join("\n")
+      .match(/✅ InvestorRequestManager: (0x[0-9a-fA-F]{40})/);
+    const irm = await ethers.getContractAt("InvestorRequestManager", at);
     expect(
-      await missingWiring(state, { investorTypeRegistry: types }),
+      await missingWiring(state, {
+        investorTypeRegistry: types,
+        investorRequestManager: irm,
+      }),
     ).to.deep.equal([link]);
   });
 
