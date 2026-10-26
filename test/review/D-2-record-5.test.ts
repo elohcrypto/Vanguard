@@ -274,6 +274,35 @@ describe("D-2 round 5: a retry, two sends in flight, an edited record", function
     expect(load().txs).to.deep.equal([]);
   });
 
+  it("G4-G13: the nonce lookup adopts the entry's own transaction past another sender's at the same nonce", async function () {
+    const [d, , , , , o] = await ethers.getSigners();
+    const n = await h.nonce();
+    const rec = await h.fresh(box.file);
+    const { data } = await (await IR()).getDeployTransaction();
+    rec.txs.push({
+      from: d.address,
+      to: null,
+      value: "0",
+      dataHash: ethers.keccak256(data),
+      data,
+      nonce: n,
+      block: await ethers.provider.getBlockNumber(),
+      status: "sending",
+      label: "new IdentityRegistry",
+    });
+    saveRecord(box.file, rec);
+    await network.provider.request({
+      method: "hardhat_setNonce",
+      params: [o.address, ethers.toQuantity(n)],
+    });
+    await (await o.sendTransaction({ to: o.address })).wait(); // nonce n too
+    await (await d.sendTransaction({ data, nonce: n })).wait(); // its reply lost
+    expect(await accepted()).to.equal("accepted");
+    expect(load().txs.map((t) => [t.nonce, t.status])).to.deep.equal([
+      [n, "confirmed"],
+    ]);
+  });
+
   it("C (F-1): an edited later entry is refused before anything is read or sent", async function () {
     const start = await h.nonce();
     await sendOne(true);

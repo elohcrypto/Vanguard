@@ -139,6 +139,48 @@ describe("D-2 round 5: a re-send mined at another nonce is a stray, never the en
     expect(await created(start)).to.have.length(1);
   });
 
+  it("F2 (lead condition a): a first send mined at another nonce is refused as round 4 refused it, no stray", async function () {
+    const start = await h.nonce();
+    let lie = true;
+    const restore = node(async (a, request) => {
+      const pending =
+        a.method === "eth_getTransactionCount" && a.params[1] === "pending";
+      if (pending && lie) {
+        lie = false; // the record asks for start + 1; the node gives start
+        return ethers.toQuantity(start + 1);
+      }
+      if (a.method !== "eth_sendTransaction") return undefined;
+      const { nonce, ...rest } = a.params[0]; // this signer ignores it
+      return request({ method: a.method, params: [rest] });
+    });
+    let err = "";
+    try {
+      err = await h
+        .run(box.file, await h.fresh(box.file), async () =>
+          (
+            await (await ethers.getContractFactory("IdentityRegistry")).deploy()
+          ).waitForDeployment(),
+        )
+        .then(
+          () => "",
+          (e: Error) => e.message,
+        );
+    } finally {
+      restore();
+    }
+    expect(err).to.match(
+      new RegExp(
+        `mined at nonce ${start} from 0x[0-9a-fA-F]{40}, not as the entry recorded \\(nonce ${start + 1} from .*: the signer did not send it as recorded; kept in the record`,
+      ),
+    );
+    const rec: any = load();
+    expect([rec.strays, rec.txs[0].status, !!rec.txs[0].hash]).to.deep.equal([
+      undefined,
+      "sent",
+      true,
+    ]);
+  });
+
   it("F2: with a stray recorded, a deployer transaction the record does not hold still refuses", async function () {
     const [d] = await ethers.getSigners();
     await strayed();
