@@ -180,6 +180,13 @@ prints `✅ Deployed: 74 transactions in /tmp/vanguard-runbook/deploy-record.jso
   authorization on the investor type registry, the registrars, the
   custody officer and lock amounts, the registry's nomination, the
   escrow fee wallet verified and exempt from investor limits).
+  Each new contract is read before anything holds it: no code at its
+  address, or code that is not its compiled artifact's (immutables
+  aside), stops that deploy naming it
+  (`<contract> at 0x… has code that is not <artifact>'s: its deploy transaction created another contract`,
+  or `… has no code: its deploy transaction mined without creating it`);
+  the demo's deploy options, 84 included, take the same check, so demo
+  state never holds a contract without its artifact's code.
   Each deploy step reads its own links back before it reports, so a
   link that does not read true stops that step: its error, the links
   it left missing (`   the deploy stopped; missing wiring: <links>`) and
@@ -233,10 +240,27 @@ prints `✅ Deployed: 74 transactions in /tmp/vanguard-runbook/deploy-record.jso
   (`   ⚠️  nonce N: 0x…, the signer's re-send of entry #M (<label>) at another nonce: outside the record, never adopted; it cost 0x… X ETH and created 0x…, which the record does not own`).
   Its contract is a duplicate nothing points at; its cost is the
   deployer's. A stray the chain shows from another sender or nonce is
-  refused by name, and a later entry recorded at the stray's nonce is
-  refused as a taken nonce
-  (`0x… used nonce N for a transaction that is not record entry #M (<label>): refusing`),
-  never planned again. Every entry is checked first: one whose recorded
+  refused by name. A stray is a transaction the record does not
+  otherwise account for: a re-send the signer answers with another
+  entry's transaction, or one of the deployer's from before
+  `startNonce`, is refused by name and never listed
+  (`… the signer answered its re-send with 0x…, record entry #K's transaction, not a new one: …`,
+  or `…, an older transaction (nonce N, before the record's startNonce M), not a new one: …`),
+  and the next healthy resume adopts the entry at its nonce; a `strays`
+  list holding one is refused as inconsistent
+  (`… the record's strays list is inconsistent …; remove it from strays, then re-run`).
+  A stray still pending on the node stops every resume, so nothing is
+  planned behind it
+  (`stray 0x… (nonce N, the re-send of entry #M) is pending on this node: wait for it to mine or drop, then re-run`):
+  wait for it to mine, or for the node to drop it, then re-run. One the
+  node no longer shows prints `…: dropped, not counted`, and the next
+  entry takes its nonce. An unsent intent that took a mined stray's
+  nonce from a lagging count can never mine: the resume drops it
+  (`   ↩️  <label>: its nonce N is stray 0x…'s (an intent read from a lagging RPC, never sent); dropped from the record`)
+  and the flow plans it again at the next free nonce. A sent entry at
+  a stray's nonce still refuses by name, never planned again
+  (`… is unknown to the node and 0x…'s nonce N went to 0x…, another transaction: refusing`).
+  Every entry is checked first: one whose recorded
   payload does not hash to its `dataHash`, or whose nonce, value, sender
   or target is not one, is refused before anything is read or sent
   (`… its recorded data (its keccak256 is not its dataHash): an edited record; kept, nothing sent`).
