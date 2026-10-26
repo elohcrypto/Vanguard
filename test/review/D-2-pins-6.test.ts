@@ -74,6 +74,10 @@ describe("D-2 round 6: the stray guards and the chain id, pinned", function () {
     );
     const e0 = load().txs[0];
     expect([e0.hash, e0.status]).to.deep.equal([undefined, "sending"]);
+    expect([e0.contract, e0.codeHash], "nothing taken from it").to.deep.equal([
+      undefined,
+      undefined,
+    ]);
     expect((load() as any).strays, "no stray").to.equal(undefined);
     expect(await h.nonce(), "nothing more sent").to.equal(start + 1);
     expect(await accepted(), "the healthy resume").to.equal("accepted");

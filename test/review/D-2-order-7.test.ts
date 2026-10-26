@@ -118,6 +118,9 @@ describe("D-2 round 7: nothing is sent while a recorded stray is pending", funct
       `stray ${stray} (nonce ${start + 1}, the re-send of entry #0) is dropped and its nonce is unfilled below record entry #1's nonce ${start + 2}: fill nonce ${start + 1} from the deployer (a cancel to self), then resume; if this node lags, re-run against a synced RPC`,
     );
     expect(await pending(d.address), "nothing sent").to.equal(start + 1);
+    expect(await h.nonce(), "the deployer's nonce unchanged").to.equal(
+      start + 1,
+    );
     const fill = await (
       await d.sendTransaction({ to: d.address, nonce: start + 1 })
     ).wait();
@@ -129,6 +132,10 @@ describe("D-2 round 7: nothing is sent while a recorded stray is pending", funct
       `nonce ${start + 1}: stray ${stray} replaced by ${fill!.hash}, outside the record, never adopted`,
     );
     expect(load().strays![0].replacedBy).to.equal(fill!.hash);
+    expect(
+      load().txs.map((t) => t.hash),
+      "the fill is never an entry",
+    ).to.not.include(fill!.hash);
     expect(load().txs.map((t) => [t.nonce, t.status])).to.deep.equal([
       [start, "confirmed"],
       [start + 2, "confirmed"],
@@ -136,5 +143,30 @@ describe("D-2 round 7: nothing is sent while a recorded stray is pending", funct
     expect(await h.created(start)).to.have.length(2);
     expect(await h.accepted(box.file), "a re-run").to.equal("accepted");
     expect(await h.nonce()).to.equal(start + 3);
+  });
+
+  it("GH queued copy (lead R7-C1): a copy of the intent queued at start + 2 that mines once the fill lands is adopted at its nonce, never sent again", async function () {
+    const { d, start, stray } = await ghRecord();
+    await network.provider.request({
+      method: "hardhat_dropTransaction",
+      params: [stray],
+    });
+    const e1 = load().txs[1];
+    // The hashless intent had reached a pool before the kill: queued.
+    const copy = (await network.provider.request({
+      method: "eth_sendTransaction",
+      params: [
+        { from: d.address, data: e1.data, nonce: ethers.toQuantity(start + 2) },
+      ],
+    })) as string;
+    await d.sendTransaction({ to: d.address, nonce: start + 1 }); // the fill
+    await network.provider.request({ method: "evm_mine" });
+    await network.provider.request({ method: "evm_mine" });
+    await automine(true);
+    expect(await h.nonce(), "fill and copy mined").to.equal(start + 3);
+    expect(await bounded(h.accepted(box.file))).to.equal("accepted");
+    expect(load().txs[1].hash, "the copy adopted").to.equal(copy);
+    expect(await h.nonce(), "nothing sent again").to.equal(start + 3);
+    expect(await h.created(start), "one contract per entry").to.have.length(2);
   });
 });
