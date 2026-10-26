@@ -62,8 +62,10 @@ async function deployCustody(
   }
   const [vsc, typesAddr] = [await token.getAddress(), await types.getAddress()];
   let m = state.getContract("investorRequestManager");
+  // Round 7 (lane D D6 args): a wrong bank is redeployed too.
   if (
     m &&
+    same(await m.bank(), bankSigner(state).address) &&
     same(await m.token(), vsc) &&
     same(await m.investorRegistry(), typesAddr)
   ) {

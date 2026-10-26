@@ -65,7 +65,6 @@ async function deployOnchainIDContracts(mod) {
     "KYC verification service",
   );
   await deployed(kycIssuer, "KYC ClaimIssuer", "ClaimIssuer");
-  mod.state.setContract("kycIssuer", kycIssuer);
 
   await mod.logger.logContractDeployment("KYC_ClaimIssuer", kycIssuer, [
     mod.state.signers[0].address,
@@ -81,7 +80,6 @@ async function deployOnchainIDContracts(mod) {
     "AML screening service",
   );
   await deployed(amlIssuer, "AML ClaimIssuer", "ClaimIssuer");
-  mod.state.setContract("amlIssuer", amlIssuer);
 
   await mod.logger.logContractDeployment("AML_ClaimIssuer", amlIssuer, [
     mod.state.signers[0].address,
@@ -103,13 +101,16 @@ async function deployOnchainIDContracts(mod) {
   const kmAddr = await keyManager.getAddress();
   await (await factory.setRecoveryManager(kmAddr)).wait();
   // Review F-3: in demo state only once the pin reads back from chain; an
-  // identity created without it never pins a recovery manager.
-  const local = { onchainIDFactory: factory };
+  // identity created without it never pins a recovery manager. Round 7
+  // (lane D D6 args): the issuers too, once their owner reads back.
+  const local = { onchainIDFactory: factory, kycIssuer, amlIssuer };
   const missing = await missingWiring(mod.state, local, "1");
   if (missing.length) {
     await reportStop(mod.state, local);
     throw new Error(`missing wiring: ${missing.join(", ")}`);
   }
+  mod.state.setContract("kycIssuer", kycIssuer);
+  mod.state.setContract("amlIssuer", amlIssuer);
   mod.state.setContract("onchainIDFactory", factory);
   console.log(`   🔗 OnchainIDFactory.recoveryManager = KeyManager ${kmAddr}`);
 }
@@ -283,6 +284,13 @@ async function deployComplianceRulesWithConfig(
       blockedCountries,
     );
     await deployed(complianceRules, "ComplianceRules");
+    // Round 7 (lane D D6 args): in demo state only once its owner reads back.
+    const local = { complianceRules };
+    const missing = await missingWiring(mod.state, local, "13");
+    if (missing.length) {
+      await reportStop(mod.state, local);
+      throw new Error(`missing wiring: ${missing.join(", ")}`);
+    }
     // The handover's trusted-contract scan starts here (83e, review M4).
     mod.state.complianceRulesDeployBlock = (
       await complianceRules.deploymentTransaction().wait()

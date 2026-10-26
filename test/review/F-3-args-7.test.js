@@ -14,7 +14,7 @@ const InvestorTypeModule = require("../../demo/modules/InvestorTypeModule");
 const EscrowModule = require("../../demo/modules/EscrowModule");
 const DynamicListModule = require("../../demo/modules/DynamicListModule");
 const { EnhancedLogger } = require("../../demo/logging");
-const { capture, ask } = require("../helpers/deployFlows");
+const { capture, ask, skip } = require("../helpers/deployFlows");
 
 /** `fn` with each eth_sendTransaction passed to `onSend(tx, send)` first. */
 async function sending(onSend, fn) {
@@ -211,6 +211,67 @@ describe("F-3 round 7: the deploy flows read their constructor arguments back", 
     );
     expect(r.text).to.not.contain(BANNER[84]);
     expect(r.state.getContract("dynamicListManager")).to.equal(undefined);
+  });
+
+  // Lead ruling R7-C4: option 61 reads the fee wallet's exemption back
+  // before the handover; after it (InvestorTypeRegistry's owner, read on
+  // chain, is not the deployer) only a D22 vote exempts it: warned, kept.
+  const EXEMPT = "escrow fee wallet exempt from investor limits";
+  /** Options 1 .. 51, `between(m)`, then option 61 under `onSend`. */
+  async function to61(between, onSend) {
+    const m = modules(await newState());
+    for (const s of STEPS.slice(0, STEPS.indexOf("61"))) {
+      await capture(() => step(s, m));
+    }
+    await between(m);
+    const [, lines] = await sending(onSend, () =>
+      capture(() =>
+        step("61", m).catch((e) => console.log(`THROWN: ${e.message}`)),
+      ),
+    );
+    return { text: lines.join("\n"), state: m.state };
+  }
+
+  it("option 61 before the handover: a fee wallet left unexempt stops it by name", async function () {
+    const sel = new ethers.Interface([
+      "function setInvestorLimitExempt(address,bool)",
+    ]).getFunction("setInvestorLimitExempt").selector;
+    let hits = 0;
+    const r = await fresh(() =>
+      to61(
+        async () => {},
+        async (tx, send) => {
+          const data = String(tx.data ?? tx.input ?? "").toLowerCase();
+          if (!tx.to || !data.startsWith(sel)) return null;
+          hits++;
+          return send(skip(tx)); // mined, without its effect
+        },
+      ),
+    );
+    expect(hits).to.equal(1);
+    expect(r.text).to.contain(`missing wiring: ${EXEMPT}`);
+    expect(r.text).to.not.contain(BANNER[61]);
+    expect(r.state.getContract("escrowFactory")).to.equal(undefined);
+  });
+
+  it("option 61 after the handover: the unexempt fee wallet is warned of (a D22 vote) and the option completes", async function () {
+    const r = await fresh(() =>
+      to61(
+        async (m) => {
+          const types = m.state.getContract("investorTypeRegistry");
+          const next = m.state.signers[5];
+          await (await types.transferOwnership(next.address)).wait();
+          await (await types.connect(next).acceptOwnership()).wait();
+        },
+        async () => null,
+      ),
+    );
+    expect(r.text).to.contain(
+      "is not exempt from investor limits: after the handover only an InvestorTypeConfig vote can exempt it (option 76, type 0, choice 2)",
+    );
+    expect(r.text).to.not.contain("missing wiring");
+    expect(r.text).to.contain(BANNER[61]);
+    expect(r.state.getContract("escrowFactory")).to.not.equal(undefined);
   });
 
   it("control: options 1 .. 84 unflipped all complete with no missing wiring", async function () {

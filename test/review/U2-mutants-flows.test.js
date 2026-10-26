@@ -42,8 +42,9 @@ describe("U2 the deploy flows' read-back (mutants M17, M19, M30)", function () {
       noop,
     );
     let err = "";
+    let lines = [];
     try {
-      await capture(() =>
+      [, lines] = await capture(() =>
         deployStack(inputs, ethers.hexlify(ethers.randomBytes(32)), undefined)
           .then(() => "")
           .catch((e) => (err = e.message)),
@@ -51,9 +52,14 @@ describe("U2 the deploy flows' read-back (mutants M17, M19, M30)", function () {
     } finally {
       restore();
     }
+    // Round 7 (lead ruling R7-C3): option 61 reads its own links back now,
+    // so the deploy stops there, one step before the final read-back.
     expect(err).to.equal(
-      "the deploy stopped; missing wiring: escrow fee wallet exempt from investor limits",
+      "missing wiring: escrow fee wallet exempt from investor limits",
     );
+    const out = lines.join("\n");
+    expect(out).to.not.contain("ENHANCED ESCROW SYSTEM DEPLOYED SUCCESSFULLY!");
+    expect(out).to.not.contain("Wiring read back from chain");
   });
 
   it("M19: option 74 on its own throws when its wiring fails", async function () {

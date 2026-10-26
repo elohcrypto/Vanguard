@@ -19,7 +19,7 @@ const {
 const { registerRegistrar } = require("./GovernedCalls");
 const { retirePlaceholder } = require("./CustodyFlow");
 const { onboard } = require("./Onboard");
-const { reportStop, deployed } = require("./DeployWiring");
+const { missingWiring, reportStop, deployed } = require("./DeployWiring");
 const { ethers } = require("hardhat");
 
 /** Option 61: Deploy Enhanced Escrow System */
@@ -103,6 +103,23 @@ async function deployEscrowSystem(mod) {
       throw new Error(`Factory is not a registrar: ${reg.refused}`);
     }
     // Review F-3: in demo state only once the registrar step has run.
+    // Round 7 (lane D D6 args): and its links read back; a registrar left
+    // to a vote is the pending proposal printed above, and after the
+    // handover (InvestorTypeRegistry no longer the deployer's) the fee
+    // wallet's exemption is a D22 vote, warned of above (lead R7-C4).
+    const types = mod.state.getContract("investorTypeRegistry");
+    const voted =
+      types && (await types.owner()) !== mod.state.signers[0].address;
+    const missing = (
+      await missingWiring(mod.state, { escrowFactory }, "61")
+    ).filter(
+      (n) =>
+        !(reg.proposalId && n === "escrow factory registrar on VSC") &&
+        !(voted && n === "escrow fee wallet exempt from investor limits"),
+    );
+    if (missing.length) {
+      throw new Error(`missing wiring: ${missing.join(", ")}`);
+    }
     mod.state.setContract("escrowFactory", escrowFactory);
     mod.state.escrowFactory = escrowFactory; // Alias
 

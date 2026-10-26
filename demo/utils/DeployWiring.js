@@ -1,18 +1,21 @@
 /**
  * @fileoverview The deploy flows' wiring, read back from chain (review F-3)
  * @module DeployWiring
- * @description Options 1, 21, 31, 51, 74 and 61 wire each contract they
- * deploy (the KeyManager pin, PrivacyManager's issuer key, policies,
- * policy token and code bits, agents, rule administrators, trust, the
- * registry, jurisdiction, privacy and oracle links, the consensus engine
- * and nodes, the token's authorization, the registrars, the compliance
- * officers, the custody lock amounts, the treasury and escrow fee wallet
- * exemptions). Option 1a, each of those options but 61 (its own links)
- * and the production deploy report success only when every link below
- * reads true on chain: a contract in demo state proves it was deployed,
- * not that it was wired. A check runs only once its contracts are in
- * state; a link only a vote sets after the handover reads true once the
- * deployer no longer owns its contract.
+ * @description Options 1, 13, 21, 31, 51, 74, 61 and 84 wire each
+ * contract they deploy (the KeyManager pin, PrivacyManager's issuer key,
+ * policies, policy token and code bits, agents, rule administrators,
+ * trust, the registry, jurisdiction, privacy and oracle links, the
+ * consensus engine and nodes, the token's authorization, the registrars,
+ * the compliance officers, the custody lock amounts, the treasury and
+ * escrow fee wallet exemptions, the dynamic list manager's governance).
+ * Round 7 (lane D D6 args): the constructor arguments a getter reads back
+ * (the issuers' and ComplianceRules' owner, the custody bank and token,
+ * the escrow fee wallet, governance's bound targets) are links too.
+ * Option 1a, each of those options and the production deploy report
+ * success only when every link below reads true on chain: a contract in
+ * demo state proves it was deployed, not that it was wired. A check runs
+ * only once its contracts are in state; a link only a vote sets after the
+ * handover reads true once the deployer no longer owns its contract.
  */
 
 "use strict";
@@ -26,15 +29,15 @@ const {
   DEFAULT_COMPLIANCE,
   issuerKey,
 } = require("./AttestationFlow");
-const { lockAmounts } = require("./CustodyFlow");
+const { lockAmounts, bankSigner } = require("./CustodyFlow");
 const { ORACLE_NODES, ORACLE_REPUTATION } = require("./DeployDefaults");
 
 const same = (a, b) => String(a).toLowerCase() === String(b).toLowerCase();
 
 /**
  * Each check for `state`'s contracts: [{ name, ok }], in deploy order;
- * with `flow` ("1", "21", "31", "51", "74" or "61"), only the links that
- * option makes.
+ * with `flow` ("1", "13", "21", "31", "51", "74", "61" or "84"), only the
+ * links that option makes.
  */
 async function wiring(state, flow) {
   const c = (k) => state.getContract(k);
@@ -58,6 +61,11 @@ async function wiring(state, flow) {
     c("vanguardGovernance"),
     c("escrowFactory"),
   ];
+  const [kyc, aml, dlm] = [
+    c("kycIssuer"),
+    c("amlIssuer"),
+    c("dynamicListManager"),
+  ];
   const deployer = state.signers[0].address;
   const checks = [];
   const add = (by, name, read) => checks.push([by, name, read]);
@@ -66,6 +74,32 @@ async function wiring(state, flow) {
   // `read` while the deployer owns `c`: after the handover a vote's.
   const untilHandover = (c, read) => async () =>
     !same(await c.owner(), deployer) || read();
+  if (kyc && aml) {
+    // Round 7 (lane D D6 args): the ceremony hands the issuers to the
+    // issuer admin when it takes ComplianceRules from the deployer.
+    add(
+      "1",
+      "KYC and AML ClaimIssuers owned by the deployer (until the handover)",
+      async () =>
+        (rules && !same(await rules.owner(), deployer)) ||
+        (same(await kyc.owner(), deployer) &&
+          same(await aml.owner(), deployer)),
+    );
+  }
+  if (rules) {
+    // Round 7 (lane D D6 args): the ceremony hands it to governance.
+    add(
+      "13",
+      "ComplianceRules owned by the deployer (until the handover)",
+      async () => {
+        const owner = await rules.owner();
+        return (
+          same(owner, deployer) ||
+          Boolean(gov && same(owner, await gov.getAddress()))
+        );
+      },
+    );
+  }
   if (factory && km) {
     add(
       "1",
@@ -235,9 +269,33 @@ async function wiring(state, flow) {
       return true;
     });
   }
+  if (irm && vsc) {
+    // Round 7 (lane D D6 args): both are immutables set at construction.
+    add(
+      "51",
+      "InvestorRequestManager bank (ops) and VSC as deployed",
+      async () =>
+        same(await irm.bank(), bankSigner(state).address) &&
+        same(await irm.token(), await vsc.getAddress()),
+    );
+  }
   if (types && !state.production) {
     add("51", "compliance officer wallet 1", () =>
       types.isComplianceOfficer(state.signers[1].address),
+    );
+  }
+  if (gov) {
+    // Round 7 (lane D D6 args): option 74 binds the targets in state at
+    // construction, the zero address for an absent one; no setter moves them.
+    const at = async (x) => (x ? x.getAddress() : ethers.ZeroAddress);
+    add(
+      "74",
+      "VanguardGovernance's investor type registry, ComplianceRules, OracleManager and VSC as deployed",
+      async () =>
+        same(await gov.investorTypeRegistry(), await at(types)) &&
+        same(await gov.complianceRules(), await at(rules)) &&
+        same(await gov.oracleManager(), await at(om)) &&
+        same(await gov.token(), await at(vsc)),
     );
   }
   if (gov && vgt) {
@@ -289,6 +347,18 @@ async function wiring(state, flow) {
         (await rules.trustedRegistrars(vsc, escrow)) ===
         (await walletCodeHash("MultiSigEscrowWallet")),
     );
+    // Round 7 (lane D D6 args): the constructor's fee wallet; the owner's
+    // setOwnerWallet after the handover.
+    add(
+      "61",
+      "escrow fee wallet as configured (until the handover)",
+      untilHandover(escrow, async () =>
+        same(
+          await escrow.ownerWallet(),
+          (state.production?.escrowFeeWallet ?? state.signers[1]).address,
+        ),
+      ),
+    );
     add("61", "escrow fee wallet verified", async () =>
       ir.isVerified(await escrow.ownerWallet()),
     );
@@ -302,6 +372,19 @@ async function wiring(state, flow) {
         );
       });
     }
+  }
+  if (dlm && gov) {
+    // Round 7 (lane D D6): option 84's two governance links.
+    add(
+      "84",
+      "DynamicListManager governed by VanguardGovernance",
+      is(() => dlm.governanceContract(), gov),
+    );
+    add(
+      "84",
+      "DynamicListManager registered on VanguardGovernance",
+      is(() => gov.dynamicListManager(), dlm),
+    );
   }
   const out = [];
   for (const [by, name, read] of checks) {
