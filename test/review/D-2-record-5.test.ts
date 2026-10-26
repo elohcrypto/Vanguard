@@ -257,7 +257,10 @@ describe("D-2 round 5: a retry, two sends in flight, an edited record", function
       await r.install();
       r.refuseFrom({ ops: other.address });
       const F = await IR();
-      out = await Promise.allSettled([F.connect(other).deploy(), F.deploy()]);
+      // Round 8 (lane B): the refused send settles before the next starts,
+      // so the second is a later send, the order the title asserts.
+      out = await Promise.allSettled([F.connect(other).deploy()]);
+      out.push(...(await Promise.allSettled([F.deploy()])));
       later = await F.deploy().then(
         () => "",
         (e: Error) => e.message,
