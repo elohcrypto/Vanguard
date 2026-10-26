@@ -22,7 +22,7 @@ const {
   DEFAULT_ALLOWED_COUNTRIES,
   DEFAULT_BLOCKED_COUNTRIES,
 } = require("./DeployDefaults");
-const { missingWiring, reportStop } = require("./DeployWiring");
+const { missingWiring, reportStop, deployed } = require("./DeployWiring");
 
 /**
  * Deploy ERC-3643 Digital Token System with full configuration
@@ -92,7 +92,7 @@ async function deployDigitalTokenSystem(mod) {
       await mod.state.getContract("identityRegistry").getAddress(),
       await mod.state.getContract("complianceRules").getAddress(),
     );
-    await token.waitForDeployment();
+    await deployed(token, "Token (VSC)");
     mod.state.digitalToken = token;
     mod.state.setContract("digitalToken", token);
 

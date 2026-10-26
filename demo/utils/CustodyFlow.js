@@ -74,7 +74,8 @@ async function deployCustody(
   m = await (
     await ethers.getContractFactory("InvestorRequestManager", deployer)
   ).deploy(bank.address, vsc, typesAddr, await idReg.getAddress());
-  await m.waitForDeployment();
+  // Required here: DeployWiring requires this module.
+  await require("./DeployWiring").deployed(m, "InvestorRequestManager");
   const mAddr = await m.getAddress();
   log(`   ✅ InvestorRequestManager: ${mAddr} (bank = ops ${bank.address})`);
 

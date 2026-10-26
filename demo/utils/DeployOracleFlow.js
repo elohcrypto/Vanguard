@@ -16,7 +16,7 @@ const {
   displayError,
   displayProgress,
 } = require("./DisplayHelpers");
-const { missingWiring, reportStop } = require("./DeployWiring");
+const { missingWiring, reportStop, deployed } = require("./DeployWiring");
 
 /**
  * Deploy Oracle Management System
@@ -34,7 +34,7 @@ async function deployOracleSystem(mod) {
     displayProgress("Deploying OracleManager...");
     const OracleManager = await ethers.getContractFactory("OracleManager");
     const oracleManager = await OracleManager.deploy();
-    await oracleManager.waitForDeployment();
+    await deployed(oracleManager, "OracleManager");
     local.oracleManager = oracleManager;
 
     displayProgress("Deploying WhitelistOracle...");
@@ -44,7 +44,7 @@ async function deployOracleSystem(mod) {
       "KYC Whitelist Oracle",
       "Oracle for KYC/AML whitelist management",
     );
-    await whitelistOracle.waitForDeployment();
+    await deployed(whitelistOracle, "WhitelistOracle");
     local.whitelistOracle = whitelistOracle;
 
     displayProgress("Deploying BlacklistOracle...");
@@ -54,7 +54,7 @@ async function deployOracleSystem(mod) {
       "AML Blacklist Oracle",
       "Oracle for AML blacklist screening",
     );
-    await blacklistOracle.waitForDeployment();
+    await deployed(blacklistOracle, "BlacklistOracle");
     local.blacklistOracle = blacklistOracle;
 
     // Task 4.4 (D11 = a): ConsensusOracle is the manager's weighted
@@ -64,7 +64,7 @@ async function deployOracleSystem(mod) {
     const consensusOracle = await ConsensusOracle.deploy(
       await oracleManager.getAddress(),
     );
-    await consensusOracle.waitForDeployment();
+    await deployed(consensusOracle, "ConsensusOracle");
     await (
       await oracleManager.setConsensusEngine(await consensusOracle.getAddress())
     ).wait();

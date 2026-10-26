@@ -17,7 +17,7 @@ const {
 const { ethers } = require("hardhat");
 const { deployCustody } = require("./CustodyFlow");
 const { wireInvestorRegistry } = require("./InvestorTypeRules");
-const { missingWiring, reportStop } = require("./DeployWiring");
+const { missingWiring, reportStop, deployed } = require("./DeployWiring");
 
 /** Option 51: Deploy Investor Type System */
 async function deployInvestorTypeSystem(mod) {
@@ -31,7 +31,7 @@ async function deployInvestorTypeSystem(mod) {
       "InvestorTypeRegistry",
     );
     investorTypeRegistry = await InvestorTypeRegistryFactory.deploy();
-    await investorTypeRegistry.waitForDeployment();
+    await deployed(investorTypeRegistry, "InvestorTypeRegistry");
     const registryAddress = await investorTypeRegistry.getAddress();
     console.log(`✅ InvestorTypeRegistry deployed: ${registryAddress}`);
 

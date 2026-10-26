@@ -332,4 +332,20 @@ async function reportStop(state, local) {
     console.log(`   the deploy stopped; missing wiring: ${missing.join(", ")}`);
 }
 
-module.exports = { wiring, missingWiring, reportStop };
+/**
+ * Round 5 (lane D-3): `c` deployed with code at its address, else a stop
+ * naming it (its deploy mined without creating the contract), before
+ * anything holds `c`: demo state never gets an address without code.
+ */
+async function deployed(c, name) {
+  await c.waitForDeployment();
+  const at = await c.getAddress();
+  if ((await ethers.provider.getCode(at)) === "0x") {
+    throw new Error(
+      `${name} at ${at} has no code: its deploy transaction mined without creating it`,
+    );
+  }
+  return c;
+}
+
+module.exports = { wiring, missingWiring, reportStop, deployed };

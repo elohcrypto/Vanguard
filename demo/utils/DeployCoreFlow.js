@@ -25,7 +25,7 @@ const {
   DEFAULT_ALLOWED_COUNTRIES,
   DEFAULT_BLOCKED_COUNTRIES,
 } = require("./DeployDefaults");
-const { missingWiring, reportStop } = require("./DeployWiring");
+const { missingWiring, reportStop, deployed } = require("./DeployWiring");
 
 /**
  * Deploy OnchainID contracts (Factory, KYC Issuer, AML Issuer)
@@ -48,7 +48,7 @@ async function deployOnchainIDContracts(mod) {
     mod.state.signers[0].address,
     kmHash,
   );
-  await factory.waitForDeployment();
+  await deployed(factory, "OnchainIDFactory");
 
   await mod.logger.logContractDeployment("OnchainIDFactory", factory, [
     mod.state.signers[0].address,
@@ -64,7 +64,7 @@ async function deployOnchainIDContracts(mod) {
     "KYC Service",
     "KYC verification service",
   );
-  await kycIssuer.waitForDeployment();
+  await deployed(kycIssuer, "KYC ClaimIssuer");
   mod.state.setContract("kycIssuer", kycIssuer);
 
   await mod.logger.logContractDeployment("KYC_ClaimIssuer", kycIssuer, [
@@ -80,7 +80,7 @@ async function deployOnchainIDContracts(mod) {
     "AML Service",
     "AML screening service",
   );
-  await amlIssuer.waitForDeployment();
+  await deployed(amlIssuer, "AML ClaimIssuer");
   mod.state.setContract("amlIssuer", amlIssuer);
 
   await mod.logger.logContractDeployment("AML_ClaimIssuer", amlIssuer, [
@@ -95,7 +95,7 @@ async function deployOnchainIDContracts(mod) {
   const keyManager = await (
     await ethers.getContractFactory("KeyManager")
   ).deploy();
-  await keyManager.waitForDeployment();
+  await deployed(keyManager, "KeyManager");
   mod.state.setContract("keyManager", keyManager);
   await mod.logger.logContractDeployment("KeyManager", keyManager, []);
   // Task 4.11 (R-411-14): every identity the factory creates pins this
@@ -125,7 +125,7 @@ async function deployERC3643Registries(mod) {
 
   const IdentityRegistry = await ethers.getContractFactory("IdentityRegistry");
   const identityRegistry = await IdentityRegistry.deploy();
-  await identityRegistry.waitForDeployment();
+  await deployed(identityRegistry, "IdentityRegistry");
   // The handover's log scans start here (fromBlock, 2F.5 review M-3).
   mod.state.identityRegistryDeployBlock = (
     await identityRegistry.deploymentTransaction().wait()
@@ -175,7 +175,7 @@ async function deployPrivacyPair(mod) {
   zkVerifier = await (
     await ethers.getContractFactory("ZKVerifierIntegrated")
   ).deploy(false);
-  await zkVerifier.waitForDeployment();
+  await deployed(zkVerifier, "ZKVerifierIntegrated");
   mod.state.setContract("zkVerifierIntegrated", zkVerifier);
   mod.state.setContract("zkVerifier", zkVerifier); // alias, options 42-50
   mod.state.zkVerifier = zkVerifier;
@@ -188,7 +188,7 @@ async function deployPrivacyPair(mod) {
   privacyManager = await (
     await ethers.getContractFactory("PrivacyManager")
   ).deploy(zkAddr);
-  await privacyManager.waitForDeployment();
+  await deployed(privacyManager, "PrivacyManager");
   await mod.logger.logContractDeployment("PrivacyManager", privacyManager, [
     zkAddr,
   ]);
@@ -282,7 +282,7 @@ async function deployComplianceRulesWithConfig(
       allowedCountries,
       blockedCountries,
     );
-    await complianceRules.waitForDeployment();
+    await deployed(complianceRules, "ComplianceRules");
     // The handover's trusted-contract scan starts here (83e, review M4).
     mod.state.complianceRulesDeployBlock = (
       await complianceRules.deploymentTransaction().wait()

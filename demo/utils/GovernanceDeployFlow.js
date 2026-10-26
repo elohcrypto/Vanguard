@@ -18,7 +18,7 @@ const {
 const { advancePast } = require("./ChainTime");
 const { ethers } = require("hardhat");
 const { PROPOSAL_TYPE_NAMES } = require("./GovernanceProposalFlow");
-const { missingWiring, reportStop } = require("./DeployWiring");
+const { missingWiring, reportStop, deployed } = require("./DeployWiring");
 
 /** Option 74: Deploy Governance System */
 async function deployGovernanceSystem(mod) {
@@ -54,7 +54,7 @@ async function deployGovernanceSystem(mod) {
       identityRegistryAddr,
       complianceRulesAddr,
     );
-    await govToken.waitForDeployment();
+    await deployed(govToken, "GovernanceToken");
     const govTokenAddr = await govToken.getAddress();
     console.log(`   ✅ GovernanceToken deployed: ${govTokenAddr}`);
 
@@ -106,7 +106,7 @@ async function deployGovernanceSystem(mod) {
       // settles in minutes: 336 -> 30-minute voting, ~9-minute delay.
       BigInt(process.env.GOV_TIME_SCALE || "1"),
     );
-    await vanguardGovernance.waitForDeployment();
+    await deployed(vanguardGovernance, "VanguardGovernance");
     const govAddr = await vanguardGovernance.getAddress();
     console.log(`   ✅ VanguardGovernance deployed: ${govAddr}`);
 

@@ -114,8 +114,14 @@ async function answer(call) {
     const result = await OWN[method](params);
     return { jsonrpc: "2.0", id, result };
   } catch (e) {
-    const err = e.info?.error || { message: e.shortMessage || e.message };
-    err.message = scrub(err.message, upstream, 240);
+    // ethers keeps the node's own error on e.error when it cannot coalesce
+    // it (as signer.js reads it): its words reach the deploy.
+    const err = e.info?.error || e.error || {};
+    err.message = scrub(
+      err.message || e.shortMessage || e.message,
+      upstream,
+      240,
+    );
     return {
       jsonrpc: "2.0",
       id,

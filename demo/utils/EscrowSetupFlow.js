@@ -19,7 +19,7 @@ const {
 const { registerRegistrar } = require("./GovernedCalls");
 const { retirePlaceholder } = require("./CustodyFlow");
 const { onboard } = require("./Onboard");
-const { reportStop } = require("./DeployWiring");
+const { reportStop, deployed } = require("./DeployWiring");
 const { ethers } = require("hardhat");
 
 /** Option 61: Deploy Enhanced Escrow System */
@@ -77,7 +77,7 @@ async function deployEscrowSystem(mod) {
       await identityRegistry.getAddress(),
       await mod.state.getContract("complianceRules").getAddress(),
     );
-    await escrowFactory.waitForDeployment();
+    await deployed(escrowFactory, "EscrowWalletFactory");
     console.log(`✅ EscrowWalletFactory: ${await escrowFactory.getAddress()}`);
 
     // Task 4.3: the factory is a ComplianceRules registrar on VSC for the
