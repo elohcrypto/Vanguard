@@ -198,7 +198,11 @@ prints `✅ Deployed: 74 transactions in /tmp/vanguard-runbook/deploy-record.jso
   runs, `rm <record>.lock`. A transient RPC error is retried
   (`   ↻ eth_getCode: … retry 1/6 in 500 ms`) and a send whose reply was
   lost is adopted from the chain, never sent twice
-  (`   ↪️  nonce N of 0x…: mined as 0x…; adopted (not resent)`). An
+  (`   ↪️  nonce N of 0x…: mined as 0x…; adopted (not resent)`). A send
+  that failed, or whose settle (its receipt or nonce read) failed on an
+  RPC error, stays the record's next entry until it is settled: the
+  same transaction sent again settles that entry at its nonce, never a
+  second entry, and the deployer's sends go out one at a time. An
   entry is never dropped from the record and never sent at another
   nonce: no answer of one node proves a transaction was never mined. A
   replaced, evicted or reorged transaction, one the signer refused, or
@@ -232,9 +236,9 @@ prints `✅ Deployed: 74 transactions in /tmp/vanguard-runbook/deploy-record.jso
   refused by name, and a later entry recorded at the stray's nonce is
   refused as a taken nonce
   (`0x… used nonce N for a transaction that is not record entry #M (<label>): refusing`),
-  never planned again. An entry whose recorded payload does not hash to
-  its `dataHash`, or whose nonce, value, sender or target is not one, is
-  refused before anything is read or sent
+  never planned again. Every entry is checked first: one whose recorded
+  payload does not hash to its `dataHash`, or whose nonce, value, sender
+  or target is not one, is refused before anything is read or sent
   (`… its recorded data (its keccak256 is not its dataHash): an edited record; kept, nothing sent`).
   A node that shows a used nonce but not its
   transaction, or still does not know the entry once it was sent again,
