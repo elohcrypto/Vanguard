@@ -171,7 +171,7 @@ prints `✅ Deployed: 74 transactions in /tmp/vanguard-runbook/deploy-record.jso
 `✅ Preflight passed: every check before the ceremony's first transaction holds (voters are checked by the full phase)`.
 
 - Before that line the deploy reads its wiring back from chain
-  (`🔗 Wiring read back from chain (23 links):`, 24 with `"lockAmounts"`,
+  (`🔗 Wiring read back from chain (35 links):`,
   then one `   ✅ <link>` each: the KeyManager pin on the identity
   factory, agents, rule administrators (the deployer's on VGT until the
   handover too), the identity registry's ComplianceRules, VSC's
@@ -179,20 +179,27 @@ prints `✅ Deployed: 74 transactions in /tmp/vanguard-runbook/deploy-record.jso
   three nodes (until the handover), VGT's registry and trust, VSC's
   authorization on the investor type registry, the registrars, the
   custody officer and lock amounts, the registry's nomination, the
-  escrow fee wallet verified and exempt from investor limits).
+  escrow fee wallet verified and exempt from investor limits). The
+  constructor arguments a getter shows are links too: the issuers' and
+  ComplianceRules' owner (until the handover), the custody manager's
+  bank (ops) and VSC, governance's bound registry, ComplianceRules,
+  OracleManager and VSC, and the escrow factory's fee wallet.
   Each new contract is read before anything holds it: no code at its
   address, or code that is not its compiled artifact's (immutables
   aside), stops that deploy naming it
   (`<contract> at 0x… has code that is not <artifact>'s: its deploy transaction created another contract`,
   or `… has no code: its deploy transaction mined without creating it`);
   the demo's deploy options, 84 included, take the same check, so demo
-  state never holds a contract without its artifact's code.
+  state never holds a contract without its artifact's code (the tier
+  proof's throwaway probe stack, option 58, too).
   Each deploy step reads its own links back before it reports, so a
   link that does not read true stops that step: its error, the links
   it left missing (`   the deploy stopped; missing wiring: <links>`) and
   `❌ Deploy failed: the deploy stopped; missing: <contracts> (see above)`.
-  The escrow's links, read after its step, stop it with
-  `❌ Deploy failed: the deploy stopped; missing wiring: <links>`:
+  The escrow step reads its own links too, before the factory enters
+  state (`❌ Deploy failed: missing wiring: <links>`), and the whole
+  table is read once more at the end
+  (`❌ Deploy failed: the deploy stopped; missing wiring: <links>`):
   a stack is never reported deployed half-wired. Re-run the line once the cause is
   fixed: the record replays the sent part and the wiring resumes.
 - Publicly `PROD_RECORD` and `PROD_CONFIG` are
@@ -228,6 +235,15 @@ prints `✅ Deployed: 74 transactions in /tmp/vanguard-runbook/deploy-record.jso
   transaction is the entry in every field; one a signer sent at another
   nonce is refused, kept, nothing more sent
   (`… mined at nonce N from 0x…, not as the entry recorded (nonce M from 0x…, its target, value and calldata): the signer did not send it as recorded; kept in the record, nothing more is sent`).
+  Another sender's transaction under the entry's hash (a buggy or
+  malicious signer's answer) is never the entry's nor a stray: refused
+  by name, the hash cleared, nothing listed
+  (`… from 0x…, another sender's transaction, not the entry's and not the deployer's stray: nothing recorded; …`);
+  fix the signer, and the next healthy resume finds or sends the entry
+  at its own nonce. A creation whose receipt the node shows but whose
+  code it does not yet (a lagging node) pins nothing
+  (`record entry #N (<label>): 0x… has a receipt but no code on this node: a lagging RPC; kept, re-run against a synced RPC`):
+  re-run against a synced RPC; the code is read again.
   A re-send the signer sent at another nonce than the entry's (a signer
   that drops the nonce field, behind an RPC that hid the mined entry) is
   a stray: the record keeps it under `strays`, never as the entry,
@@ -249,12 +265,27 @@ prints `✅ Deployed: 74 transactions in /tmp/vanguard-runbook/deploy-record.jso
   and the next healthy resume adopts the entry at its nonce; a `strays`
   list holding one is refused as inconsistent
   (`… the record's strays list is inconsistent …; remove it from strays, then re-run`).
-  A stray still pending on the node stops every resume, so nothing is
-  planned behind it
+  Any recorded stray still pending on the node (the deployer's or
+  another sender's) stops every resume before an entry is settled, so
+  nothing is sent while it is pending, an intent recorded behind it
+  included
   (`stray 0x… (nonce N, the re-send of entry #M) is pending on this node: wait for it to mine or drop, then re-run`):
-  wait for it to mine, or for the node to drop it, then re-run. One the
-  node no longer shows prints `…: dropped, not counted`, and the next
-  entry takes its nonce. An unsent intent that took a mined stray's
+  wait for it to mine, or for the node to drop it, then re-run. A stray
+  that stays pending: replace it at its nonce from the deployer (a
+  cancel to self), then resume. The replacement is recorded under the
+  stray (`replacedBy`), counted as a mined stray and printed on every
+  resume, never an entry
+  (`   ⚠️  nonce N: stray 0x… replaced by 0x…, outside the record, never adopted; it cost 0x… X ETH`).
+  One the node no longer shows is trusted as gone only while its sender
+  has nothing pending the node hides
+  (`… is not shown by this node but the deployer has N pending transactions it does not show: a lagging or inconsistent RPC; wait or re-run against a synced RPC`);
+  then it prints `…: dropped, not counted`, and the next entry takes its
+  nonce. A dropped stray below an entry's nonce leaves a gap no re-send
+  fills
+  (`… is dropped and its nonce is unfilled below record entry #K's nonce M: fill nonce N from the deployer (a cancel to self), then resume; …`):
+  fill it the same way (a cancel to self at nonce N); the fill is
+  counted as the stray's replacement and the entry is sent again at its
+  nonce. An unsent intent that took a mined stray's
   nonce from a lagging count can never mine: the resume drops it
   (`   ↩️  <label>: its nonce N is stray 0x…'s (an intent read from a lagging RPC, never sent); dropped from the record`)
   and the flow plans it again at the next free nonce. A sent entry at
