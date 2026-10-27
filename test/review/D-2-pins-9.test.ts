@@ -289,11 +289,12 @@ describe("D-2 round 9 pins: a listed stray's replacement is never found again (k
     const { start, stray } = await s.pendingStray();
     const data = s.load().txs[0].data!;
     await s.drop(stray);
-    // another gas limit, so another hash than the dropped stray's
+    // the entry's recorded gas less one (another hash than the dropped
+    // stray's, which had none; it fits under coverage too, as GG1's)
     const bump = await d.sendTransaction({
       data,
       nonce: start + 1,
-      gasLimit: (await ethers.provider.getBlock("latest"))!.gasLimit - 1n,
+      gasLimit: BigInt(s.load().txs[0].gas!) - 1n,
     });
     expect(bump.hash).to.not.equal(stray);
     await s.automine(true);
