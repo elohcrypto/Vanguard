@@ -16,8 +16,14 @@ export class RecordRefusal extends Error {
 
 export type Raw = (method: string, params?: unknown[]) => Promise<any>;
 
-/** Round 8 (GG2): the operator's DEPLOY_FILL_HASH and the stray it fills. */
-type Fill = { s: Stray; t: any };
+/**
+ * Round 8 (GG2): the operator's DEPLOY_FILL_HASH and the stray it fills;
+ * round 9 (D): no stray, an unrecorded re-send at a free nonce.
+ */
+type Fill = { s?: Stray; t: any };
+
+/** Round 9 (D): what every refusal naming the variable ends with. */
+const UNSET = "; unset DEPLOY_FILL_HASH after the resume completes";
 
 export const same = (a?: string | null, b?: string | null) =>
   String(a ?? "").toLowerCase() === String(b ?? "").toLowerCase();
@@ -87,6 +93,9 @@ export class StrayChain {
   /** Round 8 (J): the nonces of the deployer's strays outside() counted. */
   private counted: number[] = [];
 
+  /** Round 9 (D): the operator's fill, read once by outside(). */
+  private filled: Fill | null = null;
+
   /**
    * Round 5: each stray as the chain shows it (refused unless from its
    * sender at its nonce), printed; returns the deployer's mined ones,
@@ -98,7 +107,7 @@ export class StrayChain {
     let mined = 0;
     this.strayLines = [];
     this.counted = [];
-    const fill = await this.fill();
+    const fill = (this.filled = await this.fill());
     for (const s of this.rec.strays ?? []) {
       const of = `nonce ${s.nonce}: ${s.hash}, the signer's re-send of entry #${s.entry} (${s.label}) at another nonce`;
       const id = `stray ${s.hash} (nonce ${s.nonce}, the re-send of entry #${s.entry})`;
@@ -211,19 +220,20 @@ export class StrayChain {
    */
   private async unrecorded(free: number[]): Promise<number> {
     const d = this.rec.deployer;
-    const sent = this.rec.txs.filter(
-      (e) => same(e.from, d) && e.resendFrom !== undefined,
-    );
+    const sent = this.intents();
     if (!sent.length) return 0;
     const block = Math.min(...sent.map((e) => e.resendFrom!));
     let found = 0;
     for (const n of [...free]) {
-      const t = await this.findMined({
-        from: d,
-        nonce: n,
-        block,
-        label: `nonce ${n}`,
-      } as TxEntry);
+      // Round 9 (D): the operator's hash for this nonce, else the scan.
+      const f = this.filled;
+      const t =
+        f && !f.s && Number(f.t.nonce) === n
+          ? f.t
+          : await this.findMined(
+              { from: d, nonce: n, block, label: `nonce ${n}` } as TxEntry,
+              `pass its hash as DEPLOY_FILL_HASH=<hash>, then resume${UNSET}`,
+            );
       // Round 9 (A, GA4): a listed stray's transaction is never listed
       // again; its nonce stays free while this node lags.
       const all = this.rec.strays ?? [];
@@ -232,12 +242,7 @@ export class StrayChain {
         all.some((x) => same(x.hash, t.hash) || same(x.replacedBy, t.hash))
       )
         continue;
-      const e = sent.find(
-        (x) =>
-          t &&
-          Number(t.blockNumber) >= x.resendFrom! &&
-          this.sameTx(x, { ...t, nonce: x.nonce }),
-      );
+      const e = t && this.reSendOf(t, sent);
       if (!e) continue;
       const k = this.rec.txs.indexOf(e);
       (this.rec.strays ??= []).push({
@@ -256,6 +261,26 @@ export class StrayChain {
       found++;
     }
     return found;
+  }
+
+  /** Round 8 (J): the deployer's entries with a recorded re-send intent. */
+  private intents(): TxEntry[] {
+    const d = this.rec.deployer;
+    return this.rec.txs.filter(
+      (e) => same(e.from, d) && e.resendFrom !== undefined,
+    );
+  }
+
+  /**
+   * Round 8 (J): the entry of `sent` whose re-send `t` is: its payload
+   * (sameTx with the entry's nonce), mined after the entry's intent.
+   */
+  private reSendOf(t: any, sent: TxEntry[]): TxEntry | undefined {
+    return sent.find(
+      (x) =>
+        Number(t.blockNumber) >= x.resendFrom! &&
+        this.sameTx(x, { ...t, nonce: x.nonce }),
+    );
   }
 
   /**
@@ -328,7 +353,7 @@ export class StrayChain {
               block: s.block ?? this.rec.fromBlock,
               label: id,
             } as TxEntry,
-            "pass the hash of the transaction that filled it as DEPLOY_FILL_HASH=<hash>, then resume",
+            `pass the hash of the transaction that filled it as DEPLOY_FILL_HASH=<hash>, then resume${UNSET}`,
           );
     const fits =
       t?.blockNumber && same(t.from, s.from) && Number(t.nonce) === s.nonce;
@@ -374,13 +399,16 @@ export class StrayChain {
   /**
    * Round 8 (GG2): DEPLOY_FILL_HASH, the operator's fill of a stray's
    * nonce, verified by its hash: shown, no record entry, no stray itself,
-   * at a recorded stray's sender and nonce, mined. Null when unset.
+   * at a recorded stray's sender and nonce, mined. Null when unset. Round
+   * 9 (D): or the deployer's transaction at a free nonce (no entry's, no
+   * stray's, from startNonce on), mined, the re-send of an entry with a
+   * recorded intent: unrecorded() records it without a scan.
    */
   private async fill(): Promise<Fill | null> {
     const hash = process.env.DEPLOY_FILL_HASH;
     if (!hash) return null;
     const no = (why: string) =>
-      new RecordRefusal(`DEPLOY_FILL_HASH ${hash} ${why}: refusing`);
+      new RecordRefusal(`DEPLOY_FILL_HASH ${hash} ${why}: refusing${UNSET}`);
     if (!/^0x[0-9a-fA-F]{64}$/.test(hash))
       throw no("is not a transaction hash");
     const t = await this.raw("eth_getTransactionByHash", [hash]);
@@ -390,15 +418,19 @@ export class StrayChain {
     const all = this.rec.strays ?? [];
     const x = all.find((y) => same(y.hash, hash));
     if (x) throw no(`is stray ${x.hash} itself, not a fill`);
-    const s = all.find(
-      (y) => same(y.from, t.from) && y.nonce === Number(t.nonce),
-    );
-    if (!s) {
+    const n = Number(t.nonce);
+    const s = all.find((y) => same(y.from, t.from) && y.nonce === n);
+    const free =
+      !s &&
+      same(t.from, this.rec.deployer) &&
+      n >= this.rec.startNonce &&
+      !this.rec.txs.some((e) => same(e.from, t.from) && e.nonce === n);
+    if ((s || free) && !t.blockNumber) throw no("is not mined on this node");
+    if (!s && !(free && this.reSendOf(t, this.intents()))) {
       throw no(
-        `is ${ethers.getAddress(t.from)}'s transaction at nonce ${Number(t.nonce)}, not at a recorded stray's sender and nonce`,
+        `is ${ethers.getAddress(t.from)}'s transaction at nonce ${n}, not at a recorded stray's sender and nonce, nor an entry's re-send at a free nonce of the deployer`,
       );
     }
-    if (!t.blockNumber) throw no("is not mined on this node");
     return { s, t };
   }
 

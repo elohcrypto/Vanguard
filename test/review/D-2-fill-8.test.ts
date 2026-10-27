@@ -107,17 +107,17 @@ describe("D-2 round 8: the operator's fill is passed by hash; the scan starts at
       return err;
     };
     expect(await refused(theirs!.hash)).to.equal(
-      `DEPLOY_FILL_HASH ${theirs!.hash} is ${other.address}'s transaction at nonce ${start + 1}, not at a recorded stray's sender and nonce: refusing`,
+      `DEPLOY_FILL_HASH ${theirs!.hash} is ${other.address}'s transaction at nonce ${start + 1}, not at a recorded stray's sender and nonce, nor an entry's re-send at a free nonce of the deployer: refusing; unset DEPLOY_FILL_HASH after the resume completes`,
     );
     expect(await refused(later!.hash)).to.equal(
-      `DEPLOY_FILL_HASH ${later!.hash} is ${d.address}'s transaction at nonce ${start + 2}, not at a recorded stray's sender and nonce: refusing`,
+      `DEPLOY_FILL_HASH ${later!.hash} is ${d.address}'s transaction at nonce ${start + 2}, not at a recorded stray's sender and nonce, nor an entry's re-send at a free nonce of the deployer: refusing; unset DEPLOY_FILL_HASH after the resume completes`,
     );
     // Entry #0's own transaction (the one the liar hid), mined at start.
     expect(await refused(hide)).to.equal(
-      `DEPLOY_FILL_HASH ${hide} is record entry #0's transaction, not a fill: refusing`,
+      `DEPLOY_FILL_HASH ${hide} is record entry #0's transaction, not a fill: refusing; unset DEPLOY_FILL_HASH after the resume completes`,
     );
     expect(await refused(stray), "the dropped stray").to.equal(
-      `DEPLOY_FILL_HASH ${stray} is not shown by this node: refusing`,
+      `DEPLOY_FILL_HASH ${stray} is not shown by this node: refusing; unset DEPLOY_FILL_HASH after the resume completes`,
     );
     expect(entry.status).to.equal("sending");
   });
@@ -139,7 +139,7 @@ describe("D-2 round 8: the operator's fill is passed by hash; the scan starts at
     const before = JSON.stringify(s.load());
     process.env.DEPLOY_FILL_HASH = mined;
     expect(await s.resume()).to.equal(
-      `DEPLOY_FILL_HASH ${mined} is stray ${mined} itself, not a fill: refusing`,
+      `DEPLOY_FILL_HASH ${mined} is stray ${mined} itself, not a fill: refusing; unset DEPLOY_FILL_HASH after the resume completes`,
     );
     await s.automine(false);
     const pending = await d.sendTransaction({
@@ -149,7 +149,7 @@ describe("D-2 round 8: the operator's fill is passed by hash; the scan starts at
     });
     process.env.DEPLOY_FILL_HASH = pending.hash;
     expect(await s.resume()).to.equal(
-      `DEPLOY_FILL_HASH ${pending.hash} is not mined on this node: refusing`,
+      `DEPLOY_FILL_HASH ${pending.hash} is not mined on this node: refusing; unset DEPLOY_FILL_HASH after the resume completes`,
     );
     expect(JSON.stringify(s.load()), "nothing recorded").to.equal(before);
   });
