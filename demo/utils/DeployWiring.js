@@ -25,7 +25,6 @@
 
 const { ethers } = require("hardhat");
 const { walletCodeHash } = require("./GovernedCalls");
-const { isCodeOf } = require("./HandoverCodeHash");
 const { CIRCUITS, attestorId } = require("../../scripts/zk/attest");
 const {
   DEFAULT_MINIMUM_ACCREDITATION,
@@ -34,6 +33,7 @@ const {
 } = require("./AttestationFlow");
 const { lockAmounts, bankSigner } = require("./CustodyFlow");
 const { ORACLE_NODES, ORACLE_REPUTATION } = require("./DeployDefaults");
+const { deployed } = require("./DeployedCode");
 
 const same = (a, b) => String(a).toLowerCase() === String(b).toLowerCase();
 
@@ -447,31 +447,6 @@ async function reportStop(state, local) {
   const missing = await missingWiring(state, local).catch(() => null);
   if (missing?.length)
     console.log(`   the deploy stopped; missing wiring: ${missing.join(", ")}`);
-}
-
-/**
- * Round 5 (lane D-3): `c` deployed with code at its address, else a stop
- * naming it (its deploy mined without creating the contract), before
- * anything holds `c`: demo state never gets an address without code.
- * Round 6 (G4): and that code is `artifact`'s, its immutables aside, with
- * the masked comparison the handover's code-hash pins use (the record's
- * own checkCode compares a recorded hash, not an artifact).
- */
-async function deployed(c, name, artifact = name) {
-  await c.waitForDeployment();
-  const at = await c.getAddress();
-  const code = await ethers.provider.getCode(at);
-  if (code === "0x") {
-    throw new Error(
-      `${name} at ${at} has no code: its deploy transaction mined without creating it`,
-    );
-  }
-  if (!(await isCodeOf(code, artifact))) {
-    throw new Error(
-      `${name} at ${at} has code that is not ${artifact}'s: its deploy transaction created another contract`,
-    );
-  }
-  return c;
 }
 
 module.exports = { wiring, missingWiring, reportStop, deployed };
