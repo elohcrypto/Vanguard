@@ -19,7 +19,9 @@
 //   refused; no job calls a reusable workflow; continue-on-error appears
 //   nowhere; the workflow sets no `defaults`;
 // - every other workflow file beside it is refused if it runs a drive
-//   script or names a drive job.
+//   script or names a drive job, and every local action
+//   (.github/actions/*/action.yml, the shipped prepare included) if it
+//   runs a drive script.
 // Exits 1 naming each fault; `node scripts/ci/drives-once.js [ci.yml]`.
 const fs = require("fs");
 const path = require("path");
@@ -154,15 +156,28 @@ function others(dir, main, names) {
     );
 }
 
+/** Each local action under `dir` (.github/actions) that runs a drive. */
+function actions(dir, names) {
+  if (!fs.existsSync(dir)) return [];
+  return fs
+    .readdirSync(dir)
+    .map((a) => ["action.yml", "action.yaml"].map((f) => path.join(dir, a, f)))
+    .flat()
+    .filter((f) => fs.existsSync(f))
+    .filter((f) => named(names).test(fs.readFileSync(f, "utf8")))
+    .map((f) => `${f} runs a drive script: drives run only in the drive jobs`);
+}
+
 if (require.main === module) {
   const file = process.argv[2] || ".github/workflows/ci.yml";
   const names = drives(path.join(path.dirname(file), "../../scripts/ci"));
   const errors = [
     ...check(yaml.load(fs.readFileSync(file, "utf8")), names),
     ...others(path.dirname(file), file, names),
+    ...actions(path.join(path.dirname(file), "../actions"), names),
   ];
   errors.forEach((e) => console.error(`::error::${e}`));
   if (errors.length) process.exit(1);
   console.log(`${names.length} drives, each run exactly once in ${file}`);
 }
-module.exports = { check, drives, others };
+module.exports = { check, drives, others, actions };
