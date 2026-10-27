@@ -39,10 +39,27 @@
 //   name GITHUB_ENV, BASH_ENV or GITHUB_PATH, and runs no drive;
 // - a second workflow file that may run a drive, names a drive job
 //   (quoted or not) or calls ci.yml is refused.
+// Round 12 (item B, lane G's GCI11-1, GCI11-2; R12-C3, R12-C5):
+// - an npm script a run line reaches is read with its pre/post hooks and
+//   what it runs in turn, through flags, aliases (run-script, rum, urn,
+//   test, start), `npx`/`npm exec` of a package.json bin, yarn, pnpm and
+//   bun, in the root package.json and every workspace package's;
+// - outside the drive jobs a run line (or a script it reaches) that
+//   builds a command at run time (node -e/-p, sh -c, eval, xargs) is
+//   refused, so is any `${{ }}` in it but `${{ matrix.<k> }}` of an
+//   integer list, and a token joining that to a path;
+// - no BASH_ENV, ENV, SHELLOPTS or BASHOPTS in any env; a local `uses:`
+//   is the prepare action only, in any job and any workflow; a symlink
+//   under .github/actions is refused, not followed; an action step's
+//   `with` is one of the shipped inputs, its shell bash, its run neither
+//   redirects nor expands a name indirectly; a drive job's checkout and
+//   setup-node take the shipped inputs only.
 // Exits 1 naming each fault; `node scripts/ci/drives-once.js [ci.yml]`.
 const fs = require("fs");
 const path = require("path");
 const yaml = require("js-yaml");
+// Round 12 (B): the package.json reader, split out (the 500-line rule).
+const { reached, scriptsOf } = require("./drives-scripts");
 
 const NAMED = ["demo-smoke", "whitelist-cli"];
 const JOBS = ["demo", "deploy-drives"];
@@ -74,6 +91,40 @@ const USES = [
   [/^actions\/setup-node@[0-9a-f]{40}$/, ["node-version", "cache"]],
   [/^\.\/\.github\/actions\/prepare$/, []],
 ];
+// Round 12 (B): the inputs each action takes, as shipped (a drive job's
+// checkout and setup-node; the local actions' three).
+const WITH = {
+  checkout: [{ "persist-credentials": false }],
+  "setup-node": [{ "node-version": "22", cache: "npm" }],
+  "download-artifact": [{ name: "contracts" }],
+  "cache/restore": [
+    {
+      path: "~/.cargo/bin/circom",
+      key: "circom-${{ runner.os }}-${{ env.CIRCOM_VERSION }}",
+      "fail-on-cache-miss": true,
+    },
+    {
+      path: "build/circuits/powersOfTau28_hez_final_15.ptau",
+      key: "ptau-hez-final-15-982372c8",
+    },
+  ],
+};
+/** `w`, an action's `with`, is one `uses` takes as shipped ("" if so). */
+function shipped(uses, w, at) {
+  const k = /^actions\/([\w/-]+)@/.exec(String(uses))?.[1];
+  const ok = (WITH[k] ?? []).some(
+    (x) => JSON.stringify(x) === JSON.stringify(w ?? {}),
+  );
+  return ok
+    ? []
+    : [`${at} with ${JSON.stringify(w ?? {})} is not ${k}'s shipped input`];
+}
+const PRE = "./.github/actions/prepare";
+// Round 12 (B, R12-C3): a command built when the line runs.
+const BUILDS =
+  /(?:^|[\s;&|(`'"])(node\s+(?:-\S+\s+)*?(?:-e|--eval|-p|--print)(?=[\s=]|$)|(?:ba|da|z)?sh\s+(?:-\w+\s+)*-\w*c\w*(?=\s|$)|eval(?=\s|$)|xargs(?=\s|$))/;
+// Round 12 (B): env names that change how every later shell runs.
+const SHELLENV = /^(BASH_ENV|ENV|SHELLOPTS|BASHOPTS)$/;
 const esc = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 
 /** The drive scripts: the named ones and every *-drive*.sh in `dir`. */
@@ -91,29 +142,55 @@ const named = (names) =>
 
 /**
  * The drives `text` may run: each named in it, each a glob or a name
- * built from a variable under scripts/ci/ matches, and those of each npm
- * script it runs (`scripts`, package.json's).
+ * built from a variable under scripts/ci/ matches, and those of each
+ * package script it reaches (`scripts`, scriptsOf()'s).
  */
-function hits(text, names, scripts = {}, seen = new Set()) {
-  const out = new Set(names.filter((d) => named([d]).test(text)));
-  for (const [, p] of text.matchAll(/scripts\/ci\/([^\s;|&<>()"'`]*)/g)) {
-    if (!/[*?[$]/.test(p)) continue;
-    const re = new RegExp(
-      `^${esc(p.replace(/\$\{?\w*\}?/g, "\0"))
-        .replace(/\0|\\\*/g, ".*")
-        .replace(/\\\?/g, ".")
-        .replace(/\\\[[^\]]*\\\]/g, ".")}$`,
-    );
-    for (const d of names) if (re.test(`${d}.sh`) || re.test(d)) out.add(d);
-  }
-  const npm = /\bnpm\s+(?:run(?:-script)?\s+(?:-\S+\s+)*([\w:.-]+)|(test|t|start)\b)/g;
-  for (const [, a, b] of text.matchAll(npm)) {
-    const k = a ?? (b === "t" ? "test" : b);
-    if (seen.has(k) || typeof scripts[k] !== "string") continue;
-    seen.add(k);
-    for (const d of hits(scripts[k], names, scripts, seen)) out.add(d);
+function hits(text, names, scripts = {}) {
+  const out = new Set();
+  for (const t of [text, ...reached(text, scripts)]) {
+    for (const d of names) if (named([d]).test(t)) out.add(d);
+    for (const [, p] of t.matchAll(/scripts\/ci\/([^\s;|&<>()"'`]*)/g)) {
+      if (!/[*?[$]/.test(p)) continue;
+      const re = new RegExp(
+        `^${esc(p.replace(/\$\{?\w*\}?/g, "\0"))
+          .replace(/\0|\\\*/g, ".*")
+          .replace(/\\\?/g, ".")
+          .replace(/\\\[[^\]]*\\\]/g, ".")}$`,
+      );
+      for (const d of names) if (re.test(`${d}.sh`) || re.test(d)) out.add(d);
+    }
   }
   return out;
+}
+
+/**
+ * Round 12 (B, R12-C5): each fault of `run`, a run line outside the drive
+ * jobs of `job`: a command built at run time (in it or a script it
+ * reaches), a `${{ }}` but `${{ matrix.<k> }}` of a literal integer list
+ * (no include or exclude), and a token joining such a value to a path.
+ */
+function builds(run, job, scripts, at) {
+  const errors = [];
+  for (const t of [run, ...reached(run, scripts)]) {
+    const m = BUILDS.exec(t);
+    if (m) errors.push(`${at} builds a command at run time (${m[1].trim()})`);
+  }
+  const mx = job.strategy?.matrix;
+  const plain =
+    mx && typeof mx === "object" && !("include" in mx) && !("exclude" in mx);
+  const marked = run.replace(/\$\{\{\s*([^}]*?)\s*\}\}/g, (all, x) => {
+    const k = /^matrix\.([\w-]+)$/.exec(x)?.[1];
+    if (plain && Array.isArray(mx[k]) && mx[k].every(Number.isInteger))
+      return "\u0001";
+    errors.push(`${at} expands ${all} in its run line`);
+    return "";
+  });
+  for (const t of marked.split(/\s+/))
+    if (t.includes("\u0001") && /scripts\/ci|\/[A-Za-z._-]/.test(t))
+      errors.push(
+        `${at} builds a name at run time (${t.replace(/\u0001/g, "${{ matrix }}")})`,
+      );
+  return errors;
 }
 
 /** Each key of `o` outside `keys`, refused as `${at} sets <key>`. */
@@ -147,6 +224,7 @@ function check(doc, names, scripts = {}) {
       errors.push(`${id} job sets continue-on-error`);
     if ("uses" in job)
       errors.push(`${id} job calls the reusable workflow ${job.uses}`);
+    errors.push(...shellEnv(job.env, `${id} job`));
     if (drive) {
       errors.push(...extra(job, JOB_KEYS, `${id} job`));
       const on = job["runs-on"];
@@ -163,6 +241,9 @@ function check(doc, names, scripts = {}) {
       const at = `${id} step "${label(s)}"`;
       if (Object.keys(s).some((k) => k.trim() === "continue-on-error"))
         errors.push(`${at} sets continue-on-error`);
+      errors.push(...shellEnv(s.env, at));
+      if (!drive && String(s.uses ?? "").startsWith("./") && s.uses !== PRE)
+        errors.push(`${at} uses ${s.uses}, a local action other than ${PRE}`);
       if (drive) {
         errors.push(...extra(s, STEP_KEYS, at));
         errors.push(...unknownEnv(s.env, at));
@@ -173,7 +254,10 @@ function check(doc, names, scripts = {}) {
             errors.push(
               `${at} uses ${s.uses}, not actions/checkout, actions/setup-node or ./.github/actions/prepare`,
             );
-          else errors.push(...extra(s.with ?? {}, ok[1], `${at} with`));
+          else {
+            errors.push(...extra(s.with ?? {}, ok[1], `${at} with`));
+            if (ok[1].length) errors.push(...shipped(s.uses, s.with, at));
+          }
         } else if ("with" in s) errors.push(`${at} sets with`);
       }
       if (!("run" in s)) continue;
@@ -183,6 +267,7 @@ function check(doc, names, scripts = {}) {
       }
       const run = String(s.run ?? "").trim();
       if (!drive) {
+        errors.push(...builds(run, job, scripts, at));
         if (any.test(run))
           errors.push(`${at} runs a drive outside ${JOBS.join(" and ")}`);
         else {
@@ -213,6 +298,12 @@ function check(doc, names, scripts = {}) {
 const unknownEnv = (env, at) =>
   Object.keys(env ?? {})
     .filter((k) => !ENV.includes(k))
+    .map((k) => `${at} sets env ${k}`);
+
+/** Round 12 (B): each env name in `env` that changes how a shell runs. */
+const shellEnv = (env, at) =>
+  Object.keys(env ?? {})
+    .filter((k) => SHELLENV.test(k))
     .map((k) => `${at} sets env ${k}`);
 
 /** Each value of `env` off its shipped shape, refused by name. */
@@ -250,21 +341,32 @@ function others(dir, main, names, scripts = {}) {
     ...files
       .filter((f) => calls.test(read(f)))
       .map((f) => `${path.join(dir, f)} calls ${main0}: it runs only once`),
+    // Round 12 (B): any local path but the prepare action.
+    ...files
+      .filter((f) =>
+        [...read(f).matchAll(/uses:\s*["']?(\.\/[^\s"'#]*)/g)].some(
+          ([, u]) => u !== PRE,
+        ),
+      )
+      .map((f) => `${path.join(dir, f)} uses a local path other than ${PRE}`),
   ];
 }
 
-/** Every action file under `dir`, any depth, action.yml or .yaml, any case. */
-function actionFiles(dir) {
+/**
+ * Every action file under `dir`, any depth, action.yml or .yaml, any
+ * case; round 12 (B): a symlink there is pushed to `links`, not followed.
+ */
+function actionFiles(dir, links = []) {
   if (!fs.existsSync(dir)) return [];
-  return fs
-    .readdirSync(dir, { withFileTypes: true })
-    .flatMap((e) =>
-      e.isDirectory()
-        ? actionFiles(path.join(dir, e.name))
-        : /^action\.ya?ml$/i.test(e.name)
-          ? [path.join(dir, e.name)]
-          : [],
-    );
+  return fs.readdirSync(dir, { withFileTypes: true }).flatMap((e) => {
+    const f = path.join(dir, e.name);
+    if (e.isSymbolicLink()) {
+      links.push(f);
+      return [];
+    }
+    if (e.isDirectory()) return actionFiles(f, links);
+    return /^action\.ya?ml$/i.test(e.name) ? [f] : [];
+  });
 }
 
 /**
@@ -275,7 +377,11 @@ function actionFiles(dir) {
  */
 function actions(dir, names, scripts = {}) {
   const errors = [];
-  for (const f of actionFiles(dir)) {
+  const links = [];
+  const files = actionFiles(dir, links);
+  for (const l of links)
+    errors.push(`${l} is a symlink: refused, not followed`);
+  for (const f of files) {
     const text = fs.readFileSync(f, "utf8");
     if (named(names).test(text) || hits(text, names, scripts).size)
       errors.push(`${f} runs a drive script: drives run only in the drive jobs`);
@@ -296,10 +402,17 @@ function actions(dir, names, scripts = {}) {
         errors.push(
           `${at} uses ${s.uses}, not setup-node, download-artifact or cache/restore`,
         );
+      else if ("uses" in s) errors.push(...shipped(s.uses, s.with, at));
+      if ("shell" in s && s.shell !== "bash")
+        errors.push(`${at} shell is ${s.shell}, not bash`);
       if ("run" in s && typeof s.run !== "string")
         errors.push(`${at} run is not a string`);
       else if (WRITES.test(String(s.run ?? "")))
         errors.push(`${at} names GITHUB_ENV, BASH_ENV or GITHUB_PATH`);
+      else if (/[<>]|\$\{!/.test(String(s.run ?? "")))
+        errors.push(`${at} redirects or expands a name indirectly`);
+      else if (BUILDS.test(String(s.run ?? "")))
+        errors.push(`${at} builds a command at run time`);
     }
   }
   return errors;
@@ -309,10 +422,7 @@ if (require.main === module) {
   const file = process.argv[2] || ".github/workflows/ci.yml";
   const root = path.join(path.dirname(file), "../..");
   const names = drives(path.join(root, "scripts/ci"));
-  const pkg = path.join(root, "package.json");
-  const scripts = fs.existsSync(pkg)
-    ? (JSON.parse(fs.readFileSync(pkg, "utf8")).scripts ?? {})
-    : {};
+  const scripts = scriptsOf(root);
   const errors = [
     ...check(yaml.load(fs.readFileSync(file, "utf8")), names, scripts),
     ...others(path.dirname(file), file, names, scripts),
@@ -322,4 +432,4 @@ if (require.main === module) {
   if (errors.length) process.exit(1);
   console.log(`${names.length} drives, each run exactly once in ${file}`);
 }
-module.exports = { check, drives, others, actions };
+module.exports = { check, drives, others, actions, scriptsOf };
