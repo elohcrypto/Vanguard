@@ -1,5 +1,5 @@
 {
-  "why": "Seconds each test file took (tests and hooks, mocha durations), [coverage run, test run], read by scripts/ci/test-shards.js to balance the CI shards. Re-measured 2026-10-26 at a1ce826 (U2 round 7): the coverage column from both coverage shards run locally (scripts/ci/coverage-ratchet.sh --shard i 2, MOCHA_TIMINGS, a 24-core laptop), the test column from the round-6 CI run 40287807799 (test-timings-1/2); the eight round-7 files from one local run, coverage at about twice their test time; the thirteen round-8 files likewise (U2 round 8); U2 round 9 measured the coverage column of round 8's twelve test files (one local coverage run of the suite at e45757e, MOCHA_TIMINGS) and both columns of its seven files (one local run each at 277db5f). The 2026-10-22 table (ef7daba) left the 18 test/review files rounds 3-6 added to the mean (about 7 s each in coverage, most of them under 2 s). A file with no tests (a helper) is 0; a file missing here counts as the mean; a stale figure only unbalances the shards.",
+  "why": "Seconds each test file took (tests and hooks, mocha durations), [coverage run, test run], read by scripts/ci/test-shards.js to balance the CI shards. Re-measured 2026-10-26 at a1ce826 (U2 round 7): the coverage column from both coverage shards run locally (scripts/ci/coverage-ratchet.sh --shard i 2, MOCHA_TIMINGS, a 24-core laptop), the test column from the round-6 CI run 40287807799 (test-timings-1/2); the eight round-7 files from one local run, coverage at about twice their test time; the thirteen round-8 files likewise (U2 round 8); U2 round 9 measured the coverage column of round 8's twelve test files (one local coverage run of the suite on 688521d's code, MOCHA_TIMINGS) and both columns of its seven files (one local run each at 277db5f) and of F-3-pins-9 (at a32989d). The 2026-10-22 table (ef7daba) left the 18 test/review files rounds 3-6 added to the mean (about 7 s each in coverage, most of them under 2 s). A file with no tests (a helper) is 0; a file missing here counts as the mean; a stale figure only unbalances the shards.",
   "weights": {
     "test/ci/ArtifactGuard.test.ts": [0, 0],
     "test/ci/AuditRatchet.test.ts": [0, 0],
@@ -342,6 +342,7 @@
     "test/review/F-3-opt84-6.test.js": [1, 0.4],
     "test/review/F-3-pins-7.test.js": [1.5, 0.6],
     "test/review/F-3-pins-8.test.js": [1.9, 1.6],
+    "test/review/F-3-pins-9.test.js": [2.3, 1.6],
     "test/review/F-3-readback-3.test.js": [5.4, 2.6],
     "test/review/F-3-readback-4.test.js": [12.4, 4.8],
     "test/review/F-3-readback-5.test.js": [3.6, 1.7],
