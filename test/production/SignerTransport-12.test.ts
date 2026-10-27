@@ -185,6 +185,7 @@ describe("U2 round 12: a transport failure behind the signer is no refusal", fun
 
   it("A1: a re-send lost in transport behind the signer keeps the intent; the entry is adopted at its nonce", async function () {
     const start = await evicted();
+    const gone = load().txs[0].hash;
     const up = await proxy("drop", Infinity);
     const lines: string[] = [];
     let res = "";
@@ -199,7 +200,12 @@ describe("U2 round 12: a transport failure behind the signer is no refusal", fun
     expect(load().txs[0].resendFrom, "the intent is kept").to.be.a("number");
     // the transaction mined at the entry's nonce: adopted there
     expect(res, lines.join("\n")).to.equal("accepted");
-    expect(lines.join("\n")).to.contain(`mined as ${ethers.Transaction.from(up.raws[0]).hash}; adopted`);
+    const sent = ethers.Transaction.from(up.raws[0]).hash;
+    expect(load().txs[0].hash, "the record holds the mined re-send").to.equal(sent);
+    // adopted by its nonce, unless the signer's re-send is byte-identical
+    // to the evicted send (same fees: the same signed transaction), which
+    // the record then finds under its own hash (seen on CI, run 40601356051)
+    if (sent !== gone) expect(lines.join("\n")).to.contain(`mined as ${sent}; adopted`);
     expect(await h.nonce(), "the re-send mined at the entry's nonce").to.equal(start + 1);
     expect(await h.accepted(box.file), "a healthy resume").to.equal("accepted");
     expect(load().txs.map((t) => [t.nonce, t.status])).to.deep.equal([[start, "confirmed"]]);
