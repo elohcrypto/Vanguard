@@ -3,7 +3,8 @@
 // H04, the listed-stray skip goes on to the next free nonce; H20, the
 // operator's fill for a stray is never taken for a free nonce of the
 // deployer; H26, the replacement scan's refusal past the bound says to
-// unset the variable. Each passes at 0b4aa9c and after round 10.
+// unset the variable; P-X09 (round 10's lever), a node's answer that is
+// no hash keeps the intent. Each passes at 0b4aa9c and after round 10.
 import { expect } from "chai";
 import { ethers, network } from "hardhat";
 import { Recorder } from "../../scripts/production/deployRecord";
@@ -128,5 +129,26 @@ describe("D-2 round 10 pins: lane G's round-9 survivors (kills H04, H20, H26)", 
       `pass the hash of the transaction that filled it as DEPLOY_FILL_HASH=<hash>, then resume${UNSET}`,
     );
     expect(res.endsWith(UNSET)).to.equal(true);
+  });
+
+  it("P-X09: a node that answers the re-send with no transaction hash keeps the intent (only a send the node refused leaves none)", async function () {
+    const start = await h.nonce();
+    await h.sendOne(s.box.file);
+    const hide = s.load().txs[0].hash!;
+    const restore = h.node(async (a) => {
+      if (a.method === "eth_sendTransaction") return "0x";
+      if (a.method === "eth_getTransactionCount")
+        return ethers.toQuantity(start);
+      const hides =
+        a.method === "eth_getTransactionByHash" ||
+        a.method === "eth_getTransactionReceipt";
+      return hides && a.params[0] === hide ? null : undefined;
+    });
+    try {
+      expect(await h.accepted(s.box.file)).to.contain("no transaction hash");
+    } finally {
+      restore();
+    }
+    expect(s.load().txs[0].resendFrom, "kept").to.be.a("number");
   });
 });
