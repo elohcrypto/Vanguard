@@ -14,6 +14,8 @@
  * Round 8 (GA-ARGS): so are the address arguments a getter reads (the list
  * oracles' manager, the custody and escrow registries, token and rules;
  * C2: both tokens' registry and compliance), a vote's once settable.
+ * Round 9 (GC1): and the calls' (the KYC/AML trusted issuers, VSC's
+ * registry in ComplianceRules, the dynamic list manager's oracles).
  * Option 1a, each of those options and the production deploy report
  * success only when every link below reads true on chain: a contract in
  * demo state proves it was deployed, not that it was wired. A check runs
@@ -34,6 +36,7 @@ const {
 const { lockAmounts, bankSigner } = require("./CustodyFlow");
 const { ORACLE_NODES, ORACLE_REPUTATION } = require("./DeployDefaults");
 const { deployed } = require("./DeployedCode");
+const { KYC_TOPIC, AML_TOPIC } = require("./Kyc");
 
 const same = (a, b) => String(a).toLowerCase() === String(b).toLowerCase();
 
@@ -119,6 +122,20 @@ async function wiring(state, flow, only = () => true) {
       is(() => factory.recoveryManager(), km),
     );
   }
+  if (ir && kyc && aml) {
+    // Round 9 (GC1, D8-1): the trust anchor. The ceremony hands
+    // IdentityRegistry to governance, whose votes add and remove issuers.
+    add(
+      "1",
+      "KYC/AML issuers trusted on IdentityRegistry",
+      untilHandover(
+        ir,
+        async () =>
+          (await ir.isTrustedIssuer(kyc, KYC_TOPIC)) &&
+          ir.isTrustedIssuer(aml, AML_TOPIC),
+      ),
+    );
+  }
   if (pm) {
     // The deploy's issuer key and default policies (setupDemoAttestations).
     add(
@@ -155,6 +172,12 @@ async function wiring(state, flow, only = () => true) {
     asDeployed("21", "Token", vsc, "compliance", rules, true);
     add("21", "VSC agent on IdentityRegistry (recovery)", () =>
       ir.isAgent(vsc),
+    );
+    // Round 9 (GC1): as VGT's at option 74.
+    add(
+      "21",
+      "VSC identity registry in ComplianceRules",
+      is(() => rules.tokenIdentityRegistry(vsc), ir),
     );
     // The ceremony takes ComplianceRules and this role from the deployer.
     add(
@@ -198,13 +221,17 @@ async function wiring(state, flow, only = () => true) {
     }
   }
   if (om) {
-    if (engine) {
-      add(
-        "31",
-        "ConsensusOracle engine on OracleManager",
-        is(() => om.consensusEngine(), engine),
-      );
-    }
+    // Round 9 (R9-C6): read with no engine in state or local too (option
+    // 31 holds it only once setConsensusEngine mined), so a refused bind
+    // names this link; the manager's owner may rebind it after the handover.
+    add(
+      "31",
+      "ConsensusOracle engine on OracleManager",
+      untilHandover(
+        om,
+        engine ? is(() => om.consensusEngine(), engine) : async () => false,
+      ),
+    );
     asDeployed("31", "WhitelistOracle", whitelist, "oracleManager", om);
     asDeployed("31", "BlacklistOracle", blacklist, "oracleManager", om);
     // After the handover governance's votes replace the deploy's nodes.
@@ -409,6 +436,20 @@ async function wiring(state, flow, only = () => true) {
       "84",
       "DynamicListManager registered on VanguardGovernance",
       is(() => gov.dynamicListManager(), dlm),
+    );
+  }
+  if (dlm && whitelist && blacklist) {
+    // Round 9 (GC1): the ceremony hands DynamicListManager to governance,
+    // whose votes may setOracles.
+    add(
+      "84",
+      "DynamicListManager oracles as deployed",
+      untilHandover(
+        dlm,
+        async () =>
+          (await is(() => dlm.whitelistOracle(), whitelist)()) &&
+          is(() => dlm.blacklistOracle(), blacklist)(),
+      ),
     );
   }
   const out = [];

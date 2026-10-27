@@ -128,11 +128,8 @@ async function deployERC3643Registries(mod) {
   const IdentityRegistry = await ethers.getContractFactory("IdentityRegistry");
   const identityRegistry = await IdentityRegistry.deploy();
   await deployed(identityRegistry, "IdentityRegistry");
-  // The handover's log scans start here (fromBlock, 2F.5 review M-3).
-  mod.state.identityRegistryDeployBlock = (
-    await identityRegistry.deploymentTransaction().wait()
-  ).blockNumber;
-  mod.state.setContract("identityRegistry", identityRegistry);
+  const deployBlock = (await identityRegistry.deploymentTransaction().wait())
+    .blockNumber;
 
   await mod.logger.logContractDeployment(
     "IdentityRegistry",
@@ -156,8 +153,20 @@ async function deployERC3643Registries(mod) {
   const amlIssuerAddr = await amlIssuer.getAddress();
   await identityRegistry.addTrustedIssuer(amlIssuerAddr, [AML_TOPIC]);
   console.log(`   ✅ Trusted issuer for AML: ${amlIssuerAddr}`);
-  await identityRegistry.addClaimTopic(AML_TOPIC);
+  // Mined (and every send before it) before the read-back below.
+  await (await identityRegistry.addClaimTopic(AML_TOPIC)).wait();
   console.log(`   ✅ Required claim topic: AML (${AML_TOPIC})`);
+  // Round 9 (R9-C7): in demo state only once its trusted issuers read
+  // back from chain.
+  const local = { identityRegistry };
+  const missing = await missingWiring(mod.state, local, "1");
+  if (missing.length) {
+    await reportStop(mod.state, local);
+    throw new Error(`missing wiring: ${missing.join(", ")}`);
+  }
+  // The handover's log scans start here (fromBlock, 2F.5 review M-3).
+  mod.state.identityRegistryDeployBlock = deployBlock;
+  mod.state.setContract("identityRegistry", identityRegistry);
 }
 
 /**
