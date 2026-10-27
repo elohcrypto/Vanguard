@@ -214,6 +214,14 @@ export class StrayChain {
         block,
         label: `nonce ${n}`,
       } as TxEntry);
+      // Round 9 (A, GA4): a listed stray's transaction is never listed
+      // again; its nonce stays free while this node lags.
+      const all = this.rec.strays ?? [];
+      if (
+        t &&
+        all.some((x) => same(x.hash, t.hash) || same(x.replacedBy, t.hash))
+      )
+        continue;
       const e = sent.find(
         (x) =>
           t &&
@@ -330,6 +338,12 @@ export class StrayChain {
           (same(x.replacedBy, t.hash) && all.indexOf(x) < all.indexOf(s))),
     );
     if (twin) return twin.hash;
+    // Round 9 (A, GA3): a stray is never its own replacement.
+    if (same(t.hash, s.hash)) {
+      throw new RecordRefusal(
+        `${id} is not shown by this node by its hash, but its block holds it from ${s.from} at nonce ${s.nonce}: a lagging RPC; kept, re-run against a synced RPC`,
+      );
+    }
     if (!s.replacedBy) {
       s.replacedBy = t.hash;
       this.save();
