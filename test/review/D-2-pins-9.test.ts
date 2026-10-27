@@ -404,13 +404,13 @@ describe("D-2 round 9 pins: the fill for an unrecorded re-send (kills W11, W17),
     const start = await h.nonce();
     await h.sendOne(s.box.file);
     const hide = s.load().txs[0].hash!;
-    const first = await killedResend(start, true, hide); // start + 1
-    await mine(1);
-    const second = await killedResend(start, true, hide); // start + 2
+    await killedResend(start, false, hide); // the intent only, then its re-sends past its 5000 blocks:
     await mine(5001);
+    const first = (await (await (await ethers.getSigners())[0].sendTransaction({ data: s.load().txs[0].data, nonce: start + 1 })).wait())!.hash;
+    const second = (await (await (await ethers.getSigners())[0].sendTransaction({ data: s.load().txs[0].data, nonce: start + 2 })).wait())!.hash;
     process.env.DEPLOY_FILL_HASH = second;
     expect(await s.resume(), "the lower nonce first").to.contain(
-      `nonce ${start + 1}: ${s.load().deployer} used nonce ${start + 1} more than 5000 blocks after the intent`,
+      `nonce ${start + 1}: the chain head (block ${await ethers.provider.getBlockNumber()}) is more than 5000 blocks past entry #0 (${s.load().txs[0].label})'s intent (block ${s.load().txs[0].resendFrom}), the earliest the record keeps, and those 5000 blocks hold no transaction of ${s.load().deployer} at nonce ${start + 1}`,
     );
     expect(s.load().strays ?? [], "nothing recorded").to.deep.equal([]);
     process.env.DEPLOY_FILL_HASH = first;

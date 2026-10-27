@@ -149,7 +149,7 @@ describe("D-2 round 11 pins: lane G's round-10 survivors", function () {
   it("P-G41: 5001 blocks after the intent the scan is refused", async function () {
     const { d, start, from } = await unrecorded(5001);
     expect(await s.resume()).to.contain(
-      `nonce ${start + 2}: ${d.address} used nonce ${start + 2} more than 5000 blocks after the intent (block ${from})`,
+      `nonce ${start + 2}: the chain head (block ${from + 5001}) is more than 5000 blocks past entry #1 (${s.load().txs[1].label})'s intent (block ${from}), the earliest the record keeps, and those 5000 blocks hold no transaction of ${d.address} at nonce ${start + 2}`,
     );
   });
 

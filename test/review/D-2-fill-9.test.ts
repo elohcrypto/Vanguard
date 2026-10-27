@@ -151,11 +151,13 @@ describe("D-2 round 9: DEPLOY_FILL_HASH names a fill or an unrecorded re-send", 
   });
 
   it("an unrecorded re-send past the bound: the refusal names DEPLOY_FILL_HASH and unset; with its hash the resume records it as the entry's stray, counted once", async function () {
-    const { start, stray } = await killedResend(true);
+    const { start } = await killedResend(false); // the intent only
     const from = s.load().txs[0].resendFrom!;
-    await mine(5001);
+    await mine(5001); // its re-send mined past the intent's 5000 blocks:
+    const [d] = await ethers.getSigners();
+    const stray = (await (await d.sendTransaction({ data: s.load().txs[0].data, nonce: start + 1 })).wait())!.hash;
     expect(await s.resume()).to.equal(
-      `nonce ${start + 1}: ${s.load().deployer} used nonce ${start + 1} more than 5000 blocks after the intent (block ${from}); the bound is entry #0 (${s.load().txs[0].label})'s intent, the earliest the record keeps; if it is an entry's re-send, pass its hash as DEPLOY_FILL_HASH=<hash>, then resume; otherwise record it by hand${UNSET}`,
+      `nonce ${start + 1}: the chain head (block ${await ethers.provider.getBlockNumber()}) is more than 5000 blocks past entry #0 (${s.load().txs[0].label})'s intent (block ${from}), the earliest the record keeps, and those 5000 blocks hold no transaction of ${s.load().deployer} at nonce ${start + 1}; if nonce ${start + 1} is an entry's re-send, pass its hash as DEPLOY_FILL_HASH=<hash>, then resume; otherwise record it by hand${UNSET}`,
     );
     expect(s.load().strays ?? [], "no stray recorded").to.deep.equal([]);
     process.env.DEPLOY_FILL_HASH = stray;

@@ -242,7 +242,8 @@ export class StrayChain {
           ? f.t
           : await this.findMined(
               { from: d, nonce: n, block, label: `nonce ${n}` } as TxEntry,
-              `the bound is entry #${this.rec.txs.indexOf(first)} (${first.label})'s intent, the earliest the record keeps; if it is an entry's re-send, pass its hash as DEPLOY_FILL_HASH=<hash>, then resume; otherwise record it by hand${UNSET}`,
+              `if nonce ${n} is an entry's re-send, pass its hash as DEPLOY_FILL_HASH=<hash>, then resume; otherwise record it by hand${UNSET}`,
+              `entry #${this.rec.txs.indexOf(first)} (${first.label})'s intent`,
             );
       const e = t && this.reSendOf(t, sent);
       if (!e) continue;
@@ -450,18 +451,26 @@ export class StrayChain {
     return { s, t };
   }
 
-  /** The mined transaction from `e.from` at `e.nonce` since `e.block`. */
+  /**
+   * The mined transaction from `e.from` at `e.nonce` since `e.block`.
+   * Round 12 (C, R12-C2 option 2, R12-C7): with `intent` (the unrecorded
+   * scan's), the 5000 blocks from it are read whatever the head, so a
+   * re-send mined there is found at any later time; only a use past them
+   * is refused.
+   */
   async findMined(
     e: TxEntry,
     how = "find that transaction and record it by hand",
+    intent?: string,
   ): Promise<any> {
     const head = Number(await this.raw("eth_blockNumber"));
-    if (head - e.block > 5000) {
+    const past = head - e.block > 5000;
+    if (past && !intent) {
       throw new RecordRefusal(
         `${e.label}: ${e.from} used nonce ${e.nonce} more than 5000 blocks after the intent (block ${e.block}); ${how}`,
       );
     }
-    for (let b = e.block; b <= head; b++) {
+    for (let b = e.block; b <= Math.min(head, e.block + 5000); b++) {
       const blk = await this.raw("eth_getBlockByNumber", [
         ethers.toQuantity(b),
         true,
@@ -470,6 +479,10 @@ export class StrayChain {
         if (same(t.from, e.from) && Number(t.nonce) === e.nonce) return t;
       }
     }
+    if (past)
+      throw new RecordRefusal(
+        `${e.label}: the chain head (block ${head}) is more than 5000 blocks past ${intent} (block ${e.block}), the earliest the record keeps, and those 5000 blocks hold no transaction of ${e.from} at nonce ${e.nonce}; ${how}`,
+      );
     return null;
   }
 }

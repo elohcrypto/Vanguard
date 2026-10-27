@@ -43,8 +43,8 @@ describe("D-2 round 11: the bound names the intent that set it", function () {
   }
 
   /** The text past the bound, naming entry #0's day-1 intent. */
-  const bound = (n: number, d: string, day1: number, label: string) =>
-    `nonce ${n}: ${d} used nonce ${n} more than 5000 blocks after the intent (block ${day1}); the bound is entry #0 (${label})'s intent, the earliest the record keeps; if it is an entry's re-send, pass its hash as DEPLOY_FILL_HASH=<hash>, then resume; otherwise record it by hand${UNSET}`;
+  const bound = async (n: number, d: string, day1: number, label: string) =>
+    `nonce ${n}: the chain head (block ${await ethers.provider.getBlockNumber()}) is more than 5000 blocks past entry #0 (${label})'s intent (block ${day1}), the earliest the record keeps, and those 5000 blocks hold no transaction of ${d} at nonce ${n}; if nonce ${n} is an entry's re-send, pass its hash as DEPLOY_FILL_HASH=<hash>, then resume; otherwise record it by hand${UNSET}`;
 
   /** Day 3: entry #1's re-send killed after it left; it mines. */
   async function day3(d: any, start: number, r: any) {
@@ -63,7 +63,7 @@ describe("D-2 round 11: the bound names the intent that set it", function () {
     const { d, start, r, day1 } = await two();
     await day3(d, start, r);
     expect(await s.resume()).to.equal(
-      bound(start + 2, d.address, day1, r.txs[0].label),
+      await bound(start + 2, d.address, day1, r.txs[0].label),
     );
     expect(s.load().strays ?? [], "nothing recorded").to.deep.equal([]);
   });
@@ -85,7 +85,7 @@ describe("D-2 round 11: the bound names the intent that set it", function () {
     const t = await d.sendTransaction({ to: d.address, nonce: start + 2 });
     await t.wait();
     expect(await s.resume()).to.equal(
-      bound(start + 2, d.address, day1, r.txs[0].label),
+      await bound(start + 2, d.address, day1, r.txs[0].label),
     );
     process.env.DEPLOY_FILL_HASH = t.hash;
     expect(await s.resume()).to.equal(
