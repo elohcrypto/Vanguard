@@ -1,15 +1,20 @@
 #!/usr/bin/env node
 "use strict";
-// U2 round 7 (lead ruling R7-C5) and round 8 (lane G's G-CI1): demo and
-// deploy-drives split the drives, so every drive script runs exactly once
-// across the workflow. The drives are the named smoke and CLI scripts and
-// every scripts/ci/*-drive*.sh, so a new drive is counted too. A run is a
-// step's `run` command line starting with the script (or after `&&`):
-// YAML comments are not parsed into it and whole-line # comments inside a
-// run are stripped first, as scripts-referenced.js strips them. No step
-// of demo or deploy-drives may set `continue-on-error` or `if:` (either
-// lets a drive's failure or its absence pass). Exits 1 naming each fault;
-// `node scripts/ci/drives-once.js [ci.yml]`.
+// U2 round 7 (lead ruling R7-C5), round 8 (lane G's G-CI1) and round 9
+// (item E, lane G's GCI1-GCI5 and GCI8): every drive script runs exactly
+// once across the workflow, and nothing can hide its failure. The drives
+// are the named smoke and CLI scripts and every scripts/ci/*-drive*.sh,
+// so a new drive is counted too. Round 9 reads a grammar instead of a
+// list of faults:
+// - a drive step is any step whose run names a drive script; its run is
+//   one line of drive scripts (`scripts/ci/<drive>.sh`, joined by
+//   ` && `) and nothing else (no `|| true`, pipe, `false &&`, comment or
+//   second line);
+// - drive steps live only in the demo and deploy-drives jobs;
+// - those jobs and their steps set no continue-on-error, if, strategy or
+//   matrix;
+// - continue-on-error appears nowhere else in the workflow.
+// Exits 1 naming each fault; `node scripts/ci/drives-once.js [ci.yml]`.
 const fs = require("fs");
 const path = require("path");
 const yaml = require("js-yaml");
@@ -30,32 +35,51 @@ function drives(dir) {
 /** Each fault of workflow `doc` for `names`, as one line. */
 function check(doc, names) {
   const jobs = doc.jobs || {};
-  const runs = Object.values(jobs)
-    .flatMap((j) => j.steps || [])
-    .map((s) => String(s.run ?? "").replace(/^\s*#.*$/gm, ""))
-    .join("\n");
+  const any = new RegExp(
+    `scripts/ci/(${names.map(esc).join("|")})\\.sh(?![\\w.-])`,
+  );
+  const line = new RegExp(
+    `^scripts/ci/(${names.map(esc).join("|")})\\.sh( && scripts/ci/(${names.map(esc).join("|")})\\.sh)*$`,
+  );
+  const ran = Object.fromEntries(names.map((d) => [d, 0]));
   const errors = [];
-  for (const d of names) {
-    const at = new RegExp(
-      `(^|&&)\\s*scripts/ci/${esc(d)}\\.sh(?![\\w.-])`,
-      "gm",
-    );
-    const n = (runs.match(at) || []).length;
-    if (n !== 1) errors.push(`scripts/ci/${d}.sh runs ${n} times, not once`);
-  }
-  for (const id of JOBS) {
-    const job = jobs[id];
-    if (!job) {
-      errors.push(`no ${id} job`);
-      continue;
+  const label = (s) => s.name ?? s.uses ?? s.run;
+  for (const [id, job] of Object.entries(jobs)) {
+    const drive = JOBS.includes(id);
+    if ("continue-on-error" in job)
+      errors.push(`${id} job sets continue-on-error`);
+    if (drive) {
+      for (const k of ["if", "strategy", "matrix"])
+        if (k in job) errors.push(`${id} job sets ${k}`);
     }
-    for (const k of ["continue-on-error", "if"]) {
-      if (k in job) errors.push(`${id} job sets ${k}`);
-      for (const s of job.steps || []) {
-        if (k in s) errors.push(`${id} step "${s.name ?? s.run}" sets ${k}`);
+    for (const s of job.steps || []) {
+      if ("continue-on-error" in s)
+        errors.push(`${id} step "${label(s)}" sets continue-on-error`);
+      if (drive) {
+        for (const k of ["if", "strategy", "matrix"])
+          if (k in s) errors.push(`${id} step "${label(s)}" sets ${k}`);
+      }
+      const run = String(s.run ?? "").trim();
+      if (!any.test(run)) continue;
+      if (!drive) {
+        errors.push(
+          `${id} step "${label(s)}" runs a drive outside ${JOBS.join(" and ")}`,
+        );
+      } else if (!line.test(run)) {
+        errors.push(
+          `${id} step "${label(s)}" is not a drive line (scripts/ci/<drive>.sh, joined by " && ")`,
+        );
+      } else {
+        for (const d of run.split(" && "))
+          ran[d.replace(/^scripts\/ci\/|\.sh$/g, "")]++;
       }
     }
   }
+  for (const d of names) {
+    if (ran[d] !== 1)
+      errors.push(`scripts/ci/${d}.sh runs ${ran[d]} times, not once`);
+  }
+  for (const id of JOBS) if (!jobs[id]) errors.push(`no ${id} job`);
   return errors;
 }
 
