@@ -17,6 +17,10 @@
 import { ethers } from "hardhat";
 import { TxEntry } from "./deployRecordFile";
 import { RecordRefusal, same, StrayChain } from "./deployRecordStrays";
+import { ERRORS } from "hardhat/internal/core/errors-list";
+
+/** Hardhat's HttpProvider error number for a refused connection (108). */
+const REFUSED = ERRORS.NETWORK.NODE_IS_NOT_RUNNING.number;
 
 export { RecordRefusal, StrayChain };
 export type { Raw } from "./deployRecordStrays";
@@ -123,8 +127,13 @@ export class EntryChain extends StrayChain {
       // numeric code) is a refusal; a transport failure (a 502, a
       // timeout, a reset) may have forwarded the send, and the intent is
       // what finds its stray. (R11-C4: the non-hash reply's own Error
-      // carries no code, so no flag for "answered" is needed.)
-      if (kept === undefined && typeof x?.code === "number") {
+      // carries no code, so no flag for "answered" is needed.) Round 12
+      // (A2, R12-C1): a refused connection (Hardhat's NODE_IS_NOT_RUNNING,
+      // ECONNREFUSED) sent nothing either; its request timeout may have.
+      if (
+        kept === undefined &&
+        (typeof x?.code === "number" || x?.number === REFUSED)
+      ) {
         delete e.resendFrom;
         this.save();
       }

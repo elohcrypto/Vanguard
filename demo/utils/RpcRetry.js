@@ -32,6 +32,9 @@ const ARCHIVE_ERROR =
   /missing trie node|header not found|state (is )?not available|historical state|state histor|pruned|required archive|archive node|unknown block|block not found/i;
 const TRANSIENT =
   /ECONNRESET|ECONNABORTED|ETIMEDOUT|EPIPE|EAI_AGAIN|ENETUNREACH|socket hang up|other side closed|UND_ERR|fetch failed|network timeout|NETWORK_TIMEOUT|HH108|timed? ?out|too many requests|rate.?limit|request limit|limit exceeded|exceeded .*(capacity|quota|rate)|-32005|(status|http|code)( code)?:? ?(429|50[234])\b|bad gateway|service unavailable|gateway timeout/i;
+/** Hardhat's HttpProvider error number for a refused connection. */
+const REFUSED = require("hardhat/internal/core/errors-list").ERRORS.NETWORK
+  .NODE_IS_NOT_RUNNING.number;
 /** A repeated nonce: the first attempt may have been accepted. */
 const NONCE_USED =
   /nonce too low|already known|known transaction|nonce has already been used|replacement transaction underpriced|NONCE_EXPIRED|transaction already imported/i;
@@ -176,24 +179,37 @@ function installRetry(provider, opts = {}) {
     }
     const start = Number(await read("eth_blockNumber", []));
     let unsure = false;
-    for (let i = 0; ; i++) {
-      try {
-        return await raw("eth_sendTransaction", [tx, ...params.slice(1)]);
-      } catch (e) {
-        const t = textOf(e);
-        if (unsure && NONCE_USED.test(t)) return adopt(tx, nonce, start);
-        if (!isTransient(e) || i >= retries) throw e;
-        unsure = true;
-        retried++;
-        const ms = Math.min(maxMs, baseMs * 2 ** i);
-        log(
-          `   ↻ eth_sendTransaction nonce ${nonce}: ${t.split("\n")[0].slice(0, 120)}; outcome unknown, retry ${i + 1}/${retries} in ${ms} ms (same nonce)`,
-        );
-        await sleep(ms);
-        const used =
-          Number(await read("eth_getTransactionCount", [tx.from, "latest"])) >
-          nonce;
-        if (used) return adopt(tx, nonce, start);
+    try {
+      return await attempts();
+    } catch (e) {
+      // U2 round 12 (R12-C6): after an unknown outcome the send may be
+      // out, so what leaves here never reads as a refusal (a numeric code
+      // or Hardhat's refused-connection number): same message, the cause
+      // kept.
+      if (!unsure) throw e;
+      throw Object.assign(new Error(e?.message ?? String(e)), { cause: e });
+    }
+    async function attempts() {
+      for (let i = 0; ; i++) {
+        try {
+          return await raw("eth_sendTransaction", [tx, ...params.slice(1)]);
+        } catch (e) {
+          const t = textOf(e);
+          if (unsure && NONCE_USED.test(t)) return adopt(tx, nonce, start);
+          if (!isTransient(e) || i >= retries) throw e;
+          // A refused connection reached nothing: no unknown outcome.
+          if (e?.number !== REFUSED) unsure = true;
+          retried++;
+          const ms = Math.min(maxMs, baseMs * 2 ** i);
+          log(
+            `   ↻ eth_sendTransaction nonce ${nonce}: ${t.split("\n")[0].slice(0, 120)}; outcome unknown, retry ${i + 1}/${retries} in ${ms} ms (same nonce)`,
+          );
+          await sleep(ms);
+          const used =
+            Number(await read("eth_getTransactionCount", [tx.from, "latest"])) >
+            nonce;
+          if (used) return adopt(tx, nonce, start);
+        }
       }
     }
   }
