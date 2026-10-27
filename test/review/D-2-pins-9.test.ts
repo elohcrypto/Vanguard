@@ -317,7 +317,7 @@ describe("D-2 round 9 pins: a listed stray's replacement is never found again (k
   });
 });
 
-describe("D-2 round 9 pins: the fill for an unrecorded re-send (kills W11, W17) and the hidden count (kills G15)", function () {
+describe("D-2 round 9 pins: the fill for an unrecorded re-send (kills W11, W17), the hidden count (G15), the deployer's intents (G05, V27)", function () {
   this.timeout(300000);
   const s = strays();
   afterEach(() => delete process.env.DEPLOY_FILL_HASH);
@@ -451,5 +451,32 @@ describe("D-2 round 9 pins: the fill for an unrecorded re-send (kills W11, W17) 
     expect(res).to.contain(
       "the deployer has 2 pending transactions it does not show",
     );
+  });
+
+  it("P-G05: a role key's older re-send intent does not move the deployer's scan: the deployer's unrecorded re-send is found inside the bound", async function () {
+    const [, role] = await ethers.getSigners();
+    const t0 = await role.sendTransaction({ to: role.address });
+    const r0 = (await t0.wait())!;
+    await mine(5001);
+    const start = await h.nonce();
+    await h.sendOne(s.box.file);
+    const first = await killedResend(start, true, s.load().txs[0].hash!);
+    const rec = s.load();
+    rec.txs.push({
+      from: role.address,
+      to: role.address,
+      value: "0",
+      dataHash: ethers.keccak256("0x"),
+      nonce: t0.nonce,
+      block: r0.blockNumber,
+      hash: t0.hash,
+      resendFrom: r0.blockNumber,
+      status: "confirmed",
+      gasUsed: r0.gasUsed.toString(),
+      label: "a role key's call",
+    });
+    saveRecord(s.box.file, rec);
+    expect(await s.resume()).to.equal("accepted");
+    expect(s.load().strays!.map((x) => x.hash)).to.deep.equal([first]);
   });
 });
