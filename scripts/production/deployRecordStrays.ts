@@ -436,6 +436,13 @@ export class StrayChain {
       !this.rec.txs.some((e) => same(e.from, t.from) && e.nonce === n);
     if ((s || free) && !t.blockNumber) throw no("is not mined on this node");
     if (!s && !(free && this.reSendOf(t, this.intents()))) {
+      // Round 12 (A3): an entry's payload with no intent before it (a
+      // foreign signer dropped one): only a row by hand records it.
+      const k = free ? this.rec.txs.findIndex((e) => this.sameTx(e, { ...t, nonce: e.nonce })) : -1;
+      if (k >= 0)
+        throw no(
+          `carries entry #${k} (${this.rec.txs[k].label})'s payload at nonce ${n}, but the record keeps no re-send intent of that entry from before its block: add it to strays by hand (runbook 02a, "A stray recorded by hand"), then resume without DEPLOY_FILL_HASH`,
+        );
       throw no(
         `is ${ethers.getAddress(t.from)}'s transaction at nonce ${n}, not at a recorded stray's sender and nonce, nor an entry's re-send at a free nonce of the deployer`,
       );
