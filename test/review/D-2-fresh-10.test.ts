@@ -52,7 +52,8 @@ describe("D-2 round 10: a refused send leaves no intent", function () {
   /** A resume whose re-send of entry #0 the signer refuses (signer down). */
   async function refusedResend(start: number, hide: string) {
     const restore = h.node(async (a) => {
-      if (a.method === "eth_sendTransaction") throw new Error("signer down");
+      if (a.method === "eth_sendTransaction")
+        throw Object.assign(new Error("signer down"), { code: -32000 });
       if (a.method === "eth_getTransactionCount")
         return ethers.toQuantity(start);
       const hides =

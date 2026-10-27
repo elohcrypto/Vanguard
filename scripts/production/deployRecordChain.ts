@@ -121,7 +121,11 @@ export class EntryChain extends StrayChain {
     } catch (x: any) {
       // Round 10 (D, GB-C, R10-C3): the node refused the send itself, so
       // nothing of it is out: an intent it set goes; an earlier one stays.
-      if (!answered && kept === undefined) {
+      // Round 11 (A, GH10-1, R11-C1): only a JSON-RPC error answer (a
+      // numeric code) is a refusal; a transport failure (a 502, a
+      // timeout, a reset) may have forwarded the send, and the intent is
+      // what finds its stray.
+      if (!answered && kept === undefined && typeof x?.code === "number") {
         delete e.resendFrom;
         this.save();
       }
