@@ -4,10 +4,10 @@
 // the re-send forwarded, any further resume against the same faulty
 // backend moved resendFrom past the unrecorded stray's block: the stray
 // was unfindable and "record it by hand" was permanent. The earliest
-// intent is kept (`??=`), and the field is cleared only once the entry is
-// mined and the account balanced with no free nonce left and nothing of
-// the deployer's pending (R9-C2): the scan window stops growing for the
-// rest of the deploy, and a clear never runs while a nonce is free.
+// intent is kept (`??=`). Round 10 (item A, R10-C1): round 9's clear of
+// the field once the account balanced is deleted with its pin (a lagging
+// pending count let it run while a re-send was out: D-2-keep-10); the
+// two "no clear while" cases stay as controls.
 import { expect } from "chai";
 import { ethers, network } from "hardhat";
 import { Recorder } from "../../scripts/production/deployRecord";
@@ -111,17 +111,6 @@ describe("D-2 round 9: a re-send's intent keeps its earliest block", function ()
     const res = await s.resume();
     expect(res).to.contain("but the record accounts for");
     expect(res).to.contain(`nonce ${start + 1} is no entry's and no stray's`);
-  });
-
-  it("the intent is cleared once the entry is mined and the account balances with no free nonce", async function () {
-    const start = await h.nonce();
-    await h.sendOne(s.box.file);
-    await killedResend(start, true, s.load().txs[0].hash!);
-    expect(s.load().txs[0].resendFrom).to.be.a("number");
-    expect(await s.resume()).to.equal("accepted");
-    expect(s.load().txs[0].status).to.equal("confirmed");
-    expect(s.load().txs[0], "cleared").to.not.have.property("resendFrom");
-    expect(await s.resume(), "a re-run").to.equal("accepted");
   });
 
   it("no clear while a nonce is free: the refused resume keeps the intent", async function () {

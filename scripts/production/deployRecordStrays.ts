@@ -199,16 +199,8 @@ export class StrayChain {
         `the deployer's nonce is ${nonce} but the record accounts for ${accounted + found}: a transaction outside the record; refusing to resume${why}`,
       );
     }
-    // Round 9 (B, R9-C2): balanced, no nonce free, nothing pending: a
-    // mined entry's re-send intents are spent, so the scan window ends.
-    const spent = own.filter(
-      (e) =>
-        e.resendFrom !== undefined && /^(confirmed|reverted)$/.test(e.status),
-    );
-    if (!spent.length || free.length) return;
-    if (nonce !== (await this.count(this.rec.deployer, "pending"))) return;
-    for (const e of spent) delete e.resendFrom;
-    this.save();
+    // Round 10 (A, GB-A): a re-send's intent is never cleared: a pending
+    // count from a lagging node cannot prove no re-send is still out.
   }
 
   /**
