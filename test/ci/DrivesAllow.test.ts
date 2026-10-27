@@ -12,8 +12,10 @@ import * as path from "path";
  * a hidden extra run, a reusable workflow or a container all passed, and
  * the gate read only ci.yml. The drive jobs now follow an allow-list:
  * every other key, at any level, is refused by name; the gate reads
- * every workflow file. Lane G's rows, each refused by name; H35 pinned (a
- * `run: |` block is the drive line once trimmed).
+ * every workflow file and every local action. Lane G's rows, each refused
+ * by name; GCI6 (the shipped composite action, which the allow-list
+ * admits, running a drive); H35 pinned (a `run: |` block is the drive
+ * line once trimmed).
  */
 describe("every drive exactly once: the drive jobs' allow-list (round 10)", function () {
   this.timeout(60000);
@@ -137,6 +139,43 @@ describe("every drive exactly once: the drive jobs' allow-list (round 10)", func
       } finally {
         fs.rmSync(dir, { recursive: true, force: true });
       }
+    }
+  });
+
+  it("GCI6: the shipped composite action running a drive script fails the gate step by name", function () {
+    const step = load().jobs.gates.steps.find(
+      (x: any) => x.name === "Every drive exactly once",
+    );
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "drives-allow-"));
+    try {
+      fs.mkdirSync(path.join(dir, ".github/workflows"), { recursive: true });
+      fs.writeFileSync(path.join(dir, ".github/workflows/ci.yml"), CI);
+      fs.cpSync(path.join(ROOT, ".github/actions"), path.join(dir, ".github/actions"), {
+        recursive: true,
+      });
+      const action = path.join(dir, ".github/actions/prepare/action.yml");
+      fs.appendFileSync(
+        action,
+        "    - run: scripts/ci/deploy-drive.sh || true\n      shell: bash\n",
+      );
+      fs.cpSync(path.join(ROOT, "scripts/ci"), path.join(dir, "scripts/ci"), {
+        recursive: true,
+      });
+      fs.symlinkSync(
+        path.join(ROOT, "node_modules"),
+        path.join(dir, "node_modules"),
+      );
+      const r = spawnSync("bash", ["-e", "-c", step.run], {
+        cwd: dir,
+        encoding: "utf8",
+      });
+      const out = `${r.stdout}${r.stderr}`;
+      expect(r.status, out).to.equal(1);
+      expect(out).to.contain(
+        ".github/actions/prepare/action.yml runs a drive script",
+      );
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
     }
   });
 
