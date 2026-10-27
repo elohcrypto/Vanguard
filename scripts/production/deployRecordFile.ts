@@ -51,7 +51,12 @@ export interface Stray {
    * the stray (a speed-up or a cancel), never a record entry.
    */
   replacedBy?: string;
-  /** D-2 round 8: the head block before its re-send: scans start here. */
+  /**
+   * D-2 round 8: the head block before its re-send: scans start here.
+   * Round 10 (lane C C9-2): a row recorded from a re-send's intent (the
+   * intent scan or DEPLOY_FILL_HASH) carries the intent's block, where
+   * its search starts, not the block the stray mined in.
+   */
   block?: number;
 }
 

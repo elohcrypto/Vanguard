@@ -305,9 +305,12 @@ describe("D-2 round 9 pins: a listed stray's replacement is never found again (k
         : undefined,
     );
     try {
-      expect(await s.resume(), "the lagging resume").to.contain(
-        `nonce ${start + 1} is no entry's and no stray's`,
+      // round 10 (item B): the listed stray's nonce reads as lagging
+      const res = await s.resume();
+      expect(res, "the lagging resume").to.contain(
+        `stray ${stray} is listed but not shown mined on this node: a lagging RPC`,
       );
+      expect(res).to.not.contain("by hand");
     } finally {
       restore();
     }

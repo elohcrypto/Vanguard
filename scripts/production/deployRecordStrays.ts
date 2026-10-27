@@ -190,13 +190,27 @@ export class StrayChain {
       if (!held.has(n)) free.push(n);
     const found = nonce > accounted ? await this.unrecorded(free) : 0;
     if (nonce !== accounted + found) {
-      const why = !free.length
-        ? ""
-        : free.length === 1
-          ? ` (nonce ${free[0]} is no entry's and no stray's: find that transaction and record it by hand)`
-          : ` (nonces ${free.join(", ")} are no entry's and no stray's: find those transactions and record them by hand)`;
+      // Round 10 (B, GA4-text): a free nonce a listed stray holds is that
+      // stray lagging on this node; "by hand" only for one no stray lists.
+      const lag = free.flatMap((n) => this.listed(n) ?? []);
+      const lost = free.filter((n) => !this.listed(n));
+      const why = [
+        ...lag.map(
+          (x) =>
+            `stray ${x.hash} is listed but not shown mined on this node: a lagging RPC; resume against a synced RPC`,
+        ),
+        ...(lost.length === 1
+          ? [
+              `nonce ${lost[0]} is no entry's and no stray's: find that transaction and record it by hand`,
+            ]
+          : lost.length
+            ? [
+                `nonces ${lost.join(", ")} are no entry's and no stray's: find those transactions and record them by hand`,
+              ]
+            : []),
+      ];
       throw new RecordRefusal(
-        `the deployer's nonce is ${nonce} but the record accounts for ${accounted + found}: a transaction outside the record; refusing to resume${why}`,
+        `the deployer's nonce is ${nonce} but the record accounts for ${accounted + found}: a transaction outside the record; refusing to resume${why.length ? ` (${why.join("; ")})` : ""}`,
       );
     }
     // Round 10 (A, GB-A): a re-send's intent is never cleared: a pending
@@ -217,6 +231,10 @@ export class StrayChain {
     const block = Math.min(...sent.map((e) => e.resendFrom!));
     let found = 0;
     for (const n of [...free]) {
+      // Round 9 (A, GA4): a listed stray's transaction is never listed
+      // again; round 10 (B): its nonce is not searched, it stays free
+      // while this node lags.
+      if (this.listed(n)) continue;
       // Round 9 (D): the operator's hash for this nonce, else the scan.
       const f = this.filled;
       const t =
@@ -226,14 +244,6 @@ export class StrayChain {
               { from: d, nonce: n, block, label: `nonce ${n}` } as TxEntry,
               `pass its hash as DEPLOY_FILL_HASH=<hash>, then resume${UNSET}`,
             );
-      // Round 9 (A, GA4): a listed stray's transaction is never listed
-      // again; its nonce stays free while this node lags.
-      const all = this.rec.strays ?? [];
-      if (
-        t &&
-        all.some((x) => same(x.hash, t.hash) || same(x.replacedBy, t.hash))
-      )
-        continue;
       const e = t && this.reSendOf(t, sent);
       if (!e) continue;
       const k = this.rec.txs.indexOf(e);
@@ -253,6 +263,13 @@ export class StrayChain {
       found++;
     }
     return found;
+  }
+
+  /** Round 10 (B): the deployer's listed stray at nonce `n`, if any. */
+  private listed(n: number): Stray | undefined {
+    return (this.rec.strays ?? []).find(
+      (x) => same(x.from, this.rec.deployer) && x.nonce === n,
+    );
   }
 
   /** Round 8 (J): the deployer's entries with a recorded re-send intent. */
