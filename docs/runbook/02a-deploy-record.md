@@ -149,7 +149,11 @@ when that part neared the 500-line rule (U2 round 9).
   keeps the first intent's block, and the intent is kept for the life
   of the record (never cleared: a pending count from a lagging node
   cannot prove that no re-send is still out); a send the node refused
-  outright leaves no intent of its own. A stray row recorded from an
+  outright (a JSON-RPC error answer: the node answered, nothing of the
+  send is out) leaves no intent of its own. A transport failure (a 502
+  from a proxy, a timeout, a reset) is no refusal: the send may have
+  gone out, so its intent is kept and the next resume finds any stray
+  through it. A stray row recorded from an
   intent (this search or `DEPLOY_FILL_HASH`) carries the intent's
   `block`, where its search starts, not the block it mined in. More than
   5000 blocks after the intent the search is refused
