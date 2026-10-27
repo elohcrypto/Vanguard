@@ -324,9 +324,9 @@ async function wiring(state, flow, only = () => true) {
   }
   asDeployed("51", "InvestorRequestManager", irm, "identityRegistry", ir);
   if (types && !state.production) {
-    add("51", "compliance officer wallet 1", () =>
-      types.isComplianceOfficer(state.signers[1].address),
-    );
+    // Round 10 (D9-3): an owner setter, a vote's after the handover.
+    const officer = () => types.isComplianceOfficer(state.signers[1].address);
+    add("51", "compliance officer wallet 1", untilHandover(types, officer));
   }
   if (gov) {
     // Round 7 (lane D D6 args): option 74 binds the targets in state at
