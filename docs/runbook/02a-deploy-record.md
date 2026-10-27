@@ -148,25 +148,48 @@ when that part neared the 500-line rule (U2 round 9).
   re-run against a synced RPC; never record it by hand. A later re-send
   keeps the first intent's block, and the intent is kept for the life
   of the record (never cleared: a pending count from a lagging node
-  cannot prove that no re-send is still out); a send the node refused
-  outright (a JSON-RPC error answer: the node answered, nothing of the
-  send is out) leaves no intent of its own. A transport failure (a 502
-  from a proxy, a timeout, a reset) is no refusal: the send may have
-  gone out, so its intent is kept and the next resume finds any stray
-  through it. A stray row recorded from an
+  cannot prove that no re-send is still out). A JSON-RPC error answer
+  is a refusal: the node, or the signer relaying the node's answer,
+  answered it, and the send leaves no intent of its own; so does a
+  refused connection (Hardhat's `HH108`, ECONNREFUSED: nothing left the
+  machine). A transport failure is no refusal: the shipped signer
+  (`scripts/production/signer.js`) answers a broadcast it forwarded and
+  then lost (a reset, a timeout, a gateway error upstream) with HTTP 502
+  and a body that is no JSON-RPC answer (`{"transport": "HTTP 502: …"}`),
+  never as a JSON-RPC error; the CLI's request timeout (`HH109`) is one
+  too. The send may have gone out, so its intent is kept, and that
+  resume, or the next, finds it from the intent. The CLI's retry layer
+  sends the same nonce again through the signer, which signs the same
+  transaction again; once an attempt's outcome is unknown, no later
+  error reaching the record reads as a refusal. A stray row recorded from an
   intent (this search or `DEPLOY_FILL_HASH`) carries the intent's
-  `block`, where its search starts, not the block it mined in. More than
-  5000 blocks after the intent the search is refused
-  (`nonce K: 0x… used nonce K more than 5000 blocks after the intent (block N); the bound is entry #M (<label>)'s intent, the earliest the record keeps; if it is an entry's re-send, pass its hash as DEPLOY_FILL_HASH=<hash>, then resume; otherwise record it by hand; unset DEPLOY_FILL_HASH after the resume completes`):
+  `block`, where its search starts, not the block it mined in. The
+  search reads the 5000 blocks from the earliest intent the record
+  keeps (entry #M's, block N), whatever the chain head, so a re-send
+  mined there is found at any later resume. A nonce used past them is
+  refused
+  (`nonce K: the chain head (block H) is more than 5000 blocks past entry #M (<label>)'s intent (block N), the earliest the record keeps, and those 5000 blocks hold no transaction of 0x… at nonce K; if nonce K is an entry's re-send, pass its hash as DEPLOY_FILL_HASH=<hash>, then resume; otherwise record it by hand; unset DEPLOY_FILL_HASH after the resume completes`):
   find the deployer's transaction at nonce K on an explorer and re-run
-  with its hash set. The search starts at the earliest intent the
-  record keeps (entry #M's, block N), so once the record is older than
-  5000 blocks even a later entry's killed re-send is refused this way:
-  the fill is then the expected path, one hash. It is recorded as that
-  entry's stray only if it is the deployer's at that free nonce, mined
-  after the intent, with the entry's payload; anything else is refused
-  by name (a transaction that is no entry's re-send is recorded by
-  hand). Unset the variable once the resume completes: left set, a hash a later resume
+  with its hash set. Once the record is older than 5000 blocks a later
+  entry's killed re-send mined past entry #M's window is refused this
+  way: the fill is then the expected path, one hash. It is recorded as
+  that entry's stray only if it is the deployer's at that free nonce,
+  mined after the intent, with the entry's payload; anything else is
+  refused by name (a transaction that is no entry's re-send is recorded
+  by hand). An entry's payload at a free nonce with no intent of that
+  entry from before its block (a foreign signer that turned a lost
+  forward into a JSON-RPC error and dropped the nonce, so the intent
+  went) is refused naming the row by hand
+  (`DEPLOY_FILL_HASH 0x… carries entry #M (<label>)'s payload at nonce K, but the record keeps no re-send intent of that entry from before its block: add it to strays by hand (runbook 02a, "A stray recorded by hand"), then resume without DEPLOY_FILL_HASH: refusing; unset DEPLOY_FILL_HASH after the resume completes`).
+  A stray recorded by hand: with no deploy running, add to the record's
+  `strays` list (create it if absent) one object
+  `{"hash": "0x…", "from": "<deployer>", "nonce": K, "entry": M, "label": "<entry M's label>", "block": <the block it mined in>}`,
+  the transaction's own hash, its sender and nonce as the chain shows
+  them and the entry whose payload it carries, then resume without
+  `DEPLOY_FILL_HASH`: the resume checks the row against the chain
+  (refused by name if the chain shows it from another sender or nonce)
+  and counts it once.
+  Unset the variable once the resume completes: left set, a hash a later resume
   cannot place (the stray it recorded is now listed) refuses every
   resume until it is unset. One hash at a time: with two nonces to
   fill, resume once per hash, the lower nonce first. A transaction stuck in the

@@ -14,6 +14,7 @@ import { ethers, network } from "hardhat";
 import { HardhatError } from "hardhat/internal/core/errors";
 import { ERRORS } from "hardhat/internal/core/errors-list";
 import { Recorder } from "../../scripts/production/deployRecord";
+import { saveRecord } from "../../scripts/production/deployRecordFile";
 import * as h from "../helpers/deployRecordFlow";
 import { strays } from "../helpers/deployRecordStrays";
 
@@ -117,5 +118,13 @@ describe("D-2 round 12: a refused connection drops the intent; a timeout keeps i
     expect(await s.resume()).to.equal(
       `DEPLOY_FILL_HASH ${mined} carries entry #0 (${s.load().txs[0].label})'s payload at nonce ${start + 1}, but the record keeps no re-send intent of that entry from before its block: add it to strays by hand (runbook 02a, "A stray recorded by hand"), then resume without DEPLOY_FILL_HASH: refusing; unset DEPLOY_FILL_HASH after the resume completes`,
     );
+    // runbook 02a's row by hand, then a resume without the variable
+    delete process.env.DEPLOY_FILL_HASH;
+    const r = s.load();
+    const t = (await ethers.provider.getTransaction(mined))!;
+    r.strays = [{ hash: mined, from: r.deployer, nonce: start + 1, entry: 0, label: r.txs[0].label, block: t.blockNumber! }];
+    saveRecord(s.box.file, r);
+    expect(await s.resume(), "the by-hand row").to.equal("accepted");
+    expect(await s.resume(), "a further resume").to.equal("accepted");
   });
 });
