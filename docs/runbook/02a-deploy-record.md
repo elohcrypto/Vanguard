@@ -87,11 +87,13 @@ when that part neared the 500-line rule (U2 round 9).
   (`   ⚠️  nonce N: stray 0x… replaced by 0x…, outside the record, never adopted; it cost 0x… X ETH`).
   More than 5000 blocks after the stray the scan is refused and asks for
   the hash
-  (`… more than 5000 blocks after the intent (block N); pass the hash of the transaction that filled it as DEPLOY_FILL_HASH=<hash>, then resume`):
+  (`… more than 5000 blocks after the intent (block N); pass the hash of the transaction that filled it as DEPLOY_FILL_HASH=<hash>, then resume; unset DEPLOY_FILL_HASH after the resume completes`):
   re-run with `DEPLOY_FILL_HASH=0x…` (the cancel's hash) set. It is read
   by that hash and must be mined, from the stray's sender at its nonce,
   and no record entry or stray, else it is refused by name
-  (`DEPLOY_FILL_HASH 0x… is <what it is>: refusing`).
+  (`DEPLOY_FILL_HASH 0x… is <what it is>: refusing; unset DEPLOY_FILL_HASH after the resume completes`).
+  Unset it once the resume completes: a stale value a later resume
+  cannot place refuses with that line.
   One the node no longer shows is trusted as gone only while its sender
   has nothing pending the node hides
   (`… is not shown by this node but the deployer has N pending transactions it does not show: a lagging or inconsistent RPC; wait or re-run against a synced RPC`);
@@ -136,6 +138,17 @@ when that part neared the 500-line rule (U2 round 9).
   run was killed is found at such a nonce and recorded as the entry's
   stray
   (`   ⚠️  nonce K: 0x…, the signer's re-send of entry #M (<label>) at another nonce, found on chain from its recorded intent (the run that sent it stopped before recording it): recorded as a stray`).
-  Any other transaction there keeps the refusal: find it on an explorer
-  (the deployer at nonce K) and record it by hand. A transaction stuck
-  in the mempool: `signer.js bump` (section 1a).
+  A stray already listed is never found again: while the node shows it
+  `not mined on this node, not counted`, or in a block but not by its
+  hash (`stray 0x… … is not shown by this node by its hash, but its block holds it …: a lagging RPC; kept, re-run against a synced RPC`),
+  re-run against a synced RPC; never record it by hand. A later re-send
+  keeps the first intent's block, and the intent is cleared once the
+  account balances with no free nonce and nothing pending. More than
+  5000 blocks after the intent the search is refused
+  (`nonce K: 0x… used nonce K more than 5000 blocks after the intent (block N); pass its hash as DEPLOY_FILL_HASH=<hash>, then resume; unset DEPLOY_FILL_HASH after the resume completes`):
+  find the deployer's transaction at nonce K on an explorer and re-run
+  with its hash set. It is recorded as that entry's stray only if it is
+  the deployer's at that free nonce, mined after the intent, with the
+  entry's payload; anything else is refused by name. Unset the
+  variable once the resume completes. A transaction stuck in the
+  mempool: `signer.js bump` (section 1a).

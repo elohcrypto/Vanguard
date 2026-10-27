@@ -171,10 +171,12 @@ prints `✅ Deployed: 74 transactions in /tmp/vanguard-runbook/deploy-record.jso
 `✅ Preflight passed: every check before the ceremony's first transaction holds (voters are checked by the full phase)`.
 
 - Before that line the deploy reads its wiring back from chain
-  (`🔗 Wiring read back from chain (47 links):`,
+  (`🔗 Wiring read back from chain (49 links):`,
   then one `   ✅ <link>` each: the KeyManager pin on the identity
   factory, agents, rule administrators (the deployer's on VGT until the
-  handover too), the identity registry's ComplianceRules, VSC's
+  handover too), the KYC and AML issuers trusted on the identity
+  registry (until the handover), the identity registry's
+  ComplianceRules, VSC's identity registry in ComplianceRules, VSC's
   PrivacyManager and blacklist oracle, the consensus engine and the
   three nodes (until the handover), VGT's registry and trust, VSC's
   authorization on the investor type registry, the registrars, the
@@ -189,8 +191,10 @@ prints `✅ Deployed: 74 transactions in /tmp/vanguard-runbook/deploy-record.jso
   the custody manager's identity registry (read right after its deploy,
   wherever it is deployed), the escrow factory's VSC, identity registry
   and ComplianceRules, governance's VGT and identity registry, and
-  VSC's and VGT's identity registry and compliance (the last six until
-  the handover: their owners may move them).
+  VSC's and VGT's identity registry and compliance. Six of them read
+  only until the handover, since their owners may move them: VSC's and
+  VGT's `identityRegistry` and `compliance`, and the escrow factory's
+  `identityRegistry` and `complianceRules`.
   Each new contract is read before anything holds it: no code at its
   address, or code that is not its compiled artifact's (immutables
   aside), stops that deploy naming it
