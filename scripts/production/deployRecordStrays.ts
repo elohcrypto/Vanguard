@@ -228,7 +228,7 @@ export class StrayChain {
     const d = this.rec.deployer;
     const sent = this.intents();
     if (!sent.length) return 0;
-    const block = Math.min(...sent.map((e) => e.resendFrom!));
+    const block = Math.min(...sent.map((e) => e.resendFrom!)), first = sent.find((e) => e.resendFrom === block)!;
     let found = 0;
     for (const n of [...free]) {
       // Round 9 (A, GA4): a listed stray's transaction is never listed
@@ -242,7 +242,7 @@ export class StrayChain {
           ? f.t
           : await this.findMined(
               { from: d, nonce: n, block, label: `nonce ${n}` } as TxEntry,
-              `pass its hash as DEPLOY_FILL_HASH=<hash>, then resume${UNSET}`,
+              `the bound is entry #${this.rec.txs.indexOf(first)} (${first.label})'s intent, the earliest the record keeps; if it is an entry's re-send, pass its hash as DEPLOY_FILL_HASH=<hash>, then resume; otherwise record it by hand${UNSET}`,
             );
       const e = t && this.reSendOf(t, sent);
       if (!e) continue;

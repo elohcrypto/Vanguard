@@ -155,7 +155,7 @@ describe("D-2 round 9: DEPLOY_FILL_HASH names a fill or an unrecorded re-send", 
     const from = s.load().txs[0].resendFrom!;
     await mine(5001);
     expect(await s.resume()).to.equal(
-      `nonce ${start + 1}: ${s.load().deployer} used nonce ${start + 1} more than 5000 blocks after the intent (block ${from}); pass its hash as DEPLOY_FILL_HASH=<hash>, then resume${UNSET}`,
+      `nonce ${start + 1}: ${s.load().deployer} used nonce ${start + 1} more than 5000 blocks after the intent (block ${from}); the bound is entry #0 (${s.load().txs[0].label})'s intent, the earliest the record keeps; if it is an entry's re-send, pass its hash as DEPLOY_FILL_HASH=<hash>, then resume; otherwise record it by hand${UNSET}`,
     );
     expect(s.load().strays ?? [], "no stray recorded").to.deep.equal([]);
     process.env.DEPLOY_FILL_HASH = stray;

@@ -153,12 +153,16 @@ when that part neared the 500-line rule (U2 round 9).
   intent (this search or `DEPLOY_FILL_HASH`) carries the intent's
   `block`, where its search starts, not the block it mined in. More than
   5000 blocks after the intent the search is refused
-  (`nonce K: 0x… used nonce K more than 5000 blocks after the intent (block N); pass its hash as DEPLOY_FILL_HASH=<hash>, then resume; unset DEPLOY_FILL_HASH after the resume completes`):
+  (`nonce K: 0x… used nonce K more than 5000 blocks after the intent (block N); the bound is entry #M (<label>)'s intent, the earliest the record keeps; if it is an entry's re-send, pass its hash as DEPLOY_FILL_HASH=<hash>, then resume; otherwise record it by hand; unset DEPLOY_FILL_HASH after the resume completes`):
   find the deployer's transaction at nonce K on an explorer and re-run
-  with its hash set. It is recorded as that entry's stray only if it is
-  the deployer's at that free nonce, mined after the intent, with the
-  entry's payload; anything else is refused by name. Unset the
-  variable once the resume completes: left set, a hash a later resume
+  with its hash set. The search starts at the earliest intent the
+  record keeps (entry #M's, block N), so once the record is older than
+  5000 blocks even a later entry's killed re-send is refused this way:
+  the fill is then the expected path, one hash. It is recorded as that
+  entry's stray only if it is the deployer's at that free nonce, mined
+  after the intent, with the entry's payload; anything else is refused
+  by name (a transaction that is no entry's re-send is recorded by
+  hand). Unset the variable once the resume completes: left set, a hash a later resume
   cannot place (the stray it recorded is now listed) refuses every
   resume until it is unset. One hash at a time: with two nonces to
   fill, resume once per hash, the lower nonce first. A transaction stuck in the
