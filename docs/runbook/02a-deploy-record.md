@@ -133,6 +133,10 @@ when that part neared the 500-line rule (U2 round 9).
   Every resume counts the deployer's nonce from `startNonce`, an empty
   record included, and names each nonce no entry and no stray holds
   (`the deployer's nonce is N but the record accounts for M: a transaction outside the record; refusing to resume (nonce K is no entry's and no stray's: find that transaction and record it by hand)`).
+  Only such a nonce is to be found and recorded by hand. A free nonce
+  a listed stray holds is that stray lagging on this node (its receipt
+  not shown yet): never record it again, resume against a synced RPC
+  (`… refusing to resume (stray 0x… is listed but not shown mined on this node: a lagging RPC; resume against a synced RPC)`).
   A re-send writes its intent (the entry and the head block) before it
   goes out, so a re-send the signer answered at another nonce while the
   run was killed is found at such a nonce and recorded as the entry's
@@ -142,13 +146,20 @@ when that part neared the 500-line rule (U2 round 9).
   `not mined on this node, not counted`, or in a block but not by its
   hash (`stray 0x… … is not shown by this node by its hash, but its block holds it …: a lagging RPC; kept, re-run against a synced RPC`),
   re-run against a synced RPC; never record it by hand. A later re-send
-  keeps the first intent's block, and the intent is cleared once the
-  account balances with no free nonce and nothing pending. More than
+  keeps the first intent's block, and the intent is kept for the life
+  of the record (never cleared: a pending count from a lagging node
+  cannot prove that no re-send is still out); a send the node refused
+  outright leaves no intent of its own. A stray row recorded from an
+  intent (this search or `DEPLOY_FILL_HASH`) carries the intent's
+  `block`, where its search starts, not the block it mined in. More than
   5000 blocks after the intent the search is refused
   (`nonce K: 0x… used nonce K more than 5000 blocks after the intent (block N); pass its hash as DEPLOY_FILL_HASH=<hash>, then resume; unset DEPLOY_FILL_HASH after the resume completes`):
   find the deployer's transaction at nonce K on an explorer and re-run
   with its hash set. It is recorded as that entry's stray only if it is
   the deployer's at that free nonce, mined after the intent, with the
   entry's payload; anything else is refused by name. Unset the
-  variable once the resume completes. A transaction stuck in the
+  variable once the resume completes: left set, a hash a later resume
+  cannot place (the stray it recorded is now listed) refuses every
+  resume until it is unset. One hash at a time: with two nonces to
+  fill, resume once per hash, the lower nonce first. A transaction stuck in the
   mempool: `signer.js bump` (section 1a).
