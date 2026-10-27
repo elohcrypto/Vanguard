@@ -94,7 +94,6 @@ export class EntryChain extends StrayChain {
     const kept = e.resendFrom;
     e.resendFrom ??= head;
     this.save();
-    let answered = false;
     try {
       const hash = await this.raw("eth_sendTransaction", [
         {
@@ -106,7 +105,6 @@ export class EntryChain extends StrayChain {
           nonce: ethers.toQuantity(e.nonce),
         },
       ]);
-      answered = true;
       if (!/^0x[0-9a-fA-F]{64}$/.test(String(hash)))
         throw new Error(`no transaction hash (${hash})`);
       if (e.hash && !e.resent) e.sentHash = e.hash;
@@ -124,8 +122,9 @@ export class EntryChain extends StrayChain {
       // Round 11 (A, GH10-1, R11-C1): only a JSON-RPC error answer (a
       // numeric code) is a refusal; a transport failure (a 502, a
       // timeout, a reset) may have forwarded the send, and the intent is
-      // what finds its stray.
-      if (!answered && kept === undefined && typeof x?.code === "number") {
+      // what finds its stray. (R11-C4: the non-hash reply's own Error
+      // carries no code, so no flag for "answered" is needed.)
+      if (kept === undefined && typeof x?.code === "number") {
         delete e.resendFrom;
         this.save();
       }
