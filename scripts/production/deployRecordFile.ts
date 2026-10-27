@@ -26,9 +26,11 @@ export interface TxEntry {
    */
   sentHash?: string;
   /**
-   * D-2 round 8: the head block read before the record last sent this
-   * entry again, saved before that send (the re-send's intent): a re-send
-   * the run did not live to record is looked for from here.
+   * D-2 round 8: the head block read before the record sent this entry
+   * again, saved before that send (the re-send's intent): a re-send the
+   * run did not live to record is looked for from here. Round 9: the
+   * earliest intent is kept; round 10: never cleared, and a send the
+   * node refused leaves none of its own.
    */
   resendFrom?: number;
   status: "sending" | "sent" | "confirmed" | "reverted";

@@ -91,8 +91,10 @@ export class EntryChain extends StrayChain {
     // GJ1): the earliest intent is kept, so a later re-send never moves
     // the scan past an unrecorded stray of an earlier one.
     const head = Number(await this.raw("eth_blockNumber"));
+    const kept = e.resendFrom;
     e.resendFrom ??= head;
     this.save();
+    let answered = false;
     try {
       const hash = await this.raw("eth_sendTransaction", [
         {
@@ -104,6 +106,7 @@ export class EntryChain extends StrayChain {
           nonce: ethers.toQuantity(e.nonce),
         },
       ]);
+      answered = true;
       if (!/^0x[0-9a-fA-F]{64}$/.test(String(hash)))
         throw new Error(`no transaction hash (${hash})`);
       if (e.hash && !e.resent) e.sentHash = e.hash;
@@ -116,6 +119,12 @@ export class EntryChain extends StrayChain {
         `   📤 #${n} ${e.label}: sent again at its nonce ${e.nonce}: ${hash}`,
       );
     } catch (x: any) {
+      // Round 10 (D, GB-C, R10-C3): the node refused the send itself, so
+      // nothing of it is out: an intent it set goes; an earlier one stays.
+      if (!answered && kept === undefined) {
+        delete e.resendFrom;
+        this.save();
+      }
       return `; the node answered: ${String(x?.message ?? x).split("\n")[0]}`;
     }
     // Round 5 (lane C F1): the next read is what the signer sent.

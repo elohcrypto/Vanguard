@@ -171,9 +171,15 @@ describe("D-2 round 9 pins: item J's match (kills G04, G07, G08)", function () {
   this.timeout(300000);
   const s = strays();
   async function intentOnly(start: number, hide: string) {
-    // an intent for entry #0 (resendFrom set) whose send the node refused
+    // an intent for entry #0 (resendFrom set) whose send never reached the
+    // node and whose reply never came (round 10, item D: a send the node
+    // refuses leaves no intent of its own)
+    let sent = false;
     const restore = h.node(async (a) => {
-      if (a.method === "eth_sendTransaction") throw new Error("refused");
+      if (a.method === "eth_sendTransaction") {
+        sent = true;
+        return new Promise(() => {});
+      }
       if (a.method === "eth_getTransactionCount")
         return ethers.toQuantity(start);
       const hides =
@@ -181,9 +187,12 @@ describe("D-2 round 9 pins: item J's match (kills G04, G07, G08)", function () {
         a.method === "eth_getTransactionReceipt";
       return hides && a.params[0] === hide ? null : undefined;
     });
+    const r = new Recorder(s.box.file, s.load(), 1, () => {});
+    void r.install().catch(() => {});
     try {
-      await h.accepted(s.box.file);
+      for (let i = 0; !sent && i < 500; i++) await s.wait(10);
     } finally {
+      r.remove();
       restore();
     }
   }
