@@ -7,6 +7,7 @@
 // (tools/mutate-9.py).
 import { expect } from "chai";
 import { ethers, network } from "hardhat";
+import { Recorder } from "../../scripts/production/deployRecord";
 import { saveRecord } from "../../scripts/production/deployRecordFile";
 import * as h from "../helpers/deployRecordFlow";
 import { strays } from "../helpers/deployRecordStrays";
@@ -38,11 +39,15 @@ describe("D-2 round 9 pins: round-8 rules lane G found unpinned", function () {
     const { d, start, r } = await two();
     const head0 = await ethers.provider.getBlockNumber();
     await (
-      await d.sendTransaction({ to: r.txs[1].to!, data: await recData(r, 1), nonce: start + 2 })
+      await d.sendTransaction({
+        to: r.txs[1].to!,
+        data: await recData(r, 1),
+        nonce: start + 2,
+      })
     ).wait();
     await mine(3);
     r.txs[0].resendFrom = head0; // early intent: the scan starts here
-    r.txs[1].resendFrom = (await ethers.provider.getBlockNumber()); // later than the duplicate
+    r.txs[1].resendFrom = await ethers.provider.getBlockNumber(); // later than the duplicate
     saveRecord(s.box.file, r);
     const res = await s.resume();
     expect(res).to.contain(`nonce ${start + 2} is no entry's and no stray's`);
@@ -70,10 +75,14 @@ describe("D-2 round 9 pins: round-8 rules lane G found unpinned", function () {
     const rec = s.load();
     const row = { from: d.address, entry: 0, label: rec.txs[0].label };
     // stray A at start+1 replaced long ago; stray B at start+2 replaced now
-    const a = (await (await d.sendTransaction({ to: d.address, nonce: start + 1 })).wait())!.hash;
+    const a = (await (
+      await d.sendTransaction({ to: d.address, nonce: start + 1 })
+    ).wait())!.hash;
     await mine(5001);
     const head = await ethers.provider.getBlockNumber();
-    const b = (await (await d.sendTransaction({ to: d.address, nonce: start + 2 })).wait())!.hash;
+    const b = (await (
+      await d.sendTransaction({ to: d.address, nonce: start + 2 })
+    ).wait())!.hash;
     rec.strays = [
       { ...row, hash: fake("A"), nonce: start + 1 },
       { ...row, hash: fake("B"), nonce: start + 2, block: head },
@@ -148,7 +157,11 @@ describe("D-2 round 9 pins: round-8 rules lane G found unpinned", function () {
     // entries drop `data` once mined: rebuild it from the artifact / the call
     if (r.txs[i].data) return r.txs[i].data;
     if (i === 0)
-      return (await (await ethers.getContractFactory("IdentityRegistry")).getDeployTransaction()).data as string;
+      return (
+        await (
+          await ethers.getContractFactory("IdentityRegistry")
+        ).getDeployTransaction()
+      ).data as string;
     const ir = await ethers.getContractAt("IdentityRegistry", r.txs[1].to);
     return ir.interface.encodeFunctionData("addAgent", [h.AGENT]);
   }
@@ -161,7 +174,8 @@ describe("D-2 round 9 pins: item J's match (kills G04, G07, G08)", function () {
     // an intent for entry #0 (resendFrom set) whose send the node refused
     const restore = h.node(async (a) => {
       if (a.method === "eth_sendTransaction") throw new Error("refused");
-      if (a.method === "eth_getTransactionCount") return ethers.toQuantity(start);
+      if (a.method === "eth_getTransactionCount")
+        return ethers.toQuantity(start);
       const hides =
         a.method === "eth_getTransactionByHash" ||
         a.method === "eth_getTransactionReceipt";
@@ -179,7 +193,11 @@ describe("D-2 round 9 pins: item J's match (kills G04, G07, G08)", function () {
     await h.sendOne(s.box.file);
     await intentOnly(start, s.load().txs[0].hash!);
     await (
-      await d.sendTransaction({ to: d.address, data: s.load().txs[0].data!, nonce: start + 1 })
+      await d.sendTransaction({
+        to: d.address,
+        data: s.load().txs[0].data!,
+        nonce: start + 1,
+      })
     ).wait();
     const res = await s.resume();
     expect(res).to.contain(`nonce ${start + 1} is no entry's and no stray's`);
@@ -192,15 +210,18 @@ describe("D-2 round 9 pins: item J's match (kills G04, G07, G08)", function () {
     await intentOnly(start, s.load().txs[0].hash!);
     const from = s.load().txs[0].resendFrom!;
     // nonce start+1: the entry's payload (a duplicate by hand); start+2: unrelated
-    await (await d.sendTransaction({ data: s.load().txs[0].data!, nonce: start + 1 })).wait();
+    await (
+      await d.sendTransaction({ data: s.load().txs[0].data!, nonce: start + 1 })
+    ).wait();
     await (await d.sendTransaction({ to: d.address, nonce: start + 2 })).wait();
     const res = await s.resume();
-    expect(res).to.contain(`(nonce ${start + 2} is no entry's and no stray's: find that transaction and record it by hand)`);
+    expect(res).to.contain(
+      `(nonce ${start + 2} is no entry's and no stray's: find that transaction and record it by hand)`,
+    );
     expect(res).to.not.contain(`nonces ${start + 1}`);
     expect(s.load().strays![0].block, "the intent's block").to.equal(from);
   });
 });
-
 
 describe("D-2 round 9 pins: a stale DEPLOY_FILL_HASH without strays (kills G29)", function () {
   this.timeout(300000);
@@ -254,9 +275,181 @@ describe("D-2 round 9 pins: the kept hash survives a second re-send (kills G33)"
       method: "hardhat_mine",
       params: [ethers.toQuantity(5001)],
     });
-    expect(await s.resume(), "adopted by its kept hash").to.equal(
-      "accepted",
-    );
+    expect(await s.resume(), "adopted by its kept hash").to.equal("accepted");
     expect(s.load().txs[0].hash).to.equal(own);
+  });
+});
+
+describe("D-2 round 9 pins: a listed stray's replacement is never found again (kills W02)", function () {
+  this.timeout(300000);
+  const s = strays();
+
+  it("P-W02: the stray's fee bump (its payload, its nonce) mined as its replacement, its receipt lagging: one row; the healthy resume completes", async function () {
+    const [d] = await ethers.getSigners();
+    const { start, stray } = await s.pendingStray();
+    const data = s.load().txs[0].data!;
+    await s.drop(stray);
+    // another gas limit, so another hash than the dropped stray's
+    const bump = await d.sendTransaction({
+      data,
+      nonce: start + 1,
+      gasLimit: (await ethers.provider.getBlock("latest"))!.gasLimit - 1n,
+    });
+    expect(bump.hash).to.not.equal(stray);
+    await s.automine(true);
+    await network.provider.request({ method: "evm_mine" });
+    const restore = h.node(async (a) =>
+      a.method === "eth_getTransactionReceipt" && a.params[0] === bump.hash
+        ? null
+        : undefined,
+    );
+    try {
+      expect(await s.resume(), "the lagging resume").to.contain(
+        `nonce ${start + 1} is no entry's and no stray's`,
+      );
+    } finally {
+      restore();
+    }
+    expect(s.load().strays, "one row").to.have.length(1);
+    expect(s.load().strays![0].replacedBy).to.equal(bump.hash);
+    expect(await s.resume(), "the node caught up").to.equal("accepted");
+    expect(s.load().strays, "still one row").to.have.length(1);
+  });
+});
+
+describe("D-2 round 9 pins: the fill for an unrecorded re-send (kills W11, W17) and the hidden count (kills G15)", function () {
+  this.timeout(300000);
+  const s = strays();
+  afterEach(() => delete process.env.DEPLOY_FILL_HASH);
+  const mine = (n: number) =>
+    network.provider.request({
+      method: "hardhat_mine",
+      params: [ethers.toQuantity(n)],
+    });
+
+  /** A run killed while its re-send's reply is awaited (D-2-unrecorded-8). */
+  async function killedResend(start: number, forward: boolean, hide: string) {
+    let sent: string | null = null;
+    const restore = h.node(async (a, request) => {
+      if (a.method === "eth_sendTransaction") {
+        const { nonce, ...rest } = a.params[0];
+        sent = forward
+          ? await request({ method: a.method, params: [rest] })
+          : "0x";
+        return new Promise(() => {});
+      }
+      if (a.method === "eth_getTransactionCount")
+        return ethers.toQuantity(start);
+      const hides =
+        a.method === "eth_getTransactionByHash" ||
+        a.method === "eth_getTransactionReceipt";
+      return hides && a.params[0] === hide ? null : undefined;
+    });
+    const r = new Recorder(s.box.file, s.load(), 1, () => {});
+    void r.install().catch(() => {});
+    try {
+      for (let i = 0; !sent && i < 500; i++) await s.wait(10);
+      expect(sent, "the re-send went out").to.not.equal(null);
+    } finally {
+      r.remove();
+      restore();
+    }
+    return sent!;
+  }
+
+  it("P-W11: a re-send's payload at another entry's nonce is no fill: refused by fill() by name", async function () {
+    const [d] = await ethers.getSigners();
+    const start = await h.nonce();
+    await h.sendOne(s.box.file);
+    const hide = s.load().txs[0].hash!;
+    await killedResend(start, false, hide); // entry #0's intent, nothing sent
+    const rec = s.load();
+    rec.txs.push({
+      from: d.address,
+      to: d.address,
+      value: "0",
+      dataHash: ethers.keccak256("0x"),
+      data: "0x",
+      nonce: start + 1,
+      block: await ethers.provider.getBlockNumber(),
+      status: "sending",
+      label: "a call",
+    });
+    saveRecord(s.box.file, rec);
+    const t = await d.sendTransaction({
+      data: rec.txs[0].data!,
+      nonce: start + 1,
+    });
+    await t.wait();
+    process.env.DEPLOY_FILL_HASH = t.hash;
+    expect(await s.resume()).to.equal(
+      `DEPLOY_FILL_HASH ${t.hash} is ${d.address}'s transaction at nonce ${start + 1}, not at a recorded stray's sender and nonce, nor an entry's re-send at a free nonce of the deployer: refusing; unset DEPLOY_FILL_HASH after the resume completes`,
+    );
+  });
+
+  it("P-W17: two unrecorded re-sends past the bound are named one by one, each at its own nonce", async function () {
+    const start = await h.nonce();
+    await h.sendOne(s.box.file);
+    const hide = s.load().txs[0].hash!;
+    const first = await killedResend(start, true, hide); // start + 1
+    await mine(1);
+    const second = await killedResend(start, true, hide); // start + 2
+    await mine(5001);
+    process.env.DEPLOY_FILL_HASH = second;
+    expect(await s.resume(), "the lower nonce first").to.contain(
+      `nonce ${start + 1}: ${s.load().deployer} used nonce ${start + 1} more than 5000 blocks after the intent`,
+    );
+    expect(s.load().strays ?? [], "nothing recorded").to.deep.equal([]);
+    process.env.DEPLOY_FILL_HASH = first;
+    expect(await s.resume()).to.contain(`nonce ${start + 2}: `);
+    expect(s.load().strays!.map((x) => [x.nonce, x.hash])).to.deep.equal([
+      [start + 1, first],
+    ]);
+    process.env.DEPLOY_FILL_HASH = second;
+    expect(await s.resume()).to.equal("accepted");
+    expect(s.load().strays!.map((x) => [x.nonce, x.hash])).to.deep.equal([
+      [start + 1, first],
+      [start + 2, second],
+    ]);
+  });
+
+  it("P-G15: an own sent entry the node does not show is no explanation: both hidden transactions are counted", async function () {
+    const [d] = await ethers.getSigners();
+    const { start, stray } = await s.pendingStray();
+    const own = await d.sendTransaction({
+      to: d.address,
+      nonce: start + 2,
+      gasLimit: 21000,
+    });
+    const rec = s.load();
+    rec.txs.push({
+      from: d.address,
+      to: d.address,
+      value: "0",
+      dataHash: ethers.keccak256("0x"),
+      data: "0x",
+      nonce: start + 2,
+      block: await ethers.provider.getBlockNumber(),
+      hash: own.hash,
+      status: "sent",
+      label: "a call",
+    });
+    saveRecord(s.box.file, rec);
+    const restore = h.node(async (a) =>
+      (a.method === "eth_getTransactionByHash" ||
+        a.method === "eth_getTransactionReceipt") &&
+      (a.params[0] === stray || a.params[0] === own.hash)
+        ? null
+        : undefined,
+    );
+    let res = "";
+    try {
+      res = await s.resume();
+    } finally {
+      restore();
+    }
+    expect(res).to.contain(
+      "the deployer has 2 pending transactions it does not show",
+    );
   });
 });

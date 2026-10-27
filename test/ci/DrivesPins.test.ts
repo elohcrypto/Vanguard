@@ -8,7 +8,7 @@ import * as path from "path";
  * Pnn kills mutant Gnn of g-mutate8.py). Each passes at 688521d and after
  * round 9's grammar.
  */
-describe("drives-once pins (kills G43, G45, G46)", function () {
+describe("drives-once pins (kills G43, G45, G46, V28m, W25)", function () {
   const yaml = require("js-yaml");
   const once = require("../../scripts/ci/drives-once");
   const FILE = path.join(__dirname, "../../.github/workflows/ci.yml");
@@ -49,6 +49,35 @@ describe("drives-once pins (kills G43, G45, G46)", function () {
     s.run = "scripts/ci/deploy-drive.sh.bak && scripts/ci/multisig-drive.sh";
     expect(once.check(doc, once.drives(dir)).join("\n")).to.contain(
       "deploy-drive.sh runs 0 times",
+    );
+  });
+
+  it("P-V28m: a comment line in a drive step is no drive line (the grammar reads the run as written)", function () {
+    const doc = load();
+    const s = doc.jobs["deploy-drives"].steps.find((x: any) =>
+      /deploy-drive/.test(x.run ?? ""),
+    );
+    s.run = `${s.run}\n# both drives`;
+    expect(once.check(doc, once.drives(dir)).join("\n")).to.contain(
+      "is not a drive line",
+    );
+  });
+
+  it("P-G46: a step outside the drive jobs running a longer script name is no drive and passes", function () {
+    const doc = load();
+    doc.jobs.gates.steps.push({
+      name: "a backup",
+      run: "scripts/ci/deploy-drive.sh.bak",
+    });
+    expect(once.check(doc, once.drives(dir))).to.deep.equal([]);
+  });
+
+  it("P-W25: a drive job renamed is named missing", function () {
+    const doc = load();
+    doc.jobs["demo-b"] = doc.jobs.demo;
+    delete doc.jobs.demo;
+    expect(once.check(doc, once.drives(dir)).join("\n")).to.contain(
+      "no demo job",
     );
   });
 });
