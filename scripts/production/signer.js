@@ -163,6 +163,20 @@ async function serve() {
       throw new Error(`refused by the operator (#${n})`);
   };
 
+  /**
+   * U2 round 12 (A1, R12-C1): `raw` sent upstream. A failure that is no
+   * JSON-RPC error answer of the node (a reset, a timeout, a gateway
+   * error: no numeric code) may follow the forward, so it is marked as a
+   * transport failure and answered with HTTP 502, never as a refusal. (A
+   * forwarded read keeps its error answer: no read sends anything.)
+   */
+  const broadcast = (raw) =>
+    provider.broadcastTransaction(raw).catch((e) => {
+      if (typeof (e.info?.error || e.error || {}).code !== "number")
+        e.transport = true;
+      throw e;
+    });
+
   function sendTransaction(tx) {
     const w = holder(tx.from);
     const req = {
@@ -231,7 +245,7 @@ async function serve() {
         throw new Error("the signed transaction is not the one shown: refused");
       }
       byNonce.set(slot, { unsigned: shown.unsigned, raw });
-      const sent = await provider.broadcastTransaction(raw);
+      const sent = await broadcast(raw);
       signed++;
       return sent.hash;
     });
@@ -266,7 +280,7 @@ async function serve() {
       const raw = await w.signTransaction(t);
       byNonce.set(slot, { unsigned: Transaction.from(raw).unsignedHash, raw });
       signed++;
-      return (await provider.broadcastTransaction(raw)).hash;
+      return (await broadcast(raw)).hash;
     });
   }
   function signMessage(address, data) {
@@ -371,7 +385,7 @@ async function serve() {
       throw new Error(`upstream HTTP ${r.status}: ${text}`);
     }
   }
-  async function answer(call) {
+  async function answer(call, req, res, reply) {
     const { id, method, params = [] } = call;
     try {
       if (!OWN[method]) {
@@ -394,6 +408,9 @@ async function serve() {
         upstream,
         240,
       );
+      // Round 12 (A1): no JSON-RPC error for a transport failure; the
+      // "HTTP 502" in the body is what RpcRetry retries on.
+      if (e.transport) return reply(502, { transport: `HTTP 502: ${message}` });
       return {
         jsonrpc: "2.0",
         id,
