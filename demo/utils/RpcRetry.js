@@ -202,7 +202,7 @@ function installRetry(provider, opts = {}) {
           retried++;
           const ms = Math.min(maxMs, baseMs * 2 ** i);
           log(
-            `   ↻ eth_sendTransaction nonce ${nonce}: ${t.split("\n")[0].slice(0, 120)}; outcome unknown, retry ${i + 1}/${retries} in ${ms} ms (same nonce)`,
+            `   ↻ eth_sendTransaction nonce ${nonce}: ${t.split("\n")[0].slice(0, 120)}; ${unsure ? "outcome unknown, " : ""}retry ${i + 1}/${retries} in ${ms} ms (same nonce)`,
           );
           await sleep(ms);
           const used =
