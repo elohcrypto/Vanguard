@@ -45,7 +45,7 @@ describe("U2 round 13: the signer sends the raw transaction alone", function () 
    * proxy12.js MODE bnfail). `wronghash`: eth_sendRawTransaction is
    * forwarded, then answered with another hash.
    */
-  async function proxy(mode: "bnfail" | "wronghash") {
+  async function proxy(mode: "bnfail" | "wronghash" | "502" | "strcode" | "code") {
     const raws: string[] = [];
     const seen: Record<string, number> = {};
     const state = { during: false };
@@ -67,6 +67,12 @@ describe("U2 round 13: the signer sends the raw transaction alone", function () 
         if (c.method === "eth_sendRawTransaction") {
           raws.push(c.params[0]);
           if (mode === "wronghash") out = { jsonrpc: "2.0", id: c.id, result: `0x${"ab".repeat(32)}` };
+          if (mode === "502") {
+            res.statusCode = 502;
+            return res.end("<html>502 Bad Gateway</html>");
+          }
+          if (mode === "strcode") out = { jsonrpc: "2.0", id: c.id, error: { code: "-32000", message: "strcode" } };
+          if (mode === "code") out = { jsonrpc: "2.0", id: c.id, error: { code: -32005, message: "rate limited" } };
         }
         res.setHeader("content-type", "application/json");
         res.end(JSON.stringify(out));
@@ -77,6 +83,19 @@ describe("U2 round 13: the signer sends the raw transaction alone", function () 
     return { server, raws, seen, state, url };
   }
 
+  /** The signer's answer to one eth_sendTransaction through `up` (`at`: its upstream URL). */
+  async function sendVia(up: { url: string; server: http.Server }, at = up.url) {
+    const [d] = await ethers.getSigners();
+    let a: any;
+    try {
+      await runSigner("scripts/production/signer.js", env(at), async (live: Live) => {
+        a = await rpc(live, "eth_sendTransaction", [{ from: d.address, to: d.address, value: "0x1" }]);
+      });
+    } finally {
+      up.server.close();
+    }
+    return a;
+  }
   const env = (url: string) => ({
     SIGNER_UPSTREAM: url,
     SIGNER_TEST: "1",
@@ -126,5 +145,27 @@ describe("U2 round 13: the signer sends the raw transaction alone", function () 
     expect(a.status).to.equal(502);
     expect(a.body.error, "no JSON-RPC error").to.equal(undefined);
     expect(a.body.transport).to.match(/^HTTP 502: /);
+  });
+
+  // Round 13 (item D, lane G's round-12 survivors Q01, Q10, Q11).
+  it("P-Q01: a node error with a string code is no JSON-RPC answer of a refusal: a transport failure, HTTP 502", async function () {
+    const a = await sendVia(await proxy("strcode"));
+    expect(a.status).to.equal(502);
+    expect(a.body.error).to.equal(undefined);
+    expect(a.body.transport).to.match(/^HTTP 502: /);
+  });
+
+  it("P-Q11: a refusal the node answered is relayed with its own numeric code", async function () {
+    const a = await sendVia(await proxy("code"));
+    expect(a.status).to.equal(200);
+    expect(a.body.error.code).to.equal(-32005);
+    expect(a.body.error.message).to.contain("rate limited");
+  });
+
+  it("P-Q10: the 502 body of a lost forward never carries the upstream URL's key", async function () {
+    const up = await proxy("502"); // ethers' full message names the request URL
+    const a = await sendVia(up, `${up.url}/k3y-s3cr3t-0001`);
+    expect(a.status).to.equal(502);
+    expect(JSON.stringify(a.body)).to.not.contain("k3y-s3cr3t-0001");
   });
 });
