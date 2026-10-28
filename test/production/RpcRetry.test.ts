@@ -339,4 +339,19 @@ describe("RpcRetry (bounded retry, no double send)", function () {
     expect(thrown?.number).to.equal(108);
     expect(thrown?.cause).to.equal(undefined);
   });
+  // U2 round 13 (L5, lane C): a refused first attempt marks nothing
+  // unknown, so its retry line does not say so.
+  it("L5: a connection refused on the first attempt (HH108) logs a retry, never 'outcome unknown'", async function () {
+    const c = chain();
+    const real = c.request;
+    c.request = async (a: any) => {
+      if (a.method === "eth_sendTransaction")
+        throw Object.assign(new Error("HH108: Cannot connect to the network remote."), { number: 108 });
+      return real(a);
+    };
+    const { lines } = hook(c);
+    await c.request({ method: "eth_sendTransaction", params: [tx] }).catch(() => {});
+    expect(lines.join("\n")).to.match(/HH108: Cannot connect to the network remote\.; retry 1\/\d+ in \d+ ms \(same nonce\)/);
+    expect(lines.join("\n")).to.not.contain("outcome unknown");
+  });
 });
