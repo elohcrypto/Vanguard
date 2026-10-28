@@ -112,6 +112,30 @@ describe("drives-once pins, round 12 (lane G's round-11 survivors, R12-C5)", fun
     has(got, at);
   });
 
+  // Round 12's own gate rules the round-12 lever found unpinned.
+  it("P-Z40: a package script a run line reaches that builds a command is refused by name", function () {
+    has(gates("npm run x", { x: `node -e "require('child_process').execSync('x')"` }), 'gates step "npm run x" builds a command at run time (node -e)');
+  });
+  it("P-Z60: a script that runs another script that runs a drive is read through", function () {
+    has(gates("npm run drives", { drives: "npm run a", a: `echo a && ${DRIVE}` }), outside("npm run drives"));
+  });
+  it("P-Z56: an action run that builds a command is refused by name", function () {
+    const { at, got } = act(comp('run: bash -c "$X"'));
+    has(got, `${at} step "bash -c "$X"" builds a command at run time`);
+  });
+
+  // Round 12's shellEnv refuses BASH_ENV in every env, so round 10's pins
+  // of the drive jobs' env allow-list (BASH_ENV) no longer tell it apart.
+  it("P-X15 (kills X15, G10-G69): a drive job env name off the allow-list is refused by name", function () {
+    has(demoEnv("FOO", "1"), "demo job sets env FOO");
+  });
+  it("P-X16 (kills X16, G10-G70): a drive step env name off the allow-list is refused by name", function () {
+    const d = load();
+    const s = d.jobs.demo.steps.find((x: any) => x.run);
+    s.env = { ...s.env, FOO: "1" };
+    has(check(d, names), `demo step "${s.name ?? s.run}" sets env FOO`);
+  });
+
   // R12-C5: a run line outside the drive jobs may expand ${{ matrix.<k> }}
   // only when that job's strategy.matrix.<k> is a literal integer list.
   const matrix = (m: any, run = "TEST_SHARD=${{ matrix.shard }}/2 npm test") => {

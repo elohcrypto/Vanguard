@@ -323,4 +323,20 @@ describe("RpcRetry (bounded retry, no double send)", function () {
       .catch((e: any) => (thrown = e));
     expect(thrown?.number).to.equal(108);
   });
+  it("P-Z15: a connection refused on every attempt, the reads answered, is no unknown outcome: it passes up with its number", async function () {
+    const c = chain();
+    const real = c.request;
+    c.request = async (a: any) => {
+      if (a.method === "eth_sendTransaction")
+        throw Object.assign(new Error("HH108: Cannot connect to the network remote."), { number: 108 });
+      return real(a);
+    };
+    hook(c);
+    let thrown: any;
+    await c
+      .request({ method: "eth_sendTransaction", params: [tx] })
+      .catch((e: any) => (thrown = e));
+    expect(thrown?.number).to.equal(108);
+    expect(thrown?.cause).to.equal(undefined);
+  });
 });

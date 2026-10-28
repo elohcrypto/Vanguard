@@ -285,6 +285,28 @@ describe("U2 round 12: a transport failure behind the signer is no refusal", fun
     expect(await h.accepted(box.file), "a further resume").to.equal("accepted");
   });
 
+  it("P-Z24: a fee bump whose broadcast is lost upstream is answered HTTP 502 too", async function () {
+    const up = await proxy("drop", (n) => n === 2);
+    const [d] = await ethers.getSigners();
+    const start = await h.nonce();
+    await automine(false);
+    try {
+      await runSigner("scripts/production/signer.js", env(up.url), async (live: Live) => {
+        const tx = { from: d.address, to: d.address, value: "0x1", nonce: ethers.toQuantity(start) };
+        expect((await rpc(live, "eth_sendTransaction", [tx])).body.result).to.match(/^0x[0-9a-f]{64}$/);
+        const b = await rpc(live, "vanguard_bump", [d.address, String(start)]);
+        expect(b.body.error, "the signer answered a JSON-RPC error").to.equal(undefined);
+        expect(b.status).to.equal(502);
+        expect(b.body.transport).to.match(/^HTTP 502: /);
+      });
+    } finally {
+      up.server.close();
+      await automine(true);
+      await base({ method: "evm_mine" }); // the bump mines: nothing left pending
+    }
+    expect(up.raws, "the bump was forwarded").to.have.length(2);
+  });
+
   /** A TCP relay to `to` that refuses every connection once closed. */
   async function relay(to: number) {
     const socks: net.Socket[] = [];

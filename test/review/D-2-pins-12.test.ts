@@ -45,6 +45,24 @@ describe("D-2 round 12 pins: lane G's round-11 survivors", function () {
     expect(s.load().txs[0].resendFrom).to.be.a("number");
   });
 
+  it("P-R05 (kills G11-R05): a refusal with a positive code (3, execution reverted) drops the intent it set", async function () {
+    const start = await h.nonce();
+    await h.sendOne(s.box.file);
+    const hide = s.load().txs[0].hash!;
+    const restore = h.node(async (a) => {
+      if (a.method === "eth_sendTransaction") throw Object.assign(new Error("execution reverted"), { code: 3 });
+      if (a.method === "eth_getTransactionCount") return ethers.toQuantity(start);
+      const hides = a.method === "eth_getTransactionByHash" || a.method === "eth_getTransactionReceipt";
+      return hides && a.params[0] === hide ? null : undefined;
+    });
+    try {
+      expect(await h.accepted(s.box.file)).to.contain("; the node answered: execution reverted");
+    } finally {
+      restore();
+    }
+    expect(s.load().txs[0], "a refusal leaves no intent").to.not.have.property("resendFrom");
+  });
+
   for (const [id, mk] of [
     ["P-R09 (kills R09)", (x: string) => `${x}zz`],
     ["P-R10 (kills R10)", (x: string) => `zz${x}`],
@@ -92,5 +110,39 @@ describe("D-2 round 12 pins: lane G's round-11 survivors", function () {
       r.txs[1].resendFrom = await ethers.provider.getBlockNumber();
     });
     expect(res).to.contain(named(1, r));
+  });
+  // Round 12's own record rules the round-12 lever found unpinned.
+  it("P-G42n (kills G10-G42n, G11-S11n): exactly 5000 blocks past the intent with nothing at the nonce there, the window refusal is not given", async function () {
+    const [d] = await ethers.getSigners();
+    const start = await h.nonce();
+    const rec = await h.fresh(s.box.file);
+    await h.run(s.box.file, rec, () => h.flow(2)).catch(() => {});
+    expect(await h.accepted(s.box.file)).to.equal("accepted");
+    const r = s.load();
+    const ir = await ethers.getContractAt("IdentityRegistry", r.txs[1].to!);
+    const data = r.txs[1].data ?? ir.interface.encodeFunctionData("addAgent", [h.AGENT]);
+    // entry #1's payload at the next free nonce, mined one block BEFORE the intent
+    const at = (await (await d.sendTransaction({ to: r.txs[1].to!, data, nonce: start + 2 })).wait())!.blockNumber;
+    r.txs[1].resendFrom = at + 1;
+    saveRecord(s.box.file, r);
+    await mine(5000);
+    expect(await ethers.provider.getBlockNumber()).to.equal(at + 5000);
+    await mine(1);
+    const res = await s.resume();
+    expect(res).to.not.contain("is more than 5000 blocks past");
+    expect(res).to.contain(`(nonce ${start + 2} is no entry's and no stray's: find that transaction and record it by hand)`);
+  });
+  it("P-S08 (kills G11-S08): past the bound, the stray scan's refusal shows the stray's block, not the head", async function () {
+    const [d] = await ethers.getSigners();
+    const { start, stray } = await s.pendingStray();
+    await s.drop(stray);
+    await d.sendTransaction({ to: d.address, nonce: start + 1 });
+    await s.automine(true);
+    await network.provider.request({ method: "evm_mine" });
+    await mine(5001);
+    const row = s.load().strays![0];
+    expect(await s.resume()).to.contain(
+      `${d.address} used nonce ${start + 1} more than 5000 blocks after the intent (block ${row.block}); `,
+    );
   });
 });
