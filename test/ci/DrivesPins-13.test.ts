@@ -90,4 +90,20 @@ describe("drives-once pins, round 13 (lane G's round-12 survivors)", function ()
     it(`${id}: ${k} in a listed step's env is refused by name`, function () {
       has(listed("npm ci", {}, "gates", { [k]: "x" }), `gates step "npm ci" sets env ${k}`);
     });
+
+  // The round-13 lever's own survivors (r13/mutants-13-full-gate-s0.txt).
+  for (const [id, run, k] of [
+    ["P-T46", "npm install", "prepare"],
+    ["P-T47", "npm pack", "prepack"],
+    ["P-T55", "npm pack", "postpack"],
+    ["P-T48", "npm version patch", "version"],
+    ["P-T56", "npm version patch", "preversion"],
+    ["P-T58", "npm version patch", "postversion"],
+  ])
+    it(`${id}: a listed \`${run}\` whose ${k} script runs a drive is refused by name`, function () {
+      has(listed(run, repo((p) => (p.scripts[k] = DRIVE))), `gates step "${run}" runs npm ${run.split(" ")[1]}, whose ${k} script runs a drive`);
+    });
+  it("P-T38: an env value naming a drive without scripts/ci/ is refused by name", function () {
+    has(listed("npm ci", {}, "gates", { X: "./deploy-drive.sh" }), 'gates step "npm ci" env X names a drive');
+  });
 });
