@@ -8,6 +8,7 @@
  */
 import { ethers } from "hardhat";
 import { DeployRecord, Stray, TxEntry } from "./deployRecordFile";
+import { scanWindow } from "./deployRecordWindow";
 
 /** Thrown when a re-run cannot follow its record: nothing more is sent. */
 export class RecordRefusal extends Error {
@@ -229,6 +230,12 @@ export class StrayChain {
     const sent = this.intents();
     if (!sent.length) return 0;
     const block = Math.min(...sent.map((e) => e.resendFrom!)), first = sent.find((e) => e.resendFrom === block)!;
+    // Round 13 (B, R13-C3): one pass over the window per resume, every
+    // free nonce answered from it (not one pass per nonce).
+    const f = this.filled;
+    const want = free.filter((n) => !this.listed(n) && !(f && !f.s && Number(f.t.nonce) === n));
+    const head = want.length ? Number(await this.raw("eth_blockNumber")) : 0;
+    const at = { head, seen: want.length ? await scanWindow(this.raw, d, block, want, head) : new Map() };
     let found = 0;
     for (const n of [...free]) {
       // Round 9 (A, GA4): a listed stray's transaction is never listed
@@ -236,7 +243,6 @@ export class StrayChain {
       // while this node lags.
       if (this.listed(n)) continue;
       // Round 9 (D): the operator's hash for this nonce, else the scan.
-      const f = this.filled;
       const t =
         f && !f.s && Number(f.t.nonce) === n
           ? f.t
@@ -244,6 +250,7 @@ export class StrayChain {
               { from: d, nonce: n, block, label: `nonce ${n}` } as TxEntry,
               `if nonce ${n} is an entry's re-send, pass its hash as DEPLOY_FILL_HASH=<hash>, then resume; otherwise record it by hand${UNSET}`,
               `entry #${this.rec.txs.indexOf(first)} (${first.label})'s intent`,
+              at,
             );
       const e = t && this.reSendOf(t, sent);
       if (!e) continue;
@@ -456,29 +463,23 @@ export class StrayChain {
    * Round 12 (C, R12-C2 option 2, R12-C7): with `intent` (the unrecorded
    * scan's), the 5000 blocks from it are read whatever the head, so a
    * re-send mined there is found at any later time; only a use past them
-   * is refused.
+   * is refused. Round 13 (B): `at`, unrecorded()'s one pass, read instead.
    */
   async findMined(
     e: TxEntry,
     how = "find that transaction and record it by hand",
     intent?: string,
+    at?: { head: number; seen: Map<number, any> },
   ): Promise<any> {
-    const head = Number(await this.raw("eth_blockNumber"));
+    const head = at?.head ?? Number(await this.raw("eth_blockNumber"));
     const past = head - e.block > 5000;
     if (past && !intent) {
       throw new RecordRefusal(
         `${e.label}: ${e.from} used nonce ${e.nonce} more than 5000 blocks after the intent (block ${e.block}); ${how}`,
       );
     }
-    for (let b = e.block; b <= Math.min(head, e.block + 5000); b++) {
-      const blk = await this.raw("eth_getBlockByNumber", [
-        ethers.toQuantity(b),
-        true,
-      ]);
-      for (const t of blk?.transactions ?? []) {
-        if (same(t.from, e.from) && Number(t.nonce) === e.nonce) return t;
-      }
-    }
+    const t = (at?.seen ?? (await scanWindow(this.raw, e.from, e.block, [e.nonce], head))).get(e.nonce);
+    if (t) return t;
     if (past)
       throw new RecordRefusal(
         `${e.label}: the chain head (block ${head}) is more than 5000 blocks past ${intent} (block ${e.block}), the earliest the record keeps, and those 5000 blocks hold no transaction of ${e.from} at nonce ${e.nonce}; ${how}`,
