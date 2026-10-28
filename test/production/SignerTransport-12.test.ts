@@ -69,9 +69,11 @@ describe("U2 round 12: a transport failure behind the signer is no refusal", fun
    * The in-process node behind a proxy. Every eth_sendRawTransaction is
    * forwarded; the first `fail` replies are lost (`drop`: the socket
    * closed; `502`: a gateway error page). `mineOn`: the raw send that is
-   * followed by one mined block before its reply.
+   * followed by one mined block before its reply. `tip`: the priority fee
+   * the signer is told (R12-C8: a re-send with other fees than the
+   * evicted send has another hash).
    */
-  async function proxy(mode: string, fail: number, mineOn = 0) {
+  async function proxy(mode: string, fail: number | ((n: number) => boolean), mineOn = 0, tip?: bigint) {
     const raws: string[] = [];
     const server = http.createServer((req, res) => {
       let b = "";
@@ -80,7 +82,8 @@ describe("U2 round 12: a transport failure behind the signer is no refusal", fun
         const c = JSON.parse(b);
         let out: any;
         try {
-          out = { jsonrpc: "2.0", id: c.id, result: await base(c) };
+          const fee = tip !== undefined && c.method === "eth_maxPriorityFeePerGas";
+          out = { jsonrpc: "2.0", id: c.id, result: fee ? ethers.toQuantity(tip) : await base(c) };
         } catch (e: any) {
           const error = { code: e.code ?? -32603, message: e.message };
           out = { jsonrpc: "2.0", id: c.id, error };
@@ -88,7 +91,7 @@ describe("U2 round 12: a transport failure behind the signer is no refusal", fun
         if (c.method === "eth_sendRawTransaction") {
           raws.push(c.params[0]);
           if (raws.length === mineOn) await base({ method: "evm_mine" });
-          if (raws.length <= fail) {
+          if (typeof fail === "function" ? fail(raws.length) : raws.length <= fail) {
             if (mode === "drop") return req.socket.destroy();
             res.statusCode = 502;
             return res.end("<html>502 Bad Gateway</html>");
@@ -126,6 +129,19 @@ describe("U2 round 12: a transport failure behind the signer is no refusal", fun
     await base({ method: "hardhat_dropTransaction", params: [load().txs[0].hash] });
     await automine(true);
     return start;
+  }
+
+  /** As evicted(), entry #0 sent through the signer at `live`. */
+  async function evictedVia(live: Live) {
+    const p = cli(live.url, live.token);
+    const restore = h.node(async (a) =>
+      a.method === "eth_sendTransaction" ? p.request(a) : undefined,
+    );
+    try {
+      return await evicted();
+    } finally {
+      restore();
+    }
   }
 
   /** A resume whose eth_sendTransaction goes through `p`; its lines kept. */
@@ -183,10 +199,13 @@ describe("U2 round 12: a transport failure behind the signer is no refusal", fun
     }
   });
 
+  // R12-C8: run 40601356051 (tests 1/2) found the re-send byte-identical
+  // to the evicted send, so no adoption ran. Each case is forced here.
   it("A1: a re-send lost in transport behind the signer keeps the intent; the entry is adopted at its nonce", async function () {
     const start = await evicted();
     const gone = load().txs[0].hash;
-    const up = await proxy("drop", Infinity);
+    // another priority fee than the evicted send's: another signed transaction
+    const up = await proxy("drop", Infinity, 0, ethers.parseUnits("1", "gwei") + 7n);
     const lines: string[] = [];
     let res = "";
     try {
@@ -201,11 +220,35 @@ describe("U2 round 12: a transport failure behind the signer is no refusal", fun
     // the transaction mined at the entry's nonce: adopted there
     expect(res, lines.join("\n")).to.equal("accepted");
     const sent = ethers.Transaction.from(up.raws[0]).hash;
+    expect(sent, "the re-send is another signed transaction").to.not.equal(gone);
     expect(load().txs[0].hash, "the record holds the mined re-send").to.equal(sent);
-    // adopted by its nonce, unless the signer's re-send is byte-identical
-    // to the evicted send (same fees: the same signed transaction), which
-    // the record then finds under its own hash (seen on CI, run 40601356051)
-    if (sent !== gone) expect(lines.join("\n")).to.contain(`mined as ${sent}; adopted`);
+    expect(lines.join("\n")).to.contain(`mined as ${sent}; adopted`);
+    expect(await h.nonce(), "the re-send mined at the entry's nonce").to.equal(start + 1);
+    expect(await h.accepted(box.file), "a healthy resume").to.equal("accepted");
+    expect(load().txs.map((t) => [t.nonce, t.status])).to.deep.equal([[start, "confirmed"]]);
+    expect(load().strays ?? []).to.deep.equal([]);
+  });
+
+  it("A1, byte for byte: a re-send of the signer's own evicted send lost in transport keeps the intent; it mines under its own hash", async function () {
+    const up = await proxy("drop", (n) => n > 1);
+    const lines: string[] = [];
+    let [res, start, gone] = ["", 0, ""];
+    try {
+      await runSigner("scripts/production/signer.js", env(up.url), async (live: Live) => {
+        start = await evictedVia(live);
+        gone = load().txs[0].hash!;
+        res = await resumeVia(cli(live.url, live.token), lines);
+      });
+    } finally {
+      up.server.close();
+    }
+    expect(up.raws, "sent, then sent again byte for byte").to.have.length(2);
+    expect(up.raws[1]).to.equal(up.raws[0]);
+    expect(ethers.Transaction.from(up.raws[1]).hash).to.equal(gone);
+    expect(load().txs[0].resendFrom, "the intent is kept").to.be.a("number");
+    expect(res, lines.join("\n")).to.equal("accepted");
+    expect(load().txs[0].hash, "found under its own hash").to.equal(gone);
+    expect(lines.join("\n")).to.not.contain("adopted");
     expect(await h.nonce(), "the re-send mined at the entry's nonce").to.equal(start + 1);
     expect(await h.accepted(box.file), "a healthy resume").to.equal("accepted");
     expect(load().txs.map((t) => [t.nonce, t.status])).to.deep.equal([[start, "confirmed"]]);
