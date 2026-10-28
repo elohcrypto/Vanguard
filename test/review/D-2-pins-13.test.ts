@@ -2,9 +2,11 @@
 // lever survivors on the record side (swarm-12/G/out/g-mutants-12-rec):
 // A05 (the refused-connection clause without the earlier-intent guard:
 // lane G's R5, ported) and F05 (the fill's by-hand text naming entry #0
-// whatever entry's payload it carries).
+// whatever entry's payload it carries); and the round-13 lever's G11-S09 /
+// W01m (unrecorded()'s listed-nonce skip off), which round 12's P-W02 no
+// longer kills because the one pass leaves a listed nonce out of the map.
 import { expect } from "chai";
-import { ethers } from "hardhat";
+import { ethers, network } from "hardhat";
 import { HardhatError } from "hardhat/internal/core/errors";
 import { ERRORS } from "hardhat/internal/core/errors-list";
 import { Recorder } from "../../scripts/production/deployRecord";
@@ -83,5 +85,31 @@ describe("D-2 round 13 pins: lane G's round-12 record survivors", function () {
     expect(await s.resume()).to.contain(
       `DEPLOY_FILL_HASH ${t!.hash} carries entry #1 (${rec.txs[1].label})'s payload at nonce ${start + 2}`,
     );
+  });
+
+  it("P-S09: a listed stray whose replacement's receipt lags, 5000 blocks past the intent, another nonce free: still the lagging-RPC refusal, never the window's", async function () {
+    const [d] = await ethers.getSigners();
+    const { start, stray } = await s.pendingStray();
+    const data = s.load().txs[0].data!;
+    await s.drop(stray);
+    const bump = await d.sendTransaction({ data, nonce: start + 1, gasLimit: BigInt(s.load().txs[0].gas!) - 1n });
+    await s.automine(true);
+    await network.provider.request({ method: "evm_mine" });
+    const restore = h.node(async (a) =>
+      a.method === "eth_getTransactionReceipt" && a.params[0] === bump.hash ? null : undefined,
+    );
+    try {
+      expect(await s.resume()).to.contain(`stray ${stray} is listed but not shown mined on this node: a lagging RPC`);
+      expect(s.load().strays![0].replacedBy, "found once, by the scan").to.equal(bump.hash);
+      // another free nonce, so the pass runs (with no nonce to scan, no head is read)
+      await (await d.sendTransaction({ to: d.address, nonce: start + 2 })).wait();
+      await network.provider.request({ method: "hardhat_mine", params: [ethers.toQuantity(5001)] });
+      const res = await s.resume();
+      expect(res).to.contain(`nonce ${start + 2} is no entry's and no stray's`);
+      expect(res).to.contain(`stray ${stray} is listed but not shown mined on this node: a lagging RPC`);
+      expect(res).to.not.contain("is more than 5000 blocks past");
+    } finally {
+      restore();
+    }
   });
 });
