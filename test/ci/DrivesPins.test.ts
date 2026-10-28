@@ -69,7 +69,10 @@ describe("drives-once pins (kills G43, G45, G46, V28m, W25)", function () {
       name: "a backup",
       run: "scripts/ci/deploy-drive.sh.bak",
     });
-    expect(once.check(doc, once.drives(dir))).to.deep.equal([]);
+    // Round 13 (R13-C1): an unlisted line is refused by the table only.
+    expect(once.check(doc, once.drives(dir))).to.deep.equal([
+      "run line not in scripts/ci/run-lines.json: gates: scripts/ci/deploy-drive.sh.bak",
+    ]);
   });
 
   it("P-W25: a drive job renamed is named missing", function () {

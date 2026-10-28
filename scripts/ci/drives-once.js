@@ -54,12 +54,16 @@
 //   `with` is one of the shipped inputs, its shell bash, its run neither
 //   redirects nor expands a name indirectly; a drive job's checkout and
 //   setup-node take the shipped inputs only.
+// Round 13 (item C; R13-C1, R13-C5, R13-C6): see drives-lines.js.
 // Exits 1 naming each fault; `node scripts/ci/drives-once.js [ci.yml]`.
 const fs = require("fs");
 const path = require("path");
 const yaml = require("js-yaml");
 // Round 12 (B): the package.json reader, split out (the 500-line rule).
 const { reached, scriptsOf } = require("./drives-scripts");
+// Round 13 (C): the shipped table of run lines and uses, split out too.
+const lines = require("./drives-lines");
+const ROOT = path.join(__dirname, "../..");
 
 const NAMED = ["demo-smoke", "whitelist-cli"];
 const JOBS = ["demo", "deploy-drives"];
@@ -200,7 +204,7 @@ const extra = (o, keys, at) =>
     .map((k) => `${at} sets ${k}`);
 
 /** Each fault of workflow `doc` for `names`, as one line. */
-function check(doc, names, scripts = {}) {
+function check(doc, names, scripts = {}, tab = lines.table(ROOT)) {
   const jobs = doc.jobs || {};
   const any = named(names);
   const line = new RegExp(
@@ -210,6 +214,8 @@ function check(doc, names, scripts = {}) {
   const errors = [];
   const label = (s) => s.name ?? s.uses ?? s.run;
   if ("defaults" in doc) errors.push("the workflow sets defaults");
+  if (!tab) errors.push(`${lines.TABLE} is missing`);
+  const bad = verdict(names);
   errors.push(...extra(doc, TOP, "the workflow"));
   errors.push(
     ...Object.keys(doc.env ?? {})
@@ -225,6 +231,10 @@ function check(doc, names, scripts = {}) {
     if ("uses" in job)
       errors.push(`${id} job calls the reusable workflow ${job.uses}`);
     errors.push(...shellEnv(job.env, `${id} job`));
+    // Round 13 (C): no image, service or default shell around the runs.
+    for (const k of ["container", "services", "defaults"])
+      if (k in job) errors.push(`${id} job sets ${k}`);
+    errors.push(...drivey(job.env, `${id} job env`, names));
     if (drive) {
       errors.push(...extra(job, JOB_KEYS, `${id} job`));
       const on = job["runs-on"];
@@ -242,6 +252,11 @@ function check(doc, names, scripts = {}) {
       if (Object.keys(s).some((k) => k.trim() === "continue-on-error"))
         errors.push(`${at} sets continue-on-error`);
       errors.push(...shellEnv(s.env, at));
+      errors.push(...drivey(s.env, `${at} env`, names));
+      errors.push(...drivey(s.with, `${at} with`, names));
+      if ("shell" in s && s.shell !== "bash")
+        errors.push(`${at} shell is ${s.shell}, not bash`);
+      if (!drive) errors.push(...lines.unlisted(tab, id, s));
       if (!drive && String(s.uses ?? "").startsWith("./") && s.uses !== PRE)
         errors.push(`${at} uses ${s.uses}, a local action other than ${PRE}`);
       if (drive) {
@@ -268,6 +283,7 @@ function check(doc, names, scripts = {}) {
       const run = String(s.run ?? "").trim();
       if (!drive) {
         errors.push(...builds(run, job, scripts, at));
+        errors.push(...lines.lifecycle(run, scripts, at, bad));
         if (any.test(run))
           errors.push(`${at} runs a drive outside ${JOBS.join(" and ")}`);
         else {
@@ -312,8 +328,17 @@ const badValue = (env, at) =>
     .filter(([k, v]) => VALUES[k] && !VALUES[k][0].test(String(v)))
     .map(([k, v]) => `${at} env ${k} is ${v}, not ${VALUES[k][1]}`);
 
+/** Round 13 (C): what `t` does that no run may ("" if nothing). */
+const verdict = (names) => (t) =>
+  named(names).test(t) || hits(t, names).size
+    ? "runs a drive"
+    : BUILDS.test(t)
+      ? "builds a command at run time"
+      : "";
+const drivey = (o, at, names) => lines.drivey(o, at, verdict(names));
+
 /** Each workflow file in `dir` but `main` that runs a drive or names a drive job. */
-function others(dir, main, names, scripts = {}) {
+function others(dir, main, names, scripts = {}, tab = lines.table(ROOT)) {
   const job = new RegExp(`^\\s*(${JOBS.map(esc).join("|")})\\s*:`, "m");
   // Round 11 (B): quoted or any case; a call of `main` itself.
   const quoted = new RegExp(`^\\s*["']?(${JOBS.map(esc).join("|")})["']?\\s*:`, "mi");
@@ -341,6 +366,8 @@ function others(dir, main, names, scripts = {}) {
     ...files
       .filter((f) => calls.test(read(f)))
       .map((f) => `${path.join(dir, f)} calls ${main0}: it runs only once`),
+    // Round 13 (C, R13-C1, R13-C5): each run line and uses, tabled.
+    ...files.flatMap((f) => lines.workflow(path.join(dir, f), tab)),
     // Round 12 (B): any local path but the prepare action.
     ...files
       .filter((f) =>
@@ -375,7 +402,7 @@ function actionFiles(dir, links = []) {
  * setup-node, download-artifact or cache/restore steps and run lines
  * that never name GITHUB_ENV, BASH_ENV or GITHUB_PATH.
  */
-function actions(dir, names, scripts = {}) {
+function actions(dir, names, scripts = {}, tab = lines.table(ROOT)) {
   const errors = [];
   const links = [];
   const files = actionFiles(dir, links);
@@ -395,8 +422,13 @@ function actions(dir, names, scripts = {}) {
     const using = doc.runs?.using;
     if (using !== "composite")
       errors.push(`${f} runs using ${using}, not composite`);
+    // Round 13 (C, R13-C6): the prepare action's run lines are tabled.
+    const key = `./${path.join(".github/actions", path.relative(dir, path.dirname(f)))}`;
     for (const s of doc.runs?.steps ?? []) {
       const at = `${f} step "${s.name ?? s.uses ?? s.run}"`;
+      if (key === PRE && "run" in s) errors.push(...lines.unlisted(tab, key, { run: s.run }));
+      if (typeof s.run === "string")
+        errors.push(...lines.lifecycle(s.run.trim(), scripts, at, verdict(names)));
       errors.push(...extra(s, ACTION_KEYS, at));
       if ("uses" in s && !ACTION_USES.test(String(s.uses)))
         errors.push(
@@ -423,10 +455,12 @@ if (require.main === module) {
   const root = path.join(path.dirname(file), "../..");
   const names = drives(path.join(root, "scripts/ci"));
   const scripts = scriptsOf(root);
+  const tab = lines.table(root);
   const errors = [
-    ...check(yaml.load(fs.readFileSync(file, "utf8")), names, scripts),
-    ...others(path.dirname(file), file, names, scripts),
-    ...actions(path.join(path.dirname(file), "../actions"), names, scripts),
+    ...check(yaml.load(fs.readFileSync(file, "utf8")), names, scripts, tab),
+    ...others(path.dirname(file), file, names, scripts, tab),
+    ...actions(path.join(path.dirname(file), "../actions"), names, scripts, tab),
+    ...lines.npmrc(root),
   ];
   errors.forEach((e) => console.error(`::error::${e}`));
   if (errors.length) process.exit(1);

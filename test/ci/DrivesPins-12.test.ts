@@ -82,7 +82,10 @@ describe("drives-once pins, round 12 (lane G's round-11 survivors, R12-C5)", fun
     });
 
   it("P-D25: a script that only ends in a drive's name is no drive run", function () {
-    expect(gates("echo notdeploy-drive.sh", {})).to.deep.equal([]);
+    // Round 13 (R13-C1): an unlisted line is refused by the table only.
+    expect(gates("echo notdeploy-drive.sh", {})).to.deep.equal([
+      "run line not in scripts/ci/run-lines.json: gates: echo notdeploy-drive.sh",
+    ]);
   });
 
   const wf = (text: string, scripts = {}) => {
@@ -146,7 +149,10 @@ describe("drives-once pins, round 12 (lane G's round-11 survivors, R12-C5)", fun
   };
   const expands = (run: string) => `tests step "${run}" expands \${{ matrix.shard }} in its run line`;
   it("P-C5a: the shipped integer matrix passes", function () {
-    expect(matrix({ shard: [1, 2] })).to.deep.equal([]);
+    // Round 13 (R13-C1): an unlisted line is refused by the table only.
+    expect(matrix({ shard: [1, 2] })).to.deep.equal([
+      "run line not in scripts/ci/run-lines.json: tests: TEST_SHARD=${{ matrix.shard }}/2 npm test",
+    ]);
   });
   it("P-C5b: a string matrix value is refused by name", function () {
     has(matrix({ shard: [1, "2"] }), expands("TEST_SHARD=${{ matrix.shard }}/2 npm test"));
