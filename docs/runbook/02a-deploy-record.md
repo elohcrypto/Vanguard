@@ -29,7 +29,15 @@ when that part neared the 500-line rule (U2 round 9).
   sends again what it signed at that nonce, or a fee bump of it. A nonce
   mines once, so the entry deploys once. Past 5000 blocks or a taken
   nonce is refused: find that nonce's transaction on an explorer and fix
-  the record by hand. An entry sent again keeps the hash of its own
+  the record by hand. An entry's own re-send mined at its own nonce
+  under another hash more than 5000 blocks after the entry's block is
+  refused naming the entry's block, not an intent's
+  (`<label>: 0x… used nonce K more than 5000 blocks after the intent (block N); find that transaction and record it by hand`,
+  N the entry's block): with no deploy running, set that entry's `hash`
+  in the record's `txs` to the transaction's hash (the one the chain
+  shows from the deployer at nonce K with the entry's payload), leave
+  its other fields as they are, then resume: the resume reads the entry
+  by that hash and confirms it. An entry sent again keeps the hash of its own
   earlier send (`sentHash`) and is read by that hash before any block
   scan, so a stray at the re-send (below) does not need one. Another transaction still pending at the entry's
   nonce is refused too
@@ -150,7 +158,10 @@ when that part neared the 500-line rule (U2 round 9).
   of the record (never cleared: a pending count from a lagging node
   cannot prove that no re-send is still out). A JSON-RPC error answer
   is a refusal: the node, or the signer relaying the node's answer,
-  answered it, and the send leaves no intent of its own; so does a
+  answered it, and the send leaves no intent of its own. That holds
+  because the shipped signer forwards the raw transaction alone
+  (`eth_sendRawTransaction`; no read rides with it) and answers a hash
+  other than that transaction's as a transport failure; so does a
   refused connection (Hardhat's `HH108`, ECONNREFUSED: nothing left the
   machine). A transport failure is no refusal: the shipped signer
   (`scripts/production/signer.js`) answers a broadcast it forwarded and
@@ -166,7 +177,10 @@ when that part neared the 500-line rule (U2 round 9).
   `block`, where its search starts, not the block it mined in. The
   search reads the 5000 blocks from the earliest intent the record
   keeps (entry #M's, block N), whatever the chain head, so a re-send
-  mined there is found at any later resume. A nonce used past them is
+  mined there is found at any later resume. It reads them once per
+  resume for every free nonce together (blocks N to N + 5000, at most
+  5001 reads, none when no nonce is free); a nonce left unrecorded past
+  them costs that pass on each resume until it is recorded. A nonce used past them is
   refused
   (`nonce K: the chain head (block H) is more than 5000 blocks past entry #M (<label>)'s intent (block N), the earliest the record keeps, and those 5000 blocks hold no transaction of 0x… at nonce K; if nonce K is an entry's re-send, pass its hash as DEPLOY_FILL_HASH=<hash>, then resume; otherwise record it by hand; unset DEPLOY_FILL_HASH after the resume completes`):
   find the deployer's transaction at nonce K on an explorer and re-run
