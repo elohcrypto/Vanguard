@@ -169,13 +169,27 @@ async function serve() {
    * error: no numeric code) may follow the forward, so it is marked as a
    * transport failure and answered with HTTP 502, never as a refusal. (A
    * forwarded read keeps its error answer: no read sends anything.)
+   * Round 13 (A, R13-C2): eth_sendRawTransaction alone, no read beside it
+   * (ethers' broadcastTransaction read the block number too, and a node
+   * error on that read came back as the send's refusal); its answer is the
+   * raw transaction's hash, else a transport failure (a lying node).
    */
   const broadcast = (raw) =>
-    provider.broadcastTransaction(raw).catch((e) => {
-      if (typeof (e.info?.error || e.error || {}).code !== "number")
-        e.transport = true;
-      throw e;
-    });
+    provider.send("eth_sendRawTransaction", [raw]).then(
+      (hash) => {
+        if (hash !== keccak256(raw))
+          throw Object.assign(
+            new Error(`the node answered ${hash} for ${keccak256(raw)}`),
+            { transport: true },
+          );
+        return hash;
+      },
+      (e) => {
+        if (typeof (e.info?.error || e.error || {}).code !== "number")
+          e.transport = true;
+        throw e;
+      },
+    );
 
   function sendTransaction(tx) {
     const w = holder(tx.from);
@@ -247,7 +261,7 @@ async function serve() {
       byNonce.set(slot, { unsigned: shown.unsigned, raw });
       const sent = await broadcast(raw);
       signed++;
-      return sent.hash;
+      return sent;
     });
   }
   /**
@@ -280,7 +294,7 @@ async function serve() {
       const raw = await w.signTransaction(t);
       byNonce.set(slot, { unsigned: Transaction.from(raw).unsignedHash, raw });
       signed++;
-      return (await broadcast(raw)).hash;
+      return await broadcast(raw);
     });
   }
   function signMessage(address, data) {
