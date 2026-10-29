@@ -63,7 +63,7 @@ describe("U2 round 15: reads retry, the send never", function () {
         const c = JSON.parse(b);
         const raw = c.method === "eth_sendRawTransaction";
         const once = st.armed && mode === `read429:${c.method}` && st.faults === 0;
-        const nth = st.armed && !raw && mode.startsWith("readN:") && ++st.reads % Number(mode.slice(6)) === 0;
+        const nth = st.armed && !raw && /readN:/.test(mode) && ++st.reads % Number(/readN:(\d+)/.exec(mode)![1]) === 0;
         if (once || nth) {
           st.faults++;
           res.statusCode = 429;
@@ -76,6 +76,12 @@ describe("U2 round 15: reads retry, the send never", function () {
           out = { jsonrpc: "2.0", id: c.id, result: await base(c) };
         } catch (e: any) {
           out = { jsonrpc: "2.0", id: c.id, error: { code: e.code ?? -32603, message: e.message } };
+        }
+        if (raw && st.armed && mode.startsWith("send429+")) {
+          st.faults++;
+          res.statusCode = 429;
+          res.setHeader("content-type", "text/plain");
+          return res.end("Too Many Requests");
         }
         res.setHeader("content-type", "application/json");
         res.end(JSON.stringify(out));
@@ -114,7 +120,9 @@ describe("U2 round 15: reads retry, the send never", function () {
     return { a, sendsIn: up.st.sendsIn, faults: up.st.faults, start, end: await nonce() };
   }
 
-  for (const m of ["eth_getCode", "eth_getBlockByNumber"])
+  // eth_getCode is SignerTransport-14's 429code row (its expectation
+  // flipped by R15-C3, countersigned R15-CS3); these are the other reads.
+  for (const m of ["eth_getBlockByNumber", "eth_estimateGas"])
     it(`a 429 once on the signer's own ${m} is retried: the hash, one raw at the node`, async function () {
       const r = await send(`read429:${m}`);
       expect(r.faults, "the 429 was answered").to.equal(1);
@@ -131,6 +139,14 @@ describe("U2 round 15: reads retry, the send never", function () {
     expect(r.a.body.result, JSON.stringify(r.a.body)).to.match(/^0x[0-9a-f]{64}$/);
     expect(r.sendsIn).to.equal(1);
     expect(r.end).to.equal(r.start + 1);
+  });
+
+  it("Z14-01..04's guard: a send forwarded, then answered 429, still gets one attempt while reads are retried: 502, one raw at the node", async function () {
+    const r = await send("send429+readN:2");
+    expect(r.a.status, JSON.stringify(r.a.body)).to.equal(502);
+    expect(r.a.body.transport).to.match(/^HTTP 502: .*429/);
+    expect(r.sendsIn, "raw transactions the node received").to.equal(1);
+    expect(r.end, "the one copy mined").to.equal(r.start + 1);
   });
 
   describe("the record's refusal after a re-send answered by a rate limit", function () {

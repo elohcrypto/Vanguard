@@ -243,8 +243,9 @@ export class EntryChain extends StrayChain {
           );
         }
         if (resent !== null) {
+          // Round 15 (C, R15-C3): a rate limit is named as one.
           throw new RecordRefusal(
-            `${why} is unused after it was sent again at that nonce${resent}: a lagging or inconsistent RPC; kept in the record, resume against a synced RPC`,
+            `${why} is unused after it was sent again at that nonce${resent}: ${/429|too many requests/i.test(resent) ? "the RPC rate-limited the send; kept in the record, wait, then resume" : "a lagging or inconsistent RPC; kept in the record, resume against a synced RPC"}`,
           );
         }
         this.log(

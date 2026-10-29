@@ -48,13 +48,12 @@ const fs = require("fs");
 const {
   AbiCoder,
   Contract,
-  FetchRequest,
-  JsonRpcProvider,
   Transaction,
   getBytes,
   keccak256,
 } = require("ethers");
 const { guardedServer } = require("./rpcGuard");
+const { upstreamProvider } = require("./upstream");
 const {
   clears,
   differs,
@@ -92,24 +91,9 @@ async function serve() {
   if (!upstream || !dir)
     throw new Error("set SIGNER_UPSTREAM and SIGNER_KEYSTORE_DIR");
   holdKeystores(dir); // review D-4: one signer per keystore directory
-  // Round 14 (A, R14-C1): one upstream attempt per request. ethers re-sent
-  // the same raw transaction on an HTTP 429 (its throttle retry), so a
-  // forward answered 429 reached the node twice. Now a 429 is the answer
-  // (no numeric code: a send's transport failure), and so is a redirect:
-  // without its location ethers follows none (fetch.js redirect()).
-  const conn = new FetchRequest(upstream);
-  conn.retryFunc = async () => false;
-  const get = conn.getUrlFunc;
-  conn.getUrlFunc = async (req, signal) => {
-    const r = await get(req, signal);
-    delete r.headers.location;
-    return r;
-  };
-  const provider = new JsonRpcProvider(conn, undefined, {
-    staticNetwork: true,
-    batchMaxCount: 1,
-    cacheTimeout: -1,
-  });
+  // Rounds 14-15 (R14-C1, R15-C3): one upstream attempt per send, a read
+  // retried on a 429, no redirect followed (./upstream.js).
+  const provider = upstreamProvider(upstream);
   const chain = await guardChain(provider);
   // Task 5.17 (deep review L-5): asking is the default off 31337.
   const { prompt, warning } = promptMode(chain);

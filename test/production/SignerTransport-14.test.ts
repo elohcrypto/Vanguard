@@ -17,7 +17,6 @@ import * as os from "os";
 import * as path from "path";
 import { AddressInfo } from "net";
 import { Live, rpc, runSigner } from "../helpers/signerProcess";
-const { isTransient } = require("../../demo/utils/RpcRetry");
 
 type Mode = "429once" | "429nofwd" | "429code" | "307";
 
@@ -166,15 +165,14 @@ describe("U2 round 14: one send, one answer", function () {
     expect(r.end, "nothing mined").to.equal(r.start);
   });
 
-  it("429code: a 429 on the signer's own read before it signs sends nothing; its answer is one RpcRetry retries", async function () {
+  // Round 15 (R15-C3): a read keeps ethers' 429 retry (the send never),
+  // so the signer's own read retried answers the hash; before, its 429
+  // came back as a coded -32000 that RpcRetry retried (isTransient).
+  it("429code: a 429 on the signer's own read before it signs is retried by its provider (R15-C3): the hash, one raw at the node", async function () {
     const r = await send("429code");
-    expect(r.sendsIn, "raw transactions the node received").to.equal(0);
-    expect(r.end).to.equal(r.start);
-    expect(r.a.body.result, "no hash").to.equal(undefined);
-    const e = r.a.body.error ?? r.a.body;
-    expect(
-      isTransient(Object.assign(new Error(e.message ?? e.transport), e)),
-      JSON.stringify(r.a.body),
-    ).to.equal(true);
+    expect(r.sendsIn, "raw transactions the node received").to.equal(1);
+    expect(r.end).to.equal(r.start + 1);
+    expect(r.a.body.error, JSON.stringify(r.a.body)).to.equal(undefined);
+    expect(r.a.body.result).to.match(/^0x[0-9a-f]{64}$/);
   });
 });
