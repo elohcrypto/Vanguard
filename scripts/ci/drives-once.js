@@ -57,6 +57,7 @@
 // Round 13 (item C; R13-C1, R13-C5, R13-C6): see drives-lines.js.
 // Round 14 (item B; R14-C2, R14-C3): a second workflow gets check()'s job
 // and step rules; RUNENV and working-directory refused; see drives-lines.js.
+// Round 15 (item B; R15-C2): every env is a table literal; drives-lines.js.
 // Exits 1 naming each fault; `node scripts/ci/drives-once.js [ci.yml]`.
 const fs = require("fs");
 const path = require("path");
@@ -65,6 +66,8 @@ const yaml = require("js-yaml");
 const { reached, scriptsOf } = require("./drives-scripts");
 // Round 13 (C): the shipped table of run lines and uses, split out too.
 const lines = require("./drives-lines");
+// Round 15 (B, R15-C2): the env rules live there too (the 480-line cap).
+const { shellEnv, unknownEnv, badValue } = lines;
 const ROOT = path.join(__dirname, "../..");
 
 const NAMED = ["demo-smoke", "whitelist-cli"];
@@ -78,13 +81,6 @@ const JOB_KEYS = [
   "steps",
 ];
 const STEP_KEYS = ["name", "id", "uses", "with", "run", "env"];
-// The variables the drive jobs set today (demo's node and smoke output),
-// each with the shape of its shipped value.
-const VALUES = {
-  DEMO_RPC_URL: [/^http:\/\/127\.0\.0\.1:\d+$/, "a http://127.0.0.1:<port> URL"],
-  DEMO_SMOKE_OUT: [/^\/tmp\/[\w.-]+\.json$/, "a /tmp/<name>.json file"],
-};
-const ENV = Object.keys(VALUES);
 const TOP = ["name", "on", "permissions", "concurrency", "env", "jobs"];
 // What a step of a local action may use or name.
 const ACTION_USES =
@@ -129,10 +125,6 @@ const PRE = "./.github/actions/prepare";
 // Round 12 (B, R12-C3): a command built when the line runs.
 const BUILDS =
   /(?:^|[\s;&|(`'"])(node\s+(?:-\S+\s+)*?(?:-e|--eval|-p|--print)(?=[\s=]|$)|(?:ba|da|z)?sh\s+(?:-\w+\s+)*-\w*c\w*(?=\s|$)|eval(?=\s|$)|xargs(?=\s|$))/;
-// Round 12 (B): env names that change how every later shell runs.
-const SHELLENV = /^(BASH_ENV|ENV|SHELLOPTS|BASHOPTS)$/;
-// Round 14 (B, R14-C3): env names that change what a listed line runs.
-const RUNENV = /^(NODE_OPTIONS|LD_PRELOAD|PATH)$|^npm_config_/i;
 const esc = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 
 /** The drive scripts: the named ones and every *-drive*.sh in `dir`. */
@@ -226,6 +218,7 @@ function check(doc, names, scripts = {}, tab = lines.table(ROOT), main = true) {
       .filter((k) => k !== "CIRCOM_VERSION")
       .map((k) => `the workflow sets env ${k}`),
   );
+  if ("env" in doc) errors.push(...lines.envs(tab, "the workflow", doc.env));
   for (const [id, job] of Object.entries(jobs)) {
     const drive = main && JOBS.includes(id);
     if (!/^[a-z][a-z0-9-]*$/.test(id))
@@ -235,6 +228,7 @@ function check(doc, names, scripts = {}, tab = lines.table(ROOT), main = true) {
     if ("uses" in job)
       errors.push(`${id} job calls the reusable workflow ${job.uses}`);
     errors.push(...shellEnv(job.env, `${id} job`));
+    if ("env" in job) errors.push(...lines.envs(tab, `${id} job`, job.env));
     // Round 13 (C): no image, service or default shell around the runs.
     for (const k of ["container", "services", "defaults"])
       if (k in job) errors.push(`${id} job sets ${k}`);
@@ -257,6 +251,7 @@ function check(doc, names, scripts = {}, tab = lines.table(ROOT), main = true) {
         errors.push(`${at} sets continue-on-error`);
       if ("working-directory" in s) errors.push(`${at} sets working-directory`);
       errors.push(...shellEnv(s.env, at));
+      if ("env" in s) errors.push(...lines.envs(tab, `${id} step`, s.env));
       errors.push(...drivey(s.env, `${at} env`, names));
       errors.push(...drivey(s.with, `${at} with`, names));
       if ("shell" in s && s.shell !== "bash")
@@ -314,24 +309,6 @@ function check(doc, names, scripts = {}, tab = lines.table(ROOT), main = true) {
   for (const id of main ? JOBS : []) if (!jobs[id]) errors.push(`no ${id} job`);
   return [...new Set(errors)];
 }
-
-/** Each env name in `env` the drive jobs do not use, refused by name. */
-const unknownEnv = (env, at) =>
-  Object.keys(env ?? {})
-    .filter((k) => !ENV.includes(k))
-    .map((k) => `${at} sets env ${k}`);
-
-/** Round 12 (B): each env name in `env` that changes how a shell runs. */
-const shellEnv = (env, at) =>
-  Object.keys(env ?? {})
-    .filter((k) => SHELLENV.test(k) || RUNENV.test(k))
-    .map((k) => `${at} sets env ${k}`);
-
-/** Each value of `env` off its shipped shape, refused by name. */
-const badValue = (env, at) =>
-  Object.entries(env ?? {})
-    .filter(([k, v]) => VALUES[k] && !VALUES[k][0].test(String(v)))
-    .map(([k, v]) => `${at} env ${k} is ${v}, not ${VALUES[k][1]}`);
 
 /** Round 13 (C): what `t` does that no run may ("" if nothing). */
 const verdict = (names) => (t) =>

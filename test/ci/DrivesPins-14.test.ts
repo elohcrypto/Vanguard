@@ -55,7 +55,8 @@ describe("drives-once pins, round 14 (lane G's round-13 survivors)", function ()
   it("P-L29: an env value that builds a command names no drive", function () {
     const doc = yaml.load(CI);
     doc.jobs.gates.steps.find((s: any) => s.run === "npm ci").env = { X: "bash -c ls" };
-    expect(check(doc, names)).to.deep.equal([]);
+    // Round 15 (R15-C2): only the table's one refusal of the unlisted env.
+    expect(check(doc, names)).to.deep.equal([`env not in ${lines.TABLE}: gates step: {"X":"bash -c ls"}`]);
   });
 
   // The round-14 lever's own survivor (r14/mutants-14-full-gate-s0.txt).

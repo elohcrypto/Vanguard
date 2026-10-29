@@ -34,7 +34,10 @@ describe("drives-once pins, round 10 (the allow-list's rules)", function () {
   it("kills X15: an unknown env name on a drive job is refused by name; demo's own pass", function () {
     const doc = load();
     doc.jobs.demo.env.BASH_ENV = "/tmp/x";
-    expect(errs(doc)).to.equal("demo job sets env BASH_ENV");
+    // Round 15 (R15-C2): and the table's one refusal of the changed literal.
+    expect(errs(doc)).to.equal(
+      'demo job sets env BASH_ENV\nenv not in scripts/ci/run-lines.json: demo job: {"BASH_ENV":"/tmp/x","DEMO_RPC_URL":"http://127.0.0.1:8545","DEMO_SMOKE_OUT":"/tmp/demo-smoke-out.json"}',
+    );
   });
 
   it("V20 (kills X18, X19): an input the action does not take, or `with` on a run step, is refused by name", function () {

@@ -16,7 +16,11 @@
 // onload-script are refused beside script-shell; so is npm's implicit
 // node-gyp install (gyp()).
 // Round 15 (A, R15-C1): an .npmrc key as npm's ini reads it (npmrcKeys()),
-// userconfig and globalconfig refused too.
+// userconfig and globalconfig refused too. (B, R15-C2): every env mapping
+// of every workflow, at workflow, job and step level, is a table entry
+// {"at": "the workflow" | "<job> job" | "<job> step", "env": {...}},
+// compared as its literal (envs()); the env rules moved here from
+// drives-once.js (its 480-line cap).
 const fs = require("fs");
 const path = require("path");
 const { reached } = require("./drives-scripts");
@@ -45,19 +49,67 @@ const NPM_LIFE = /^npm\s+(ci|install|pack|version)(?=\s|$)/;
 const literal = (s) =>
   `${s.uses} with ${JSON.stringify(Object.fromEntries(Object.entries(s.with ?? {}).sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))))}`;
 
-/** The table at `root` (job key -> its run lines and uses), else null. */
+/** The table at `root` (job key -> its run lines and uses; ENVS: env literals), else null. */
 function table(root) {
   const f = path.join(root, TABLE);
   // Round 14 (R14-C3, lane G H11): a regular file, never a symlink.
   if (!fs.lstatSync(f, { throwIfNoEntry: false })?.isFile()) return null;
-  const t = {};
+  // Round 15 (R15-C4, lane G INFO): no prototype, so a job `constructor` is a key.
+  const t = Object.assign(Object.create(null), { [ENVS]: new Set() });
   for (const e of JSON.parse(fs.readFileSync(f, "utf8"))) {
+    if ("env" in e) {
+      if (isMap(e.env)) t[ENVS].add(`${e.at}: ${envLit(e.env)}`);
+      continue;
+    }
     const k = (t[e.job] ??= { run: new Set(), uses: new Set() });
     if ("run" in e) k.run.add(String(e.run).trim());
     if ("uses" in e) k.uses.add(literal(e));
   }
   return t;
 }
+
+const ENVS = Symbol("env literals");
+const isMap = (o) => o !== null && typeof o === "object" && !Array.isArray(o);
+/** An env's literal: a mapping as JSON, keys sorted (literal()'s form); else its JSON. */
+const envLit = (o) =>
+  JSON.stringify(isMap(o) ? Object.fromEntries(Object.entries(o).sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))) : o);
+/**
+ * Round 15 (B, R15-C2, lane G G14-2): `env` at `at` ("the workflow",
+ * "<job> job", "<job> step") unless the table holds its literal; one that
+ * is no mapping (an expression, a list) never is. Names are no longer
+ * enumerated: shellEnv() keeps the early, named reason.
+ */
+const envs = (tab, at, env) =>
+  isMap(env) && tab?.[ENVS]?.has(`${at}: ${envLit(env)}`) ? [] : [`env not in ${TABLE}: ${at}: ${envLit(env)}`];
+
+// The variables the drive jobs set today (demo's node and smoke output),
+// each with the shape of its shipped value.
+const VALUES = {
+  DEMO_RPC_URL: [/^http:\/\/127\.0\.0\.1:\d+$/, "a http://127.0.0.1:<port> URL"],
+  DEMO_SMOKE_OUT: [/^\/tmp\/[\w.-]+\.json$/, "a /tmp/<name>.json file"],
+};
+// Round 12 (B): env names that change how every later shell runs.
+const SHELLENV = /^(BASH_ENV|ENV|SHELLOPTS|BASHOPTS)$/;
+// Round 14 (B, R14-C3): env names that change what a listed line runs.
+const RUNENV = /^(NODE_OPTIONS|LD_PRELOAD|PATH)$|^npm_config_/i;
+
+/** Each env name in `env` the drive jobs do not use, refused by name. */
+const unknownEnv = (env, at) =>
+  Object.keys(env ?? {})
+    .filter((k) => !Object.hasOwn(VALUES, k))
+    .map((k) => `${at} sets env ${k}`);
+
+/** Round 12 (B): each env name in `env` that changes how a shell runs. */
+const shellEnv = (env, at) =>
+  Object.keys(env ?? {})
+    .filter((k) => SHELLENV.test(k) || RUNENV.test(k))
+    .map((k) => `${at} sets env ${k}`);
+
+/** Each value of `env` off its shipped shape, refused by name. */
+const badValue = (env, at) =>
+  Object.entries(env ?? {})
+    .filter(([k, v]) => Object.hasOwn(VALUES, k) && !VALUES[k][0].test(String(v)))
+    .map(([k, v]) => `${at} env ${k} is ${v}, not ${VALUES[k][1]}`);
 
 /** Each run line (if `runs`) or uses of step `s` of `job` that `tab` does not list. */
 function unlisted(tab, job, s, runs = true) {
@@ -107,8 +159,8 @@ function npmrc(root, dir = root) {
 const NPMRC = new Set(["script-shell", "node-options", "shell", "onload-script", "userconfig", "globalconfig"]);
 
 /**
- * Round 15 (A, R15-C1, lane G G14-1): each line's key as npm's ini 5.0.0
- * decode() reads it: blank and ;/# lines skipped, the text before the
+ * Round 15 (A, R15-C1, lane G G14-1): ports the key logic of ini 5.0.0's
+ * decode() and unsafe() (npm 10.9.8's): each line's key as npm reads it: blank and ;/# lines skipped, the text before the
  * first `=` (unsafe(): trimmed; quoted, the quotes off and JSON read; else
  * cut at an unescaped ; or #). Keys are case-sensitive. Sections are not
  * tracked: a key under [x] stays refused (over-refusal, as at effed74).
@@ -171,4 +223,4 @@ function load(f) {
   }
 }
 
-module.exports = { TABLE, table, unlisted, lifecycle, npmrc, gyp, drivey, load };
+module.exports = { TABLE, table, unlisted, lifecycle, npmrc, gyp, drivey, load, envs, shellEnv, unknownEnv, badValue };
