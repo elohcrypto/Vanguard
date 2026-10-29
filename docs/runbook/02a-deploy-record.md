@@ -129,7 +129,10 @@ when that part neared the 500-line rule (U2 round 9).
   transaction, or still does not know the entry once it was sent again,
   is refused with the entry kept
   (`… a lagging or inconsistent RPC; kept in the record, resume against a synced RPC`):
-  resume against a synced RPC. So is a receipt of another transaction
+  resume against a synced RPC. When the send itself was answered by a
+  rate limit (a 429 or "too many requests" in its text), the refusal
+  says so (`… the RPC rate-limited the send; kept in the record, wait, then resume`):
+  wait, then resume. So is a receipt of another transaction
   for its hash. Off a dev chain only the calls the deploy makes reach
   the RPC, by exact name: `eth_accounts`, `eth_blockNumber`, `eth_call`,
   `eth_chainId`, `eth_estimateGas`, `eth_getBlockByNumber`, `eth_getCode`,
