@@ -15,6 +15,8 @@
 // table is a regular file; .npmrc keys node-options, shell and
 // onload-script are refused beside script-shell; so is npm's implicit
 // node-gyp install (gyp()).
+// Round 15 (A, R15-C1): an .npmrc key as npm's ini reads it (npmrcKeys()),
+// userconfig and globalconfig refused too.
 const fs = require("fs");
 const path = require("path");
 const { reached } = require("./drives-scripts");
@@ -96,13 +98,46 @@ function npmrc(root, dir = root) {
     if (e.isDirectory() && !e.isSymbolicLink())
       return e.name === "node_modules" || e.name === ".git" ? [] : npmrc(root, f);
     if (e.name !== ".npmrc") return [];
-    return [...fs.readFileSync(f, "utf8").matchAll(NPMRC)].map(
-      (m) => `${path.relative(root, f)} sets ${m[1]}`,
-    );
+    return npmrcKeys(fs.readFileSync(f, "utf8"))
+      .filter((k) => NPMRC.has(k))
+      .map((k) => `${path.relative(root, f)} sets ${k}`);
   });
 }
-// .npmrc keys are case-sensitive (npm ini-parses them as written).
-const NPMRC = /^\s*(script-shell|node-options|shell|onload-script)\s*=/gm;
+// The keys that run code or name another config file (R15-C1).
+const NPMRC = new Set(["script-shell", "node-options", "shell", "onload-script", "userconfig", "globalconfig"]);
+
+/**
+ * Round 15 (A, R15-C1, lane G G14-1): each line's key as npm's ini 5.0.0
+ * decode() reads it: blank and ;/# lines skipped, the text before the
+ * first `=` (unsafe(): trimmed; quoted, the quotes off and JSON read; else
+ * cut at an unescaped ; or #). Keys are case-sensitive. Sections are not
+ * tracked: a key under [x] stays refused (over-refusal, as at effed74).
+ */
+const npmrcKeys = (text) =>
+  text.split(/[\r\n]+/).flatMap((line) => {
+    const m = /^\[([^\]]*)\]\s*$|^([^=]+)(=(.*))?$/.exec(line);
+    return !m || m[1] !== undefined || /^\s*([;#]|$)/.test(line) ? [] : [unsafe(m[2])];
+  });
+function unsafe(v) {
+  v = v.trim();
+  if (/^(".*"|'.*')$/s.test(v)) {
+    try {
+      return JSON.parse(v[0] === "'" ? v.slice(1, -1) : v);
+    } catch {
+      return v[0] === "'" ? v.slice(1, -1) : v;
+    }
+  }
+  let out = "", esc = false;
+  for (const c of v) {
+    if (esc) {
+      out += "\\;#".includes(c) ? c : `\\${c}`;
+      esc = false;
+    } else if (";#".includes(c)) break;
+    else if (c === "\\") esc = true;
+    else out += c;
+  }
+  return (esc ? `${out}\\` : out).trim();
+}
 
 /** Round 14 (R14-C3, lane G H18): npm's implicit `node-gyp rebuild` install. */
 function gyp(root) {
