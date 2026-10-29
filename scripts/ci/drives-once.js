@@ -55,6 +55,8 @@
 //   redirects nor expands a name indirectly; a drive job's checkout and
 //   setup-node take the shipped inputs only.
 // Round 13 (item C; R13-C1, R13-C5, R13-C6): see drives-lines.js.
+// Round 14 (item B; R14-C2, R14-C3): a second workflow gets check()'s job
+// and step rules; RUNENV and working-directory refused; see drives-lines.js.
 // Exits 1 naming each fault; `node scripts/ci/drives-once.js [ci.yml]`.
 const fs = require("fs");
 const path = require("path");
@@ -129,6 +131,8 @@ const BUILDS =
   /(?:^|[\s;&|(`'"])(node\s+(?:-\S+\s+)*?(?:-e|--eval|-p|--print)(?=[\s=]|$)|(?:ba|da|z)?sh\s+(?:-\w+\s+)*-\w*c\w*(?=\s|$)|eval(?=\s|$)|xargs(?=\s|$))/;
 // Round 12 (B): env names that change how every later shell runs.
 const SHELLENV = /^(BASH_ENV|ENV|SHELLOPTS|BASHOPTS)$/;
+// Round 14 (B, R14-C3): env names that change what a listed line runs.
+const RUNENV = /^(NODE_OPTIONS|LD_PRELOAD|PATH)$|^npm_config_/i;
 const esc = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 
 /** The drive scripts: the named ones and every *-drive*.sh in `dir`. */
@@ -203,8 +207,8 @@ const extra = (o, keys, at) =>
     .filter((k) => !keys.includes(k))
     .map((k) => `${at} sets ${k}`);
 
-/** Each fault of workflow `doc` for `names`, as one line. */
-function check(doc, names, scripts = {}, tab = lines.table(ROOT)) {
+/** Each fault of workflow `doc` for `names` (ci.yml if `main`), as one line. */
+function check(doc, names, scripts = {}, tab = lines.table(ROOT), main = true) {
   const jobs = doc.jobs || {};
   const any = named(names);
   const line = new RegExp(
@@ -214,7 +218,7 @@ function check(doc, names, scripts = {}, tab = lines.table(ROOT)) {
   const errors = [];
   const label = (s) => s.name ?? s.uses ?? s.run;
   if ("defaults" in doc) errors.push("the workflow sets defaults");
-  if (!tab) errors.push(`${lines.TABLE} is missing`);
+  if (main && !tab) errors.push(`${lines.TABLE} is missing or not a regular file`);
   const bad = verdict(names);
   errors.push(...extra(doc, TOP, "the workflow"));
   errors.push(
@@ -223,7 +227,7 @@ function check(doc, names, scripts = {}, tab = lines.table(ROOT)) {
       .map((k) => `the workflow sets env ${k}`),
   );
   for (const [id, job] of Object.entries(jobs)) {
-    const drive = JOBS.includes(id);
+    const drive = main && JOBS.includes(id);
     if (!/^[a-z][a-z0-9-]*$/.test(id))
       errors.push(`job key ${id} is not lower-case`);
     if (Object.keys(job).some((k) => k.trim() === "continue-on-error"))
@@ -251,12 +255,13 @@ function check(doc, names, scripts = {}, tab = lines.table(ROOT)) {
       const at = `${id} step "${label(s)}"`;
       if (Object.keys(s).some((k) => k.trim() === "continue-on-error"))
         errors.push(`${at} sets continue-on-error`);
+      if ("working-directory" in s) errors.push(`${at} sets working-directory`);
       errors.push(...shellEnv(s.env, at));
       errors.push(...drivey(s.env, `${at} env`, names));
       errors.push(...drivey(s.with, `${at} with`, names));
       if ("shell" in s && s.shell !== "bash")
         errors.push(`${at} shell is ${s.shell}, not bash`);
-      if (!drive) errors.push(...lines.unlisted(tab, id, s));
+      errors.push(...lines.unlisted(tab, id, s, !drive)); // R14-C4: uses everywhere
       if (!drive && String(s.uses ?? "").startsWith("./") && s.uses !== PRE)
         errors.push(`${at} uses ${s.uses}, a local action other than ${PRE}`);
       if (drive) {
@@ -302,11 +307,11 @@ function check(doc, names, scripts = {}, tab = lines.table(ROOT)) {
       }
     }
   }
-  for (const d of names) {
+  for (const d of main ? names : []) {
     if (ran[d] !== 1)
       errors.push(`scripts/ci/${d}.sh runs ${ran[d]} times, not once`);
   }
-  for (const id of JOBS) if (!jobs[id]) errors.push(`no ${id} job`);
+  for (const id of main ? JOBS : []) if (!jobs[id]) errors.push(`no ${id} job`);
   return [...new Set(errors)];
 }
 
@@ -319,7 +324,7 @@ const unknownEnv = (env, at) =>
 /** Round 12 (B): each env name in `env` that changes how a shell runs. */
 const shellEnv = (env, at) =>
   Object.keys(env ?? {})
-    .filter((k) => SHELLENV.test(k))
+    .filter((k) => SHELLENV.test(k) || RUNENV.test(k))
     .map((k) => `${at} sets env ${k}`);
 
 /** Each value of `env` off its shipped shape, refused by name. */
@@ -366,8 +371,11 @@ function others(dir, main, names, scripts = {}, tab = lines.table(ROOT)) {
     ...files
       .filter((f) => calls.test(read(f)))
       .map((f) => `${path.join(dir, f)} calls ${main0}: it runs only once`),
-    // Round 13 (C, R13-C1, R13-C5): each run line and uses, tabled.
-    ...files.flatMap((f) => lines.workflow(path.join(dir, f), tab)),
+    // Round 14 (B, R14-C2): each under check()'s job and step rules.
+    ...files.flatMap((f) => {
+      const p = path.join(dir, f), d = lines.load(p);
+      return d ? check(d, names, scripts, tab, false).map((e) => `${p}: ${e}`) : [`${p} is not YAML`];
+    }),
     // Round 12 (B): any local path but the prepare action.
     ...files
       .filter((f) =>
@@ -426,7 +434,7 @@ function actions(dir, names, scripts = {}, tab = lines.table(ROOT)) {
     const key = `./${path.join(".github/actions", path.relative(dir, path.dirname(f)))}`;
     for (const s of doc.runs?.steps ?? []) {
       const at = `${f} step "${s.name ?? s.uses ?? s.run}"`;
-      if (key === PRE && "run" in s) errors.push(...lines.unlisted(tab, key, { run: s.run }));
+      if (key === PRE) errors.push(...lines.unlisted(tab, key, s));
       if (typeof s.run === "string")
         errors.push(...lines.lifecycle(s.run.trim(), scripts, at, verdict(names)));
       errors.push(...extra(s, ACTION_KEYS, at));
@@ -461,6 +469,7 @@ if (require.main === module) {
     ...others(path.dirname(file), file, names, scripts, tab),
     ...actions(path.join(path.dirname(file), "../actions"), names, scripts, tab),
     ...lines.npmrc(root),
+    ...lines.gyp(root),
   ];
   errors.forEach((e) => console.error(`::error::${e}`));
   if (errors.length) process.exit(1);

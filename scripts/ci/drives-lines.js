@@ -8,6 +8,13 @@
 // in any second workflow and in the action. An edit of a run line or uses
 // there needs the table's edit in the same PR, by design. For drives-once.js
 // (split out of it by the 500-line rule).
+// Round 14 (item B, lane G's round-13 hides; R14-C3, R14-C4, R14-C9): a
+// uses entry is the step's full literal, its uses and its `with` (absent =
+// {}), compared as `<uses> with <JSON of with, keys sorted>` (literal());
+// every uses is one, the drive jobs' and the prepare action's too. The
+// table is a regular file; .npmrc keys node-options, shell and
+// onload-script are refused beside script-shell; so is npm's implicit
+// node-gyp install (gyp()).
 const fs = require("fs");
 const path = require("path");
 const { reached } = require("./drives-scripts");
@@ -24,31 +31,41 @@ const LIFE = [
   "preversion",
   "version",
   "postversion",
+  // Round 14 (R14-C9): npm ci and npm install run these too (npm 10.9.8).
+  "prepublish",
+  "preprepare",
+  "postprepare",
+  "dependencies",
 ];
 const NPM_LIFE = /^npm\s+(ci|install|pack|version)(?=\s|$)/;
+
+/** A uses step's full literal: its uses and its with, keys sorted. */
+const literal = (s) =>
+  `${s.uses} with ${JSON.stringify(Object.fromEntries(Object.entries(s.with ?? {}).sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))))}`;
 
 /** The table at `root` (job key -> its run lines and uses), else null. */
 function table(root) {
   const f = path.join(root, TABLE);
-  if (!fs.existsSync(f)) return null;
+  // Round 14 (R14-C3, lane G H11): a regular file, never a symlink.
+  if (!fs.lstatSync(f, { throwIfNoEntry: false })?.isFile()) return null;
   const t = {};
   for (const e of JSON.parse(fs.readFileSync(f, "utf8"))) {
     const k = (t[e.job] ??= { run: new Set(), uses: new Set() });
     if ("run" in e) k.run.add(String(e.run).trim());
-    if ("uses" in e) k.uses.add(String(e.uses));
+    if ("uses" in e) k.uses.add(literal(e));
   }
   return t;
 }
 
-/** Each run line or uses of step `s` of `job` that `tab` does not list. */
-function unlisted(tab, job, s) {
+/** Each run line (if `runs`) or uses of step `s` of `job` that `tab` does not list. */
+function unlisted(tab, job, s, runs = true) {
   const k = tab?.[job];
   const out = [];
   const run = String(s.run ?? "").trim();
-  if ("run" in s && !k?.run.has(run))
+  if (runs && "run" in s && !k?.run.has(run))
     out.push(`run line not in ${TABLE}: ${job}: ${run}`);
-  if ("uses" in s && !k?.uses.has(String(s.uses)))
-    out.push(`uses not in ${TABLE}: ${job}: ${s.uses}`);
+  if ("uses" in s && !k?.uses.has(literal(s)))
+    out.push(`uses not in ${TABLE}: ${job}: ${literal(s)}`);
   return out;
 }
 
@@ -71,7 +88,7 @@ function lifecycle(run, scripts, at, bad) {
   return out;
 }
 
-/** Each .npmrc under `root` (node_modules and .git skipped) setting script-shell. */
+/** Each .npmrc under `root` (node_modules and .git skipped) setting a key that runs code. */
 function npmrc(root, dir = root) {
   if (!fs.existsSync(dir)) return [];
   return fs.readdirSync(dir, { withFileTypes: true }).flatMap((e) => {
@@ -79,10 +96,25 @@ function npmrc(root, dir = root) {
     if (e.isDirectory() && !e.isSymbolicLink())
       return e.name === "node_modules" || e.name === ".git" ? [] : npmrc(root, f);
     if (e.name !== ".npmrc") return [];
-    return /^\s*script-shell\s*=/m.test(fs.readFileSync(f, "utf8"))
-      ? [`${path.relative(root, f)} sets script-shell`]
-      : [];
+    return [...fs.readFileSync(f, "utf8").matchAll(NPMRC)].map(
+      (m) => `${path.relative(root, f)} sets ${m[1]}`,
+    );
   });
+}
+// .npmrc keys are case-sensitive (npm ini-parses them as written).
+const NPMRC = /^\s*(script-shell|node-options|shell|onload-script)\s*=/gm;
+
+/** Round 14 (R14-C3, lane G H18): npm's implicit `node-gyp rebuild` install. */
+function gyp(root) {
+  const p = path.join(root, "package.json");
+  return [
+    ...(fs.existsSync(path.join(root, "binding.gyp"))
+      ? ["binding.gyp at the root: npm installs it with node-gyp rebuild"]
+      : []),
+    ...(fs.existsSync(p) && "gypfile" in JSON.parse(fs.readFileSync(p, "utf8"))
+      ? ["package.json sets gypfile"]
+      : []),
+  ];
 }
 
 /**
@@ -94,17 +126,14 @@ const drivey = (o, at, bad) =>
     .filter(([, v]) => /scripts\/ci\//.test(String(v)) || bad(String(v)) === "runs a drive")
     .map(([k]) => `${at} ${k} names a drive`);
 
-/** Each run line and uses of workflow file `f` that `tab` does not list. */
-function workflow(f, tab) {
-  let doc;
+/** Workflow file `f` (R14-C2): a mapping (else {}), or null when it is no YAML. */
+function load(f) {
   try {
-    doc = require("js-yaml").load(fs.readFileSync(f, "utf8")) ?? {};
+    const d = require("js-yaml").load(fs.readFileSync(f, "utf8"));
+    return d && typeof d === "object" ? d : {};
   } catch {
-    return [`${f} is not YAML`];
+    return null;
   }
-  return Object.entries(doc.jobs ?? {}).flatMap(([id, j]) =>
-    (j?.steps ?? []).flatMap((s) => unlisted(tab, id, s)),
-  );
 }
 
-module.exports = { TABLE, table, unlisted, lifecycle, npmrc, drivey, workflow };
+module.exports = { TABLE, table, unlisted, lifecycle, npmrc, gyp, drivey, load };
