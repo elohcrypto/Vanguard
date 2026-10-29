@@ -10,7 +10,8 @@ import * as path from "path";
  * (a second workflow that is no YAML accepted), L23 and L26 (an .npmrc in
  * node_modules or .git read), L29 (any verdict "names a drive"), L01 (the
  * table's run entries untrimmed). Lane G's K-D21 is DrivesAllow-14's
- * second-workflow control.
+ * second-workflow control. And the round-14 lever's Z14-15 (a second
+ * workflow that is no mapping no longer read as an empty one).
  */
 describe("drives-once pins, round 14 (lane G's round-13 survivors)", function () {
   this.timeout(60000);
@@ -55,6 +56,15 @@ describe("drives-once pins, round 14 (lane G's round-13 survivors)", function ()
     const doc = yaml.load(CI);
     doc.jobs.gates.steps.find((s: any) => s.run === "npm ci").env = { X: "bash -c ls" };
     expect(check(doc, names)).to.deep.equal([]);
+  });
+
+  // The round-14 lever's own survivor (r14/mutants-14-full-gate-s0.txt).
+  it("P-Z15: an empty or one-scalar second workflow runs nothing and passes", function () {
+    const dir = tmp();
+    put(dir, "ci.yml", CI);
+    put(dir, "w2.yml", "");
+    put(dir, "w3.yml", "just text\n");
+    expect(others(dir, path.join(dir, "ci.yml"), names)).to.deep.equal([]);
   });
 
   it("P-L01: a table entry with trailing blanks lists the trimmed line", function () {
