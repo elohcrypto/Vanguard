@@ -159,11 +159,13 @@ when that part neared the 500-line rule (U2 round 9).
   cannot prove that no re-send is still out). A JSON-RPC error answer
   is a refusal: the node, or the signer relaying the node's answer,
   answered it, and the send leaves no intent of its own. That holds
-  because the shipped signer forwards the raw transaction alone
-  (`eth_sendRawTransaction`; no read rides with it) and answers a hash
-  other than that transaction's as a transport failure; so does a
+  because the shipped signer makes one upstream attempt per send
+  (`eth_sendRawTransaction` alone; no read rides with it; no HTTP retry:
+  a 429 or a gateway error after the forward is a transport failure) and
+  answers a hash other than that transaction's as a transport failure. A
   refused connection (Hardhat's `HH108`, ECONNREFUSED: nothing left the
-  machine). A transport failure is no refusal: the shipped signer
+  machine) leaves no intent of its own either. A transport failure is no
+  refusal: the shipped signer
   (`scripts/production/signer.js`) answers a broadcast it forwarded and
   then lost (a reset, a timeout, a gateway error upstream) with HTTP 502
   and a body that is no JSON-RPC answer (`{"transport": "HTTP 502: …"}`),
