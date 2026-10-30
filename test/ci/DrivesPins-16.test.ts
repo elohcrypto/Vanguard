@@ -85,6 +85,50 @@ describe("drives-once pins, round 16 (npm's project config pinned empty; lane G'
     expect(oracle("; a comment\n# another\n")).to.deep.equal([]);
   });
 
+  // R16-CS6: npm 10.9.8 takes an env npm_config_globalconfig over the
+  // --globalconfig flag (npx exports one; measured), so the oracle sets
+  // both npm_config_* keys to its pins too. A shim first in PATH records
+  // what the oracle's npm printed for each `npm config list --json`.
+  const shimmed = (env: Record<string, string>) => {
+    const real = require("child_process").execFileSync("bash", ["-c", "command -v npm"], { encoding: "utf8" }).trim();
+    const bin = tmp();
+    const log = tmp();
+    fs.writeFileSync(
+      path.join(bin, "npm"),
+      `#!/usr/bin/env bash\nout=$("${real}" "$@"); rc=$?\nprintf '%s' "$out"\ncase " $* " in *" --json "*) printf '%s' "$out" > "${log}/json-$$-$RANDOM";; esac\nexit $rc\n`,
+      { mode: 0o755 },
+    );
+    const keep = { ...process.env };
+    Object.assign(process.env, env, { PATH: `${bin}:${process.env.PATH}` });
+    try {
+      expect(oracle()).to.deep.equal([]);
+    } finally {
+      for (const k of Object.keys(process.env)) if (!(k in keep)) delete process.env[k];
+      Object.assign(process.env, keep);
+    }
+    return fs.readdirSync(log).map((f) => JSON.parse(fs.readFileSync(path.join(log, f), "utf8")));
+  };
+  /** Each JSON listing's user and global config: the two pinned files, distinct, whatever the env named. */
+  const pinned = (lists: any[]) => {
+    expect(lists).to.have.length(2);
+    for (const o of lists) {
+      expect(path.basename(o.userconfig), JSON.stringify(o.userconfig)).to.equal("user");
+      expect(path.basename(o.globalconfig), JSON.stringify(o.globalconfig)).to.equal("global");
+      expect(path.dirname(o.globalconfig)).to.equal(path.dirname(o.userconfig));
+    }
+  };
+  it("P-N9: an inherited npm_config_globalconfig naming another file: npm still reads the oracle's pinned global file", function () {
+    const other = path.join(tmp(), "other-npmrc");
+    fs.writeFileSync(other, "");
+    pinned(shimmed({ npm_config_globalconfig: other }));
+  });
+
+  it("P-N10: both npm_config_* keys naming one path: the oracle overrides them with its two distinct pins", function () {
+    const one = path.join(tmp(), "one-npmrc");
+    fs.writeFileSync(one, "");
+    pinned(shimmed({ npm_config_userconfig: one, npm_config_globalconfig: one }));
+  });
+
   // Item E (R16-C5, lane G G15-4 E18/E19): a second workflow's env literal at each level.
   const w2 = (body: string) => {
     const dir = tmp();
