@@ -49,15 +49,16 @@ describe("U2 round 16: a read's 429 retry is bounded", function () {
   });
   afterEach(() => fs.rmSync(dir, { recursive: true, force: true }));
 
-  /** The in-process node behind a proxy answering every eth_getCode HTTP 429 with `Retry-After: 1200000` once `armed`. */
-  async function proxy() {
+  /** The in-process node behind a proxy answering every eth_getCode HTTP 429 with `Retry-After: 1200000` once `armed` (or, `slow`, every eth_getCode 2.5 s late). */
+  async function proxy(slow = false) {
     const st = { sendsIn: 0, faults: 0, armed: false };
     const server = http.createServer((req, res) => {
       let b = "";
       req.on("data", (c) => (b += c));
       req.on("end", async () => {
         const c = JSON.parse(b);
-        if (st.armed && c.method === "eth_getCode") {
+        if (slow && st.armed && c.method === "eth_getCode") await new Promise((ok) => setTimeout(ok, 2500));
+        else if (st.armed && c.method === "eth_getCode") {
           st.faults++;
           res.statusCode = 429;
           res.setHeader("retry-after", "1200000");
@@ -153,6 +154,28 @@ describe("U2 round 16: a read's 429 retry is bounded", function () {
     expect(up.st.sendsIn, "raw transactions the node received").to.equal(0);
     expect(await nonce()).to.equal(start);
     expect(await refusal(a.body.error.message)).to.match(/: the RPC rate-limited the send; kept in the record, wait, then resume$/);
+  });
+
+  // Lane G G15-4 U20 (R16-C5): the request timeout stays ethers' 300 s;
+  // a shorter one would fail a slow read the signer needs.
+  it("U20: a read answered 2.5 s late still answers: the hash, one raw at the node", async function () {
+    const [d] = await ethers.getSigners();
+    const up = await proxy(true);
+    const start = await nonce();
+    let a: any;
+    try {
+      await runSigner("scripts/production/signer.js", env(up.url), async (live: Live) => {
+        up.st.armed = true;
+        a = await rpc(live, "eth_sendTransaction", [
+          { from: d.address, to: d.address, value: "0x1", nonce: ethers.toQuantity(start) },
+        ]);
+      });
+    } finally {
+      up.server.close();
+    }
+    expect(a.body.result, JSON.stringify(a.body)).to.match(/^0x[0-9a-f]{64}$/);
+    expect(up.st.sendsIn).to.equal(1);
+    expect(await nonce()).to.equal(start + 1);
   });
 
   // Lane F INFO 7: SignerTransport-14's flipped 429code row no longer
