@@ -239,9 +239,10 @@ describe("every drive exactly once: run lines and uses come from a shipped table
     row("K6 a with: value of a remote action naming the drive", (t) => step(t, { uses: `evil/act@${SHA}`, with: { run: DRIVE } }), "with run names a drive");
     row("H31 a docker action's args naming the drive", (t) => step(t, { uses: "docker://alpine:3", with: { args: DRIVE } }), "with args names a drive");
     row("a with: value naming the drive on a listed uses", (t) => edit(t, (d) => (d.jobs.tests.steps.find((s: any) => /upload-artifact/.test(s.uses ?? "")).with.path = DRIVE)), "with path names a drive");
-    row("H21 an .npmrc setting script-shell", (t) => SH(t, ".npmrc", "script-shell=./x.sh\n"), ".npmrc sets script-shell");
-    row("an .npmrc in a workspace package setting script-shell", (t) => SH(t, "pk/.npmrc", "script-shell = ./x.sh\n"), "pk/.npmrc sets script-shell");
-    row("an .npmrc without script-shell", (t) => SH(t, ".npmrc", "fund=false\n"), "PASSES");
+    row("H21 an .npmrc setting script-shell", (t) => SH(t, ".npmrc", "script-shell=./x.sh\n"), ".npmrc: an .npmrc is not allowed in this tree");
+    row("an .npmrc in a workspace package setting script-shell", (t) => SH(t, "pk/.npmrc", "script-shell = ./x.sh\n"), "pk/.npmrc: an .npmrc is not allowed in this tree");
+    // Round 16 (R16-C1, countersigned R16-CS2): any .npmrc is refused by name.
+    row("an .npmrc without script-shell", (t) => SH(t, ".npmrc", "fund=false\n"), ".npmrc: an .npmrc is not allowed in this tree");
     row("H19 npm ci and a preinstall running the drive", (t) => P(t, (p) => (p.scripts.preinstall = DRIVE)), `gates step "Install dependencies" runs npm ci, whose preinstall script runs a drive`);
     row("H20 / K15 npm ci and a postinstall", (t) => P(t, (p) => (p.scripts.postinstall = DRIVE)), "runs npm ci, whose postinstall script runs a drive");
     row("K16 npm ci and a prepare script", (t) => P(t, (p) => (p.scripts.prepare = DRIVE)), "runs npm ci, whose prepare script runs a drive");

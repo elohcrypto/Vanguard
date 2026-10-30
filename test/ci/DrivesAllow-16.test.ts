@@ -108,29 +108,33 @@ describe("every drive exactly once: npm's project config is pinned empty (round 
       const old: Record<string, string | undefined> = {};
       for (const k of Object.keys(env)) (old[k] = process.env[k]), (process.env[k] = env[k]);
       try {
-        return config!(t);
+        return config!(t).map((r) => r.split(t).join("<root>"));
       } finally {
         for (const k of Object.keys(env)) old[k] === undefined ? delete process.env[k] : (process.env[k] = old[k]);
         fs.rmSync(t, { recursive: true, force: true });
       }
     };
     const SETS = (k: string) => `npm's project config sets ${k}`;
+    // R16-CS4: the text listing names the root's .npmrc as a source.
+    const PROJ = "npm reads a project config: <root>/.npmrc";
     it("an env-expanded key with its env set", function () {
-      expect(ask({ X16: "script-shell" }, "${X16}=./hide.sh\n")).to.deep.equal([SETS("script-shell")]);
+      expect(ask({ X16: "script-shell" }, "${X16}=./hide.sh\n")).to.deep.equal([SETS("script-shell"), PROJ]);
     });
     it("a quoted key", function () {
-      expect(ask({}, '"script-shell"=./hide.sh\n')).to.deep.equal([SETS("script-shell")]);
+      expect(ask({}, '"script-shell"=./hide.sh\n')).to.deep.equal([SETS("script-shell"), PROJ]);
     });
     it("CR-only line ends", function () {
       expect(ask({}, "foo=1\rscript-shell=./hide.sh\r")).to.include(SETS("script-shell"));
     });
     it("an unknown key", function () {
-      expect(ask({}, "foo-bar=1\n")).to.deep.equal([SETS("foo-bar")]);
+      expect(ask({}, "foo-bar=1\n")).to.deep.equal([SETS("foo-bar"), PROJ]);
     });
+    // R16-CS4: the oracle pins userconfig on the command line, which
+    // beats the project layer, so the redirect changes no effective key
+    // (the JSON diff alone saw nothing); the text listing still names
+    // the project config as a source.
     it("the userconfig redirect", function () {
-      const r = ask({}, "userconfig=./evil.npmrc\n", { "evil.npmrc": "script-shell=./hide.sh\n" });
-      expect(r).to.include(SETS("userconfig"));
-      expect(r).to.include(SETS("script-shell"));
+      expect(ask({}, "userconfig=./evil.npmrc\n", { "evil.npmrc": "script-shell=./hide.sh\n" })).to.deep.equal([PROJ]);
     });
     it("no .npmrc: nothing", function () {
       expect(ask({})).to.deep.equal([]);

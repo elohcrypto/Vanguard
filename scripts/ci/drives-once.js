@@ -66,6 +66,7 @@ const yaml = require("js-yaml");
 const { reached, scriptsOf } = require("./drives-scripts");
 // Round 13 (C): the shipped table of run lines and uses, split out too.
 const lines = require("./drives-lines");
+const npm = require("./drives-npm");
 // Round 15 (B, R15-C2): the env rules live there too (the 480-line cap).
 const { shellEnv, unknownEnv, badValue } = lines;
 const ROOT = path.join(__dirname, "../..");
@@ -446,6 +447,7 @@ if (require.main === module) {
     ...others(path.dirname(file), file, names, scripts, tab),
     ...actions(path.join(path.dirname(file), "../actions"), names, scripts, tab),
     ...lines.npmrc(root),
+    ...npm.config(root),
     ...lines.gyp(root),
   ];
   errors.forEach((e) => console.error(`::error::${e}`));

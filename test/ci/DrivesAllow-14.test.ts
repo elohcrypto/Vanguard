@@ -123,9 +123,9 @@ describe("every drive exactly once: what changes a listed line is refused too (r
       SH(t, "sub/package.json", JSON.stringify({ name: "s", scripts: { preinstall: `../${DRIVE}` } }));
       gstep(t, INSTALL, (s) => (s["working-directory"] = "sub"));
     }, [`gates step "${INSTALL}" sets working-directory`]);
-    row("H1 an .npmrc onload-script", (t) => SH(t, ".npmrc", "onload-script=./hide.js\n"), [".npmrc sets onload-script"]);
-    row("H16 an .npmrc node-options", (t) => SH(t, ".npmrc", "node-options=--require ./hide.js\n"), [".npmrc sets node-options"]);
-    row("an .npmrc shell in a package directory", (t) => SH(t, "pk/.npmrc", "shell = ./x.sh\n"), ["pk/.npmrc sets shell"]);
+    row("H1 an .npmrc onload-script", (t) => SH(t, ".npmrc", "onload-script=./hide.js\n"), [".npmrc: an .npmrc is not allowed in this tree"]);
+    row("H16 an .npmrc node-options", (t) => SH(t, ".npmrc", "node-options=--require ./hide.js\n"), [".npmrc: an .npmrc is not allowed in this tree"]);
+    row("an .npmrc shell in a package directory", (t) => SH(t, "pk/.npmrc", "shell = ./x.sh\n"), ["pk/.npmrc: an .npmrc is not allowed in this tree"]);
     row("H18 a root binding.gyp (npm's implicit node-gyp install)", (t) => SH(t, "binding.gyp", "{}"), ["binding.gyp at the root"]);
     row("a package.json gypfile key", (t) => P(t, (p) => (p.gypfile = true)), ["package.json sets gypfile"]);
     row("H11 the table a symlink", (t) => {

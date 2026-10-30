@@ -39,7 +39,9 @@ describe("drives-once pins, round 15 (lane G's round-14 survivors, the round-15 
   };
 
   it("P-L57: an .npmrc key on a later line is read", function () {
-    expect(rc("registry=https://registry.npmjs.org/\nscript-shell=./hide.sh\n")).to.deep.equal([".npmrc sets script-shell"]);
+    expect(rc("registry=https://registry.npmjs.org/\nscript-shell=./hide.sh\n")).to.deep.equal([
+      ".npmrc: an .npmrc is not allowed in this tree; npm's project config is pinned empty (R16-C1)",
+    ]);
   });
 
   it("P-L62: a package.json gypfile of any value is refused", function () {
@@ -68,15 +70,6 @@ describe("drives-once pins, round 15 (lane G's round-14 survivors, the round-15 
     put(dir, "ci.yml", CI);
     put(dir, "w2.yaml", "name: w2\non: push\nenv:\n  BASH_ENV: ./hide.sh\njobs: {}\n");
     expect(others(dir, path.join(dir, "ci.yml"), names).join("\n")).to.contain("w2.yaml: the workflow sets env BASH_ENV");
-  });
-
-  // Item A (R15-C1): npmrcKeys(), ini 5.0.0's key.
-  it("P-A1: a key cut at ; is trimmed, so is a bare key line (ini reads it as true)", function () {
-    expect(rc("script-shell ;x=./hide.sh\nnode-options\n")).to.deep.equal([".npmrc sets script-shell", ".npmrc sets node-options"]);
-  });
-
-  it("P-A2: keys are case-sensitive, a longer key or a value naming one is no key", function () {
-    expect(rc("Shell=./x\nregistry=script-shell\nmy-script-shell=./x\nxshell=./x\n")).to.deep.equal([]);
   });
 
   // Item B (R15-C2): envs(), the table's env literals.

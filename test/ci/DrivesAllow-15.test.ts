@@ -70,13 +70,12 @@ describe("every drive exactly once: npm's .npmrc keys and the env literal (round
     });
   const NPMRC = (t: string, text: string) => SH(t, ".npmrc", text);
   const envNot = (at: string, lit: string) => `env not in ${TABLE}: ${at}: ${lit}`;
+  // Round 16 (R16-C1): any .npmrc is refused by name, its keys no longer read.
+  const NA = ".npmrc: an .npmrc is not allowed in this tree";
+  const BYNAME = [NA];
 
-  describe("controls (npm reads none of these as a key the gate refuses; measured)", function () {
+  describe("controls", function () {
     row("the shipped tree passes", () => {}, "PASSES");
-    row("A10 `Script-Shell=` (npm ignores another case)", (t) => NPMRC(t, "Script-Shell=./hide.sh\n"), "PASSES");
-    row("A11 `script_shell=`", (t) => NPMRC(t, "script_shell=./hide.sh\n"), "PASSES");
-    row("an escaped `script\\-shell=`", (t) => NPMRC(t, "script\\-shell=./hide.sh\n"), "PASSES");
-    row("a comment line naming the key", (t) => NPMRC(t, "; script-shell=./hide.sh\n# userconfig=./x\n"), "PASSES");
     row("E6 a workspace member with binding.gyp (npm ci builds none)", (t) => {
       SH(t, "pk/package.json", '{"name":"pk","version":"1.0.0"}');
       SH(t, "pk/binding.gyp", "{}");
@@ -91,26 +90,28 @@ describe("every drive exactly once: npm's .npmrc keys and the env literal (round
     }, "PASSES");
   });
 
-  describe("R15-C1: an .npmrc key as npm's ini reads it (lane G G14-1)", function () {
-    row('A1 `"script-shell"=` (a double-quoted key)', (t) => NPMRC(t, '"script-shell"=./hide.sh\n'), [".npmrc sets script-shell"]);
-    row("A2 `'script-shell'=` (a single-quoted key)", (t) => NPMRC(t, "'script-shell'=./hide.sh\n"), [".npmrc sets script-shell"]);
-    row('A3 `"node-options"=` (quoted)', (t) => NPMRC(t, '"node-options"=--require ./hide.js\n'), [".npmrc sets node-options"]);
+  describe("R15-C1, refused by name since R16-C1: any .npmrc, whatever its keys", function () {
+    row("A10 `Script-Shell=` (npm ignores another case; flipped, R16-C1)", (t) => NPMRC(t, "Script-Shell=./hide.sh\n"), BYNAME);
+    row("A11 `script_shell=` (flipped)", (t) => NPMRC(t, "script_shell=./hide.sh\n"), BYNAME);
+    row("an escaped `script\\-shell=` (flipped)", (t) => NPMRC(t, "script\\-shell=./hide.sh\n"), BYNAME);
+    row("a comment line naming the key (flipped)", (t) => NPMRC(t, "; script-shell=./hide.sh\n# userconfig=./x\n"), BYNAME);
+    row('A1 `"script-shell"=` (a double-quoted key)', (t) => NPMRC(t, '"script-shell"=./hide.sh\n'), BYNAME);
+    row("A2 `'script-shell'=` (a single-quoted key)", (t) => NPMRC(t, "'script-shell'=./hide.sh\n"), BYNAME);
+    row('A3 `"node-options"=` (quoted)', (t) => NPMRC(t, '"node-options"=--require ./hide.js\n'), BYNAME);
     row("A4 `userconfig=` naming a file that sets script-shell", (t) => {
       NPMRC(t, "userconfig=./evilrc\n");
       SH(t, "evilrc", "script-shell=./hide.sh\n");
-    }, [".npmrc sets userconfig"]);
+    }, BYNAME);
     row("A5 `globalconfig=` naming a file that sets script-shell", (t) => {
       NPMRC(t, "globalconfig=./evilrc\n");
       SH(t, "evilrc", "script-shell=./hide.sh\n");
-    }, [".npmrc sets globalconfig"]);
-    row('`"script\\u002dshell"=` (a JSON escape in the quoted key)', (t) => NPMRC(t, '"script\\u002dshell"=./hide.sh\n'), [".npmrc sets script-shell"]);
-    row("`script-shell;x=` (ini cuts the key at an unescaped ;)", (t) => NPMRC(t, "script-shell;x=./hide.sh\n"), [".npmrc sets script-shell"]);
-    row("`script-shell#x=` (and at an unescaped #)", (t) => NPMRC(t, "script-shell#x=./hide.sh\n"), [".npmrc sets script-shell"]);
-    // Refused at effed74 too: npm reads x.script-shell (measured), but
-    // accepting it would loosen the gate; the over-refusal stays.
-    row("a key under an ini section `[x]` stays refused", (t) => NPMRC(t, "[x]\nscript-shell=./hide.sh\n"), [".npmrc sets script-shell"]);
-    row(`\`'"script-shell"'=\` (single quotes around a JSON string)`, (t) => NPMRC(t, `'"script-shell"'=./hide.sh\n`), [".npmrc sets script-shell"]);
-    row("a quoted key in a package directory's .npmrc, CRLF and a BOM", (t) => SH(t, "pk/.npmrc", '\ufeffregistry=https://registry.npmjs.org/\r\n "shell" = ./x.sh\r\n'), ["pk/.npmrc sets shell"]);
+    }, BYNAME);
+    row('`"script\\u002dshell"=` (a JSON escape in the quoted key)', (t) => NPMRC(t, '"script\\u002dshell"=./hide.sh\n'), BYNAME);
+    row("`script-shell;x=` (ini cuts the key at an unescaped ;)", (t) => NPMRC(t, "script-shell;x=./hide.sh\n"), BYNAME);
+    row("`script-shell#x=` (and at an unescaped #)", (t) => NPMRC(t, "script-shell#x=./hide.sh\n"), BYNAME);
+    row("a key under an ini section `[x]` stays refused", (t) => NPMRC(t, "[x]\nscript-shell=./hide.sh\n"), BYNAME);
+    row(`\`'"script-shell"'=\` (single quotes around a JSON string)`, (t) => NPMRC(t, `'"script-shell"'=./hide.sh\n`), BYNAME);
+    row("a quoted key in a package directory's .npmrc, CRLF and a BOM", (t) => SH(t, "pk/.npmrc", '\ufeffregistry=https://registry.npmjs.org/\r\n "shell" = ./x.sh\r\n'), [`pk/${NA}`]);
   });
 
   describe("R15-C2: every env is a table literal (lane G G14-2)", function () {

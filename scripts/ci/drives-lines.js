@@ -12,11 +12,13 @@
 // uses entry is the step's full literal, its uses and its `with` (absent =
 // {}), compared as `<uses> with <JSON of with, keys sorted>` (literal());
 // every uses is one, the drive jobs' and the prepare action's too. The
-// table is a regular file; .npmrc keys node-options, shell and
-// onload-script are refused beside script-shell; so is npm's implicit
-// node-gyp install (gyp()).
-// Round 15 (A, R15-C1): an .npmrc key as npm's ini reads it (npmrcKeys()),
-// userconfig and globalconfig refused too. (B, R15-C2): every env mapping
+// table is a regular file; npm's implicit node-gyp install is refused
+// (gyp()). Round 14's .npmrc key list (node-options, shell,
+// onload-script beside script-shell) and round 15's (A, R15-C1) port of
+// ini's key grammar (npmrcKeys(), userconfig, globalconfig) are gone:
+// npm expands ${VAR} in a key after ini (lane G G15-1), so round 16 (A,
+// R16-C1) refuses any .npmrc by name (npmrc()) and asks npm itself
+// (drives-npm.js). Round 15 (B, R15-C2): every env mapping
 // of every workflow, at workflow, job and step level, is a table entry
 // {"at": "the workflow" | "<job> job" | "<job> step", "env": {...}},
 // compared as its literal (envs()); the env rules moved here from
@@ -142,53 +144,22 @@ function lifecycle(run, scripts, at, bad) {
   return out;
 }
 
-/** Each .npmrc under `root` (node_modules and .git skipped) setting a key that runs code. */
+/**
+ * Round 16 (A, R16-C1): each entry named .npmrc under `root`, a file, a
+ * directory or a symlink, refused by name (node_modules and .git skipped,
+ * a symlinked directory not followed): npm's project config is pinned
+ * empty, and drives-npm.js proves it with npm itself.
+ */
 function npmrc(root, dir = root) {
   if (!fs.existsSync(dir)) return [];
   return fs.readdirSync(dir, { withFileTypes: true }).flatMap((e) => {
     const f = path.join(dir, e.name);
+    if (e.name === ".npmrc")
+      return [`${path.relative(root, f)}: an .npmrc is not allowed in this tree; npm's project config is pinned empty (R16-C1)`];
     if (e.isDirectory() && !e.isSymbolicLink())
       return e.name === "node_modules" || e.name === ".git" ? [] : npmrc(root, f);
-    if (e.name !== ".npmrc") return [];
-    return npmrcKeys(fs.readFileSync(f, "utf8"))
-      .filter((k) => NPMRC.has(k))
-      .map((k) => `${path.relative(root, f)} sets ${k}`);
+    return [];
   });
-}
-// The keys that run code or name another config file (R15-C1).
-const NPMRC = new Set(["script-shell", "node-options", "shell", "onload-script", "userconfig", "globalconfig"]);
-
-/**
- * Round 15 (A, R15-C1, lane G G14-1): ports the key logic of ini 5.0.0's
- * decode() and unsafe() (npm 10.9.8's): each line's key as npm reads it: blank and ;/# lines skipped, the text before the
- * first `=` (unsafe(): trimmed; quoted, the quotes off and JSON read; else
- * cut at an unescaped ; or #). Keys are case-sensitive. Sections are not
- * tracked: a key under [x] stays refused (over-refusal, as at effed74).
- */
-const npmrcKeys = (text) =>
-  text.split(/[\r\n]+/).flatMap((line) => {
-    const m = /^\[([^\]]*)\]\s*$|^([^=]+)(=(.*))?$/.exec(line);
-    return !m || m[1] !== undefined || /^\s*([;#]|$)/.test(line) ? [] : [unsafe(m[2])];
-  });
-function unsafe(v) {
-  v = v.trim();
-  if (/^(".*"|'.*')$/s.test(v)) {
-    try {
-      return JSON.parse(v[0] === "'" ? v.slice(1, -1) : v);
-    } catch {
-      return v[0] === "'" ? v.slice(1, -1) : v;
-    }
-  }
-  let out = "", esc = false;
-  for (const c of v) {
-    if (esc) {
-      out += "\\;#".includes(c) ? c : `\\${c}`;
-      esc = false;
-    } else if (";#".includes(c)) break;
-    else if (c === "\\") esc = true;
-    else out += c;
-  }
-  return (esc ? `${out}\\` : out).trim();
 }
 
 /** Round 14 (R14-C3, lane G H18): npm's implicit `node-gyp rebuild` install. */
