@@ -129,6 +129,20 @@ describe("drives-once pins, round 16 (npm's project config pinned empty; lane G'
     pinned(shimmed({ npm_config_userconfig: one, npm_config_globalconfig: one }));
   });
 
+  it("P-N11: npm exiting non-zero is refused even when it printed a JSON object (lever row Z16-09)", function () {
+    const bin = tmp();
+    fs.writeFileSync(path.join(bin, "npm"), "#!/usr/bin/env bash\necho '{}'\nexit 1\n", { mode: 0o755 });
+    const keep = process.env.PATH;
+    process.env.PATH = `${bin}:${keep}`;
+    try {
+      const r = oracle();
+      expect(r).to.have.length(1);
+      expect(r[0]).to.match(/^npm config list failed: /);
+    } finally {
+      process.env.PATH = keep;
+    }
+  });
+
   // Item E (R16-C5, lane G G15-4 E18/E19): a second workflow's env literal at each level.
   const w2 = (body: string) => {
     const dir = tmp();
