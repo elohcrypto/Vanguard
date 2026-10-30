@@ -14,6 +14,11 @@
  * 14, so a rate-limited read of the signer's own (the code it shows, the
  * fee block, the gas estimate) no longer fails the send step. No request
  * is added on a clean path: ethers asks retryFunc only after a 429.
+ * Round 16 (D, R16-C4, lane G G15-3): that retry is bounded. ethers takes
+ * an integer Retry-After as a delay in milliseconds, past its request
+ * timeout (a real one is in seconds), so the header is dropped; and a
+ * read gets 8 attempts, at most 30 s of backoff (250 ms * sum of 2^a - 1,
+ * a = 0..6), then "exceeded maximum retry limit".
  */
 const { FetchRequest, JsonRpcProvider, toUtf8String } = require("ethers");
 
@@ -26,14 +31,16 @@ function sends(req) {
   }
 }
 
-/** A provider on the URL `upstream`: a read retried on a 429, a send never, no redirect followed. */
+/** A provider on the URL `upstream`: a read retried on a 429 (8 attempts), a send never, no redirect followed. */
 function upstreamProvider(upstream) {
   const conn = new FetchRequest(upstream);
+  conn.setThrottleParams({ maxAttempts: 8 });
   conn.retryFunc = async (req) => !sends(req);
   const get = conn.getUrlFunc;
   conn.getUrlFunc = async (req, signal) => {
     const r = await get(req, signal);
     delete r.headers.location;
+    delete r.headers["retry-after"];
     return r;
   };
   return new JsonRpcProvider(conn, undefined, {
