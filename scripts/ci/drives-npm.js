@@ -15,8 +15,12 @@ const path = require("path");
 
 /** `npm config list` (`--json` if `json`) in `cwd`, user and global config pinned to `user` and `global`: its output, else the refusal. */
 function list(cwd, user, global, json) {
+  // R16-CS6: npm 10.9.8 takes an env npm_config_globalconfig over the
+  // --globalconfig flag (npx exports one), so both are pinned.
+  const env = Object.fromEntries(Object.entries(process.env).filter(([k]) => !/^npm_config_(userconfig|globalconfig)$/i.test(k)));
   const r = cp.spawnSync("npm", ["config", "list", ...(json ? ["--json"] : []), `--userconfig=${user}`, `--globalconfig=${global}`], {
     cwd,
+    env: { ...env, npm_config_userconfig: user, npm_config_globalconfig: global },
     encoding: "utf8",
     timeout: 60000,
   });
@@ -45,8 +49,9 @@ const sources = (text) => [...text.matchAll(/^; "([^"]+)" config from (.+)$/gm)]
  * holding only userconfig or globalconfig changes no effective key but
  * still shows as a source. npm failing or printing no JSON object is
  * refused. User and global config are two DISTINCT empty files (one file
- * for both makes npm exit 1, "double-loading config"); process.env is
- * passed through, as the later steps see it. No allow-list: a legitimate
+ * for both makes npm exit 1, "double-loading config"), pinned by flag and
+ * by env; every other key of process.env is passed through, as the later
+ * steps see it. No allow-list: a legitimate
  * .npmrc edits the gate in the same PR, as the run-line table does. npm
  * names no source for an .npmrc with no key (empty, comments only): the
  * claim is that npm reads no project config key here.
