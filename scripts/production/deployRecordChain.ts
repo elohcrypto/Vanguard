@@ -39,6 +39,10 @@ function edited(e: TxEntry): string {
   return "";
 }
 
+/** U2 round 16 (B, R16-C2, R16-CS1): a rate limit in the node's answer. */
+const RATE =
+  /(?:\b(?:http|status|code|response|error)\W{0,3}|answered: )429\b|too many requests|rate[ -]?(?:limit|exceed)|-32005\b|exceeded maximum retry limit|compute units/i;
+
 /**
  * Each entry against the chain; the strays and the reads both share:
  * StrayChain (deployRecordStrays.ts).
@@ -243,9 +247,11 @@ export class EntryChain extends StrayChain {
           );
         }
         if (resent !== null) {
-          // Round 15 (C, R15-C3): a rate limit is named as one.
+          // Round 15 (C, R15-C3): a rate limit is named as one. Round 16
+          // (B, R16-C2, R16-CS1): by a 429 status or the whole answer,
+          // not a 429 in an amount, nonce or address, and by its phrases.
           throw new RecordRefusal(
-            `${why} is unused after it was sent again at that nonce${resent}: ${/429|too many requests/i.test(resent) ? "the RPC rate-limited the send; kept in the record, wait, then resume" : "a lagging or inconsistent RPC; kept in the record, resume against a synced RPC"}`,
+            `${why} is unused after it was sent again at that nonce${resent}: ${RATE.test(resent) ? "the RPC rate-limited the send; kept in the record, wait, then resume" : "a lagging or inconsistent RPC; kept in the record, resume against a synced RPC"}`,
           );
         }
         this.log(
