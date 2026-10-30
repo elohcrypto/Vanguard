@@ -279,4 +279,79 @@ describe("RpcRetry (bounded retry, no double send)", function () {
     expect(thrown?.message).to.equal("nonce too low");
     expect(c.sends.length).to.equal(1);
   });
+
+  // U2 round 12 (R12-C6): after an unknown outcome the send may be out, so
+  // no error leaving it may read as a refusal: no code, no number, the
+  // message and the cause kept. A connection refused before anything
+  // left is no unknown outcome: its error passes up as it came.
+  it("after an unknown outcome, an error leaving the send carries no code and no number (R12-C6)", async function () {
+    const c = chain(["reset-before"]);
+    const real = c.request;
+    // the read after the unknown send is answered with a JSON-RPC error
+    c.request = async (a: any) => {
+      if (c.sends.length && a.method === "eth_getTransactionCount")
+        throw err("refused by the node", -32000);
+      return real(a);
+    };
+    hook(c);
+    let thrown: any;
+    await c
+      .request({ method: "eth_sendTransaction", params: [tx] })
+      .catch((e: any) => (thrown = e));
+    expect(thrown?.message).to.equal("refused by the node");
+    expect(thrown?.code).to.equal(undefined);
+    expect(thrown?.number).to.equal(undefined);
+    expect(thrown?.cause?.code).to.equal(-32000);
+  });
+
+  it("a connection refused on the first attempt (HH108) is no unknown outcome: it passes up with its number", async function () {
+    const c = chain();
+    const refused = () =>
+      Object.assign(new Error("HH108: Cannot connect to the network remote."), {
+        number: 108,
+      });
+    const real = c.request;
+    c.request = async (a: any) => {
+      if (a.method === "eth_sendTransaction") throw refused();
+      return real(a);
+    };
+    c.readFaults = Array.from({ length: 7 }, refused);
+    hook(c);
+    let thrown: any;
+    await c
+      .request({ method: "eth_sendTransaction", params: [tx] })
+      .catch((e: any) => (thrown = e));
+    expect(thrown?.number).to.equal(108);
+  });
+  it("P-Z15: a connection refused on every attempt, the reads answered, is no unknown outcome: it passes up with its number", async function () {
+    const c = chain();
+    const real = c.request;
+    c.request = async (a: any) => {
+      if (a.method === "eth_sendTransaction")
+        throw Object.assign(new Error("HH108: Cannot connect to the network remote."), { number: 108 });
+      return real(a);
+    };
+    hook(c);
+    let thrown: any;
+    await c
+      .request({ method: "eth_sendTransaction", params: [tx] })
+      .catch((e: any) => (thrown = e));
+    expect(thrown?.number).to.equal(108);
+    expect(thrown?.cause).to.equal(undefined);
+  });
+  // U2 round 13 (L5, lane C): a refused first attempt marks nothing
+  // unknown, so its retry line does not say so.
+  it("L5: a connection refused on the first attempt (HH108) logs a retry, never 'outcome unknown'", async function () {
+    const c = chain();
+    const real = c.request;
+    c.request = async (a: any) => {
+      if (a.method === "eth_sendTransaction")
+        throw Object.assign(new Error("HH108: Cannot connect to the network remote."), { number: 108 });
+      return real(a);
+    };
+    const { lines } = hook(c);
+    await c.request({ method: "eth_sendTransaction", params: [tx] }).catch(() => {});
+    expect(lines.join("\n")).to.match(/HH108: Cannot connect to the network remote\.; retry 1\/\d+ in \d+ ms \(same nonce\)/);
+    expect(lines.join("\n")).to.not.contain("outcome unknown");
+  });
 });

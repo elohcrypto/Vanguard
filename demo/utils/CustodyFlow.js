@@ -31,6 +31,10 @@ const STATUS = [
 const same = (a, b) => a.toLowerCase() === b.toLowerCase();
 const fmt = (v) => Number(ethers.formatEther(v)).toLocaleString();
 
+/** D45: a production deploy's lock amounts (Task 5.7), else cap/4, cap/2, cap. */
+const lockAmounts = (state, cap) =>
+  state.production?.lockRequirements ?? [cap / 4n, cap / 2n, cap];
+
 /** The custody bank: ops (wallet 10), never the deployer (handover). */
 function bankSigner(state) {
   return state.signers[10];
@@ -44,9 +48,14 @@ function bankSigner(state) {
  * the type) and a ComplianceRules registrar; ownership goes to ops.
  * Returns the manager, or null with the reason printed.
  */
-async function deployCustody(state, log = console.log) {
-  const token = state.getContract("digitalToken");
-  const types = state.getContract("investorTypeRegistry");
+async function deployCustody(
+  state,
+  log = console.log,
+  // Option 51 passes its registry before it is in state (review F-3),
+  // option 21 its token (round 8, C2).
+  types = state.getContract("investorTypeRegistry"),
+  token = state.getContract("digitalToken"),
+) {
   const idReg = state.getContract("identityRegistry");
   if (!token || !types || !idReg) {
     log("   ℹ️  Custody needs VSC and the investor type registry (21, 51)");
@@ -54,10 +63,14 @@ async function deployCustody(state, log = console.log) {
   }
   const [vsc, typesAddr] = [await token.getAddress(), await types.getAddress()];
   let m = state.getContract("investorRequestManager");
+  // Round 7 (lane D D6 args): a wrong bank is redeployed too; round 8
+  // (C2): a wrong identity registry too.
   if (
     m &&
+    same(await m.bank(), bankSigner(state).address) &&
     same(await m.token(), vsc) &&
-    same(await m.investorRegistry(), typesAddr)
+    same(await m.investorRegistry(), typesAddr) &&
+    same(await m.identityRegistry(), await idReg.getAddress())
   ) {
     return m;
   }
@@ -66,18 +79,28 @@ async function deployCustody(state, log = console.log) {
   m = await (
     await ethers.getContractFactory("InvestorRequestManager", deployer)
   ).deploy(bank.address, vsc, typesAddr, await idReg.getAddress());
-  await m.waitForDeployment();
+  // Required here: DeployWiring requires this module.
+  const wired = require("./DeployWiring");
+  await wired.deployed(m, "InvestorRequestManager");
   const mAddr = await m.getAddress();
   log(`   ✅ InvestorRequestManager: ${mAddr} (bank = ops ${bank.address})`);
+  // Round 8 (C2): its constructor's links before any use, whichever option
+  // or first use deploys it (21, 51, 23, 62): option 51's own names.
+  const local = {
+    investorRequestManager: m,
+    investorTypeRegistry: types,
+    digitalToken: token,
+  };
+  const args = await wired.missingWiring(state, local, "51", (n) =>
+    /^InvestorRequestManager .* as deployed$/.test(n),
+  );
+  if (args.length) throw new Error(`missing wiring: ${args.join(", ")}`);
 
   const cap = (await types.getInvestorTypeConfig(0)).maxTransferAmount;
-  // D45: a production deploy's amounts (Task 5.7), else cap/4, cap/2, cap.
-  const set = state.production?.lockRequirements;
-  const locks = [
-    [TYPES.RETAIL, set ? set[0] : cap / 4n],
-    [TYPES.ACCREDITED, set ? set[1] : cap / 2n],
-    [TYPES.INSTITUTIONAL, set ? set[2] : cap],
-  ];
+  const amounts = lockAmounts(state, cap);
+  const locks = [TYPES.RETAIL, TYPES.ACCREDITED, TYPES.INSTITUTIONAL].map(
+    (t, i) => [t, amounts[i]],
+  );
   for (const [t, amount] of locks) {
     await (await m.updateLockRequirement(t, amount)).wait();
   }
@@ -106,7 +129,13 @@ async function deployCustody(state, log = console.log) {
       "   ⚠️  The registry is governance's: approvals need setComplianceOfficer(manager) by vote",
     );
   }
-  const reg = await registerRegistrar(state, mAddr, "MultiSigWallet", log);
+  const reg = await registerRegistrar(
+    state,
+    mAddr,
+    "MultiSigWallet",
+    log,
+    token,
+  );
   if (reg.direct) {
     log(
       "   ✅ Manager is a ComplianceRules registrar on VSC: it trusts only the MultiSigWallets it deploys",
@@ -116,9 +145,17 @@ async function deployCustody(state, log = console.log) {
       `   ⏳ Wallets cannot be created until proposal #${reg.proposalId} passes (options 77, 78)`,
     );
   } else {
-    log(`   ⚠️  Manager is not a registrar: ${reg.refused}`);
+    // Review F-3: a manager no wallet can be trusted by is no deploy.
+    throw new Error(`Manager is not a registrar: ${reg.refused}`);
   }
-  state.setContract("investorRequestManager", m);
+  // Round 8 (D7-1, C2): option 51's registry or option 21's token is not
+  // in state yet; that option sets the manager once its read-back passes.
+  if (
+    types === state.getContract("investorTypeRegistry") &&
+    token === state.getContract("digitalToken")
+  ) {
+    state.setContract("investorRequestManager", m);
+  }
   return m;
 }
 
@@ -388,6 +425,7 @@ async function retirePlaceholder(
 
 module.exports = {
   TYPES,
+  lockAmounts,
   bankSigner,
   deployCustody,
   requestOf,

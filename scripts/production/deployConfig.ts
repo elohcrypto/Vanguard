@@ -128,8 +128,8 @@ const KEYS = new Set([
 ]);
 /** Task 5.13: the roles that may be external (never the voters). */
 const EXTERNAL = ["ops", "issuerAdmin", "guardian"];
-/** docs/TESTNET_SETUP.md role wallets: the defaults where allowed. */
-const INDEX: Record<string, number | number[]> = {
+/** The role wallets by signer index: the defaults where allowed. */
+export const INDEX: Record<string, number | number[]> = {
   oracleNodes: [1, 2, 3],
   proposer: 4,
   voters: [5, 6],

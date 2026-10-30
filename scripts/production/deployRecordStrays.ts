@@ -1,0 +1,489 @@
+/**
+ * The strays of a deploy record, for the Recorder (deployRecord.ts) through
+ * EntryChain (deployRecordChain.ts), which extends this class: each stray
+ * as the chain shows it (mined, pending, replaced or dropped), the nonce
+ * account (round 8, J: moved from deployRecord.ts), and the chain reads
+ * both files share. Moved out of deployRecordChain.ts unchanged (U2
+ * round 8, the 500-line rule); each later change is marked by its item.
+ */
+import { ethers } from "hardhat";
+import { DeployRecord, Stray, TxEntry } from "./deployRecordFile";
+import { scanWindow } from "./deployRecordWindow";
+
+/** Thrown when a re-run cannot follow its record: nothing more is sent. */
+export class RecordRefusal extends Error {
+  name = "RecordRefusal";
+}
+
+export type Raw = (method: string, params?: unknown[]) => Promise<any>;
+
+/**
+ * Round 8 (GG2): the operator's DEPLOY_FILL_HASH and the stray it fills;
+ * round 9 (D): no stray, an unrecorded re-send at a free nonce.
+ */
+type Fill = { s?: Stray; t: any };
+
+/** Round 9 (D): what every refusal naming the variable ends with. */
+const UNSET = "; unset DEPLOY_FILL_HASH after the resume completes";
+
+export const same = (a?: string | null, b?: string | null) =>
+  String(a ?? "").toLowerCase() === String(b ?? "").toLowerCase();
+
+export class StrayChain {
+  constructor(
+    protected raw: Raw,
+    protected rec: DeployRecord,
+    protected confirmations: number,
+    protected log: (m: string) => void,
+    protected save: () => void,
+  ) {}
+
+  count = async (from: string, tag: string) =>
+    Number(await this.raw("eth_getTransactionCount", [from, tag]));
+
+  /** `t` (a mined transaction) is record entry `e` in every field. */
+  sameTx(e: TxEntry, t: any): boolean {
+    return (
+      same(t.from, e.from) &&
+      Number(t.nonce) === e.nonce &&
+      same(t.to, e.to) &&
+      BigInt(t.value) === BigInt(e.value) &&
+      ethers.keccak256(t.input) === e.dataHash
+    );
+  }
+
+  /**
+   * Round 6 (G1): the entry whose transaction `hash` is (its index), or
+   * -1 when it is the deployer's from before the record's start (`at`
+   * below startNonce), or null: only then is it outside the record.
+   */
+  protected accounted(hash: string, from: string, at: number, not?: TxEntry) {
+    const k = this.rec.txs.findIndex((x) => x !== not && same(x.hash, hash));
+    if (k >= 0) return k;
+    const older = same(from, this.rec.deployer) && at < this.rec.startNonce;
+    return older ? -1 : null;
+  }
+
+  /**
+   * Round 6 (G3): "stray <hash>" when `e` is an intent (status sending, no
+   * hash) whose nonce a recorded stray of `e`'s sender holds mined, so `e`
+   * can never mine; else "". Both must hold: the chain shows the stray
+   * mined from that sender at that nonce, and its hash is in rec.strays
+   * (the record's own re-send). Any other transaction at the nonce keeps
+   * the refusal by name, and a sent entry there is never dropped.
+   */
+  async heldByStray(e: TxEntry): Promise<string> {
+    if (e.status !== "sending" || e.hash) return "";
+    const s = (this.rec.strays ?? []).find(
+      (x) => same(x.from, e.from) && x.nonce === e.nonce,
+    );
+    // Round 8 (GG8): a replaced stray's transaction is its replacement's.
+    const t =
+      s &&
+      (await this.raw("eth_getTransactionByHash", [s.replacedBy ?? s.hash]));
+    return t?.blockNumber &&
+      same(t.from, s!.from) &&
+      Number(t.nonce) === s!.nonce
+      ? `stray ${s!.hash}`
+      : "";
+  }
+
+  /** Round 5: what each stray cost, printed once by every resume (round 8). */
+  strayLines: string[] = [];
+
+  /** Round 8 (J): the nonces of the deployer's strays outside() counted. */
+  private counted: number[] = [];
+
+  /** Round 9 (D): the operator's fill, read once by outside(). */
+  private filled: Fill | null = null;
+
+  /**
+   * Round 5: each stray as the chain shows it (refused unless from its
+   * sender at its nonce), printed; returns the deployer's mined ones,
+   * which hold nonces outside the record's entries. Round 7 (GH): read
+   * before any entry is settled, so nothing is sent while one is pending;
+   * one the node does not show is a replacement, a gap or dropped.
+   */
+  async outside(deployer: string): Promise<number> {
+    let mined = 0;
+    this.strayLines = [];
+    this.counted = [];
+    const fill = (this.filled = await this.fill());
+    for (const s of this.rec.strays ?? []) {
+      const of = `nonce ${s.nonce}: ${s.hash}, the signer's re-send of entry #${s.entry} (${s.label}) at another nonce`;
+      const id = `stray ${s.hash} (nonce ${s.nonce}, the re-send of entry #${s.entry})`;
+      const k = this.accounted(s.hash, s.from, s.nonce);
+      if (k !== null) {
+        const known =
+          k >= 0
+            ? `record entry #${k}'s transaction`
+            : `below the record's startNonce ${this.rec.startNonce}`;
+        throw new RecordRefusal(
+          `${id} is ${known}: the record's strays list is inconsistent (a stray is a transaction the record does not otherwise account for); remove it from strays, then re-run`,
+        );
+      }
+      const t = await this.raw("eth_getTransactionByHash", [s.hash]);
+      if (t && (!same(t.from, s.from) || Number(t.nonce) !== s.nonce)) {
+        throw new RecordRefusal(
+          `stray ${s.hash} (nonce ${s.nonce}, the re-send of entry #${s.entry}): the chain shows it from ${ethers.getAddress(t.from)} at nonce ${Number(t.nonce)}, not as recorded: refusing`,
+        );
+      }
+      // Round 6 (G2): no entry is planned behind a pending stray.
+      if (t && !t.blockNumber) {
+        throw new RecordRefusal(
+          `${id} is pending on this node: wait for it to mine or drop, then re-run`,
+        );
+      }
+      const by = t ? null : await this.replacement(s, fill);
+      if (typeof by === "string") {
+        this.strayLines.push(
+          `   ⚠️  ${of}: dropped, its nonce taken by stray ${by}`,
+        );
+        continue;
+      }
+      const x = t ?? by;
+      const r = x
+        ? await this.raw("eth_getTransactionReceipt", [x.hash])
+        : null;
+      if (!x) {
+        this.strayLines.push(`   ⚠️  ${of}: dropped, not counted`);
+      } else if (!r) {
+        this.strayLines.push(
+          `   ⚠️  ${of}: not mined on this node, not counted`,
+        );
+      } else {
+        const fee =
+          BigInt(r.gasUsed) * BigInt(r.effectiveGasPrice ?? x.gasPrice);
+        const made = r.contractAddress
+          ? ` and created ${ethers.getAddress(r.contractAddress)}, which the record does not own`
+          : "";
+        const was = by
+          ? `nonce ${s.nonce}: stray ${s.hash} replaced by ${by.hash},`
+          : `${of}:`;
+        this.strayLines.push(
+          `   ⚠️  ${was} outside the record, never adopted; it cost ${s.from} ${ethers.formatEther(fee + BigInt(x.value))} ETH${made}`,
+        );
+        if (same(s.from, deployer)) mined++;
+        if (same(s.from, deployer)) this.counted.push(s.nonce);
+      }
+    }
+    for (const l of this.strayLines) this.log(l);
+    return mined;
+  }
+
+  /**
+   * The deployer's mined nonce against the record (moved from
+   * deployRecord.ts): its start, its own entries and its mined strays.
+   * Review D-2: from the record's start, so an empty record and a dropped
+   * first entry are counted too; round 5: and its strays. Round 8 (J): a
+   * nonce none of them holds may be a re-send the run did not live to
+   * record (unrecorded()); the refusal names every nonce still unheld.
+   */
+  async account(strays: number): Promise<void> {
+    const own = this.rec.txs.filter((e) => same(e.from, this.rec.deployer));
+    const nonce = Number(
+      await this.raw("eth_getTransactionCount", [this.rec.deployer, "latest"]),
+    );
+    const accounted = this.rec.startNonce + own.length + strays;
+    const held = new Set([...own.map((e) => e.nonce), ...this.counted]);
+    const free: number[] = [];
+    for (let n = this.rec.startNonce; n < nonce; n++)
+      if (!held.has(n)) free.push(n);
+    const found = nonce > accounted ? await this.unrecorded(free) : 0;
+    if (nonce !== accounted + found) {
+      // Round 10 (B, GA4-text): a free nonce a listed stray holds is that
+      // stray lagging on this node; "by hand" only for one no stray lists.
+      const lag = free.flatMap((n) => this.listed(n) ?? []);
+      const lost = free.filter((n) => !this.listed(n));
+      const why = [
+        ...lag.map(
+          (x) =>
+            `stray ${x.hash} is listed but not shown mined on this node: a lagging RPC; resume against a synced RPC`,
+        ),
+        ...(lost.length === 1
+          ? [
+              `nonce ${lost[0]} is no entry's and no stray's: find that transaction and record it by hand`,
+            ]
+          : lost.length
+            ? [
+                `nonces ${lost.join(", ")} are no entry's and no stray's: find those transactions and record them by hand`,
+              ]
+            : []),
+      ];
+      throw new RecordRefusal(
+        `the deployer's nonce is ${nonce} but the record accounts for ${accounted + found}: a transaction outside the record; refusing to resume${why.length ? ` (${why.join("; ")})` : ""}`,
+      );
+    }
+    // Round 10 (A, GB-A): a re-send's intent is never cleared: a pending
+    // count from a lagging node cannot prove no re-send is still out.
+  }
+
+  /**
+   * Round 8 (lane C cX): at each of the deployer's `free` nonces, its
+   * mined transaction with the payload of an entry whose re-send intent
+   * the record saved (resendFrom, mined after it) is that re-send, sent
+   * before a kill could record it: recorded now as the entry's stray and
+   * taken from `free`. Returns how many; anything else stays free.
+   */
+  private async unrecorded(free: number[]): Promise<number> {
+    const d = this.rec.deployer;
+    const sent = this.intents();
+    if (!sent.length) return 0;
+    const block = Math.min(...sent.map((e) => e.resendFrom!)), first = sent.find((e) => e.resendFrom === block)!;
+    // Round 13 (B, R13-C3): one pass over the window per resume, every
+    // free nonce answered from it (not one pass per nonce).
+    const f = this.filled;
+    const want = free.filter((n) => !this.listed(n) && !(f && !f.s && Number(f.t.nonce) === n));
+    const head = want.length ? Number(await this.raw("eth_blockNumber")) : 0;
+    const at = { head, seen: want.length ? await scanWindow(this.raw, d, block, want, head) : new Map() };
+    let found = 0;
+    for (const n of [...free]) {
+      // Round 9 (A, GA4): a listed stray's transaction is never listed
+      // again; round 10 (B): its nonce is not searched, it stays free
+      // while this node lags.
+      if (this.listed(n)) continue;
+      // Round 9 (D): the operator's hash for this nonce, else the scan.
+      const t =
+        f && !f.s && Number(f.t.nonce) === n
+          ? f.t
+          : await this.findMined(
+              { from: d, nonce: n, block, label: `nonce ${n}` } as TxEntry,
+              `if nonce ${n} is an entry's re-send, pass its hash as DEPLOY_FILL_HASH=<hash>, then resume; otherwise record it by hand${UNSET}`,
+              `entry #${this.rec.txs.indexOf(first)} (${first.label})'s intent`,
+              at,
+            );
+      const e = t && this.reSendOf(t, sent);
+      if (!e) continue;
+      const k = this.rec.txs.indexOf(e);
+      (this.rec.strays ??= []).push({
+        hash: t.hash,
+        from: ethers.getAddress(t.from),
+        nonce: n,
+        entry: k,
+        label: e.label,
+        block: e.resendFrom,
+      });
+      this.save();
+      free.splice(free.indexOf(n), 1);
+      this.log(
+        `   ⚠️  nonce ${n}: ${t.hash}, the signer's re-send of entry #${k} (${e.label}) at another nonce, found on chain from its recorded intent (the run that sent it stopped before recording it): recorded as a stray`,
+      );
+      found++;
+    }
+    return found;
+  }
+
+  /** Round 10 (B): the deployer's listed stray at nonce `n`, if any. */
+  private listed(n: number): Stray | undefined {
+    return (this.rec.strays ?? []).find(
+      (x) => same(x.from, this.rec.deployer) && x.nonce === n,
+    );
+  }
+
+  /** Round 8 (J): the deployer's entries with a recorded re-send intent. */
+  private intents(): TxEntry[] {
+    const d = this.rec.deployer;
+    return this.rec.txs.filter(
+      (e) => same(e.from, d) && e.resendFrom !== undefined,
+    );
+  }
+
+  /**
+   * Round 8 (J): the entry of `sent` whose re-send `t` is: its payload
+   * (sameTx with the entry's nonce), mined after the entry's intent.
+   */
+  private reSendOf(t: any, sent: TxEntry[]): TxEntry | undefined {
+    return sent.find(
+      (x) =>
+        Number(t.blockNumber) >= x.resendFrom! &&
+        this.sameTx(x, { ...t, nonce: x.nonce }),
+    );
+  }
+
+  /**
+   * Round 7 (GB): stray `s`, which this node does not show, trusted as
+   * gone only when its sender has nothing pending the node hides (lane C
+   * cp). With its nonce free it is dropped (null), unless (GH) a record
+   * entry of its sender waits above it: a gap only a fill closes. With the
+   * nonce used, the sender's transaction there (`replacedBy`, once found)
+   * replaced it, unless it is a record entry (null): counted as a mined
+   * stray, never adopted. Round 8 (GG1): or another recorded stray's (its
+   * hash returned): the nonce is counted once, as that stray's.
+   */
+  private async replacement(s: Stray, fill: Fill | null): Promise<any> {
+    const id = `stray ${s.hash} (nonce ${s.nonce}, the re-send of entry #${s.entry})`;
+    const who = same(s.from, this.rec.deployer) ? "the deployer" : s.from;
+    const mined = await this.count(s.from, "latest");
+    const pending = await this.count(s.from, "pending");
+    // Round 8 (GG4): the record's own sent entries in that pending range
+    // that the node shows pending are not hidden; they are awaited.
+    let hidden = pending - mined;
+    for (const e of this.rec.txs) {
+      if (hidden <= 0) break;
+      if (e.status !== "sent" || !same(e.from, s.from)) continue;
+      if (e.nonce < mined || e.nonce >= pending) continue;
+      const o = await this.raw("eth_getTransactionByHash", [e.hash]);
+      if (o && !o.blockNumber) hidden--;
+    }
+    if (hidden > 0) {
+      throw new RecordRefusal(
+        `${id} is not shown by this node but ${who} has ${hidden} pending transactions it does not show: a lagging or inconsistent RPC; wait or re-run against a synced RPC`,
+      );
+    }
+    if (mined <= s.nonce) {
+      const k = this.rec.txs.findIndex(
+        (e) => same(e.from, s.from) && e.nonce > s.nonce,
+      );
+      if (k >= 0) {
+        throw new RecordRefusal(
+          `${id} is dropped and its nonce is unfilled below record entry #${k}'s nonce ${this.rec.txs[k].nonce}: fill nonce ${s.nonce} from ${who} (a cancel to self), then resume; if this node lags, re-run against a synced RPC`,
+        );
+      }
+      return null;
+    }
+    // An entry of the record took the nonce: read by its hash, no scan.
+    const own = this.rec.txs.find(
+      (e) => e.hash && same(e.from, s.from) && e.nonce === s.nonce,
+    );
+    const o = own && (await this.raw("eth_getTransactionByHash", [own.hash]));
+    if (!s.replacedBy && o?.blockNumber && this.sameTx(own!, o)) return null;
+    // Round 8 (GG1): another stray of the sender mined there (its hash or
+    // its replacement's): read by its hash, no scan.
+    for (const x of s.replacedBy ? [] : (this.rec.strays ?? [])) {
+      if (x === s || !same(x.from, s.from) || x.nonce !== s.nonce) continue;
+      const w = await this.raw("eth_getTransactionByHash", [
+        x.replacedBy ?? x.hash,
+      ]);
+      if (w?.blockNumber && same(w.from, s.from) && Number(w.nonce) === s.nonce)
+        return x.hash;
+    }
+    // Round 8 (GG2): the operator's fill by its hash, else a scan from
+    // the stray's block (an older row: the record's fromBlock).
+    const t = s.replacedBy
+      ? await this.raw("eth_getTransactionByHash", [s.replacedBy])
+      : fill?.s === s
+        ? fill.t
+        : await this.findMined(
+            {
+              from: s.from,
+              nonce: s.nonce,
+              block: s.block ?? this.rec.fromBlock,
+              label: id,
+            } as TxEntry,
+            `pass the hash of the transaction that filled it as DEPLOY_FILL_HASH=<hash>, then resume${UNSET}`,
+          );
+    const fits =
+      t?.blockNumber && same(t.from, s.from) && Number(t.nonce) === s.nonce;
+    if (s.replacedBy && !fits) {
+      throw new RecordRefusal(
+        `${id}: its replacement ${s.replacedBy} is not shown mined from ${s.from} at nonce ${s.nonce}: refusing`,
+      );
+    }
+    if (!fits || this.rec.txs.some((e) => this.sameTx(e, t))) return null;
+    // Round 8 (GG1): another stray's transaction is never a replacement,
+    // nor an earlier stray's replacement (a round-7 record's own pair).
+    const all = this.rec.strays ?? [];
+    const twin = all.find(
+      (x) =>
+        x !== s &&
+        (same(x.hash, t.hash) ||
+          (same(x.replacedBy, t.hash) && all.indexOf(x) < all.indexOf(s))),
+    );
+    if (twin) return twin.hash;
+    // Round 9 (A, GA3): a stray is never its own replacement.
+    if (same(t.hash, s.hash)) {
+      throw new RecordRefusal(
+        `${id} is not shown by this node by its hash, but its block holds it from ${s.from} at nonce ${s.nonce}: a lagging RPC; kept, re-run against a synced RPC`,
+      );
+    }
+    if (!s.replacedBy) {
+      s.replacedBy = t.hash;
+      this.save();
+    }
+    return t;
+  }
+
+  /**
+   * Round 8 (GG2): `e`'s transaction at its nonce, read by the hash of its
+   * own earlier send when the record kept one, else found by a scan.
+   */
+  async minedAt(e: TxEntry): Promise<any> {
+    const t =
+      e.sentHash && (await this.raw("eth_getTransactionByHash", [e.sentHash]));
+    return t?.blockNumber && this.sameTx(e, t) ? t : this.findMined(e);
+  }
+
+  /**
+   * Round 8 (GG2): DEPLOY_FILL_HASH, the operator's fill of a stray's
+   * nonce, verified by its hash: shown, no record entry, no stray itself,
+   * at a recorded stray's sender and nonce, mined. Null when unset. Round
+   * 9 (D): or the deployer's transaction at a free nonce (no entry's, no
+   * stray's, from startNonce on), mined, the re-send of an entry with a
+   * recorded intent: unrecorded() records it without a scan.
+   */
+  private async fill(): Promise<Fill | null> {
+    const hash = process.env.DEPLOY_FILL_HASH;
+    if (!hash) return null;
+    const no = (why: string) =>
+      new RecordRefusal(`DEPLOY_FILL_HASH ${hash} ${why}: refusing${UNSET}`);
+    if (!/^0x[0-9a-fA-F]{64}$/.test(hash))
+      throw no("is not a transaction hash");
+    const t = await this.raw("eth_getTransactionByHash", [hash]);
+    if (!t) throw no("is not shown by this node");
+    const k = this.rec.txs.findIndex((e) => this.sameTx(e, t));
+    if (k >= 0) throw no(`is record entry #${k}'s transaction, not a fill`);
+    const all = this.rec.strays ?? [];
+    const x = all.find((y) => same(y.hash, hash));
+    if (x) throw no(`is stray ${x.hash} itself, not a fill`);
+    const n = Number(t.nonce);
+    const s = all.find((y) => same(y.from, t.from) && y.nonce === n);
+    const free =
+      !s &&
+      same(t.from, this.rec.deployer) &&
+      n >= this.rec.startNonce &&
+      !this.rec.txs.some((e) => same(e.from, t.from) && e.nonce === n);
+    if ((s || free) && !t.blockNumber) throw no("is not mined on this node");
+    if (!s && !(free && this.reSendOf(t, this.intents()))) {
+      // Round 12 (A3): an entry's payload with no intent before it (a
+      // foreign signer dropped one): only a row by hand records it.
+      const k = free ? this.rec.txs.findIndex((e) => this.sameTx(e, { ...t, nonce: e.nonce })) : -1;
+      if (k >= 0)
+        throw no(
+          `carries entry #${k} (${this.rec.txs[k].label})'s payload at nonce ${n}, but the record keeps no re-send intent of that entry from before its block: add it to strays by hand (runbook 02a, "A stray recorded by hand"), then resume without DEPLOY_FILL_HASH`,
+        );
+      throw no(
+        `is ${ethers.getAddress(t.from)}'s transaction at nonce ${n}, not at a recorded stray's sender and nonce, nor an entry's re-send at a free nonce of the deployer`,
+      );
+    }
+    return { s, t };
+  }
+
+  /**
+   * The mined transaction from `e.from` at `e.nonce` since `e.block`.
+   * Round 12 (C, R12-C2 option 2, R12-C7): with `intent` (the unrecorded
+   * scan's), the 5000 blocks from it are read whatever the head, so a
+   * re-send mined there is found at any later time; only a use past them
+   * is refused. Round 13 (B): `at`, unrecorded()'s one pass, read instead.
+   */
+  async findMined(
+    e: TxEntry,
+    how = "find that transaction and record it by hand",
+    intent?: string,
+    at?: { head: number; seen: Map<number, any> },
+  ): Promise<any> {
+    const head = at?.head ?? Number(await this.raw("eth_blockNumber"));
+    const past = head - e.block > 5000;
+    if (past && !intent) {
+      throw new RecordRefusal(
+        `${e.label}: ${e.from} used nonce ${e.nonce} more than 5000 blocks after the intent (block ${e.block}); ${how}`,
+      );
+    }
+    const t = (at?.seen ?? (await scanWindow(this.raw, e.from, e.block, [e.nonce], head))).get(e.nonce);
+    if (t) return t;
+    if (past)
+      throw new RecordRefusal(
+        `${e.label}: the chain head (block ${head}) is more than 5000 blocks past ${intent} (block ${e.block}), the earliest the record keeps, and those 5000 blocks hold no transaction of ${e.from} at nonce ${e.nonce}; ${how}`,
+      );
+    return null;
+  }
+}

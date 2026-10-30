@@ -32,6 +32,9 @@ env:
 # coverage gates to the merge, so the critical path is compile plus the
 # slowest of a shard (+ the ~1.5 min merge), zk-coverage and demo. Step
 # bodies live in scripts/ci/; each job's timeout-minutes is a hang guard.
+# U2 round 7: the walls reached 38:38 and 39:24 (coverage 35:14, demo
+# 35:39), so coverage runs in three shards and the production deploy
+# drives (their own nodes on 8547/8549) run as their own job beside demo.
 #
 # Actions are pinned by commit SHA and updated by hand (no Dependabot
 # here). Re-resolve a pin with `gh api repos/<owner>/<repo>/git/ref/tags/
@@ -120,11 +123,17 @@ jobs:
             && node scripts/ci/free-identifiers.js \
             && node scripts/ci/docs-gate.js \
             && node scripts/ci/test-shards.js check 2 \
+            && node scripts/ci/test-shards.js check 3 \
             && node scripts/ci/required-check.js
       # Task 5.3: every guard site in contracts/ has a row in
       # test/guards/table/ (tested or unreachable); no bare revert.
       - name: Guard table (every require/revert classified)
         run: node scripts/ci/guards-table.js
+      # U2 round 7: demo and deploy-drives split the drives; each drive
+      # script runs exactly once across the two jobs, and (round 8) no
+      # step there sets continue-on-error or if (scripts/ci/drives-once.js).
+      - name: Every drive exactly once
+        run: node scripts/ci/drives-once.js
       - name: Lint ratchet (no solhint errors, no NEW warnings)
         run: scripts/ci/lint-ratchet.sh
       - name: Audit dependencies (critical blocks)
@@ -133,8 +142,9 @@ jobs:
       - name: Audit ratchet (no NEW high vulnerabilities)
         run: node scripts/ci/audit-ratchet.js
 
-  # Task 5.15 (L-6): the suite and the coverage run each in two shards
-  # (scripts/ci/test-shards.js: every test file in exactly one shard).
+  # Task 5.15 (L-6): the suite in two shards, the coverage run in three
+  # (U2 round 7) (scripts/ci/test-shards.js: every test file in exactly
+  # one shard).
   tests:
     needs: compile
     runs-on: ubuntu-latest
@@ -191,8 +201,8 @@ jobs:
     timeout-minutes: 60
     strategy:
       fail-fast: false
-      matrix: { shard: [1, 2] }
-    name: coverage (${{ matrix.shard }}/2)
+      matrix: { shard: [1, 2, 3] }
+    name: coverage (${{ matrix.shard }}/3)
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with: { persist-credentials: false }
@@ -200,7 +210,7 @@ jobs:
       # The run itself is a gate (no `|| true`); a test over 75% of its
       # mocha timeout fails it (scripts/ci/mocha-log.js).
       - name: Coverage shard (tests pass, near-timeout guard)
-        run: scripts/ci/coverage-ratchet.sh --shard ${{ matrix.shard }} 2
+        run: scripts/ci/coverage-ratchet.sh --shard ${{ matrix.shard }} 3
       - name: Upload shard coverage
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
@@ -237,7 +247,7 @@ jobs:
       - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with: { pattern: coverage-shard-*, path: shards }
       - name: Coverage ratchet (no DROP in merged line coverage)
-        run: scripts/ci/coverage-ratchet.sh --merged 2 shards/*/coverage.json
+        run: scripts/ci/coverage-ratchet.sh --merged 3 shards/*/coverage.json
       - name: Branch floors (contract run)
         run: node scripts/ci/branch-floors.js contracts coverage.json
 
@@ -284,11 +294,22 @@ jobs:
         run: scripts/ci/whitelist-cli.sh
       - name: Strict demo drive (complete ceremony, 83c/83d/83e)
         run: scripts/ci/strict-drive.sh
-      - name: Production deploy drives (external signer; multisig roles)
-        run: scripts/ci/deploy-drive.sh && scripts/ci/multisig-drive.sh
       # Six drives on fresh chains (4.17, 5.10), ~12.5 min locally.
       - name: Regression demo drives
         run: scripts/ci/regression-drives.sh
+
+  # The production deploy drives start their own nodes (8547/8549), so
+  # they run beside demo, not after it (U2 round 7: moved, unchanged).
+  deploy-drives:
+    needs: compile
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with: { persist-credentials: false }
+      - uses: ./.github/actions/prepare
+      - name: Production deploy drives (external signer; multisig roles)
+        run: scripts/ci/deploy-drive.sh && scripts/ci/multisig-drive.sh
 
   # Q22: the one check branch protection requires. It fails unless every
   # other job succeeded (skipped and cancelled fail too), and
@@ -298,7 +319,7 @@ jobs:
   # this one runs, or continue on error: either blocks or hides a result.
   required:
     if: ${{ always() && !github.event.deleted }}
-    needs: [compile, gates, tests, guard-runs, coverage, coverage-merge, zk-coverage, demo]
+    needs: [compile, gates, tests, guard-runs, coverage, coverage-merge, zk-coverage, demo, deploy-drives]
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:

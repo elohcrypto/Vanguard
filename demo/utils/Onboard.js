@@ -85,21 +85,22 @@ async function onboard(state, address, opts = {}) {
 
   // 1. The identity the registry reads, else the factory's record, else new.
   let identity = registry ? await registry.identity(address) : ZERO;
+  const source = same(identity, ZERO) ? "factory" : "registry";
+  if (same(identity, ZERO))
+    identity = await factory.getIdentityByOwner(address);
+  await adoptOwn(factory, address, identity, source);
   let created = false;
   if (same(identity, ZERO)) {
+    const rc = await deployIdentity(
+      factory,
+      address,
+      // A production deploy replays its record (Task 5.7): its salt is
+      // stable per wallet (DemoState.production), else random.
+      state.production?.identitySalt?.(address) ?? ethers.randomBytes(32),
+    );
+    if (rc) take("deploy", rc);
     identity = await factory.getIdentityByOwner(address);
-    if (same(identity, ZERO)) {
-      const rc = await deployIdentity(
-        factory,
-        address,
-        // A production deploy replays its record (Task 5.7): its salt is
-        // stable per wallet (DemoState.production), else random.
-        state.production?.identitySalt?.(address) ?? ethers.randomBytes(32),
-      );
-      if (rc) take("deploy", rc);
-      identity = await factory.getIdentityByOwner(address);
-      created = true;
-    }
+    created = true;
   }
 
   // 2. The registry entry, by a registry agent, with the country.
@@ -179,32 +180,53 @@ async function onboard(state, address, opts = {}) {
 }
 
 /**
+ * `id`, the identity `source` (the registry, the factory) names for
+ * `address`, when it is the wallet's own (ownIdentity); else refused by
+ * name (review D2-6: ownerToIdentity is set at creation only, and the
+ * registry keeps its entry when the identity's ownership moves).
+ */
+async function adoptOwn(factory, address, id, source) {
+  if (!same(id, ZERO) && !(await ownIdentity(factory, address, id))) {
+    throw new Error(
+      `${source} identity ${id} of ${address} is not its own (the factory's, owned by it, its one MANAGEMENT key, the pinned recovery manager): not adopted`,
+    );
+  }
+  return id;
+}
+
+/**
+ * Whether `id` is `address`'s own factory identity: the factory's, owned
+ * by `address`, whose one MANAGEMENT key is `address`'s, pinned to the
+ * factory's recovery manager (I-2).
+ */
+async function ownIdentity(factory, address, id) {
+  if (same(id, ZERO) || !(await factory.isOnchainID(id))) return false;
+  const oid = await ethers.getContractAt("OnchainID", id);
+  const key = ethers.solidityPackedKeccak256(["address"], [address]);
+  const keys = await oid.getKeysByPurpose(1);
+  const pinned = await factory.recoveryManager();
+  return (
+    same(await oid.owner(), address) &&
+    keys.length === 1 &&
+    keys[0] === key &&
+    !same(pinned, ZERO) &&
+    same(await oid.recoveryManager(), pinned)
+  );
+}
+
+/**
  * The factory's deployOnchainID for `address` with `salt`: its receipt, or
  * null when another sender's copy of the call mined first (Task 5.7, M-1:
  * the factory is permissionless and the salt is visible while pending).
- * That identity is accepted only if it is the factory's own, owned by
- * `address`, whose one MANAGEMENT key is `address`'s, pinned to the
- * factory's recovery manager (I-2); anything else rethrows the failure.
+ * That identity is accepted only if it is `address`'s own (ownIdentity);
+ * anything else rethrows the failure.
  */
 async function deployIdentity(factory, address, salt) {
   try {
     return await (await factory.deployOnchainID(address, salt)).wait();
   } catch (e) {
     const id = await factory.getIdentityByOwner(address);
-    if (same(id, ZERO) || !(await factory.isOnchainID(id))) throw e;
-    const oid = await ethers.getContractAt("OnchainID", id);
-    const key = ethers.solidityPackedKeccak256(["address"], [address]);
-    const keys = await oid.getKeysByPurpose(1);
-    const pinned = await factory.recoveryManager();
-    if (
-      !same(await oid.owner(), address) ||
-      keys.length !== 1 ||
-      keys[0] !== key ||
-      same(pinned, ZERO) ||
-      !same(await oid.recoveryManager(), pinned)
-    ) {
-      throw e;
-    }
+    if (!(await ownIdentity(factory, address, id))) throw e;
     return null;
   }
 }
@@ -224,6 +246,7 @@ async function claimLive(issuer, identity, topic, now, renewWithin = 0) {
 
 module.exports = {
   onboard,
+  adoptOwn,
   deployIdentity,
   defaultCountry,
   registryAgent,

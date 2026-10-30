@@ -22,6 +22,7 @@ const {
   DEFAULT_ALLOWED_COUNTRIES,
   DEFAULT_BLOCKED_COUNTRIES,
 } = require("./DeployDefaults");
+const { missingWiring, reportStop, deployed } = require("./DeployWiring");
 
 /**
  * Deploy ERC-3643 Digital Token System with full configuration
@@ -37,6 +38,7 @@ async function deployDigitalTokenSystem(mod) {
     "🏭",
   );
 
+  const local = {}; // round 8 (C2): in demo state once read back
   try {
     if (!mod.state.getContract("onchainIDFactory")) {
       displayError("Please deploy contracts first (option 1)");
@@ -91,9 +93,14 @@ async function deployDigitalTokenSystem(mod) {
       await mod.state.getContract("identityRegistry").getAddress(),
       await mod.state.getContract("complianceRules").getAddress(),
     );
-    await token.waitForDeployment();
-    mod.state.digitalToken = token;
-    mod.state.setContract("digitalToken", token);
+    await deployed(token, "Token (VSC)", "Token");
+    local.digitalToken = token;
+    // Round 8 (C2): its constructor arguments first: a wrong registry or
+    // compliance reverts the wiring below with no reason string.
+    const args = await missingWiring(mod.state, local, "21", (n) =>
+      n.endsWith(" as deployed"),
+    );
+    if (args.length) throw new Error(`missing wiring: ${args.join(", ")}`);
 
     const tokenAddr = await token.getAddress();
     console.log(`   ✅ ERC-3643 Digital Token: ${tokenAddr}`);
@@ -154,7 +161,7 @@ async function deployDigitalTokenSystem(mod) {
     // Task 3.6: the privacy pair option 1 deployed becomes VSC's ZK
     // whitelist source, with the mode left OracleOnly (no change yet).
     console.log("\n📝 Step 2.7: Wiring the ZK allow list (PrivacyManager)...");
-    await mod.wirePrivacyManager();
+    await mod.wirePrivacyManager(token);
 
     // Check if InvestorTypeRegistry is deployed
     console.log(
@@ -209,7 +216,7 @@ async function deployDigitalTokenSystem(mod) {
 
       // Task 4.3: investor custody (option 23) on this token + registry.
       console.log("\n📝 Step 5: Investor custody (InvestorRequestManager)...");
-      await mod.deployInvestorCustody();
+      local.investorRequestManager = await mod.deployInvestorCustody(token);
     }
 
     // Display compliance components.
@@ -288,6 +295,16 @@ async function deployDigitalTokenSystem(mod) {
       );
     }
 
+    // Review F-3: success only once option 21's links read back from chain.
+    const missing = await missingWiring(mod.state, local, "21");
+    if (missing.length) {
+      throw new Error(`missing wiring: ${missing.join(", ")}`);
+    }
+    mod.state.digitalToken = token; // the legacy alias
+    for (const [k, c] of Object.entries(local)) {
+      if (c) mod.state.setContract(k, c);
+    }
+
     mod.state.maxTransferAmount = 8000; // 8,000 VSC limit for Normal/Retail
 
     displaySuccess("ERC-3643 DIGITAL TOKEN SYSTEM DEPLOYED!");
@@ -318,19 +335,21 @@ async function deployDigitalTokenSystem(mod) {
   } catch (error) {
     displayError(`ERC-3643 Digital Token deployment failed: ${error.message}`);
     console.error("💡 Stack trace:", error.stack);
+    await reportStop(mod.state, local);
     throw error;
   }
 }
 
 /**
  * Plan v2 Task 4.3: deploy InvestorRequestManager for VSC (bank = ops,
- * wallet 10) and record it as `investorRequestManager`; it is named a
+ * wallet 10) and record it as `investorRequestManager` (option 21, passing
+ * its `token`, records it once read back); it is named a
  * ComplianceRules registrar for the MultiSigWallet code hash. Options 21
  * and 51 call this once both VSC and the investor type registry exist.
  * @returns {Promise<Object|null>} the manager, or null when not deployable
  */
-async function deployInvestorCustody(mod) {
-  return deployCustody(mod.state);
+async function deployInvestorCustody(mod, token) {
+  return deployCustody(mod.state, console.log, undefined, token);
 }
 
 module.exports = {

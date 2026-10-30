@@ -33,13 +33,14 @@ local rehearsal box and the order of work are there).
   and the claim-signer CLI compares the Safe addresses. Compare the two
   owner lists by hand in the Safe app before the deploy.
 
-Check the demo's wallets:
+Check the wallets, each labelled with the role the deploy gives it by
+default:
 
 ```bash
 npx hardhat run scripts/print-role-wallets.js --network $NET
 ```
 
-prints one row per role, locally
+prints one row per wallet, locally
 ` 10  ops                                0xBcd4042DE499D14e55001CcbB24a551F3b954096  10000.0 ETH`.
 On Sepolia the roles are not the demo's wallet indices: the deploy config
 names them by address (section 2.3).
@@ -55,7 +56,9 @@ derives its keys from `MNEMONIC`, refuses a chain other than 31337 unless
 `SIGNER_ALLOW_CHAIN` names it, and must never run with a real key.
 
 **Keystores.** One encrypted keystore per key, mode 0600, all under one
-password, in one directory. The signer orders them by file name and that
+password, in one directory, yours and mode 0700 (`signer.js new` creates
+it so; else `chmod 700 <KEYSTORE_DIR>`): the signer refuses any other at
+start (`signer: <KEYSTORE_DIR> must be this user's own directory, mode 0700 (it is 755): chmod 700 <KEYSTORE_DIR>`). The signer orders them by file name and that
 order is the wallet index the ceremony uses (index 0 is the deployer;
 the index is the position in the order, not the number in the name), so
 name them with a sortable prefix:
@@ -88,6 +91,31 @@ and one `   <index> <name> <address>` line per key. The token file is
 `SIGNER_TOKEN_FILE`, else `<tmp>/vanguard-signer-<uid>/<port>.token`
 (0600; the CLIs read the same path through `hardhat.config.ts`); it is
 removed when the signer exits normally (a `kill -9` leaves it: `rm` it).
+One signer runs per keystore directory: it holds
+`<KEYSTORE_DIR>/signer.lock` while it runs (one line naming its pid,
+host, boot, PID namespace and start time, created whole by `link()`), and
+a second one is refused
+(`signer: <KEYSTORE_DIR>/signer.lock is held by pid N (a signer running on these keystores): refusing to start a second one; if none runs, rm <KEYSTORE_DIR>/signer.lock`);
+a lock a killed signer left (`kill -9`) on this host, boot and PID
+namespace is taken over at the next start, one starter at a time
+(`<KEYSTORE_DIR>/signer.lock.takeover`). A lock this signer cannot check
+is refused with its `rm`, never taken over: one from another host, boot
+(after a reboot: `rm` it once) or PID namespace
+(`signer: … is held by pid N on host "H" (boot "B", "pid:[I]"), another host, boot or PID namespace than this signer's, where it cannot be checked: refusing to start; if no signer runs there, rm …`),
+an empty or unparsable one, a lock from before this format
+(`signer: … is not a signer lock (empty or unparsable): refusing to start; if no signer runs on these keystores, rm …`),
+and a takeover file a killed start left
+(`signer: ….takeover exists: another signer is taking over …, or was killed doing so: refusing to start; if none is starting, rm ….takeover`).
+Remove the takeover file only while no signer is starting on these
+keystores: a start still inside its takeover would remove the lock of a
+signer started meanwhile, and a third start would then run beside it.
+The lock's PID-namespace tests (`test/review/D-4-lock-3.test.ts`, L3)
+run a holder under `unshare -Upf --mount-proc --map-root-user`, which
+needs unprivileged user namespaces: CI's prepare step sets
+`kernel.apparmor_restrict_unprivileged_userns=0`, and a stock Ubuntu
+24.04 host needs the same
+(`sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0`)
+before the suite, else those two cases fail.
 A refusal ends `signer: <reason>` with exit 3 (for the signer a failure,
 not the CLIs' pause): on another chain
 `signer: upstream is chain 31337: this signer serves Sepolia (11155111) only (31337 with SIGNER_TEST=1)`
@@ -114,8 +142,9 @@ use it). `SIGNER_PROMPT=0` switches the prompt off, needs no terminal and
 says so at start:
 `⚠️  SIGNER_PROMPT=0 on chain 11155111: EVERY REQUEST IS SIGNED WITHOUT ASKING. …`.
 
-**One transaction per nonce.** The signed nonces are kept in
-`<token file>.signed.json` (0600, survives a restart). A request at a
+**One transaction per nonce.** The signed nonces are kept beside the
+keystores in `<KEYSTORE_DIR>/signed-nonces` (0600; a restart on any
+port, a reboot or a cleaned temp directory keeps it). A request at a
 recorded nonce with the same chain, from, to, value and data is the same
 transaction (re-sent, or re-signed when only gas or fees moved); a
 different one is refused:
@@ -134,13 +163,13 @@ the signer first (a running signer keeps the record in memory and writes
 the entry back with its next signature), then
 
 ```bash
-node scripts/production/signer.js forget <ADDRESS> <NONCE>
+SIGNER_KEYSTORE_DIR=<KEYSTORE_DIR> node scripts/production/signer.js forget <ADDRESS> <NONCE>
 ```
 
-prints `signer: forgot 11155111:0x…:N in <token file>.signed.json: the next request at that nonce is signed as new`;
-start the signer again. Both take the signer's port as a third argument
-when it is not 1248 (and `SIGNER_TOKEN_FILE` when the signer was started
-with one). `node scripts/production/signer.js help` prints the four
+prints `signer: forgot 11155111:0x…:N in <KEYSTORE_DIR>/signed-nonces: the next request at that nonce is signed as new`;
+start the signer again. `bump` takes the signer's port as a third
+argument when it is not 1248 (and `SIGNER_TOKEN_FILE` when the signer was
+started with one). `node scripts/production/signer.js help` prints the four
 forms.
 
 **The CLIs.** Point them at it: `export SIGNER_RPC_URL=http://127.0.0.1:1248`.

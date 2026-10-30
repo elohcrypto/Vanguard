@@ -11,6 +11,7 @@
 "use strict";
 
 const { ethers } = require("hardhat");
+const { adoptOwn } = require("./Onboard");
 const {
   displaySection,
   displaySuccess,
@@ -130,7 +131,13 @@ async function createOnchainID(mod) {
       },
     );
 
-    const identityAddress = await factory.getIdentityByOwner(selectedAddress);
+    // The wallet's own (review D2-6), not whatever ownerToIdentity names.
+    const identityAddress = await adoptOwn(
+      factory,
+      selectedAddress,
+      await factory.getIdentityByOwner(selectedAddress),
+      "factory",
+    );
 
     mod.state.identities.set(identityAddress, {
       address: identityAddress,

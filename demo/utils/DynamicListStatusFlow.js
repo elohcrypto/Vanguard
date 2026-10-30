@@ -15,6 +15,7 @@ const {
   displayError,
 } = require("./DisplayHelpers");
 const { ethers } = require("hardhat");
+const { missingWiring, deployed } = require("./DeployWiring");
 
 /** Option 84: Deploy Dynamic List Manager */
 async function deployDynamicListSystem(mod) {
@@ -34,9 +35,8 @@ async function deployDynamicListSystem(mod) {
     const dynamicListManager = await DynamicListManager.deploy(
       mod.state.signers[0].address,
     );
-    await dynamicListManager.waitForDeployment();
+    await deployed(dynamicListManager, "DynamicListManager");
 
-    mod.state.setContract("dynamicListManager", dynamicListManager);
     const address = await dynamicListManager.getAddress();
 
     console.log(`✅ DynamicListManager deployed at: ${address}`);
@@ -56,6 +56,17 @@ async function deployDynamicListSystem(mod) {
     await setListMgrTx.wait();
     console.log("✅ DynamicListManager registered with Governance");
     await mod._wireOracles(dynamicListManager, address);
+    // Round 7 (lane D D6): in demo state only once its governance links
+    // read back from chain.
+    const missing = await missingWiring(
+      mod.state,
+      { dynamicListManager },
+      "84",
+    );
+    if (missing.length) {
+      throw new Error(`missing wiring: ${missing.join(", ")}`);
+    }
+    mod.state.setContract("dynamicListManager", dynamicListManager);
 
     console.log("\n📊 DEPLOYMENT SUMMARY:");
     console.log("=".repeat(70));

@@ -219,7 +219,10 @@ async function guardedServer(handle, opts) {
           };
         }
         try {
-          return await handle(c, req, res);
+          // Round 12 (A1): `reply` answers with its own status and body.
+          return await handle(c, req, res, (status, body) =>
+            send(res, status, body),
+          );
         } catch (e) {
           return {
             jsonrpc: "2.0",

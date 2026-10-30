@@ -25,6 +25,7 @@ const {
   DEFAULT_ALLOWED_COUNTRIES,
   DEFAULT_BLOCKED_COUNTRIES,
 } = require("./DeployDefaults");
+const { missingWiring, reportStop, deployed } = require("./DeployWiring");
 
 /**
  * Deploy OnchainID contracts (Factory, KYC Issuer, AML Issuer)
@@ -47,8 +48,7 @@ async function deployOnchainIDContracts(mod) {
     mod.state.signers[0].address,
     kmHash,
   );
-  await factory.waitForDeployment();
-  mod.state.setContract("onchainIDFactory", factory);
+  await deployed(factory, "OnchainIDFactory");
 
   await mod.logger.logContractDeployment("OnchainIDFactory", factory, [
     mod.state.signers[0].address,
@@ -64,8 +64,7 @@ async function deployOnchainIDContracts(mod) {
     "KYC Service",
     "KYC verification service",
   );
-  await kycIssuer.waitForDeployment();
-  mod.state.setContract("kycIssuer", kycIssuer);
+  await deployed(kycIssuer, "KYC ClaimIssuer", "ClaimIssuer");
 
   await mod.logger.logContractDeployment("KYC_ClaimIssuer", kycIssuer, [
     mod.state.signers[0].address,
@@ -80,8 +79,7 @@ async function deployOnchainIDContracts(mod) {
     "AML Service",
     "AML screening service",
   );
-  await amlIssuer.waitForDeployment();
-  mod.state.setContract("amlIssuer", amlIssuer);
+  await deployed(amlIssuer, "AML ClaimIssuer", "ClaimIssuer");
 
   await mod.logger.logContractDeployment("AML_ClaimIssuer", amlIssuer, [
     mod.state.signers[0].address,
@@ -95,13 +93,26 @@ async function deployOnchainIDContracts(mod) {
   const keyManager = await (
     await ethers.getContractFactory("KeyManager")
   ).deploy();
-  await keyManager.waitForDeployment();
-  mod.state.setContract("keyManager", keyManager);
+  await deployed(keyManager, "KeyManager");
   await mod.logger.logContractDeployment("KeyManager", keyManager, []);
   // Task 4.11 (R-411-14): every identity the factory creates pins this
   // KeyManager as its one recovery manager.
   const kmAddr = await keyManager.getAddress();
   await (await factory.setRecoveryManager(kmAddr)).wait();
+  // Review F-3: in demo state only once the pin reads back from chain; an
+  // identity created without it never pins a recovery manager. Round 7
+  // (lane D D6 args): the issuers too, once their owner reads back.
+  // Round 8 (C2): and the KeyManager the pin names.
+  const local = { onchainIDFactory: factory, kycIssuer, amlIssuer, keyManager };
+  const missing = await missingWiring(mod.state, local, "1");
+  if (missing.length) {
+    await reportStop(mod.state, local);
+    throw new Error(`missing wiring: ${missing.join(", ")}`);
+  }
+  mod.state.setContract("keyManager", keyManager);
+  mod.state.setContract("kycIssuer", kycIssuer);
+  mod.state.setContract("amlIssuer", amlIssuer);
+  mod.state.setContract("onchainIDFactory", factory);
   console.log(`   🔗 OnchainIDFactory.recoveryManager = KeyManager ${kmAddr}`);
 }
 
@@ -116,12 +127,9 @@ async function deployERC3643Registries(mod) {
 
   const IdentityRegistry = await ethers.getContractFactory("IdentityRegistry");
   const identityRegistry = await IdentityRegistry.deploy();
-  await identityRegistry.waitForDeployment();
-  // The handover's log scans start here (fromBlock, 2F.5 review M-3).
-  mod.state.identityRegistryDeployBlock = (
-    await identityRegistry.deploymentTransaction().wait()
-  ).blockNumber;
-  mod.state.setContract("identityRegistry", identityRegistry);
+  await deployed(identityRegistry, "IdentityRegistry");
+  const deployBlock = (await identityRegistry.deploymentTransaction().wait())
+    .blockNumber;
 
   await mod.logger.logContractDeployment(
     "IdentityRegistry",
@@ -145,8 +153,20 @@ async function deployERC3643Registries(mod) {
   const amlIssuerAddr = await amlIssuer.getAddress();
   await identityRegistry.addTrustedIssuer(amlIssuerAddr, [AML_TOPIC]);
   console.log(`   ✅ Trusted issuer for AML: ${amlIssuerAddr}`);
-  await identityRegistry.addClaimTopic(AML_TOPIC);
+  // Mined (and every send before it) before the read-back below.
+  await (await identityRegistry.addClaimTopic(AML_TOPIC)).wait();
   console.log(`   ✅ Required claim topic: AML (${AML_TOPIC})`);
+  // Round 9 (R9-C7): in demo state only once its trusted issuers read
+  // back from chain.
+  const local = { identityRegistry };
+  const missing = await missingWiring(mod.state, local, "1");
+  if (missing.length) {
+    await reportStop(mod.state, local);
+    throw new Error(`missing wiring: ${missing.join(", ")}`);
+  }
+  // The handover's log scans start here (fromBlock, 2F.5 review M-3).
+  mod.state.identityRegistryDeployBlock = deployBlock;
+  mod.state.setContract("identityRegistry", identityRegistry);
 }
 
 /**
@@ -166,10 +186,7 @@ async function deployPrivacyPair(mod) {
   zkVerifier = await (
     await ethers.getContractFactory("ZKVerifierIntegrated")
   ).deploy(false);
-  await zkVerifier.waitForDeployment();
-  mod.state.setContract("zkVerifierIntegrated", zkVerifier);
-  mod.state.setContract("zkVerifier", zkVerifier); // alias, options 42-50
-  mod.state.zkVerifier = zkVerifier;
+  await deployed(zkVerifier, "ZKVerifierIntegrated");
   await mod.logger.logContractDeployment("ZKVerifierIntegrated", zkVerifier, [
     false,
   ]);
@@ -179,8 +196,7 @@ async function deployPrivacyPair(mod) {
   privacyManager = await (
     await ethers.getContractFactory("PrivacyManager")
   ).deploy(zkAddr);
-  await privacyManager.waitForDeployment();
-  mod.state.setContract("privacyManager", privacyManager);
+  await deployed(privacyManager, "PrivacyManager");
   await mod.logger.logContractDeployment("PrivacyManager", privacyManager, [
     zkAddr,
   ]);
@@ -194,6 +210,19 @@ async function deployPrivacyPair(mod) {
   // Task 3.7b: the demo issuer key trusted for the three attestation
   // circuits, and the default policies.
   await setupDemoAttestations({ state: mod.state, privacyManager });
+  // Review F-3: in demo state only once its issuer key and policies read
+  // back from chain (options 1 and 41).
+  const local = { privacyManager };
+  const missing = await missingWiring(mod.state, local, "1");
+  if (missing.length) {
+    await reportStop(mod.state, local);
+    throw new Error(`missing wiring: ${missing.join(", ")}`);
+  }
+  // Round 8 (D7-2): the verifier too, so a refused pair leaves neither.
+  mod.state.setContract("zkVerifierIntegrated", zkVerifier);
+  mod.state.setContract("zkVerifier", zkVerifier); // alias, options 42-50
+  mod.state.zkVerifier = zkVerifier;
+  mod.state.setContract("privacyManager", privacyManager);
   return { zkVerifier, privacyManager };
 }
 
@@ -204,9 +233,11 @@ async function deployPrivacyPair(mod) {
  * wiring (R-3R-15); option 42 -> 1 switches VSC to Either.
  * @returns {Promise<boolean>} true when VSC reads this PrivacyManager
  */
-async function wirePrivacyManager(mod) {
+async function wirePrivacyManager(
+  mod,
+  token = mod.state.getContract("digitalToken"), // option 21's, round 8 C2
+) {
   const rules = mod.state.getContract("complianceRules");
-  const token = mod.state.getContract("digitalToken");
   const pm = mod.state.getContract("privacyManager");
   if (!rules || !token || !pm) {
     console.log(
@@ -265,7 +296,14 @@ async function deployComplianceRulesWithConfig(
       allowedCountries,
       blockedCountries,
     );
-    await complianceRules.waitForDeployment();
+    await deployed(complianceRules, "ComplianceRules");
+    // Round 7 (lane D D6 args): in demo state only once its owner reads back.
+    const local = { complianceRules };
+    const missing = await missingWiring(mod.state, local, "13");
+    if (missing.length) {
+      await reportStop(mod.state, local);
+      throw new Error(`missing wiring: ${missing.join(", ")}`);
+    }
     // The handover's trusted-contract scan starts here (83e, review M4).
     mod.state.complianceRulesDeployBlock = (
       await complianceRules.deploymentTransaction().wait()

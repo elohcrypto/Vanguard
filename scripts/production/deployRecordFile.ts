@@ -11,11 +11,28 @@ export interface TxEntry {
   to: string | null;
   value: string;
   dataHash: string;
+  /** The calldata until the entry is mined: a resume sends it again (D-2). */
+  data?: string;
   gas?: string;
   nonce: number;
   /** The latest block when the intent was written: replay reads here. */
   block: number;
   hash?: string;
+  /** D-2 round 5: `hash` came back from the record's own re-send. */
+  resent?: boolean;
+  /**
+   * D-2 round 8: the hash of the entry's own send that a re-send's hash
+   * replaced: the entry is read by it before any block scan.
+   */
+  sentHash?: string;
+  /**
+   * D-2 round 8: the head block read before the record sent this entry
+   * again, saved before that send (the re-send's intent): a re-send the
+   * run did not live to record is looked for from here. Round 9: the
+   * earliest intent is kept; round 10: never cleared, and a send the
+   * node refused leaves none of its own.
+   */
+  resendFrom?: number;
   status: "sending" | "sent" | "confirmed" | "reverted";
   contract?: string;
   codeHash?: string;
@@ -23,16 +40,46 @@ export interface TxEntry {
   label: string;
 }
 
+/** D-2 round 5: what the signer sent for an entry's re-send, at another nonce. */
+export interface Stray {
+  hash: string;
+  from: string;
+  nonce: number;
+  /** The record entry whose re-send it was. */
+  entry: number;
+  label: string;
+  /**
+   * D-2 round 7: the sender's transaction mined at this nonce in place of
+   * the stray (a speed-up or a cancel), never a record entry.
+   */
+  replacedBy?: string;
+  /**
+   * D-2 round 8: the head block before its re-send: scans start here.
+   * Round 10 (lane C C9-2): a row recorded from a re-send's intent (the
+   * intent scan or DEPLOY_FILL_HASH) carries the intent's block, where
+   * its search starts, not the block the stray mined in.
+   */
+  block?: number;
+}
+
 export interface DeployRecord {
   version: 1;
   chainId: number;
   configDigest: string;
   deployer: string;
+  /** The deployer's mined nonce when the record was made (D-2). */
+  startNonce: number;
   /** The block before the first deploy transaction: the scans' start. */
   fromBlock: number;
   /** Random, made with the record: identity salts derive from it. */
   salt: string;
   txs: TxEntry[];
+  /**
+   * D-2 round 5: transactions outside the record, never an entry, each
+   * counted in its sender's nonce once the chain shows it mined. Older
+   * records have none.
+   */
+  strays?: Stray[];
   contracts: Record<string, string>;
   complete: boolean;
 }

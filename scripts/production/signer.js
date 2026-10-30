@@ -38,8 +38,9 @@
  * (Task 5.17: the default; SIGNER_PROMPT=0 switches it off with a loud
  * warning, =1 asks on 31337 too). A request repeating an earlier one with
  * a pinned nonce (a retry after a lost reply, demo/utils/RpcRetry.js) is
- * shown as a RETRY of it. The nonces it signed are kept next to the token
- * file (signerState.js), and the token file is removed on exit.
+ * shown as a RETRY of it. The nonces it signed are kept beside the
+ * keystores, whose directory (this user's, 0700) one signer holds at a
+ * time (signerState.js), and the token file is removed on exit.
  */
 "use strict";
 
@@ -47,12 +48,12 @@ const fs = require("fs");
 const {
   AbiCoder,
   Contract,
-  JsonRpcProvider,
   Transaction,
   getBytes,
   keccak256,
 } = require("ethers");
 const { guardedServer } = require("./rpcGuard");
+const { upstreamProvider } = require("./upstream");
 const {
   clears,
   differs,
@@ -62,6 +63,8 @@ const {
   fieldsOf,
   promptMode,
   signedStore,
+  recordFile,
+  holdKeystores,
 } = require("./signerState");
 const { HELP, create, forgetCmd, bumpCmd } = require("./signerCommands");
 const {
@@ -87,11 +90,10 @@ async function serve() {
   const dir = process.env.SIGNER_KEYSTORE_DIR;
   if (!upstream || !dir)
     throw new Error("set SIGNER_UPSTREAM and SIGNER_KEYSTORE_DIR");
-  const provider = new JsonRpcProvider(upstream, undefined, {
-    staticNetwork: true,
-    batchMaxCount: 1,
-    cacheTimeout: -1,
-  });
+  holdKeystores(dir); // review D-4: one signer per keystore directory
+  // Rounds 14-15 (R14-C1, R15-C3): one upstream attempt per send, a read
+  // retried on a 429, no redirect followed (./upstream.js).
+  const provider = upstreamProvider(upstream);
   const chain = await guardChain(provider);
   // Task 5.17 (deep review L-5): asking is the default off 31337.
   const { prompt, warning } = promptMode(chain);
@@ -158,6 +160,34 @@ async function serve() {
     if (!askTty(text, d.token))
       throw new Error(`refused by the operator (#${n})`);
   };
+
+  /**
+   * U2 round 12 (A1, R12-C1): `raw` sent upstream. A failure that is no
+   * JSON-RPC error answer of the node (a reset, a timeout, a gateway
+   * error: no numeric code) may follow the forward, so it is marked as a
+   * transport failure and answered with HTTP 502, never as a refusal. (A
+   * forwarded read keeps its error answer: no read sends anything.)
+   * Round 13 (A, R13-C2): eth_sendRawTransaction alone, no read beside it
+   * (ethers' broadcastTransaction read the block number too, and a node
+   * error on that read came back as the send's refusal); its answer is the
+   * raw transaction's hash, else a transport failure (a lying node).
+   */
+  const broadcast = (raw) =>
+    provider.send("eth_sendRawTransaction", [raw]).then(
+      (hash) => {
+        if (hash !== keccak256(raw))
+          throw Object.assign(
+            new Error(`the node answered ${hash} for ${keccak256(raw)}`),
+            { transport: true },
+          );
+        return hash;
+      },
+      (e) => {
+        if (typeof (e.info?.error || e.error || {}).code !== "number")
+          e.transport = true;
+        throw e;
+      },
+    );
 
   function sendTransaction(tx) {
     const w = holder(tx.from);
@@ -227,9 +257,9 @@ async function serve() {
         throw new Error("the signed transaction is not the one shown: refused");
       }
       byNonce.set(slot, { unsigned: shown.unsigned, raw });
-      const sent = await provider.broadcastTransaction(raw);
+      const sent = await broadcast(raw);
       signed++;
-      return sent.hash;
+      return sent;
     });
   }
   /**
@@ -262,7 +292,7 @@ async function serve() {
       const raw = await w.signTransaction(t);
       byNonce.set(slot, { unsigned: Transaction.from(raw).unsignedHash, raw });
       signed++;
-      return (await provider.broadcastTransaction(raw)).hash;
+      return await broadcast(raw);
     });
   }
   function signMessage(address, data) {
@@ -367,7 +397,7 @@ async function serve() {
       throw new Error(`upstream HTTP ${r.status}: ${text}`);
     }
   }
-  async function answer(call) {
+  async function answer(call, req, res, reply) {
     const { id, method, params = [] } = call;
     try {
       if (!OWN[method]) {
@@ -390,6 +420,9 @@ async function serve() {
         upstream,
         240,
       );
+      // Round 12 (A1): no JSON-RPC error for a transport failure; the
+      // "HTTP 502" in the body is what RpcRetry retries on.
+      if (e.transport) return reply(502, { transport: `HTTP 502: ${message}` });
       return {
         jsonrpc: "2.0",
         id,
@@ -406,20 +439,21 @@ async function serve() {
     tokenFile: process.env.SIGNER_TOKEN_FILE,
   });
   // Synchronous after the await: no request is handled before it.
-  byNonce = signedStore(`${tokenFile}.signed.json`, chain);
+  byNonce = signedStore(recordFile(dir), chain);
   // Task 5.17 (deep review L-6): the token goes with the process.
   process.on("exit", () => fs.rmSync(tokenFile, { force: true }));
-  console.log(
-    `signer on 127.0.0.1:${at}: ${keys.length} key(s), chain ${chain}${prompt ? ", every request asked" : ", NOT asking"}; token in ${tokenFile}; ${byNonce.size()} signed nonce(s) remembered`,
-  );
-  for (const [i, k] of keys.entries())
-    console.log(`   ${i} ${k.name} ${k.wallet.address}`);
+  // before the line: a signal sent on it still runs the exit hooks
   for (const sig of ["SIGTERM", "SIGINT"]) {
     process.on(sig, () => {
       console.log(`signer: ${signed} request(s) signed`);
       process.exit(0);
     });
   }
+  console.log(
+    `signer on 127.0.0.1:${at}: ${keys.length} key(s), chain ${chain}${prompt ? ", every request asked" : ", NOT asking"}; token in ${tokenFile}; ${byNonce.size()} signed nonce(s) remembered`,
+  );
+  for (const [i, k] of keys.entries())
+    console.log(`   ${i} ${k.name} ${k.wallet.address}`);
 }
 
 module.exports = { privateFile, loadKeys, guardChain, PUBLISHED, SEPOLIA };
@@ -430,7 +464,7 @@ if (require.main === module) {
     cmd === "new"
       ? create(a, process.argv.slice(4), password)
       : cmd === "forget"
-        ? forgetCmd(a, b, c)
+        ? forgetCmd(a, b)
         : cmd === "bump"
           ? bumpCmd(a, b, c)
           : cmd === "help" || cmd === "--help"

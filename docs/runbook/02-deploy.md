@@ -10,7 +10,11 @@ there). Keys and the signer: [part 1](01-keys-and-signer.md).
 and option 61's escrow factory through the signer (section 1a; no
 unsigned-transaction files), records every transaction in the deploy
 record before the next, writes the ceremony's `handover.json` and runs
-its preflight. The signer has one upstream that serves both its reads and
+its preflight. The record (`deployments/<chainId>.json`) holds the
+deployer and its mined nonce when the record was made (`startNonce`; a
+deployer with a pending transaction is refused until it mines), the
+config digest, `fromBlock`, the salt, and one entry per transaction
+(intent with its payload until it mines, hash, receipt). The signer has one upstream that serves both its reads and
 its sends and must be archive (2.1): a send-only private RPC (e.g.
 Flashbots Protect) cannot be that upstream.
 
@@ -166,22 +170,54 @@ prints `✅ Deployed: 74 transactions in /tmp/vanguard-runbook/deploy-record.jso
 (N about 74.6 M; it moves by a few dozen gas between runs) and
 `✅ Preflight passed: every check before the ceremony's first transaction holds (voters are checked by the full phase)`.
 
+- Before that line the deploy reads its wiring back from chain
+  (`🔗 Wiring read back from chain (49 links):`,
+  then one `   ✅ <link>` each: the KeyManager pin on the identity
+  factory, agents, rule administrators (the deployer's on VGT until the
+  handover too), the KYC and AML issuers trusted on the identity
+  registry (until the handover), the identity registry's
+  ComplianceRules, VSC's identity registry in ComplianceRules, VSC's
+  PrivacyManager and blacklist oracle, the consensus engine and the
+  three nodes (until the handover), VGT's registry and trust, VSC's
+  authorization on the investor type registry, the registrars, the
+  custody officer and lock amounts, the registry's nomination, the
+  escrow fee wallet verified and exempt from investor limits). The
+  constructor arguments a getter shows are links too: the issuers' and
+  ComplianceRules' owner (until the handover), the custody manager's
+  bank (ops) and VSC, governance's bound registry, ComplianceRules,
+  OracleManager and VSC, and the escrow factory's fee wallet. So is
+  every address argument that names another contract
+  (`<Contract> <field> as deployed`): the list oracles' OracleManager,
+  the custody manager's identity registry (read right after its deploy,
+  wherever it is deployed), the escrow factory's VSC, identity registry
+  and ComplianceRules, governance's VGT and identity registry, and
+  VSC's and VGT's identity registry and compliance. Six of them read
+  only until the handover, since their owners may move them: VSC's and
+  VGT's `identityRegistry` and `compliance`, and the escrow factory's
+  `identityRegistry` and `complianceRules`.
+  Each new contract is read before anything holds it: no code at its
+  address, or code that is not its compiled artifact's (immutables
+  aside), stops that deploy naming it
+  (`<contract> at 0x… has code that is not <artifact>'s: its deploy transaction created another contract`,
+  or `… has no code: its deploy transaction mined without creating it`);
+  the demo's deploy options, 84 included, take the same check, so demo
+  state never holds a contract without its artifact's code (the tier
+  proof's throwaway probe stack, option 58, too).
+  Each deploy step reads its own links back before it reports, so a
+  link that does not read true stops that step: its error, the links
+  it left missing (`   the deploy stopped; missing wiring: <links>`) and
+  `❌ Deploy failed: the deploy stopped; missing: <contracts> (see above)`.
+  The escrow step reads its own links too, before the factory enters
+  state (`❌ Deploy failed: missing wiring: <links>`), and the whole
+  table is read once more at the end
+  (`❌ Deploy failed: the deploy stopped; missing wiring: <links>`):
+  a stack is never reported deployed half-wired. Re-run the line once the cause is
+  fixed: the record replays the sent part and the wiring resumes.
 - Publicly `PROD_RECORD` and `PROD_CONFIG` are
   `deployments/11155111.json` (keep it) and
   `deployments/11155111.handover.json`, the deploy's defaults.
-- Stopped? Re-run the line (`   ⏭️  #N …: skipped (recorded, code hash ok)`,
-  the rest sent; complete: `(74 from the record, 0 sent now; …)`). It reads
-  past blocks (archive RPC); a contradicting record, config or flow is
-  refused. After a kill `<record>.lock is held by pid N`: if no deploy
-  runs, `rm <record>.lock`. A transient RPC error is retried
-  (`   ↻ eth_getCode: … retry 1/6 in 500 ms`) and a send whose reply was
-  lost is adopted from the chain, never sent twice
-  (`   ↪️  nonce N of 0x…: mined as 0x…; adopted (not resent)`). A
-  replaced or evicted transaction is adopted if mined unchanged at its
-  nonce, else re-sent while the nonce is unused; past 5000 blocks or a
-  taken nonce is refused: find that nonce's transaction on an explorer and
-  fix the record by hand. A transaction stuck in the mempool: `signer.js
-  bump` (section 1a).
+- Stopped? Re-run the line: what a resume prints and what to do is
+  section 2.3a, [part 2a](02a-deploy-record.md).
 - The ceremony (section 5) takes the escrow factory by vote, hands both
   list oracles (`"oracles"`; the unbound whitelist oracle prints
   `   ⚠️  oracle 0x… is not bound on chain; handed over anyway`) to ops

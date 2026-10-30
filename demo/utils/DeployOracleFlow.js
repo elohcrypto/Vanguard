@@ -16,6 +16,8 @@ const {
   displayError,
   displayProgress,
 } = require("./DisplayHelpers");
+const { missingWiring, reportStop, deployed } = require("./DeployWiring");
+const { ORACLE_NODES, ORACLE_REPUTATION } = require("./DeployDefaults");
 
 /**
  * Deploy Oracle Management System
@@ -28,13 +30,13 @@ const {
 async function deployOracleSystem(mod) {
   displaySection("DEPLOYING ORACLE MANAGEMENT SYSTEM", "🔮");
 
+  const local = {}; // review F-3: in demo state once read back from chain
   try {
     displayProgress("Deploying OracleManager...");
     const OracleManager = await ethers.getContractFactory("OracleManager");
     const oracleManager = await OracleManager.deploy();
-    await oracleManager.waitForDeployment();
-    mod.state.oracleManager = oracleManager;
-    mod.state.setContract("oracleManager", oracleManager);
+    await deployed(oracleManager, "OracleManager");
+    local.oracleManager = oracleManager;
 
     displayProgress("Deploying WhitelistOracle...");
     const WhitelistOracle = await ethers.getContractFactory("WhitelistOracle");
@@ -43,9 +45,8 @@ async function deployOracleSystem(mod) {
       "KYC Whitelist Oracle",
       "Oracle for KYC/AML whitelist management",
     );
-    await whitelistOracle.waitForDeployment();
-    mod.state.whitelistOracle = whitelistOracle;
-    mod.state.setContract("whitelistOracle", whitelistOracle);
+    await deployed(whitelistOracle, "WhitelistOracle");
+    local.whitelistOracle = whitelistOracle;
 
     displayProgress("Deploying BlacklistOracle...");
     const BlacklistOracle = await ethers.getContractFactory("BlacklistOracle");
@@ -54,9 +55,8 @@ async function deployOracleSystem(mod) {
       "AML Blacklist Oracle",
       "Oracle for AML blacklist screening",
     );
-    await blacklistOracle.waitForDeployment();
-    mod.state.blacklistOracle = blacklistOracle;
-    mod.state.setContract("blacklistOracle", blacklistOracle);
+    await deployed(blacklistOracle, "BlacklistOracle");
+    local.blacklistOracle = blacklistOracle;
 
     // Task 4.4 (D11 = a): ConsensusOracle is the manager's weighted
     // engine, bound to it at construction; the manager binds it back.
@@ -65,45 +65,30 @@ async function deployOracleSystem(mod) {
     const consensusOracle = await ConsensusOracle.deploy(
       await oracleManager.getAddress(),
     );
-    await consensusOracle.waitForDeployment();
+    await deployed(consensusOracle, "ConsensusOracle");
     await (
       await oracleManager.setConsensusEngine(await consensusOracle.getAddress())
     ).wait();
-    mod.state.consensusOracle = consensusOracle;
-    mod.state.setContract("consensusOracle", consensusOracle);
+    local.consensusOracle = consensusOracle;
 
     // Register oracles in the manager. Menu options 32+ (registration,
     // whitelist/blacklist, consensus voting) read these signer roles and
     // this.state.oracleConfig; both used to exist only in the menu-only
     // OracleModule.deployOracleSystem, which never bound the blacklist
     // oracle into ComplianceRules. Folded here so there is one deploy path.
-    // Reputation 500: above MIN_REPUTATION, so ops may unpause (4.4).
     displayProgress("Registering oracles in manager...");
-    for (const [key, i, role, about] of [
-      [
-        "kyc",
-        1,
-        "KYC_ORACLE",
-        "KYC verification oracle for identity validation",
-      ],
-      [
-        "aml",
-        2,
-        "AML_ORACLE",
-        "AML screening oracle for anti-money laundering checks",
-      ],
-      [
-        "compliance",
-        3,
-        "COMPLIANCE_ORACLE",
-        "Compliance validation oracle for regulatory checks",
-      ],
-    ]) {
+    for (const [key, i, role, about] of ORACLE_NODES) {
       const address = mod.state.signers[i].address;
       await (
-        await oracleManager.registerOracle(address, role, about, 500)
+        await oracleManager.registerOracle(
+          address,
+          role,
+          about,
+          ORACLE_REPUTATION,
+        )
       ).wait();
-      mod.state.oracleConfig.set(key, { address, role, reputation: 500 });
+      const reputation = Number(ORACLE_REPUTATION);
+      mod.state.oracleConfig.set(key, { address, role, reputation });
     }
     console.log("   ✅ KYC/AML/Compliance oracles registered (3)");
 
@@ -155,9 +140,19 @@ async function deployOracleSystem(mod) {
       );
     }
 
+    const missing = await missingWiring(mod.state, local, "31");
+    if (missing.length) {
+      throw new Error(`missing wiring: ${missing.join(", ")}`);
+    }
+    for (const [k, contract] of Object.entries(local)) {
+      mod.state[k] = contract; // the legacy alias
+      mod.state.setContract(k, contract);
+    }
+
     displaySuccess("Oracle Management System deployed successfully!");
   } catch (error) {
     displayError(`Oracle System deployment failed: ${error.message}`);
+    await reportStop(mod.state, local);
     throw error;
   }
 }

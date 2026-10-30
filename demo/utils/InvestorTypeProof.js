@@ -186,8 +186,9 @@ async function proveTier(state, pair, log = console.log) {
     const c = await (
       await ethers.getContractFactory(name, runner)
     ).deploy(...a);
-    await c.waitForDeployment();
-    return c;
+    // Round 7 (lane G, W-probe): the probe's code checked like every
+    // deploy site's; required here as CustodyFlow does.
+    return require("./DeployWiring").deployed(c, name);
   };
   const rules = await deploy("ComplianceRules", runner.address, [], []);
   const probe = await deploy(
