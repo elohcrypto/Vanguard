@@ -13,7 +13,7 @@ import * as path from "path";
  */
 describe("drives-once pins, round 16 (npm's project config pinned empty; lane G's round-15 survivors)", function () {
   this.timeout(60000);
-  const { drives, others } = require("../../scripts/ci/drives-once");
+  const { check, drives, others } = require("../../scripts/ci/drives-once");
   const lines = require("../../scripts/ci/drives-lines");
   const npm = require("../../scripts/ci/drives-npm");
   const ROOT = path.join(__dirname, "../..");
@@ -155,6 +155,19 @@ describe("drives-once pins, round 16 (npm's project config pinned empty; lane G'
       `w2.yml: env not in ${lines.TABLE}: x step: {"CIRCOM_VERSION":"v2.2.3"}`,
     );
   });
+
+  // Lane G G15-4 E13-E15: an env given as null is still an env key: it is
+  // refused at each level as an unlisted literal, never skipped as falsy.
+  for (const [id, at, put] of [
+    ["P-E13", "the workflow", (d: any) => (d.env = null)],
+    ["P-E14", "gates job", (d: any) => (d.jobs.gates.env = null)],
+    ["P-E15", "gates step", (d: any) => (d.jobs.gates.steps.find((s: any) => s.run === "npm ci").env = null)],
+  ] as [string, string, (d: any) => void][])
+    it(`${id}: an env that is null at ${at} level is refused, not skipped`, function () {
+      const doc = require("js-yaml").load(CI);
+      put(doc);
+      expect(check(doc, names)).to.include(`env not in ${lines.TABLE}: ${at}: null`);
+    });
 
   it("P-E19: a second workflow's env that differs from the table is refused at workflow level", function () {
     expect(w2("name: w2\non: push\nenv:\n  CIRCOM_VERSION: v9.9.9\njobs: {}\n")).to.deep.equal([
